@@ -5,6 +5,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 ## 索引
 
 - [0001：产品服务和 Host Agent 使用 Go](0001-use-go-for-product-services.md)
+- [0002：客户端产品接口使用 REST 和 OpenAPI](0002-use-rest-openapi-for-product-clients.md)
 
 ## 格式
 

@@ -41,6 +41,14 @@ build/anas-host-agent
 
 Go 模块路径为 `github.com/zhongwater123/A-NAS`。架构语言决策记录在 [ADR 0001](docs/adr/0001-use-go-for-product-services.md)。
 
+启动使用确定性 Fake Adapter 的本地产品 API：
+
+```bash
+go run ./cmd/anas-api
+```
+
+默认监听 `127.0.0.1:8080`，可通过 `ANAS_HTTP_ADDR` 覆盖。当前接口为 `/healthz`、`/api/v1/system` 和 `/api/v1/disks`；完整契约见 [OpenAPI](api/openapi.yaml)。
+
 ## 项目文档
 
 新会话从 [AGENTS.md](AGENTS.md) 开始；它会根据任务把开发者或 Agent 路由到当前状态、领域语言、架构、规格、调查记录或运行手册。文档分类和维护规则见 [文档系统](docs/README.md)。

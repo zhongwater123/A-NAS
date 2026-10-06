@@ -1,0 +1,201 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: A-NAS Product API
+  version: 0.1.0
+  description: Read-only local product API for the first A-NAS development milestone.
+servers:
+  - url: http://127.0.0.1:8080
+security: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Report whether the API process is alive
+      responses:
+        "200":
+          description: The API process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/system:
+    get:
+      operationId: getSystemState
+      summary: Read the latest observed host system state
+      responses:
+        "200":
+          description: The observed system state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemResponse"
+        "503":
+          $ref: "#/components/responses/StateUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/disks:
+    get:
+      operationId: listDisks
+      summary: List disks by stable resource ID
+      responses:
+        "200":
+          description: Disks ordered by stable resource ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisksResponse"
+        "503":
+          $ref: "#/components/responses/StateUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+components:
+  responses:
+    StateUnavailable:
+      description: Host state cannot currently be read.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    MethodNotAllowed:
+      description: The path exists but does not support the request method.
+      headers:
+        Allow:
+          schema:
+            type: string
+          description: Supported method for this endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Health:
+      type: string
+      enum: [healthy, warning, critical, unknown]
+    DiskRole:
+      type: string
+      enum: [system, data, unassigned]
+    Transport:
+      type: string
+      enum: [nvme, sata, usb, unknown]
+    StableResourceID:
+      type: string
+      minLength: 1
+      pattern: "^[^/\\\\]+$"
+      description: Opaque identity that is not a device path or mount point.
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    OperatingSystem:
+      type: object
+      additionalProperties: false
+      required: [name, version]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+    SystemResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - hostname
+        - operatingSystem
+        - architecture
+        - uptimeSeconds
+        - health
+        - productVersion
+        - observedAt
+      properties:
+        id:
+          $ref: "#/components/schemas/StableResourceID"
+        hostname:
+          type: string
+          minLength: 1
+        operatingSystem:
+          $ref: "#/components/schemas/OperatingSystem"
+        architecture:
+          type: string
+          minLength: 1
+        uptimeSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        health:
+          $ref: "#/components/schemas/Health"
+        productVersion:
+          type: string
+          minLength: 1
+        observedAt:
+          type: string
+          format: date-time
+    Disk:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - model
+        - transport
+        - capacityBytes
+        - rotational
+        - role
+        - health
+      properties:
+        id:
+          $ref: "#/components/schemas/StableResourceID"
+        model:
+          type: string
+          minLength: 1
+        transport:
+          $ref: "#/components/schemas/Transport"
+        capacityBytes:
+          type: integer
+          format: int64
+          minimum: 1
+        rotational:
+          type: boolean
+        role:
+          $ref: "#/components/schemas/DiskRole"
+        health:
+          $ref: "#/components/schemas/Health"
+        temperatureCelsius:
+          type: integer
+          minimum: -273
+    DisksResponse:
+      type: object
+      additionalProperties: false
+      required: [observedAt, items]
+      properties:
+        observedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Disk"
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"

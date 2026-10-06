@@ -11,13 +11,13 @@
 产品服务（非特权）
   ├── Auth / Files / Storage / Share / Jobs / Policy
   ├── AI Orchestrator
-  └── Adapter contracts
-          │ 窄而类型化的 IPC
-          ▼
-      Host Agent（最小特权）
-          │
-          ├── Fake Adapter（开发与契约测试）
-          └── Linux Adapter（实验 NAS）
+  └── hoststate.Reader
+          ├── Fake Adapter（当前本地开发与契约测试）
+          └── Host Agent client（后续）
+                    │ 窄而类型化的 IPC
+                    ▼
+                Host Agent（最小特权）
+                    └── Linux Adapter（实验 NAS）
 
 文件事件 → Ingestion → AI Provider → Search Index → Policy 过滤 → 引用原文件
 ```
@@ -37,10 +37,13 @@
 
 | 路径 | 责任 | 当前状态 |
 |---|---|---|
-| `cmd/anas-api` | 产品服务进程入口 | 可构建的占位入口 |
+| `cmd/anas-api` | 产品 API 进程入口 | 可启动，支持优雅关闭 |
 | `cmd/anas-host-agent` | Host Agent 进程入口 | 可构建的占位入口 |
+| `internal/hoststate` | 只读宿主机状态接口与 Fake Adapter | 已实现并通过测试 |
+| `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
+| `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
-| `docs/specs` | 可验收的产品行为 | 尚无功能规格 |
+| `docs/specs` | 可验收的产品行为 | 已记录首个只读状态规格 |
 | `docs/investigations` | 复杂缺陷的证据和根因 | 尚无调查记录 |
 | `docs/runbooks` | 可重复且可验证的操作 | 尚无运行手册 |
 
@@ -52,3 +55,5 @@
 - [当前状态](../status/CURRENT.md)
 - [ADR 索引](../adr/README.md)
 - [Go 语言决策](../adr/0001-use-go-for-product-services.md)
+- [REST/OpenAPI 决策](../adr/0002-use-rest-openapi-for-product-clients.md)
+- [只读宿主机状态规格](../specs/read-only-host-state.md)

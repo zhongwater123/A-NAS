@@ -33,7 +33,7 @@ A-NAS 的目标不是给传统 NAS 简单增加一个聊天框，而是构建一
 | 数据盘 | 512 GB 机械硬盘 | 可作为可清空的开发测试数据盘；单盘没有冗余，不能视为生产数据保护方案 |
 | AI 加速 | 暂无独立 GPU/NPU | 不妨碍 API-first MVP；后续根据实测模型和功耗再选择加速硬件 |
 
-当前状态：机器已组装完成并成功点亮 BIOS，计划使用 U 盘安装 Debian；尚未记录 Debian 安装完成和 SSH 连通。
+当前状态：机器已刷入 Debian 13 amd64；尚未记录 SSH 连通、非 root 开发账号和硬件基线。
 
 ### 2.2 当前机器的定位
 
@@ -468,6 +468,7 @@ E:\A-NAS
 - 本机 Linux 开发环境：WSL2 Ubuntu 24.04，使用隔离的非特权用户 `anas-dev`。
 - Git 仓库：已初始化，默认分支为 `main`。
 - 后端语言：产品服务和 Host Agent 使用 Go，见 ADR 0001。
+- 客户端产品接口：使用版本化 REST/JSON 与 OpenAPI，见 ADR 0002；Host Agent IPC 仍待决策。
 - 文档与溯源：使用 `AGENTS.md` 路由到术语、状态、架构、ADR、规格、调查和运行手册，Git 保存实现历史。
 - 不直接使用 fnOS 私有产品层作为商业代码底座。
 - 不假定 fnOS 基于 OMV。
@@ -490,14 +491,13 @@ E:\A-NAS
 - SQLite 或 PostgreSQL；
 - Docker/Moby 或 Podman；
 - Btrfs RAID1，还是 md RAID1 + Btrfs；
-- API 契约采用 REST/OpenAPI、gRPC/Protobuf或组合；
 - 身份模型、ACL 映射和远程访问方案；
 - OTA/A-B 更新和恢复分区设计；
 - 云端多模态 Provider 与数据合规策略；
 - 本地模型 Runtime、GPU/NPU 和最终硬件 SKU；
 - 应用包格式和第三方应用安全模型。
 
-Go 的选择记录在 `docs/adr/0001-use-go-for-product-services.md`，依据是统一工具链、部署简单、Linux 生态和长期维护成本，而不是因为 fnOS 使用了 Go。进程权限边界、类型化 IPC 和 Adapter 设计仍需通过原型验证。
+Go 的选择记录在 `docs/adr/0001-use-go-for-product-services.md`，客户端产品接口的 REST/OpenAPI 选择记录在 `docs/adr/0002-use-rest-openapi-for-product-clients.md`。进程权限边界、Host Agent 类型化 IPC 和 Adapter 设计仍需通过原型验证。
 
 ## 14. 建议的近期里程碑
 
