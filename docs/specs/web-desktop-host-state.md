@@ -1,6 +1,6 @@
 # Web 桌面宿主机状态
 
-状态：implemented
+状态：implemented；local-console confinement pending
 更新时间：2026-10-06
 
 ## 目标
@@ -50,6 +50,8 @@
 - Given：Experimental NAS 连接屏幕、键盘和鼠标，Kiosk 会话已安装。
 - When：设备进入图形启动目标。
 - Then：Cage 中的 Chromium 以 `anas-dev` 打开回环地址上的同一 Web 桌面，不出现通用桌面、浏览器导航界面或额外特权 API。
+
+当前实机已验证显示、中文字体和鼠标窗口交互；`F1` 可进入通用 Chromium 界面，且 VT 切换未通过，因此本场景尚未完全验收，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 
 ## 边界与失败
 

@@ -41,7 +41,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
 | `cmd/anas-api` | 产品 API 进程入口 | 可启动，支持优雅关闭 |
 | `cmd/anas-host-agent` | Host Agent 进程入口 | 通过用户运行目录中的 UDS 提供只读 Linux 状态 |
 | `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 资源管理和系统设置已实现 |
-| `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 已实现并通过实机验收 |
+| `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 只读状态 IPC 已实现 |
 | `internal/hoststate` | 只读宿主机状态接口、Fake Adapter 与 Debian Linux Adapter | 已实现并通过本地及实验 NAS 测试 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |

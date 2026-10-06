@@ -9,7 +9,7 @@
 - 发现并验证当前未被 Debian 识别的 512 GB 数据盘。
 - 增加只读 SMART、NVMe 健康和温度观测。
 
-## [v1.0.0] - 2026-10-06
+## [v1.0.0] - 2026-10-06（release candidate；tag pending）
 
 ### Added
 
@@ -29,6 +29,7 @@
 ### Scope
 
 - 这是首个硬件集成开发基线，不是具备存储写入、共享、认证、升级和恢复能力的消费级 NAS 正式版。
+- 本地 Kiosk 的浏览器约束和 VT 恢复尚有开放调查，不得作为面向非受信任本地用户的安全边界。
 - 详细范围、证据和已知限制见 [v1.0.0 发布记录](docs/releases/v1.0.0.md)。
 
 [Unreleased]: https://github.com/zhongwater123/A-NAS/compare/v1.0.0...HEAD

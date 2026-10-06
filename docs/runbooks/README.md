@@ -7,8 +7,8 @@
 - [配置实验 NAS 的 SSH 开发账号](bootstrap-experimental-nas-ssh.md)（verified）
 - [部署 M1 API 到实验 NAS](deploy-m1-api-to-experimental-nas.md)（verified）
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）
-- [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（verified；可选 SSH 隧道待验收）
-- [运行实验 NAS 本地控制台](operate-local-kiosk.md)（verified）
+- [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（verified）
+- [运行实验 NAS 本地控制台](operate-local-kiosk.md)（display/pointer verified；confinement/VT pending）
 
 ## 使用方式
 

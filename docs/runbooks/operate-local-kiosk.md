@@ -1,6 +1,6 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, verified on Experimental NAS
+状态：implemented, display and pointer verified; confinement and VT recovery pending
 更新时间：2026-10-06
 
 ## 目的
@@ -11,7 +11,7 @@
 
 - Kiosk 以 `anas-dev` 运行，不以 root 运行 Chromium，也不使用 `--no-sandbox`。
 - Cage 通过 PAM 向 `systemd-logind` 注册真实本地会话，由 logind 授予活动 seat 的显示和输入设备访问；不要预先把 `anas-dev` 加入 `input` 或 `video` 组。
-- `cage -s` 保留 VT 切换作为本地恢复路径。Kiosk 不是登录界面，也不提供终端。
+- Cage 已使用 `-s` 请求允许 VT 切换，但 Experimental NAS 的实体切换尚未成功，当前恢复路径仍是 SSH；Kiosk 不是登录界面，也不提供终端。
 - 页面仍来自只监听 `127.0.0.1:8080` 的产品服务；直连屏幕不会扩大网络暴露面。
 - 如果机器已经存在其他 display manager，停止配置并先决定唯一图形会话所有者。
 
@@ -84,7 +84,8 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
 2. 桌面右上角显示“模拟数据”或“实时主机”；打开资源管理可读取对应状态。
 3. `ps` 显示 Cage 与 Chromium 均属于 `anas-dev`，Chromium 参数中不存在 `--no-sandbox`。
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
-5. `Ctrl+Alt+F2` 可切到恢复终端；SSH 执行 `systemctl restart anas-kiosk@tty1.service` 可恢复显示会话。
+5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
+6. `F1`、浏览器导航、开发工具、不受控缩放和右键菜单不可逃离产品界面；当前 Experimental NAS 未通过 `F1` 和缩放项，不能把本地 Kiosk 视为面向非受信任用户的安全边界。
 
 如果分辨率、方向或 UI 大小不正确，先在同一 Wayland 会话中用 `wlr-randr` 临时验证，再更新 `/etc/a-nas/kiosk.env`；不要在不知道输出名称时写死显卡或 connector。
 

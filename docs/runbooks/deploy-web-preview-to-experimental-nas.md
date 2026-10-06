@@ -69,7 +69,7 @@ Host Agent IPC 在实机通过后切换实时状态：
 .\scripts\deploy-dev.ps1 -NasHost <NAS_HOST> -Mode agent
 ```
 
-2026-10-06 实机已验证 Fake 部署、失败自动回滚、修复后的 Live 部署、制品哈希、`0600` UDS、`503` 映射和恢复路径。首次 Live 失败的证据链见[调查记录](../investigations/2026-10-06-host-agent-runtime-directory.md)。
+2026-10-06 实机已验证 Fake 部署、失败自动回滚、修复后的 Live 部署、制品哈希、`0600` UDS、`503` 映射和恢复路径。限定 SSH 配置也已验证：普通公钥命令保持可用，`127.0.0.1:18080 → 127.0.0.1:8080` 返回健康响应，而转发到远端 22 端口被 `administratively prohibited` 拒绝。首次 Live 失败的证据链见[调查记录](../investigations/2026-10-06-host-agent-runtime-directory.md)。
 
 ## 远程浏览与验证
 
