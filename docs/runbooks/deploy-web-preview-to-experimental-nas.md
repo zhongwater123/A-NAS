@@ -1,6 +1,6 @@
 # 部署 Web 桌面预览到实验 NAS
 
-状态：implemented, remote verification pending
+状态：implemented, remote verified
 更新时间：2026-10-06
 
 ## 目的
@@ -68,6 +68,8 @@ Host Agent IPC 在实机通过后切换实时状态：
 ```powershell
 .\scripts\deploy-dev.ps1 -NasHost <NAS_HOST> -Mode agent
 ```
+
+2026-10-06 实机已验证 Fake 部署、失败自动回滚、修复后的 Live 部署、制品哈希、`0600` UDS、`503` 映射和恢复路径。首次 Live 失败的证据链见[调查记录](../investigations/2026-10-06-host-agent-runtime-directory.md)。
 
 ## 远程浏览与验证
 

@@ -1,6 +1,6 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, remote verification pending
+状态：implemented, packages verified, activation pending
 更新时间：2026-10-06
 
 ## 目的
@@ -23,7 +23,7 @@
 - `anas-kiosk@.service`
 - `a-nas-kiosk.pam`
 
-当前实机只读核对显示这些图形包尚未安装。管理员在 NAS 上执行：
+2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成。重装或新设备由管理员执行：
 
 ```bash
 apt update

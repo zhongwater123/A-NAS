@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-M2：只读硬件闭环进行中；Web 桌面、基础 Linux Adapter、只读 Host Agent IPC 和本地 Kiosk 配置已实现，Experimental NAS 常驻部署与直连屏幕尚待验收。
+M2：只读硬件闭环进行中；Web 桌面、基础 Linux Adapter、只读 Host Agent IPC 已在 Experimental NAS 常驻运行，本地 Kiosk 配置已实现且软件包就绪，直连屏幕尚待验收。
 
 ## 当前目标
 
@@ -20,17 +20,18 @@ M2：只读硬件闭环进行中；Web 桌面、基础 Linux Adapter、只读 Ho
 - React/TypeScript Web 桌面实现资源管理、系统设置、窗口管理、断线保留和 Fake/Live 标识；Vite 资源嵌入 `anas-api`，见 [Web 桌面规格](../specs/web-desktop-host-state.md)。
 - 原始桌面原型已保存为独立证据提交 `86b034b`，没有进入 main 生产源码。
 - Host Agent 通过权限为 `0600` 的 Unix Socket 暴露原子只读状态，Product Service 通过 Client Adapter 继续使用 `hoststate.Reader`，见 [ADR 0004](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)。
-- 一键部署、用户级 systemd、健康检查、自动回滚和限定 SSH 隧道脚本已实现；实机管理员配置与部署验收尚未执行，见 [Web 预览运行手册](../runbooks/deploy-web-preview-to-experimental-nas.md)。
+- 一键部署、用户级 systemd、健康检查和自动回滚已通过实机验收；限定 SSH 隧道仍待管理员配置，见 [Web 预览运行手册](../runbooks/deploy-web-preview-to-experimental-nas.md)。
 - Experimental NAS 明确是带直连屏幕和输入设备的 ITX 设备，不是纯无头服务器；Cage/Chromium 单应用本地控制台已形成版本化配置，见[本地控制台运行手册](../runbooks/operate-local-kiosk.md)。
 - Experimental NAS 已运行 Debian 13 amd64，主机名为 `a-nas-dev`；无 `sudo` 的 `anas-dev`、SSH 指纹与限时密钥登录已验证。
-- Experimental NAS 用户级 systemd 正常、home 可用空间约 213 GB；Git、Go、Make 和 curl 未安装，linger 尚未启用；Cage/Chromium 等本地控制台包正在由管理员安装。
+- Experimental NAS 用户级 systemd 正常、home 可用空间约 213 GB；Git、Go、Make 和 curl 未安装，linger 尚未启用；Cage、Chromium 154、中文字体和 Wayland 调试工具已安装。
+- 版本 `657fe3d43fa1` 已以 Live 模式运行；API 与 Host Agent 均为 `active`，远端制品哈希一致，UDS 目录/Socket 权限分别为 `0700`/`0600`。首次 Live 激活失败后自动回滚并完成修复，见[调查记录](../investigations/2026-10-06-host-agent-runtime-directory.md)。
 - Linux Adapter 已在 Experimental NAS 通过只读集成测试；当前识别 NVMe 系统盘和安装 U 盘，健康为 `unknown`，512 GB 机械盘仍未被检测到。
 - M1 Fake API 制品曾完成临时冒烟并优雅停止；旧证据见 [M1 部署手册](../runbooks/deploy-m1-api-to-experimental-nas.md)。
 
 ## 下一步
 
-1. 由管理员完成 Cage/Chromium 安装、启用 `anas-dev` linger，并按运行手册配置本地 Kiosk 与限制为 `127.0.0.1:8080` 的 SSH 转发。
-2. 提交并推送当前版本，先以 `fake` 模式部署并在本地屏幕/远程隧道验收，再以 `agent` 模式核对真实 `lsblk` 状态与断线恢复。
+1. 由管理员启用 `anas-dev` linger，并按运行手册安装/启动本地 Kiosk 与配置限制为 `127.0.0.1:8080` 的 SSH 转发。
+2. 在直连屏幕验收分辨率、中文字体、键盘鼠标、窗口交互和 Live 断线恢复；远程隧道作为补充验收入口。
 3. 安全关机后拔除 Debian 安装 U 盘，再次确认系统从 NVMe 独立启动。
 4. 在 BIOS 和物理连接层排查 512 GB 机械盘未被 Debian 检测到的原因；检测到后仍不格式化。
 5. 由管理员安装 `smartmontools` 和 `nvme-cli` 后，补充只读 SMART、NVMe 健康与温度基线。

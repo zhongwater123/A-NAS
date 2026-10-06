@@ -4,7 +4,7 @@
 
 ## 索引
 
-当前尚无调查记录。
+- [2026-10-06：Host Agent 无法创建运行时 Socket](2026-10-06-host-agent-runtime-directory.md)（resolved）
 
 ## 使用方式
 
