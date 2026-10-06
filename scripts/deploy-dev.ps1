@@ -29,6 +29,18 @@ try {
     if ($version -notmatch '^[0-9a-f]{7,12}$') {
         throw 'Cannot determine the Git version.'
     }
+    $productVersion = $version
+    $releaseTags = @(& git -c $gitSafeDirectory tag --points-at HEAD --sort=-version:refname --list 'v[0-9]*')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Cannot inspect release tags.'
+    }
+    foreach ($releaseTag in $releaseTags) {
+        $candidate = ([string]$releaseTag).Trim()
+        if ($candidate -match '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            $productVersion = $candidate
+            break
+        }
+    }
     $changes = & git -c $gitSafeDirectory status --porcelain
     if ($LASTEXITCODE -ne 0) {
         throw 'Cannot inspect the Git working tree.'
@@ -40,16 +52,17 @@ try {
         throw "SSH identity does not exist: $IdentityFile"
     }
 
-    $summary = "build commit $version, deploy both binaries and local-console artifacts in $Mode mode, activate, verify, and rollback on failure"
+    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts in $Mode mode, activate, verify, and rollback on failure"
     if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
-        Write-Host "Version: $version"
+        Write-Host "Release: $version"
+        Write-Host "Product: $productVersion"
         Write-Host "Target:  $target"
         Write-Host "Mode:    $Mode"
         Write-Host 'No build, network connection, or remote change was performed.'
         return
     }
 
-    & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check VERSION=$version"
+    & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check VERSION=$productVersion"
     if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
 
     $apiBinary = Join-Path $repoRoot 'build\anas-api'
@@ -83,11 +96,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Upload failed: $($upload.Source)" }
     }
 
-    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $version $apiHash $agentHash $Mode"
+    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $version $apiHash $agentHash $Mode $productVersion"
     & ssh.exe @sshOptions $target $activate
     if ($LASTEXITCODE -ne 0) { throw 'Remote activation failed; inspect the user journal and release directory.' }
 
-    Write-Host "A-NAS $version is active on $NasHost in $Mode mode."
+    Write-Host "A-NAS $productVersion ($version) is active on $NasHost in $Mode mode."
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
 } finally {

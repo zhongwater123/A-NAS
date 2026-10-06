@@ -105,7 +105,6 @@ button { font: inherit; }
 .rail-button:hover:not(:disabled), .rail-button.active { color: #fff; background: rgba(255,255,255,.18); transform: translateY(-1px); }
 .rail-button:disabled { cursor: not-allowed; opacity: .72; }
 .rail-avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(145deg, #ffd0a8, #e69d78); color: #67422d; font-size: 12px; font-weight: 850; }
-.notification-badge { position: absolute; right: -3px; top: -3px; min-width: 17px; height: 17px; padding: 0 4px; border: 2px solid rgba(91,60,146,.75); border-radius: 999px; display: grid; place-items: center; background: #ff4e4e; color: white; font-size: 9px; font-weight: 850; }
 
 .desktop-grid {
   position: absolute;
@@ -278,8 +277,6 @@ button { font: inherit; }
 .disk-title h4 { overflow: hidden; margin: 0; color: #242d39; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 .disk-main p { margin: 3px 0 7px; color: var(--muted); font-size: 9px; }
 .disk-main small { color: #8b949f; font-size: 9px; }
-.capacity-track { max-width: 290px; height: 3px; margin-bottom: 6px; overflow: hidden; border-radius: 5px; background: #e8ebef; }
-.capacity-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #38b9aa, #5f86ee); }
 .disk-stats { min-width: 105px; display: grid; justify-items: end; gap: 4px; }
 .disk-stats > strong { color: #202a36; font-size: 14px; }
 .disk-stats > span:last-child { color: var(--muted); font-size: 9px; }

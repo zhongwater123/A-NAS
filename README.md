@@ -4,6 +4,8 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 
 项目决策与当前背景以 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) 为准。
 
+当前基线为 [v1.0.0 首个硬件集成开发版](docs/releases/v1.0.0.md)：已打通只读 Live 状态、可回滚部署和设备本地控制台，但尚不是具备数据写入与共享能力的消费级 NAS 正式版。版本变化见 [CHANGELOG](CHANGELOG.md)。
+
 ## 本地开发入口
 
 当前推荐环境是 Windows 主机加 WSL2 Ubuntu。源码保存在 `E:\A-NAS`，WSL 中通过专用用户访问：

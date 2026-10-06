@@ -86,7 +86,7 @@ export default function App() {
         <div className="rail-spacer" />
         <div className="rail-group rail-secondary">
           <button className="rail-button" aria-label="任务历史，规划中" disabled><RotateCcw /></button>
-          <button className="rail-button notification" aria-label="通知，规划中" disabled><Bell /><span className="notification-badge">2</span></button>
+          <button className="rail-button" aria-label="通知，规划中" disabled><Bell /></button>
           <span className="rail-avatar" aria-label="开发用户">A</span>
           <button className="rail-button" aria-label="打开系统设置" onClick={() => dispatch({ type: "open", id: "settings" })}><Settings /></button>
         </div>
@@ -238,7 +238,7 @@ function ResourcePanel({ host }: { host: ReturnType<typeof useHostState> }) {
           {snapshot.disks.map((disk) => (
             <article className="disk-card" key={disk.id}>
               <div className={`disk-visual ${disk.rotational ? "rotational" : "solid"}`}><HardDrive /></div>
-              <div className="disk-main"><div className="disk-title"><h4>{disk.model}</h4><RoleBadge role={disk.role} /></div><p>{disk.transport.toUpperCase()} · {disk.rotational ? "机械磁盘" : "固态存储"}</p><div className="capacity-track"><span style={{ width: disk.role === "system" ? "64%" : "18%" }} /></div><small>稳定 ID · {shortID(disk.id)}</small></div>
+              <div className="disk-main"><div className="disk-title"><h4>{disk.model}</h4><RoleBadge role={disk.role} /></div><p>{disk.transport.toUpperCase()} · {disk.rotational ? "机械磁盘" : "固态存储"}</p><small>稳定 ID · {shortID(disk.id)}</small></div>
               <div className="disk-stats"><strong>{formatCapacity(disk.capacityBytes)}</strong><HealthBadge value={disk.health} /><span>{disk.temperatureCelsius === undefined ? "温度 —" : `${disk.temperatureCelsius}°C`}</span></div>
             </article>
           ))}
@@ -254,6 +254,7 @@ function SettingsPanel({ state }: { state?: HostState }) {
     ["设备名称", state.system.hostname],
     ["操作系统", `${state.system.operatingSystem.name} ${state.system.operatingSystem.version}`],
     ["系统架构", state.system.architecture],
+    ["运行时间", formatUptime(state.system.uptimeSeconds)],
     ["产品版本", state.productVersion],
     ["数据来源", state.dataSource === "live" ? "实时主机" : "模拟数据"],
     ["观测时间", formatTime(state.observedAt)],
@@ -267,7 +268,7 @@ function SettingsPanel({ state }: { state?: HostState }) {
         <button disabled><ShieldCheck />安全与远程<small>规划中</small></button>
       </aside>
       <div className="settings-page">
-        <div className="settings-hero"><div className="settings-device"><span className="brand-mark large">A</span></div><div><p className="section-label">ABOUT THIS A-NAS</p><h2>{state.system.hostname}</h2><p>可信家庭存储 · 开发预览</p></div></div>
+        <div className="settings-hero"><div className="settings-device"><span className="brand-mark large">A</span></div><div><p className="section-label">ABOUT THIS A-NAS</p><h2>{state.system.hostname}</h2><p>只读硬件集成基线 · 开发预览</p></div></div>
         <div className="settings-card">
           {rows.map(([label, value]) => <div className="settings-row" key={label}><span>{label}</span><strong>{value}</strong><ChevronRight /></div>)}
         </div>

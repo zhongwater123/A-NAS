@@ -61,7 +61,7 @@ systemctl reload ssh
 .\scripts\deploy-dev.ps1 -NasHost <NAS_HOST> -Mode fake
 ```
 
-脚本固定执行完整检查、Linux/amd64 构建、SHA-256 校验、版本化上传、原子 `current` 切换、用户服务重启和两个 HTTP 冒烟请求；同时把本地控制台启动器、systemd 单元和 PAM 配置放入同一版本目录，供管理员按[本地控制台运行手册](operate-local-kiosk.md)安装。任何激活失败会恢复上一 `current`、环境文件、用户服务单元和 Host Agent 模式；失败制品保留用于诊断。
+脚本固定执行完整检查、Linux/amd64 构建、SHA-256 校验、版本化上传、原子 `current` 切换、用户服务重启和两个 HTTP 冒烟请求；同时把本地控制台启动器、systemd 单元和 PAM 配置放入同一版本目录，供管理员按[本地控制台运行手册](operate-local-kiosk.md)安装。任何激活失败会恢复上一 `current`、环境文件、用户服务单元和 Host Agent 模式；失败制品保留用于诊断。发布目录始终使用 Git 短提交；当 HEAD 恰好带有合法的 `vMAJOR.MINOR.PATCH` 标签时，二进制和产品接口显示该语义版本，否则显示短提交。
 
 Host Agent IPC 在实机通过后切换实时状态：
 

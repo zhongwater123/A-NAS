@@ -1,6 +1,6 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, packages verified, activation pending
+状态：implemented, verified on Experimental NAS
 更新时间：2026-10-06
 
 ## 目的

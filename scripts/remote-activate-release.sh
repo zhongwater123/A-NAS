@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ $# -ne 4 ]]; then
-  echo "usage: remote-activate-release.sh VERSION API_SHA AGENT_SHA MODE" >&2
+if [[ $# -ne 5 ]]; then
+  echo "usage: remote-activate-release.sh VERSION API_SHA AGENT_SHA MODE PRODUCT_VERSION" >&2
   exit 2
 fi
 
@@ -10,11 +10,13 @@ version="$1"
 api_sha="$2"
 agent_sha="$3"
 mode="$4"
+product_version="$5"
 
 [[ "$version" =~ ^[0-9a-f]{7,40}$ ]] || { echo "invalid version" >&2; exit 2; }
 [[ "$api_sha" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid API hash" >&2; exit 2; }
 [[ "$agent_sha" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid Host Agent hash" >&2; exit 2; }
 [[ "$mode" == "fake" || "$mode" == "agent" ]] || { echo "invalid host state mode" >&2; exit 2; }
+[[ "$product_version" =~ ^[0-9a-f]{7,40}$ || "$product_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || { echo "invalid product version" >&2; exit 2; }
 
 release="$HOME/apps/a-nas/releases/$version"
 current="$HOME/apps/a-nas/current"
@@ -101,8 +103,8 @@ install -m 0644 anas-host-agent.service.incoming "$unit_dir/anas-host-agent.serv
 ln -sfn "$release" "$HOME/apps/a-nas/current.next"
 mv -Tf "$HOME/apps/a-nas/current.next" "$current"
 
-printf 'version=%s\napi_sha256=%s\nhost_agent_sha256=%s\nmode=%s\nsource=%s\n' \
-  "$version" "$api_sha" "$agent_sha" "$mode" \
+printf 'version=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\nmode=%s\nsource=%s\n' \
+  "$version" "$product_version" "$api_sha" "$agent_sha" "$mode" \
   "https://github.com/zhongwater123/A-NAS/commit/$version" > RELEASE
 chmod 0640 RELEASE
 

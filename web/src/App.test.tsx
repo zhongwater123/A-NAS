@@ -52,7 +52,7 @@ describe("A-NAS desktop", () => {
     stubFetch(healthyState);
     const user = userEvent.setup();
 
-    render(<App />);
+    const { container } = render(<App />);
 
     expect(screen.queryByRole("dialog")).toBeNull();
     await user.click(screen.getByRole("button", { name: "打开资源管理" }));
@@ -60,6 +60,7 @@ describe("A-NAS desktop", () => {
     expect(screen.getAllByText("模拟数据")).toHaveLength(2);
     expect(screen.getByText("A-NAS Fake SSD")).toBeTruthy();
     expect(screen.getByText("116.4 GiB")).toBeTruthy();
+    expect(container.querySelector(".capacity-track")).toBeNull();
   });
 
   it("never presents unknown health as healthy", async () => {
@@ -131,6 +132,7 @@ describe("A-NAS desktop", () => {
     await user.click(within(desktop).getByRole("button", { name: "打开系统设置" }));
     const settings = screen.getByRole("dialog", { name: "系统设置" });
     expect(settings).toBeTruthy();
+    expect(within(settings).getByText("1 小时 1 分钟")).toBeTruthy();
 
     await user.click(within(settings).getByRole("button", { name: "最小化系统设置" }));
     expect(screen.queryByRole("dialog", { name: "系统设置" })).toBeNull();
@@ -154,6 +156,8 @@ describe("A-NAS desktop", () => {
     expect(within(desktop).getByRole("button", { name: "文件管理，规划中" }).hasAttribute("disabled")).toBe(true);
     expect(within(desktop).getByRole("button", { name: "Docker，规划中" }).hasAttribute("disabled")).toBe(true);
     expect(within(desktop).getByRole("button", { name: "AI 助手，规划中" }).hasAttribute("disabled")).toBe(true);
+    const notifications = screen.getByRole("button", { name: "通知，规划中" });
+    expect(within(notifications).queryByText("2")).toBeNull();
   });
 });
 
