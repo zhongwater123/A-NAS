@@ -2,10 +2,10 @@
 
 ## 开工
 
-1. 先读 `docs/status/CURRENT.md`，确认当前阶段、下一步和已知阻塞。
-2. 再读 `CONTEXT.md`，使用项目的规范术语。
-3. 按 `docs/README.md` 的路由只加载与任务相关的文档。
-4. 检查 `git status`；代码任务开始前确认 `make check` 的既有状态。
+1. 先检查 `git status` 和任务涉及的路径。
+2. 延续既有计划、判断优先级或接手未完成工作时，读 `docs/status/CURRENT.md`。
+3. 涉及产品概念、领域命名或资源身份时，读 `CONTEXT.md`。
+4. 文档类型或事实归属不明确时，使用 `docs/README.md` 路由；其余情况只加载下面与任务匹配的文档。
 
 ## 文档路由
 
@@ -16,9 +16,16 @@
 - 产品目标、历史研究或完整决策盘点：按需读 `PROJECT_CONTEXT.md`。
 - 本机工具或 WSL 问题：读 `docs/development/LOCAL_ENVIRONMENT.md`。
 
+## 验证
+
+- `make docs-check` 和 `make check` 只使用本地源码与可丢弃构建产物，不访问实验 NAS 或生产环境；可直接运行、修复当前变更导致的失败并重跑相关检查。
+- 纯文档变更运行 `make docs-check`。
+- Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
+- 其他变更运行能证明结果的最小相关检查。
+
 ## 完工
 
-1. 运行 `make check`，留下测试或可复现的验证证据。
+1. 留下已运行检查或其他可复现的验证证据。
 2. 只更新发生变化的事实源：术语、当前状态、架构、ADR、规格、调查或手册。
 3. 在文档的“关联”部分链接相关代码、测试、ADR 或调查记录。
 4. 若任务改变了当前阶段、下一步或阻塞，更新 `docs/status/CURRENT.md`。
