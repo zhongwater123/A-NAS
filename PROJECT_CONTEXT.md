@@ -421,9 +421,17 @@ Nginx → PHP-FPM → rpc.php → omv-engined
 
 ```text
 E:\A-NAS
+├── AGENTS.md                # Agent 开工、路由与完工规则
+├── CONTEXT.md               # 项目领域语言
 ├── PROJECT_CONTEXT.md       # 本文，项目上下文入口
 ├── README.md                # 面向开发者的快速开始
-├── docs/                    # ADR、领域模型、研究和产品规格
+├── docs/
+│   ├── status/              # 当前阶段、下一步和阻塞
+│   ├── architecture/        # 系统边界、数据流和不变量
+│   ├── adr/                 # 难以逆转的架构决策
+│   ├── specs/               # 可验收的功能行为
+│   ├── investigations/      # 复杂缺陷的证据与根因
+│   └── runbooks/            # 安装、恢复和高风险操作
 ├── api/                     # OpenAPI、JSON Schema、事件契约
 ├── web/                     # 自研管理前端
 ├── services/                # Go 产品层
@@ -460,6 +468,7 @@ E:\A-NAS
 - 本机 Linux 开发环境：WSL2 Ubuntu 24.04，使用隔离的非特权用户 `anas-dev`。
 - Git 仓库：已初始化，默认分支为 `main`。
 - 后端语言：产品服务和 Host Agent 使用 Go，见 ADR 0001。
+- 文档与溯源：使用 `AGENTS.md` 路由到术语、状态、架构、ADR、规格、调查和运行手册，Git 保存实现历史。
 - 不直接使用 fnOS 私有产品层作为商业代码底座。
 - 不假定 fnOS 基于 OMV。
 
