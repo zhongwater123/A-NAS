@@ -32,6 +32,8 @@ docs-check:
 ops-check:
 	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh
 	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh
+	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
 
 vet:
 	$(GO) vet ./...

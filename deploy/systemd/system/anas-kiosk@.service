@@ -4,7 +4,7 @@ Documentation=https://github.com/zhongwater123/A-NAS
 After=systemd-user-sessions.service plymouth-quit-wait.service
 Before=graphical.target
 ConditionPathExists=/dev/tty0
-ConditionPathExists=%h/apps/a-nas/current/kiosk-launcher
+ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher
 Wants=dbus.socket systemd-logind.service
 After=dbus.socket systemd-logind.service
 Conflicts=getty@%i.service
@@ -13,7 +13,7 @@ After=getty@%i.service
 [Service]
 Type=simple
 User=anas-dev
-ExecStart=/usr/bin/cage -s -- %h/apps/a-nas/current/kiosk-launcher
+ExecStart=/usr/bin/cage -s -- /home/anas-dev/apps/a-nas/current/kiosk-launcher
 ExecStartPost=+/bin/sh -c "tty_name='%i'; exec /usr/bin/chvt $${tty_name#tty}"
 Restart=always
 RestartSec=3s

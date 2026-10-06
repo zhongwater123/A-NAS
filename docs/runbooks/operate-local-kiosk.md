@@ -59,6 +59,8 @@ systemctl enable anas-kiosk@tty1.service
 
 该单元只通过 `graphical.target.wants` 启动，不声明 `display-manager.service` 别名。Debian 13 的 systemd 会拒绝把显式模板实例别名为非模板单元，而该别名并不是 Kiosk 随 `graphical.target` 启动的必要条件。
 
+系统级单元中的启动器路径固定为 `/home/anas-dev/apps/a-nas/current/kiosk-launcher`，不使用 `%h`；系统管理器会把 `%h` 解析为 `/root`，即使服务配置了 `User=anas-dev`。
+
 保持 SSH 恢复会话后，首次验证可执行：
 
 ```bash
