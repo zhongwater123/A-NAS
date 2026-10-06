@@ -20,11 +20,19 @@ $target = "anas-dev@$NasHost"
 
 Push-Location $repoRoot
 try {
-    $version = (& git rev-parse --short=12 HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^[0-9a-f]{7,12}$') {
+    $gitSafeDirectory = "safe.directory=$($repoRoot.Replace('\', '/'))"
+    $versionOutput = & git -c $gitSafeDirectory rev-parse --short=12 HEAD
+    if ($LASTEXITCODE -ne 0) {
         throw 'Cannot determine the Git version.'
     }
-    $changes = & git status --porcelain
+    $version = ([string]$versionOutput).Trim()
+    if ($version -notmatch '^[0-9a-f]{7,12}$') {
+        throw 'Cannot determine the Git version.'
+    }
+    $changes = & git -c $gitSafeDirectory status --porcelain
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Cannot inspect the Git working tree.'
+    }
     if ($changes) {
         throw 'Deployment requires a clean, committed working tree.'
     }
