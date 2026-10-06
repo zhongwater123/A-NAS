@@ -31,7 +31,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { PointerEvent as ReactPointerEvent, ReactNode, useMemo, useReducer } from "react";
+import { PointerEvent as ReactPointerEvent, ReactNode, useEffect, useReducer, useState } from "react";
 
 import { DiskRole, Health, HostState } from "./api";
 import { useHostState } from "./useHostState";
@@ -70,7 +70,7 @@ const initialWindows: WindowModel[] = [
 export default function App() {
   const host = useHostState();
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
-  const now = useMemo(() => new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date()), []);
+  const now = useCurrentMinute();
 
   return (
     <main className="desktop-shell">
@@ -146,6 +146,27 @@ export default function App() {
       </nav>
     </main>
   );
+}
+
+function useCurrentMinute(): string {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    let timeout: number;
+    const scheduleNextMinute = () => {
+      const current = new Date();
+      const millisecondsIntoMinute = current.getSeconds() * 1_000 + current.getMilliseconds();
+      timeout = window.setTimeout(() => {
+        setNow(new Date());
+        scheduleNextMinute();
+      }, 60_000 - millisecondsIntoMinute);
+    };
+
+    scheduleNextMinute();
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(now);
 }
 
 function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch: (action: WindowAction) => void; children: ReactNode }) {

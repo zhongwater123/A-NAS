@@ -31,10 +31,25 @@ const healthyState = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("A-NAS desktop", () => {
+  it("keeps the desktop clock aligned with the current minute", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-06T00:00:00Z"));
+    stubFetch(healthyState);
+    const formatClock = (date: Date) => new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(date);
+
+    render(<App />);
+    expect(screen.getByText(formatClock(new Date()), { selector: ".clock" })).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(screen.getByText(formatClock(new Date()), { selector: ".clock" })).toBeTruthy();
+  });
+
   it("shows a loading state while the first host observation is pending", async () => {
     let finishRequest: ((response: Response) => void) | undefined;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { finishRequest = resolve; })));
