@@ -57,6 +57,8 @@ systemctl set-default graphical.target
 systemctl enable anas-kiosk@tty1.service
 ```
 
+该单元只通过 `graphical.target.wants` 启动，不声明 `display-manager.service` 别名。Debian 13 的 systemd 会拒绝把显式模板实例别名为非模板单元，而该别名并不是 Kiosk 随 `graphical.target` 启动的必要条件。
+
 保持 SSH 恢复会话后，首次验证可执行：
 
 ```bash
