@@ -75,12 +75,14 @@ install -m 0750 anas-host-agent.incoming anas-host-agent
 install -m 0750 kiosk-launcher.incoming kiosk-launcher
 install -m 0644 anas-kiosk@.service.incoming anas-kiosk@.service
 install -m 0644 a-nas-kiosk.pam.incoming a-nas-kiosk.pam
+install -m 0644 kiosk.env.incoming kiosk.env
 rm -f \
   anas-api.incoming \
   anas-host-agent.incoming \
   kiosk-launcher.incoming \
   anas-kiosk@.service.incoming \
-  a-nas-kiosk.pam.incoming
+  a-nas-kiosk.pam.incoming \
+  kiosk.env.incoming
 
 install -d -m 0700 "$config_dir"
 install -d -m 0750 "$unit_dir"

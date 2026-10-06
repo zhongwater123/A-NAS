@@ -22,6 +22,7 @@
 - `kiosk-launcher`
 - `anas-kiosk@.service`
 - `a-nas-kiosk.pam`
+- `kiosk.env`（Experimental NAS 已实机校准的输出配置）
 
 2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成。重装或新设备由管理员执行：
 
@@ -51,6 +52,10 @@ install -m 0644 \
 install -m 0644 \
   /home/anas-dev/apps/a-nas/current/anas-kiosk@.service \
   /etc/systemd/system/anas-kiosk@.service
+install -d -m 0755 /etc/a-nas
+install -m 0644 \
+  /home/anas-dev/apps/a-nas/current/kiosk.env \
+  /etc/a-nas/kiosk.env
 
 systemctl daemon-reload
 systemctl set-default graphical.target
@@ -60,6 +65,8 @@ systemctl enable anas-kiosk@tty1.service
 该单元只通过 `graphical.target.wants` 启动，不声明 `display-manager.service` 别名。Debian 13 的 systemd 会拒绝把显式模板实例别名为非模板单元，而该别名并不是 Kiosk 随 `graphical.target` 启动的必要条件。
 
 系统级单元中的启动器路径固定为 `/home/anas-dev/apps/a-nas/current/kiosk-launcher`，不使用 `%h`；系统管理器会把 `%h` 解析为 `/root`，即使服务配置了 `User=anas-dev`。
+
+本机屏幕已在 `DP-2` 的原生 `1536x2048@60.6Hz` 模式下实机校准为逆时针 `90` 度、缩放 `1.5`。这些硬件相关值位于 root 管理的 `/etc/a-nas/kiosk.env`；启动器会先校验配置，再在 Chromium 启动前原子应用 transform 和 scale。其他硬件不得直接复用 connector 名称。
 
 保持 SSH 恢复会话后，首次验证可执行：
 
@@ -79,7 +86,7 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 可切到恢复终端；SSH 执行 `systemctl restart anas-kiosk@tty1.service` 可恢复显示会话。
 
-如果分辨率或屏幕方向不正确，先记录 `journalctl` 中的 DRM connector 名称，再在同一 Wayland 会话中用 `wlr-randr` 验证；不要在不知道输出名称时写死显卡或 connector。
+如果分辨率、方向或 UI 大小不正确，先在同一 Wayland 会话中用 `wlr-randr` 临时验证，再更新 `/etc/a-nas/kiosk.env`；不要在不知道输出名称时写死显卡或 connector。
 
 ## 回滚
 

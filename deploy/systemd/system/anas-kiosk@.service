@@ -13,6 +13,7 @@ After=getty@%i.service
 [Service]
 Type=simple
 User=anas-dev
+EnvironmentFile=-/etc/a-nas/kiosk.env
 ExecStart=/usr/bin/cage -s -- /home/anas-dev/apps/a-nas/current/kiosk-launcher
 ExecStartPost=+/bin/sh -c "tty_name='%i'; exec /usr/bin/chvt $${tty_name#tty}"
 Restart=always
