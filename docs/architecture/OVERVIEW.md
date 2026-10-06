@@ -39,13 +39,13 @@
 |---|---|---|
 | `cmd/anas-api` | 产品 API 进程入口 | 可启动，支持优雅关闭 |
 | `cmd/anas-host-agent` | Host Agent 进程入口 | 可构建的占位入口 |
-| `internal/hoststate` | 只读宿主机状态接口与 Fake Adapter | 已实现并通过测试 |
+| `internal/hoststate` | 只读宿主机状态接口、Fake Adapter 与 Debian Linux Adapter | 已实现并通过本地及实验 NAS 测试 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
 | `docs/specs` | 可验收的产品行为 | 已记录首个只读状态规格 |
 | `docs/investigations` | 复杂缺陷的证据和根因 | 尚无调查记录 |
-| `docs/runbooks` | 可重复且可验证的操作 | 尚无运行手册 |
+| `docs/runbooks` | 可重复且可验证的操作 | SSH、用户态部署与 Linux Adapter 验收手册已验证 |
 
 新增模块时，应在其代码附近放置包级说明和测试；只有跨模块关系或系统不变量才更新本页。
 

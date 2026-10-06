@@ -5,6 +5,7 @@
 ## 索引
 
 - [只读宿主机状态](read-only-host-state.md)（implemented）
+- [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）
 
 ## 使用方式
 

@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-M1：本地只读开发闭环已完成，准备进入 M2 只读硬件闭环。
+M2：只读硬件闭环进行中；基础 Linux Adapter 已完成，健康工具与 Host Agent IPC 尚待补齐。
 
 ## 当前目标
 
-补齐实验 NAS 的只读硬件基线并查明未检测到的数据盘，然后原型验证 Host Agent IPC，在不修改宿主机状态的前提下接入 Debian 13 Linux Adapter。
+查明未检测到的数据盘，补齐 SMART/NVMe 只读健康能力，并原型验证 Host Agent IPC；产品服务仍不直接加载 Linux Adapter。
 
 ## 已就绪
 
@@ -26,16 +26,17 @@ M1：本地只读开发闭环已完成，准备进入 M2 只读硬件闭环。
 - Codex 已通过 Windows `ssh-agent` 对实验 NAS 完成无交互 SSH 验证；当前维护窗口使用服务器端公钥到期选项，精确到期时间只保留在操作者会话中，不写入仓库。
 - 实验 NAS 的用户级 systemd 正常、home 可用空间约 213 GB；Git、Go、Make 和 curl 尚未安装，`anas-dev` 的 linger 尚未启用。
 - M1 `anas-api` 的版本 `03fc068` 已作为校验过哈希的用户态制品上传，并在 Debian 13 上完成三个 Fake API 的临时冒烟验收；进程已优雅停止，见 [部署运行手册](../runbooks/deploy-m1-api-to-experimental-nas.md)。
+- Debian Linux Adapter 已通过既有 `hoststate.Reader` seam 实现：从 `os-release`、machine-id、uptime 和固定参数的 `lsblk --json` 生成只读状态，公开 ID 不泄露原始机器或磁盘标识。
+- Linux Adapter 已在实验 NAS 上通过显式启用的真实主机集成测试；当前识别唯一 NVMe 系统盘和安装 U 盘，健康状态保持 `unknown`，不伪报 SMART 结果。
 
 ## 下一步
 
 1. 安全关机后拔除 Debian 安装 U 盘，再次确认系统从 NVMe 独立启动。
 2. 在 BIOS 和物理连接层排查 512 GB 机械盘未被 Debian 检测到的原因；检测到后仍不格式化。
-3. 补充 CPU、内存、PCI、网卡、温度和磁盘健康的只读基线。
-4. 决定实机采用“本机构建后上传制品”还是额外安装构建工具；首选上传可追溯制品，避免把实验 NAS 变成源码事实源。
-5. 由管理员决定是否为 `anas-dev` 启用 linger，以便无 root 的用户级服务在 SSH 登出后持续运行。
-6. 比较并原型验证 Host Agent IPC 候选，但不提前加入特权写操作。
-7. 定义只读 Linux Adapter 的发现范围、失败语义和契约测试。
+3. 由管理员安装 `smartmontools` 和 `nvme-cli` 后，补充只读 SMART、NVMe 健康与温度基线。
+4. 比较并原型验证 Host Agent IPC 候选，但不提前加入特权写操作，也不让产品服务直接加载 Linux Adapter。
+5. 决定实机采用“本机构建后上传制品”还是额外安装构建工具；首选上传可追溯制品，避免把实验 NAS 变成源码事实源。
+6. 由管理员决定是否为 `anas-dev` 启用 linger，以便无 root 的用户级服务在 SSH 登出后持续运行。
 
 ## 尚未阻塞本地开发的外部工作
 
