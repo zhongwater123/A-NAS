@@ -4,7 +4,7 @@
 
 ## 索引
 
-当前尚无运行手册。M0 的第一份手册应覆盖实验 NAS 的 Debian 安装与只读基线采集。
+- [配置实验 NAS 的 SSH 开发账号](bootstrap-experimental-nas-ssh.md)（verified）
 
 ## 使用方式
 

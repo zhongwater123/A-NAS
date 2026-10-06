@@ -18,7 +18,7 @@
 
 - `anas-dev` 不复用现有的 `docker-dev` home、Git 配置、SSH 密钥或语言缓存。
 - `anas-dev` 不属于 `sudo` 或 `docker` 组，日常开发默认非特权运行。
-- 尚未为 A-NAS 创建 SSH 私钥；待实验 NAS 地址和部署流程明确后再建立项目专用密钥。
+- Windows 已为实验 NAS 创建项目专用 ED25519 密钥，默认路径为 `%USERPROFILE%\.ssh\a-nas-dev_ed25519`；私钥内容和口令不进入仓库。
 - Docker 虽已存在于 WSL，但当前不是已冻结的 A-NAS 依赖，也未向 `anas-dev` 授权。
 - Git 用户名和邮箱需要由开发者在 `anas-dev` 下自行设置，仓库不记录个人身份。
 - Go 安装在 `/opt/go/1.27.1`，`anas-dev` 使用自己的模块、构建和工具缓存。
@@ -43,6 +43,18 @@ bash scripts/check-dev-env.sh
 ```powershell
 wsl -d Ubuntu-24.04 -u root
 ```
+
+## 实验 NAS 接入
+
+| 项目 | 当前状态 |
+|---|---|
+| 主机名 | `a-nas-dev` |
+| 系统 | Debian 13 trixie amd64 |
+| SSH | OpenSSH 已启用；Windows 主机密钥登录已验证 |
+| 开发账号 | `anas-dev`，无 `sudo` 权限 |
+| 地址 | DHCP 地址，不写入仓库；每次使用前按需确认 |
+
+首次配置、指纹核对、密钥轮换和恢复步骤见[实验 NAS SSH 运行手册](../runbooks/bootstrap-experimental-nas-ssh.md)。尚未关闭密码登录；完成恢复路径与第二把管理员密钥设计前不做 SSH 全局加固。
 
 ## 尚待决定后再安装
 

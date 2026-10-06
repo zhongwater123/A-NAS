@@ -29,11 +29,11 @@ A-NAS 的目标不是给传统 NAS 简单增加一个聊天框，而是构建一
 |---|---|---|
 | CPU | Intel Core i3-12100 | x86-64/Intel 64，应安装 Debian `amd64`，不是 `arm64` |
 | 内存 | 8 GB | 足够开发 NAS 基础能力和调用云端 AI API；不适合舒适运行较大的本地多模态模型 |
-| 系统盘 | 125 GB M.2 固态 | 当前用于 Debian、开发服务和数据库；长期同时保存模型、索引和派生数据会偏小 |
-| 数据盘 | 512 GB 机械硬盘 | 可作为可清空的开发测试数据盘；单盘没有冗余，不能视为生产数据保护方案 |
+| 系统盘 | Acer N3500CN 256 GB NVMe | Debian 根文件系统使用 ext4，EFI、根分区和 swap 均位于该盘 |
+| 数据盘 | 512 GB 机械硬盘 | 计划作为可清空的开发测试盘；当前未被 Debian `lsblk` 检测到，排障前不得格式化任何其他设备 |
 | AI 加速 | 暂无独立 GPU/NPU | 不妨碍 API-first MVP；后续根据实测模型和功耗再选择加速硬件 |
 
-当前状态：机器已刷入 Debian 13 amd64；尚未记录 SSH 连通、非 root 开发账号和硬件基线。
+当前状态：机器已运行 Debian 13 amd64，Windows 已通过项目专用 ED25519 密钥登录无 `sudo` 权限的 `anas-dev`；系统盘身份已确认，完整硬件基线和 512 GB 机械盘检测仍待完成。
 
 ### 2.2 当前机器的定位
 
@@ -461,11 +461,12 @@ E:\A-NAS
 - 最终隐私方向：优先端侧、本地处理，数据默认不上传。
 - MVP AI 路线：允许先接多模态 API 验证产品闭环。
 - 基础系统：Linux，当前选择 Debian Stable。
-- 当前硬件：i3-12100、8 GB、125 GB M.2、512 GB 机械盘。
+- 当前硬件：i3-12100、8 GB、256 GB NVMe 系统盘；512 GB 机械盘当前未被 Debian 检测到。
 - CPU 架构和安装镜像：x86-64，对应 Debian `amd64`。
 - 开发目录：`E:\A-NAS`。
 - 开发方式：主电脑开发 + Linux 本地环境 + Debian 裸机远程集成测试。
 - 本机 Linux 开发环境：WSL2 Ubuntu 24.04，使用隔离的非特权用户 `anas-dev`。
+- 实验 NAS：Debian 13 amd64，主机名 `a-nas-dev`，使用无 `sudo` 权限的 `anas-dev` 和项目专用 SSH 密钥。
 - Git 仓库：已初始化，默认分支为 `main`。
 - 后端语言：产品服务和 Host Agent 使用 Go，见 ADR 0001。
 - 客户端产品接口：使用版本化 REST/JSON 与 OpenAPI，见 ADR 0002；Host Agent IPC 仍待决策。
