@@ -69,5 +69,5 @@
 ## 关联
 
 - 规格：[Debian 只读宿主机状态](../specs/read-only-linux-host-state.md)
-- ADR：Host Agent IPC 尚未决定
+- ADR：[只读 Host Agent 状态使用 Unix Socket 上的 HTTP/JSON](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
 - 调查：不涉及

@@ -16,7 +16,11 @@ Thumbs.db
 
 # Build, test, and cache output
 dist/
+!internal/webui/dist/
+internal/webui/dist/*
+!internal/webui/dist/.keep
 build/
+output/
 coverage/
 coverage.out
 .cache/

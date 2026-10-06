@@ -1,0 +1,7 @@
+# Dedicated non-interactive PAM stack for the root-owned A-NAS kiosk unit.
+# Authentication is authorized by the fixed User=anas-dev systemd unit; the
+# account and session modules still validate the account and register logind.
+auth       required pam_permit.so
+account    required pam_unix.so
+session    required pam_unix.so
+session    required pam_systemd.so

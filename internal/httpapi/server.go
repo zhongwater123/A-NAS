@@ -13,16 +13,25 @@ import (
 
 type handler struct {
 	reader         hoststate.Reader
+	dataSource     DataSource
 	productVersion string
 	logger         *slog.Logger
 }
 
-func New(reader hoststate.Reader, productVersion string, logger *slog.Logger) http.Handler {
+type DataSource string
+
+const (
+	DataSourceSimulated DataSource = "simulated"
+	DataSourceLive      DataSource = "live"
+)
+
+func New(reader hoststate.Reader, dataSource DataSource, productVersion string, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &handler{
 		reader:         reader,
+		dataSource:     dataSource,
 		productVersion: productVersion,
 		logger:         logger,
 	}
@@ -30,7 +39,7 @@ func New(reader hoststate.Reader, productVersion string, logger *slog.Logger) ht
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/healthz", "/api/v1/system", "/api/v1/disks":
+	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -92,6 +101,21 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if r.URL.Path == "/api/v1/host-state" {
+		state, err := h.reader.Read(r.Context())
+		if err != nil {
+			h.writeStateUnavailable(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, hostStateResponse{
+			DataSource:     h.dataSource,
+			ProductVersion: h.productVersion,
+			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
+			System:         mapSystem(state.System),
+			Disks:          mapDisks(state.Disks),
+		})
+		return
+	}
 }
 
 func (h *handler) writeStateUnavailable(w http.ResponseWriter, r *http.Request, err error) {
@@ -115,6 +139,15 @@ type systemResponse struct {
 	ObservedAt      string                  `json:"observedAt"`
 }
 
+type systemStateResponse struct {
+	ID              string                  `json:"id"`
+	Hostname        string                  `json:"hostname"`
+	OperatingSystem operatingSystemResponse `json:"operatingSystem"`
+	Architecture    string                  `json:"architecture"`
+	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
+	Health          hoststate.Health        `json:"health"`
+}
+
 type diskResponse struct {
 	ID                 string              `json:"id"`
 	Model              string              `json:"model"`
@@ -129,6 +162,46 @@ type diskResponse struct {
 type disksResponse struct {
 	ObservedAt string         `json:"observedAt"`
 	Items      []diskResponse `json:"items"`
+}
+
+type hostStateResponse struct {
+	DataSource     DataSource          `json:"dataSource"`
+	ProductVersion string              `json:"productVersion"`
+	ObservedAt     string              `json:"observedAt"`
+	System         systemStateResponse `json:"system"`
+	Disks          []diskResponse      `json:"disks"`
+}
+
+func mapSystem(system hoststate.System) systemStateResponse {
+	return systemStateResponse{
+		ID:       system.ID.String(),
+		Hostname: system.Hostname,
+		OperatingSystem: operatingSystemResponse{
+			Name:    system.OperatingSystem.Name,
+			Version: system.OperatingSystem.Version,
+		},
+		Architecture:  system.Architecture,
+		UptimeSeconds: system.UptimeSeconds,
+		Health:        system.Health,
+	}
+}
+
+func mapDisks(disks []hoststate.Disk) []diskResponse {
+	items := make([]diskResponse, len(disks))
+	for i, disk := range disks {
+		items[i] = diskResponse{
+			ID:                 disk.ID.String(),
+			Model:              disk.Model,
+			Transport:          disk.Transport,
+			CapacityBytes:      disk.CapacityBytes,
+			Rotational:         disk.Rotational,
+			Role:               disk.Role,
+			Health:             disk.Health,
+			TemperatureCelsius: disk.TemperatureCelsius,
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return items
 }
 
 type errorDetail struct {

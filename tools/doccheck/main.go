@@ -88,7 +88,7 @@ func validateDocumentation(root string) ([]string, int) {
 		}
 		if entry.IsDir() {
 			name := entry.Name()
-			if name == ".git" || name == "build" {
+			if name == ".git" || name == "build" || name == "node_modules" || name == "dist" {
 				return filepath.SkipDir
 			}
 			return nil

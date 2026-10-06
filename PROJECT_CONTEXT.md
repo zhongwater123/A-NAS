@@ -37,12 +37,13 @@ A-NAS 的目标不是给传统 NAS 简单增加一个聊天框，而是构建一
 
 ### 2.2 当前机器的定位
 
-这台机器首先作为 **裸机硬件集成测试机**，用于验证：
+这台机器首先作为 **带直连屏幕和输入设备的裸机硬件集成测试机**，不是纯无头服务器；它同时承载 A-NAS 设备端本地控制台，用于验证：
 
 - UEFI、磁盘、网卡、温度、风扇和电源行为；
 - Debian、systemd、udev、SMART、Btrfs、Samba；
 - 格式化、挂载、快照、故障和恢复路径；
 - 产品服务安装、升级、重启和日志；
+- Cage/Chromium 本地控制台、显示器、键盘和鼠标交互；
 - AI 任务对 NAS CPU、内存和 I/O 的干扰。
 
 它不是源码的唯一保存位置，也不承担主要日常编码工作，可以被反复部署甚至重装。
@@ -113,7 +114,7 @@ i3-12100 Debian 裸机：真实磁盘、网络、systemd 和破坏性集成测�
 - 已建立隔离的非特权开发用户 `anas-dev`，其独立 home 为 `/home/anas-dev`；
 - WSL 工作区入口为 `~/workspace/A-NAS`，指向 `/mnt/e/A-NAS`；
 - Git、通用编译工具、Python、SQLite、Ansible 和常用检查工具已经就绪；
-- Go 1.27.1 已作为产品服务和 Host Agent 的初始工具链；数据库服务和容器运行时仍等待原型与 ADR。
+- Go 1.27.1 已作为产品服务和 Host Agent 工具链；Web 桌面使用 Node.js 26、npm、React、TypeScript 和 Vite；数据库服务和容器运行时仍等待原型与 ADR。
 
 详细使用方式见 `docs/development/LOCAL_ENVIRONMENT.md`。
 
@@ -469,7 +470,10 @@ E:\A-NAS
 - 实验 NAS：Debian 13 amd64，主机名 `a-nas-dev`，使用无 `sudo` 权限的 `anas-dev` 和项目专用 SSH 密钥。
 - Git 仓库：已初始化，默认分支为 `main`。
 - 后端语言：产品服务和 Host Agent 使用 Go，见 ADR 0001。
-- 客户端产品接口：使用版本化 REST/JSON 与 OpenAPI，见 ADR 0002；Host Agent IPC 仍待决策。
+- 客户端产品接口：使用版本化 REST/JSON 与 OpenAPI，见 ADR 0002。
+- Web 桌面：使用 React、TypeScript、Vite 和 npm，构建产物嵌入 Go 二进制，见 ADR 0003。
+- 只读 Host Agent IPC：使用 Unix Socket 上的 HTTP/JSON，并以 Client Adapter 保持 `hoststate.Reader` seam，见 ADR 0004。
+- 本地控制台：使用 Cage/Chromium 单应用 Wayland Kiosk 呈现同一 Web 桌面，不安装通用桌面环境，见 ADR 0005。
 - 文档与溯源：使用 `AGENTS.md` 路由到术语、状态、架构、ADR、规格、调查和运行手册，Git 保存实现历史。
 - 不直接使用 fnOS 私有产品层作为商业代码底座。
 - 不假定 fnOS 基于 OMV。
@@ -487,8 +491,6 @@ E:\A-NAS
 
 ### 13.3 待决策
 
-- Host Agent 与产品层之间的 IPC 协议；
-- 前端框架；
 - SQLite 或 PostgreSQL；
 - Docker/Moby 或 Podman；
 - Btrfs RAID1，还是 md RAID1 + Btrfs；
@@ -498,7 +500,7 @@ E:\A-NAS
 - 本地模型 Runtime、GPU/NPU 和最终硬件 SKU；
 - 应用包格式和第三方应用安全模型。
 
-Go 的选择记录在 `docs/adr/0001-use-go-for-product-services.md`，客户端产品接口的 REST/OpenAPI 选择记录在 `docs/adr/0002-use-rest-openapi-for-product-clients.md`。进程权限边界、Host Agent 类型化 IPC 和 Adapter 设计仍需通过原型验证。
+Go 的选择记录在 `docs/adr/0001-use-go-for-product-services.md`，客户端 REST/OpenAPI、Web 桌面和只读 Host Agent IPC 分别记录在 ADR 0002～0004。未来特权执行计划的接口与进程权限仍需单独原型验证。
 
 ## 14. 建议的近期里程碑
 
@@ -558,7 +560,7 @@ Go 的选择记录在 `docs/adr/0001-use-go-for-product-services.md`，客户端
 - `F:\NAS\research\nas-os-open-source-options.md`
 - `F:\NAS\research\ai-first-home-nas-architecture.md`
 
-其中早期 AI 架构文档曾把 Go 写为既定选择。当前已更正：**架构边界暂定，产品层实现语言未定。**
+其中早期 AI 架构文档记录的是当时的探索状态。当前产品服务与 Host Agent 的 Go 选择已经由 ADR 0001 正式冻结；历史材料不能覆盖现行 ADR。
 
 主要公开参考：
 

@@ -10,8 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
 var version = "dev"
@@ -30,9 +33,20 @@ func run(logger *slog.Logger) error {
 		address = "127.0.0.1:8080"
 	}
 
+	reader, dataSource, err := configuredReader()
+	if err != nil {
+		return err
+	}
+
+	apiHandler := httpapi.New(reader, dataSource, version, logger)
+	handler, err := webui.New(apiHandler)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:              address,
-		Handler:           httpapi.New(fake.NewHealthy(), version, logger),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -66,5 +80,20 @@ func run(logger *slog.Logger) error {
 			return nil
 		}
 		return err
+	}
+}
+
+func configuredReader() (hoststate.Reader, httpapi.DataSource, error) {
+	switch mode := os.Getenv("ANAS_HOSTSTATE_MODE"); mode {
+	case "", "fake":
+		return fake.NewHealthy(), httpapi.DataSourceSimulated, nil
+	case "agent":
+		socketPath, err := agent.SocketPath()
+		if err != nil {
+			return nil, "", err
+		}
+		return agent.NewClient(socketPath), httpapi.DataSourceLive, nil
+	default:
+		return nil, "", errors.New("ANAS_HOSTSTATE_MODE must be fake or agent")
 	}
 }

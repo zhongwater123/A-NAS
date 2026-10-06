@@ -53,6 +53,17 @@ func TestValidateDocumentationCountsMarkdownAndFindsBrokenLinks(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("[missing](missing.md)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	for _, ignored := range []string{
+		filepath.Join(root, "web", "node_modules", "dependency", "README.md"),
+		filepath.Join(root, "internal", "webui", "dist", "generated.md"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(ignored), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(ignored, []byte("[dependency link](missing.md)\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	problems, files := validateDocumentation(root)
 	if files != len(requiredDocuments)+1 {

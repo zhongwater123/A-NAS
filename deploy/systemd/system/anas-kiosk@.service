@@ -1,0 +1,35 @@
+[Unit]
+Description=A-NAS local desktop on %I
+Documentation=https://github.com/zhongwater123/A-NAS
+After=systemd-user-sessions.service plymouth-quit-wait.service
+Before=graphical.target
+ConditionPathExists=/dev/tty0
+ConditionPathExists=%h/apps/a-nas/current/kiosk-launcher
+Wants=dbus.socket systemd-logind.service
+After=dbus.socket systemd-logind.service
+Conflicts=getty@%i.service
+After=getty@%i.service
+
+[Service]
+Type=simple
+User=anas-dev
+ExecStart=/usr/bin/cage -s -- %h/apps/a-nas/current/kiosk-launcher
+ExecStartPost=+/bin/sh -c "tty_name='%i'; exec /usr/bin/chvt $${tty_name#tty}"
+Restart=always
+RestartSec=3s
+TimeoutStopSec=10s
+UtmpIdentifier=%I
+UtmpMode=user
+TTYPath=/dev/%I
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+PAMName=a-nas-kiosk
+
+[Install]
+WantedBy=graphical.target
+Alias=display-manager.service
+DefaultInstance=tty1

@@ -3,7 +3,7 @@ jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: A-NAS Product API
   version: 0.1.0
-  description: Read-only local product API for the first A-NAS development milestone.
+  description: Read-only local product API for the A-NAS Web desktop and future product clients.
 servers:
   - url: http://127.0.0.1:8080
 security: []
@@ -51,6 +51,21 @@ paths:
           $ref: "#/components/responses/StateUnavailable"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/host-state:
+    get:
+      operationId: getHostState
+      summary: Read one atomic host system and disk snapshot
+      responses:
+        "200":
+          description: The observed host state and its data source.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostStateResponse"
+        "503":
+          $ref: "#/components/responses/StateUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
 components:
   responses:
     StateUnavailable:
@@ -80,6 +95,9 @@ components:
     Transport:
       type: string
       enum: [nvme, sata, usb, unknown]
+    DataSource:
+      type: string
+      enum: [simulated, live]
     StableResourceID:
       type: string
       minLength: 1
@@ -137,6 +155,33 @@ components:
         observedAt:
           type: string
           format: date-time
+    SystemState:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - hostname
+        - operatingSystem
+        - architecture
+        - uptimeSeconds
+        - health
+      properties:
+        id:
+          $ref: "#/components/schemas/StableResourceID"
+        hostname:
+          type: string
+          minLength: 1
+        operatingSystem:
+          $ref: "#/components/schemas/OperatingSystem"
+        architecture:
+          type: string
+          minLength: 1
+        uptimeSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        health:
+          $ref: "#/components/schemas/Health"
     Disk:
       type: object
       additionalProperties: false
@@ -178,6 +223,25 @@ components:
           type: string
           format: date-time
         items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Disk"
+    HostStateResponse:
+      type: object
+      additionalProperties: false
+      required: [dataSource, productVersion, observedAt, system, disks]
+      properties:
+        dataSource:
+          $ref: "#/components/schemas/DataSource"
+        productVersion:
+          type: string
+          minLength: 1
+        observedAt:
+          type: string
+          format: date-time
+        system:
+          $ref: "#/components/schemas/SystemState"
+        disks:
           type: array
           items:
             $ref: "#/components/schemas/Disk"

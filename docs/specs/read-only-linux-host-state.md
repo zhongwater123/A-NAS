@@ -65,6 +65,6 @@ Host Agent 内的 Linux Adapter 在 Debian 13 上通过既有 `hoststate.Reader`
 ## 关联
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)
-- ADR：Host Agent IPC 尚未决定
+- ADR：[只读 Host Agent 状态使用 Unix Socket 上的 HTTP/JSON](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
 - 代码：[宿主机状态接口](../../internal/hoststate/state.go)、[Linux Adapter](../../internal/hoststate/linux/reader.go)
 - 测试：[Reader seam 测试](../../internal/hoststate/linux/reader_test.go)、[Debian 集成测试](../../internal/hoststate/linux/reader_integration_test.go)
