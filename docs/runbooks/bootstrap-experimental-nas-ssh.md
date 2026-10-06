@@ -105,11 +105,39 @@
        IdentitiesOnly yes
    ```
 
+## 限时自动化维护窗口
+
+Windows 内置 OpenSSH 的 `ssh-agent` 可能拒绝 `ssh-add -t <seconds>` 的生命周期约束，并返回 `agent refused operation`。先确认代理服务已启动，再不带 `-t` 加载密钥：
+
+```powershell
+$keyPath = Join-Path $env:USERPROFILE ".ssh\a-nas-dev_ed25519"
+ssh-add "$keyPath"
+ssh-add -l
+```
+
+若维护窗口必须到期，可在 Debian 的对应 `authorized_keys` 行前设置 UTC 到期时间，并关闭与部署无关的转发能力：
+
+```text
+expiry-time="<YYYYMMDDHHMMSSZ>",no-agent-forwarding,no-port-forwarding,no-X11-forwarding ssh-ed25519 <PUBLIC_KEY> <COMMENT>
+```
+
+- 修改前使用 `cp -p` 创建带 UTC 时间戳的备份，并保持 `authorized_keys` 为 `600`。
+- 只在 `timedatectl` 显示 NTP 已同步、目标公钥指纹和条目数量均已确认时修改。
+- 修改后必须建立一条全新的 SSH 连接验证，而不能仅依赖修改前已建立的连接。
+- 该到期时间能阻止文件保持不变时的后续认证，但 `authorized_keys` 当前由 `anas-dev` 所有，因此它不是抵抗该账号主动篡改的强安全边界。若需要不可自行延长的授权，应由 root 使用独立的系统级授权文件管理公钥。
+- 活动窗口的精确到期时间、目标地址和备份文件名属于操作态信息，不提交到远端仓库。
+- 窗口结束后仍应从 Windows 代理中删除项目密钥：
+
+  ```powershell
+  ssh-add -d "$keyPath"
+  ```
+
 ## 验证
 
 - `ssh a-nas-dev` 可以登录，且 `id` 不包含 `sudo`。
 - `ssh-keygen -lf %USERPROFILE%\.ssh\a-nas-dev_ed25519.pub` 与服务器 `authorized_keys` 的指纹一致。
 - `systemctl is-active ssh` 仍返回 `active`。
+- 限时授权场景中，`date -u`、`timedatectl show -p NTPSynchronized` 和 `authorized_keys` 的 `expiry-time` 均与批准的维护窗口一致。
 
 ## 回滚或恢复
 

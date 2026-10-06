@@ -5,6 +5,7 @@
 ## 索引
 
 - [配置实验 NAS 的 SSH 开发账号](bootstrap-experimental-nas-ssh.md)（verified）
+- [部署 M1 API 到实验 NAS](deploy-m1-api-to-experimental-nas.md)（verified）
 
 ## 使用方式
 
