@@ -1,6 +1,6 @@
 # 空白磁盘计划导致本地桌面蓝屏
 
-状态：fixed locally；`v1.0.1-rc.4` 实机回归待完成
+状态：fixed in `v1.0.1-rc.4`；已完整验证并 stage，实机回归待完成
 
 ## 症状与影响
 
@@ -28,7 +28,7 @@ Experimental NAS 在 `v1.0.1-rc.3` 中成功创建管理员后，用户从“存
 - 每个桌面窗口增加错误边界，面板异常时保留桌面并提供重新载入入口。
 - 后端回归断言空盘计划 JSON 包含 `"signatures":[]`；React 回归把 `signatures/actions` 故意设为 `null` 并验证桌面仍可操作。
 
-`go test ./internal/storage` 与 `npm test -- --run src/App.test.tsx` 已通过。实机只需重新生成计划验证页面，不得把此前蓝屏描述为已经执行过格式化。
+`go test ./internal/storage`、`npm test -- --run src/App.test.tsx` 与 `make check VERSION=v1.0.1-rc.4` 已通过。实机只需重新生成计划验证页面，不得把此前蓝屏描述为已经执行过格式化。
 
 ## 关联
 

@@ -1,6 +1,6 @@
 # 本地 Kiosk 可进入通用 Chromium 界面
 
-状态：open；密码保存提示已在 rc.4 候选修复，完整浏览器约束仍待验收
+状态：open；密码保存提示已在 rc.4 修复并 stage，完整浏览器约束仍待验收
 更新时间：2026-10-07
 
 ## 症状与影响
@@ -48,7 +48,7 @@ Experimental NAS 的直连屏幕能够显示和操作 A-NAS 桌面，但长按 `
 
 ## 修复与回归证据
 
-- `v1.0.1-rc.4` 候选增加 root 所有的 Chromium mandatory policy，设置 `PasswordManagerEnabled=false`、`PasswordManagerPasskeysEnabled=false` 和 `SyncDisabled=true`；系统安装脚本把它放到 `/etc/chromium/policies/managed/a-nas.json` 并重启活动 Kiosk。Chromium 官方说明 Linux Chromium 从该目录读取托管 JSON，且托管文件只能由管理员写入；`PasswordManagerEnabled=false` 禁止保存新密码。参见 [Linux Quick Start](https://www.chromium.org/administrators/linux-quick-start/) 与 [Password Manager Enabled](https://chromeenterprise.google/policies/password-manager-enabled/)。
+- `v1.0.1-rc.4` 增加 root 所有的 Chromium mandatory policy，设置 `PasswordManagerEnabled=false`、`PasswordManagerPasskeysEnabled=false` 和 `SyncDisabled=true`；系统安装脚本把它放到 `/etc/chromium/policies/managed/a-nas.json` 并重启活动 Kiosk。Chromium 官方说明 Linux Chromium 从该目录读取托管 JSON，且托管文件只能由管理员写入；`PasswordManagerEnabled=false` 禁止保存新密码。参见 [Linux Quick Start](https://www.chromium.org/administrators/linux-quick-start/) 与 [Password Manager Enabled](https://chromeenterprise.google/policies/password-manager-enabled/)。
 - 登录和创建账号表单也使用正确的 `autocomplete` 语义，但它只是网页提示，不能替代浏览器托管策略。
 - 密码提示的实机回归待 rc.4 安装后完成；URL、网络、快捷键和 profile 生命周期的完整收敛仍保持开放，不能把本次修复描述成 Kiosk 已完全加固。
 - 自动化门禁待增加：托管策略内容、服务网络限制、临时 profile 和启动参数的静态/实机检查。
