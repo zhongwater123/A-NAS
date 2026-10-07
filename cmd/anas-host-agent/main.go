@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
@@ -23,6 +26,13 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
+		if err := filebroker.RunWorker(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "A-NAS file worker:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
 		logger.Error("A-NAS Host Agent stopped", "error", err)
@@ -47,8 +57,9 @@ func run(logger *slog.Logger) error {
 		_ = os.Remove(socketPath)
 	}()
 	reader := linuxhoststate.New()
+	mountPoint := environment("ANAS_DATA_MOUNT", "/srv/a-nas/data")
 	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
-		MountPoint:   environment("ANAS_DATA_MOUNT", "/srv/a-nas/data"),
+		MountPoint:   mountPoint,
 		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
 	})
 	repaired, err := executor.ReconcileDataVolume(context.Background())
@@ -62,12 +73,35 @@ func run(logger *slog.Logger) error {
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
+	sessions := accounts.NewSessionDirectory(filepath.Join(environment("ANAS_STATE_DIR", "/var/lib/a-nas"), "control.db"))
+	defer sessions.Close()
+	broker, err := filebroker.NewServer(filebroker.Config{
+		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer broker.Close()
+	brokerSocket := environment("ANAS_FILE_BROKER_SOCKET", filepath.Join(filepath.Dir(socketPath), "file-broker.sock"))
+	brokerListener, err := listen(brokerSocket, strings.TrimSpace(os.Getenv("ANAS_HOST_AGENT_GROUP")))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = brokerListener.Close()
+		_ = os.Remove(brokerSocket)
+	}()
+	go func() {
+		if err := broker.Serve(brokerListener); err != nil {
+			logger.Error("file broker stopped", "error", err)
+		}
+	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go repairPermissionsPeriodically(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
-		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "version", version)
+		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "file_broker", brokerSocket, "version", version)
 		serveError <- server.Serve(listener)
 	}()
 	select {

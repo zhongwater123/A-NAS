@@ -277,6 +277,7 @@ type Service struct {
 	credentials CredentialProvisioner
 	now         func() time.Time
 	random      io.Reader
+	sessions    sessionMemory
 }
 
 func NewService(store *Store, credentials CredentialProvisioner, options Options) *Service {
@@ -469,6 +470,7 @@ func (s *Service) Authenticate(ctx context.Context, username, password string) (
 		tokenHash(token), csrf, user.ID, formatTime(expiresAt), formatTime(now)); err != nil {
 		return Session{}, err
 	}
+	s.sessions.remember(user.ID, token, expiresAt)
 	return Session{Token: token, CSRFToken: csrf, ExpiresAt: expiresAt, User: user}, nil
 }
 
@@ -489,12 +491,15 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(
 	session.User.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	if session.User.Status != UserStatusActive || !s.now().UTC().Before(session.ExpiresAt) {
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash = ?", tokenHash(token))
+		s.sessions.forgetToken(token)
 		return Session{}, ErrSessionNotFound
 	}
+	s.sessions.remember(session.User.ID, token, session.ExpiresAt)
 	return session, nil
 }
 
 func (s *Service) EndSession(ctx context.Context, token string) error {
+	s.sessions.forgetToken(token)
 	_, err := s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash = ?", tokenHash(token))
 	return err
 }
@@ -639,6 +644,7 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 		return err
 	}
 	_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
+	s.sessions.forgetUser(userID)
 	return s.appendAudit(ctx, actor.ID, "user.disabled", "user", userID, "")
 }
 
@@ -679,6 +685,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
+		s.sessions.forgetUser(userID)
 		return fmt.Errorf("provision account credential: %w", err)
 	}
 	tx, err := s.store.db.BeginTx(ctx, nil)
@@ -696,6 +703,7 @@ status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE i
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.sessions.forgetUser(userID)
 	return s.appendAudit(ctx, actor.ID, "user.credential_reset", "user", userID, "")
 }
 

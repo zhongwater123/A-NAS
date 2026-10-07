@@ -661,7 +661,8 @@ func (h *productHandler) withSession(next func(http.ResponseWriter, *http.Reques
 			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
-		next(w, r, session)
+		// The File Broker verifies the token itself before acting as the user.
+		next(w, r.WithContext(accounts.WithSessionToken(r.Context(), cookie.Value)), session)
 	}
 }
 

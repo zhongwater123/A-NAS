@@ -75,6 +75,7 @@ printf '%s\n' \
   'ANAS_HTTP_ADDR=127.0.0.1:8080' \
   'ANAS_HOSTSTATE_MODE=agent' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
+  'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
 chown root:a-nas /etc/a-nas/anas-api.env
@@ -82,6 +83,8 @@ chmod 0640 /etc/a-nas/anas-api.env
 
 printf '%s\n' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
+  'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
+  'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_HOST_AGENT_GROUP=a-nas' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env

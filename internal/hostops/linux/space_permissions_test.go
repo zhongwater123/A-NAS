@@ -39,16 +39,16 @@ func TestMaterializeRegisteredSpacesAppliesTheACLLayout(t *testing.T) {
 	privateTrash := filepath.Join(privateRoot, ".a-nas-trash")
 	sharedTrash := filepath.Join(sharedRoot, ".a-nas-trash")
 	want := map[string]string{
-		spacesRoot:       "user::rwx,group::---,other::---,group:a-nas-users:--x,user:a-nas:--x,mask::--x",
-		privateContainer: "user::rwx,group::---,other::---,group:a-nas-users:--x,user:a-nas:--x,mask::--x",
-		privateRoot: "user::rwx,group::---,other::---,mask::rwx,user:alice:rwx,user:a-nas:rwx," +
-			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:user:alice:rwx,default:user:a-nas:rwx",
-		privateTrash: "user::rwx,group::---,other::---,user:alice:--x,user:a-nas:rwx,mask::rwx",
-		filepath.Join(privateTrash, "alice"): "user::rwx,group::---,other::---,mask::rwx,user:alice:rwx,user:a-nas:rwx," +
-			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:user:alice:rwx,default:user:a-nas:rwx",
-		sharedRoot: "user::rwx,group::---,other::---,mask::rwx,group:a-nas-users:rwx,user:a-nas:rwx," +
-			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:group:a-nas-users:rwx,default:user:a-nas:rwx",
-		sharedTrash:                         "user::rwx,group::---,other::---,group:a-nas-users:--x,user:a-nas:rwx,mask::rwx",
+		spacesRoot:       "user::rwx,group::---,other::---,group:a-nas-users:--x,mask::--x",
+		privateContainer: "user::rwx,group::---,other::---,group:a-nas-users:--x,mask::--x",
+		privateRoot: "user::rwx,group::---,other::---,mask::rwx,user:alice:rwx," +
+			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:user:alice:rwx",
+		privateTrash: "user::rwx,group::---,other::---,user:alice:--x,mask::--x",
+		filepath.Join(privateTrash, "alice"): "user::rwx,group::---,other::---,mask::rwx,user:alice:rwx," +
+			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:user:alice:rwx",
+		sharedRoot: "user::rwx,group::---,other::---,mask::rwx,group:a-nas-users:rwx," +
+			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:group:a-nas-users:rwx",
+		sharedTrash:                         "user::rwx,group::---,other::---,group:a-nas-users:--x,mask::--x",
 		filepath.Join(sharedTrash, "alice"): userTrashACL("alice"),
 		filepath.Join(sharedTrash, "bob"):   userTrashACL("bob"),
 	}
@@ -73,8 +73,9 @@ func TestMaterializeRegisteredSpacesAppliesTheACLLayout(t *testing.T) {
 		t.Error("A-NAS accounts cannot traverse to the data-volume mount point")
 	}
 	for _, command := range runner.commands {
-		if strings.Contains(strings.Join(command.args, " "), "a-nas-members") {
-			t.Errorf("legacy sharing group is still used: %v", command)
+		joined := strings.Join(command.args, " ")
+		if strings.Contains(joined, "a-nas-members") || strings.Contains(joined, "user:a-nas:") {
+			t.Errorf("the Product Service account or the legacy group is still granted access: %v", command)
 		}
 	}
 	slices.Sort(repaired)

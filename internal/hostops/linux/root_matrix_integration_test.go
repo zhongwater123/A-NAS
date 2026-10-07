@@ -4,20 +4,26 @@ package linux
 
 import (
 	"context"
+	"errors"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
 // TestRootPermissionMatrix checks the ADR 0008 layout on a real Btrfs volume
-// with real Samba: SMB and local processes (the terminal entry point) run as
-// the user, the transitional Product Service account stands in for Web until
-// the File Broker exists, and the kernel decides every access.
+// with real Samba: SMB, local processes (the terminal entry point), and Web
+// through the File Broker's per-user workers all run as the user, the Product
+// Service account has no access, and the kernel decides every access.
 func TestRootPermissionMatrix(t *testing.T) {
 	ctx := context.Background()
 	mount := "/srv/a-nas/data"
@@ -38,6 +44,7 @@ func TestRootPermissionMatrix(t *testing.T) {
 	}
 	run(t, "getent", "group", "a-nas-users")
 	passwords := map[string]string{"keeper": "keeper password for tests", "alice": "alice password for tests", "bob": "bob password for tests"}
+	identities := map[string]accounts.Identity{}
 	for i, user := range []struct {
 		name string
 		role accounts.Role
@@ -48,7 +55,10 @@ func TestRootPermissionMatrix(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("SetCredential(%s) error = %v", user.name, err)
 		}
+		identities[user.name+"-token"] = accounts.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
 	}
+	web := startFileBroker(t, mount, executor, identities)
+	as := func(user string) context.Context { return accounts.WithSessionToken(ctx, user+"-token") }
 	private := filepath.Join(mount, "spaces", "private", "alice")
 	shared := filepath.Join(mount, "spaces", "shared")
 	// t.TempDir is private to root; every test identity must read the payload.
@@ -75,39 +85,94 @@ func TestRootPermissionMatrix(t *testing.T) {
 			t.Errorf("%s: allowed=%v, want %v\n%s", what, result.ok, allowed, result.output)
 		}
 	}
+	webRead := func(user, path string) outcome {
+		file, err := web.Open(as(user), path)
+		if err != nil {
+			return outcome{err.Error(), false}
+		}
+		defer file.Close()
+		contents, err := io.ReadAll(file)
+		return outcome{string(contents), err == nil}
+	}
+	webWrite := func(user, path string) outcome {
+		file, temporary, err := web.CreateTemp(as(user), filepath.Dir(path), ".a-nas-upload-")
+		if err != nil {
+			return outcome{err.Error(), false}
+		}
+		_, writeErr := file.WriteString("written from Web\n")
+		_ = file.Close()
+		if writeErr == nil {
+			writeErr = web.Rename(as(user), temporary, path)
+		}
+		if writeErr != nil {
+			return outcome{writeErr.Error(), false}
+		}
+		return outcome{"", true}
+	}
+	ownerOf := func(path string) uint32 {
+		var stat syscall.Stat_t
+		if err := syscall.Lstat(path, &stat); err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		return stat.Uid
+	}
 
-	// Personal space: owner via SMB and terminal; Web (transitional a-nas).
+	// Personal space: owner via SMB, terminal, and Web; nobody else.
 	expect("alice SMB writes her space", true, smb("alice", "alice", "put "+payload+" a.txt; mkdir docs; put "+payload+` docs\c.txt; put `+payload+" d.txt"))
 	expect("alice terminal reads her file", true, asUser("alice", "cat", filepath.Join(private, "a.txt")))
 	expect("alice terminal appends", true, asUser("alice", "sh", "-c", "echo more >> "+filepath.Join(private, "a.txt")))
-	expect("Web (a-nas) reads alice's SMB file", true, asUser("a-nas", "cat", filepath.Join(private, "a.txt")))
-	expect("Web (a-nas) creates a file", true, asUser("a-nas", "cp", payload, filepath.Join(private, "web.txt")))
+	expect("alice Web reads her SMB file", true, webRead("alice", filepath.Join(private, "a.txt")))
+	expect("alice Web uploads", true, webWrite("alice", filepath.Join(private, "web.txt")))
+	if uid := ownerOf(filepath.Join(private, "web.txt")); uid != 20111 {
+		t.Errorf("Web upload is owned by UID %d, want alice (20111)", uid)
+	}
 	expect("alice SMB reads the Web file", true, smb("alice", "alice", "get web.txt /dev/null"))
 	expect("alice SMB renames", true, smb("alice", "alice", "rename a.txt b.txt"))
 	expect("bob terminal lists alice's space", false, asUser("bob", "ls", private))
 	expect("bob SMB opens alice's space", false, smb("bob", "alice", "ls"))
+	expect("bob Web reads alice's file", false, webRead("bob", filepath.Join(private, "b.txt")))
 	expect("admin terminal reads alice's file", false, asUser("keeper", "cat", filepath.Join(private, "b.txt")))
 	expect("admin SMB opens alice's space", false, smb("keeper", "alice", "ls"))
+	expect("admin Web reads alice's file", false, webRead("keeper", filepath.Join(private, "b.txt")))
+	expect("Product Service reads alice's file", false, asUser("a-nas", "cat", filepath.Join(private, "b.txt")))
 	expect("alice lists the private-space container", false, asUser("alice", "ls", filepath.Join(mount, "spaces", "private")))
+	// The space root itself can be stat'ed through the traverse-only container,
+	// as from a terminal; its contents cannot be listed or examined.
+	if _, err := web.Scan(as("bob"), private, files.ScanSkip{}); !errors.Is(err, files.ErrForbidden) {
+		t.Errorf("bob Web listing of alice's space error = %v, want ErrForbidden", err)
+	}
+	if _, err := web.Lstat(as("bob"), filepath.Join(private, "b.txt")); !errors.Is(err, files.ErrForbidden) {
+		t.Errorf("bob Web stat inside alice's space error = %v, want ErrForbidden", err)
+	}
 
-	// Deletion: Web first, then SMB, both into .a-nas-trash/alice.
+	// Deletion: Web first, then SMB, both into .a-nas-trash/alice as alice.
 	webTrash := filepath.Join(private, ".a-nas-trash", "alice", "trash0123", "content")
-	expect("Web (a-nas) deletes into the per-user trash", true, asUser("a-nas", "sh", "-c",
-		"mkdir "+filepath.Dir(webTrash)+" && mv "+filepath.Join(private, "web.txt")+" "+webTrash))
+	if err := web.Mkdir(as("alice"), filepath.Dir(webTrash)); err != nil {
+		t.Fatalf("alice Web trash container: %v", err)
+	}
+	if err := web.Rename(as("alice"), filepath.Join(private, "web.txt"), webTrash); err != nil {
+		t.Fatalf("alice Web delete: %v", err)
+	}
 	expect("alice SMB deletes after Web", true, smb("alice", "alice", `del docs\c.txt; del d.txt`))
 	for _, path := range []string{webTrash, filepath.Join(private, ".a-nas-trash", "alice", "docs", "c.txt"), filepath.Join(private, ".a-nas-trash", "alice", "d.txt")} {
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("deleted file is not in the per-user trash: %v", err)
-		}
-		expect("Web (a-nas) reads trash item "+filepath.Base(path), true, asUser("a-nas", "cat", path))
+		expect("alice Web reads trash item "+filepath.Base(path), true, webRead("alice", path))
 	}
-	expect("Web (a-nas) restores", true, asUser("a-nas", "mv", webTrash, filepath.Join(private, "restored.txt")))
+	if entries, err := web.Scan(as("alice"), filepath.Join(private, ".a-nas-trash", "alice"), files.ScanSkip{}); err != nil || len(entries) < 4 {
+		t.Errorf("alice Web scan of her trash = %d entries, %v", len(entries), err)
+	}
+	if err := web.Rename(as("alice"), webTrash, filepath.Join(private, "restored.txt")); err != nil {
+		t.Errorf("alice Web restore: %v", err)
+	}
 	expect("alice SMB reads the restored file", true, smb("alice", "alice", "get restored.txt /dev/null"))
 
 	// Shared: everyone reads and writes; deleted files stay private to the deleter.
 	expect("alice SMB writes Shared", true, smb("alice", "Shared", "put "+payload+" s.txt"))
 	expect("bob terminal appends to alice's Shared file", true, asUser("bob", "sh", "-c", "echo bob >> "+filepath.Join(shared, "s.txt")))
+	expect("bob Web reads alice's Shared file", true, webRead("bob", filepath.Join(shared, "s.txt")))
 	expect("admin SMB reads Shared", true, smb("keeper", "Shared", "get s.txt /dev/null"))
+	expect("bob Web uploads to Shared", true, webWrite("bob", filepath.Join(shared, "from-bob.txt")))
+	expect("alice terminal appends to bob's Web file", true, asUser("alice", "sh", "-c", "echo alice >> "+filepath.Join(shared, "from-bob.txt")))
+	expect("Product Service reads Shared", false, asUser("a-nas", "cat", filepath.Join(shared, "s.txt")))
 	if acl := asUser("root", "getfacl", "--omit-header", filepath.Join(shared, "s.txt")).output; !strings.Contains(acl, "group:a-nas-users:rw") {
 		t.Errorf("SMB-created Shared file did not inherit the folder ACL:\n%s", acl)
 	}
@@ -116,6 +181,9 @@ func TestRootPermissionMatrix(t *testing.T) {
 		t.Errorf("Shared deletion is not in bob's trash: %v", err)
 	}
 	expect("alice lists bob's Shared trash", false, asUser("alice", "ls", filepath.Join(shared, ".a-nas-trash", "bob")))
+	if _, err := web.Scan(as("alice"), filepath.Join(shared, ".a-nas-trash", "bob"), files.ScanSkip{}); !errors.Is(err, files.ErrForbidden) {
+		t.Errorf("alice Web scan of bob's trash error = %v, want ErrForbidden", err)
+	}
 	if listing := smb("alice", "Shared", "ls").output; strings.Contains(listing, ".a-nas-trash") {
 		t.Errorf("SMB shows the trash container:\n%s", listing)
 	}
@@ -162,9 +230,12 @@ func TestRootPermissionMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("alice writes Media", true, asUser("alice", "cp", payload, filepath.Join(media, "m.txt")))
+	expect("alice Web uploads to Media", true, webWrite("alice", filepath.Join(media, "web.txt")))
 	expect("bob reads Media", true, asUser("bob", "cat", filepath.Join(media, "m.txt")))
+	expect("bob Web reads Media", true, webRead("bob", filepath.Join(media, "web.txt")))
 	expect("bob writes Media", false, asUser("bob", "sh", "-c", "echo bob >> "+filepath.Join(media, "m.txt")))
 	expect("bob creates in Media", false, asUser("bob", "cp", payload, filepath.Join(media, "bob.txt")))
+	expect("bob Web uploads to Media", false, webWrite("bob", filepath.Join(media, "bob-web.txt")))
 
 	// Drift on a space root is detected and repaired.
 	run(t, "setfacl", "--modify", "user:bob:rwx", private)
@@ -187,6 +258,49 @@ func TestRootPermissionMatrix(t *testing.T) {
 	}
 }
 
+// startFileBroker serves the File Broker with real per-user workers. The test
+// binary is copied somewhere every user can execute, because the worker is
+// this binary re-executed under the user's credentials.
+func startFileBroker(t *testing.T, mount string, executor *Executor, identities map[string]accounts.Identity) *filebroker.Client {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := "/usr/local/bin/anas-matrix-file-worker"
+	run(t, "install", "-m", "0755", self, worker)
+	server, err := filebroker.NewServer(filebroker.Config{
+		Sessions: sessionTable(identities), VolumeRoot: mount, VolumeReady: executor.DataVolumeReady,
+		Command: func(volumeRoot string) *exec.Cmd {
+			return exec.Command(worker, filebroker.WorkerArgument, volumeRoot)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(t.TempDir(), "file-broker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		server.Close()
+	})
+	return filebroker.NewClient(socket)
+}
+
+type sessionTable map[string]accounts.Identity
+
+func (s sessionTable) ResolveSessionIdentity(_ context.Context, token string) (accounts.Identity, error) {
+	identity, ok := s[token]
+	if !ok {
+		return accounts.Identity{}, accounts.ErrSessionNotFound
+	}
+	return identity, nil
+}
+
 type outcome struct {
 	output string
 	ok     bool
@@ -201,8 +315,8 @@ func asUser(user string, command ...string) outcome {
 }
 
 // setUpDataVolume mounts a loop-backed Btrfs volume the way the product lays
-// out /srv/a-nas, including the Product Service account the transitional ACL
-// entries name.
+// out /srv/a-nas, including the Product Service account that must not reach
+// any space.
 func setUpDataVolume(t *testing.T, mount string) {
 	t.Helper()
 	if _, err := exec.Command("id", "a-nas").CombinedOutput(); err != nil {

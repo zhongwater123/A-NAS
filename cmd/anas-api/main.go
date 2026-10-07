@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
@@ -85,6 +86,11 @@ func run(logger *slog.Logger) error {
 			return volumes[0].FilesystemUUID, nil
 		}}
 		fileOptions.SnapshotBackend = operations
+		brokerSocket, err := fileBrokerSocket()
+		if err != nil {
+			return err
+		}
+		fileOptions.FileSystem = filebroker.NewClient(brokerSocket)
 	} else if err := os.MkdirAll(volumeRoot, 0o700); err != nil {
 		return err
 	}
@@ -159,14 +165,13 @@ func runDirectoryReconciliation(ctx context.Context, accountService *accounts.Se
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			users, err := accountService.ActiveUsers(ctx)
-			if err != nil {
-				logger.ErrorContext(ctx, "list users for directory reconciliation failed", "error", err)
-				continue
-			}
-			for _, user := range users {
-				if err := fileService.ReconcileVisibleSpaces(ctx, user); err != nil && !errors.Is(err, files.ErrVolumeUnavailable) {
-					logger.ErrorContext(ctx, "directory reconciliation failed", "user_id", user.ID, "error", err)
+			// File operations run as the user through the File Broker, which
+			// needs a valid session; users without one are reconciled on their
+			// next visit.
+			for _, session := range accountService.RememberedSessions(ctx) {
+				userCtx := accounts.WithSessionToken(ctx, session.Token)
+				if err := fileService.ReconcileVisibleSpaces(userCtx, session.User); err != nil && !errors.Is(err, files.ErrVolumeUnavailable) {
+					logger.ErrorContext(ctx, "directory reconciliation failed", "user_id", session.User.ID, "error", err)
 				}
 			}
 		}
@@ -194,6 +199,21 @@ func configuredServices() (hoststate.Observer, httpapi.DataSource, productOperat
 	default:
 		return nil, "", nil, false, errors.New("ANAS_HOSTSTATE_MODE must be fake or agent")
 	}
+}
+
+// fileBrokerSocket defaults to the File Broker socket beside the Host Agent's.
+func fileBrokerSocket() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("ANAS_FILE_BROKER_SOCKET")); configured != "" {
+		if !filepath.IsAbs(configured) {
+			return "", errors.New("ANAS_FILE_BROKER_SOCKET must be an absolute path")
+		}
+		return filepath.Clean(configured), nil
+	}
+	socketPath, err := agent.SocketPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(socketPath), "file-broker.sock"), nil
 }
 
 func stateDirectory() (string, error) {

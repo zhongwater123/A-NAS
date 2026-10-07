@@ -102,7 +102,7 @@ rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）�
 
 ## 功能验收
 
-升级后先按[存储架构中的 ACL 表](../architecture/storage-and-files.md#卷与目录)验证权限链：容器只能穿过、空间与回收站目录为 `root:root` 且只授予对应用户（另含过渡条目 `user:a-nas`）：
+升级后先按[存储架构中的 ACL 表](../architecture/storage-and-files.md#卷与目录)验证权限链：容器只能穿过、空间与回收站目录为 `root:root` 且只授予对应用户；Product Service 账号 `a-nas` 必须被拒绝，Web 文件操作经 `/run/a-nas/file-broker.sock` 以用户身份执行：
 
 ```bash
 namei -l /srv/a-nas/data/spaces/private/admin
@@ -115,8 +115,9 @@ getfacl -p \
   /srv/a-nas/data/spaces/shared \
   /srv/a-nas/data/spaces/shared/.a-nas-trash
 setpriv --reuid=admin --regid=admin --init-groups -- ls /srv/a-nas/data/spaces/private/admin
-runuser -u a-nas -- test -r /srv/a-nas/data/spaces/private/admin
-journalctl -u anas-host-agent | grep 'repaired drifted'
+! runuser -u a-nas -- test -r /srv/a-nas/data/spaces/private/admin
+ls -l /run/a-nas/file-broker.sock
+journalctl -u anas-host-agent | grep -E 'repaired drifted|file worker'
 ```
 
 rc.5 及更早版本的 `a-nas-members` 组不再使用；确认无引用后可执行 `gpasswd -d a-nas a-nas-members` 与 `groupdel a-nas-members`。
