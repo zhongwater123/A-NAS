@@ -82,9 +82,9 @@ check() {
   if "$@"; then echo "PASS $name"; else echo "FAIL $name"; failures=$((failures + 1)); fi
 }
 # denied COMMAND...: succeeds when the command fails, quietly.
-# shellcheck disable=SC2329 # invoked through check
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 denied() { ! "$@" >/dev/null 2>&1; }
-# shellcheck disable=SC2329 # invoked through check
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 quiet() { "$@" >/dev/null 2>&1; }
 as() { local user=$1; shift; setpriv --reuid="$user" --regid="$user" --init-groups "$@"; }
 mode_of() { stat -c '%a %U:%G' "$1"; }
@@ -116,7 +116,7 @@ thumbnail_ready() { curl -s -b /tmp/jar "$api/api/v1/photos/assets/$asset" | gre
 for _ in $(seq 1 50); do thumbnail_ready && break; sleep 0.2; done
 check "thumbnail rendered by the photo service" thumbnail_ready
 check "thumbnail served" test "$(status_of -b /tmp/jar "$api/api/v1/photos/assets/$asset/thumbnail")" = 200
-# shellcheck disable=SC2329 # invoked through check
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 original_matches() { curl -s -b /tmp/jar "$api/api/v1/photos/assets/$asset/original" | cmp -s - /tmp/e2e.png; }
 check "original bytes round-trip" original_matches
 check "objects belong to a-nas-photos" test "$(find /srv/a-nas/data/photos/objects -type f -printf '%U %m\n' | sort -u)" = "31000 400"
