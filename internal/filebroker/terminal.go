@@ -46,15 +46,11 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 		return
 	}
 	s.config.Logger.Info("terminal shell started", "username", identity.Username, "pid", cmd.Process.Pid)
-	exited := make(chan int, 1)
-	go func() {
-		_ = cmd.Wait()
-		exited <- cmd.ProcessState.ExitCode()
-	}()
+	shell := terminal.WatchProcessGroup(cmd)
 	err = writeMessage(conn, response{}, master)
 	_ = master.Close()
 	if err != nil {
-		hangUp(cmd.Process.Pid, exited)
+		shell.HangUp(hangupGracePeriod)
 		return
 	}
 	closed := make(chan struct{})
@@ -67,36 +63,24 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 	defer recheck.Stop()
 	for {
 		select {
-		case code := <-exited:
+		case <-shell.Done():
+			code := shell.ExitCode()
 			_ = writeMessage(conn, response{ExitCode: &code}, nil)
 			return
 		case <-closed:
-			code := hangUp(cmd.Process.Pid, exited)
+			code := shell.HangUp(hangupGracePeriod)
 			_ = writeMessage(conn, response{ExitCode: &code}, nil)
 			return
 		case <-recheck.C:
 			current, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
 			if err != nil || !current.Enabled || current.Role != accounts.RoleAdmin || current.UID != identity.UID {
 				s.config.Logger.Info("terminal session no longer valid; hanging up", "username", identity.Username)
-				code := hangUp(cmd.Process.Pid, exited)
+				code := shell.HangUp(hangupGracePeriod)
 				_ = writeMessage(conn, response{ExitCode: &code}, nil)
 				return
 			}
 		}
 	}
-}
-
-// hangUp sends SIGHUP to the shell's process group, escalating to SIGKILL
-// when the shell ignores it, and returns the exit code.
-func hangUp(pid int, exited <-chan int) int {
-	_ = syscall.Kill(-pid, syscall.SIGHUP)
-	select {
-	case code := <-exited:
-		return code
-	case <-time.After(hangupGracePeriod):
-	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
-	return <-exited
 }
 
 func (s *Server) startShell(identity accounts.Identity, cols, rows uint16) (*exec.Cmd, *os.File, error) {

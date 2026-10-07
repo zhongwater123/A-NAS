@@ -46,14 +46,14 @@
 - Shell 由 Host Agent 内的文件代理启动：代理自行校验会话令牌且只为管理员启动，以该账号的 UID/组运行并把 PTY 从设备属主改为该账号（`tty` 组 `0620`），只把 PTY 主端描述符交给产品服务转发数据。产品服务账号不再持有 Shell。
 - 同机其他本地进程不受 Origin 约束，但必须持有有效的管理员会话令牌才能获得该管理员的 Shell；功能仍默认关闭，只应在受信任的设备上启用。
 - Shell 继承 Host Agent 的 systemd 沙箱：`ProtectSystem=strict` 只允许写入数据卷等少数路径，`PrivateTmp`、`ProtectHome` 与 `NoNewPrivileges` 生效。
-- 客户端断开、服务关闭、会话失效（注销、过期、账号被禁用或不再是管理员，代理每 30 秒复核）时向 Shell 进程组发送 `SIGHUP`，2 秒后升级为 `SIGKILL`；使用作业控制放入其他进程组的后台任务由 systemd 在 Host Agent 停止时清理。
+- 客户端断开、服务关闭、会话失效（注销、过期、账号被禁用或不再是管理员，代理每 30 秒复核）时向 Shell 进程组发送 `SIGHUP`，2 秒后升级为 `SIGKILL`；Shell 已退出并被回收后不再发送信号，因为其 PID（即进程组 ID）可能已被其他进程复用；使用作业控制放入其他进程组的后台任务由 systemd 在 Host Agent 停止时清理。
 - 开发模式（无 Host Agent）仍以产品服务用户在本地 PTY 中启动 Shell。
 - 产品服务的 HTTP 读写超时不作用于已升级的终端连接。
 - Chromium 保留的快捷键（例如 `Ctrl+W`、`Ctrl+T`）不会传入 Shell。
 
 ## 验收证据
 
-- 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环与 Host 校验、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）和会话失效后结束。
+- 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环与 Host 校验、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）和会话失效后结束；[进程组测试](../../internal/terminal/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
 - root：[终端身份测试](../../internal/hostops/linux/root_terminal_integration_test.go) 在特权容器中验证 Shell 的 UID、组、起始目录与 PTY 属主，且读取其他成员的文件被拒绝。
 - 契约：[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
 - 前端：[桌面测试](../../web/src/App.test.tsx) 与 [协议测试](../../web/src/terminal.test.ts)。

@@ -1,5 +1,3 @@
-//go:build unix
-
 package terminal
 
 import (
@@ -7,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -32,43 +29,28 @@ func (s localSpawner) StartShell(_ context.Context, cols, rows uint16) (Shell, e
 	if err != nil {
 		return nil, err
 	}
-	shell := &localShell{cmd: cmd, ptmx: ptmx, done: make(chan struct{}), code: -1}
-	go func() {
-		_ = cmd.Wait()
-		shell.code = cmd.ProcessState.ExitCode()
-		close(shell.done)
-	}()
-	return shell, nil
+	return &localShell{group: WatchProcessGroup(cmd), ptmx: ptmx}, nil
 }
 
 type localShell struct {
-	cmd   *exec.Cmd
+	group *ProcessGroup
 	ptmx  *os.File
-	done  chan struct{}
-	code  int
 	close sync.Once
 }
 
 func (s *localShell) Read(p []byte) (int, error)  { return s.ptmx.Read(p) }
 func (s *localShell) Write(p []byte) (int, error) { return s.ptmx.Write(p) }
-func (s *localShell) Done() <-chan struct{}       { return s.done }
-func (s *localShell) ExitCode() int               { return s.code }
+func (s *localShell) Done() <-chan struct{}       { return s.group.Done() }
+func (s *localShell) ExitCode() int               { return s.group.ExitCode() }
 
 func (s *localShell) Resize(cols, rows uint16) error {
 	return pty.Setsize(s.ptmx, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-// Close hangs up the shell's process group, escalating to SIGKILL when the
-// shell ignores the hangup.
+// Close hangs up the shell's process group unless the shell already exited.
 func (s *localShell) Close() error {
 	s.close.Do(func() {
-		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGHUP)
-		select {
-		case <-s.done:
-		case <-time.After(hangupGracePeriod):
-			_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
-			<-s.done
-		}
+		s.group.HangUp(hangupGracePeriod)
 		_ = s.ptmx.Close()
 	})
 	return nil

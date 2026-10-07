@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !linux
 
 package terminal
 
@@ -15,5 +15,5 @@ type localSpawner struct {
 }
 
 func (localSpawner) StartShell(context.Context, uint16, uint16) (Shell, error) {
-	return nil, errors.New("terminal requires a Unix PTY")
+	return nil, errors.New("terminal requires Linux")
 }
