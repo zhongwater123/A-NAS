@@ -19,7 +19,7 @@
   - 数据卷 UUID 与 [当前状态](../status/CURRENT.md) 记录一致，并已挂载到 `/srv/a-nas/data`。
 - **前提**：设备已按 [实机配置手册](provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008) 升级到统一身份，账号 UID 在 20100–29999。
 - **真实磁盘写入**：
-  - Host Agent 在数据卷上创建 `photos` Btrfs 子卷，并为 `/srv/a-nas` 增加一条 `user:a-nas-photos:--x` ACL。
+  - Host Agent 在数据卷上创建 `photos` Btrfs 子卷，并为 `/srv/a-nas` 与 `/srv/a-nas/data` 各增加一条 `user:a-nas-photos:--x` ACL。
   - 它不分区、不格式化，也不改动任何空间。
 - **风险**：
   - 产品服务单元新增 `SupplementaryGroups=a-nas-photos`，该组缺失时 `anas-api` 无法启动。
@@ -67,7 +67,8 @@
   - `btrfs subvolume show /srv/a-nas/data/photos` 成功。
   - `stat -c '%a %U:%G' /srv/a-nas/data/photos` 为 `700 a-nas-photos:a-nas-photos`。
   - `getfacl -p /srv/a-nas/data/photos` 只有 `user::rwx`、`group::---`、`other::---`。
-  - `getfacl -p /srv/a-nas` 含 `user:a-nas-photos:--x`。
+  - `getfacl -p /srv/a-nas /srv/a-nas/data` 两者都含 `user:a-nas-photos:--x`。
+  - `setpriv --reuid=a-nas-photos --regid=a-nas-photos --init-groups ls /srv/a-nas/data` 因权限失败（只能穿过，不能列出卷根）。
 - **日志**：
   - `journalctl -u anas-photos -b --no-pager` 出现 `photo service ready`，没有 `photo store unavailable`。
   - `journalctl -u anas-host-agent -b --no-pager` 没有 `photo store repair failed`。

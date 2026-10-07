@@ -23,6 +23,9 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 	mount := "/srv/a-nas/data"
 	resetAgentState(t)
 	setUpDataVolume(t, mount)
+	// Like the Experimental NAS, the volume root lets nobody else pass
+	// through, so every identity needs its own traversal entry.
+	run(t, "chmod", "0750", mount)
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
 	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
@@ -69,6 +72,7 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 	expect("photo service reads the volume marker", true, asUser(accounts.PhotoServiceUser, "cat", filepath.Join(mount, ".a-nas-volume.json")))
 	expect("photo service reads a member's private space", false, asUser(accounts.PhotoServiceUser, "cat", filepath.Join(private, "secret.txt")))
 	expect("photo service lists the Shared folder", false, asUser(accounts.PhotoServiceUser, "ls", filepath.Join(mount, "spaces", "shared")))
+	expect("photo service lists the volume root", false, asUser(accounts.PhotoServiceUser, "ls", mount))
 	expect("an administrator lists the photo store", false, asUser("petra", "ls", photos))
 	expect("the Product Service lists the photo store", false, asUser("a-nas", "ls", photos))
 	expect("an administrator's terminal reads a photo file", false, asUser("petra", "cat", filepath.Join(photos, "probe")))

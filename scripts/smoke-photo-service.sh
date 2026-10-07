@@ -49,6 +49,8 @@ install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
 truncate --size=64G /tmp/data.img
 mkfs.btrfs --quiet /tmp/data.img
 mount -o loop /tmp/data.img /srv/a-nas/data
+# Like the Experimental NAS, the volume root lets nobody else pass through.
+chmod 0750 /srv/a-nas/data
 btrfs subvolume create /srv/a-nas/data/spaces >/dev/null
 printf '{"filesystemUuid":"e2e","formatVersion":1}\n' > /srv/a-nas/data/.a-nas-volume.json
 mkdir -p /etc/samba

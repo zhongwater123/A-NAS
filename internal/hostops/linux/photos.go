@@ -51,11 +51,14 @@ func (e *Executor) ensurePhotosStore(ctx context.Context) (bool, error) {
 	if !exists {
 		return false, nil
 	}
-	// The service must pass through the parent of the mount point, like smbd.
-	if output, err := e.runner.Run(ctx, "setfacl", []string{
-		"--modify", "user:" + accounts.PhotoServiceUser + ":--x", filepath.Dir(e.mountPoint),
-	}, ""); err != nil {
-		return false, commandError("allow the photo service to reach the data volume", err, output)
+	// Like smbd, the service passes through the mount point and its parent,
+	// neither of which it may list.
+	for _, path := range []string{filepath.Dir(e.mountPoint), e.mountPoint} {
+		if output, err := e.runner.Run(ctx, "setfacl", []string{
+			"--modify", "user:" + accounts.PhotoServiceUser + ":--x", path,
+		}, ""); err != nil {
+			return false, commandError("allow the photo service to reach the data volume", err, output)
+		}
 	}
 	photos := filepath.Join(e.mountPoint, photosDirectory)
 	created := false

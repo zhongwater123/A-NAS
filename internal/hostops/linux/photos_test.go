@@ -83,6 +83,7 @@ func TestPhotosStoreIsCreatedForThePhotoServiceAlone(t *testing.T) {
 	photos := filepath.Join(mountPoint, photosDirectory)
 	for _, command := range []spacePermissionCommand{
 		{name: "setfacl", args: []string{"--modify", "user:a-nas-photos:--x", filepath.Dir(mountPoint)}},
+		{name: "setfacl", args: []string{"--modify", "user:a-nas-photos:--x", mountPoint}},
 		{name: "btrfs", args: []string{"subvolume", "create", photos}},
 		{name: "chown", args: []string{"31000:31000", photos}},
 		{name: "setfacl", args: []string{"--remove-all", "--remove-default", photos}},
