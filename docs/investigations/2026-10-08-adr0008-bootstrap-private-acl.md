@@ -1,6 +1,6 @@
 # ADR 0008 首次升级时 Host Agent 无法启动
 
-状态：启动 ACL 与构建修复已实机验证；数据卷入口遍历修复待实机回归
+状态：resolved；三项修复已在实验 NAS 完成实机回归
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -58,7 +58,7 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 - `SyncIdentities` 创建并记录 Linux 身份后仍调用同一个权限修复入口，将 root-only ACL 收敛为所有者 ACL，并建立个人回收站。
 - 管理员查看模式的 viewer 条目也只从已知统一身份生成，避免陈旧查看记录触发相同的命名用户解析失败。
 - `TestMaterializeRegisteredSpacesProtectsPrivateSpaceBeforeIdentitySync` 修复前以同一错误失败，修复后通过；已有完整身份的空间 ACL 布局测试继续覆盖正常稳态。
-- 实验 NAS 仍需用修复制品完成 Host Agent 启动、身份同步、ACL、File Broker、Samba 与 Kiosk 的实机验证。
+- 实验 NAS 的最终修复 release 为 `ae4b642fe89d`：Host Agent、API、Samba 与 Kiosk 均 active，Host Agent 和 File Broker socket 均为 `root:a-nas 0660`，系统盘与数据卷身份镜像均为 `root:root 0600`。
 
 第一次修复制品只运行了 `make build-binaries`。该目标原先未依赖 `web-build`，因此 Go 编译成功时 `internal/webui/dist` 仍只有 `.keep`；修复后的 Host Agent 已在实验 NAS 正常监听并成功应用启动期 root-only ACL，但同 release 的 API 持续以 `embedded web UI is not built` 退出。现有 `TestHandlerServesEmbeddedDesktopAndImmutableAssets` 在该源码/产物状态下稳定复现错误。
 
@@ -66,7 +66,7 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 
 完整构建的 `67f6ccd17ff0` 随后成功启动 API、Host Agent、File Broker 与 Kiosk，并重建 `admin` 为 UID/GID 20100；最终权限验收又暴露数据卷入口遗漏：个人空间已含 `user:admin:rwx`，`admin` 也已属于 `a-nas-users`，但以该用户访问仍被拒绝。`namei` 将不可达层级定位到挂载点 `/srv/a-nas/data`。对账此前只给父目录 `/srv/a-nas` 添加了 `a-nas-users:--x`，没有给挂载点本身添加；每一级路径分量都要求执行权限，因此空间根 ACL 正确也不可达。
 
-`TestMaterializeRegisteredSpacesAppliesTheACLLayout` 现同时要求父目录与数据卷挂载点获得仅遍历 ACL。修复让启动对账对两级目录都执行同一幂等操作，不授予列目录权限；实机仍需证明 `admin` 可以进入自己的个人空间，而 Product Service 账号 `a-nas` 继续被内核拒绝。
+`TestMaterializeRegisteredSpacesAppliesTheACLLayout` 现同时要求父目录与数据卷挂载点获得仅遍历 ACL。修复让启动对账对两级目录都执行同一幂等操作，不授予列目录权限。最终实机验收证明：`admin` 可以穿过卷根并进入自己的个人空间、不能列出卷根，Product Service 账号 `a-nas` 继续被内核拒绝；`healthz`、嵌入式桌面和屏保 byte-range 请求均成功。ADR 0008 唯一剩余操作是管理员在 Web 重置密码以重新生成已按手册删除的 Samba 凭据。
 
 ## 关联
 
