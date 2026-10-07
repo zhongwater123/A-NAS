@@ -78,11 +78,11 @@ anas-photos（a-nas-photos）◄──────┘
 
 ## 后台任务与资源隔离
 
-SQLite 任务表保存 `capability`、输入资产、期望派生版本、状态、尝试次数、`lease_until` 和稳定错误类别。Worker 以短租约领取单张、单能力任务；重复执行必须由 `(asset_id, derivation_id)` 唯一约束收敛为同一当前结果。
+SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、尝试次数、`lease_until`、下次可执行时间和稳定错误类别。Worker 以短租约领取单张、单能力任务；重复执行由唯一约束收敛为同一当前结果。只依赖原图字节的派生（缩略图、基础元数据，以及未来的 Embedding）以 `(object_id, derivation)` 为键，副本与重复照片共用；依赖图库设置或用户数据的派生才以照片资产为键。派生文件位于 `derived/<派生版本>/`，与原图分开统计和清除；最后一个引用被清除时随原图一起删除。
 
 任务分为两类，共用同一张表和租约语义：
 
-- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后以低优先级立即执行，不等待空闲条件，也不依赖 AI Worker。JPEG/PNG 用 Go 标准库在进程内解码，先读取尺寸并拒绝超过像素上限的输入；HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成时，JPEG/PNG 可以直接显示原图。
+- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后以低优先级立即执行，不等待空闲条件，也不依赖 AI Worker。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。
 - **AI 任务**：Embedding、标签、OCR、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
 
 默认执行策略：

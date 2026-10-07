@@ -59,15 +59,24 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 			return err
 		}
 		now := formatTime(s.now())
+		metadata := staged.metadata
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-			staged.id, staged.size, staged.mediaType, now); err != nil {
+			`INSERT INTO objects(id, size_bytes, media_type, width, height, orientation, created_at)
+			 VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			staged.id, staged.size, staged.mediaType, metadata.width, metadata.height, metadata.orientation, now); err != nil {
 			return err
 		}
+		var takenAt any
+		if !metadata.takenAt.IsZero() {
+			takenAt = formatTime(metadata.takenAt)
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at)
-			 VALUES(?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
-			assetID, lib.id, request.DirectoryID, staged.id, name, p.UserID, now); err != nil {
+			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at, taken_at)
+			 VALUES(?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
+			assetID, lib.id, request.DirectoryID, staged.id, name, p.UserID, now, takenAt); err != nil {
+			return err
+		}
+		if err := s.enqueueDerivations(ctx, tx, staged.id); err != nil {
 			return err
 		}
 		record, err := s.assetByID(ctx, tx, assetID)
@@ -83,6 +92,7 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		}
 		return Asset{}, err
 	}
+	s.wakeMedia()
 	return imported, nil
 }
 
@@ -140,7 +150,8 @@ const (
 	maxPageSize     = 500
 )
 
-// Timeline lists the available assets of one library, newest import first.
+// Timeline lists the available assets of one library, newest first by
+// capture time, or by import time for originals without one.
 func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor string, limit int) (Page, error) {
 	lib, err := s.visibleLibrary(ctx, s.db, p, libraryID)
 	if err != nil {
@@ -150,17 +161,18 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 		limit = defaultPageSize
 	}
 	limit = min(limit, maxPageSize)
+	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
 	where := "WHERE a.library_id = ? AND a.trashed_at IS NULL"
 	args := []any{lib.id}
 	if cursor != "" {
-		importedAt, id, err := decodeCursor(cursor)
+		at, id, err := decodeCursor(cursor)
 		if err != nil {
 			return Page{}, err
 		}
-		where += " AND (a.imported_at < ? OR (a.imported_at = ? AND a.id < ?))"
-		args = append(args, importedAt, importedAt, id)
+		where += " AND (" + sortKey + " < ? OR (" + sortKey + " = ? AND a.id < ?))"
+		args = append(args, at, at, id)
 	}
-	records, err := s.queryAssets(ctx, s.db, where+" ORDER BY a.imported_at DESC, a.id DESC LIMIT ?", append(args, limit+1)...)
+	records, err := s.queryAssets(ctx, s.db, where+" ORDER BY "+sortKey+" DESC, a.id DESC LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return Page{}, err
 	}
@@ -168,7 +180,11 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	for i, record := range records {
 		if i == limit {
 			last := page.Assets[limit-1]
-			page.Next = encodeCursor(formatTime(last.ImportedAt), last.ID)
+			at := last.ImportedAt
+			if last.TakenAt != nil {
+				at = *last.TakenAt
+			}
+			page.Next = encodeCursor(formatTime(at), last.ID)
 			break
 		}
 		page.Assets = append(page.Assets, record.Asset)
@@ -176,8 +192,8 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	return page, nil
 }
 
-func encodeCursor(importedAt, id string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(importedAt + "\n" + id))
+func encodeCursor(at, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(at + "\n" + id))
 }
 
 func decodeCursor(cursor string) (string, string, error) {
@@ -185,14 +201,14 @@ func decodeCursor(cursor string) (string, string, error) {
 	if err != nil {
 		return "", "", ErrInvalidCursor
 	}
-	importedAt, id, found := strings.Cut(string(raw), "\n")
+	at, id, found := strings.Cut(string(raw), "\n")
 	if !found || id == "" {
 		return "", "", ErrInvalidCursor
 	}
-	if _, err := parseTime(importedAt); err != nil {
+	if _, err := parseTime(at); err != nil {
 		return "", "", ErrInvalidCursor
 	}
-	return importedAt, id, nil
+	return at, id, nil
 }
 
 func (s *Service) Rename(ctx context.Context, p Principal, assetID, name string) (Asset, error) {
@@ -301,9 +317,9 @@ func (s *Service) Copy(ctx context.Context, p Principal, assetID, targetLibraryI
 		}
 		id := s.randomID("photo")
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at)
-			 VALUES(?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
-			id, target.id, targetDirectoryID, source.objectID, source.Name, p.UserID, formatTime(s.now())); err != nil {
+			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at, taken_at)
+			 SELECT ?, ?, NULLIF(?, ''), object_id, name, ?, ?, taken_at FROM assets WHERE id = ?`,
+			id, target.id, targetDirectoryID, p.UserID, formatTime(s.now()), source.ID); err != nil {
 			return err
 		}
 		record, err := s.assetByID(ctx, tx, id)
@@ -398,6 +414,7 @@ func (s *Service) ExpireTrash(ctx context.Context) (int, error) {
 func (s *Service) purge(ctx context.Context, actorID, action string, records []assetRecord) (int, error) {
 	var purged int
 	var orphaned []string
+	derived := make(map[string][]string)
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		for _, record := range records {
 			result, err := tx.ExecContext(ctx, "DELETE FROM assets WHERE id = ? AND trashed_at IS NOT NULL", record.ID)
@@ -418,10 +435,15 @@ func (s *Service) purge(ctx context.Context, actorID, action string, records []a
 				return err
 			}
 			if !referenced {
+				derivations, err := derivationsOf(ctx, tx, record.objectID)
+				if err != nil {
+					return err
+				}
 				if _, err := tx.ExecContext(ctx, "DELETE FROM objects WHERE id = ?", record.objectID); err != nil {
 					return err
 				}
 				orphaned = append(orphaned, record.objectID)
+				derived[record.objectID] = derivations
 			}
 			if err := s.audit(ctx, tx, actorID, action, record.ID, record.Name); err != nil {
 				return err
@@ -436,7 +458,24 @@ func (s *Service) purge(ctx context.Context, actorID, action string, records []a
 	// removes it.
 	var removeErr error
 	for _, id := range orphaned {
-		removeErr = errors.Join(removeErr, s.removeObject(id))
+		removeErr = errors.Join(removeErr, s.removeObject(id), s.removeDerived(id, derived[id]))
 	}
 	return purged, removeErr
+}
+
+func derivationsOf(ctx context.Context, q queryer, objectID string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT derivation FROM derived_files WHERE object_id = ?", objectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var derivations []string
+	for rows.Next() {
+		var derivation string
+		if err := rows.Scan(&derivation); err != nil {
+			return nil, err
+		}
+		derivations = append(derivations, derivation)
+	}
+	return derivations, rows.Err()
 }

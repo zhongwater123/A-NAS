@@ -92,16 +92,22 @@ const (
 )
 
 type Asset struct {
-	ID          string        `json:"id"`
-	LibraryID   string        `json:"libraryId"`
-	DirectoryID string        `json:"directoryId,omitempty"`
-	Name        string        `json:"name"`
-	MediaType   string        `json:"mediaType"`
-	SizeBytes   int64         `json:"sizeBytes"`
-	UploadedBy  string        `json:"uploadedBy"`
-	ImportedAt  time.Time     `json:"importedAt"`
-	Duplicate   DuplicateRole `json:"duplicate,omitempty"`
-	Trash       *TrashState   `json:"trash,omitempty"`
+	ID          string    `json:"id"`
+	LibraryID   string    `json:"libraryId"`
+	DirectoryID string    `json:"directoryId,omitempty"`
+	Name        string    `json:"name"`
+	MediaType   string    `json:"mediaType"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	UploadedBy  string    `json:"uploadedBy"`
+	ImportedAt  time.Time `json:"importedAt"`
+	// TakenAt is the capture time from the original's EXIF, when recorded.
+	TakenAt *time.Time `json:"takenAt,omitempty"`
+	// Width and Height are the upright display size; zero when unknown.
+	Width     int            `json:"width"`
+	Height    int            `json:"height"`
+	Thumbnail ThumbnailState `json:"thumbnail"`
+	Duplicate DuplicateRole  `json:"duplicate,omitempty"`
+	Trash     *TrashState    `json:"trash,omitempty"`
 }
 
 type TrashState struct {
@@ -129,6 +135,9 @@ type Options struct {
 	// DisableCapacityReserve skips the data-volume reserve check; only tests
 	// on ordinary temporary directories may set it.
 	DisableCapacityReserve bool
+	// Location interprets EXIF capture times recorded without an offset;
+	// it defaults to time.Local.
+	Location *time.Location
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -144,7 +153,10 @@ type Service struct {
 	trashRetention         time.Duration
 	maxImportBytes         int64
 	disableCapacityReserve bool
+	location               *time.Location
 	sharedLibraryID        string
+	// mediaWake tells RunMedia that an import queued work.
+	mediaWake chan struct{}
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -175,7 +187,7 @@ func Open(root string, options Options) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open photo library root: %w", err)
 	}
-	for _, dir := range []string{objectsDir, stagingDir} {
+	for _, dir := range []string{objectsDir, stagingDir, derivedDir} {
 		if err := opened.MkdirAll(dir, 0o700); err != nil {
 			_ = opened.Close()
 			return nil, fmt.Errorf("create %s: %w", dir, err)
@@ -190,11 +202,14 @@ func Open(root string, options Options) (*Service, error) {
 		db: db, root: opened, rootPath: root,
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
-		disableCapacityReserve: options.DisableCapacityReserve,
-		staging:                make(map[string]struct{}),
+		disableCapacityReserve: options.DisableCapacityReserve, location: options.Location,
+		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 	}
 	if service.now == nil {
 		service.now = time.Now
+	}
+	if service.location == nil {
+		service.location = time.Local
 	}
 	if service.random == nil {
 		service.random = rand.Reader

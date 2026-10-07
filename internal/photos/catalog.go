@@ -72,6 +72,44 @@ CREATE TABLE audit_events (
     detail TEXT NOT NULL DEFAULT ''
 );
 `,
+	// 2: header metadata, capture-time ordering, derived files and the
+	// durable media job queue. Objects imported before this migration keep
+	// unknown metadata but still get thumbnails.
+	`
+ALTER TABLE objects ADD COLUMN width INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE objects ADD COLUMN height INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE objects ADD COLUMN orientation INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE assets ADD COLUMN taken_at TEXT;
+DROP INDEX assets_timeline;
+CREATE INDEX assets_timeline ON assets(library_id, IFNULL(taken_at, imported_at), id) WHERE trashed_at IS NULL;
+
+CREATE TABLE derived_files (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    derivation TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, derivation)
+);
+
+CREATE TABLE jobs (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    derivation TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    not_before TEXT NOT NULL,
+    lease_until TEXT,
+    error_class TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, derivation)
+);
+CREATE INDEX jobs_ready ON jobs(state, not_before);
+
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+SELECT id, 'thumbnail/v1', 'pending', created_at, created_at FROM objects;
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
@@ -221,7 +259,13 @@ func (s *Service) libraryByID(ctx context.Context, q queryer, libraryID string) 
 const assetSelect = `
 SELECT a.id, a.library_id, IFNULL(a.directory_id, ''), a.name, o.media_type, o.size_bytes,
        a.uploaded_by, a.imported_at, IFNULL(a.trashed_at, ''), IFNULL(a.trashed_by, ''),
-       IFNULL(a.purge_after, ''),
+       IFNULL(a.purge_after, ''), IFNULL(a.taken_at, ''), o.width, o.height, o.orientation,
+       CASE
+         WHEN EXISTS (SELECT 1 FROM derived_files f WHERE f.object_id = a.object_id AND f.derivation = 'thumbnail/v1') THEN 'ready'
+         WHEN EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = a.object_id AND j.derivation = 'thumbnail/v1'
+                      AND j.state = 'failed') THEN 'failed'
+         ELSE 'pending'
+       END,
        CASE
          WHEN a.trashed_at IS NOT NULL THEN ''
          WHEN NOT EXISTS (SELECT 1 FROM assets d WHERE d.object_id = a.object_id AND d.library_id = a.library_id
@@ -244,10 +288,12 @@ type assetRecord struct {
 
 func scanAsset(row rowScanner) (assetRecord, error) {
 	var record assetRecord
-	var importedAt, trashedAt, trashedBy, purgeAfter, libraryCreatedAt string
-	var duplicate string
+	var importedAt, trashedAt, trashedBy, purgeAfter, takenAt, libraryCreatedAt string
+	var duplicate, thumbnail string
+	var metadata photoMetadata
 	if err := row.Scan(&record.ID, &record.LibraryID, &record.DirectoryID, &record.Name, &record.MediaType,
-		&record.SizeBytes, &record.UploadedBy, &importedAt, &trashedAt, &trashedBy, &purgeAfter, &duplicate,
+		&record.SizeBytes, &record.UploadedBy, &importedAt, &trashedAt, &trashedBy, &purgeAfter,
+		&takenAt, &metadata.width, &metadata.height, &metadata.orientation, &thumbnail, &duplicate,
 		&record.objectID, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return assetRecord{}, ErrNotFound
@@ -255,10 +301,19 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 		return assetRecord{}, err
 	}
 	record.Duplicate = DuplicateRole(duplicate)
+	record.Thumbnail = ThumbnailState(thumbnail)
+	record.Width, record.Height = metadata.displaySize()
 	record.library.id = record.LibraryID
 	var err error
 	if record.ImportedAt, err = parseTime(importedAt); err != nil {
 		return assetRecord{}, err
+	}
+	if takenAt != "" {
+		parsed, err := parseTime(takenAt)
+		if err != nil {
+			return assetRecord{}, err
+		}
+		record.TakenAt = &parsed
 	}
 	if record.library.createdAt, err = parseTime(libraryCreatedAt); err != nil {
 		return assetRecord{}, err

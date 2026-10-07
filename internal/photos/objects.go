@@ -26,6 +26,7 @@ type stagedObject struct {
 	id        string
 	size      int64
 	mediaType string
+	metadata  photoMetadata
 }
 
 var (
@@ -107,29 +108,35 @@ func (s *Service) stage(content io.Reader) (staged stagedObject, err error) {
 	if err := file.Close(); err != nil {
 		return stagedObject{}, err
 	}
-	if err := s.checkImage(staged); err != nil {
+	if staged.metadata, err = s.readMetadata(staged); err != nil {
 		return stagedObject{}, err
 	}
 	staged.id = hex.EncodeToString(hash.Sum(nil))
 	return staged, nil
 }
 
-// checkImage reads only the image header: it proves the bytes are the
-// declared format and bounds the pixel count before anything decodes them.
-func (s *Service) checkImage(staged stagedObject) error {
+// readMetadata reads only the image header and EXIF: it proves the bytes are
+// the declared format, bounds the pixel count before anything decodes them,
+// and records what the timeline needs immediately.
+func (s *Service) readMetadata(staged stagedObject) (photoMetadata, error) {
 	file, err := s.root.Open(staged.name)
 	if err != nil {
-		return err
+		return photoMetadata{}, err
 	}
 	defer file.Close()
 	config, format, err := image.DecodeConfig(file)
 	if err != nil || "image/"+format != staged.mediaType || config.Width <= 0 || config.Height <= 0 {
-		return ErrUnsupportedType
+		return photoMetadata{}, ErrUnsupportedType
 	}
 	if int64(config.Width)*int64(config.Height) > maxImagePixels {
-		return ErrTooLarge
+		return photoMetadata{}, ErrTooLarge
 	}
-	return nil
+	metadata := photoMetadata{width: config.Width, height: config.Height}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return photoMetadata{}, err
+	}
+	metadata.orientation, metadata.takenAt = readEXIF(file, s.location)
+	return metadata, nil
 }
 
 func (s *Service) forgetStaging(name string) {
