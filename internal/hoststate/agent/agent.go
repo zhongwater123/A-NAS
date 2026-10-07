@@ -115,6 +115,7 @@ type handler struct {
 	observer    hoststate.Observer
 	volume      storage.VolumeExecutor
 	credentials accounts.CredentialProvisioner
+	identities  accounts.IdentitySynchronizer
 	snapshots   files.SnapshotBackend
 	logger      *slog.Logger
 }
@@ -123,6 +124,7 @@ type Services struct {
 	Reader      hoststate.Observer
 	Volume      storage.VolumeExecutor
 	Credentials accounts.CredentialProvisioner
+	Identities  accounts.IdentitySynchronizer
 	Snapshots   files.SnapshotBackend
 }
 
@@ -134,7 +136,10 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &handler{observer: services.Reader, volume: services.Volume, credentials: services.Credentials, snapshots: services.Snapshots, logger: logger}
+	return &handler{
+		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
+		identities: services.Identities, snapshots: services.Snapshots, logger: logger,
+	}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +149,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/v1/accounts/credential" {
 		h.handleSetCredential(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/accounts/identities" {
+		h.handleSyncIdentities(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/accounts/credential/") {
@@ -304,14 +313,51 @@ func (h *handler) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.credentials.SetCredential(r.Context(), accounts.CredentialRequest{
 		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
-		Password: request.Password, Role: request.Role,
+		Password: request.Password, Role: request.Role, UID: request.UID, Enabled: request.Enabled,
 	}); err != nil {
 		h.logger.ErrorContext(r.Context(), "set credential failed", "username", request.Username, "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		h.writeAccountError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *handler) handleSyncIdentities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.identities == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "identity operation is unavailable")
+		return
+	}
+	var request identitiesDocument
+	if err := decodeRequest(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	identities := make([]accounts.Identity, len(request.Identities))
+	for i, identity := range request.Identities {
+		identities[i] = accounts.Identity{Username: identity.Username, UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
+	}
+	if err := h.identities.SyncIdentities(r.Context(), identities); err != nil {
+		h.logger.ErrorContext(r.Context(), "sync identities failed", "error", err)
+		h.writeAccountError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) writeAccountError(w http.ResponseWriter, err error) {
+	if errors.Is(err, accounts.ErrIdentityConflict) {
+		writeError(w, http.StatusConflict, identityConflictCode, "identity conflicts with an existing host account")
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+}
+
+const identityConflictCode = "identity_conflict"
 
 func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
@@ -348,6 +394,19 @@ type credentialDocument struct {
 	Username       string        `json:"username"`
 	Password       string        `json:"password"`
 	Role           accounts.Role `json:"role"`
+	UID            int           `json:"uid"`
+	Enabled        bool          `json:"enabled"`
+}
+
+type identityDocument struct {
+	Username string        `json:"username"`
+	UID      int           `json:"uid"`
+	Role     accounts.Role `json:"role"`
+	Enabled  bool          `json:"enabled"`
+}
+
+type identitiesDocument struct {
+	Identities []identityDocument `json:"identities"`
 }
 
 type snapshotDocument struct {
@@ -379,8 +438,16 @@ func (c *Client) CreateVolume(ctx context.Context, request storage.CreateVolumeR
 func (c *Client) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/accounts/credential", credentialDocument{
 		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
-		Password: request.Password, Role: request.Role,
+		Password: request.Password, Role: request.Role, UID: request.UID, Enabled: request.Enabled,
 	}, nil)
+}
+
+func (c *Client) SyncIdentities(ctx context.Context, identities []accounts.Identity) error {
+	document := identitiesDocument{Identities: make([]identityDocument, len(identities))}
+	for i, identity := range identities {
+		document.Identities[i] = identityDocument{Username: identity.Username, UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
+	}
+	return c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/accounts/identities", document, nil)
 }
 
 func (c *Client) DisableCredential(ctx context.Context, username string) error {
@@ -454,7 +521,11 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		var failure errorDocument
+		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&failure)
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == identityConflictCode {
+			return accounts.ErrIdentityConflict
+		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
 	if responseBody == nil || response.StatusCode == http.StatusNoContent {
@@ -724,4 +795,5 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 var _ hoststate.Observer = (*Client)(nil)
 var _ storage.VolumeExecutor = (*Client)(nil)
 var _ accounts.CredentialProvisioner = (*Client)(nil)
+var _ accounts.IdentitySynchronizer = (*Client)(nil)
 var _ files.SnapshotBackend = (*Client)(nil)

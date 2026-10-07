@@ -67,6 +67,10 @@ type Executor struct {
 	spaceRoots    map[string]string
 	registryPath  string
 	registryError error
+	identitiesMu  sync.Mutex
+	identities    map[string]identityRecord
+	identityPath  string
+	identityError error
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -88,10 +92,12 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor := &Executor{
 		resolver: resolver, runner: runner, systemRoot: filepath.Clean(systemRoot),
 		mountPoint: filepath.Clean(mountPoint), mountUnitName: unitName, smbInterface: strings.TrimSpace(options.SMBInterface),
-		spaceRoots: make(map[string]string),
+		spaceRoots: make(map[string]string), identities: make(map[string]identityRecord),
 	}
 	executor.registryPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "space-registry.json")
 	executor.registryError = executor.loadSpaceRegistry()
+	executor.identityPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "identity-registry.json")
+	executor.identityError = executor.loadIdentityRegistry()
 	return executor
 }
 
@@ -99,21 +105,27 @@ func (e *Executor) SetCredential(ctx context.Context, request accounts.Credentia
 	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || request.Password == "" {
 		return errors.New("invalid credential request")
 	}
+	identity := accounts.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
+	if err := validIdentity(identity); err != nil {
+		return err
+	}
 	if e.smbInterface != "" && !regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`).MatchString(e.smbInterface) {
 		return errors.New("invalid Samba interface")
 	}
-	if output, err := e.runner.Run(ctx, "groupadd", []string{"--force", "a-nas-members"}, ""); err != nil {
-		return commandError("ensure Samba group", err, output)
+	if e.identityError != nil {
+		return e.identityError
 	}
-	if _, err := e.runner.Run(ctx, "id", []string{"--user", request.Username}, ""); err != nil {
-		if output, err := e.runner.Run(ctx, "useradd", []string{
-			"--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", request.Username,
-		}, ""); err != nil {
-			return commandError("create locked Samba account", err, output)
-		}
+	if err := e.ensureFixedGroups(ctx); err != nil {
+		return err
 	}
-	if output, err := e.runner.Run(ctx, "usermod", []string{"--append", "--groups", "a-nas-members", request.Username}, ""); err != nil {
-		return commandError("add Samba group membership", err, output)
+	if err := e.ensureIdentity(ctx, identity); err != nil {
+		return err
+	}
+	if err := e.recordIdentity(identity); err != nil {
+		return err
+	}
+	if err := e.mirrorIdentityManifest(); err != nil {
+		return err
 	}
 	privateRoot := filepath.Join(e.mountPoint, "spaces", "private", request.Username)
 	sharedRoot := filepath.Join(e.mountPoint, "spaces", "shared")
@@ -128,6 +140,11 @@ func (e *Executor) SetCredential(ctx context.Context, request accounts.Credentia
 	passwordInput := request.Password + "\n" + request.Password + "\n"
 	if _, err := e.runner.Run(ctx, "smbpasswd", []string{"-s", "-a", request.Username}, passwordInput); err != nil {
 		return fmt.Errorf("set Samba password: %w", err)
+	}
+	if !request.Enabled {
+		if output, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", request.Username}, ""); err != nil {
+			return commandError("keep Samba credential disabled", err, output)
+		}
 	}
 	return e.applySambaConfiguration(ctx)
 }
@@ -152,6 +169,9 @@ func (e *Executor) ReconcileDataVolume(ctx context.Context) error {
 		return nil
 	}
 	if err := e.materializeRegisteredSpaces(ctx); err != nil {
+		return err
+	}
+	if err := e.mirrorIdentityManifest(); err != nil {
 		return err
 	}
 	return e.applySambaConfiguration(ctx)
@@ -275,7 +295,13 @@ func (e *Executor) DisableCredential(ctx context.Context, username string) error
 	if _, err := e.runner.Run(ctx, "usermod", []string{"--lock", username}, ""); err != nil {
 		return fmt.Errorf("lock Samba account: %w", err)
 	}
-	return nil
+	if err := e.disconnectSMBSessions(ctx, username); err != nil {
+		return err
+	}
+	if err := e.setIdentityEnabled(username, false); err != nil {
+		return err
+	}
+	return e.mirrorIdentityManifest()
 }
 
 func (e *Executor) applySambaConfiguration(ctx context.Context) error {

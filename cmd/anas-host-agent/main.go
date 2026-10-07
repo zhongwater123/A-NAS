@@ -56,7 +56,7 @@ func run(logger *slog.Logger) error {
 	}
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
-			Reader: reader, Volume: executor, Credentials: executor, Snapshots: executor,
+			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Snapshots: executor,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}

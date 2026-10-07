@@ -56,6 +56,16 @@ bash scripts/check-dev-env.sh
 wsl -d Ubuntu-24.04 -u root
 ```
 
+## Root 集成测试
+
+账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行：
+
+```bash
+docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
+  -v "$PWD:/src" -w /src <装有 Go、gcc、acl、btrfs-progs、samba、smbclient 的 Debian 镜像> \
+  make root-integration-test
+```
+
 ## 实验 NAS 接入
 
 | 项目 | 当前状态 |

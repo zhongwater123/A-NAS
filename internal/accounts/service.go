@@ -31,6 +31,21 @@ var (
 	ErrCredentialProvision = errors.New("account credential provisioning failed")
 	ErrForbidden           = errors.New("operation is forbidden")
 	ErrUserNotFound        = errors.New("user not found")
+	// ErrIdentityConflict reports that the host already has an account,
+	// group, or UID that A-NAS did not allocate for this user.
+	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
+	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
+)
+
+// Linux identity layout shared with the Host Agent (ADR 0008). Fixed group
+// GIDs and user UIDs are recorded on the data volume, so they must never change.
+const (
+	UsersGroup   = "a-nas-users"
+	AdminsGroup  = "a-nas-admins"
+	UsersGID     = 20000
+	AdminsGID    = 20001
+	FirstUserUID = 20100
+	LastUserUID  = 29999
 )
 
 type Role string
@@ -95,11 +110,29 @@ type CredentialRequest struct {
 	Username       string
 	Password       string
 	Role           Role
+	UID            int
+	// Enabled is false when an administrator resets the credential of a
+	// disabled account; the SMB credential must stay disabled.
+	Enabled bool
 }
 
 type CredentialProvisioner interface {
 	SetCredential(context.Context, CredentialRequest) error
 	DisableCredential(context.Context, string) error
+}
+
+// Identity is the Linux account the Host Agent keeps for one A-NAS user.
+type Identity struct {
+	Username string
+	UID      int
+	Role     Role
+	Enabled  bool
+}
+
+// IdentitySynchronizer converges host accounts and groups on the control plane
+// without changing any password.
+type IdentitySynchronizer interface {
+	SyncIdentities(context.Context, []Identity) error
 }
 
 type Options struct {
@@ -165,13 +198,78 @@ CREATE TABLE IF NOT EXISTS audit_events (
     occurred_at TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
+-- UIDs are never deleted or reused: files on the data volume keep the UID
+-- after the account is gone. No foreign key, so the row outlives the user.
+CREATE TABLE IF NOT EXISTS linux_identities (
+    uid INTEGER PRIMARY KEY CHECK (uid BETWEEN 20100 AND 29999),
+    user_id TEXT NOT NULL UNIQUE,
+    allocated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate SQLite: %w", err)
 	}
+	return s.allocateMissingIdentities(ctx)
+}
+
+// allocateMissingIdentities gives accounts created before ADR 0008 a UID in
+// creation order. Their host accounts are converged by SyncIdentities.
+func (s *Store) allocateMissingIdentities(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT u.id FROM users u
+LEFT JOIN linux_identities i ON i.user_id = u.id
+WHERE i.uid IS NULL ORDER BY u.created_at, u.id`)
+	if err != nil {
+		return err
+	}
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
+		if _, err := allocateUID(ctx, s.db, userID, time.Now().UTC()); err != nil {
+			return fmt.Errorf("allocate Linux identity: %w", err)
+		}
+	}
 	return nil
+}
+
+type sqlExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func allocateUID(ctx context.Context, db sqlExecutor, userID string, now time.Time) (int, error) {
+	var last int
+	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(uid), ?) FROM linux_identities", FirstUserUID-1).Scan(&last); err != nil {
+		return 0, err
+	}
+	uid := last + 1
+	if uid > LastUserUID {
+		return 0, ErrIdentityRangeExhausted
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO linux_identities(uid, user_id, allocated_at) VALUES(?,?,?)",
+		uid, userID, formatTime(now)); err != nil {
+		return 0, err
+	}
+	return uid, nil
+}
+
+func (s *Service) uidForUser(ctx context.Context, userID string) (int, error) {
+	var uid int
+	if err := s.store.db.QueryRowContext(ctx, "SELECT uid FROM linux_identities WHERE user_id = ?", userID).Scan(&uid); err != nil {
+		return 0, fmt.Errorf("read Linux identity: %w", err)
+	}
+	return uid, nil
 }
 
 type Service struct {
@@ -223,10 +321,15 @@ FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'`).Sc
 	if s.credentials == nil {
 		return s.markCredentialFailure(ctx, user, errors.New("credential provisioner is unavailable"))
 	}
+	uid, err := s.uidForUser(ctx, user.ID)
+	if err != nil {
+		return User{}, err
+	}
 	if err := s.credentials.SetCredential(ctx, CredentialRequest{
 		UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role,
+		UID: uid, Enabled: true,
 	}); err != nil {
-		return s.markCredentialFailure(ctx, user, err)
+		return s.handleProvisionFailure(ctx, "", user, err)
 	}
 	if _, err := s.store.db.ExecContext(ctx, "UPDATE users SET password_hash = ?, status = 'active' WHERE id = ?", passwordHash, user.ID); err != nil {
 		return User{}, err
@@ -290,6 +393,10 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 		formatTime(now)); err != nil {
 		return User{}, err
 	}
+	uid, err := allocateUID(ctx, tx, user.ID, now)
+	if err != nil {
+		return User{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
@@ -297,8 +404,11 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 	if s.credentials == nil {
 		return s.markCredentialFailure(ctx, user, errors.New("credential provisioner is unavailable"))
 	}
-	if err := s.credentials.SetCredential(ctx, CredentialRequest{UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role}); err != nil {
-		return s.markCredentialFailure(ctx, user, err)
+	if err := s.credentials.SetCredential(ctx, CredentialRequest{
+		UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role,
+		UID: uid, Enabled: true,
+	}); err != nil {
+		return s.handleProvisionFailure(ctx, actorID, user, err)
 	}
 	if _, err := s.store.db.ExecContext(ctx, "UPDATE users SET status = 'active' WHERE id = ? AND status = 'pending'", user.ID); err != nil {
 		return User{}, err
@@ -306,6 +416,31 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 	user.Status = UserStatusActive
 	_ = s.appendAudit(ctx, actorID, "user.created", "user", user.ID, string(role))
 	return user, nil
+}
+
+// handleProvisionFailure discards a never-provisioned account whose name or
+// UID collides with a host account, so the name can be chosen again. Its UID
+// stays allocated and is never reused.
+func (s *Service) handleProvisionFailure(ctx context.Context, actorID string, user User, cause error) (User, error) {
+	if !errors.Is(cause, ErrIdentityConflict) {
+		return s.markCredentialFailure(ctx, user, cause)
+	}
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM spaces WHERE owner_user_id = ?", user.ID); err != nil {
+		return User{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id = ? AND status IN ('pending', 'error')", user.ID); err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+	_ = s.appendAudit(ctx, actorID, "user.identity_conflict", "user", user.ID, user.Username)
+	return User{}, ErrIdentityConflict
 }
 
 func (s *Service) markCredentialFailure(ctx context.Context, user User, cause error) (User, error) {
@@ -533,10 +668,16 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	if s.credentials == nil {
 		return errors.New("credential provisioner is unavailable")
 	}
+	uid, err := s.uidForUser(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	// Resetting a password never re-enables a disabled account.
 	if err := s.credentials.SetCredential(ctx, CredentialRequest{
 		UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role,
+		UID: uid, Enabled: user.Status != UserStatusDisabled,
 	}); err != nil {
-		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ?", userID)
+		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
 		return fmt.Errorf("provision account credential: %w", err)
 	}
@@ -545,7 +686,8 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash = ?, status = 'active' WHERE id = ?", passwordHash, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?,
+status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, userID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
@@ -555,6 +697,37 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		return err
 	}
 	return s.appendAudit(ctx, actor.ID, "user.credential_reset", "user", userID, "")
+}
+
+// SyncIdentities asks the Host Agent to converge Linux accounts and group
+// membership for every provisioned user. It never changes passwords and is
+// safe to call on every Product Service start.
+func (s *Service) SyncIdentities(ctx context.Context) error {
+	synchronizer, ok := s.credentials.(IdentitySynchronizer)
+	if !ok {
+		return nil
+	}
+	rows, err := s.store.db.QueryContext(ctx, `SELECT u.username, u.role, u.status, i.uid
+FROM users u JOIN linux_identities i ON i.user_id = u.id
+WHERE u.status IN ('active', 'disabled') ORDER BY i.uid`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var identities []Identity
+	for rows.Next() {
+		var identity Identity
+		var status UserStatus
+		if err := rows.Scan(&identity.Username, &identity.Role, &status, &identity.UID); err != nil {
+			return err
+		}
+		identity.Enabled = status == UserStatusActive
+		identities = append(identities, identity)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return synchronizer.SyncIdentities(ctx, identities)
 }
 
 func (s *Service) appendAudit(ctx context.Context, actorID, action, resourceType, resourceID, detail string) error {

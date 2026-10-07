@@ -5,7 +5,7 @@ VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test root-integration-test build build-binaries check check-steps clean
 
 all: check
 
@@ -64,6 +64,10 @@ vet:
 
 test:
 	$(GO) test ./...
+
+# Modifies accounts, groups, and Samba state: disposable privileged container only.
+root-integration-test:
+	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
 
 build: web-build build-binaries
 
