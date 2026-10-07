@@ -50,6 +50,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 关联
 
 - [ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
+- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)：本页的身份与写入路径将由文件代理和文件系统 ACL 取代（尚未实现）
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
