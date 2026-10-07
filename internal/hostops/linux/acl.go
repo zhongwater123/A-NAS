@@ -29,6 +29,10 @@ func containerACL() string {
 	}, ",")
 }
 
+func rootOnlyACL() string {
+	return strings.Join([]string{"user::rwx", "group::---", "other::---"}, ",")
+}
+
 // inheritedACL grants entries on a directory and, through default entries,
 // on everything created below it.
 func inheritedACL(entries ...string) string {
@@ -100,8 +104,10 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 	if err := e.ensureFixedGroups(ctx); err != nil {
 		return nil, err
 	}
-	if err := e.ensureTraversal(ctx, filepath.Dir(e.mountPoint)); err != nil {
-		return nil, err
+	for _, path := range []string{filepath.Dir(e.mountPoint), e.mountPoint} {
+		if err := e.ensureTraversal(ctx, path); err != nil {
+			return nil, err
+		}
 	}
 	for _, path := range []string{filepath.Join(e.mountPoint, "spaces"), filepath.Join(e.mountPoint, "spaces", "private")} {
 		if err := apply(path, containerACL(), false, false); err != nil {
@@ -134,10 +140,21 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 			if !validUsername(username) {
 				return repaired, errors.New("registered private space has an invalid owner")
 			}
-			viewers = e.viewersOf(spaceID)
-			spaceACL = privateSpaceACL(username, viewers...)
-			principal = "user:" + username
-			trashUsers = []string{username}
+			if e.identityKnown(username) {
+				viewers = e.knownIdentities(e.viewersOf(spaceID))
+				spaceACL = privateSpaceACL(username, viewers...)
+				principal = "user:" + username
+				trashUsers = []string{username}
+			} else {
+				// On the first ADR 0008 boot, the space registry already
+				// names the product account but the Product Service has not
+				// synchronized its Linux identity yet. setfacl rejects a
+				// named entry for that missing account. Protect the space
+				// fail-closed until SyncIdentities reapplies its full ACL.
+				spaceACL = inheritedACL()
+				principal = ""
+				trashUsers = nil
+			}
 		}
 		if err := apply(root, spaceACL, created, false); err != nil {
 			return repaired, err
@@ -145,7 +162,11 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		// Trash directories sit in folders their users can write, so
 		// anything else found at these names is moved aside.
 		trashRoot := filepath.Join(root, ".a-nas-trash")
-		if err := apply(trashRoot, trashRootACL(principal, viewers...), false, true); err != nil {
+		trashACL := rootOnlyACL()
+		if principal != "" {
+			trashACL = trashRootACL(principal, viewers...)
+		}
+		if err := apply(trashRoot, trashACL, false, true); err != nil {
 			return repaired, err
 		}
 		for _, username := range trashUsers {
