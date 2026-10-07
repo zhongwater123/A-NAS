@@ -71,6 +71,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 | `internal/accounts` / `internal/files` / `internal/storage` | 身份 Policy、文件闭环和持久化执行计划 | 本地实现与测试完成，实机验收待进行 |
 | `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 本地与特权容器测试完成，实机验收待进行 |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | Fake command 测试完成，实机验收待进行 |
+| `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库与测试完成；尚未接入相册服务进程、API 与 Web |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |

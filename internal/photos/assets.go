@@ -1,0 +1,442 @@
+package photos
+
+import (
+	"context"
+	"database/sql"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"strings"
+)
+
+var ErrInvalidCursor = errors.New("invalid photo timeline cursor")
+
+type ImportRequest struct {
+	LibraryID string
+	// DirectoryID is the target virtual directory; empty means the library root.
+	DirectoryID string
+	Name        string
+	Content     io.Reader
+}
+
+// Import persists one original and creates its photo asset. It returns only
+// after the original and the Catalog row are durable; nothing here waits for
+// thumbnails or AI.
+func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest) (Asset, error) {
+	name, ok := cleanName(request.Name)
+	if !ok {
+		return Asset{}, ErrInvalidName
+	}
+	lib, err := s.visibleLibrary(ctx, s.db, p, request.LibraryID)
+	if err != nil {
+		return Asset{}, err
+	}
+	if !canAdd(p, lib) {
+		return Asset{}, ErrForbidden
+	}
+	if err := s.checkDirectory(ctx, s.db, lib, request.DirectoryID); err != nil {
+		return Asset{}, err
+	}
+	staged, err := s.stage(request.Content)
+	if err != nil {
+		return Asset{}, err
+	}
+	defer s.discardStaging(staged.name)
+
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+	created, err := s.publish(staged)
+	if err != nil {
+		return Asset{}, err
+	}
+	assetID := s.randomID("photo")
+	var imported Asset
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		// The directory may have been deleted while the original streamed in.
+		if err := s.checkDirectory(ctx, tx, lib, request.DirectoryID); err != nil {
+			return err
+		}
+		now := formatTime(s.now())
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+			staged.id, staged.size, staged.mediaType, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at)
+			 VALUES(?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
+			assetID, lib.id, request.DirectoryID, staged.id, name, p.UserID, now); err != nil {
+			return err
+		}
+		record, err := s.assetByID(ctx, tx, assetID)
+		if err != nil {
+			return err
+		}
+		imported = record.Asset
+		return s.audit(ctx, tx, p.UserID, "photo.imported", assetID, name)
+	})
+	if err != nil {
+		if created {
+			_ = s.removeObject(staged.id)
+		}
+		return Asset{}, err
+	}
+	return imported, nil
+}
+
+// Get returns an asset p may see. Trashed assets are visible only to those
+// who may restore them.
+func (s *Service) Get(ctx context.Context, p Principal, assetID string) (Asset, error) {
+	record, err := s.visibleAsset(ctx, s.db, p, assetID)
+	return record.Asset, err
+}
+
+func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, assetID string) (assetRecord, error) {
+	if !p.valid() {
+		return assetRecord{}, ErrForbidden
+	}
+	record, err := s.assetByID(ctx, q, assetID)
+	if err != nil {
+		return assetRecord{}, err
+	}
+	if !canView(p, record.library, s.now()) {
+		return assetRecord{}, ErrNotFound
+	}
+	if record.Trash != nil && !canChange(p, record.library, record.UploadedBy) {
+		return assetRecord{}, ErrNotFound
+	}
+	return record, nil
+}
+
+// Open returns the original read-only. The caller must close Content.Reader.
+func (s *Service) Open(ctx context.Context, p Principal, assetID string) (Content, error) {
+	record, err := s.visibleAsset(ctx, s.db, p, assetID)
+	if err != nil {
+		return Content{}, err
+	}
+	file, err := s.openObject(record.objectID)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Content{}, fmt.Errorf("original of %s is missing from the content store", record.ID)
+	}
+	if err != nil {
+		return Content{}, err
+	}
+	return Content{
+		Name: record.Name, MediaType: record.MediaType, SizeBytes: record.SizeBytes,
+		ImportedAt: record.ImportedAt, Reader: file,
+	}, nil
+}
+
+type Page struct {
+	Assets []Asset `json:"assets"`
+	// Next continues the listing; empty on the last page.
+	Next string `json:"next,omitempty"`
+}
+
+const (
+	defaultPageSize = 100
+	maxPageSize     = 500
+)
+
+// Timeline lists the available assets of one library, newest import first.
+func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor string, limit int) (Page, error) {
+	lib, err := s.visibleLibrary(ctx, s.db, p, libraryID)
+	if err != nil {
+		return Page{}, err
+	}
+	if limit <= 0 {
+		limit = defaultPageSize
+	}
+	limit = min(limit, maxPageSize)
+	where := "WHERE a.library_id = ? AND a.trashed_at IS NULL"
+	args := []any{lib.id}
+	if cursor != "" {
+		importedAt, id, err := decodeCursor(cursor)
+		if err != nil {
+			return Page{}, err
+		}
+		where += " AND (a.imported_at < ? OR (a.imported_at = ? AND a.id < ?))"
+		args = append(args, importedAt, importedAt, id)
+	}
+	records, err := s.queryAssets(ctx, s.db, where+" ORDER BY a.imported_at DESC, a.id DESC LIMIT ?", append(args, limit+1)...)
+	if err != nil {
+		return Page{}, err
+	}
+	page := Page{Assets: []Asset{}}
+	for i, record := range records {
+		if i == limit {
+			last := page.Assets[limit-1]
+			page.Next = encodeCursor(formatTime(last.ImportedAt), last.ID)
+			break
+		}
+		page.Assets = append(page.Assets, record.Asset)
+	}
+	return page, nil
+}
+
+func encodeCursor(importedAt, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(importedAt + "\n" + id))
+}
+
+func decodeCursor(cursor string) (string, string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", "", ErrInvalidCursor
+	}
+	importedAt, id, found := strings.Cut(string(raw), "\n")
+	if !found || id == "" {
+		return "", "", ErrInvalidCursor
+	}
+	if _, err := parseTime(importedAt); err != nil {
+		return "", "", ErrInvalidCursor
+	}
+	return importedAt, id, nil
+}
+
+func (s *Service) Rename(ctx context.Context, p Principal, assetID, name string) (Asset, error) {
+	name, ok := cleanName(name)
+	if !ok {
+		return Asset{}, ErrInvalidName
+	}
+	return s.changeAsset(ctx, p, assetID, "photo.renamed", name, func(tx *sql.Tx, record assetRecord) error {
+		if record.Trash != nil {
+			return ErrConflict
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE assets SET name = ? WHERE id = ?", name, record.ID)
+		return err
+	})
+}
+
+// Move changes the virtual directory of an asset within its library; the
+// asset keeps its ID and original.
+func (s *Service) Move(ctx context.Context, p Principal, assetID, directoryID string) (Asset, error) {
+	return s.changeAsset(ctx, p, assetID, "photo.moved", directoryID, func(tx *sql.Tx, record assetRecord) error {
+		if record.Trash != nil {
+			return ErrConflict
+		}
+		if err := s.checkDirectory(ctx, tx, record.library, directoryID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE assets SET directory_id = NULLIF(?, '') WHERE id = ?", directoryID, record.ID)
+		return err
+	})
+}
+
+// Trash moves an asset to its library's trash, out of browsing, for the
+// retention period.
+func (s *Service) Trash(ctx context.Context, p Principal, assetID string) (Asset, error) {
+	return s.changeAsset(ctx, p, assetID, "photo.trashed", "", func(tx *sql.Tx, record assetRecord) error {
+		if record.Trash != nil {
+			return ErrConflict
+		}
+		now := s.now()
+		_, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = ?, trashed_by = ?, purge_after = ? WHERE id = ?",
+			formatTime(now), p.UserID, formatTime(now.Add(s.trashRetention)), record.ID)
+		return err
+	})
+}
+
+// Restore returns a trashed asset to its virtual directory, or to the library
+// root if that directory no longer exists.
+func (s *Service) Restore(ctx context.Context, p Principal, assetID string) (Asset, error) {
+	return s.changeAsset(ctx, p, assetID, "photo.restored", "", func(tx *sql.Tx, record assetRecord) error {
+		if record.Trash == nil {
+			return ErrConflict
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = NULL, trashed_by = NULL, purge_after = NULL WHERE id = ?", record.ID)
+		return err
+	})
+}
+
+func (s *Service) changeAsset(ctx context.Context, p Principal, assetID, action, detail string, change func(*sql.Tx, assetRecord) error) (Asset, error) {
+	var changed Asset
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		record, err := s.visibleAsset(ctx, tx, p, assetID)
+		if err != nil {
+			return err
+		}
+		if !canChange(p, record.library, record.UploadedBy) {
+			return ErrForbidden
+		}
+		if err := change(tx, record); err != nil {
+			return err
+		}
+		updated, err := s.assetByID(ctx, tx, assetID)
+		if err != nil {
+			return err
+		}
+		changed = updated.Asset
+		if detail == "" {
+			detail = record.Name
+		}
+		return s.audit(ctx, tx, p.UserID, action, assetID, detail)
+	})
+	return changed, err
+}
+
+// Copy creates an independent asset in targetLibraryID that reuses the
+// source's original bytes. Changing or deleting either asset never affects the
+// other.
+func (s *Service) Copy(ctx context.Context, p Principal, assetID, targetLibraryID, targetDirectoryID string) (Asset, error) {
+	var copied Asset
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		source, err := s.visibleAsset(ctx, tx, p, assetID)
+		if err != nil {
+			return err
+		}
+		if source.Trash != nil {
+			return ErrConflict
+		}
+		target, err := s.visibleLibrary(ctx, tx, p, targetLibraryID)
+		if err != nil {
+			return err
+		}
+		if !canAdd(p, target) {
+			return ErrForbidden
+		}
+		if err := s.checkDirectory(ctx, tx, target, targetDirectoryID); err != nil {
+			return err
+		}
+		id := s.randomID("photo")
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at)
+			 VALUES(?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
+			id, target.id, targetDirectoryID, source.objectID, source.Name, p.UserID, formatTime(s.now())); err != nil {
+			return err
+		}
+		record, err := s.assetByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		copied = record.Asset
+		return s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)
+	})
+	return copied, err
+}
+
+// ListTrash returns the trashed assets of a library that p may restore or
+// purge, most recently trashed first.
+func (s *Service) ListTrash(ctx context.Context, p Principal, libraryID string) ([]Asset, error) {
+	records, err := s.restorableTrash(ctx, p, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	assets := make([]Asset, 0, len(records))
+	for _, record := range records {
+		assets = append(assets, record.Asset)
+	}
+	return assets, nil
+}
+
+func (s *Service) restorableTrash(ctx context.Context, p Principal, libraryID string) ([]assetRecord, error) {
+	lib, err := s.visibleLibrary(ctx, s.db, p, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.queryAssets(ctx, s.db,
+		"WHERE a.library_id = ? AND a.trashed_at IS NOT NULL ORDER BY a.trashed_at DESC, a.id DESC", lib.id)
+	if err != nil {
+		return nil, err
+	}
+	restorable := records[:0]
+	for _, record := range records {
+		if canChange(p, lib, record.UploadedBy) {
+			restorable = append(restorable, record)
+		}
+	}
+	return restorable, nil
+}
+
+// Purge permanently deletes one trashed asset.
+func (s *Service) Purge(ctx context.Context, p Principal, assetID string) error {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+	record, err := s.visibleAsset(ctx, s.db, p, assetID)
+	if err != nil {
+		return err
+	}
+	if !canChange(p, record.library, record.UploadedBy) {
+		return ErrForbidden
+	}
+	if record.Trash == nil {
+		return ErrConflict
+	}
+	_, err = s.purge(ctx, p.UserID, "photo.purged", []assetRecord{record})
+	return err
+}
+
+// EmptyTrash permanently deletes every trashed asset of a library that p may
+// purge. An administrator can never empty a member's private trash.
+func (s *Service) EmptyTrash(ctx context.Context, p Principal, libraryID string) (int, error) {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+	records, err := s.restorableTrash(ctx, p, libraryID)
+	if err != nil {
+		return 0, err
+	}
+	return s.purge(ctx, p.UserID, "photo.purged", records)
+}
+
+// ExpireTrash permanently deletes assets whose retention has elapsed. It runs
+// as the photo service itself and needs no user session.
+func (s *Service) ExpireTrash(ctx context.Context) (int, error) {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+	records, err := s.queryAssets(ctx, s.db, "WHERE a.purge_after <= ? ORDER BY a.purge_after", formatTime(s.now()))
+	if err != nil {
+		return 0, err
+	}
+	return s.purge(ctx, "system", "photo.purged.retention", records)
+}
+
+// purge deletes trashed assets and every content object they were the last
+// reference to. The caller holds commitMu, so no import can decide to reuse
+// an object between its last reference disappearing and its file being
+// unlinked.
+func (s *Service) purge(ctx context.Context, actorID, action string, records []assetRecord) (int, error) {
+	var purged int
+	var orphaned []string
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		for _, record := range records {
+			result, err := tx.ExecContext(ctx, "DELETE FROM assets WHERE id = ? AND trashed_at IS NOT NULL", record.ID)
+			if err != nil {
+				return err
+			}
+			deleted, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if deleted == 0 {
+				// Restored since it was listed.
+				continue
+			}
+			purged++
+			var referenced bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE object_id = ?)", record.objectID).Scan(&referenced); err != nil {
+				return err
+			}
+			if !referenced {
+				if _, err := tx.ExecContext(ctx, "DELETE FROM objects WHERE id = ?", record.objectID); err != nil {
+					return err
+				}
+				orphaned = append(orphaned, record.objectID)
+			}
+			if err := s.audit(ctx, tx, actorID, action, record.ID, record.Name); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	// A file left behind by a failure here has no Catalog row; Reconcile
+	// removes it.
+	var removeErr error
+	for _, id := range orphaned {
+		removeErr = errors.Join(removeErr, s.removeObject(id))
+	}
+	return purged, removeErr
+}

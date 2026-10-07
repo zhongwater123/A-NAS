@@ -69,12 +69,12 @@ anas-photos（a-nas-photos）◄──────┘
 
 ### 原图提交
 
-1. 在目标数据卷的 staging 目录流式写入并同时计算 SHA-256，不先把整个文件读入内存。
-2. 校验格式与大小，刷新文件后原子移动到按内容哈希分层的对象路径；已存在时复用对象。
-3. 在单个数据库事务中创建独立照片资产、对象引用、重复组关系与待处理任务。
-4. 崩溃后由对账任务删除超过安全期且没有目录引用的 staging 或孤立对象；任何自动回收都不能触碰仍有引用的对象。
+1. 在 `photos` 子卷的 `staging/` 流式写入并同时计算 SHA-256，不先把整个文件读入内存；写入过程中按块检查大小上限与容量保留，前 8 字节判定 JPEG/PNG。
+2. 刷新文件后只读取图片头校验格式与像素上限，再设为只读并以硬链接发布到 `objects/<2 位>/<2 位>/<SHA-256>`，随后刷新所在目录；同名对象已存在时直接复用，从不覆盖。
+3. 在单个数据库事务中创建对象行与独立照片资产；重复组不单独存表，由同一图库内引用同一对象的未删除资产推导。
+4. 发布对象与引用它的事务、清除最后一个引用与删除对象文件，都在同一把提交锁内成对完成，因此清除不会删掉刚被导入复用的对象。崩溃后由对账删除不在写入中的 staging 文件与没有对象行的对象文件，并报告有引用但文件缺失的原图；任何自动回收都不能触碰仍有引用的对象。
 
-对象路径不是资源身份。备份和恢复必须同时覆盖对象、目录以及二者的校验清单。
+对象路径不是资源身份。备份和恢复必须同时覆盖对象、目录以及二者的校验清单。实现见 [`internal/photos`](../../internal/photos/photos.go)。
 
 ## 后台任务与资源隔离
 
@@ -194,3 +194,5 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - [统一身份与文件授权规格](../specs/unified-identity-and-file-acl.md)
 - [本地照片 AI 模型与 Runtime 研究](../research/photo-ai-model-runtime-selection.md)
 - [领域语言](../../CONTEXT.md)
+- 代码：[`internal/photos`](../../internal/photos/photos.go)；Policy 见 [`policy.go`](../../internal/photos/policy.go)，崩溃对账见 [`reconcile.go`](../../internal/photos/reconcile.go)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)
