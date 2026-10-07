@@ -50,7 +50,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 |---|---|---|
 | `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、快照与可选终端已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态及类型化特权操作 |
-| `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 登录、文件、回收站、快照、账号、存储、资源管理和终端窗口已实现 |
+| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、回收站、快照、账号、存储、资源管理、终端窗口与本地屏保已实现 |
 | `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端，以产品服务用户运行 | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |

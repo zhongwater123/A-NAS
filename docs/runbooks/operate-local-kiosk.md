@@ -5,7 +5,7 @@
 
 ## 目的
 
-让带直连屏幕、键盘和鼠标的 Experimental NAS 在启动后进入 A-NAS Web 桌面。Cage 只承载一个最大化 Chromium，浏览器只访问回环地址 `http://127.0.0.1:8080/`；产品服务和 Host Agent 的权限边界不变。
+让带直连屏幕、键盘和鼠标的 Experimental NAS 在启动后进入 A-NAS Web 桌面。Cage 只承载一个最大化 Chromium，浏览器只访问回环地址 `http://127.0.0.1:8080/?local-console=1`；查询标记只启用本地显示行为，产品服务和 Host Agent 的权限边界不变。
 
 ## 安全边界
 
@@ -23,6 +23,7 @@
 - `anas-kiosk@.service`
 - `a-nas-kiosk.pam`
 - `kiosk.env`（Experimental NAS 已实机校准的输出配置）
+- `screensaver.mp4`（可选；由部署命令显式提供，不进入 Git）
 
 2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成。重装或新设备由管理员执行：
 
@@ -68,6 +69,8 @@ systemctl enable anas-kiosk@tty1.service
 
 本机屏幕已在 `DP-2` 的原生 `1536x2048@60.6Hz` 模式下实机校准为逆时针 `90` 度、缩放 `1.5`。这些硬件相关值位于 root 管理的 `/etc/a-nas/kiosk.env`；启动器会先校验配置，再在 Chromium 启动前原子应用 transform 和 scale。其他硬件不得直接复用 connector 名称。
 
+屏保视频由系统安装脚本从版本目录可选复制到 `/var/lib/a-nas/screensavers/computer-chip.mp4`，权限为 `root:a-nas 0640`；产品服务只读提供媒体字节，Chromium 不直接访问宿主机路径。视频缺失不会阻止产品服务或 Kiosk 启动。
+
 保持 SSH 恢复会话后，首次验证可执行：
 
 ```bash
@@ -86,6 +89,7 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 6. `F1`、浏览器导航、开发工具、不受控缩放和右键菜单不可逃离产品界面；当前 Experimental NAS 未通过 `F1` 和缩放项，不能把本地 Kiosk 视为面向非受信任用户的安全边界。
+7. 登录后保持三分钟无输入，屏保视频应静音、循环、居中铺满且无黑边；第一次移动鼠标或按键只退出屏保，不打开或操作下层应用。
 
 如果分辨率、方向或 UI 大小不正确，先在同一 Wayland 会话中用 `wlr-randr` 临时验证，再更新 `/etc/a-nas/kiosk.env`；不要在不知道输出名称时写死显卡或 connector。
 
@@ -103,8 +107,11 @@ systemctl reset-failed
 
 这只移除本地显示会话，不停止 A-NAS API、Host Agent 或 SSH。
 
+屏保视频是持久外部资产，回滚产品版本时可以保留。确认不再使用后可另行删除 `/var/lib/a-nas/screensavers/computer-chip.mp4`；删除后桌面自动退回静态壁纸。
+
 ## 依据
 
 - [Cage 官方 systemd 启动说明](https://github.com/cage-kiosk/cage/wiki/Starting-Cage-on-boot-with-systemd)
 - [Debian 13 Cage 手册](https://manpages.debian.org/trixie/cage/cage.1.en.html)
 - [systemd.exec 对 PAM、TTY 和运行时目录的说明](https://manpages.debian.org/trixie/systemd/systemd.exec.5.en.html)
+- [本地控制台屏保规格](../specs/local-console-screensaver.md)

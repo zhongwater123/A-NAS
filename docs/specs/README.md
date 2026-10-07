@@ -11,6 +11,7 @@
 - [相册与本地智能检索](photo-library.md)（draft，核心开发基线已冻结）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
 - [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
+- [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented locally；hardware acceptance pending）
 
 ## 使用方式
 

@@ -100,7 +100,9 @@ func run(logger *slog.Logger) error {
 		Accounts: accountService, Files: fileService, Storage: storageService,
 		Terminal: terminals, Logger: logger,
 	})
-	handler, err := webui.New(apiHandler)
+	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
+		ScreensaverVideoPath: environment("ANAS_SCREENSAVER_VIDEO", "/var/lib/a-nas/screensavers/computer-chip.mp4"),
+	})
 	if err != nil {
 		return err
 	}
