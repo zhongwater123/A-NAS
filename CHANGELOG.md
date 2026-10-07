@@ -4,16 +4,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- v1.0.1 本地实现单盘 Btrfs 三阶段初始化、SQLite/WAL 控制面、管理员与成员、个人空间与唯一 Shared。
+- Web 与 SMB3 共用账号和 Policy，提供文件管理、30 天回收站、手动只读快照和按文件恢复。
+- 磁盘 SMART、温度、容量、占用、文件系统、数据卷资格及统一审计导出。
+- root Host Agent 类型化 IPC、非特权产品服务、root 所有的系统发布目录与 systemd 安装流程。
+
+### Security
+
+- 一次性管理员初始化码、Argon2id、服务端会话和 CSRF；Samba 凭据失败时账号不可登录。
+- 数据卷身份或 Btrfs 挂载验证失败时拒绝文件写入，绝不回退到系统盘。
+- Samba 要求 SMB3、加密和签名，禁用 guest、SMB1 和 Unix extensions，只绑定显式局域网接口。
+
 ### Fixed
 
 - 桌面时钟改为在真实分钟边界重新读取系统墙钟，不再冻结在页面首次渲染时刻。
 
 ### Planned
 
-- 发现并验证当前未被 Debian 识别的 512 GB 数据盘。
-- 增加只读 SMART、NVMe 健康和温度观测。
+- 在已恢复在线的 Experimental NAS 上完成已确认 500 GB 实验盘、Btrfs、Windows SMB、文件、回收站与快照验收。
+- 补齐安全移除、运行中 SATA 热拔插、同盘重新接入与自动恢复；该任务不阻塞 v1.0.1。
+- 全部实机门禁通过前仅发布 `v1.0.1-rc.N`。
 
-## [v1.0.0] - 2026-10-06（release candidate；tag pending）
+## [v1.0.0] - 2026-10-07
 
 ### Added
 

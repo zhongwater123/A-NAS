@@ -78,13 +78,21 @@ install -m 0750 kiosk-launcher.incoming kiosk-launcher
 install -m 0644 anas-kiosk@.service.incoming anas-kiosk@.service
 install -m 0644 a-nas-kiosk.pam.incoming a-nas-kiosk.pam
 install -m 0644 kiosk.env.incoming kiosk.env
+install -m 0644 anas-api-system.service.incoming anas-api-system.service
+install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
+install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
+install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 rm -f \
   anas-api.incoming \
   anas-host-agent.incoming \
   kiosk-launcher.incoming \
   anas-kiosk@.service.incoming \
   a-nas-kiosk.pam.incoming \
-  kiosk.env.incoming
+  kiosk.env.incoming \
+  anas-api-system.service.incoming \
+  anas-host-agent-system.service.incoming \
+  install-v1.0.1-system-services.sh.incoming \
+  provision-v1.0.1-rc.sh.incoming
 
 install -d -m 0700 "$config_dir"
 install -d -m 0750 "$unit_dir"
@@ -125,11 +133,9 @@ http_get() {
 healthy=0
 for _ in $(seq 1 20); do
   health="$(http_get /healthz 2>/dev/null || true)"
-  state="$(http_get /api/v1/host-state 2>/dev/null || true)"
-  expected_source="simulated"
-  [[ "$mode" == "fake" ]] || expected_source="live"
+  setup="$(http_get /api/v1/setup/status 2>/dev/null || true)"
   if [[ "$health" == *"200 OK"* && "$health" == *'"status":"ok"'* && \
-        "$state" == *"200 OK"* && "$state" == *"\"dataSource\":\"$expected_source\""* ]]; then
+        "$setup" == *"200 OK"* && "$setup" == *'"setupRequired"'* ]]; then
     healthy=1
     break
   fi

@@ -33,11 +33,18 @@ type dependencies struct {
 	architecture     string
 	now              func() time.Time
 	readBlockDevices func(context.Context) ([]byte, error)
+	readSMART        func(context.Context, string) ([]byte, error)
 }
 
 // Reader observes a Debian host without changing its state.
 type Reader struct {
 	dependencies dependencies
+}
+
+type ResolvedDevice struct {
+	Disk          hoststate.Disk
+	DevicePath    string
+	PartitionPath string
 }
 
 // New returns a Reader backed by the local Linux filesystem and lsblk.
@@ -55,8 +62,18 @@ func New() *Reader {
 				"--bytes",
 				"--tree",
 				"--exclude", "7",
-				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,MOUNTPOINTS,WWN,SERIAL",
+				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,FSTYPE,MOUNTPOINTS,WWN,SERIAL",
 			).Output()
+		},
+		readSMART: func(ctx context.Context, deviceName string) ([]byte, error) {
+			if deviceName == "" || strings.ContainsAny(deviceName, `/\\`) {
+				return nil, errors.New("invalid block device name")
+			}
+			output, err := exec.CommandContext(ctx, "smartctl", "--json", "--all", "/dev/"+deviceName).Output()
+			if err != nil && len(output) == 0 {
+				return nil, err
+			}
+			return output, nil
 		},
 	})
 }
@@ -102,7 +119,7 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
-	disks, err := parseDisks(blockDevices)
+	disks, err := parseDisks(ctx, blockDevices, r.dependencies.readSMART)
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
@@ -124,6 +141,51 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 		},
 		Disks: disks,
 	}, nil
+}
+
+// ResolveDevice maps an opaque disk ID to a current kernel device path for the
+// privileged Linux Adapter. The path never crosses the product API boundary.
+func (r *Reader) ResolveDevice(ctx context.Context, diskID string) (ResolvedDevice, error) {
+	contents, err := r.dependencies.readBlockDevices(ctx)
+	if err != nil {
+		return ResolvedDevice{}, err
+	}
+	var document blockDeviceDocument
+	if err := json.Unmarshal(contents, &document); err != nil {
+		return ResolvedDevice{}, err
+	}
+	disks, err := parseDisks(ctx, contents, r.dependencies.readSMART)
+	if err != nil {
+		return ResolvedDevice{}, err
+	}
+	byID := make(map[string]hoststate.Disk, len(disks))
+	for _, disk := range disks {
+		byID[disk.ID.String()] = disk
+	}
+	for _, device := range document.BlockDevices {
+		if device.Type != "disk" {
+			continue
+		}
+		identity, err := stableDiskIdentity(device)
+		if err != nil {
+			continue
+		}
+		id, err := derivedResourceID("disk", diskIdentityDomain, identity)
+		if err != nil || id.String() != diskID {
+			continue
+		}
+		if device.Name == "" || strings.ContainsAny(device.Name, `/\\`) {
+			return ResolvedDevice{}, errors.New("invalid kernel block-device name")
+		}
+		partitionName := device.Name + "1"
+		if last := device.Name[len(device.Name)-1]; last >= '0' && last <= '9' {
+			partitionName = device.Name + "p1"
+		}
+		return ResolvedDevice{
+			Disk: byID[diskID], DevicePath: "/dev/" + device.Name, PartitionPath: "/dev/" + partitionName,
+		}, nil
+	}
+	return ResolvedDevice{}, errors.New("stable disk ID was not found")
 }
 
 func readOSRelease(root fs.FS) (hoststate.OperatingSystem, error) {
@@ -208,13 +270,15 @@ type blockDevice struct {
 	Model       string        `json:"model"`
 	Transport   string        `json:"tran"`
 	Rotational  bool          `json:"rota"`
+	Removable   bool          `json:"rm"`
+	Filesystem  string        `json:"fstype"`
 	Mountpoints []*string     `json:"mountpoints"`
 	WWN         string        `json:"wwn"`
 	Serial      string        `json:"serial"`
 	Children    []blockDevice `json:"children"`
 }
 
-func parseDisks(contents []byte) ([]hoststate.Disk, error) {
+func parseDisks(ctx context.Context, contents []byte, readSMART func(context.Context, string) ([]byte, error)) ([]hoststate.Disk, error) {
 	var document blockDeviceDocument
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return nil, err
@@ -247,15 +311,33 @@ func parseDisks(contents []byte) ([]hoststate.Disk, error) {
 		if containsMountpoint(device, "/") {
 			role = hoststate.DiskRoleSystem
 			systemDisks++
+		} else if containsMountpoint(device, "/srv/a-nas/data") {
+			role = hoststate.DiskRoleData
+		}
+		smartStatus := hoststate.HealthUnknown
+		var temperature *int
+		if readSMART != nil {
+			if smartJSON, smartErr := readSMART(ctx, device.Name); smartErr == nil {
+				smartStatus, temperature = parseSMART(smartJSON)
+			}
+		}
+		health := smartStatus
+		if health == "" {
+			health = hoststate.HealthUnknown
 		}
 		disks = append(disks, hoststate.Disk{
-			ID:            id,
-			Model:         strings.TrimSpace(device.Model),
-			Transport:     mapTransport(device.Transport),
-			CapacityBytes: device.Size,
-			Rotational:    device.Rotational,
-			Role:          role,
-			Health:        hoststate.HealthUnknown,
+			ID:                 id,
+			Model:              strings.TrimSpace(device.Model),
+			Transport:          mapTransport(device.Transport),
+			CapacityBytes:      device.Size,
+			Rotational:         device.Rotational,
+			Removable:          device.Removable,
+			InUse:              deviceInUse(device),
+			Filesystems:        collectFilesystems(device),
+			Role:               role,
+			Health:             health,
+			SMARTStatus:        smartStatus,
+			TemperatureCelsius: temperature,
 		})
 	}
 	if systemDisks != 1 {
@@ -266,6 +348,87 @@ func parseDisks(contents []byte) ([]hoststate.Disk, error) {
 		return disks[i].ID.String() < disks[j].ID.String()
 	})
 	return disks, nil
+}
+
+type smartDocument struct {
+	SMARTStatus *struct {
+		Passed bool `json:"passed"`
+	} `json:"smart_status"`
+	Temperature *struct {
+		Current int `json:"current"`
+	} `json:"temperature"`
+	NVMeHealth *struct {
+		Temperature int `json:"temperature"`
+	} `json:"nvme_smart_health_information_log"`
+}
+
+func parseSMART(contents []byte) (hoststate.Health, *int) {
+	var document smartDocument
+	if len(contents) == 0 || json.Unmarshal(contents, &document) != nil {
+		return hoststate.HealthUnknown, nil
+	}
+	health := hoststate.HealthUnknown
+	if document.SMARTStatus != nil {
+		if document.SMARTStatus.Passed {
+			health = hoststate.HealthHealthy
+		} else {
+			health = hoststate.HealthCritical
+		}
+	}
+	var temperature *int
+	if document.Temperature != nil {
+		value := document.Temperature.Current
+		temperature = &value
+	} else if document.NVMeHealth != nil {
+		value := document.NVMeHealth.Temperature
+		temperature = &value
+	}
+	return health, temperature
+}
+
+func deviceInUse(device blockDevice) bool {
+	for _, mountpoint := range device.Mountpoints {
+		if mountpoint != nil && strings.TrimSpace(*mountpoint) != "" {
+			return true
+		}
+	}
+	filesystem := strings.ToLower(strings.TrimSpace(device.Filesystem))
+	if filesystem == "swap" || filesystem == "linux_raid_member" || filesystem == "lvm2_member" || filesystem == "crypto_luks" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(device.Type)) {
+	case "crypt", "lvm", "raid", "md", "mpath":
+		return true
+	}
+	for _, child := range device.Children {
+		if deviceInUse(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectFilesystems(device blockDevice) []string {
+	seen := make(map[string]struct{})
+	var visit func(blockDevice)
+	visit = func(candidate blockDevice) {
+		if filesystem := strings.ToLower(strings.TrimSpace(candidate.Filesystem)); filesystem != "" {
+			seen[filesystem] = struct{}{}
+		}
+		for _, child := range candidate.Children {
+			visit(child)
+		}
+	}
+	visit(device)
+	if len(seen) == 0 {
+		return nil
+	}
+	filesystems := make([]string, 0, len(seen))
+	for filesystem := range seen {
+		filesystems = append(filesystems, filesystem)
+	}
+	sort.Strings(filesystems)
+	return filesystems
 }
 
 func stableDiskIdentity(device blockDevice) (string, error) {

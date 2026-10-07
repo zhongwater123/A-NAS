@@ -15,6 +15,7 @@ import {
   HardDrive,
   Home,
   Image,
+  LogOut,
   Maximize2,
   Minus,
   Monitor,
@@ -31,13 +32,19 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { PointerEvent as ReactPointerEvent, ReactNode, useEffect, useReducer, useState } from "react";
+import { FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useState } from "react";
 
-import { DiskRole, Health, HostState } from "./api";
+import {
+  APIError, DiskRole, FileEntry, Health, HostState, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User,
+  confirmStoragePlan, createDirectory, createMember, createSnapshot, createStoragePlan, currentSession, deleteFile,
+  deleteSnapshot, disableMember, executeStoragePlan, fileDownloadURL, getSetupStatus, listEntries, listSnapshots,
+  listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
+  restoreSnapshotEntry, restoreTrash, setupAdministrator, uploadFile,
+} from "./api";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "resources" | "settings";
+type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings";
 
 interface WindowModel {
   id: WindowID;
@@ -63,12 +70,61 @@ type WindowAction =
   | { type: "show-desktop" };
 
 const initialWindows: WindowModel[] = [
+	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3 },
+	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2 },
+	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2 },
+	{ id: "accounts", title: "账号管理", open: false, minimized: false, maximized: false, x: 330, y: 110, width: 760, height: 540, z: 2 },
+	{ id: "storage", title: "存储初始化", open: false, minimized: false, maximized: false, x: 260, y: 80, width: 850, height: 590, z: 2 },
   { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2 },
   { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1 },
 ];
 
 export default function App() {
-  const host = useHostState();
+	const [session, setSessionState] = useState<Session>();
+	const [mode, setMode] = useState<"loading" | "setup" | "login">("loading");
+	const [error, setError] = useState("");
+	useEffect(() => {
+		let active = true;
+		void getSetupStatus().then(async ({ setupRequired }) => {
+			if (!active) return;
+			if (setupRequired) setMode("setup");
+			else {
+				try { const value = await currentSession(); if (active) setSessionState(value); }
+				catch { if (active) setMode("login"); }
+			}
+		}).catch(() => { if (active) { setError("无法连接 A-NAS 产品服务"); setMode("login"); } });
+		return () => { active = false; };
+	}, []);
+	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={setSessionState} />;
+	return <Desktop session={session} onLogout={() => { void logout().finally(() => { setSessionState(undefined); setMode("login"); }); }} />;
+}
+
+function Authentication({ mode, error: initialError, onAuthenticated }: { mode: "loading" | "setup" | "login"; error: string; onAuthenticated: (session: Session) => void }) {
+	const [error, setError] = useState(initialError);
+	const [submitting, setSubmitting] = useState(false);
+	if (mode === "loading") return <main className="auth-shell"><div className="auth-card"><span className="loader" /><h1>正在启动 A-NAS…</h1></div></main>;
+	const submit = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault(); setSubmitting(true); setError("");
+		const data = new FormData(event.currentTarget);
+		try {
+			const session = mode === "setup"
+				? await setupAdministrator(String(data.get("setupCode")), String(data.get("username")), String(data.get("password")))
+				: await login(String(data.get("username")), String(data.get("password")));
+			onAuthenticated(session);
+		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
+		finally { setSubmitting(false); }
+	};
+	return <main className="auth-shell"><form className="auth-card" onSubmit={(event) => void submit(event)}>
+		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "初始化管理员" : "登录 A-NAS"}</h1>
+		{mode === "setup" && <label>一次性初始化码<input name="setupCode" required autoComplete="one-time-code" /></label>}
+		<label>账号<input name="username" required autoComplete="username" /></label>
+		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} /></label>
+		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员" : "登录"}</button>
+	</form></main>;
+}
+
+function Desktop({ session, onLogout }: { session: Session; onLogout: () => void }) {
+  const host = useHostState(true);
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const now = useCurrentMinute();
 
@@ -87,20 +143,23 @@ export default function App() {
         <div className="rail-group rail-secondary">
           <button className="rail-button" aria-label="任务历史，规划中" disabled><RotateCcw /></button>
           <button className="rail-button" aria-label="通知，规划中" disabled><Bell /></button>
-          <span className="rail-avatar" aria-label="开发用户">A</span>
+		  <span className="rail-avatar" aria-label={`当前用户 ${session.user.username}`}>{session.user.username.slice(0, 1).toUpperCase()}</span>
+		  <button className="rail-button" aria-label="退出登录" onClick={onLogout}><LogOut /></button>
           <button className="rail-button" aria-label="打开系统设置" onClick={() => dispatch({ type: "open", id: "settings" })}><Settings /></button>
         </div>
       </aside>
 
       <section className="desktop-grid" aria-label="桌面应用">
-        <DesktopShortcut label="文件管理" ariaLabel="文件管理，规划中" tone="files" icon={<FolderClosed />} disabled />
-        <DesktopShortcut label="回收站" ariaLabel="回收站，规划中" tone="trash" icon={<Trash2 />} disabled />
-        <DesktopShortcut label="系统设置" ariaLabel="打开系统设置" tone="settings" icon={<Settings />} active={windows[1].open} onClick={() => dispatch({ type: "open", id: "settings" })} />
-        <DesktopShortcut label="资源管理" ariaLabel="打开资源管理" tone="resources" icon={<Activity />} active={windows[0].open} onClick={() => dispatch({ type: "open", id: "resources" })} />
+		<DesktopShortcut label="文件管理" ariaLabel="打开文件管理" tone="files" icon={<FolderClosed />} active={windows.find((item) => item.id === "files")?.open} onClick={() => dispatch({ type: "open", id: "files" })} />
+		<DesktopShortcut label="回收站" ariaLabel="打开回收站" tone="trash" icon={<Trash2 />} active={windows.find((item) => item.id === "trash")?.open} onClick={() => dispatch({ type: "open", id: "trash" })} />
+		<DesktopShortcut label="系统设置" ariaLabel="打开系统设置" tone="settings" icon={<Settings />} active={windows.find((item) => item.id === "settings")?.open} onClick={() => dispatch({ type: "open", id: "settings" })} />
+		<DesktopShortcut label="资源管理" ariaLabel="打开资源管理" tone="resources" icon={<Activity />} active={windows.find((item) => item.id === "resources")?.open} onClick={() => dispatch({ type: "open", id: "resources" })} />
         <DesktopShortcut label="应用中心" ariaLabel="应用中心，规划中" tone="store" icon={<ShoppingBag />} disabled />
         <DesktopShortcut label="影视" ariaLabel="影视，规划中" tone="video" icon={<PlaySquare />} disabled />
         <DesktopShortcut label="下载" ariaLabel="下载，规划中" tone="download" icon={<Download />} disabled />
-        <DesktopShortcut label="文件快照" ariaLabel="文件快照，规划中" tone="snapshot" icon={<Camera />} disabled />
+		<DesktopShortcut label="文件快照" ariaLabel="打开文件快照" tone="snapshot" icon={<Camera />} onClick={() => dispatch({ type: "open", id: "snapshots" })} />
+		{session.user.role === "admin" && <DesktopShortcut label="账号管理" ariaLabel="打开账号管理" tone="settings" icon={<UserRound />} onClick={() => dispatch({ type: "open", id: "accounts" })} />}
+		{session.user.role === "admin" && <DesktopShortcut label="存储初始化" ariaLabel="打开存储初始化" tone="resources" icon={<Database />} onClick={() => dispatch({ type: "open", id: "storage" })} />}
         <DesktopShortcut label="Docker" ariaLabel="Docker，规划中" tone="docker" icon={<Box />} disabled />
         <DesktopShortcut label="相册" ariaLabel="相册，规划中" tone="photos" icon={<Image />} disabled />
         <DesktopShortcut label="日志" ariaLabel="日志，规划中" tone="logs" icon={<FileText />} disabled />
@@ -125,7 +184,13 @@ export default function App() {
           if (!window.open || window.minimized) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
-              {window.id === "resources" ? <ResourcePanel host={host} /> : <SettingsPanel state={host.snapshot} />}
+			  {window.id === "resources" && <ResourcePanel host={host} />}
+			  {window.id === "settings" && <SettingsPanel state={host.snapshot} />}
+			  {window.id === "files" && <FilePanel />}
+			  {window.id === "trash" && <TrashPanel />}
+			  {window.id === "snapshots" && <SnapshotPanel />}
+			  {window.id === "accounts" && <AccountsPanel currentUser={session.user} />}
+			  {window.id === "storage" && <StoragePanel state={host.snapshot} />}
             </AppWindow>
           );
         })}
@@ -139,7 +204,7 @@ export default function App() {
             aria-label={window.minimized ? `恢复${window.title}` : `聚焦${window.title}`}
             onClick={() => dispatch({ type: "open", id: window.id })}
           >
-            {window.id === "resources" ? <Activity size={18} /> : <Settings size={18} />}
+			{window.id === "resources" ? <Activity size={18} /> : window.id === "files" ? <FolderClosed size={18} /> : <Settings size={18} />}
             <span>{window.title}</span>
           </button>
         ))}
@@ -298,6 +363,67 @@ function SettingsPanel({ state }: { state?: HostState }) {
     </div>
   );
 }
+
+function FilePanel() {
+	const [spaces, setSpaces] = useState<Space[]>([]);
+	const [spaceID, setSpaceID] = useState("");
+	const [entries, setEntries] = useState<FileEntry[]>([]);
+	const [trail, setTrail] = useState<Array<{ id: string; name: string }>>([]);
+	const [error, setError] = useState("");
+	const parentID = trail.at(-1)?.id ?? "";
+	const refresh = useCallback(async (selected = spaceID, parent = parentID) => {
+		if (!selected) return;
+		try { setEntries(await listEntries(selected, parent)); setError(""); }
+		catch (caught) { setError(messageOf(caught)); }
+	}, [spaceID, parentID]);
+	useEffect(() => { void listSpaces().then((items) => { setSpaces(items); if (items[0]) setSpaceID(items[0].id); }).catch((caught) => setError(messageOf(caught))); }, []);
+	useEffect(() => { setTrail([]); if (spaceID) void refresh(spaceID, ""); }, [spaceID]);
+	const makeDirectory = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault(); const form = event.currentTarget; const name = String(new FormData(form).get("name"));
+		try { await createDirectory(spaceID, parentID, name); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); }
+	};
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">FILES</p><h2>文件管理</h2></div><select aria-label="空间" value={spaceID} onChange={(event) => setSpaceID(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : `个人空间 · ${space.name}`}</option>)}</select></div>
+		{error && <PanelNotice error={error} />}
+		<div className="file-toolbar"><button onClick={() => { setTrail((value) => value.slice(0, -1)); }} disabled={!trail.length}>返回上级</button><span>/{trail.map((item) => item.name).join("/")}</span><button onClick={() => void refresh()}>刷新</button></div>
+		<form className="inline-form" onSubmit={(event) => void makeDirectory(event)}><input name="name" aria-label="新目录名称" placeholder="新目录名称" required /><button>新建目录</button><label className="upload-button">上传文件<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(spaceID, parentID, file).then(() => refresh()).catch((caught) => setError(messageOf(caught))); }} /></label></form>
+		<div className="data-list">{entries.map((entry) => <div className="data-row" key={entry.id}><span>{entry.kind === "directory" ? <FolderClosed /> : <FileText />}</span>{entry.kind === "directory" ? <button className="link-button" onClick={() => setTrail((value) => [...value, { id: entry.id, name: entry.name }])}>{entry.name}</button> : <a href={fileDownloadURL(entry.id)}>{entry.name}</a>}<small>{entry.kind === "file" ? formatCapacity(entry.sizeBytes) : "目录"}</small><button className="danger-link" onClick={() => void deleteFile(entry.id).then(() => refresh()).catch((caught) => setError(messageOf(caught)))}>删除</button></div>)}</div>
+		{!entries.length && <div className="empty-compact">这个目录是空的</div>}
+	</div>;
+}
+
+function TrashPanel() {
+	const [items, setItems] = useState<TrashItem[]>([]); const [error, setError] = useState("");
+	const refresh = useCallback(() => listTrash().then(setItems).catch((caught) => setError(messageOf(caught))), []);
+	useEffect(() => { void refresh(); }, [refresh]);
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">RECYCLE BIN</p><h2>回收站</h2><p>项目默认保留 30 天</p></div><button onClick={() => void refresh()}>刷新</button></div>{error && <PanelNotice error={error} />}<div className="data-list">{items.map((item) => <div className="data-row" key={item.id}><Trash2 /><strong>{item.name}</strong><small>{new Date(item.deletedAt).toLocaleString("zh-CN")}</small><button onClick={() => void restoreTrash(item.id, item.name).then(refresh).catch((caught) => setError(messageOf(caught)))}>恢复</button><button className="danger-link" onClick={() => void purgeTrash(item.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>永久删除</button></div>)}</div>{!items.length && <div className="empty-compact">回收站为空</div>}</div>;
+}
+
+function SnapshotPanel() {
+	const [spaces, setSpaces] = useState<Space[]>([]); const [spaceID, setSpaceID] = useState(""); const [snapshots, setSnapshots] = useState<Snapshot[]>([]); const [selected, setSelected] = useState<Snapshot>(); const [entries, setEntries] = useState<SnapshotEntry[]>([]); const [error, setError] = useState("");
+	const refresh = useCallback(async (id = spaceID) => { if (!id) return; try { setSnapshots(await listSnapshots(id)); setError(""); } catch (caught) { setError(messageOf(caught)); } }, [spaceID]);
+	useEffect(() => { void listSpaces().then((items) => { setSpaces(items); if (items[0]) setSpaceID(items[0].id); }).catch((caught) => setError(messageOf(caught))); }, []);
+	useEffect(() => { setSelected(undefined); setEntries([]); if (spaceID) void refresh(spaceID); }, [spaceID]);
+	const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; try { await createSnapshot(spaceID, String(new FormData(form).get("name"))); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); } };
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">READ-ONLY SNAPSHOTS</p><h2>文件快照</h2></div><select aria-label="快照空间" value={spaceID} onChange={(event) => setSpaceID(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}</select></div>{error && <PanelNotice error={error} />}<form className="inline-form" onSubmit={(event) => void create(event)}><input name="name" placeholder="快照名称" required /><button>创建只读快照</button></form><div className="split-list"><div className="data-list">{snapshots.map((snapshot) => <div className="data-row" key={snapshot.id}><Camera /><button className="link-button" onClick={() => { setSelected(snapshot); void listSnapshotEntries(snapshot.id).then(setEntries).catch((caught) => setError(messageOf(caught))); }}>{snapshot.name}</button><button className="danger-link" onClick={() => void deleteSnapshot(snapshot.id).then(() => refresh()).catch((caught) => setError(messageOf(caught)))}>删除</button></div>)}</div><div className="data-list">{selected ? entries.map((entry) => <div className="data-row" key={entry.id}><FileText /><strong>{entry.name}</strong>{entry.kind === "file" && <button onClick={() => void restoreSnapshotEntry(selected.id, entry.id, entry.name).then(() => setError("")).catch((caught) => setError(messageOf(caught)))}>恢复为新文件</button>}</div>) : <div className="empty-compact">选择快照浏览</div>}</div></div></div>;
+}
+
+function AccountsPanel({ currentUser }: { currentUser: User }) {
+	const [users, setUsers] = useState<User[]>([]); const [error, setError] = useState("");
+	const refresh = useCallback(() => listUsers().then(setUsers).catch((caught) => setError(messageOf(caught))), []);
+	useEffect(() => { void refresh(); }, [refresh]);
+	const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { await createMember(String(data.get("username")), String(data.get("password"))); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); } };
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id !== currentUser.id && <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div></div>;
+}
+
+function StoragePanel({ state }: { state?: HostState }) {
+	const [volumes, setVolumes] = useState<Array<{ id: string; state: string; filesystemUuid?: string }>>([]); const [plan, setPlan] = useState<StoragePlan>(); const [phrase, setPhrase] = useState(""); const [error, setError] = useState("");
+	const refresh = useCallback(() => listVolumes().then(setVolumes).catch((caught) => setError(messageOf(caught))), []);
+	useEffect(() => { void refresh(); }, [refresh]);
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">DATA VOLUME</p><h2>存储初始化</h2><p>只允许非系统、非 USB、未占用且身份稳定的磁盘</p></div></div>{error && <PanelNotice error={error} />}<div className="data-list">{volumes.map((volume) => <div className="data-row" key={volume.id}><Database /><strong>{volume.id}</strong><small>{volume.state} · {volume.filesystemUuid ?? "等待 UUID"}</small></div>)}</div>{state?.disks.filter((disk) => disk.role === "unassigned").map((disk) => <div className="danger-zone" key={disk.id}><strong>{disk.model} · {formatCapacity(disk.capacityBytes)}</strong><p>{disk.eligibleForDataVolume ? `稳定 ID：${shortID(disk.id)}` : disk.ineligibleReasons.join("；")}</p><button disabled={!disk.eligibleForDataVolume || Boolean(plan)} onClick={() => void createStoragePlan(disk.id).then(setPlan).catch((caught) => setError(messageOf(caught)))}>生成格式化计划</button></div>)}{plan && <div className="plan-card"><h3>破坏性操作计划</h3><p>身份指纹：<code>{plan.fingerprint}</code></p><p>将清除的已知签名：{plan.signatures.length ? plan.signatures.join("、") : "未检测到文件系统签名"}</p>{plan.actions.map((action) => <p key={action.kind}>• {action.description}</p>)}<p>有效期至 {new Date(plan.expiresAt).toLocaleString("zh-CN")}</p><label>输入确认短语 <code>{plan.confirmationPhrase}</code><input value={phrase} onChange={(event) => setPhrase(event.target.value)} /></label>{plan.state === "planned" && <button disabled={phrase !== plan.confirmationPhrase} onClick={() => void confirmStoragePlan(plan.id, phrase).then(setPlan).catch((caught) => setError(messageOf(caught)))}>确认计划</button>}{plan.state === "confirmed" && <button className="danger-button" onClick={() => void executeStoragePlan(plan.id).then((value) => { setPlan(value); void refresh(); }).catch((caught) => setError(messageOf(caught)))}>执行清除并创建数据卷</button>}<strong>状态：{plan.state}</strong></div>}</div>;
+}
+
+function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
+function messageOf(error: unknown) { return error instanceof Error ? error.message : "请求失败"; }
 
 function DesktopShortcut({ label, ariaLabel, tone, icon, onClick, active, disabled }: { label: string; ariaLabel: string; tone: string; icon: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean }) {
   return <button className={`desktop-shortcut ${active ? "running" : ""}`} aria-label={ariaLabel} title={disabled ? `${label} · 规划中` : label} disabled={disabled} onClick={onClick}><span className={`desktop-icon icon-${tone}`}>{icon}</span><span>{label}</span>{disabled && <small>规划中</small>}</button>;

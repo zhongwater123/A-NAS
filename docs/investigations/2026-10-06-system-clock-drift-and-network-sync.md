@@ -1,6 +1,6 @@
 # 桌面时钟持续落后于系统时间
 
-状态：resolved in code，Experimental NAS 部署待完成
+状态：resolved，Experimental NAS 部署验证完成
 更新时间：2026-10-06
 
 ## 症状与影响
@@ -40,11 +40,12 @@
 - 修复：[`useCurrentMinute`](../../web/src/App.tsx)在每个真实分钟边界重新采样墙钟；timer 延迟不会累积为显示漂移。
 - 测试：新增[桌面时钟回归测试](../../web/src/App.test.tsx)；修复前 1 失败/8 通过，修复后 9/9 通过。
 - 完整检查：`make check` 通过前端类型、测试、生产构建、文档、运维静态检查、Go vet、Go 测试和二进制构建。
+- 实机部署：release `4e98e86b77c5` 与 `/home/anas-dev/apps/a-nas/current` 一致，Kiosk 重启后保持 active，用户确认桌面时钟验证成功。
+- 实机校时复核：部署后仍为 `Timezone=Asia/Shanghai`、`NTP=yes`、`NTPSynchronized=yes`；`timesync-status` 显示有效 server、`+21.311ms` offset 和 packet count `7`。
 
 ## 后续工作
 
-- 把包含前端修复的新 release 部署到 Experimental NAS，重启 Kiosk 使 Chromium 载入新的哈希资源。
-- 在直连屏幕跨过至少两个分钟边界，确认显示持续前进；部署证据补齐后将状态改为 resolved。
+- 无。本问题已经由前端回归测试、实机部署和用户验收关闭；后续网络校时或显示时间异常应按新证据另建调查。
 
 ## 关联
 

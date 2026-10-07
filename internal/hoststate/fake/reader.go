@@ -70,7 +70,10 @@ func baseState() hoststate.State {
 				Rotational:         false,
 				Role:               hoststate.DiskRoleSystem,
 				Health:             hoststate.HealthHealthy,
+				SMARTStatus:        hoststate.HealthHealthy,
 				TemperatureCelsius: intPointer(36),
+				InUse:              true,
+				Filesystems:        []string{"ext4"},
 			},
 			{
 				ID:                 mustResourceID("disk:fake-data-01"),
@@ -80,6 +83,7 @@ func baseState() hoststate.State {
 				Rotational:         true,
 				Role:               hoststate.DiskRoleUnassigned,
 				Health:             hoststate.HealthHealthy,
+				SMARTStatus:        hoststate.HealthHealthy,
 				TemperatureCelsius: intPointer(31),
 			},
 		},
@@ -94,6 +98,7 @@ func cloneState(state hoststate.State) hoststate.State {
 		if disk.TemperatureCelsius != nil {
 			cloned.Disks[i].TemperatureCelsius = intPointer(*disk.TemperatureCelsius)
 		}
+		cloned.Disks[i].Filesystems = append([]string(nil), disk.Filesystems...)
 	}
 	return cloned
 }

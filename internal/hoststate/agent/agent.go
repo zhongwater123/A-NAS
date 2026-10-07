@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,12 +11,17 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 const requestTimeout = 3 * time.Second
@@ -39,7 +45,8 @@ func SocketPath() (string, error) {
 }
 
 type Client struct {
-	httpClient *http.Client
+	httpClient      *http.Client
+	operationClient *http.Client
 }
 
 func NewClient(socketPath string) *Client {
@@ -50,7 +57,10 @@ func NewClient(socketPath string) *Client {
 		},
 		DisableKeepAlives: true,
 	}
-	return &Client{httpClient: &http.Client{Transport: transport, Timeout: requestTimeout}}
+	return &Client{
+		httpClient:      &http.Client{Transport: transport, Timeout: requestTimeout},
+		operationClient: &http.Client{Transport: transport, Timeout: 15 * time.Minute},
+	}
 }
 
 func (c *Client) Read(ctx context.Context) (hoststate.State, error) {
@@ -85,18 +95,52 @@ func (c *Client) Read(ctx context.Context) (hoststate.State, error) {
 }
 
 type handler struct {
-	reader hoststate.Reader
-	logger *slog.Logger
+	reader      hoststate.Reader
+	volume      storage.VolumeExecutor
+	credentials accounts.CredentialProvisioner
+	snapshots   files.SnapshotBackend
+	logger      *slog.Logger
+}
+
+type Services struct {
+	Reader      hoststate.Reader
+	Volume      storage.VolumeExecutor
+	Credentials accounts.CredentialProvisioner
+	Snapshots   files.SnapshotBackend
 }
 
 func NewHandler(reader hoststate.Reader, logger *slog.Logger) http.Handler {
+	return NewOperationsHandler(Services{Reader: reader}, logger)
+}
+
+func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &handler{reader: reader, logger: logger}
+	return &handler{reader: services.Reader, volume: services.Volume, credentials: services.Credentials, snapshots: services.Snapshots, logger: logger}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/storage/volumes" {
+		h.handleCreateVolume(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/accounts/credential" {
+		h.handleSetCredential(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/v1/accounts/credential/") {
+		h.handleDisableCredential(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/snapshots" {
+		h.handleCreateSnapshot(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/v1/snapshots/") {
+		h.handleSnapshotResource(w, r)
+		return
+	}
 	if r.URL.Path != "/v1/state" {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
@@ -106,6 +150,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if h.reader == nil {
+		writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
+		return
+	}
 	state, err := h.reader.Read(r.Context())
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "host state read failed", "error", err)
@@ -113,6 +161,280 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, documentFromDomain(state))
+}
+
+func (h *handler) handleCreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.snapshots == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
+		return
+	}
+	var request snapshotDocument
+	if err := decodeRequest(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	objects, err := h.snapshots.Create(r.Context(), request.SpaceID, request.SnapshotID)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "create snapshot failed", "snapshot", request.SnapshotID, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshotObjectsDocument{Items: objects})
+}
+
+func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request) {
+	if h.snapshots == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
+		return
+	}
+	remainder := strings.TrimPrefix(r.URL.Path, "/v1/snapshots/")
+	snapshotID, suffix, _ := strings.Cut(remainder, "/")
+	if snapshotID == "" || strings.Contains(snapshotID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "snapshot ID is invalid")
+		return
+	}
+	if r.Method == http.MethodDelete && suffix == "" {
+		spaceID := r.URL.Query().Get("spaceId")
+		if err := h.snapshots.Delete(r.Context(), spaceID, snapshotID); err != nil {
+			h.logger.ErrorContext(r.Context(), "delete snapshot failed", "snapshot", snapshotID, "error", err)
+			writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == http.MethodGet && suffix == "object" {
+		key := r.URL.Query().Get("key")
+		reader, object, err := h.snapshots.Open(r.Context(), snapshotID, key)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "snapshot object was not found")
+			return
+		}
+		defer reader.Close()
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("X-A-NAS-Object-Key", object.Key)
+		w.Header().Set("X-A-NAS-Object-Name", url.QueryEscape(object.Name))
+		w.Header().Set("X-A-NAS-Object-Kind", string(object.Kind))
+		w.Header().Set("X-A-NAS-Object-Size", strconv.FormatInt(object.SizeBytes, 10))
+		if _, err := io.Copy(w, reader); err != nil {
+			h.logger.ErrorContext(r.Context(), "stream snapshot object failed", "snapshot", snapshotID, "error", err)
+		}
+		return
+	}
+	w.Header().Set("Allow", http.MethodGet+", "+http.MethodDelete)
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+}
+
+func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	var document createVolumeDocument
+	if err := decodeRequest(r, &document); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	volume, err := h.volume.CreateVolume(r.Context(), storage.CreateVolumeRequest{
+		PlanID: document.PlanID, DiskID: document.DiskID, Fingerprint: document.Fingerprint,
+	})
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "create volume failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, volume)
+}
+
+func (h *handler) handleSetCredential(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.credentials == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
+		return
+	}
+	var request credentialDocument
+	if err := decodeRequest(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	if err := h.credentials.SetCredential(r.Context(), accounts.CredentialRequest{
+		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
+		Password: request.Password, Role: request.Role,
+	}); err != nil {
+		h.logger.ErrorContext(r.Context(), "set credential failed", "username", request.Username, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("Allow", http.MethodDelete)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.credentials == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
+		return
+	}
+	username := strings.TrimPrefix(r.URL.Path, "/v1/accounts/credential/")
+	if username == "" || strings.Contains(username, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "username is invalid")
+		return
+	}
+	if err := h.credentials.DisableCredential(r.Context(), username); err != nil {
+		h.logger.ErrorContext(r.Context(), "disable credential failed", "username", username, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type createVolumeDocument struct {
+	PlanID      string `json:"planId"`
+	DiskID      string `json:"diskId"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+type credentialDocument struct {
+	UserID         string        `json:"userId"`
+	PrivateSpaceID string        `json:"privateSpaceId"`
+	Username       string        `json:"username"`
+	Password       string        `json:"password"`
+	Role           accounts.Role `json:"role"`
+}
+
+type snapshotDocument struct {
+	SpaceID    string `json:"spaceId"`
+	SnapshotID string `json:"snapshotId"`
+}
+
+type snapshotObjectsDocument struct {
+	Items []files.SnapshotObject `json:"items"`
+}
+
+func decodeRequest(r *http.Request, target any) error {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	return ensureEndOfJSON(decoder)
+}
+
+func (c *Client) CreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
+	var response storage.Volume
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes", createVolumeDocument{
+		PlanID: request.PlanID, DiskID: request.DiskID, Fingerprint: request.Fingerprint,
+	}, &response)
+	return response, err
+}
+
+func (c *Client) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/accounts/credential", credentialDocument{
+		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
+		Password: request.Password, Role: request.Role,
+	}, nil)
+}
+
+func (c *Client) DisableCredential(ctx context.Context, username string) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodDelete, "/v1/accounts/credential/"+url.PathEscape(username), nil, nil)
+}
+
+func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) ([]files.SnapshotObject, error) {
+	var response snapshotObjectsDocument
+	if err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/snapshots", snapshotDocument{SpaceID: spaceID, SnapshotID: snapshotID}, &response); err != nil {
+		return nil, err
+	}
+	return response.Items, nil
+}
+
+func (c *Client) Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://host-agent/v1/snapshots/"+url.PathEscape(snapshotID)+"/object?key="+url.QueryEscape(key), nil)
+	if err != nil {
+		return nil, files.SnapshotObject{}, err
+	}
+	response, err := c.operationClient.Do(request)
+	if err != nil {
+		return nil, files.SnapshotObject{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	if response.StatusCode != http.StatusOK {
+		defer response.Body.Close()
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return nil, files.SnapshotObject{}, fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
+	}
+	size, err := strconv.ParseInt(response.Header.Get("X-A-NAS-Object-Size"), 10, 64)
+	if err != nil {
+		_ = response.Body.Close()
+		return nil, files.SnapshotObject{}, errors.New("invalid snapshot object size")
+	}
+	name, err := url.QueryUnescape(response.Header.Get("X-A-NAS-Object-Name"))
+	if err != nil {
+		_ = response.Body.Close()
+		return nil, files.SnapshotObject{}, errors.New("invalid snapshot object name")
+	}
+	object := files.SnapshotObject{
+		Key: response.Header.Get("X-A-NAS-Object-Key"), Name: name,
+		Kind: files.EntryKind(response.Header.Get("X-A-NAS-Object-Kind")), SizeBytes: size,
+	}
+	return response.Body, object, nil
+}
+
+func (c *Client) Delete(ctx context.Context, spaceID, snapshotID string) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodDelete,
+		"/v1/snapshots/"+url.PathEscape(snapshotID)+"?spaceId="+url.QueryEscape(spaceID), nil, nil)
+}
+
+func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path string, requestBody, responseBody any) error {
+	var body io.Reader
+	if requestBody != nil {
+		encoded, err := json.Marshal(requestBody)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(encoded)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, "http://host-agent"+path, body)
+	if err != nil {
+		return err
+	}
+	if requestBody != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
+	}
+	if responseBody == nil || response.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(responseBody); err != nil {
+		return err
+	}
+	return ensureEndOfJSON(decoder)
 }
 
 type stateDocument struct {
@@ -141,8 +463,12 @@ type diskDocument struct {
 	Transport          hoststate.Transport `json:"transport"`
 	CapacityBytes      uint64              `json:"capacityBytes"`
 	Rotational         bool                `json:"rotational"`
+	Removable          bool                `json:"removable"`
+	InUse              bool                `json:"inUse"`
+	Filesystems        []string            `json:"filesystems"`
 	Role               hoststate.DiskRole  `json:"role"`
 	Health             hoststate.Health    `json:"health"`
+	SMARTStatus        hoststate.Health    `json:"smartStatus"`
 	TemperatureCelsius *int                `json:"temperatureCelsius,omitempty"`
 }
 
@@ -155,8 +481,12 @@ func documentFromDomain(state hoststate.State) stateDocument {
 			Transport:          disk.Transport,
 			CapacityBytes:      disk.CapacityBytes,
 			Rotational:         disk.Rotational,
+			Removable:          disk.Removable,
+			InUse:              disk.InUse,
+			Filesystems:        append([]string(nil), disk.Filesystems...),
 			Role:               disk.Role,
 			Health:             disk.Health,
+			SMARTStatus:        disk.SMARTStatus,
 			TemperatureCelsius: disk.TemperatureCelsius,
 		}
 	}
@@ -207,8 +537,13 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			return hoststate.State{}, errors.New("duplicate disk ID")
 		}
 		seen[id.String()] = struct{}{}
-		if strings.TrimSpace(disk.Model) == "" || disk.CapacityBytes == 0 || !validTransport(disk.Transport) || !validRole(disk.Role) || !validHealth(disk.Health) {
+		if strings.TrimSpace(disk.Model) == "" || disk.CapacityBytes == 0 || !validTransport(disk.Transport) || !validRole(disk.Role) || !validHealth(disk.Health) || !validHealth(disk.SMARTStatus) {
 			return hoststate.State{}, errors.New("invalid disk state")
+		}
+		for _, filesystem := range disk.Filesystems {
+			if strings.TrimSpace(filesystem) == "" {
+				return hoststate.State{}, errors.New("invalid disk filesystem evidence")
+			}
 		}
 		disks[i] = hoststate.Disk{
 			ID:                 id,
@@ -216,8 +551,12 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			Transport:          disk.Transport,
 			CapacityBytes:      disk.CapacityBytes,
 			Rotational:         disk.Rotational,
+			Removable:          disk.Removable,
+			InUse:              disk.InUse,
+			Filesystems:        append([]string(nil), disk.Filesystems...),
 			Role:               disk.Role,
 			Health:             disk.Health,
+			SMARTStatus:        disk.SMARTStatus,
 			TemperatureCelsius: disk.TemperatureCelsius,
 		}
 	}
@@ -298,3 +637,6 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 var _ hoststate.Reader = (*Client)(nil)
+var _ storage.VolumeExecutor = (*Client)(nil)
+var _ accounts.CredentialProvisioner = (*Client)(nil)
+var _ files.SnapshotBackend = (*Client)(nil)

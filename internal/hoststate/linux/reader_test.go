@@ -80,6 +80,7 @@ func TestReaderReturnsOneDebianObservation(t *testing.T) {
 				Rotational:    true,
 				Role:          hoststate.DiskRoleUnassigned,
 				Health:        hoststate.HealthUnknown,
+				SMARTStatus:   hoststate.HealthUnknown,
 			},
 			{
 				ID:            mustResourceID(t, "disk:8bb18d37a490d7b4811b53077c58d2c5"),
@@ -87,8 +88,10 @@ func TestReaderReturnsOneDebianObservation(t *testing.T) {
 				Transport:     hoststate.TransportNVMe,
 				CapacityBytes: 125000000000,
 				Rotational:    false,
+				InUse:         true,
 				Role:          hoststate.DiskRoleSystem,
 				Health:        hoststate.HealthUnknown,
+				SMARTStatus:   hoststate.HealthUnknown,
 			},
 		},
 	}
@@ -212,6 +215,94 @@ func TestReaderRejectsInvalidBlockDeviceObservations(t *testing.T) {
 	}
 }
 
+func TestReaderReportsRemovableUseAndFilesystemEvidence(t *testing.T) {
+	reader := newFixtureReader(t, `{
+  "blockdevices": [
+    {
+      "name": "nvme0n1", "type": "disk", "size": 125000000000,
+      "model": "System", "tran": "nvme", "rota": false, "rm": false,
+      "mountpoints": [], "wwn": "system",
+      "children": [{"name": "nvme0n1p2", "type": "part", "fstype": "ext4", "mountpoints": ["/"]}]
+    },
+    {
+      "name": "sda", "type": "disk", "size": 64000000000,
+      "model": "Installer", "tran": "usb", "rota": false, "rm": true,
+      "mountpoints": [], "wwn": "installer",
+      "children": [{"name": "sda1", "type": "part", "fstype": "vfat", "mountpoints": ["/media/installer"]}]
+    }
+  ]
+}`)
+
+	state, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	var installer hoststate.Disk
+	for _, disk := range state.Disks {
+		if disk.Model == "Installer" {
+			installer = disk
+		}
+	}
+	if !installer.Removable {
+		t.Fatal("installer Removable = false, want true")
+	}
+	if !installer.InUse {
+		t.Fatal("installer InUse = false, want true")
+	}
+	if got, want := installer.Filesystems, []string{"vfat"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("installer Filesystems = %#v, want %#v", got, want)
+	}
+}
+
+func TestDeviceInUseRejectsStorageStackMembersEvenWhenUnmounted(t *testing.T) {
+	for _, filesystem := range []string{"swap", "linux_raid_member", "LVM2_member", "crypto_LUKS"} {
+		if !deviceInUse(blockDevice{Type: "part", Filesystem: filesystem}) {
+			t.Fatalf("deviceInUse(%q) = false, want true", filesystem)
+		}
+	}
+}
+
+func TestReaderAddsSMARTHealthAndTemperatureWithoutExposingDeviceName(t *testing.T) {
+	reader := newReader(dependencies{
+		root: fstest.MapFS{
+			"etc/os-release": &fstest.MapFile{Data: []byte("ID=debian\nNAME=Debian\nVERSION_ID=13\n")},
+			"etc/machine-id": &fstest.MapFile{Data: []byte("0123456789abcdef0123456789abcdef\n")},
+			"proc/uptime":    &fstest.MapFile{Data: []byte("1.0 2.0\n")},
+		},
+		hostname:     func() (string, error) { return "a-nas-dev", nil },
+		architecture: "amd64",
+		now:          func() time.Time { return time.Unix(0, 0) },
+		readBlockDevices: func(context.Context) ([]byte, error) {
+			return []byte(`{"blockdevices":[{
+              "name":"nvme0n1","type":"disk","size":125000000000,
+              "model":"System","tran":"nvme","wwn":"system",
+              "children":[{"name":"nvme0n1p2","type":"part","mountpoints":["/"]}]
+            }]}`), nil
+		},
+		readSMART: func(_ context.Context, deviceName string) ([]byte, error) {
+			if got, want := deviceName, "nvme0n1"; got != want {
+				t.Fatalf("SMART device = %q, want %q", got, want)
+			}
+			return []byte(`{"smart_status":{"passed":true},"temperature":{"current":34}}`), nil
+		},
+	})
+
+	state, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	disk := state.Disks[0]
+	if got, want := disk.SMARTStatus, hoststate.HealthHealthy; got != want {
+		t.Fatalf("SMARTStatus = %q, want %q", got, want)
+	}
+	if disk.TemperatureCelsius == nil || *disk.TemperatureCelsius != 34 {
+		t.Fatalf("TemperatureCelsius = %v, want 34", disk.TemperatureCelsius)
+	}
+	if strings.Contains(disk.ID.String(), "nvme0n1") {
+		t.Fatalf("public disk ID leaked device name: %q", disk.ID.String())
+	}
+}
+
 func TestReaderHonorsCanceledContextBeforeReading(t *testing.T) {
 	called := false
 	reader := newReader(dependencies{
@@ -248,6 +339,9 @@ func newFixtureReader(t *testing.T, blockDevices string) *Reader {
 		now:          func() time.Time { return time.Unix(0, 0) },
 		readBlockDevices: func(context.Context) ([]byte, error) {
 			return []byte(blockDevices), nil
+		},
+		readSMART: func(context.Context, string) ([]byte, error) {
+			return nil, errors.New("SMART unavailable in fixture")
 		},
 	})
 }

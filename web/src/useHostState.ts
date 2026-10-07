@@ -10,7 +10,7 @@ export interface HostStateView {
   refresh: () => Promise<void>;
 }
 
-export function useHostState(): HostStateView {
+export function useHostState(enabled = true): HostStateView {
   const [snapshot, setSnapshot] = useState<HostState>();
   const snapshotRef = useRef<HostState | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -19,6 +19,7 @@ export function useHostState(): HostStateView {
   const activeController = useRef<AbortController | undefined>(undefined);
 
   const refresh = useCallback(async () => {
+	if (!enabled) return;
     activeController.current?.abort();
     const controller = new AbortController();
     activeController.current = controller;
@@ -39,9 +40,10 @@ export function useHostState(): HostStateView {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+	if (!enabled) return;
     void refresh();
     const interval = window.setInterval(() => {
       if (!document.hidden) void refresh();

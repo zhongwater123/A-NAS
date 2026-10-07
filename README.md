@@ -4,7 +4,7 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 
 项目决策与当前背景以 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) 为准。
 
-当前拟发布基线为 [v1.0.0 首个硬件集成开发版候选](docs/releases/v1.0.0.md)：已打通只读 Live 状态、可回滚部署和设备本地控制台，但正式标签与候选部署尚未执行，也不是具备数据写入与共享能力的消费级 NAS 正式版。版本变化见 [CHANGELOG](CHANGELOG.md)。
+当前开发基线为 [v1.0.1 实验 NAS 基础存储与共享闭环](docs/releases/v1.0.1.md)：本地实现已完成，版本保持 `v1.0.1-rc.N`，正在在线 Experimental NAS 上进行真实 Btrfs、SMB、文件、回收站和快照验收。它只允许可丢弃测试数据，不是家庭生产版；运行中 SATA 热插拔作为后续任务，不属于本次发布门禁。版本变化见 [CHANGELOG](CHANGELOG.md)。
 
 ## 本地开发入口
 
@@ -24,7 +24,7 @@ wsl -d Ubuntu-24.04 -u root
 
 仓库已使用公开 GitHub 身份配置本地提交信息；`anas-dev` 的全局 Git 身份保持为空，避免影响其他项目。
 
-产品服务和 Host Agent 使用 Go，当前版本记录在 `.go-version`；Web 桌面使用 React、TypeScript、Vite 和 npm lockfile。数据库和容器运行时仍未冻结。
+产品服务和 Host Agent 使用 Go，当前版本记录在 `.go-version`；Web 桌面使用 React、TypeScript、Vite 和 npm lockfile。v1.0.1 控制面数据库使用 SQLite/WAL，存储与特权边界见 [ADR 0007](docs/adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)。
 
 ## 开发与检查
 
@@ -54,7 +54,7 @@ go run ./cmd/anas-api
 
 前端单独开发时可运行 `cd web && npm run dev`；Vite 把 `/api` 和 `/healthz` 代理到本地 Go 服务。前端技术原因见 [ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)。
 
-部署 Experimental NAS 和打开限定 SSH 隧道见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md)。NAS 直连屏幕使用 Cage/Chromium 呈现同一个 Web 桌面，安装与恢复步骤见[本地控制台运行手册](docs/runbooks/operate-local-kiosk.md)。
+部署 Experimental NAS 和打开限定 SSH 隧道见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md)。v1.0.1 系统服务、破坏性磁盘计划与实机验收使用[基础存储实机手册](docs/runbooks/provision-v1.0.1-experimental-storage.md)。NAS 直连屏幕使用 Cage/Chromium 呈现同一个 Web 桌面。
 
 ## 项目文档
 

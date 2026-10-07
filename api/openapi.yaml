@@ -2,14 +2,16 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: A-NAS Product API
-  version: 0.1.0
-  description: Read-only local product API for the A-NAS Web desktop and future product clients.
+  version: 1.0.1-rc.1
+  description: Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, and snapshots.
 servers:
   - url: http://127.0.0.1:8080
-security: []
+security:
+  - cookieAuth: []
 paths:
   /healthz:
     get:
+      security: []
       operationId: getHealth
       summary: Report whether the API process is alive
       responses:
@@ -66,8 +68,234 @@ paths:
           $ref: "#/components/responses/StateUnavailable"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/setup/status:
+    get:
+      security: []
+      operationId: getSetupStatus
+      responses:
+        "200": { description: Setup state, content: { application/json: { schema: { $ref: "#/components/schemas/SetupStatus" } } } }
+  /api/v1/setup/admin:
+    post:
+      security: []
+      operationId: setupAdministrator
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SetupRequest" } } } }
+      responses:
+        "201": { description: Administrator created, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/session:
+    post:
+      security: []
+      operationId: createSession
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CredentialInput" } } } }
+      responses:
+        "200": { description: Authenticated session, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+    get:
+      operationId: getSession
+      responses:
+        "200": { description: Current session, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteSession
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Session ended }
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      responses:
+        "200": { description: Users, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/User" } } } } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+    post:
+      operationId: createUser
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CredentialInput" } } } }
+      responses:
+        "201": { description: Member created, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/users/{userId}:
+    delete:
+      operationId: disableUser
+      parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: User disabled }
+        "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/users/{userId}/credential:
+    patch:
+      operationId: resetUserCredential
+      parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [password], properties: { password: { type: string, minLength: 12 } } } } } }
+      responses:
+        "204": { description: Credential reset }
+  /api/v1/volumes:
+    get:
+      operationId: listVolumes
+      responses:
+        "200": { description: Data volumes, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Volume" } } } } } } }
+  /api/v1/storage/plans:
+    post:
+      operationId: createStoragePlan
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [diskId], properties: { diskId: { $ref: "#/components/schemas/StableResourceID" } } } } } }
+      responses:
+        "201": { description: Destructive storage plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/storage/plans/{planId}/confirm:
+    post:
+      operationId: confirmStoragePlan
+      parameters: [{ $ref: "#/components/parameters/PlanID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirmationPhrase], properties: { confirmationPhrase: { type: string } } } } } }
+      responses:
+        "200": { description: Confirmed plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+        "410": { $ref: "#/components/responses/ProductError" }
+  /api/v1/storage/plans/{planId}/execute:
+    post:
+      operationId: executeStoragePlan
+      parameters: [{ $ref: "#/components/parameters/PlanID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: Executed plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/operations/{operationId}:
+    get:
+      operationId: getOperation
+      parameters: [{ name: operationId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Operation state, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+  /api/v1/audit:
+    get:
+      operationId: listAuditEvents
+      responses:
+        "200": { description: Administrator audit export, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } } } } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/spaces:
+    get:
+      operationId: listSpaces
+      responses:
+        "200": { description: Visible spaces only, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Space" } } } } } } }
+  /api/v1/spaces/{spaceId}/entries:
+    get:
+      operationId: listEntries
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }, { name: parentId, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: Directory entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/FileEntry" } } } } } } }
+        "423": { $ref: "#/components/responses/ProductError" }
+  /api/v1/spaces/{spaceId}/directories:
+    post:
+      operationId: createDirectory
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      responses:
+        "201": { description: Directory created, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "507": { $ref: "#/components/responses/ProductError" }
+  /api/v1/spaces/{spaceId}/uploads:
+    post:
+      operationId: uploadFile
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { parentId: { type: string }, file: { type: string, format: binary } } } } } }
+      responses:
+        "201": { description: File uploaded, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "507": { $ref: "#/components/responses/ProductError" }
+  /api/v1/files/{fileId}/content:
+    get:
+      operationId: downloadFile
+      parameters: [{ $ref: "#/components/parameters/FileID" }, { name: Range, in: header, schema: { type: string } }]
+      responses:
+        "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+  /api/v1/files/{fileId}:
+    patch:
+      operationId: moveFile
+      parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      responses:
+        "200": { description: File moved, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+    delete:
+      operationId: trashFile
+      parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: Trash item, content: { application/json: { schema: { $ref: "#/components/schemas/TrashItem" } } } }
+  /api/v1/files/{fileId}/copies:
+    post:
+      operationId: copyFile
+      parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      responses:
+        "201": { description: File copied, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+  /api/v1/trash:
+    get:
+      operationId: listTrash
+      responses:
+        "200": { description: Visible recycle-bin items, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/TrashItem" } } } } } } }
+  /api/v1/trash/{trashId}/restore:
+    post:
+      operationId: restoreTrash
+      parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      responses:
+        "200": { description: Restored entry, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/trash/{trashId}:
+    delete:
+      operationId: purgeTrash
+      parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Item permanently removed }
+  /api/v1/spaces/{spaceId}/snapshots:
+    get:
+      operationId: listSnapshots
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }]
+      responses:
+        "200": { description: Snapshots, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Snapshot" } } } } } } }
+    post:
+      operationId: createSnapshot
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses:
+        "201": { description: Snapshot created, content: { application/json: { schema: { $ref: "#/components/schemas/Snapshot" } } } }
+  /api/v1/snapshots/{snapshotId}/entries:
+    get:
+      operationId: listSnapshotEntries
+      parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { name: parentId, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: Snapshot entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/SnapshotEntry" } } } } } } }
+  /api/v1/snapshots/{snapshotId}/entries/{entryId}/restore:
+    post:
+      operationId: restoreSnapshotEntry
+      parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { name: entryId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      responses:
+        "201": { description: File restored as a new entry, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/snapshots/{snapshotId}:
+    delete:
+      operationId: deleteSnapshot
+      parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Snapshot deleted }
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: anas_session
+  parameters:
+    CSRFToken: { name: X-CSRF-Token, in: header, required: true, schema: { type: string, minLength: 1 } }
+    UserID: { name: userId, in: path, required: true, schema: { type: string } }
+    PlanID: { name: planId, in: path, required: true, schema: { type: string } }
+    SpaceID: { name: spaceId, in: path, required: true, schema: { type: string } }
+    FileID: { name: fileId, in: path, required: true, schema: { type: string } }
+    TrashID: { name: trashId, in: path, required: true, schema: { type: string } }
+    SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
   responses:
+    ProductError:
+      description: Product operation error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     StateUnavailable:
       description: Host state cannot currently be read.
       content:
@@ -191,8 +419,14 @@ components:
         - transport
         - capacityBytes
         - rotational
+        - removable
+        - inUse
+        - filesystems
         - role
         - health
+        - smartStatus
+        - eligibleForDataVolume
+        - ineligibleReasons
       properties:
         id:
           $ref: "#/components/schemas/StableResourceID"
@@ -207,10 +441,26 @@ components:
           minimum: 1
         rotational:
           type: boolean
+        removable:
+          type: boolean
+        inUse:
+          type: boolean
+        filesystems:
+          type: array
+          items:
+            type: string
         role:
           $ref: "#/components/schemas/DiskRole"
         health:
           $ref: "#/components/schemas/Health"
+        smartStatus:
+          $ref: "#/components/schemas/Health"
+        eligibleForDataVolume:
+          type: boolean
+        ineligibleReasons:
+          type: array
+          items:
+            type: string
         temperatureCelsius:
           type: integer
           minimum: -273
@@ -245,6 +495,154 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Disk"
+    SetupStatus:
+      type: object
+      additionalProperties: false
+      required: [setupRequired]
+      properties:
+        setupRequired: { type: boolean }
+    SetupRequest:
+      type: object
+      additionalProperties: false
+      required: [setupCode, username, password]
+      properties:
+        setupCode: { type: string, minLength: 1 }
+        username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
+        password: { type: string, minLength: 12 }
+    CredentialInput:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
+        password: { type: string, minLength: 12 }
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, username, role, status, createdAt]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [admin, member] }
+        status: { type: string, enum: [pending, active, disabled, error] }
+        createdAt: { type: string, format: date-time }
+    Session:
+      type: object
+      additionalProperties: false
+      required: [csrfToken, expiresAt, user]
+      properties:
+        csrfToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/User" }
+    Space:
+      type: object
+      additionalProperties: false
+      required: [id, kind, name, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [private, shared] }
+        name: { type: string }
+        ownerUserId: { type: string }
+        createdAt: { type: string, format: date-time }
+    FileEntry:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, name, kind, sizeBytes, modifiedAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        parentId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        modifiedAt: { type: string, format: date-time }
+    FileDestination:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        parentId: { type: string }
+        name: { type: string, minLength: 1 }
+    TrashItem:
+      type: object
+      additionalProperties: false
+      required: [id, entryId, spaceId, name, deletedBy, deletedAt]
+      properties:
+        id: { type: string }
+        entryId: { type: string }
+        spaceId: { type: string }
+        name: { type: string }
+        deletedBy: { type: string }
+        deletedAt: { type: string, format: date-time }
+    Volume:
+      type: object
+      additionalProperties: false
+      required: [id, diskId, state]
+      properties:
+        id: { type: string }
+        diskId: { $ref: "#/components/schemas/StableResourceID" }
+        filesystemUuid: { type: string }
+        capacityBytes: { type: integer, format: int64, minimum: 0 }
+        availableBytes: { type: integer, format: int64, minimum: 0 }
+        state: { type: string, enum: [creating, available, unavailable, read_only] }
+    StorageAction:
+      type: object
+      additionalProperties: false
+      required: [kind, description]
+      properties:
+        kind: { type: string }
+        description: { type: string }
+    StoragePlan:
+      type: object
+      additionalProperties: false
+      required: [id, diskId, diskModel, capacityBytes, fingerprint, signatures, confirmationPhrase, actions, state, createdAt, expiresAt]
+      properties:
+        id: { type: string }
+        diskId: { $ref: "#/components/schemas/StableResourceID" }
+        diskModel: { type: string }
+        capacityBytes: { type: integer, format: int64, minimum: 1 }
+        fingerprint: { type: string }
+        signatures: { type: array, items: { type: string } }
+        confirmationPhrase: { type: string }
+        actions: { type: array, items: { $ref: "#/components/schemas/StorageAction" } }
+        state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        failure: { type: string }
+        volume: { $ref: "#/components/schemas/Volume" }
+    Snapshot:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, name, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        name: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    SnapshotEntry:
+      type: object
+      additionalProperties: false
+      required: [id, snapshotId, name, kind, sizeBytes]
+      properties:
+        id: { type: string }
+        snapshotId: { type: string }
+        parentId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, action, resourceType, resourceId, occurredAt]
+      properties:
+        id: { type: string }
+        actorUserId: { type: string }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        occurredAt: { type: string, format: date-time }
+        detail: { type: string }
     ErrorDetail:
       type: object
       additionalProperties: false

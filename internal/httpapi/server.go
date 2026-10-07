@@ -83,16 +83,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		items := make([]diskResponse, len(state.Disks))
 		for i, disk := range state.Disks {
-			items[i] = diskResponse{
-				ID:                 disk.ID.String(),
-				Model:              disk.Model,
-				Transport:          disk.Transport,
-				CapacityBytes:      disk.CapacityBytes,
-				Rotational:         disk.Rotational,
-				Role:               disk.Role,
-				Health:             disk.Health,
-				TemperatureCelsius: disk.TemperatureCelsius,
-			}
+			items[i] = mapDisk(disk)
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 		writeJSON(w, http.StatusOK, disksResponse{
@@ -154,8 +145,14 @@ type diskResponse struct {
 	Transport          hoststate.Transport `json:"transport"`
 	CapacityBytes      uint64              `json:"capacityBytes"`
 	Rotational         bool                `json:"rotational"`
+	Removable          bool                `json:"removable"`
+	InUse              bool                `json:"inUse"`
+	Filesystems        []string            `json:"filesystems"`
 	Role               hoststate.DiskRole  `json:"role"`
 	Health             hoststate.Health    `json:"health"`
+	SMARTStatus        hoststate.Health    `json:"smartStatus"`
+	Eligible           bool                `json:"eligibleForDataVolume"`
+	IneligibleReasons  []string            `json:"ineligibleReasons"`
 	TemperatureCelsius *int                `json:"temperatureCelsius,omitempty"`
 }
 
@@ -189,19 +186,40 @@ func mapSystem(system hoststate.System) systemStateResponse {
 func mapDisks(disks []hoststate.Disk) []diskResponse {
 	items := make([]diskResponse, len(disks))
 	for i, disk := range disks {
-		items[i] = diskResponse{
-			ID:                 disk.ID.String(),
-			Model:              disk.Model,
-			Transport:          disk.Transport,
-			CapacityBytes:      disk.CapacityBytes,
-			Rotational:         disk.Rotational,
-			Role:               disk.Role,
-			Health:             disk.Health,
-			TemperatureCelsius: disk.TemperatureCelsius,
-		}
+		items[i] = mapDisk(disk)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	return items
+}
+
+func mapDisk(disk hoststate.Disk) diskResponse {
+	filesystems := append([]string(nil), disk.Filesystems...)
+	if filesystems == nil {
+		filesystems = []string{}
+	}
+	reasons := make([]string, 0, 4)
+	if disk.Role == hoststate.DiskRoleSystem {
+		reasons = append(reasons, "system_disk")
+	} else if disk.Role == hoststate.DiskRoleData {
+		reasons = append(reasons, "data_volume")
+	}
+	if disk.Transport == hoststate.TransportUSB || disk.Transport == hoststate.TransportUnknown {
+		reasons = append(reasons, "unsupported_transport")
+	}
+	if disk.Removable {
+		reasons = append(reasons, "removable")
+	}
+	if disk.InUse {
+		reasons = append(reasons, "in_use")
+	}
+	return diskResponse{
+		ID: disk.ID.String(), Model: disk.Model, Transport: disk.Transport,
+		CapacityBytes: disk.CapacityBytes, Rotational: disk.Rotational,
+		Removable: disk.Removable, InUse: disk.InUse, Filesystems: filesystems,
+		Role: disk.Role, Health: disk.Health, SMARTStatus: disk.SMARTStatus,
+		Eligible:          len(reasons) == 0 && disk.Role == hoststate.DiskRoleUnassigned,
+		IneligibleReasons: reasons, TemperatureCelsius: disk.TemperatureCelsius,
+	}
 }
 
 type errorDetail struct {

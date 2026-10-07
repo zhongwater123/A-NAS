@@ -9,6 +9,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0003：Web 桌面使用 React 和 TypeScript](0003-use-react-typescript-for-web-desktop.md)
 - [0004：只读 Host Agent 状态使用 Unix Socket 上的 HTTP/JSON](0004-use-http-json-over-unix-socket-for-host-state.md)
 - [0005：本地控制台使用单应用 Wayland Kiosk](0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
+- [0006：相册使用受管图库与不可变内容对象](0006-use-a-managed-photo-library.md)
+- [0007：基础存储使用单盘 Btrfs、SQLite 与类型化特权边界](0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 
 ## 格式
 

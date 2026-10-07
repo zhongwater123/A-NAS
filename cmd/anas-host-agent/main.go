@@ -8,10 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 )
@@ -27,11 +31,14 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	if os.Geteuid() != 0 {
+		return errors.New("A-NAS Host Agent must run as root")
+	}
 	socketPath, err := agent.SocketPath()
 	if err != nil {
 		return err
 	}
-	listener, err := listen(socketPath)
+	listener, err := listen(socketPath, strings.TrimSpace(os.Getenv("ANAS_HOST_AGENT_GROUP")))
 	if err != nil {
 		return err
 	}
@@ -39,23 +46,24 @@ func run(logger *slog.Logger) error {
 		_ = listener.Close()
 		_ = os.Remove(socketPath)
 	}()
-
+	reader := linuxhoststate.New()
+	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
+		MountPoint:   environment("ANAS_DATA_MOUNT", "/srv/a-nas/data"),
+		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
+	})
 	server := &http.Server{
-		Handler:           agent.NewHandler(linuxhoststate.New(), logger),
-		ReadHeaderTimeout: 2 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      5 * time.Second,
-		IdleTimeout:       30 * time.Second,
+		Handler: agent.NewOperationsHandler(agent.Services{
+			Reader: reader, Volume: executor, Credentials: executor, Snapshots: executor,
+		}, logger),
+		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
 	serveError := make(chan error, 1)
 	go func() {
 		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "version", version)
 		serveError <- server.Serve(listener)
 	}()
-
 	select {
 	case err := <-serveError:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -64,7 +72,7 @@ func run(logger *slog.Logger) error {
 		return err
 	case <-ctx.Done():
 		logger.Info("A-NAS Host Agent shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return err
@@ -77,12 +85,27 @@ func run(logger *slog.Logger) error {
 	}
 }
 
-func listen(socketPath string) (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
+func listen(socketPath, groupName string) (net.Listener, error) {
+	directory := filepath.Dir(socketPath)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(filepath.Dir(socketPath), 0o700); err != nil {
+	if err := os.Chmod(directory, 0o750); err != nil {
 		return nil, err
+	}
+	gid := -1
+	if groupName != "" {
+		group, err := user.LookupGroup(groupName)
+		if err != nil {
+			return nil, err
+		}
+		gid, err = strconv.Atoi(group.Gid)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Chown(directory, 0, gid); err != nil {
+			return nil, err
+		}
 	}
 	if info, err := os.Lstat(socketPath); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -103,10 +126,26 @@ func listen(socketPath string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(socketPath, 0o600); err != nil {
+	mode := os.FileMode(0o600)
+	if gid >= 0 {
+		if err := os.Chown(socketPath, 0, gid); err != nil {
+			_ = listener.Close()
+			_ = os.Remove(socketPath)
+			return nil, err
+		}
+		mode = 0o660
+	}
+	if err := os.Chmod(socketPath, mode); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(socketPath)
 		return nil, err
 	}
 	return listener, nil
+}
+
+func environment(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
 }

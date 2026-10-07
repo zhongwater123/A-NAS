@@ -1,0 +1,27 @@
+[Unit]
+Description=A-NAS local Product Service
+Documentation=https://github.com/zhongwater123/A-NAS
+After=anas-host-agent.service
+Wants=anas-host-agent.service
+
+[Service]
+Type=simple
+User=a-nas
+Group=a-nas
+EnvironmentFile=/etc/a-nas/anas-api.env
+ExecStart=/opt/a-nas/current/anas-api
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=20s
+StateDirectory=a-nas
+StateDirectoryMode=0700
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/a-nas /srv/a-nas
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

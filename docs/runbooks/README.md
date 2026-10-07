@@ -9,6 +9,7 @@
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）
 - [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（verified）
 - [运行实验 NAS 本地控制台](operate-local-kiosk.md)（display/pointer verified；confinement/VT pending）
+- [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（draft；NAS offline）
 
 ## 使用方式
 

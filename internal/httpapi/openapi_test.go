@@ -46,6 +46,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+test.path, nil)
+			request.AddCookie(&http.Cookie{Name: "anas_session", Value: "contract-test"})
 			recorder := httptest.NewRecorder()
 			newHandler(test.reader).ServeHTTP(recorder, request)
 
@@ -60,6 +61,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 				Request:    request,
 				PathParams: pathParams,
 				Route:      route,
+				Options: &openapi3filter.Options{AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error {
+					return nil
+				}},
 			}
 			if err := openapi3filter.ValidateRequest(ctx, requestInput); err != nil {
 				t.Fatalf("validate request: %v", err)

@@ -73,8 +73,12 @@ type Disk struct {
 	Transport          Transport
 	CapacityBytes      uint64
 	Rotational         bool
+	Removable          bool
+	InUse              bool
+	Filesystems        []string
 	Role               DiskRole
 	Health             Health
+	SMARTStatus        Health
 	TemperatureCelsius *int
 }
 
