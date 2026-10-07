@@ -102,3 +102,20 @@ func TestPhotosStoreIsCreatedForThePhotoServiceAlone(t *testing.T) {
 		t.Fatalf("existing photos store was created again")
 	}
 }
+
+func TestSpacesReconcileDespiteABrokenPhotoServiceIdentity(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	sharedRoot := filepath.Join(mountPoint, "spaces", "shared")
+	if err := os.MkdirAll(sharedRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	runner := &photosRunner{passwd: "a-nas-photos:x:998:998::/nonexistent:/usr/sbin/nologin"}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	executor.spaceRoots = map[string]string{sharedSpaceID: sharedRoot}
+	if _, err := executor.materializeRegisteredSpaces(context.Background()); err != nil {
+		t.Fatalf("materializeRegisteredSpaces() error = %v; a photo store problem must not block spaces", err)
+	}
+	if runner.ran(spacePermissionCommand{name: "getent", args: []string{"passwd", accounts.PhotoServiceUser}}) {
+		t.Fatalf("space reconciliation consulted the photo service identity")
+	}
+}

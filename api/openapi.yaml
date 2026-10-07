@@ -610,8 +610,12 @@ paths:
   /api/v1/photos/libraries/{libraryId}/entries:
     get:
       operationId: listPhotoEntries
-      summary: List one level of the library projection
-      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { name: directoryId, in: query, description: Empty or absent for the library root., schema: { type: string } }]
+      summary: List one level of the library projection; assets by name, a page at a time
+      parameters:
+        - { $ref: "#/components/parameters/PhotoLibraryID" }
+        - { name: directoryId, in: query, description: Empty or absent for the library root., schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
       responses:
         "200": { description: Virtual directories and photo assets, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoDirectoryListing" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
@@ -620,7 +624,7 @@ paths:
       operationId: uploadPhoto
       summary: Import one JPEG or PNG original; returns once the original is durable
       parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string }, file: { type: string, format: binary } } } } } }
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string, description: "Must precede the file part, which is streamed as it arrives; parts after the file are not read." }, file: { type: string, format: binary } } } } } }
       responses:
         "201": { description: Photo asset created, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
@@ -694,6 +698,7 @@ paths:
       responses:
         "200": { description: "The original, inline unless download=1", content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
         "206": { description: Part of the original, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+        "304": { description: The client's copy still matches the ETag }
         "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/thumbnail:
     get:
@@ -701,6 +706,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
       responses:
         "200": { description: Upright JPEG thumbnail at most 512 pixels on its longer side, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "304": { description: The client's copy still matches the ETag }
         "404": { description: "Not found, or thumbnail_unavailable while it is pending or failed (use the original)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/assets/{assetId}/copies:
     post:
@@ -1670,8 +1676,9 @@ components:
       additionalProperties: false
       required: [directories, assets]
       properties:
-        directories: { type: array, items: { $ref: "#/components/schemas/PhotoDirectory" } }
+        directories: { type: array, description: Every subdirectory on the first page; empty on later pages., items: { $ref: "#/components/schemas/PhotoDirectory" } }
         assets: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
+        next: { type: string, description: Pass as cursor for the next page; absent on the last page. }
     TerminalStatusResponse:
       type: object
       additionalProperties: false

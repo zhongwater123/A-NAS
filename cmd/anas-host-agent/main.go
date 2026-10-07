@@ -68,6 +68,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logRepairs(logger, repaired)
+	ensurePhotosStore(context.Background(), executor, logger)
 	expireViewing(context.Background(), executor, logger)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
@@ -179,8 +180,20 @@ func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.E
 				logger.ErrorContext(ctx, "data-volume permission repair failed", "error", err)
 			}
 			logRepairs(logger, repaired)
+			ensurePhotosStore(ctx, executor, logger)
 		}
 	}
+}
+
+// ensurePhotosStore keeps the photo service's store in shape. A failure, such
+// as another account holding the photo service's UID, only leaves photos
+// unavailable; the Host Agent keeps serving everything else.
+func ensurePhotosStore(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	repaired, err := executor.EnsurePhotosStore(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
+	}
+	logRepairs(logger, repaired)
 }
 
 // expireViewingPeriodically revokes Administrative Viewing Mode grants on

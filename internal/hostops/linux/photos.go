@@ -21,6 +21,23 @@ const (
 	photosACL       = "user::rwx,group::---,other::---"
 )
 
+// EnsurePhotosStore creates and repairs the photo service's store while the
+// data volume is mounted, and returns the store if it had drifted. It stays
+// apart from space reconciliation: a broken photo service identity keeps
+// photos unavailable but never blocks spaces, accounts or viewing.
+func (e *Executor) EnsurePhotosStore(ctx context.Context) ([]string, error) {
+	if !e.dataVolumeReady() {
+		return nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	drifted, err := e.ensurePhotosStore(ctx)
+	if drifted {
+		return []string{filepath.Join(e.mountPoint, photosDirectory)}, err
+	}
+	return nil, err
+}
+
 // ensurePhotosStore creates the photos subvolume for the photo service
 // identity and repairs drift in its owner, mode and ACL. It does nothing
 // while that identity is absent, refuses one whose UID differs from the fixed

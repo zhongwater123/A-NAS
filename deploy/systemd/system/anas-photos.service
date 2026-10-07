@@ -36,6 +36,10 @@ ProtectControlGroups=true
 ReadWritePaths=/srv/a-nas/data
 RestrictAddressFamilies=AF_UNIX
 MemoryMax=2G
+# Thumbnails render at once but yield CPU and disk to file sharing and the
+# desktop whenever those compete.
+CPUWeight=20
+IOWeight=20
 
 [Install]
 WantedBy=multi-user.target

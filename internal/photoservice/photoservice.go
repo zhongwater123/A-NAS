@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -99,13 +100,20 @@ func Run(ctx context.Context, config Config) error {
 
 	service, err := openWhenReady(ctx, config)
 	if err == nil {
-		defer service.Close()
+		workers, stopWorkers := context.WithCancel(ctx)
+		background := make(chan struct{})
+		go func() {
+			defer close(background)
+			RunBackground(workers, service, config.Logger)
+		}()
+		// The Catalog closes only after the workers using it have stopped.
+		defer func() {
+			stopWorkers()
+			<-background
+			_ = service.Close()
+		}()
 		ready := photosapi.New(service, config.Logger)
 		api.Store(&ready)
-		go service.RunMedia(ctx, time.Minute, func(err error) {
-			config.Logger.ErrorContext(ctx, "photo media job failed", "error", err)
-		})
-		go maintain(ctx, service, config.Logger)
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
 	}
 
@@ -146,6 +154,20 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 		case <-time.After(config.RetryInterval):
 		}
 	}
+}
+
+// RunBackground renders media and maintains the store until ctx ends. It
+// returns only once both have stopped, so the caller may then close service.
+// Neither needs a user session.
+func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger) {
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		service.RunMedia(ctx, time.Minute, func(err error) {
+			logger.ErrorContext(ctx, "photo media job failed", "error", err)
+		})
+	})
+	workers.Go(func() { maintain(ctx, service, logger) })
+	workers.Wait()
 }
 
 // maintain repairs the store after an unclean stop and then expires trashed

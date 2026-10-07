@@ -82,7 +82,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 
 任务分为两类，共用同一张表和租约语义：
 
-- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后以低优先级立即执行，不等待空闲条件，也不依赖 AI Worker。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。
+- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
 - **AI 任务**：Embedding、标签、OCR、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
 
 默认执行策略：
@@ -141,10 +141,10 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 1. **Catalog**：图库、资产、对象引用、重复组、虚拟目录、相册、回收站和用户元数据；版本化 migration 与 Policy 表格测试（所有者、其他成员、管理员、持有查看授权的管理员 × 私有图库、共享图库中自己或他人上传的照片 × 各操作）。
 2. **Managed storage**：流式导入、staging 刷新后原子发布并刷新目录、内容对象复用、崩溃对账、容量保护（沿用文件服务“保留 5% 且至少 10 GiB”）、故障注入测试和临时目录 Adapter；不依赖真实数据盘。
 3. **媒体派生与任务表**：缩略图、EXIF 方向与基础元数据，以及后续 AI 共用的持久任务、租约与派生版本。
-4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、相册副本、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件大小上限在上传接口实现前确定；Web 桌面启用现有“相册”入口。`internal/photosapi` 不自行认证，只信任包装它的一方放入的 `photos.Principal`：开发模式下产品服务从会话构造并检查 CSRF；切片 5 起由相册服务经 Host Agent 会话查询构造。原图与缩略图以 `private, no-cache` 返回，访问结束后浏览器必须重新验证。
+4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、相册副本、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件大小上限在上传接口实现前确定；Web 桌面启用现有“相册”入口。`internal/photosapi` 不自行认证，只信任包装它的一方放入的 `photos.Principal`：开发模式下产品服务从会话构造并检查 CSRF；切片 5 起由相册服务经 Host Agent 会话查询构造。原图与缩略图以 `private, no-cache` 返回，访问结束后浏览器必须重新验证；验证器是强 ETag（原图为内容哈希，缩略图另含派生版本），不用导入时间。目录列表与时间线一样按游标分页。
 5. **服务化与部署**：`anas-photos` 进程与 systemd 单元、`a-nas-photos` 固定身份、Host Agent 创建 `photos` 子卷并修复漂移、会话查询接口、`anas-api` 转发、`make ops-check` 与部署手册。实现要点：
    - 相册服务是同一 `anas-api` 二进制的 `photo-service` 子命令，由 `anas-photos.service` 以 `a-nas-photos` 运行，因此发布制品仍只校验两个二进制；拒绝以 root 运行。
-   - 安装器以固定 UID/GID 31000 创建 `a-nas-photos`，不接管已被占用的名称或 ID；Host Agent 只在该账号存在时创建 `photos` 子卷。
+   - 安装器以固定 UID/GID 31000 创建 `a-nas-photos`，不接管已被占用的名称或 ID；Host Agent 只在该账号存在时创建 `photos` 子卷。存储区修复与空间对账分开执行：账号冲突等失败只记录 `photo store repair failed` 并让相册不可用，不阻止 Host Agent 启动，也不影响空间、账号与查看授权。
    - 相册服务在 `/run/a-nas-photos/photos.sock`（`0660`，目录 `0750`）提供相册 API；产品服务账号属于 `a-nas-photos` 组，只能连接该套接字，进不了存储区。
    - 产品服务在浏览器边界检查 Cookie 与 CSRF，转发时去掉 Cookie，只附带会话令牌头；相册服务把令牌交给 Host Agent 的 `/run/a-nas-sessions/photos.sock` 换取账号、角色和是否需要改密，不读取 `control.db`。
    - 存储区未就绪（数据卷未挂载或 `photos` 尚未创建）时相册服务只回答 `photos_unavailable`，从不自行创建目录；就绪后再打开 Catalog 并启动缩略图任务、对账与回收站到期。

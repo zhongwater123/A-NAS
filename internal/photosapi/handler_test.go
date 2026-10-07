@@ -158,6 +158,20 @@ func TestUploadBrowseAndServeOriginals(t *testing.T) {
 	if got := ranged.Header().Get("Cache-Control"); got != "private, no-cache" {
 		t.Fatalf("Cache-Control = %q", got)
 	}
+	// Revalidation compares content, not import time: the thumbnail's ETag
+	// differs from the original's and names its derivation version.
+	originalTag, thumbnailTag := ranged.Header().Get("ETag"), thumbnail.Header().Get("ETag")
+	if originalTag == "" || thumbnailTag == "" || originalTag == thumbnailTag || !strings.Contains(thumbnailTag, "thumbnail/v1") {
+		t.Fatalf("ETag original = %q, thumbnail = %q", originalTag, thumbnailTag)
+	}
+	revalidate := httptest.NewRequest(http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/thumbnail", nil)
+	revalidate.Header.Set("If-None-Match", thumbnailTag)
+	revalidate = revalidate.WithContext(photosapi.WithPrincipal(revalidate.Context(), alice))
+	notModified := httptest.NewRecorder()
+	handler.ServeHTTP(notModified, revalidate)
+	if notModified.Code != http.StatusNotModified {
+		t.Fatalf("revalidated thumbnail status = %d", notModified.Code)
+	}
 	download := owner.do(http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/original?download=1", nil, "")
 	if !strings.HasPrefix(download.Header().Get("Content-Disposition"), "attachment") || !bytes.Equal(download.Body.Bytes(), original) {
 		t.Fatalf("download = %d %v", download.Code, download.Header())

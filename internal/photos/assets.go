@@ -146,7 +146,7 @@ func (s *Service) Open(ctx context.Context, p Principal, assetID string) (Conten
 	}
 	return Content{
 		Name: record.Name, MediaType: record.MediaType, SizeBytes: record.SizeBytes,
-		ImportedAt: record.ImportedAt, Reader: file,
+		ETag: `"` + record.objectID + `"`, Reader: file,
 	}, nil
 }
 
@@ -168,10 +168,7 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	if err != nil {
 		return Page{}, err
 	}
-	if limit <= 0 {
-		limit = defaultPageSize
-	}
-	limit = min(limit, maxPageSize)
+	limit = pageSize(limit)
 	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
 	where := "WHERE a.library_id = ? AND a.trashed_at IS NULL"
 	args := []any{lib.id}
@@ -179,6 +176,9 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 		at, id, err := decodeCursor(cursor)
 		if err != nil {
 			return Page{}, err
+		}
+		if _, err := parseTime(at); err != nil {
+			return Page{}, ErrInvalidCursor
 		}
 		where += " AND (" + sortKey + " < ? OR (" + sortKey + " = ? AND a.id < ?))"
 		args = append(args, at, at, id)
@@ -206,8 +206,17 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	return page, nil
 }
 
-func encodeCursor(at, id string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(at + "\n" + id))
+func pageSize(limit int) int {
+	if limit <= 0 {
+		return defaultPageSize
+	}
+	return min(limit, maxPageSize)
+}
+
+// A cursor holds the sort key and ID of the last item on the previous page.
+// Neither names nor times contain a newline.
+func encodeCursor(key, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(key + "\n" + id))
 }
 
 func decodeCursor(cursor string) (string, string, error) {
@@ -215,72 +224,89 @@ func decodeCursor(cursor string) (string, string, error) {
 	if err != nil {
 		return "", "", ErrInvalidCursor
 	}
-	at, id, found := strings.Cut(string(raw), "\n")
-	if !found || id == "" {
+	key, id, found := strings.Cut(string(raw), "\n")
+	if !found || key == "" || id == "" {
 		return "", "", ErrInvalidCursor
 	}
-	if _, err := parseTime(at); err != nil {
-		return "", "", ErrInvalidCursor
-	}
-	return at, id, nil
+	return key, id, nil
 }
 
-func (s *Service) Rename(ctx context.Context, p Principal, assetID, name string) (Asset, error) {
-	name, ok := cleanName(name)
-	if !ok {
-		return Asset{}, ErrInvalidName
+// AssetUpdate renames and/or moves an asset; nil fields stay unchanged. A
+// DirectoryID of "" is the library root.
+type AssetUpdate struct {
+	Name        *string
+	DirectoryID *string
+}
+
+// Update applies an AssetUpdate in one transaction, so a rejected half
+// leaves the asset unchanged. The asset keeps its ID and original.
+func (s *Service) Update(ctx context.Context, p Principal, assetID string, update AssetUpdate) (Asset, error) {
+	var name string
+	if update.Name != nil {
+		var ok bool
+		if name, ok = cleanName(*update.Name); !ok {
+			return Asset{}, ErrInvalidName
+		}
 	}
-	return s.changeAsset(ctx, p, assetID, "photo.renamed", name, func(tx *sql.Tx, record assetRecord) error {
+	return s.changeAsset(ctx, p, assetID, func(tx *sql.Tx, record assetRecord) error {
 		if record.Trash != nil {
 			return ErrConflict
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE assets SET name = ? WHERE id = ?", name, record.ID)
-		return err
-	})
-}
-
-// Move changes the virtual directory of an asset within its library; the
-// asset keeps its ID and original.
-func (s *Service) Move(ctx context.Context, p Principal, assetID, directoryID string) (Asset, error) {
-	return s.changeAsset(ctx, p, assetID, "photo.moved", directoryID, func(tx *sql.Tx, record assetRecord) error {
-		if record.Trash != nil {
-			return ErrConflict
+		if update.DirectoryID != nil {
+			directoryID := *update.DirectoryID
+			if err := s.checkDirectory(ctx, tx, record.library, directoryID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE assets SET directory_id = NULLIF(?, '') WHERE id = ?", directoryID, record.ID); err != nil {
+				return err
+			}
+			if err := s.audit(ctx, tx, p.UserID, "photo.moved", record.ID, directoryID); err != nil {
+				return err
+			}
 		}
-		if err := s.checkDirectory(ctx, tx, record.library, directoryID); err != nil {
-			return err
+		if update.Name != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE assets SET name = ? WHERE id = ?", name, record.ID); err != nil {
+				return err
+			}
+			return s.audit(ctx, tx, p.UserID, "photo.renamed", record.ID, name)
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE assets SET directory_id = NULLIF(?, '') WHERE id = ?", directoryID, record.ID)
-		return err
+		return nil
 	})
 }
 
 // Trash moves an asset to its library's trash, out of browsing, for the
 // retention period.
 func (s *Service) Trash(ctx context.Context, p Principal, assetID string) (Asset, error) {
-	return s.changeAsset(ctx, p, assetID, "photo.trashed", "", func(tx *sql.Tx, record assetRecord) error {
+	return s.changeAsset(ctx, p, assetID, func(tx *sql.Tx, record assetRecord) error {
 		if record.Trash != nil {
 			return ErrConflict
 		}
 		now := s.now()
-		_, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = ?, trashed_by = ?, purge_after = ? WHERE id = ?",
-			formatTime(now), p.UserID, formatTime(now.Add(s.trashRetention)), record.ID)
-		return err
+		if _, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = ?, trashed_by = ?, purge_after = ? WHERE id = ?",
+			formatTime(now), p.UserID, formatTime(now.Add(s.trashRetention)), record.ID); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, p.UserID, "photo.trashed", record.ID, record.Name)
 	})
 }
 
 // Restore returns a trashed asset to its virtual directory, or to the library
 // root if that directory no longer exists.
 func (s *Service) Restore(ctx context.Context, p Principal, assetID string) (Asset, error) {
-	return s.changeAsset(ctx, p, assetID, "photo.restored", "", func(tx *sql.Tx, record assetRecord) error {
+	return s.changeAsset(ctx, p, assetID, func(tx *sql.Tx, record assetRecord) error {
 		if record.Trash == nil {
 			return ErrConflict
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = NULL, trashed_by = NULL, purge_after = NULL WHERE id = ?", record.ID)
-		return err
+		if _, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = NULL, trashed_by = NULL, purge_after = NULL WHERE id = ?", record.ID); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, p.UserID, "photo.restored", record.ID, record.Name)
 	})
 }
 
-func (s *Service) changeAsset(ctx context.Context, p Principal, assetID, action, detail string, change func(*sql.Tx, assetRecord) error) (Asset, error) {
+// changeAsset runs change, which also writes its audit events, on an asset p
+// may change.
+func (s *Service) changeAsset(ctx context.Context, p Principal, assetID string, change func(*sql.Tx, assetRecord) error) (Asset, error) {
 	var changed Asset
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		record, err := s.visibleAsset(ctx, tx, p, assetID)
@@ -298,10 +324,7 @@ func (s *Service) changeAsset(ctx context.Context, p Principal, assetID, action,
 			return err
 		}
 		changed = updated.Asset
-		if detail == "" {
-			detail = record.Name
-		}
-		return s.audit(ctx, tx, p.UserID, action, assetID, detail)
+		return nil
 	})
 	return changed, err
 }
@@ -315,6 +338,11 @@ func (s *Service) Copy(ctx context.Context, p Principal, assetID, targetLibraryI
 		source, err := s.visibleAsset(ctx, tx, p, assetID)
 		if err != nil {
 			return err
+		}
+		// Administrative Viewing Mode is read-only: copying would keep a
+		// member's private photo after the grant ends.
+		if viewingOnly(p, source.library) {
+			return ErrForbidden
 		}
 		if source.Trash != nil {
 			return ErrConflict

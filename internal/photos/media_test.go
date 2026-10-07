@@ -265,6 +265,36 @@ func TestExpiredJobLeaseIsReclaimedAfterACrash(t *testing.T) {
 	}
 }
 
+func TestJobThatKeepsLosingItsLeaseFailsInsteadOfLooping(t *testing.T) {
+	ctx := context.Background()
+	service, c, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	asset := importPhoto(t, service, alice, private.ID, "", "p.png", encodePNG(34))
+
+	// Every attempt so far ended with the process dying mid-render.
+	db, err := sql.Open("sqlite3", filepath.Join(root, "catalog.db")+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	defer db.Close()
+	leaseUntil := c.Now().Add(5 * time.Minute).UTC().Format("2006-01-02T15:04:05.000000000Z")
+	if _, err := db.Exec("UPDATE jobs SET state = 'running', attempts = 3, lease_until = ?", leaseUntil); err != nil {
+		t.Fatalf("simulate claimed job: %v", err)
+	}
+
+	c.Advance(5 * time.Minute)
+	if ok, err := service.ProcessMediaJob(ctx); err != nil || ok {
+		t.Fatalf("ProcessMediaJob() = %v, %v; want the job failed, not reclaimed", ok, err)
+	}
+	if got, _ := service.Get(ctx, alice, asset.ID); got.Thumbnail != photos.ThumbnailFailed {
+		t.Fatalf("Thumbnail = %q, want failed", got.Thumbnail)
+	}
+	var class string
+	if err := db.QueryRow("SELECT error_class FROM jobs").Scan(&class); err != nil || class != "interrupted" {
+		t.Fatalf("error class = %q, %v; want interrupted", class, err)
+	}
+}
+
 func TestRunMediaWakesOnImport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	service, _, _ := newService(t)

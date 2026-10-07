@@ -15,11 +15,14 @@ import (
 // to the photo service, which confirms it with the Host Agent itself.
 const SessionHeader = "X-A-NAS-Session"
 
-// NewProxy forwards the photo API to the photo service's Unix socket
+// Proxy forwards the photo API to the photo service's Unix socket
 // (ADR 0011). The caller has already authenticated the browser and checked
 // CSRF on writes; the proxy passes only the session token, never cookies, so
-// the photo service learns nothing it cannot verify.
-func NewProxy(socketPath string, logger *slog.Logger) http.Handler {
+// the photo service learns nothing it cannot verify. It needs no Principal:
+// the photo service builds its own.
+type Proxy struct{ *httputil.ReverseProxy }
+
+func NewProxy(socketPath string, logger *slog.Logger) *Proxy {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -30,7 +33,7 @@ func NewProxy(socketPath string, logger *slog.Logger) http.Handler {
 		},
 		MaxIdleConns: 16, IdleConnTimeout: 60 * time.Second,
 	}
-	return &httputil.ReverseProxy{
+	return &Proxy{&httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.Out.URL.Scheme = "http"
 			request.Out.URL.Host = "photos"
@@ -44,5 +47,5 @@ func NewProxy(socketPath string, logger *slog.Logger) http.Handler {
 			logger.WarnContext(r.Context(), "photo service unreachable", "error", err)
 			WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 		},
-	}
+	}}
 }

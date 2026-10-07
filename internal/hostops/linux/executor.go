@@ -463,6 +463,9 @@ WantedBy=local-fs.target
 	if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
 		return storage.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
 	}
+	// Best effort: a failure only delays photos until the Host Agent's
+	// periodic repair, which logs it.
+	_, _ = e.EnsurePhotosStore(ctx)
 	return storage.Volume{
 		ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: uuid,
 		CapacityBytes: device.Disk.CapacityBytes, State: storage.VolumeStateAvailable,

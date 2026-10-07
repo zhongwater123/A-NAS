@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -54,6 +54,10 @@ describe("PhotosPanel", () => {
     expect(within(may).getByText("重复")).toBeTruthy();
     // Without a capture time the import day is used.
     expect(screen.getByRole("region", { name: "2026年10月8日" })).toBeTruthy();
+
+    // A ready thumbnail that cannot be fetched falls back to the original.
+    fireEvent.error(images[0]);
+    expect(images[0].getAttribute("src")).toBe("/api/v1/photos/assets/photo%3Aa/original");
   });
 
   it("uploads several photos, reports the ones that failed and reloads", async () => {
@@ -193,6 +197,8 @@ describe("PhotosPanel viewing and hints", () => {
     await user.click(await screen.findByRole("button", { name: "查看 photo:w.jpg" }));
     expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重命名" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制到共享图库" })).toBeNull();
+    expect(screen.getByRole("link", { name: "下载原图" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "关闭查看" }));
     await user.click(screen.getByRole("button", { name: "结束查看" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/viewing/viewing%3A7", expect.objectContaining({ method: "DELETE" }));

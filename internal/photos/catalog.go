@@ -273,8 +273,8 @@ SELECT a.id, a.library_id, IFNULL(a.directory_id, ''), a.name, o.media_type, o.s
        a.uploaded_by, a.imported_at, IFNULL(a.trashed_at, ''), IFNULL(a.trashed_by, ''),
        IFNULL(a.purge_after, ''), IFNULL(a.taken_at, ''), o.width, o.height, o.orientation,
        CASE
-         WHEN EXISTS (SELECT 1 FROM derived_files f WHERE f.object_id = a.object_id AND f.derivation = 'thumbnail/v1') THEN 'ready'
-         WHEN EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = a.object_id AND j.derivation = 'thumbnail/v1'
+         WHEN EXISTS (SELECT 1 FROM derived_files f WHERE f.object_id = a.object_id AND f.derivation = '` + thumbnailDerivation + `') THEN 'ready'
+         WHEN EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = a.object_id AND j.derivation = '` + thumbnailDerivation + `'
                       AND j.state = 'failed') THEN 'failed'
          ELSE 'pending'
        END,

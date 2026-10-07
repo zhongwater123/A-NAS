@@ -68,7 +68,9 @@
   - `stat -c '%a %U:%G' /srv/a-nas/data/photos` 为 `700 a-nas-photos:a-nas-photos`。
   - `getfacl -p /srv/a-nas/data/photos` 只有 `user::rwx`、`group::---`、`other::---`。
   - `getfacl -p /srv/a-nas` 含 `user:a-nas-photos:--x`。
-- **日志**：`journalctl -u anas-photos -b --no-pager` 出现 `photo service ready`，没有 `photo store unavailable`。
+- **日志**：
+  - `journalctl -u anas-photos -b --no-pager` 出现 `photo service ready`，没有 `photo store unavailable`。
+  - `journalctl -u anas-host-agent -b --no-pager` 没有 `photo store repair failed`。
 - **隔离**：
   - `setpriv --reuid=a-nas --regid=a-nas --init-groups ls /srv/a-nas/data/photos` 因权限失败。
   - `setpriv --reuid=a-nas-photos --regid=a-nas-photos --init-groups ls /srv/a-nas/data/spaces/shared` 因权限失败。
@@ -77,7 +79,7 @@
   2. 另一成员登录后看不到这张私有照片。
   3. `systemctl restart anas-photos` 之后照片仍在。
   4. 后台日志没有 `photo media job failed`。
-  5. 成员上传一张照片；管理员在“账号管理”中对该成员选择“查看私有图库”，填写原因并输入自己的密码。管理员在相册中看到“只读查看 · <成员>”，可以浏览和下载，但没有修改按钮。
+  5. 成员上传一张照片；管理员在“账号管理”中对该成员选择“查看私有图库”，填写原因并输入自己的密码。管理员在相册中看到“只读查看 · <成员>”，可以浏览和下载，但没有修改或复制按钮。
   6. 成员下次登录看到“管理员……开启了对你私有图库的只读查看”通知；管理员点击“结束查看”后，该图库立即从列表消失。
   7. 文件管理中不会因此出现该成员的个人空间。
 - **审计与对账**：`journalctl -u anas-photos` 中启动时的 `photo store reconciled` 报告只在异常停止后出现，正常重启后为空。

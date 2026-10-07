@@ -45,7 +45,7 @@ var policyOperations = []policyOperation{
 		return err
 	}},
 	{name: "rename", run: func(ctx context.Context, f policyFixture, p photos.Principal) error {
-		_, err := f.service.Rename(ctx, p, f.asset.ID, "renamed.png")
+		_, err := f.service.Update(ctx, p, f.asset.ID, photos.AssetUpdate{Name: new("renamed.png")})
 		return err
 	}},
 	{name: "trash", run: func(ctx context.Context, f policyFixture, p photos.Principal) error {
@@ -60,18 +60,27 @@ var policyOperations = []policyOperation{
 		return f.service.Purge(ctx, p, f.asset.ID)
 	}},
 	{name: "copy-to-own-library", run: func(ctx context.Context, f policyFixture, p photos.Principal) error {
-		all, err := f.service.Libraries(ctx, p)
-		if err != nil {
+		return copyTo(ctx, f, p, func(lib photos.Library) bool {
+			return lib.Kind == photos.LibraryKindPrivate && lib.OwnerUserID == p.UserID
+		})
+	}},
+	{name: "copy-to-shared", run: func(ctx context.Context, f policyFixture, p photos.Principal) error {
+		return copyTo(ctx, f, p, func(lib photos.Library) bool { return lib.Kind == photos.LibraryKindShared })
+	}},
+}
+
+func copyTo(ctx context.Context, f policyFixture, p photos.Principal, target func(photos.Library) bool) error {
+	all, err := f.service.Libraries(ctx, p)
+	if err != nil {
+		return err
+	}
+	for _, lib := range all {
+		if target(lib) {
+			_, err = f.service.Copy(ctx, p, f.asset.ID, lib.ID, "")
 			return err
 		}
-		for _, lib := range all {
-			if lib.Kind == photos.LibraryKindPrivate && lib.OwnerUserID == p.UserID {
-				_, err = f.service.Copy(ctx, p, f.asset.ID, lib.ID, "")
-				return err
-			}
-		}
-		return errors.New("no private library")
-	}},
+	}
+	return errors.New("no target library")
 }
 
 func TestPolicyMatrix(t *testing.T) {
@@ -105,7 +114,8 @@ func TestPolicyMatrix(t *testing.T) {
 			"trash":               {ok, notFound, notFound, forbidden, notFound, notFound},
 			"restore":             {ok, notFound, notFound, notFound, notFound, notFound},
 			"purge":               {ok, notFound, notFound, notFound, notFound, notFound},
-			"copy-to-own-library": {ok, notFound, notFound, ok, notFound, notFound},
+			"copy-to-own-library": {ok, notFound, notFound, forbidden, notFound, notFound},
+			"copy-to-shared":      {ok, notFound, notFound, forbidden, notFound, notFound},
 		},
 		// The shared asset was uploaded by the owner principal (alice).
 		"shared": {
@@ -118,6 +128,7 @@ func TestPolicyMatrix(t *testing.T) {
 			"restore":             {ok, notFound, ok, ok, ok, notFound},
 			"purge":               {ok, notFound, ok, ok, ok, notFound},
 			"copy-to-own-library": {ok, ok, ok, ok, ok, ok},
+			"copy-to-shared":      {ok, ok, ok, ok, ok, ok},
 		},
 	}
 
@@ -159,8 +170,8 @@ func TestHiddenAssetIsIndistinguishableFromMissing(t *testing.T) {
 	if hiddenErr == nil || hiddenErr.Error() != missingErr.Error() {
 		t.Fatalf("hidden error %v differs from missing error %v", hiddenErr, missingErr)
 	}
-	_, hiddenErr = service.ListDirectory(ctx, bob, alicePrivate.ID, "")
-	_, missingErr = service.ListDirectory(ctx, bob, "library:does-not-exist", "")
+	_, hiddenErr = service.ListDirectory(ctx, bob, alicePrivate.ID, "", "", 0)
+	_, missingErr = service.ListDirectory(ctx, bob, "library:does-not-exist", "", "", 0)
 	if hiddenErr == nil || hiddenErr.Error() != missingErr.Error() {
 		t.Fatalf("hidden library error %v differs from missing error %v", hiddenErr, missingErr)
 	}
@@ -213,16 +224,16 @@ func TestSharedDirectoriesBelongToTheirCreator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDirectory() error = %v", err)
 	}
-	if _, err := service.RenameDirectory(ctx, bob, directory.ID, "Bob's"); !errors.Is(err, photos.ErrForbidden) {
-		t.Fatalf("member RenameDirectory() error = %v, want ErrForbidden", err)
+	if _, err := service.UpdateDirectory(ctx, bob, directory.ID, photos.DirectoryUpdate{Name: new("Bob's")}); !errors.Is(err, photos.ErrForbidden) {
+		t.Fatalf("member rename error = %v, want ErrForbidden", err)
 	}
 	// Any member may still file their own photos into it.
 	asset := importPhoto(t, service, bob, shared.ID, directory.ID, "bob.png", pngBytes(t, 3))
 	if asset.DirectoryID != directory.ID {
 		t.Fatalf("DirectoryID = %q, want %q", asset.DirectoryID, directory.ID)
 	}
-	if _, err := service.RenameDirectory(ctx, admin, directory.ID, "Family trip"); err != nil {
-		t.Fatalf("admin RenameDirectory() error = %v", err)
+	if _, err := service.UpdateDirectory(ctx, admin, directory.ID, photos.DirectoryUpdate{Name: new("Family trip")}); err != nil {
+		t.Fatalf("admin rename error = %v", err)
 	}
 }
 

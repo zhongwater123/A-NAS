@@ -40,7 +40,7 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 		}
 	}
 
-	if _, err := executor.RepairDataVolumePermissions(ctx); err != nil {
+	if _, err := executor.EnsurePhotosStore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(photos); !errors.Is(err, os.ErrNotExist) {
@@ -54,7 +54,7 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 		_ = exec.Command("userdel", accounts.PhotoServiceUser).Run()
 		_ = exec.Command("groupdel", accounts.PhotoServiceUser).Run()
 	})
-	if _, err := executor.RepairDataVolumePermissions(ctx); err != nil {
+	if _, err := executor.EnsurePhotosStore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var stat syscall.Stat_t
@@ -76,7 +76,7 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 	// Someone with root loosens the store; the next repair restores it.
 	run(t, "chmod", "0755", photos)
 	run(t, "setfacl", "--modify", "user:petra:rwx", photos)
-	repaired, err := executor.RepairDataVolumePermissions(ctx)
+	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

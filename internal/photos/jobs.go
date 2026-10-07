@@ -40,6 +40,9 @@ const (
 	jobErrorUndecodable     = "undecodable"
 	jobErrorMissingOriginal = "missing_original"
 	jobErrorIO              = "io"
+	// jobErrorInterrupted marks a job whose lease ran out on every attempt,
+	// as when decoding the original keeps killing the service.
+	jobErrorInterrupted = "interrupted"
 )
 
 var ErrThumbnailUnavailable = errors.New("photo thumbnail is not available yet")
@@ -70,7 +73,10 @@ func (s *Service) Thumbnail(ctx context.Context, p Principal, assetID string) (C
 		_ = file.Close()
 		return Content{}, err
 	}
-	return Content{Name: record.Name, MediaType: "image/jpeg", SizeBytes: info.Size(), ImportedAt: record.ImportedAt, Reader: file}, nil
+	return Content{
+		Name: record.Name, MediaType: "image/jpeg", SizeBytes: info.Size(),
+		ETag: `"` + record.objectID + "." + thumbnailDerivation + `"`, Reader: file,
+	}, nil
 }
 
 // enqueueDerivations schedules the media work for a newly referenced object
@@ -140,6 +146,14 @@ func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) claimJob(ctx context.Context) (claimedJob, error) {
+	// Every claim counts as an attempt, so a job that never finishes stops
+	// being reclaimed once its attempts are used up.
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE jobs SET state = 'failed', lease_until = NULL, error_class = ?
+WHERE state = 'running' AND lease_until <= ? AND attempts >= ?`,
+		jobErrorInterrupted, formatTime(s.now()), jobMaxAttempts); err != nil {
+		return claimedJob{}, err
+	}
 	var job claimedJob
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
@@ -160,7 +174,14 @@ LIMIT 1`, now, now).Scan(&job.objectID, &job.derivation, &job.attempts, &job.ori
 	return job, err
 }
 
-func (s *Service) renderJob(job claimedJob) ([]byte, int, int, string) {
+// renderJob treats a decoder panic like an undecodable original: the same
+// bytes would panic again, and the service must keep serving.
+func (s *Service) renderJob(job claimedJob) (thumbnail []byte, width, height int, class string) {
+	defer func() {
+		if recover() != nil {
+			thumbnail, width, height, class = nil, 0, 0, jobErrorUndecodable
+		}
+	}()
 	original, err := s.openObject(job.objectID)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, 0, 0, jobErrorMissingOriginal
@@ -169,7 +190,7 @@ func (s *Service) renderJob(job claimedJob) ([]byte, int, int, string) {
 		return nil, 0, 0, jobErrorIO
 	}
 	defer original.Close()
-	thumbnail, width, height, err := renderThumbnail(original, job.orientation)
+	thumbnail, width, height, err = renderThumbnail(original, job.orientation)
 	if err != nil {
 		return nil, 0, 0, jobErrorUndecodable
 	}

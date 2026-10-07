@@ -130,13 +130,16 @@ type TrashState struct {
 	PurgeAfter time.Time `json:"purgeAfter"`
 }
 
-// Content is an original opened read-only; the caller must close Reader.
+// Content is an original or derived file opened read-only; the caller must
+// close Reader.
 type Content struct {
-	Name       string
-	MediaType  string
-	SizeBytes  int64
-	ImportedAt time.Time
-	Reader     *os.File
+	Name      string
+	MediaType string
+	SizeBytes int64
+	// ETag is a strong validator: originals are immutable and derived files
+	// change only with their derivation version.
+	ETag   string
+	Reader *os.File
 }
 
 type Options struct {

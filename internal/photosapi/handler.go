@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -119,16 +120,25 @@ func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, itemsResponse[photos.Library]{Items: libraries})
 }
 
+// pageLimit reads the optional limit query parameter; 0 means the default.
+func pageLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	value := r.URL.Query().Get("limit")
+	if value == "" {
+		return 0, true
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit < 1 {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+		return 0, false
+	}
+	return limit, true
+}
+
 func (h *handler) timeline(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
-	limit := 0
-	if value := r.URL.Query().Get("limit"); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil || parsed < 1 {
-			WriteError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
-			return
-		}
-		limit = parsed
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
 	}
 	page, err := h.service.Timeline(r.Context(), principal, r.PathValue("libraryID"), r.URL.Query().Get("cursor"), limit)
 	if err != nil {
@@ -140,7 +150,12 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
-	listing, err := h.service.ListDirectory(r.Context(), principal, r.PathValue("libraryID"), r.URL.Query().Get("directoryId"))
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	listing, err := h.service.ListDirectory(r.Context(), principal, r.PathValue("libraryID"), query.Get("directoryId"), query.Get("cursor"), limit)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -231,15 +246,8 @@ func (h *handler) changeDirectory(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or parentId")
 		return
 	}
-	id := r.PathValue("directoryID")
-	var directory photos.Directory
-	var err error
-	if request.ParentID != nil {
-		directory, err = h.service.MoveDirectory(r.Context(), principal, id, *request.ParentID)
-	}
-	if err == nil && request.Name != nil {
-		directory, err = h.service.RenameDirectory(r.Context(), principal, id, *request.Name)
-	}
+	directory, err := h.service.UpdateDirectory(r.Context(), principal, r.PathValue("directoryID"),
+		photos.DirectoryUpdate{Name: request.Name, ParentID: request.ParentID})
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -276,15 +284,8 @@ func (h *handler) changeAsset(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or directoryId")
 		return
 	}
-	id := r.PathValue("assetID")
-	var asset photos.Asset
-	var err error
-	if request.DirectoryID != nil {
-		asset, err = h.service.Move(r.Context(), principal, id, *request.DirectoryID)
-	}
-	if err == nil && request.Name != nil {
-		asset, err = h.service.Rename(r.Context(), principal, id, *request.Name)
-	}
+	asset, err := h.service.Update(r.Context(), principal, r.PathValue("assetID"),
+		photos.AssetUpdate{Name: request.Name, DirectoryID: request.DirectoryID})
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -398,7 +399,8 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request, content photos.C
 	w.Header().Set("Content-Type", content.MediaType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": content.Name}))
-	http.ServeContent(w, r, content.Name, content.ImportedAt, content.Reader)
+	w.Header().Set("ETag", content.ETag)
+	http.ServeContent(w, r, content.Name, time.Time{}, content.Reader)
 }
 
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {

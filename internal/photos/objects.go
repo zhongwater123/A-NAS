@@ -13,7 +13,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
 // Content objects are immutable originals stored once per SHA-256 under
@@ -216,20 +217,16 @@ func (s *Service) removeObject(id string) error {
 
 func (s *Service) openObject(id string) (*os.File, error) { return s.root.Open(objectPath(id)) }
 
-// ensureCapacity keeps the same data-volume reserve as ordinary files: 5% of
-// the volume and at least 10 GiB stay free.
+// ensureCapacity keeps the same data-volume reserve as ordinary files.
 func (s *Service) ensureCapacity(incoming int64) error {
 	if s.disableCapacityReserve {
 		return nil
 	}
-	var stats syscall.Statfs_t
-	if err := syscall.Statfs(s.rootPath, &stats); err != nil {
+	ok, err := capacity.Admits(s.rootPath, incoming)
+	if err != nil {
 		return err
 	}
-	total := uint64(stats.Blocks) * uint64(stats.Bsize)
-	available := uint64(stats.Bavail) * uint64(stats.Bsize)
-	reserve := max(total/20, uint64(10<<30))
-	if uint64(max(incoming, 0)) >= available || available-uint64(max(incoming, 0)) < reserve {
+	if !ok {
 		return ErrInsufficientSpace
 	}
 	return nil

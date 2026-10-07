@@ -33,8 +33,10 @@ type ProductDependencies struct {
 	// manage Docker, so only administrators reach them (ADR 0008).
 	Containers http.Handler
 	Apps       http.Handler
-	// Photos serves /api/v1/photos to every signed-in user; it receives the
-	// caller as a photos.Principal and enforces the photo Policy itself.
+	// Photos serves /api/v1/photos to every signed-in user and enforces the
+	// photo Policy itself. A *photosapi.Proxy confirms the session in the
+	// photo service; any other handler receives the caller as a
+	// photos.Principal.
 	Photos http.Handler
 	Logger *slog.Logger
 }
@@ -799,17 +801,22 @@ func (h *productHandler) handleEndViewing(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// withPhotoPrincipal passes the signed-in user to the photo API, which applies
-// its own Policy; writes still need the session's CSRF token.
+// withPhotoPrincipal admits signed-in users to the photo API, which applies
+// its own Policy; writes still need the session's CSRF token. An in-process
+// photo API receives the caller as a Principal, while a Proxy forwards only
+// the session token for the photo service to confirm.
 func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc {
-	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
-		if err != nil {
-			h.internalError(w, r, err)
-			return
+	serve := func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { next.ServeHTTP(w, r) }
+	if _, proxied := next.(*photosapi.Proxy); !proxied {
+		serve = func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+			viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
+			if err != nil {
+				h.internalError(w, r, err)
+				return
+			}
+			principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
+			next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
 		}
-		principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
-		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
 	}
 	read, write := h.withSession(serve), h.withMutation(serve)
 	return func(w http.ResponseWriter, r *http.Request) {

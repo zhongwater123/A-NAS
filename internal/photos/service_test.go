@@ -213,6 +213,50 @@ func TestTimelinePagesNewestFirstAndSkipsTrash(t *testing.T) {
 	}
 }
 
+func TestDirectoryListingPagesAssetsByName(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+	private, _ := libraries(t, service, alice)
+	album, err := service.CreateDirectory(ctx, alice, private.ID, "", "Album")
+	if err != nil {
+		t.Fatalf("CreateDirectory() error = %v", err)
+	}
+	// Two assets share a name, so the cursor must also order by ID.
+	for i, name := range []string{"d.png", "a.png", "c.png", "a.png", "b.png"} {
+		importPhoto(t, service, alice, private.ID, "", name, encodePNG(uint8(i)))
+	}
+
+	var names []string
+	var directories int
+	cursor := ""
+	for page := 0; ; page++ {
+		listing, err := service.ListDirectory(ctx, alice, private.ID, "", cursor, 2)
+		if err != nil {
+			t.Fatalf("ListDirectory() error = %v", err)
+		}
+		if page == 0 && (len(listing.Directories) != 1 || listing.Directories[0].ID != album.ID) {
+			t.Fatalf("first page directories = %+v", listing.Directories)
+		}
+		directories += len(listing.Directories)
+		for _, asset := range listing.Assets {
+			names = append(names, asset.Name)
+		}
+		if listing.Next == "" {
+			break
+		}
+		if page > 3 {
+			t.Fatalf("listing did not terminate")
+		}
+		cursor = listing.Next
+	}
+	if got := strings.Join(names, ","); got != "a.png,a.png,b.png,c.png,d.png" || directories != 1 {
+		t.Fatalf("listing = %s with %d directories", got, directories)
+	}
+	if _, err := service.ListDirectory(ctx, alice, private.ID, "", "not a cursor", 2); !errors.Is(err, photos.ErrInvalidCursor) {
+		t.Fatalf("ListDirectory(bad cursor) error = %v, want ErrInvalidCursor", err)
+	}
+}
+
 func TestVirtualDirectoriesOrganiseWithoutChangingAssets(t *testing.T) {
 	ctx := context.Background()
 	service, _, _ := newService(t)
@@ -231,10 +275,10 @@ func TestVirtualDirectoriesOrganiseWithoutChangingAssets(t *testing.T) {
 	if _, err := service.CreateDirectory(ctx, alice, private.ID, month.ID, "2026"); err != nil {
 		t.Fatalf("same name under another parent error = %v", err)
 	}
-	if _, err := service.MoveDirectory(ctx, alice, year.ID, month.ID); !errors.Is(err, photos.ErrConflict) {
+	if _, err := service.UpdateDirectory(ctx, alice, year.ID, photos.DirectoryUpdate{ParentID: new(month.ID)}); !errors.Is(err, photos.ErrConflict) {
 		t.Fatalf("move into descendant error = %v, want ErrConflict", err)
 	}
-	if _, err := service.MoveDirectory(ctx, alice, year.ID, year.ID); !errors.Is(err, photos.ErrConflict) {
+	if _, err := service.UpdateDirectory(ctx, alice, year.ID, photos.DirectoryUpdate{ParentID: new(year.ID)}); !errors.Is(err, photos.ErrConflict) {
 		t.Fatalf("move into itself error = %v, want ErrConflict", err)
 	}
 	sharedDirectory, err := service.CreateDirectory(ctx, alice, shared.ID, "", "Elsewhere")
@@ -243,18 +287,23 @@ func TestVirtualDirectoriesOrganiseWithoutChangingAssets(t *testing.T) {
 	}
 
 	asset := importPhoto(t, service, alice, private.ID, month.ID, "cat.png", encodePNG(1))
-	if _, err := service.Move(ctx, alice, asset.ID, sharedDirectory.ID); !errors.Is(err, photos.ErrNotFound) {
+	rejected := photos.AssetUpdate{Name: new("dog.png"), DirectoryID: new(sharedDirectory.ID)}
+	if _, err := service.Update(ctx, alice, asset.ID, rejected); !errors.Is(err, photos.ErrNotFound) {
 		t.Fatalf("move into another library's directory error = %v, want ErrNotFound", err)
 	}
-	moved, err := service.Move(ctx, alice, asset.ID, year.ID)
+	// The rename sent with the rejected move did not apply either.
+	if got, err := service.Get(ctx, alice, asset.ID); err != nil || got.Name != "cat.png" || got.DirectoryID != month.ID {
+		t.Fatalf("after a rejected update Get() = %+v, %v", got, err)
+	}
+	moved, err := service.Update(ctx, alice, asset.ID, photos.AssetUpdate{DirectoryID: new(year.ID)})
 	if err != nil || moved.ID != asset.ID || moved.DirectoryID != year.ID {
 		t.Fatalf("Move() = %+v, %v", moved, err)
 	}
-	renamed, err := service.Rename(ctx, alice, asset.ID, "kitten.png")
+	renamed, err := service.Update(ctx, alice, asset.ID, photos.AssetUpdate{Name: new("kitten.png")})
 	if err != nil || renamed.ID != asset.ID || renamed.Name != "kitten.png" {
 		t.Fatalf("Rename() = %+v, %v", renamed, err)
 	}
-	listing, err := service.ListDirectory(ctx, alice, private.ID, year.ID)
+	listing, err := service.ListDirectory(ctx, alice, private.ID, year.ID, "", 0)
 	if err != nil || len(listing.Directories) != 1 || listing.Directories[0].ID != month.ID ||
 		len(listing.Assets) != 1 || listing.Assets[0].ID != asset.ID {
 		t.Fatalf("ListDirectory() = %+v, %v", listing, err)
@@ -263,13 +312,13 @@ func TestVirtualDirectoriesOrganiseWithoutChangingAssets(t *testing.T) {
 	if err := service.DeleteDirectory(ctx, alice, year.ID); !errors.Is(err, photos.ErrConflict) {
 		t.Fatalf("delete non-empty directory error = %v, want ErrConflict", err)
 	}
-	if _, err := service.Move(ctx, alice, asset.ID, month.ID); err != nil {
+	if _, err := service.Update(ctx, alice, asset.ID, photos.AssetUpdate{DirectoryID: new(month.ID)}); err != nil {
 		t.Fatalf("Move() error = %v", err)
 	}
 	if _, err := service.Trash(ctx, alice, asset.ID); err != nil {
 		t.Fatalf("Trash() error = %v", err)
 	}
-	child, err := service.ListDirectory(ctx, alice, private.ID, month.ID)
+	child, err := service.ListDirectory(ctx, alice, private.ID, month.ID, "", 0)
 	if err != nil || len(child.Directories) != 1 {
 		t.Fatalf("ListDirectory(month) = %+v, %v", child, err)
 	}
@@ -302,7 +351,7 @@ func TestTrashRestoreAndPurge(t *testing.T) {
 		!trashed.Trash.PurgeAfter.Equal(c.Now().Add(photos.DefaultTrashRetention)) {
 		t.Fatalf("Trash() = %+v, %v", trashed, err)
 	}
-	if _, err := service.Rename(ctx, alice, asset.ID, "x.png"); !errors.Is(err, photos.ErrConflict) {
+	if _, err := service.Update(ctx, alice, asset.ID, photos.AssetUpdate{Name: new("x.png")}); !errors.Is(err, photos.ErrConflict) {
 		t.Fatalf("Rename(trashed) error = %v, want ErrConflict", err)
 	}
 	if page, _ := service.Timeline(ctx, alice, private.ID, "", 10); len(page.Assets) != 0 {
@@ -338,7 +387,7 @@ func TestCopyIsIndependentButSharesTheOriginal(t *testing.T) {
 	if err != nil || copied.ID == source.ID || copied.LibraryID != shared.ID || copied.UploadedBy != alice.UserID {
 		t.Fatalf("Copy() = %+v, %v", copied, err)
 	}
-	if _, err := service.Rename(ctx, alice, copied.ID, "family dog.png"); err != nil {
+	if _, err := service.Update(ctx, alice, copied.ID, photos.AssetUpdate{Name: new("family dog.png")}); err != nil {
 		t.Fatalf("Rename(copy) error = %v", err)
 	}
 	if got, _ := service.Get(ctx, alice, source.ID); got.Name != "dog.png" {

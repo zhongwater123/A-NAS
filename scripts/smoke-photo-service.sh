@@ -149,6 +149,9 @@ grant_id=$(curl -fsS -b /tmp/jar -H "X-CSRF-Token: $csrf" -H 'Content-Type: appl
   -d '{"password":"e2e owner password","reason":"e2e smoke","scope":"library"}' "$api/api/v1/users/$alice_id/viewing" | json_field id)
 check "library grant opens the member's library" test "$(status_of -b /tmp/jar "$alice_timeline")" = 200
 check "library grant is read-only" test "$(status_of -X DELETE -b /tmp/jar -H "X-CSRF-Token: $csrf" "$api/api/v1/photos/assets/$alice_asset")" = 403
+shared_library=$(sed -E 's/.*"id":"(library:[0-9a-f]+)","kind":"shared".*/\1/' /tmp/alice-libraries.json)
+check "library grant cannot copy photos out" test "$(status_of -b /tmp/jar -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+  -d "{\"libraryId\":\"$shared_library\"}" "$api/api/v1/photos/assets/$alice_asset/copies")" = 403
 check "library grant does not open the private space" denied as owner ls "/srv/a-nas/data/spaces/private/alice"
 check "member is told about the viewing" grep -q admin_library_viewing <(curl -fsS -b /tmp/alice-jar "$api/api/v1/notifications")
 curl -fsS -o /dev/null -X DELETE -b /tmp/jar -H "X-CSRF-Token: $csrf" "$api/api/v1/viewing/$grant_id"

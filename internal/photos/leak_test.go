@@ -40,14 +40,17 @@ func TestAnotherMembersPrivateLibraryIsIndistinguishableFromNothing(t *testing.T
 
 	type probe func(library, directory, asset string) error
 	probes := map[string]probe{
-		"get":           func(_, _, a string) error { _, err := service.Get(ctx, namedBob, a); return err },
-		"open":          func(_, _, a string) error { _, err := service.Open(ctx, namedBob, a); return err },
-		"thumbnail":     func(_, _, a string) error { _, err := service.Thumbnail(ctx, namedBob, a); return err },
-		"timeline":      func(l, _, _ string) error { _, err := service.Timeline(ctx, namedBob, l, "", 10); return err },
-		"entries":       func(l, d, _ string) error { _, err := service.ListDirectory(ctx, namedBob, l, d); return err },
-		"trash":         func(l, _, _ string) error { _, err := service.ListTrash(ctx, namedBob, l); return err },
-		"empty trash":   func(l, _, _ string) error { _, err := service.EmptyTrash(ctx, namedBob, l); return err },
-		"rename":        func(_, _, a string) error { _, err := service.Rename(ctx, namedBob, a, "x.png"); return err },
+		"get":         func(_, _, a string) error { _, err := service.Get(ctx, namedBob, a); return err },
+		"open":        func(_, _, a string) error { _, err := service.Open(ctx, namedBob, a); return err },
+		"thumbnail":   func(_, _, a string) error { _, err := service.Thumbnail(ctx, namedBob, a); return err },
+		"timeline":    func(l, _, _ string) error { _, err := service.Timeline(ctx, namedBob, l, "", 10); return err },
+		"entries":     func(l, d, _ string) error { _, err := service.ListDirectory(ctx, namedBob, l, d, "", 0); return err },
+		"trash":       func(l, _, _ string) error { _, err := service.ListTrash(ctx, namedBob, l); return err },
+		"empty trash": func(l, _, _ string) error { _, err := service.EmptyTrash(ctx, namedBob, l); return err },
+		"rename": func(_, _, a string) error {
+			_, err := service.Update(ctx, namedBob, a, photos.AssetUpdate{Name: new("x.png")})
+			return err
+		},
 		"trash asset":   func(_, _, a string) error { _, err := service.Trash(ctx, namedBob, a); return err },
 		"restore":       func(_, _, a string) error { _, err := service.Restore(ctx, namedBob, a); return err },
 		"purge":         func(_, _, a string) error { return service.Purge(ctx, namedBob, a) },
@@ -55,10 +58,16 @@ func TestAnotherMembersPrivateLibraryIsIndistinguishableFromNothing(t *testing.T
 		"copy in":       func(l, _, _ string) error { _, err := service.Copy(ctx, namedBob, bobAsset.ID, l, ""); return err },
 		"import":        func(l, _, _ string) error { return importInto(ctx, service, namedBob, l, "") },
 		"import to dir": func(_, d, _ string) error { return importInto(ctx, service, namedBob, bobPrivate.ID, d) },
-		"move to dir":   func(_, d, _ string) error { _, err := service.Move(ctx, namedBob, bobAsset.ID, d); return err },
-		"create dir":    func(l, _, _ string) error { _, err := service.CreateDirectory(ctx, namedBob, l, "", "x"); return err },
-		"rename dir":    func(_, d, _ string) error { _, err := service.RenameDirectory(ctx, namedBob, d, "x"); return err },
-		"delete dir":    func(_, d, _ string) error { return service.DeleteDirectory(ctx, namedBob, d) },
+		"move to dir": func(_, d, _ string) error {
+			_, err := service.Update(ctx, namedBob, bobAsset.ID, photos.AssetUpdate{DirectoryID: new(d)})
+			return err
+		},
+		"create dir": func(l, _, _ string) error { _, err := service.CreateDirectory(ctx, namedBob, l, "", "x"); return err },
+		"rename dir": func(_, d, _ string) error {
+			_, err := service.UpdateDirectory(ctx, namedBob, d, photos.DirectoryUpdate{Name: new("x")})
+			return err
+		},
+		"delete dir": func(_, d, _ string) error { return service.DeleteDirectory(ctx, namedBob, d) },
 		"move dir under": func(_, d, _ string) error {
 			_, err := service.CreateDirectory(ctx, namedBob, bobPrivate.ID, d, "x")
 			return err
@@ -137,7 +146,7 @@ func TestCrossMemberDuplicateHintRevealsOnlyTheOtherMembersName(t *testing.T) {
 			return page.Assets, err
 		},
 		"entries": func() ([]photos.Asset, error) {
-			listing, err := service.ListDirectory(ctx, namedAlice, alicePrivate.ID, "")
+			listing, err := service.ListDirectory(ctx, namedAlice, alicePrivate.ID, "", "", 0)
 			return listing.Assets, err
 		},
 	} {

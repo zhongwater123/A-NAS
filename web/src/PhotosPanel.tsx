@@ -129,7 +129,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
               <div className="photo-grid">
                 {group.items.map(({ asset, index }) => (
                   <button key={asset.id} className="photo-tile" aria-label={`查看 ${asset.name}`} onClick={() => setSelected(index)}>
-                    <img src={previewURL(asset)} alt={asset.name} loading="lazy" />
+                    <img src={previewURL(asset)} alt={asset.name} loading="lazy" onError={(event) => showOriginal(event.currentTarget, asset.id)} />
                     {asset.duplicate === "duplicate" && <span className="photo-badge">重复</span>}
                   </button>
                 ))}
@@ -186,7 +186,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
                 const name = window.prompt("新的照片名称", current.name);
                 if (name && name !== current.name) void act(() => renamePhoto(current.id, name), () => loadTimeline());
               }}><Pencil size={13} />重命名</button>}
-              {library?.kind === "private" && shared && <button onClick={() => void act(() => copyPhoto(current.id, shared.id), async () => setError(""))}><Copy size={13} />复制到共享图库</button>}
+              {library?.kind === "private" && !readOnly && shared && <button onClick={() => void act(() => copyPhoto(current.id, shared.id), async () => setError(""))}><Copy size={13} />复制到共享图库</button>}
               {canChange(current) && <button className="danger-link" onClick={() => void act(() => trashPhoto(current.id), async () => { setSelected(undefined); await loadTimeline(); })}><Trash2 size={13} />移到回收站</button>}
             </div>
           </aside>
@@ -213,6 +213,13 @@ function groupByDay(assets: PhotoAsset[]) {
     else groups.push({ label, items: [{ asset, index }] });
   });
   return groups;
+}
+
+// A thumbnail reported ready can still be missing until reconciliation
+// renders it again; the original displays directly in its place.
+function showOriginal(image: HTMLImageElement, assetId: string) {
+  const original = originalURL(assetId);
+  if (image.getAttribute("src") !== original) image.src = original;
 }
 
 function formatDate(value: string) { return new Date(value).toLocaleString("zh-CN"); }
