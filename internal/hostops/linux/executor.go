@@ -150,6 +150,10 @@ func (e *Executor) SetCredential(ctx context.Context, request accounts.Credentia
 	return e.applySambaConfiguration(ctx)
 }
 
+// DataVolumeReady reports whether the intended Btrfs data volume, with its
+// identity marker, is mounted at the mount point.
+func (e *Executor) DataVolumeReady() bool { return e.dataVolumeReady() }
+
 func (e *Executor) dataVolumeReady() bool {
 	var stats syscall.Statfs_t
 	if err := syscall.Statfs(e.mountPoint, &stats); err != nil || uint64(stats.Type) != 0x9123683e {

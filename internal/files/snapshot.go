@@ -336,3 +336,22 @@ func (b *directorySnapshotBackend) Delete(_ context.Context, _ string, snapshotI
 	}
 	return os.RemoveAll(root)
 }
+
+// copyRegularFile copies one file for the development snapshot backend, which
+// runs only without a Host Agent.
+func copyRegularFile(source, destination string, mode os.FileMode) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return err
+	}
+	return output.Close()
+}

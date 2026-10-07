@@ -16,11 +16,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
 
-// transitionalServiceAccount keeps the Product Service able to read and write
-// spaces until the File Broker performs Web file operations as the signed-in
-// user (ADR 0008, issue #13). Remove every use of it with that change.
-const transitionalServiceAccount = "a-nas"
-
 const sharedSpaceID = "space:shared"
 
 // Space roots, trash directories, and their containers are owned by
@@ -30,7 +25,7 @@ const sharedSpaceID = "space:shared"
 func containerACL() string {
 	return strings.Join([]string{
 		"user::rwx", "group::---", "other::---",
-		"group:" + accounts.UsersGroup + ":--x", "user:" + transitionalServiceAccount + ":--x", "mask::--x",
+		"group:" + accounts.UsersGroup + ":--x", "mask::--x",
 	}, ",")
 }
 
@@ -46,7 +41,7 @@ func inheritedACL(entries ...string) string {
 }
 
 func privateSpaceACL(username string) string {
-	return inheritedACL("user:"+username+":rwx", "user:"+transitionalServiceAccount+":rwx")
+	return inheritedACL("user:" + username + ":rwx")
 }
 
 // sharedFolderACL lets every A-NAS account read a shared folder and grants
@@ -60,7 +55,7 @@ func sharedFolderACL(writers ...string) string {
 		}
 		entries = append(entries, writer+":rwx")
 	}
-	return inheritedACL(append(entries, "user:"+transitionalServiceAccount+":rwx")...)
+	return inheritedACL(entries...)
 }
 
 // trashRootACL lets the space's users reach their own trash directory without
@@ -68,12 +63,12 @@ func sharedFolderACL(writers ...string) string {
 func trashRootACL(principal string) string {
 	return strings.Join([]string{
 		"user::rwx", "group::---", "other::---",
-		principal + ":--x", "user:" + transitionalServiceAccount + ":rwx", "mask::rwx",
+		principal + ":--x", "mask::--x",
 	}, ",")
 }
 
 func userTrashACL(username string) string {
-	return inheritedACL("user:"+username+":rwx", "user:"+transitionalServiceAccount+":rwx")
+	return inheritedACL("user:" + username + ":rwx")
 }
 
 func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, error) {
