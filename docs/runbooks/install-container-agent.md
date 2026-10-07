@@ -1,6 +1,6 @@
 # 安装 Docker 与容器代理
 
-状态：active（适用于 ADR 0008 后的系统服务部署；Experimental NAS 验证待完成）
+状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证）
 更新时间：2026-10-08
 
 ## 目的
@@ -156,6 +156,12 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 发布探针通过 `--desktop-only` 检查健康 JSON、嵌入式桌面和 1024 字节 Range；通过 `--agent-only` 检查前两行。`bash -n` 和 ShellCheck 不能发现接口路径写错。开发机可先在具备本地 Docker 只读访问权限的环境执行 `python3 scripts/check-container-deployment-probes.py`，它使用已有 `build/anas-api`、`build/anas-container-agent` 和临时状态目录，只读取 Docker；会重现两个错误路径的 404，并用真实二进制验证探针。不要在 NAS 上运行这个开发检查。
 
 `/api/v1/containers` 与 `/api/v1/apps` 需要管理员产品会话；未带会话的 `curl` 返回未授权不能证明能力未启用。以服务、socket、环境键和登录后的 UI 共同作为完成证据。
+
+### Experimental NAS 已验证基线
+
+2026-10-08 使用本手册完成 `c902acded999` 切换：Docker 26.1.5、Compose 2.26.1、containerd、Container Agent、Host Agent、API、Kiosk 与 Samba 均 active；代理的 `/v1/snapshot`、`/v1/apps`，桌面的 `/healthz`、`/` 以及屏保 Range 请求均通过。安装过程确认 Debian 13 配合 `--no-install-recommends` 时必须显式列出 `docker-cli`。
+
+验证脚本曾因手写 `/screensaver.mp4` 和 `/v1/containers` 两个不存在的路径而触发安全回滚。恢复时保留 Docker 数据和已经安装的软件，只重新切换不可变 release；这类 404 应先核对上表的协议层级与真实路由，不要重复安装 Docker，也不要扩大账号权限。
 
 ## 回滚或恢复
 
