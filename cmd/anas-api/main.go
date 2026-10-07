@@ -171,7 +171,7 @@ func run(logger *slog.Logger) error {
 		}
 		appOptions.Host = host
 		guard := fileOptions.VolumeGuard
-		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, true) }
+		appOptions.VolumeReady = func(ctx context.Context) error { return checkAppVolume(ctx, guard, volumeRoot) }
 	}
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
@@ -236,6 +236,13 @@ func run(logger *slog.Logger) error {
 		}
 		return err
 	}
+}
+
+func checkAppVolume(ctx context.Context, guard files.VolumeGuard, volumeRoot string) error {
+	// The Product Service runs with ProtectSystem=strict and never writes the
+	// data volume directly. The Host Agent rechecks real writability before it
+	// prepares app folders, so this boundary only proves identity and presence.
+	return guard.Check(ctx, volumeRoot, false)
 }
 
 // syncIdentities converges host accounts on the control plane at startup, so

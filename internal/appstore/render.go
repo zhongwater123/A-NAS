@@ -158,6 +158,7 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 		service := project.Services[name]
 		descriptions := casaosDescriptions(service.Extensions)
 		checkService(name, service, reject)
+		applyAppIdentity(&service, identity)
 
 		volumes := make([]types.ServiceVolumeConfig, 0, len(service.Volumes))
 		for _, volume := range service.Volumes {
@@ -270,6 +271,25 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 	plan.Compose = rendered
 	sort.Slice(plan.Ports, func(i, j int) bool { return plan.Ports[i].HostPort < plan.Ports[j].HostPort })
 	return plan, nil
+}
+
+// applyAppIdentity adapts the two runtime-identity conventions accepted by
+// the reviewed catalog to the stable Linux identity allocated by the Host
+// Agent. An explicit Compose user overrides the image user, while PUID/PGID
+// are image-specific environment conventions; literal upstream values must
+// not escape the A-NAS identity boundary in either form.
+func applyAppIdentity(service *types.ServiceConfig, identity Identity) {
+	uid := strconv.Itoa(identity.UID)
+	gid := strconv.Itoa(identity.GID)
+	if strings.TrimSpace(service.User) != "" {
+		service.User = uid + ":" + gid
+	}
+	for name, value := range map[string]string{"PUID": uid, "PGID": gid} {
+		if _, declared := service.Environment[name]; declared {
+			value := value
+			service.Environment[name] = &value
+		}
+	}
 }
 
 func checkService(name string, service types.ServiceConfig, reject func(string, ...any)) {

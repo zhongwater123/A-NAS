@@ -485,6 +485,27 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByText("应用中心未启用")).toBeTruthy();
   });
 
+  it("explains when app installation is blocked by an unavailable data volume", async () => {
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      apps: async (url, init) => {
+        if (init?.method === "POST") {
+          return { ok: false, status: 423, json: async () => ({ error: { code: "volume_unavailable", message: "the data volume is not available" } }) } as Response;
+        }
+        if (url.endsWith("/plan")) return okResponse(memosPlan);
+        return okResponse(appList({}));
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
+    const store = screen.getByRole("dialog", { name: "应用中心" });
+    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
+    await user.click(within(store).getByRole("button", { name: "安装" }));
+    await user.click(await within(store).findByRole("button", { name: "确认安装" }));
+    expect((await within(store).findByRole("alert")).textContent).toContain("数据卷当前不可用");
+  });
+
   it("opens a terminal session from the desktop icon", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();

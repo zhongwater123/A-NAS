@@ -318,6 +318,7 @@ function describeError(error: unknown): string {
     port_in_use: `端口已被占用${taken ? `（${taken}）` : ""}`,
     name_in_use: `容器名已被占用${taken ? `（${taken}）` : ""}`,
     policy_violation: "该应用不符合安装安全策略",
+    volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
     apps_unavailable: "无法连接容器代理",
     network_error: "无法连接 A-NAS",
   };

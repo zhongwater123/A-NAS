@@ -22,6 +22,7 @@ name: demo
 services:
   web:
     image: example/web:1
+    user: "999:1000"
     ports:
       - target: 80
         published: "8099"
@@ -34,8 +35,8 @@ services:
       - /etc/timezone:/etc/timezone:ro
     environment:
       TZ: $TZ
-      PUID: $PUID
-      PGID: $PGID
+      PUID: "1000"
+      PGID: "1000"
 x-casaos:
   title:
     en_US: Demo
@@ -54,6 +55,7 @@ x-casaos:
 		"io.a-nas.app: demo",
 		"TZ: Asia/Shanghai",
 		"name: a-nas-demo",
+		"user: 30005:30005",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("rendered compose lacks %q:\n%s", want, compose)
@@ -74,9 +76,19 @@ x-casaos:
 	if err != nil {
 		t.Fatalf("rendered compose does not load: %v", err)
 	}
+	service := reloaded.Services["web"]
+	if service.User != "30005:30005" {
+		t.Errorf("rendered user = %q, want app identity", service.User)
+	}
+	for name := range map[string]bool{"PUID": true, "PGID": true} {
+		value := service.Environment[name]
+		if value == nil || *value != "30005" {
+			t.Errorf("rendered %s = %v, want app identity", name, value)
+		}
+	}
 	// Data-volume folders are subpaths of A-NAS volumes, which Docker resolves
 	// without following links out of them; only /etc/localtime stays a bind.
-	for _, volume := range reloaded.Services["web"].Volumes {
+	for _, volume := range service.Volumes {
 		switch {
 		case volume.Type == types.VolumeTypeBind && volume.Source != "/etc/localtime":
 			t.Errorf("%s is a bind mount", volume.Source)
