@@ -159,7 +159,8 @@ export function setSession(session?: Session) { csrfToken = session?.csrfToken ?
 // csrfHeaders lets the Docker and App Center clients send the session's CSRF token on writes.
 export function csrfHeaders(): Record<string, string> { return csrfToken ? { "X-CSRF-Token": csrfToken } : {}; }
 
-async function request<T>(path: string, init: RequestInit = {}, mutation = false): Promise<T> {
+// request sends a same-origin product API call; mutations carry the CSRF token.
+export async function request<T>(path: string, init: RequestInit = {}, mutation = false): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (mutation && csrfToken) headers.set("X-CSRF-Token", csrfToken);

@@ -39,7 +39,7 @@ rc.4 已消除空盘计划蓝屏并完成真实格式化。随后实机证据显
 2. 实现 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（统一 Linux 身份、文件系统 ACL、文件代理与管理员查看模式），取代 rc.5 中由 `a-nas` 与用户共同持有个人空间的过渡模型；实验卷只含可丢弃测试数据，不做迁移。
 3. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
 4. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复。
-5. 相册 M1 的切片 1–2 已在 [`internal/photos`](../../internal/photos/photos.go) 以与进程无关的库实现（Catalog、JPEG/PNG 受管存储、Policy、虚拟目录、回收站与崩溃对账）；下一步按[技术设计的开发切片](../architecture/photo-library.md#开发切片)做切片 3 的缩略图与持久任务表、切片 4 的 API 与 Web，再做切片 5 的 `anas-photos` 服务化。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
+5. 相册 M1 的切片 1–4 已实现：[`internal/photos`](../../internal/photos/photos.go)（Catalog、JPEG/PNG 受管存储、EXIF、缩略图持久任务、Policy、回收站与崩溃对账）、[`/api/v1/photos`](../../internal/photosapi/handler.go) 与桌面“相册”窗口；目前只在开发模式下由产品服务进程内运行，生产中返回 `photos_unavailable`。下一步按[技术设计的开发切片](../architecture/photo-library.md#开发切片)做切片 5 的 `anas-photos` 服务化（专用身份、`photos` 子卷、Host Agent 会话查询与转发）。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
 
 ## 外部条件与限制
 

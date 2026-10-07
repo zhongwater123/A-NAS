@@ -47,12 +47,13 @@ import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { PhotosPanel } from "./PhotosPanel";
 import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker" | "store";
+type WindowID = "files" | "photos" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -81,6 +82,7 @@ type WindowAction =
 
 const initialWindows: WindowModel[] = [
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
+	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
 	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2, opened: 0 },
 	{ id: "accounts", title: "账号管理", open: false, minimized: false, maximized: false, x: 330, y: 110, width: 760, height: 540, z: 2, opened: 0 },
@@ -94,6 +96,7 @@ const initialWindows: WindowModel[] = [
 
 const windowIcons: Record<WindowID, LucideIcon> = {
   files: FolderClosed,
+  photos: Image,
   trash: Trash2,
   snapshots: Camera,
   accounts: UserRound,
@@ -107,6 +110,7 @@ const windowIcons: Record<WindowID, LucideIcon> = {
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
   files: "files",
+  photos: "photos",
   trash: "trash",
   snapshots: "snapshot",
   accounts: "settings",
@@ -240,7 +244,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
       { id: "storage", label: "存储初始化", ariaLabel: "打开存储初始化", tone: "resources", icon: <Database />, active: isOpen("storage"), onClick: () => openWindow("storage") },
     ] : []),
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
-    { id: "photos", label: "相册", ariaLabel: "相册，规划中", tone: "photos", icon: <Image />, disabled: true },
+    { id: "photos", label: "相册", ariaLabel: "打开相册", tone: "photos", icon: <Image />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "backup", label: "备份", ariaLabel: "备份，规划中", tone: "backup", icon: <ShieldCheck />, disabled: true },
@@ -286,6 +290,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "resources" && <ResourcePanel host={host} />}
 			  {window.id === "settings" && <SettingsPanel state={host.snapshot} />}
 			  {window.id === "files" && <FilePanel />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "trash" && <TrashPanel />}
 			  {window.id === "snapshots" && <SnapshotPanel />}
 			  {window.id === "accounts" && <AccountsPanel currentUser={session.user} />}

@@ -5,7 +5,7 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
-    an opt-in administrator terminal, and container lifecycle actions that go through the separate
+    the managed photo library, an opt-in administrator terminal, and container lifecycle actions that go through the separate
     container agent.
 servers:
   - url: http://127.0.0.1:8080
@@ -588,6 +588,144 @@ paths:
           $ref: "#/components/responses/AppConflict"
         "503":
           $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/photos/libraries:
+    get:
+      operationId: listPhotoLibraries
+      summary: List the caller's private library, the shared library and any member library being viewed
+      responses:
+        "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PhotoLibrary" } } } } } } }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/libraries/{libraryId}/timeline:
+    get:
+      operationId: listPhotoTimeline
+      summary: List available photo assets, newest capture time first
+      parameters:
+        - { $ref: "#/components/parameters/PhotoLibraryID" }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One timeline page, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/entries:
+    get:
+      operationId: listPhotoEntries
+      summary: List one level of the library projection
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { name: directoryId, in: query, description: Empty or absent for the library root., schema: { type: string } }]
+      responses:
+        "200": { description: Virtual directories and photo assets, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoDirectoryListing" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/uploads:
+    post:
+      operationId: uploadPhoto
+      summary: Import one JPEG or PNG original; returns once the original is durable
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string }, file: { type: string, format: binary } } } } } }
+      responses:
+        "201": { description: Photo asset created, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "507": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/directories:
+    post:
+      operationId: createPhotoDirectory
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { parentId: { type: string }, name: { type: string, minLength: 1 } } } } } }
+      responses:
+        "201": { description: Virtual directory created, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoDirectory" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/trash:
+    get:
+      operationId: listPhotoTrash
+      summary: List trashed photo assets the caller may restore or purge
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }]
+      responses:
+        "200": { description: Trashed photo assets, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } } } } } } }
+    delete:
+      operationId: emptyPhotoTrash
+      summary: Permanently delete every trashed photo asset the caller may purge
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: Number of purged assets, content: { application/json: { schema: { type: object, additionalProperties: false, required: [purged], properties: { purged: { type: integer, minimum: 0 } } } } } }
+  /api/v1/photos/directories/{directoryId}:
+    patch:
+      operationId: changePhotoDirectory
+      parameters: [{ $ref: "#/components/parameters/PhotoDirectoryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1 }, parentId: { type: string, description: Empty for the library root. } } } } } }
+      responses:
+        "200": { description: Virtual directory changed, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoDirectory" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deletePhotoDirectory
+      parameters: [{ $ref: "#/components/parameters/PhotoDirectoryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Empty virtual directory removed }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}:
+    get:
+      operationId: getPhotoAsset
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Photo asset, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: changePhotoAsset
+      summary: Rename an asset and/or move it to another virtual directory of its library
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1 }, directoryId: { type: string, description: Empty for the library root. } } } } } }
+      responses:
+        "200": { description: Photo asset changed, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: trashPhotoAsset
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: Photo asset moved to trash, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/original:
+    get:
+      operationId: getPhotoOriginal
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: download, in: query, schema: { type: string, enum: ["1"] } }, { name: Range, in: header, schema: { type: string } }]
+      responses:
+        "200": { description: "The original, inline unless download=1", content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+        "206": { description: Part of the original, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/thumbnail:
+    get:
+      operationId: getPhotoThumbnail
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Upright JPEG thumbnail at most 512 pixels on its longer side, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "404": { description: "Not found, or thumbnail_unavailable while it is pending or failed (use the original)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/assets/{assetId}/copies:
+    post:
+      operationId: copyPhotoAsset
+      summary: Create an independent photo asset that reuses the original's bytes
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [libraryId], properties: { libraryId: { type: string }, directoryId: { type: string } } } } } }
+      responses:
+        "201": { description: Photo asset copied, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/restore:
+    post:
+      operationId: restorePhotoAsset
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: Photo asset restored, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/trash/{assetId}:
+    delete:
+      operationId: purgePhotoAsset
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Photo asset permanently deleted }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
@@ -658,6 +796,9 @@ components:
     SpaceID: { name: spaceId, in: path, required: true, schema: { type: string } }
     FileID: { name: fileId, in: path, required: true, schema: { type: string } }
     TrashID: { name: trashId, in: path, required: true, schema: { type: string } }
+    PhotoLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
+    PhotoDirectoryID: { name: directoryId, in: path, required: true, schema: { type: string } }
+    PhotoAssetID: { name: assetId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
     AppId:
       name: appId
@@ -1456,6 +1597,67 @@ components:
           pattern: "^[a-f0-9]{64}$"
         compose:
           type: string
+    PhotoLibrary:
+      type: object
+      additionalProperties: false
+      required: [id, kind, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [private, shared] }
+        ownerUserId: { type: string }
+        createdAt: { type: string, format: date-time }
+        viewing: { type: boolean, description: True when the caller sees this member library only through Administrative Viewing Mode; read-only. }
+    PhotoDirectory:
+      type: object
+      additionalProperties: false
+      required: [id, libraryId, name, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        parentId: { type: string }
+        name: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    PhotoAsset:
+      type: object
+      additionalProperties: false
+      required: [id, libraryId, name, mediaType, sizeBytes, uploadedBy, importedAt, width, height, thumbnail]
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        directoryId: { type: string }
+        name: { type: string }
+        mediaType: { type: string, enum: [image/jpeg, image/png] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        uploadedBy: { type: string }
+        importedAt: { type: string, format: date-time }
+        takenAt: { type: string, format: date-time, description: Capture time from the original's EXIF. }
+        width: { type: integer, minimum: 0, description: Upright display width; 0 when unknown. }
+        height: { type: integer, minimum: 0, description: Upright display height; 0 when unknown. }
+        thumbnail: { type: string, enum: [ready, pending, failed] }
+        duplicate: { type: string, enum: [first, duplicate], description: Role among assets of the same library with identical originals. }
+        trash:
+          type: object
+          additionalProperties: false
+          required: [trashedAt, trashedBy, purgeAfter]
+          properties:
+            trashedAt: { type: string, format: date-time }
+            trashedBy: { type: string }
+            purgeAfter: { type: string, format: date-time }
+    PhotoTimeline:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
+        next: { type: string, description: Cursor for the next page; absent on the last page. }
+    PhotoDirectoryListing:
+      type: object
+      additionalProperties: false
+      required: [directories, assets]
+      properties:
+        directories: { type: array, items: { $ref: "#/components/schemas/PhotoDirectory" } }
+        assets: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
     TerminalStatusResponse:
       type: object
       additionalProperties: false

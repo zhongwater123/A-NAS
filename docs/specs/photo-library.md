@@ -410,5 +410,5 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 - ADR：[受管图库与不可变内容对象](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 研究：[本地照片 AI 模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md)
-- 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy 与崩溃对账；尚未接入服务、API 与 Web）
-- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)
+- 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/PhotosPanel.tsx)；生产中的相册服务进程尚未实现
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/PhotosPanel.test.tsx)

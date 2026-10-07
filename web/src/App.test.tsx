@@ -156,14 +156,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.getByRole("option", { name: "共享空间" })).toBeTruthy();
   });
 
-  it("keeps photos planned while enabling trash, snapshots, accounts, and storage", async () => {
-    installAPI(); render(<App />);
+  it("enables photos, trash, snapshots, accounts, and storage", async () => {
+    installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开文件快照" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开账号管理" })).toBeTruthy();
     expect(within(desktop).getByRole("button", { name: "打开存储初始化" })).toBeTruthy();
-    expect(within(desktop).getByRole("button", { name: "相册，规划中" }).hasAttribute("disabled")).toBe(true);
+    await user.click(within(desktop).getByRole("button", { name: "打开相册" }));
+    expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
   it("keeps the desktop usable when a blank-disk plan contains legacy null arrays", async () => {

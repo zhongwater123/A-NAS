@@ -29,6 +29,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/webui"
@@ -108,6 +110,17 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
+	// The Product Service cannot reach the data volume in production; there
+	// the photo service owns the photos subvolume under its own identity
+	// (ADR 0011) and the photo API answers photos_unavailable until it runs.
+	var photoService *photos.Service
+	if !live {
+		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{})
+		if err != nil {
+			return err
+		}
+		defer photoService.Close()
+	}
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -137,6 +150,7 @@ func run(logger *slog.Logger) error {
 		Terminal:   terminals,
 		Containers: containersapi.New(containerManager, containerSource, logger),
 		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		Photos:     photosapi.New(photoService, logger),
 		Logger:     logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
@@ -153,6 +167,12 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
+	if photoService != nil {
+		go photoService.RunMedia(ctx, time.Minute, func(err error) {
+			logger.ErrorContext(ctx, "photo media job failed", "error", err)
+		})
+		go runPhotoMaintenance(ctx, photoService, logger)
+	}
 	listenError := make(chan error, 1)
 	go func() {
 		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled, "containers", containerManager != nil)
@@ -209,6 +229,28 @@ func runDirectoryReconciliation(ctx context.Context, accountService *accounts.Se
 					logger.ErrorContext(ctx, "directory reconciliation failed", "user_id", session.User.ID, "error", err)
 				}
 			}
+		}
+	}
+}
+
+// runPhotoMaintenance repairs the photo store after an unclean stop and then
+// expires trashed photos hourly. Neither needs a user session.
+func runPhotoMaintenance(ctx context.Context, photoService *photos.Service, logger *slog.Logger) {
+	if report, err := photoService.Reconcile(ctx); err != nil {
+		logger.ErrorContext(ctx, "photo reconciliation failed", "error", err)
+	} else if report != (photos.ReconcileReport{}) {
+		logger.InfoContext(ctx, "photo store reconciled", "report", report)
+	}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if _, err := photoService.ExpireTrash(ctx); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "photo trash expiry failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
@@ -32,7 +34,10 @@ type ProductDependencies struct {
 	// manage Docker, so only administrators reach them (ADR 0008).
 	Containers http.Handler
 	Apps       http.Handler
-	Logger     *slog.Logger
+	// Photos serves /api/v1/photos to every signed-in user; it receives the
+	// caller as a photos.Principal and enforces the photo Policy itself.
+	Photos http.Handler
+	Logger *slog.Logger
 }
 
 type productHandler struct {
@@ -43,6 +48,7 @@ type productHandler struct {
 	terminal   http.Handler
 	containers http.Handler
 	apps       http.Handler
+	photos     http.Handler
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -55,8 +61,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
-		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, logger: logger,
-		mux: http.NewServeMux(),
+		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
+		photos: dependencies.Photos, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -69,6 +75,9 @@ func (h *productHandler) routes() {
 			h.mux.Handle(prefix, h.withAdministrator(handler))
 			h.mux.Handle(prefix+"/", h.withAdministrator(handler))
 		}
+	}
+	if h.photos != nil {
+		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
 	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)
@@ -779,6 +788,23 @@ func (h *productHandler) handleEndViewing(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// withPhotoPrincipal passes the signed-in user to the photo API, which applies
+// its own Policy; writes still need the session's CSRF token.
+func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc {
+	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+		principal := photos.Principal{UserID: session.User.ID, Admin: session.User.Role == accounts.RoleAdmin}
+		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
+	}
+	read, write := h.withSession(serve), h.withMutation(serve)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			read(w, r)
+			return
+		}
+		write(w, r)
+	}
 }
 
 func (h *productHandler) withMutation(next func(http.ResponseWriter, *http.Request, accounts.Session)) http.HandlerFunc {

@@ -141,7 +141,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 1. **Catalog**：图库、资产、对象引用、重复组、虚拟目录、相册、回收站和用户元数据；版本化 migration 与 Policy 表格测试（所有者、其他成员、管理员、持有查看授权的管理员 × 私有图库、共享图库中自己或他人上传的照片 × 各操作）。
 2. **Managed storage**：流式导入、staging 刷新后原子发布并刷新目录、内容对象复用、崩溃对账、容量保护（沿用文件服务“保留 5% 且至少 10 GiB”）、故障注入测试和临时目录 Adapter；不依赖真实数据盘。
 3. **媒体派生与任务表**：缩略图、EXIF 方向与基础元数据，以及后续 AI 共用的持久任务、租约与派生版本。
-4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、相册副本、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件大小上限在上传接口实现前确定；Web 桌面启用现有“相册”入口。
+4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、相册副本、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件大小上限在上传接口实现前确定；Web 桌面启用现有“相册”入口。`internal/photosapi` 不自行认证，只信任包装它的一方放入的 `photos.Principal`：开发模式下产品服务从会话构造并检查 CSRF；切片 5 起由相册服务经 Host Agent 会话查询构造。原图与缩略图以 `private, no-cache` 返回，访问结束后浏览器必须重新验证。
 5. **服务化与部署**：`anas-photos` 进程与 systemd 单元、`a-nas-photos` 固定身份、Host Agent 创建 `photos` 子卷并修复漂移、会话查询接口、`anas-api` 转发、`make ops-check` 与部署手册。
 6. **多用户权限**：私有图库管理员查看、共享图库上传者与管理员权限、跨成员重复提示，以及列表、缩略图、计数和错误信息的泄漏测试。
 7. **M1 实机闸门**：真实数据卷上的强制终止与断电对账、卷离线、容量不足，以及 4 名成员、20,000 张合成照片的列表与权限性能。
@@ -194,5 +194,5 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - [统一身份与文件授权规格](../specs/unified-identity-and-file-acl.md)
 - [本地照片 AI 模型与 Runtime 研究](../research/photo-ai-model-runtime-selection.md)
 - [领域语言](../../CONTEXT.md)
-- 代码：[`internal/photos`](../../internal/photos/photos.go)；Policy 见 [`policy.go`](../../internal/photos/policy.go)，崩溃对账见 [`reconcile.go`](../../internal/photos/reconcile.go)
-- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)
+- 代码：[`internal/photos`](../../internal/photos/photos.go)；Policy 见 [`policy.go`](../../internal/photos/policy.go)，缩略图任务见 [`jobs.go`](../../internal/photos/jobs.go)，崩溃对账见 [`reconcile.go`](../../internal/photos/reconcile.go)；接口见 [`internal/photosapi`](../../internal/photosapi/handler.go) 与 [`api/openapi.yaml`](../../api/openapi.yaml)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[迁移](../../internal/photos/migrate_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[API](../../internal/photosapi/handler_test.go)
