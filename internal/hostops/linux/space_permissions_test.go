@@ -7,28 +7,30 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
 
-func TestMaterializeRegisteredSpacesRepairsContainerPermissions(t *testing.T) {
+func TestMaterializeRegisteredSpacesAppliesTheACLLayout(t *testing.T) {
 	mountPoint := filepath.Join(t.TempDir(), "data")
 	privateRoot := filepath.Join(mountPoint, "spaces", "private", "alice")
 	sharedRoot := filepath.Join(mountPoint, "spaces", "shared")
 	for _, root := range []string{privateRoot, sharedRoot} {
+		// An rc.5 volume already has the space roots.
 		if err := os.MkdirAll(root, 0o750); err != nil {
-			t.Fatalf("create existing rc4 layout: %v", err)
+			t.Fatalf("create existing layout: %v", err)
 		}
 	}
 	runner := &spacePermissionRunner{}
-	executor := NewExecutor(nil, runner, Options{
-		SystemRoot: t.TempDir(),
-		MountPoint: mountPoint,
-	})
-	executor.spaceRoots = map[string]string{
-		"space:alice":  privateRoot,
-		"space:shared": sharedRoot,
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	executor.spaceRoots = map[string]string{"space:alice": privateRoot, sharedSpaceID: sharedRoot}
+	executor.identities = map[string]identityRecord{
+		"alice": {UID: 20101, Role: accounts.RoleMember, Enabled: true},
+		"bob":   {UID: 20102, Role: accounts.RoleMember, Enabled: true},
 	}
 
-	if err := executor.materializeRegisteredSpaces(context.Background()); err != nil {
+	repaired, err := executor.materializeRegisteredSpaces(context.Background())
+	if err != nil {
 		t.Fatalf("materializeRegisteredSpaces() error = %v", err)
 	}
 
@@ -36,35 +38,72 @@ func TestMaterializeRegisteredSpacesRepairsContainerPermissions(t *testing.T) {
 	privateContainer := filepath.Join(spacesRoot, "private")
 	privateTrash := filepath.Join(privateRoot, ".a-nas-trash")
 	sharedTrash := filepath.Join(sharedRoot, ".a-nas-trash")
-	privateACL := "user::rwx,user:alice:rwx,group::rwx,mask::rwx,other::---," +
-		"default:user::rwx,default:user:alice:rwx,default:group::rwx,default:mask::rwx,default:other::---"
-	for _, command := range []spacePermissionCommand{
-		{name: "chown", args: []string{"root:a-nas-members", spacesRoot}},
-		{name: "chmod", args: []string{"0710", spacesRoot}},
-		{name: "chown", args: []string{"root:a-nas-members", privateContainer}},
-		{name: "chmod", args: []string{"0710", privateContainer}},
-		{name: "chown", args: []string{"alice:a-nas", privateRoot}},
-		{name: "chmod", args: []string{"2770", privateRoot}},
-		{name: "setfacl", args: []string{"--modify", privateACL, privateRoot}},
-		{name: "chown", args: []string{"alice:a-nas", privateTrash}},
-		{name: "chmod", args: []string{"2770", privateTrash}},
-		{name: "setfacl", args: []string{"--modify", privateACL, privateTrash}},
-		{name: "chown", args: []string{"root:a-nas-members", sharedRoot}},
-		{name: "chmod", args: []string{"2770", sharedRoot}},
-		{name: "chown", args: []string{"root:a-nas-members", sharedTrash}},
-		{name: "chmod", args: []string{"2770", sharedTrash}},
-	} {
-		if !slices.ContainsFunc(runner.commands, func(got spacePermissionCommand) bool {
-			return got.name == command.name && slices.Equal(got.args, command.args)
-		}) {
-			t.Errorf("missing command %s %v; got %#v", command.name, command.args, runner.commands)
+	want := map[string]string{
+		spacesRoot:       "user::rwx,group::---,other::---,group:a-nas-users:--x,user:a-nas:--x,mask::--x",
+		privateContainer: "user::rwx,group::---,other::---,group:a-nas-users:--x,user:a-nas:--x,mask::--x",
+		privateRoot: "user::rwx,group::---,other::---,mask::rwx,user:alice:rwx,user:a-nas:rwx," +
+			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:user:alice:rwx,default:user:a-nas:rwx",
+		privateTrash: "user::rwx,group::---,other::---,user:alice:--x,user:a-nas:rwx,mask::rwx",
+		filepath.Join(privateTrash, "alice"): "user::rwx,group::---,other::---,mask::rwx,user:alice:rwx,user:a-nas:rwx," +
+			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:user:alice:rwx,default:user:a-nas:rwx",
+		sharedRoot: "user::rwx,group::---,other::---,mask::rwx,group:a-nas-users:rwx,user:a-nas:rwx," +
+			"default:user::rwx,default:group::---,default:other::---,default:mask::rwx,default:group:a-nas-users:rwx,default:user:a-nas:rwx",
+		sharedTrash:                         "user::rwx,group::---,other::---,group:a-nas-users:--x,user:a-nas:rwx,mask::rwx",
+		filepath.Join(sharedTrash, "alice"): userTrashACL("alice"),
+		filepath.Join(sharedTrash, "bob"):   userTrashACL("bob"),
+	}
+	for path, acl := range want {
+		for _, command := range []spacePermissionCommand{
+			{name: "chown", args: []string{"root:root", path}},
+			{name: "chmod", args: []string{"g-s", path}},
+			{name: "setfacl", args: []string{"--set", acl, path}},
+		} {
+			if !runner.ran(command) {
+				t.Errorf("missing %s %v", command.name, command.args)
+			}
+		}
+		if info, err := os.Lstat(path); err != nil || !info.IsDir() {
+			t.Errorf("%s was not materialized as a directory: %v", path, err)
 		}
 	}
-	for _, path := range []string{privateTrash, sharedTrash} {
-		info, err := os.Lstat(path)
-		if err != nil || !info.IsDir() {
-			t.Errorf("trash root %q was not materialized as a directory: %v", path, err)
+	if runner.ran(spacePermissionCommand{name: "setfacl", args: []string{"--set", userTrashACL("bob"), filepath.Join(privateTrash, "bob")}}) {
+		t.Error("another member received a trash directory inside alice's private space")
+	}
+	if !runner.ran(spacePermissionCommand{name: "setfacl", args: []string{"--modify", "group:a-nas-users:--x", filepath.Dir(mountPoint)}}) {
+		t.Error("A-NAS accounts cannot traverse to the data-volume mount point")
+	}
+	for _, command := range runner.commands {
+		if strings.Contains(strings.Join(command.args, " "), "a-nas-members") {
+			t.Errorf("legacy sharing group is still used: %v", command)
 		}
+	}
+	slices.Sort(repaired)
+	if wantRepaired := []string{sharedRoot, privateRoot, spacesRoot, privateContainer}; !sameStrings(repaired, wantRepaired) {
+		t.Errorf("repaired = %v, want the pre-existing directories %v", repaired, wantRepaired)
+	}
+}
+
+func TestSharedFolderACLGrantsReadToAllAndWriteToListedPrincipals(t *testing.T) {
+	acl := sharedFolderACL("user:alice")
+	for _, entry := range []string{
+		"group:a-nas-users:r-x", "user:alice:rwx", "default:group:a-nas-users:r-x", "default:user:alice:rwx",
+	} {
+		if !slices.Contains(strings.Split(acl, ","), entry) {
+			t.Errorf("read-only shared folder ACL %q is missing %q", acl, entry)
+		}
+	}
+	if strings.Contains(sharedFolderACL("group:a-nas-users"), "group:a-nas-users:r-x") {
+		t.Error("a writable shared folder still lists a read-only entry for all accounts")
+	}
+}
+
+func TestSameACLIgnoresOrderAndEffectiveComments(t *testing.T) {
+	getfacl := "user::rwx\nuser:alice:rwx\t\t#effective:r-x\ngroup::---\nmask::r-x\nother::---\n\n"
+	if !sameACL(getfacl, "other::---,mask::r-x,group::---,user:alice:rwx,user::rwx") {
+		t.Fatal("equivalent ACLs compared as different")
+	}
+	if sameACL(getfacl, "user::rwx,group::---,mask::r-x,other::---") {
+		t.Fatal("an extra entry was ignored")
 	}
 }
 
@@ -73,19 +112,29 @@ func TestMaterializeRegisteredSpacesRejectsSymlinkContainer(t *testing.T) {
 	if err := os.MkdirAll(mountPoint, 0o750); err != nil {
 		t.Fatalf("create mount point: %v", err)
 	}
-	if err := os.Symlink(t.TempDir(), filepath.Join(mountPoint, "spaces")); err != nil {
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(mountPoint, "spaces")); err != nil {
 		t.Fatalf("create spaces symlink: %v", err)
 	}
 	runner := &spacePermissionRunner{}
 	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
 
-	err := executor.materializeRegisteredSpaces(context.Background())
+	_, err := executor.materializeRegisteredSpaces(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "not a safe directory") {
 		t.Fatalf("materializeRegisteredSpaces() error = %v, want unsafe-directory rejection", err)
 	}
-	if len(runner.commands) != 0 {
-		t.Fatalf("unsafe container reached privileged commands: %#v", runner.commands)
+	for _, command := range runner.commands {
+		if slices.Contains(command.args, filepath.Join(mountPoint, "spaces")) || slices.Contains(command.args, target) {
+			t.Fatalf("unsafe container reached a privileged command: %#v", command)
+		}
 	}
+}
+
+func sameStrings(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
 }
 
 type spacePermissionCommand struct {
@@ -95,6 +144,12 @@ type spacePermissionCommand struct {
 
 type spacePermissionRunner struct {
 	commands []spacePermissionCommand
+}
+
+func (r *spacePermissionRunner) ran(command spacePermissionCommand) bool {
+	return slices.ContainsFunc(r.commands, func(got spacePermissionCommand) bool {
+		return got.name == command.name && slices.Equal(got.args, command.args)
+	})
 }
 
 func (r *spacePermissionRunner) Run(_ context.Context, name string, args []string, _ string) ([]byte, error) {

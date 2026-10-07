@@ -24,10 +24,7 @@ type identityRecord struct {
 	Enabled bool          `json:"enabled"`
 }
 
-const (
-	identityManifestName = ".a-nas-identities.json"
-	legacyMembersGroup   = "a-nas-members"
-)
+const identityManifestName = ".a-nas-identities.json"
 
 var fixedGroups = []struct {
 	name string
@@ -88,9 +85,6 @@ func validIdentity(identity accounts.Identity) error {
 }
 
 func (e *Executor) ensureFixedGroups(ctx context.Context) error {
-	if output, err := e.runner.Run(ctx, "groupadd", []string{"--force", legacyMembersGroup}, ""); err != nil {
-		return commandError("ensure legacy sharing group", err, output)
-	}
 	for _, group := range fixedGroups {
 		fields, found, err := e.getent(ctx, "group", group.name)
 		if err != nil {
@@ -151,9 +145,7 @@ func (e *Executor) ensureIdentity(ctx context.Context, identity accounts.Identit
 			return commandError("create A-NAS identity", err, output)
 		}
 	}
-	// a-nas-members is the rc.5 sharing group that the space layout still
-	// uses; the ACL layout of ADR 0008 removes it.
-	groups := accounts.UsersGroup + "," + legacyMembersGroup
+	groups := accounts.UsersGroup
 	if identity.Role == accounts.RoleAdmin {
 		groups += "," + accounts.AdminsGroup
 	}

@@ -69,12 +69,9 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
-	trashRootInfo, err := os.Stat(filepath.Join(volumeRoot, "spaces", "private", "alice", ".a-nas-trash"))
-	if err != nil {
-		t.Fatalf("stat shared Web/SMB trash root: %v", err)
-	}
-	if got, want := trashRootInfo.Mode().Perm(), os.FileMode(0o770); got != want {
-		t.Fatalf("trash root mode = %04o, want %04o", got, want)
+	userTrash := filepath.Join(volumeRoot, "spaces", "private", "alice", ".a-nas-trash", "alice")
+	if items, err := os.ReadDir(userTrash); err != nil || len(items) != 1 {
+		t.Fatalf("Web delete did not use the shared Web/SMB per-user trash: %v %v", items, err)
 	}
 	entries, err = service.List(ctx, alice, privateSpace.ID, directory.ID)
 	if err != nil {
@@ -95,6 +92,9 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	gotContents, err := io.ReadAll(content.Reader)
 	if err != nil {
 		t.Fatalf("read restored content: %v", err)
+	}
+	if items, err := os.ReadDir(userTrash); err != nil || len(items) != 0 {
+		t.Fatalf("restore left a trash container or removed the per-user trash: %v %v", items, err)
 	}
 	if got, want := string(gotContents), "hello A-NAS"; got != want {
 		t.Fatalf("restored content = %q, want %q", got, want)

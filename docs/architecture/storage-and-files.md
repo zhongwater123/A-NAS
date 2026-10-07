@@ -27,9 +27,20 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec`。
 - 根目录必须同时是 Btrfs 且存在 root 创建的 `.a-nas-volume.json`。缺少任一证据时，文件服务返回 `volume_unavailable`，不会创建空间目录。
 - 个人空间位于 `spaces/private/<username>`，共享空间位于 `spaces/shared`；公开接口只使用不透明空间 ID。
-- `spaces` 与 `spaces/private` 使用 `root:a-nas-members 0710`，允许 Product Service 和已注册 SMB 账号穿过但不能列出个人空间容器。个人空间使用 `username:a-nas 2770` 与访问/默认 POSIX ACL，让该用户和 `a-nas` 对新文件保持共同读写；Shared 使用 `root:a-nas-members 2770`。
-- Web 删除移动到空间内 `.a-nas-trash/<trash-id>/content`；Samba `recycle` 写入 `.a-nas-trash/<username>`，目录对账把它导入同一回收目录。
-- `.a-nas-trash` 由 Host Agent 在 materialize 时预建并保护；Web 与 Samba 的回收站子目录均使用 `0770`，不得由任一写入方独占为 `0700`。Host Agent 启动时幂等对账已注册空间，修复已初始化卷的容器权限并刷新经过 `testparm` 的 Samba 配置。
+- 授权只由 POSIX ACL 表达（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。空间根目录、回收站目录及其容器均为 `root:root`、无 setgid，权限只在这些目录上设置，内容靠默认 ACL 继承，从不递归改写：
+
+  | 目录 | 访问 ACL | 默认 ACL |
+  |---|---|---|
+  | `spaces`、`spaces/private` | `a-nas-users` 与 `a-nas` 仅 `--x`（可穿过、不可列出） | 无 |
+  | `spaces/private/<username>` | 所有者 `rwx` | 同访问 ACL |
+  | `spaces/shared` | `a-nas-users` `rwx`（只读共享文件夹为 `r-x`，另授写入者 `rwx`） | 同访问 ACL |
+  | `<空间>/.a-nas-trash` | 该空间的用户仅 `--x` | 无 |
+  | `<空间>/.a-nas-trash/<username>` | 该用户 `rwx` | 同访问 ACL |
+
+  过渡期内每个空间与回收站另含 `user:a-nas`，因为 Web 仍由 Product Service 代为读写；文件代理（[#13](https://github.com/zhongwater123/A-NAS/issues/13)）落地后移除。数据卷挂载点的父目录 `/srv/a-nas` 授予 `a-nas-users` 穿过权限，供 smbd 切换到用户身份后进入共享。
+- Samba 以登录用户身份读写：`inherit acls = yes`、`nt acl support = no`、`hide unreadable = yes`，不使用 `force group`；`create mask = 0660`、`directory mask = 0770` 决定新条目的 ACL mask，缺省 `0744` 会让继承的写权限失效。
+- Web 删除与 Samba `recycle`（`keeptree`）统一写入 `<空间>/.a-nas-trash/<username>`：Web 条目为 `<trash-id>/content`，SMB 删除保留原相对路径并按文件导入回收站，原目录仍存在时恢复到原目录。每个用户的回收目录由 Host Agent 预建，恢复或清除只删除其下的空目录，不删除用户回收目录本身。共享空间中他人删除的文件对其他成员不可见。
+- Host Agent 启动时幂等对账已注册空间并刷新经过 `testparm` 的 Samba 配置；之后每 15 分钟以 `getfacl` 比对上述目录，修复属主、setgid 或 ACL 漂移并在 journal 记录 `repaired drifted data-volume permissions`。
 - 只读快照位于 `.a-nas-snapshots/<snapshot-hash>`，不由 Samba 发布；恢复复制到普通空间的新位置。
 
 ## 身份与一致性

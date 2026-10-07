@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -356,27 +357,22 @@ func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entr
 		return TrashItem{}, err
 	}
 	trashID := s.randomID("trash")
-	trashRelative := filepath.ToSlash(filepath.Join(".a-nas-trash", safeSegment(trashID), "content"))
-	trashRoot := filepath.Join(root, ".a-nas-trash")
-	trashContainer := filepath.Join(root, filepath.FromSlash(filepath.Dir(trashRelative)))
-	trashRootCreated := false
-	if info, err := os.Lstat(trashRoot); errors.Is(err, os.ErrNotExist) {
-		trashRootCreated = true
-	} else if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return TrashItem{}, ErrUnsupportedType
-	}
-	if err := os.MkdirAll(trashContainer, 0o770); err != nil {
-		return TrashItem{}, err
-	}
-	if trashRootCreated {
-		if err := os.Chmod(trashRoot, 0o770); err != nil {
-			return TrashItem{}, err
+	// Web and Samba recycle share .a-nas-trash/<username>; the Host Agent
+	// prepares it with the user's ACL. Creating it here is only a fallback for
+	// development volumes without a Host Agent.
+	userTrash := filepath.Join(".a-nas-trash", safeSegment(actor.Username))
+	trashRelative := filepath.ToSlash(filepath.Join(userTrash, safeSegment(trashID), "content"))
+	for _, directory := range []string{".a-nas-trash", userTrash} {
+		path := filepath.Join(root, directory)
+		if info, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			if err := os.Mkdir(path, 0o770); err != nil {
+				return TrashItem{}, err
+			}
+		} else if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return TrashItem{}, ErrUnsupportedType
 		}
 	}
-	if info, err := os.Lstat(trashContainer); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return TrashItem{}, ErrUnsupportedType
-	}
-	if err := os.Chmod(trashContainer, 0o770); err != nil {
+	if err := os.Mkdir(filepath.Join(root, filepath.FromSlash(filepath.Dir(trashRelative))), 0o770); err != nil {
 		return TrashItem{}, err
 	}
 	destination := filepath.Join(root, filepath.FromSlash(trashRelative))
@@ -520,6 +516,7 @@ FROM trash WHERE space_id = ? AND deleted_at <= ?`, spaceID, cutoff)
 		if err := os.RemoveAll(path); err != nil {
 			return err
 		}
+		removeEmptyTrashParents(root, item.relative)
 		tx, err := s.store.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -539,6 +536,10 @@ FROM trash WHERE space_id = ? AND deleted_at <= ?`, spaceID, cutoff)
 	return nil
 }
 
+// reconcileSambaTrash imports files that Samba recycle moved into
+// .a-nas-trash/<username>. recycle:keeptree mirrors the deleted path, so every
+// file becomes its own trash item and its original directory is restored
+// when it still exists. Web trash items in the same directory are skipped.
 func (s *Service) reconcileSambaTrash(ctx context.Context, space accounts.Space, root string) error {
 	resolver, ok := s.policy.(trashActorResolver)
 	if !ok {
@@ -552,6 +553,10 @@ func (s *Service) reconcileSambaTrash(ctx context.Context, space accounts.Space,
 	if err != nil {
 		return err
 	}
+	known, err := s.trashPaths(ctx, space.ID)
+	if err != nil {
+		return err
+	}
 	for _, userDirectory := range users {
 		if !userDirectory.IsDir() || safeSegment(userDirectory.Name()) != userDirectory.Name() {
 			continue
@@ -561,72 +566,124 @@ func (s *Service) reconcileSambaTrash(ctx context.Context, space accounts.Space,
 			continue
 		}
 		userRoot := filepath.Join(recycleRoot, userDirectory.Name())
-		items, err := os.ReadDir(userRoot)
+		err = filepath.WalkDir(userRoot, func(path string, item fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if path == userRoot {
+				return nil
+			}
+			trashRelative, relErr := filepath.Rel(root, path)
+			if relErr != nil || !withinRoot(root, path) {
+				return filepath.SkipDir
+			}
+			trashRelative = filepath.ToSlash(trashRelative)
+			if known[trashRelative] {
+				if item.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !item.Type().IsRegular() {
+				return nil
+			}
+			deletedFrom, _ := filepath.Rel(userRoot, filepath.Dir(path))
+			return s.importSambaTrashFile(ctx, space.ID, path, trashRelative, filepath.ToSlash(deletedFrom), deletedBy)
+		})
 		if err != nil {
 			return err
 		}
-		for _, item := range items {
-			path := filepath.Join(userRoot, item.Name())
-			trashRelative, relErr := filepath.Rel(root, path)
-			if relErr != nil || !withinRoot(root, path) {
-				continue
-			}
-			trashRelative = filepath.ToSlash(trashRelative)
-			var count int
-			if err := s.store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM trash WHERE space_id = ? AND trash_relative_path = ?", space.ID, trashRelative).Scan(&count); err != nil {
-				return err
-			}
-			if count != 0 {
-				continue
-			}
-			info, err := os.Lstat(path)
-			if err != nil || info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
-				continue
-			}
-			inode, err := inodeOf(info)
-			if err != nil {
-				return err
-			}
-			trashID := s.randomID("trash")
-			entryID := s.randomID("file")
-			kind := EntryKindFile
-			if info.IsDir() {
-				kind = EntryKindDirectory
-			}
-			var oldRelative string
-			queryErr := s.store.db.QueryRowContext(ctx, "SELECT id, relative_path FROM entries WHERE space_id = ? AND inode = ?", space.ID, inode).Scan(&entryID, &oldRelative)
-			tx, err := s.store.db.BeginTx(ctx, nil)
-			if err != nil {
-				return err
-			}
-			if queryErr == nil {
-				_, err = tx.ExecContext(ctx, `UPDATE entries
-SET relative_path = ? || substr(relative_path, length(?) + 1), trashed = 1, trash_id = ?
-WHERE space_id = ? AND (relative_path = ? OR substr(relative_path, 1, length(?) + 1) = ? || '/')`,
-					trashRelative, oldRelative, trashID, space.ID, oldRelative, oldRelative, oldRelative)
-			} else if errors.Is(queryErr, sql.ErrNoRows) {
-				_, err = tx.ExecContext(ctx, `INSERT INTO entries
-(id, space_id, parent_id, name, kind, relative_path, inode, size_bytes, modified_at, trashed, trash_id)
-VALUES(?,?,?,?,?,?,?,?,?,1,?)`, entryID, space.ID, "", info.Name(), kind, trashRelative, inode, info.Size(), formatTime(info.ModTime()), trashID)
-			} else {
-				err = queryErr
-			}
-			if err == nil {
-				_, err = tx.ExecContext(ctx, `INSERT INTO trash
-(id, entry_id, space_id, original_parent_id, original_name, trash_relative_path, deleted_by, deleted_at)
-VALUES(?,?,?,?,?,?,?,?)`, trashID, entryID, space.ID, "", info.Name(), trashRelative, deletedBy, formatTime(s.now().UTC()))
-			}
-			if err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			_ = s.audit(ctx, deletedBy, "file.trashed.smb", entryID, item.Name())
-		}
 	}
 	return nil
+}
+
+func (s *Service) trashPaths(ctx context.Context, spaceID string) (map[string]bool, error) {
+	rows, err := s.store.db.QueryContext(ctx, "SELECT trash_relative_path FROM trash WHERE space_id = ?", spaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	paths := make(map[string]bool)
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		paths[path] = true
+	}
+	return paths, rows.Err()
+}
+
+func (s *Service) importSambaTrashFile(ctx context.Context, spaceID, path, trashRelative, deletedFrom, deletedBy string) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	inode, err := inodeOf(info)
+	if err != nil {
+		return err
+	}
+	originalParentID := ""
+	if deletedFrom != "." {
+		err := s.store.db.QueryRowContext(ctx, `SELECT id FROM entries
+WHERE space_id = ? AND relative_path = ? AND kind = ? AND trashed = 0`, spaceID, deletedFrom, EntryKindDirectory).Scan(&originalParentID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	trashID := s.randomID("trash")
+	entryID := s.randomID("file")
+	var oldRelative string
+	queryErr := s.store.db.QueryRowContext(ctx, "SELECT id, relative_path FROM entries WHERE space_id = ? AND inode = ? AND kind = ?",
+		spaceID, inode, EntryKindFile).Scan(&entryID, &oldRelative)
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	switch {
+	case queryErr == nil:
+		_, err = tx.ExecContext(ctx, "UPDATE entries SET relative_path = ?, trashed = 1, trash_id = ? WHERE id = ?",
+			trashRelative, trashID, entryID)
+	case errors.Is(queryErr, sql.ErrNoRows):
+		_, err = tx.ExecContext(ctx, `INSERT INTO entries
+(id, space_id, parent_id, name, kind, relative_path, inode, size_bytes, modified_at, trashed, trash_id)
+VALUES(?,?,?,?,?,?,?,?,?,1,?)`, entryID, spaceID, "", info.Name(), EntryKindFile, trashRelative, inode, info.Size(), formatTime(info.ModTime()), trashID)
+	default:
+		err = queryErr
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO trash
+(id, entry_id, space_id, original_parent_id, original_name, trash_relative_path, deleted_by, deleted_at)
+VALUES(?,?,?,?,?,?,?,?)`, trashID, entryID, spaceID, originalParentID, info.Name(), trashRelative, deletedBy, formatTime(s.now().UTC())); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_ = s.audit(ctx, deletedBy, "file.trashed.smb", entryID, info.Name())
+	return nil
+}
+
+// removeEmptyTrashParents removes directories left empty after a trash item
+// is restored or purged, but never .a-nas-trash or a per-user trash
+// directory: Samba recycle needs the latter to keep the Host Agent's ACL.
+func removeEmptyTrashParents(root, trashRelative string) {
+	parts := strings.Split(trashRelative, "/")
+	if len(parts) < 3 || parts[0] != ".a-nas-trash" {
+		return
+	}
+	keep := 2 // .a-nas-trash/<username>
+	if len(parts[1]) > 32 {
+		keep = 1 // rc.5 Web layout: .a-nas-trash/<trash-id>/content
+	}
+	for depth := len(parts) - 1; depth > keep; depth-- {
+		if os.Remove(filepath.Join(root, filepath.FromSlash(strings.Join(parts[:depth], "/")))) != nil {
+			return
+		}
+	}
 }
 
 func (s *Service) Restore(ctx context.Context, actor accounts.User, trashID, targetParentID, targetName string) (Entry, error) {
@@ -704,7 +761,7 @@ WHERE trash_id = ?`, newRelative, trashRelative, trashID); err != nil {
 		_ = os.Rename(target, source)
 		return Entry{}, err
 	}
-	_ = os.Remove(filepath.Dir(source))
+	removeEmptyTrashParents(root, trashRelative)
 	_ = s.audit(ctx, actor.ID, "file.restored", item.EntryID, targetName)
 	entry, _, err := s.entryPath(ctx, root, item.SpaceID, item.EntryID)
 	return entry, err
@@ -739,10 +796,7 @@ FROM trash WHERE id = ?`, trashID).Scan(
 	if err := os.RemoveAll(trashPath); err != nil {
 		return err
 	}
-	parent := filepath.Dir(trashPath)
-	if strings.HasPrefix(filepath.Base(parent), "trash-") {
-		_ = os.Remove(parent)
-	}
+	removeEmptyTrashParents(root, trashRelative)
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

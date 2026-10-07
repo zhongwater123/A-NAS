@@ -47,11 +47,9 @@ for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpass
 done
 
 getent group a-nas >/dev/null || groupadd --system a-nas
-getent group a-nas-members >/dev/null || groupadd --system a-nas-members
 if ! id a-nas >/dev/null 2>&1; then
   useradd --system --gid a-nas --home-dir /var/lib/a-nas --shell /usr/sbin/nologin a-nas
 fi
-usermod --append --groups a-nas-members a-nas
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
