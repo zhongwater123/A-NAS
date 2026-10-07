@@ -1,8 +1,25 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { SessionStatus } from "./terminal";
+
+const xterm = vi.hoisted(() => ({ mounts: 0, onStatus: undefined as ((status: SessionStatus) => void) | undefined }));
+
+vi.mock("./XtermSession", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: function MockXtermSession({ onStatus }: { onStatus: (status: SessionStatus) => void }) {
+      useEffect(() => {
+        xterm.mounts += 1;
+        xterm.onStatus = onStatus;
+        onStatus({ state: "connected" });
+      }, []);
+      return <div data-testid="xterm-session" />;
+    },
+  };
+});
 
 const session = {
   csrfToken: "csrf-test", expiresAt: "2026-10-07T22:00:00Z",
@@ -18,6 +35,11 @@ const healthyState = {
     smartStatus: "healthy", eligibleForDataVolume: true, ineligibleReasons: [], temperatureCelsius: 31,
   }],
 };
+
+beforeEach(() => {
+  xterm.mounts = 0;
+  xterm.onStatus = undefined;
+});
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -103,15 +125,69 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(screen.getByRole("button", { name: "恢复系统设置" }));
     expect(screen.getByRole("dialog", { name: "系统设置" })).toBeTruthy();
   });
+
+  it("opens a terminal session from the desktop icon", async () => {
+    installAPI({ terminalEnabled: true });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+
+    const terminal = screen.getByRole("dialog", { name: "终端" });
+    expect(await within(terminal).findByTestId("xterm-session")).toBeTruthy();
+    expect(xterm.mounts).toBe(1);
+  });
+
+  it("keeps the terminal session alive while minimized", async () => {
+    installAPI({ terminalEnabled: true });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开终端" }));
+    await screen.findByTestId("xterm-session");
+
+    await user.click(within(screen.getByRole("dialog", { name: "终端" })).getByRole("button", { name: "最小化终端" }));
+    expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "恢复终端" }));
+
+    expect(screen.getByRole("dialog", { name: "终端" })).toBeTruthy();
+    expect(xterm.mounts).toBe(1);
+  });
+
+  it("offers a new session after the shell exits", async () => {
+    installAPI({ terminalEnabled: true });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开终端" }));
+    await screen.findByTestId("xterm-session");
+
+    act(() => xterm.onStatus?.({ state: "ended", exitCode: 0 }));
+    expect(await screen.findByText("Shell 已退出（代码 0）")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "新建会话" }));
+    expect(screen.queryByText("Shell 已退出（代码 0）")).toBeNull();
+    expect(xterm.mounts).toBe(2);
+  });
+
+  it("explains when the terminal is disabled", async () => {
+    installAPI({ terminalEnabled: false });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开终端" }));
+
+    expect(await screen.findByText("终端未启用")).toBeTruthy();
+    expect(screen.queryByTestId("xterm-session")).toBeNull();
+  });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; storagePlan?: unknown } = {}) {
+function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(session);
     if (path === "/api/v1/host-state") return ok(healthyState);
+    if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
     if (path === "/api/v1/volumes") return ok({ items: [] });

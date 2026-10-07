@@ -178,6 +178,7 @@ button { font: inherit; }
 .icon-backup { background: linear-gradient(155deg, #56d7ff, #3189d9); }
 .icon-music { background: linear-gradient(155deg, #ff506d, #d92471); }
 .icon-ai { background: linear-gradient(155deg, #8c7cff, #5544c4); }
+.icon-terminal { color: #5df2a0; background: linear-gradient(155deg, #33404f, #0b1017); }
 
 .resource-pill {
   position: absolute;
@@ -229,6 +230,7 @@ button { font: inherit; }
 }
 @keyframes window-in { from { opacity: 0; transform: scale(.975) translateY(8px); } to { opacity: 1; transform: none; } }
 .app-window.maximized { width: auto !important; height: auto !important; border-radius: 15px; }
+.app-window[hidden] { display: none; }
 .window-titlebar { height: 49px; flex: none; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; padding-left: 17px; border-bottom: 1px solid var(--line); background: rgba(248,250,253,.88); cursor: grab; user-select: none; }
 .window-titlebar:active { cursor: grabbing; }
 .window-title { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 750; }
@@ -263,6 +265,16 @@ button { font: inherit; }
 .plan-card h3 { margin: 0; font-size: 14px; }
 .plan-card code { padding: 2px 5px; border-radius: 5px; background: #f1e7d6; }
 .product-page .danger-button { color: white; border-color: #c73d4b; background: #c73d4b; }
+.window-content-terminal { overflow: hidden; background: #0d1117; }
+
+.terminal-panel { position: relative; height: 100%; padding: 8px 4px 4px 10px; }
+.xterm-host { width: 100%; height: 100%; }
+.terminal-state { height: 100%; min-height: 0; color: #9aa6b4; }
+.terminal-state h2 { color: #e6edf3; }
+.terminal-state p { font-size: 12px; }
+.terminal-state code { padding: 1px 5px; border-radius: 5px; color: #5df2a0; background: rgba(255,255,255,.08); }
+.terminal-ended { position: absolute; left: 50%; top: 14px; display: flex; align-items: center; gap: 14px; padding: 9px 10px 9px 16px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; color: #e6edf3; font-size: 12px; background: rgba(22,28,36,.94); box-shadow: 0 12px 30px rgba(0,0,0,.35); transform: translateX(-50%); white-space: nowrap; }
+.terminal-ended .primary { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .resize-handle { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; }
 .resize-handle::after { content: ""; position: absolute; right: 5px; bottom: 5px; width: 8px; height: 8px; border-right: 2px solid rgba(24,32,44,.28); border-bottom: 2px solid rgba(24,32,44,.28); }
 

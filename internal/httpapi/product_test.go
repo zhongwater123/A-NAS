@@ -34,16 +34,26 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	t.Cleanup(func() { _ = fileStore.Close() })
 	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	storageService := storage.NewService(fake.NewHealthy(), apiVolumeExecutor{}, storage.Options{})
+	terminalCalls := 0
+	terminalHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		terminalCalls++
+		w.WriteHeader(http.StatusNoContent)
+	})
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		ProductVersion: "v1.0.1-rc.1", Accounts: accountService, Files: fileService, Storage: storageService,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Terminal: terminalHandler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/disks", nil))
 	if got, want := unauthorized.Code, http.StatusUnauthorized; got != want {
 		t.Fatalf("unauthenticated disks status = %d, want %d", got, want)
+	}
+	unauthorizedTerminal := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedTerminal, httptest.NewRequest(http.MethodGet, "/api/v1/terminal", nil))
+	if got, want := unauthorizedTerminal.Code, http.StatusUnauthorized; got != want {
+		t.Fatalf("unauthenticated terminal status = %d, want %d", got, want)
 	}
 
 	setupBody := bytes.NewBufferString(`{"username":"owner","password":"correct horse battery staple"}`)
@@ -71,6 +81,13 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	handler.ServeHTTP(disks, disksRequest)
 	if got, want := disks.Code, http.StatusOK; got != want {
 		t.Fatalf("authenticated disks status = %d, want %d; body=%s", got, want, disks.Body.String())
+	}
+	adminTerminalRequest := httptest.NewRequest(http.MethodGet, "/api/v1/terminal", nil)
+	adminTerminalRequest.AddCookie(responseCookies[0])
+	adminTerminal := httptest.NewRecorder()
+	handler.ServeHTTP(adminTerminal, adminTerminalRequest)
+	if got, want := adminTerminal.Code, http.StatusNoContent; got != want || terminalCalls != 1 {
+		t.Fatalf("administrator terminal status/calls = %d/%d, want %d/1", got, terminalCalls, want)
 	}
 
 	spacesRequest := httptest.NewRequest(http.MethodGet, "/api/v1/spaces", nil)
@@ -191,6 +208,17 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	var createdMember accounts.User
 	if err := json.Unmarshal(member.Body.Bytes(), &createdMember); err != nil {
 		t.Fatal(err)
+	}
+	memberSession, err := accountService.Authenticate(context.Background(), "alice", "alice password for testing")
+	if err != nil {
+		t.Fatalf("authenticate member: %v", err)
+	}
+	memberTerminalRequest := httptest.NewRequest(http.MethodGet, "/api/v1/terminal", nil)
+	memberTerminalRequest.AddCookie(&http.Cookie{Name: "anas_session", Value: memberSession.Token})
+	memberTerminal := httptest.NewRecorder()
+	handler.ServeHTTP(memberTerminal, memberTerminalRequest)
+	if got, want := memberTerminal.Code, http.StatusForbidden; got != want || terminalCalls != 1 {
+		t.Fatalf("member terminal status/calls = %d/%d, want %d/1", got, terminalCalls, want)
 	}
 	resetRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+createdMember.ID+"/credential", bytes.NewBufferString(`{"password":"alice reset password"}`))
 	resetRequest.Header.Set("Content-Type", "application/json")

@@ -28,9 +28,11 @@ import {
   ShieldCheck,
   ShoppingBag,
   Sparkles,
+  SquareTerminal,
   Trash2,
   UserRound,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Component, ErrorInfo, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useState } from "react";
 
@@ -41,10 +43,11 @@ import {
   listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
   restoreSnapshotEntry, restoreTrash, setupAdministrator, uploadFile,
 } from "./api";
+import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings";
+type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal";
 
 interface WindowModel {
   id: WindowID;
@@ -77,7 +80,19 @@ const initialWindows: WindowModel[] = [
 	{ id: "storage", title: "存储初始化", open: false, minimized: false, maximized: false, x: 260, y: 80, width: 850, height: 590, z: 2 },
   { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2 },
   { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1 },
+  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0 },
 ];
+
+const windowIcons: Record<WindowID, LucideIcon> = {
+  files: FolderClosed,
+  trash: Trash2,
+  snapshots: Camera,
+  accounts: UserRound,
+  storage: Database,
+  resources: Activity,
+  settings: Settings,
+  terminal: SquareTerminal,
+};
 
 export default function App() {
 	const [session, setSessionState] = useState<Session>();
@@ -126,6 +141,7 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 function Desktop({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const host = useHostState(true);
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
+  const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
   const now = useCurrentMinute();
 
   return (
@@ -154,6 +170,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 		<DesktopShortcut label="回收站" ariaLabel="打开回收站" tone="trash" icon={<Trash2 />} active={windows.find((item) => item.id === "trash")?.open} onClick={() => dispatch({ type: "open", id: "trash" })} />
 		<DesktopShortcut label="系统设置" ariaLabel="打开系统设置" tone="settings" icon={<Settings />} active={windows.find((item) => item.id === "settings")?.open} onClick={() => dispatch({ type: "open", id: "settings" })} />
 		<DesktopShortcut label="资源管理" ariaLabel="打开资源管理" tone="resources" icon={<Activity />} active={windows.find((item) => item.id === "resources")?.open} onClick={() => dispatch({ type: "open", id: "resources" })} />
+		{session.user.role === "admin" && <DesktopShortcut label="终端" ariaLabel="打开终端" tone="terminal" icon={<SquareTerminal />} active={isOpen("terminal")} onClick={() => dispatch({ type: "open", id: "terminal" })} />}
         <DesktopShortcut label="应用中心" ariaLabel="应用中心，规划中" tone="store" icon={<ShoppingBag />} disabled />
         <DesktopShortcut label="影视" ariaLabel="影视，规划中" tone="video" icon={<PlaySquare />} disabled />
         <DesktopShortcut label="下载" ariaLabel="下载，规划中" tone="download" icon={<Download />} disabled />
@@ -181,7 +198,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 
       <section className="window-layer" aria-label="A-NAS 桌面窗口">
         {windows.map((window) => {
-          if (!window.open || window.minimized) return null;
+          // Minimized windows stay mounted so a running terminal session survives.
+          if (!window.open) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
 			  {window.id === "resources" && <ResourcePanel host={host} />}
@@ -191,23 +209,27 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "snapshots" && <SnapshotPanel />}
 			  {window.id === "accounts" && <AccountsPanel currentUser={session.user} />}
 			  {window.id === "storage" && <StoragePanel state={host.snapshot} />}
+			  {window.id === "terminal" && <TerminalPanel />}
             </AppWindow>
           );
         })}
       </section>
 
       <nav className={`task-shelf ${windows.some((window) => window.open) ? "visible" : ""}`} aria-label="已打开窗口">
-        {windows.filter((window) => window.open).map((window) => (
-          <button
-            key={window.id}
-            className={window.minimized ? "task-button minimized" : "task-button"}
-            aria-label={window.minimized ? `恢复${window.title}` : `聚焦${window.title}`}
-            onClick={() => dispatch({ type: "open", id: window.id })}
-          >
-			{window.id === "resources" ? <Activity size={18} /> : window.id === "files" ? <FolderClosed size={18} /> : <Settings size={18} />}
-            <span>{window.title}</span>
-          </button>
-        ))}
+        {windows.filter((window) => window.open).map((window) => {
+          const Icon = windowIcons[window.id];
+          return (
+            <button
+              key={window.id}
+              className={window.minimized ? "task-button minimized" : "task-button"}
+              aria-label={window.minimized ? `恢复${window.title}` : `聚焦${window.title}`}
+              onClick={() => dispatch({ type: "open", id: window.id })}
+            >
+              <Icon size={18} />
+              <span>{window.title}</span>
+            </button>
+          );
+        })}
       </nav>
     </main>
   );
@@ -272,21 +294,22 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
     window.addEventListener("pointerup", stop, { once: true });
   };
 
+  const Icon = windowIcons[model.id];
   const style = model.maximized
     ? { left: 88, top: 12, right: 12, bottom: 12, zIndex: model.z }
     : { left: model.x, top: model.y, width: model.width, height: model.height, zIndex: model.z };
 
   return (
-    <section className={`app-window ${model.maximized ? "maximized" : ""}`} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
+    <section className={`app-window ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
       <div className="window-titlebar" onPointerDown={beginDrag}>
-        <div className="window-title"><span className="window-app-icon">{model.id === "resources" ? <Activity size={17} /> : <Settings size={17} />}</span>{model.title}</div>
+        <div className="window-title"><span className="window-app-icon"><Icon size={17} /></span>{model.title}</div>
         <div className="window-actions">
           <button aria-label={`最小化${model.title}`} onClick={() => dispatch({ type: "minimize", id: model.id })}><Minus /></button>
           <button aria-label={`${model.maximized ? "还原" : "最大化"}${model.title}`} onClick={() => dispatch({ type: "maximize", id: model.id })}>{model.maximized ? <PanelLeftClose /> : <Maximize2 />}</button>
           <button className="close" aria-label={`关闭${model.title}`} onClick={() => dispatch({ type: "close", id: model.id })}><X /></button>
         </div>
       </div>
-      <div className="window-content"><PanelErrorBoundary>{children}</PanelErrorBoundary></div>
+      <div className={`window-content window-content-${model.id}`}><PanelErrorBoundary>{children}</PanelErrorBoundary></div>
       {!model.maximized && <div className="resize-handle" aria-hidden="true" onPointerDown={beginResize} />}
     </section>
   );

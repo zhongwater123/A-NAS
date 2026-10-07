@@ -5,6 +5,8 @@ go 1.27.0
 toolchain go1.27.1
 
 require (
+	github.com/coder/websocket v1.8.15
+	github.com/creack/pty v1.1.24
 	github.com/getkin/kin-openapi v0.145.0
 	github.com/mattn/go-sqlite3 v1.14.52
 	golang.org/x/crypto v0.57.0

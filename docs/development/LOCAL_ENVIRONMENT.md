@@ -14,6 +14,17 @@
 | 通用工具 | Git、C/C++ 构建工具、CMake、Ninja、Python、jq、ripgrep、ShellCheck、SQLite、Ansible |
 | 产品工具链 | Go 1.27.1；Node.js 26.9.0；npm 11.19.1 |
 
+## Windows 检出换行
+
+仓库依赖 LF（`gofmt` 检查会拒绝 CRLF）。在 Windows 全局启用 `core.autocrlf=true` 的机器上克隆后，先在仓库内覆盖再重新检出：
+
+```bash
+git config core.autocrlf false
+git config core.eol lf
+```
+
+`.ps1` 等脚本仍由 `.gitattributes` 保持 CRLF。
+
 ## 隔离边界
 
 - `anas-dev` 不复用现有的 `docker-dev` home、Git 配置、SSH 密钥或语言缓存。

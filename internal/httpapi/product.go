@@ -27,6 +27,7 @@ type ProductDependencies struct {
 	Accounts       *accounts.Service
 	Files          *files.Service
 	Storage        *storage.Service
+	Terminal       http.Handler
 	Logger         *slog.Logger
 }
 
@@ -35,6 +36,7 @@ type productHandler struct {
 	accounts *accounts.Service
 	files    *files.Service
 	storage  *storage.Service
+	terminal http.Handler
 	logger   *slog.Logger
 	mux      *http.ServeMux
 }
@@ -46,7 +48,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	}
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
-		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage, logger: logger,
+		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
+		terminal: dependencies.Terminal, logger: logger,
 		mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -60,6 +63,8 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/session", h.handleCreateSession)
 	h.mux.HandleFunc("GET /api/v1/session", h.withSession(h.handleCurrentSession))
 	h.mux.HandleFunc("DELETE /api/v1/session", h.withMutation(h.handleDeleteSession))
+	h.mux.HandleFunc("GET /api/v1/terminal", h.withSession(h.handleTerminal))
+	h.mux.HandleFunc("GET /api/v1/terminal/session", h.withSession(h.handleTerminal))
 	for _, path := range []string{"/api/v1/system", "/api/v1/disks", "/api/v1/host-state"} {
 		h.mux.HandleFunc("GET "+path, h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 			h.state.ServeHTTP(w, r)
@@ -94,6 +99,17 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
+}
+
+func (h *productHandler) handleTerminal(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if !h.requireAdministrator(w, session) {
+		return
+	}
+	if h.terminal == nil {
+		writeError(w, http.StatusServiceUnavailable, "terminal_unavailable", "terminal service is unavailable")
+		return
+	}
+	h.terminal.ServeHTTP(w, r)
 }
 
 func (h *productHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

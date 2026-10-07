@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -61,7 +62,6 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer storageStore.Close()
-
 	accountService := accounts.NewService(accountStore, operations, accounts.Options{})
 	storageService, err := storage.OpenService(reader, operations, storage.Options{Store: storageStore})
 	if err != nil {
@@ -89,11 +89,16 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
+	terminalEnabled, err := configuredTerminal()
+	if err != nil {
+		return err
+	}
+	terminals := terminal.New(terminal.Config{Enabled: terminalEnabled}, logger)
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
-		Logger: logger,
+		Terminal: terminals, Logger: logger,
 	})
 	handler, err := webui.New(apiHandler)
 	if err != nil {
@@ -108,7 +113,7 @@ func run(logger *slog.Logger) error {
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	listenError := make(chan error, 1)
 	go func() {
-		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource)
+		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled)
 		listenError <- server.ListenAndServe()
 	}()
 	select {
@@ -122,6 +127,9 @@ func run(logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := terminals.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
 		err := <-listenError
@@ -214,3 +222,14 @@ func (*developmentOperations) Open(context.Context, string, string) (io.ReadClos
 	return nil, files.SnapshotObject{}, files.ErrNotFound
 }
 func (*developmentOperations) Delete(context.Context, string, string) error { return files.ErrNotFound }
+
+func configuredTerminal() (bool, error) {
+	switch mode := os.Getenv("ANAS_TERMINAL"); mode {
+	case "", "disabled":
+		return false, nil
+	case "enabled":
+		return true, nil
+	default:
+		return false, errors.New("ANAS_TERMINAL must be enabled or disabled")
+	}
+}

@@ -10,6 +10,7 @@
 - Web 与 SMB3 共用账号和 Policy，提供文件管理、30 天回收站、手动只读快照和按文件恢复。
 - 磁盘 SMART、温度、容量、占用、文件系统、数据卷资格及统一审计导出。
 - root Host Agent 类型化 IPC、非特权产品服务、root 所有的系统发布目录与 systemd 安装流程。
+- 桌面“终端”应用：通过回环同源 WebSocket 打开以产品服务用户运行的 PTY Shell，支持窗口自适应、最小化保留会话和退出后新建会话；仅管理员可访问，默认关闭，以 `ANAS_TERMINAL=enabled` 启用。
 
 ### Security
 
