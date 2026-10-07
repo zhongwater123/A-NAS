@@ -67,9 +67,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logRepairs(logger, repaired)
+	expireViewing(context.Background(), executor, logger)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
-			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Snapshots: executor,
+			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Snapshots: executor,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
@@ -99,6 +100,7 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go repairPermissionsPeriodically(ctx, executor, logger)
+	go expireViewingPeriodically(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
 		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "file_broker", brokerSocket, "version", version)
@@ -141,6 +143,32 @@ func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.E
 			}
 			logRepairs(logger, repaired)
 		}
+	}
+}
+
+// expireViewingPeriodically revokes Administrative Viewing Mode grants on
+// time; grants that expired while the Host Agent was stopped are revoked at
+// startup.
+func expireViewingPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			expireViewing(ctx, executor, logger)
+		}
+	}
+}
+
+func expireViewing(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	revoked, err := executor.ExpireViewing(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "revoking expired viewing grants failed", "error", err)
+	}
+	for _, id := range revoked {
+		logger.Info("viewing grant expired and revoked", "grant", id)
 	}
 }
 

@@ -243,6 +243,12 @@ func (*developmentOperations) SetCredential(context.Context, accounts.Credential
 	return nil
 }
 func (*developmentOperations) DisableCredential(context.Context, string) error { return nil }
+
+// Development volumes have no ACLs; viewing access is decided by the Policy.
+func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequest) error {
+	return nil
+}
+func (*developmentOperations) RevokeViewing(context.Context, string) error { return nil }
 func (*developmentOperations) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
 	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "development", State: storage.VolumeStateAvailable}, nil
 }

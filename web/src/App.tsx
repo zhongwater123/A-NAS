@@ -36,11 +36,11 @@ import {
 import { Component, ErrorInfo, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useState } from "react";
 
 import {
-  APIError, DiskRole, FileEntry, Health, HostState, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User,
-  confirmStoragePlan, createDirectory, createMember, createSnapshot, createStoragePlan, currentSession, deleteFile,
-  deleteSnapshot, disableMember, executeStoragePlan, fileDownloadURL, getSetupStatus, listEntries, listSnapshots,
+  APIError, DiskRole, FileEntry, Health, HostState, Notification, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User,
+  acknowledgeNotification, changePassword, confirmStoragePlan, createDirectory, createMember, createSnapshot, createStoragePlan, currentSession, deleteFile,
+  deleteSnapshot, disableMember, endViewing, executeStoragePlan, fileDownloadURL, getSetupStatus, listEntries, listNotifications, listSnapshots,
   listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
-  restoreSnapshotEntry, restoreTrash, setupAdministrator, uploadFile,
+  restoreSnapshotEntry, restoreTrash, setupAdministrator, startViewing, uploadFile,
 } from "./api";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
@@ -126,7 +126,64 @@ export default function App() {
 		return () => { active = false; };
 	}, []);
 	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={setSessionState} />;
-	return <Desktop session={session} onLogout={() => { void logout().finally(() => { setSessionState(undefined); setMode("login"); }); }} />;
+	const signOut = () => { void logout().finally(() => { setSessionState(undefined); setMode("login"); }); };
+	if (session.user.mustChangePassword) {
+		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
+	}
+	return <Desktop session={session} onLogout={signOut} />;
+}
+
+// PasswordChange blocks the desktop after an administrator reset the
+// password, so only the member knows the password in use.
+function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogout: () => void }) {
+	const [error, setError] = useState("");
+	const [submitting, setSubmitting] = useState(false);
+	const submit = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault(); setError("");
+		const data = new FormData(event.currentTarget);
+		const next = String(data.get("newPassword"));
+		if (next !== String(data.get("confirmPassword"))) { setError("两次输入的新密码不一致"); return; }
+		setSubmitting(true);
+		try { await changePassword(String(data.get("currentPassword")), next); onChanged(); }
+		catch (caught) { setError(messageOf(caught)); }
+		finally { setSubmitting(false); }
+	};
+	return <main className="auth-shell"><form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
+		<span className="brand-mark large">A</span><p className="section-label">PASSWORD RESET</p><h1>设置新密码</h1>
+		<p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
+		<label>当前密码<input name="currentPassword" type="password" required autoComplete="current-password" /></label>
+		<label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
+		<label>确认新密码<input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
+		{error && <p className="form-error">{error}</p>}
+		<button className="primary" disabled={submitting}>{submitting ? "处理中…" : "保存新密码"}</button>
+		<button type="button" className="link-button" onClick={onLogout}>退出登录</button>
+	</form></main>;
+}
+
+// NotificationCenter shows what administrators did to the account since the
+// user last acknowledged it: viewing the private space or resetting the password.
+function NotificationCenter() {
+	const [items, setItems] = useState<Notification[]>([]);
+	useEffect(() => { void listNotifications().then(setItems).catch(() => undefined); }, []);
+	if (!items.length) return null;
+	const acknowledge = async () => {
+		await Promise.allSettled(items.map((item) => acknowledgeNotification(item.id)));
+		setItems([]);
+	};
+	return <div className="notice-layer"><section className="notice-card" role="alertdialog" aria-label="账号通知">
+		<p className="section-label">ACCOUNT NOTICE</p><h2>账号通知</h2>
+		<ul>{items.map((item) => <li key={item.id}>{describeNotification(item)}</li>)}</ul>
+		<button className="primary" onClick={() => void acknowledge()}>知道了</button>
+	</section></div>;
+}
+
+function describeNotification(item: Notification): string {
+	const when = new Date(item.createdAt).toLocaleString("zh-CN");
+	if (item.kind === "admin_viewing") {
+		const until = item.expiresAt ? `，${new Date(item.expiresAt).toLocaleString("zh-CN")} 自动结束` : "";
+		return `管理员 ${item.actorUsername} 于 ${when} 开启了对你个人空间的只读查看${until}。原因：${item.reason ?? "未填写"}`;
+	}
+	return `管理员 ${item.actorUsername} 于 ${when} 重置了你的密码。`;
 }
 
 function Authentication({ mode, error: initialError, onAuthenticated }: { mode: "loading" | "setup" | "login"; error: string; onAuthenticated: (session: Session) => void }) {
@@ -207,6 +264,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
       <DesktopGrid apps={desktopApps} />
 
       <StatusBar host={host} />
+
+      <NotificationCenter />
 
       <section className="window-layer" aria-label="A-NAS 桌面窗口">
         {windows.map((window) => {
@@ -397,17 +456,24 @@ function FilePanel() {
 		try { setEntries(await listEntries(selected, parent)); setError(""); }
 		catch (caught) { setError(messageOf(caught)); }
 	}, [spaceID, parentID]);
-	useEffect(() => { void listSpaces().then((items) => { setSpaces(items); if (items[0]) setSpaceID(items[0].id); }).catch((caught) => setError(messageOf(caught))); }, []);
+	const loadSpaces = useCallback(() => listSpaces().then((items) => { setSpaces(items); setSpaceID(items[0]?.id ?? ""); }).catch((caught) => setError(messageOf(caught))), []);
+	useEffect(() => { void loadSpaces(); }, [loadSpaces]);
 	useEffect(() => { setTrail([]); if (spaceID) void refresh(spaceID, ""); }, [spaceID]);
+	const viewing = spaces.find((space) => space.id === spaceID)?.viewing;
+	const stopViewing = async () => {
+		if (!viewing) return;
+		try { await endViewing(viewing.grantId); await loadSpaces(); } catch (caught) { setError(messageOf(caught)); }
+	};
 	const makeDirectory = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); const form = event.currentTarget; const name = String(new FormData(form).get("name"));
 		try { await createDirectory(spaceID, parentID, name); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); }
 	};
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">FILES</p><h2>文件管理</h2></div><select aria-label="空间" value={spaceID} onChange={(event) => setSpaceID(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : `个人空间 · ${space.name}`}</option>)}</select></div>
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">FILES</p><h2>文件管理</h2></div><select aria-label="空间" value={spaceID} onChange={(event) => setSpaceID(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${space.name}` : `个人空间 · ${space.name}`}</option>)}</select></div>
 		{error && <PanelNotice error={error} />}
+		{viewing && <div className="status-banner viewing-banner" role="status"><ShieldCheck />只读查看他人个人空间，{new Date(viewing.expiresAt).toLocaleString("zh-CN")} 自动结束；本次访问已写入审计并通知所有者。<button onClick={() => void stopViewing()}>结束查看</button></div>}
 		<div className="file-toolbar"><button onClick={() => { setTrail((value) => value.slice(0, -1)); }} disabled={!trail.length}>返回上级</button><span>/{trail.map((item) => item.name).join("/")}</span><button onClick={() => void refresh()}>刷新</button></div>
-		<form className="inline-form" onSubmit={(event) => void makeDirectory(event)}><input name="name" aria-label="新目录名称" placeholder="新目录名称" required /><button>新建目录</button><label className="upload-button">上传文件<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(spaceID, parentID, file).then(() => refresh()).catch((caught) => setError(messageOf(caught))); }} /></label></form>
-		<div className="data-list">{entries.map((entry) => <div className="data-row" key={entry.id}><span>{entry.kind === "directory" ? <FolderClosed /> : <FileText />}</span>{entry.kind === "directory" ? <button className="link-button" onClick={() => setTrail((value) => [...value, { id: entry.id, name: entry.name }])}>{entry.name}</button> : <a href={fileDownloadURL(entry.id)}>{entry.name}</a>}<small>{entry.kind === "file" ? formatCapacity(entry.sizeBytes) : "目录"}</small><button className="danger-link" onClick={() => void deleteFile(entry.id).then(() => refresh()).catch((caught) => setError(messageOf(caught)))}>删除</button></div>)}</div>
+		{!viewing && <form className="inline-form" onSubmit={(event) => void makeDirectory(event)}><input name="name" aria-label="新目录名称" placeholder="新目录名称" required /><button>新建目录</button><label className="upload-button">上传文件<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(spaceID, parentID, file).then(() => refresh()).catch((caught) => setError(messageOf(caught))); }} /></label></form>}
+		<div className="data-list">{entries.map((entry) => <div className="data-row" key={entry.id}><span>{entry.kind === "directory" ? <FolderClosed /> : <FileText />}</span>{entry.kind === "directory" ? <button className="link-button" onClick={() => setTrail((value) => [...value, { id: entry.id, name: entry.name }])}>{entry.name}</button> : <a href={fileDownloadURL(entry.id)}>{entry.name}</a>}<small>{entry.kind === "file" ? formatCapacity(entry.sizeBytes) : "目录"}</small>{!viewing && <button className="danger-link" onClick={() => void deleteFile(entry.id).then(() => refresh()).catch((caught) => setError(messageOf(caught)))}>删除</button>}</div>)}</div>
 		{!entries.length && <div className="empty-compact">这个目录是空的</div>}
 	</div>;
 }
@@ -430,10 +496,28 @@ function SnapshotPanel() {
 
 function AccountsPanel({ currentUser }: { currentUser: User }) {
 	const [users, setUsers] = useState<User[]>([]); const [error, setError] = useState("");
+	const [viewingFor, setViewingFor] = useState<User>(); const [notice, setNotice] = useState("");
+	const beginViewing = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!viewingFor) return;
+		const data = new FormData(event.currentTarget);
+		try {
+			await startViewing(viewingFor.id, String(data.get("password")), String(data.get("reason")));
+			setNotice(`已开启对 ${viewingFor.username} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${viewingFor.username}”。`);
+			setViewingFor(undefined); setError("");
+		} catch (caught) { setError(messageOf(caught)); }
+	};
 	const refresh = useCallback(() => listUsers().then(setUsers).catch((caught) => setError(messageOf(caught))), []);
 	useEffect(() => { void refresh(); }, [refresh]);
 	const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { await createMember(String(data.get("username")), String(data.get("password"))); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); } };
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id !== currentUser.id && <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div></div>;
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id !== currentUser.id && <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button onClick={() => { setNotice(""); setViewingFor(user); }}>查看个人空间</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div>
+		{viewingFor && <form className="viewing-form" aria-label={`查看 ${viewingFor.username} 的个人空间`} autoComplete="off" onSubmit={(event) => void beginViewing(event)}>
+			<p>查看他人个人空间会写入审计，并在 {viewingFor.username} 下次登录时通知对方。访问为只读，24 小时后自动结束。</p>
+			<input name="reason" aria-label="查看原因" placeholder="查看原因" maxLength={500} required />
+			<input name="password" aria-label="你的密码" type="password" placeholder="你的密码" autoComplete="current-password" required />
+			<button>开始只读查看</button><button type="button" onClick={() => setViewingFor(undefined)}>取消</button>
+		</form>}
+		{notice && <div className="status-banner" role="status"><ShieldCheck />{notice}</div>}</div>;
 }
 
 function StoragePanel({ state }: { state?: HostState }) {

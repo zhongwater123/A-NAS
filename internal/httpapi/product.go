@@ -63,6 +63,11 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/session", h.handleCreateSession)
 	h.mux.HandleFunc("GET /api/v1/session", h.withSession(h.handleCurrentSession))
 	h.mux.HandleFunc("DELETE /api/v1/session", h.withMutation(h.handleDeleteSession))
+	h.mux.HandleFunc("POST /api/v1/session/password", h.withMutation(h.handleChangePassword))
+	h.mux.HandleFunc("GET /api/v1/notifications", h.withSession(h.handleNotifications))
+	h.mux.HandleFunc("POST /api/v1/notifications/{notificationID}/acknowledge", h.withMutation(h.handleAcknowledgeNotification))
+	h.mux.HandleFunc("POST /api/v1/users/{userID}/viewing", h.withMutation(h.handleStartViewing))
+	h.mux.HandleFunc("DELETE /api/v1/viewing/{grantID}", h.withMutation(h.handleEndViewing))
 	h.mux.HandleFunc("GET /api/v1/terminal", h.withSession(h.handleTerminal))
 	h.mux.HandleFunc("GET /api/v1/terminal/session", h.withSession(h.handleTerminal))
 	for _, path := range []string{"/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics"} {
@@ -661,9 +666,87 @@ func (h *productHandler) withSession(next func(http.ResponseWriter, *http.Reques
 			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
+		if session.User.MustChangePassword && !allowedDuringPasswordChange(r) {
+			writeError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
+			return
+		}
 		// The File Broker verifies the token itself before acting as the user.
 		next(w, r.WithContext(accounts.WithSessionToken(r.Context(), cookie.Value)), session)
 	}
+}
+
+// allowedDuringPasswordChange lists what a user whose password an
+// administrator reset may do before choosing a new one.
+func allowedDuringPasswordChange(r *http.Request) bool {
+	switch {
+	case r.URL.Path == "/api/v1/session":
+		return true
+	case r.URL.Path == "/api/v1/session/password" && r.Method == http.MethodPost:
+		return true
+	case r.URL.Path == "/api/v1/notifications" && r.Method == http.MethodGet:
+		return true
+	case strings.HasPrefix(r.URL.Path, "/api/v1/notifications/") && r.Method == http.MethodPost:
+		return true
+	}
+	return false
+}
+
+func (h *productHandler) handleChangePassword(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	var request struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	if err := h.accounts.ChangePassword(r.Context(), session.User, request.CurrentPassword, request.NewPassword); err != nil {
+		h.writeAccountError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *productHandler) handleNotifications(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	notifications, err := h.accounts.Notifications(r.Context(), session.User)
+	if err != nil {
+		h.writeAccountError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": notifications})
+}
+
+func (h *productHandler) handleAcknowledgeNotification(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if err := h.accounts.AcknowledgeNotification(r.Context(), session.User, r.PathValue("notificationID")); err != nil {
+		h.writeAccountError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *productHandler) handleStartViewing(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	var request struct {
+		Password string `json:"password"`
+		Reason   string `json:"reason"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	grant, err := h.accounts.StartViewing(r.Context(), session.User, r.PathValue("userID"), request.Password, request.Reason)
+	if err != nil {
+		h.writeAccountError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, grant)
+}
+
+func (h *productHandler) handleEndViewing(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if err := h.accounts.EndViewing(r.Context(), session.User, r.PathValue("grantID")); err != nil {
+		h.writeAccountError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *productHandler) withMutation(next func(http.ResponseWriter, *http.Request, accounts.Session)) http.HandlerFunc {
@@ -715,10 +798,13 @@ func decodeJSON(r *http.Request, target any) error {
 func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrUsernameUnavailable),
-		errors.Is(err, accounts.ErrIdentityConflict):
+		errors.Is(err, accounts.ErrIdentityConflict), errors.Is(err, accounts.ErrViewingActive):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
-	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword):
+	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword),
+		errors.Is(err, accounts.ErrReasonRequired), errors.Is(err, accounts.ErrPasswordUnchanged):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+	case errors.Is(err, accounts.ErrInvalidCredentials):
+		writeError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")
 	case errors.Is(err, accounts.ErrCredentialProvision):
 		writeError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):

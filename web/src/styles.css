@@ -479,3 +479,14 @@ button { font: inherit; }
   .resource-page { padding: 20px 18px; }
   .task-shelf { display: none; }
 }
+
+/* Account notices and Administrative Viewing Mode */
+.notice-layer { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; background: rgba(12, 18, 32, .42); }
+.notice-card { width: min(460px, 100%); display: grid; gap: 12px; padding: 26px; border: 1px solid rgba(255,255,255,.55); border-radius: 20px; color: var(--text); background: rgba(250,252,255,.96); box-shadow: var(--shadow); }
+.notice-card h2 { margin: 0; font-size: 19px; }
+.notice-card ul { display: grid; gap: 10px; margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; }
+.viewing-form { display: grid; gap: 8px; margin-top: 14px; padding: 14px; border: 1px solid #ccd5df; border-radius: 12px; background: #f7f9fc; }
+.viewing-form p { margin: 0; color: #5f6975; font-size: 11px; line-height: 1.6; }
+.viewing-form input { min-height: 38px; border: 1px solid #ccd5df; border-radius: 9px; padding: 0 11px; color: #202a35; background: white; }
+.viewing-banner { background: #fff6e5; color: #6b4a00; }
+.viewing-banner button { margin-left: auto; }
