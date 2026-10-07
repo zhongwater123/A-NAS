@@ -1,4 +1,4 @@
-import { DataSource } from "./api";
+import { DataSource, csrfHeaders } from "./api";
 
 export type ContainerState = "created" | "running" | "paused" | "restarting" | "removing" | "exited" | "dead";
 export type ContainerAction = "start" | "stop" | "restart";
@@ -52,7 +52,7 @@ export async function readContainers(signal?: AbortSignal): Promise<ContainerSna
 export async function applyContainerAction(id: string, action: ContainerAction): Promise<void> {
   await request(`/api/v1/containers/${id}/actions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
     body: JSON.stringify({ action }),
   });
 }

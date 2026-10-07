@@ -62,7 +62,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "app plan", path: "/api/v1/apps/memos/plan", handler: appAPI(t), wantStatus: http.StatusOK},
 		{name: "app install stale", method: http.MethodPost, body: `{"digest":"` + strings.Repeat("a", 64) + `"}`, path: "/api/v1/apps/memos/install", handler: appAPI(t), wantStatus: http.StatusConflict},
 		{name: "app uninstall missing", method: http.MethodPost, body: `{}`, path: "/api/v1/apps/memos/uninstall", handler: appAPI(t), wantStatus: http.StatusConflict},
-		{name: "apps disabled", path: "/api/v1/apps", handler: appstoreapi.New(nil, appstoreapi.DataSourceLive, nil), wantStatus: http.StatusServiceUnavailable},
+		{name: "apps disabled", path: "/api/v1/apps", handler: appstoreapi.New(nil, appstoreapi.DataSourceLive, appstoreapi.Options{}), wantStatus: http.StatusServiceUnavailable},
 		{name: "terminal status", path: terminal.StatusPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusOK},
 		{name: "terminal disabled", path: terminal.SessionPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusForbidden},
 	}
@@ -130,5 +130,5 @@ func appAPI(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, nil)
+	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}})
 }

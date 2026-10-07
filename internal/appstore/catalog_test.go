@@ -10,13 +10,13 @@ import (
 )
 
 var testPolicy = appstore.Policy{
-	AppDataRoot:   "/srv/a-nas/appdata",
-	DataRoot:      "/srv/a-nas/data",
-	PUID:          "1000",
-	PGID:          "1000",
+	AppDataRoot:   "/srv/a-nas/data/apps",
+	DataRoot:      "/srv/a-nas/data/spaces/shared",
 	TZ:            "Asia/Shanghai",
 	ReservedPorts: []uint16{8080},
 }
+
+var testIdentity = appstore.Identity{Username: "app-demo", UID: 30005, GID: 30005}
 
 // Every vendored manifest must render under the install policy, so the store
 // never lists an app that would be refused at install time.
@@ -29,7 +29,7 @@ func TestEmbeddedCatalogPassesPolicy(t *testing.T) {
 		t.Fatal("catalog is empty")
 	}
 	for _, entry := range entries {
-		plan, err := appstore.Render(context.Background(), entry, testPolicy)
+		plan, err := appstore.Render(context.Background(), entry, testPolicy, testIdentity)
 		if err != nil {
 			var policyError *appstore.PolicyError
 			if errors.As(err, &policyError) {

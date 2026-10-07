@@ -28,17 +28,23 @@ type ProductDependencies struct {
 	Files          *files.Service
 	Storage        *storage.Service
 	Terminal       http.Handler
-	Logger         *slog.Logger
+	// Containers and Apps serve /api/v1/containers and /api/v1/apps. They
+	// manage Docker, so only administrators reach them (ADR 0008).
+	Containers http.Handler
+	Apps       http.Handler
+	Logger     *slog.Logger
 }
 
 type productHandler struct {
-	state    http.Handler
-	accounts *accounts.Service
-	files    *files.Service
-	storage  *storage.Service
-	terminal http.Handler
-	logger   *slog.Logger
-	mux      *http.ServeMux
+	state      http.Handler
+	accounts   *accounts.Service
+	files      *files.Service
+	storage    *storage.Service
+	terminal   http.Handler
+	containers http.Handler
+	apps       http.Handler
+	logger     *slog.Logger
+	mux        *http.ServeMux
 }
 
 func NewProduct(dependencies ProductDependencies) http.Handler {
@@ -49,7 +55,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
-		terminal: dependencies.Terminal, logger: logger,
+		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, logger: logger,
 		mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -58,6 +64,12 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 
 func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { h.state.ServeHTTP(w, r) })
+	for prefix, handler := range map[string]http.Handler{"/api/v1/containers": h.containers, "/api/v1/apps": h.apps} {
+		if handler != nil {
+			h.mux.Handle(prefix, h.withAdministrator(handler))
+			h.mux.Handle(prefix+"/", h.withAdministrator(handler))
+		}
+	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)
 	h.mux.HandleFunc("POST /api/v1/session", h.handleCreateSession)
@@ -672,6 +684,26 @@ func (h *productHandler) withSession(next func(http.ResponseWriter, *http.Reques
 		}
 		// The File Broker verifies the token itself before acting as the user.
 		next(w, r.WithContext(accounts.WithSessionToken(r.Context(), cookie.Value)), session)
+	}
+}
+
+// withAdministrator admits only administrators, and requires the CSRF token
+// for anything but reads.
+func (h *productHandler) withAdministrator(next http.Handler) http.HandlerFunc {
+	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+		if session.User.Role != accounts.RoleAdmin {
+			writeError(w, http.StatusForbidden, "forbidden", "only administrators manage applications")
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
+	read, write := h.withSession(serve), h.withMutation(serve)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			read(w, r)
+			return
+		}
+		write(w, r)
 	}
 }
 

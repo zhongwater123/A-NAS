@@ -229,7 +229,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     { id: "settings", label: "系统设置", ariaLabel: "打开系统设置", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openWindow("settings") },
     { id: "resources", label: "资源管理", ariaLabel: "打开资源管理", tone: "resources", icon: <Activity />, active: isOpen("resources"), onClick: () => openWindow("resources") },
     ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
-    { id: "store", label: "应用中心", ariaLabel: "打开应用中心", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") },
+    // Docker and the App Center run containers with root-equivalent engine access: administrators only.
+    ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
     { id: "video", label: "影视", ariaLabel: "影视，规划中", tone: "video", icon: <PlaySquare />, disabled: true },
     { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
     { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
@@ -237,7 +238,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
       { id: "accounts", label: "账号管理", ariaLabel: "打开账号管理", tone: "settings", icon: <UserRound />, active: isOpen("accounts"), onClick: () => openWindow("accounts") },
       { id: "storage", label: "存储初始化", ariaLabel: "打开存储初始化", tone: "resources", icon: <Database />, active: isOpen("storage"), onClick: () => openWindow("storage") },
     ] : []),
-    { id: "docker", label: "Docker", ariaLabel: "打开 Docker", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") },
+    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
     { id: "photos", label: "相册", ariaLabel: "相册，规划中", tone: "photos", icon: <Image />, disabled: true },
     { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },

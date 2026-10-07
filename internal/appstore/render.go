@@ -12,7 +12,6 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
-	"go.yaml.in/yaml/v4"
 )
 
 // casaosDataRoot is where CasaOS manifests place host data; A-NAS rewrites it.
@@ -24,12 +23,12 @@ const projectDir = "/nonexistent/a-nas-app"
 
 // Policy holds the host facts a plan is rendered against.
 type Policy struct {
-	// AppDataRoot receives /DATA/AppData/<app>/...; each app gets its own subdirectory.
+	// AppDataRoot receives /DATA/AppData/<app>/...; each app gets its own
+	// subdirectory on the data volume that SMB does not publish.
 	AppDataRoot string
-	// DataRoot receives every other /DATA/... path, e.g. shared media folders.
+	// DataRoot receives every other /DATA/... path. It is the Shared folder,
+	// never the data-volume root, so an app cannot reach private spaces.
 	DataRoot string
-	PUID     string
-	PGID     string
 	TZ       string
 	// ReservedPorts are host ports A-NAS itself needs.
 	ReservedPorts []uint16
@@ -59,13 +58,15 @@ type PortMapping struct {
 	Purpose       string
 }
 
-// Plan is what the owner confirms before an install: images that will be
-// pulled, host ports that will open and host folders containers can write.
+// Plan is what the owner confirms before an install: the identity the app
+// runs as, images that will be pulled, host ports that will open and host
+// folders containers can write.
 type Plan struct {
 	AppID      string
 	Title      string
 	Version    string
 	Project    string
+	Identity   Identity
 	Images     []string
 	Containers []string
 	Ports      []PortMapping
@@ -84,12 +85,19 @@ func (e *PolicyError) Error() string {
 }
 
 // Render validates a manifest against policy and produces the Compose file
-// that will run, rewritten to A-NAS paths and labelled with the app ID.
-func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
+// that will run as identity, rewritten to A-NAS paths and labelled with the
+// app ID.
+func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) (Plan, error) {
+	if identity.UID <= 0 || identity.GID <= 0 {
+		return Plan{}, &PolicyError{Reasons: []string{"app identity is missing"}}
+	}
 	project, err := loader.LoadWithContext(ctx, types.ConfigDetails{
 		WorkingDir:  projectDir,
 		ConfigFiles: []types.ConfigFile{{Filename: path.Join(projectDir, "docker-compose.yml"), Content: entry.Compose}},
-		Environment: types.Mapping{"AppID": entry.App.ID, "TZ": policy.TZ, "PUID": policy.PUID, "PGID": policy.PGID},
+		Environment: types.Mapping{
+			"AppID": entry.App.ID, "TZ": policy.TZ,
+			"PUID": strconv.Itoa(identity.UID), "PGID": strconv.Itoa(identity.GID),
+		},
 	}, func(options *loader.Options) {
 		options.SetProjectName(ProjectName(entry.App.ID), true)
 		options.SkipResolveEnvironment = true
@@ -127,7 +135,7 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 		}
 	}
 
-	plan := Plan{AppID: entry.App.ID, Title: entry.App.Title, Version: entry.App.Version, Project: project.Name}
+	plan := Plan{AppID: entry.App.ID, Title: entry.App.Title, Version: entry.App.Version, Project: project.Name, Identity: identity}
 	serviceNames := make([]string, 0, len(project.Services))
 	for name := range project.Services {
 		serviceNames = append(serviceNames, name)
@@ -160,11 +168,10 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 					continue
 				}
 				volume.Source = host
-				if volume.Bind == nil {
-					volume.Bind = &types.ServiceVolumeBind{}
-				}
-				volume.Bind.CreateHostPath = true
-				volume.Bind.Propagation = ""
+				// The Host Agent creates every mounted folder before the install;
+				// Docker must never create one, or an offline data volume would
+				// put app data on the system disk.
+				volume.Bind = &types.ServiceVolumeBind{}
 				plan.Mounts = append(plan.Mounts, Mount{HostPath: host, ContainerPath: volume.Target, Kind: kind, ReadOnly: volume.ReadOnly, Purpose: descriptions.volumes[volume.Target]})
 			case types.VolumeTypeVolume, types.VolumeTypeTmpfs:
 			default:
@@ -223,9 +230,6 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("render compose file: %w", err)
 	}
-	if rendered, err = forceCreateHostPath(rendered); err != nil {
-		return Plan{}, fmt.Errorf("render compose file: %w", err)
-	}
 	sum := sha256.Sum256(rendered)
 	plan.Digest = hex.EncodeToString(sum[:])
 	plan.Compose = rendered
@@ -233,35 +237,6 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 	return plan, nil
 }
 
-// forceCreateHostPath writes create_host_path: true on writable binds.
-// compose-go omits the field when true, but reads an absent field in long
-// syntax as false, so without this Docker refuses to start containers whose
-// app-data folder does not exist yet.
-func forceCreateHostPath(rendered []byte) ([]byte, error) {
-	var document map[string]any
-	if err := yaml.Unmarshal(rendered, &document); err != nil {
-		return nil, err
-	}
-	services, _ := document["services"].(map[string]any)
-	for _, service := range services {
-		volumes, _ := service.(map[string]any)["volumes"].([]any)
-		for _, item := range volumes {
-			volume, _ := item.(map[string]any)
-			if volume["type"] != types.VolumeTypeBind || volume["source"] == "/etc/localtime" {
-				continue
-			}
-			bind, _ := volume["bind"].(map[string]any)
-			if bind == nil {
-				bind = map[string]any{}
-				volume["bind"] = bind
-			}
-			bind["create_host_path"] = true
-		}
-	}
-	return yaml.Marshal(document)
-}
-
-// checkService rejects options that would give a container host privileges.
 func checkService(name string, service types.ServiceConfig, reject func(string, ...any)) {
 	if service.Build != nil {
 		reject("service %s builds an image", name)
@@ -363,4 +338,27 @@ func appendUnique(items []string, item string) []string {
 		}
 	}
 	return append(items, item)
+}
+
+// SharesFolders reports whether the plan mounts anything from the Shared
+// folder; the app identity then needs the Shared folder's ACL.
+func (p Plan) SharesFolders() bool {
+	for _, mount := range p.Mounts {
+		if mount.Kind == MountShared {
+			return true
+		}
+	}
+	return false
+}
+
+// HostFolders lists the app-data and Shared folders the Host Agent must
+// create before the install.
+func (p Plan) HostFolders() []string {
+	var folders []string
+	for _, mount := range p.Mounts {
+		if mount.Kind == MountAppData || mount.Kind == MountShared {
+			folders = appendUnique(folders, mount.HostPath)
+		}
+	}
+	return folders
 }

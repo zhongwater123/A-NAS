@@ -123,16 +123,16 @@ func (s *Store) Icon(_ context.Context, id string) ([]byte, string, error) {
 	return entry.Icon, entry.IconType, nil
 }
 
-func (s *Store) Plan(ctx context.Context, id string) (appstore.Plan, error) {
+func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity) (appstore.Plan, error) {
 	entry, ok := s.entries[id]
 	if !ok {
 		return appstore.Plan{}, appstore.ErrNotFound
 	}
-	return appstore.Render(ctx, entry, s.policy)
+	return appstore.Render(ctx, entry, s.policy, identity)
 }
 
-func (s *Store) Install(ctx context.Context, id, digest string) (appstore.Job, error) {
-	plan, err := s.Plan(ctx, id)
+func (s *Store) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
+	plan, err := s.Plan(ctx, id, identity)
 	if err != nil {
 		return appstore.Job{}, err
 	}

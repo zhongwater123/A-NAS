@@ -32,7 +32,7 @@
    - 在开发机运行 `make build-binaries`，把 `build/anas-container-agent` 与 `deploy/systemd/system/anas-container-agent.service` 传到 NAS 临时目录并核对 SHA-256。
    - 命令：`install -D -o root -g root -m 0755 anas-container-agent /usr/local/lib/a-nas/anas-container-agent`；`install -o root -g root -m 0644 anas-container-agent.service /etc/systemd/system/`；`systemctl daemon-reload && systemctl enable --now anas-container-agent.service`
    - 预期：`systemctl is-active anas-container-agent` 为 `active`；`stat -c '%a %U:%G' /run/a-nas-container /run/a-nas-container/agent.sock` 输出 `750 anas-container:anas-container` 与 `660 anas-container:anas-container`。
-   - 完成标准：权限与属主完全一致；`/var/lib/a-nas-container` 已由 systemd 创建（`StateDirectory`）。如需调整应用数据根、共享数据根或 PUID/PGID，写入 `/etc/a-nas/container-agent.env`（键为 `ANAS_APP_DATA_ROOT`、`ANAS_SHARED_DATA_ROOT`、`ANAS_APP_PUID`、`ANAS_APP_PGID`、`TZ`）后重启单元。
+   - 完成标准：权限与属主完全一致；`/var/lib/a-nas-container` 已由 systemd 创建（`StateDirectory`）。应用数据根默认为数据卷上的 `/srv/a-nas/data/apps`，共享数据根默认为共享空间 `/srv/a-nas/data/spaces/shared`；只在数据卷挂载点不同时才通过 `/etc/a-nas/container-agent.env`（键为 `ANAS_APP_DATA_ROOT`、`ANAS_SHARED_DATA_ROOT`、`TZ`）调整，且必须仍指向同一数据卷上的这两个位置。运行身份由 Host Agent 为每个应用分配，不再配置 PUID/PGID。
 5. 以真实模式重新部署产品服务，让激活脚本检测到 socket 并启用容器管理。
    - 按 [Web 预览运行手册](deploy-web-preview-to-experimental-nas.md) 以 `agent` 模式部署。
    - 预期：`~/.config/a-nas/anas-api.env` 含 `ANAS_CONTAINERS_MODE=agent`。
@@ -42,7 +42,7 @@
 - `curl -s http://127.0.0.1:8080/api/v1/containers` 返回 `"dataSource":"live"` 与 Docker 版本。
 - `curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: text/plain' -d '{"action":"stop"}' http://127.0.0.1:8080/api/v1/containers/<64 位 ID>/actions` 返回 `403`。
 - 在 Kiosk 或 SSH 隧道中打开“Docker”，对一个专用测试容器（例如 `docker run -d --name anas-smoke nginx:stable`）执行停止、启动和查看日志，结果与 `docker inspect` 一致；完成后 `docker rm -f anas-smoke`。
-- 在应用中心安装一个小型应用（例如 Memos），确认计划中的文件夹位于 `/srv/a-nas/appdata/memos`，安装完成后 `docker ps --filter label=io.a-nas.app=memos` 显示运行中容器；再从应用中心卸载并确认容器删除、数据目录保留。
+- 以管理员身份在应用中心安装一个小型应用（例如 Memos），确认计划显示运行身份 `app-memos`、文件夹位于 `/srv/a-nas/data/apps/memos`；安装完成后 `getent passwd app-memos` 的 UID 在 30000–30999，`stat -c %U /srv/a-nas/data/apps/memos` 为 `app-memos`，`docker ps --filter label=io.a-nas.app=memos` 显示运行中容器；再从应用中心卸载并确认容器删除、数据目录保留。卸载数据卷后应用不能启动，且系统盘上不出现 `/srv/a-nas/data/apps`。
 - `id anas-dev` 仍不包含 `docker`；`sudo -u anas-dev docker ps` 因权限失败。
 
 ## 回滚或恢复

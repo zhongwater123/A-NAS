@@ -43,6 +43,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
   | `spaces/shared` | `a-nas-users` `rwx`（只读共享文件夹为 `r-x`，另授写入者 `rwx`） | 同访问 ACL |
   | `<空间>/.a-nas-trash` | 该空间的用户仅 `--x` | 无 |
   | `<空间>/.a-nas-trash/<username>` | 该用户 `rwx` | 同访问 ACL |
+  | `apps`、`apps/<id>` | `apps` 仅 root；`apps/<id>` 属主为应用身份 `app-<id>` | 无 |
 
   Product Service 账号 `a-nas` 不在任何 ACL 中。数据卷挂载点的父目录 `/srv/a-nas` 授予 `a-nas-users` 穿过权限，供 smbd 与文件工作进程以用户身份进入空间。
 - Samba 以登录用户身份读写：`inherit acls = yes`、`nt acl support = no`、`hide unreadable = yes`、`veto files = /.a-nas-trash/`（客户端无法按名称打开或重命名回收站目录，`recycle` 不受影响），不使用 `force group`；`create mask = 0660`、`directory mask = 0770` 决定新条目的 ACL mask，缺省 `0744` 会让继承的写权限失效。

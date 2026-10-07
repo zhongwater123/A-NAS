@@ -118,11 +118,11 @@ func configuredAppStore() (*engine.Store, error) {
 		return nil, err
 	}
 	stateDir := valueOr(os.Getenv("STATE_DIRECTORY"), "/var/lib/a-nas-container")
+	// App data lives on the data volume beside the spaces; shared mounts
+	// resolve inside the Shared folder, never at the volume root (ADR 0008).
 	policy := appstore.Policy{
-		AppDataRoot:   valueOr(os.Getenv("ANAS_APP_DATA_ROOT"), "/srv/a-nas/appdata"),
-		DataRoot:      valueOr(os.Getenv("ANAS_SHARED_DATA_ROOT"), "/srv/a-nas/data"),
-		PUID:          valueOr(os.Getenv("ANAS_APP_PUID"), "1000"),
-		PGID:          valueOr(os.Getenv("ANAS_APP_PGID"), "1000"),
+		AppDataRoot:   valueOr(os.Getenv("ANAS_APP_DATA_ROOT"), "/srv/a-nas/data/apps"),
+		DataRoot:      valueOr(os.Getenv("ANAS_SHARED_DATA_ROOT"), "/srv/a-nas/data/spaces/shared"),
 		TZ:            valueOr(os.Getenv("TZ"), "Etc/UTC"),
 		ReservedPorts: []uint16{8080},
 	}

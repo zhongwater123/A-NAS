@@ -2,15 +2,17 @@
 // validated install plans. Every manifest is checked against Policy before it
 // can run: no privileged or host-namespace options, no devices or Docker
 // socket, published ports at or above 1024, and bind mounts only below the
-// A-NAS app-data and shared-data roots. Installing requires the digest of the
-// plan the user confirmed, so the executed Compose file is exactly the one shown.
+// app's own data folder and the Shared folder. Each app runs as its own Linux
+// identity app-<id> (ADR 0008). Installing requires the digest of the plan
+// the user confirmed, so the executed Compose file is exactly the one shown.
 package appstore
 
 import (
 	"context"
 	"errors"
-	"regexp"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/appid"
 )
 
 var (
@@ -24,11 +26,9 @@ var (
 	ErrUnavailable      = errors.New("app store engine is unavailable")
 )
 
-var appIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,40}$`)
-
 // ValidID reports whether id can name a catalog app and its Compose project.
 func ValidID(id string) bool {
-	return appIDPattern.MatchString(id)
+	return appid.Valid(id)
 }
 
 // ProjectName is the Compose project of an installed app; the prefix keeps
@@ -100,10 +100,24 @@ type AppStatus struct {
 	Job     *Job
 }
 
+// Identity is the Linux account app-<id> an app's containers run as; the
+// Host Agent allocates it (ADR 0008).
+type Identity = appid.Identity
+
+const (
+	FirstAppUID = appid.FirstUID
+	LastAppUID  = appid.LastUID
+)
+
+// IdentityName is the Linux account name of an app.
+func IdentityName(id string) string {
+	return appid.Username(id)
+}
+
 type Store interface {
 	Apps(ctx context.Context) ([]AppStatus, error)
 	Icon(ctx context.Context, id string) ([]byte, string, error)
-	Plan(ctx context.Context, id string) (Plan, error)
-	Install(ctx context.Context, id, digest string) (Job, error)
+	Plan(ctx context.Context, id string, identity Identity) (Plan, error)
+	Install(ctx context.Context, id, digest string, identity Identity) (Job, error)
 	Uninstall(ctx context.Context, id string) (Job, error)
 }

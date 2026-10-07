@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,23 +55,25 @@ func (c *Client) Icon(ctx context.Context, id string) ([]byte, string, error) {
 	return icon, contentType, err
 }
 
-func (c *Client) Plan(ctx context.Context, id string) (appstore.Plan, error) {
+func (c *Client) Plan(ctx context.Context, id string, identity appstore.Identity) (appstore.Plan, error) {
 	if !appstore.ValidID(id) {
 		return appstore.Plan{}, appstore.ErrNotFound
 	}
 	var document PlanDocument
-	if _, err := c.do(ctx, http.MethodGet, "/v1/apps/"+id+"/plan", nil, &document); err != nil {
+	path := fmt.Sprintf("/v1/apps/%s/plan?uid=%d&gid=%d", id, identity.UID, identity.GID)
+	if _, err := c.do(ctx, http.MethodGet, path, nil, &document); err != nil {
 		return appstore.Plan{}, err
 	}
 	return document.ToDomain(), nil
 }
 
-func (c *Client) Install(ctx context.Context, id, digest string) (appstore.Job, error) {
+func (c *Client) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
 	if !appstore.ValidID(id) {
 		return appstore.Job{}, appstore.ErrNotFound
 	}
 	var document JobDocument
-	if _, err := c.do(ctx, http.MethodPost, "/v1/apps/"+id+"/install", InstallRequest{Digest: digest}, &document); err != nil {
+	request := InstallRequest{Digest: digest, UID: identity.UID, GID: identity.GID}
+	if _, err := c.do(ctx, http.MethodPost, "/v1/apps/"+id+"/install", request, &document); err != nil {
 		return appstore.Job{}, err
 	}
 	return document.ToDomain()
@@ -178,7 +181,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !allow(w, r, http.MethodGet) {
 			return
 		}
-		plan, err := h.store.Plan(r.Context(), id)
+		identity, ok := identityFrom(id, r.URL.Query().Get("uid"), r.URL.Query().Get("gid"))
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
+			return
+		}
+		plan, err := h.store.Plan(r.Context(), id, identity)
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -198,7 +206,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var job appstore.Job
 		var err error
 		if operation == "install" {
-			job, err = h.store.Install(r.Context(), id, request.Digest)
+			identity, ok := identityFrom(id, strconv.Itoa(request.UID), strconv.Itoa(request.GID))
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
+				return
+			}
+			job, err = h.store.Install(r.Context(), id, request.Digest, identity)
 		} else {
 			job, err = h.store.Uninstall(r.Context(), id)
 		}
@@ -211,6 +224,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	}
+}
+
+// identityFrom accepts only the app identity range the Host Agent
+// allocates, so a request can never render a plan that runs as root or as a
+// member's account.
+func identityFrom(id, uid, gid string) (appstore.Identity, bool) {
+	parsedUID, uidErr := strconv.Atoi(uid)
+	parsedGID, gidErr := strconv.Atoi(gid)
+	if uidErr != nil || gidErr != nil || parsedUID != parsedGID ||
+		parsedUID < appstore.FirstAppUID || parsedUID > appstore.LastAppUID {
+		return appstore.Identity{}, false
+	}
+	return appstore.Identity{Username: appstore.IdentityName(id), UID: parsedUID, GID: parsedGID}, true
 }
 
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {

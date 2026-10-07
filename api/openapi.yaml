@@ -353,8 +353,9 @@ paths:
       operationId: getContainerSnapshot
       summary: List containers and images from the container engine
       description: >-
-        Running containers include CPU and memory usage sampled over about one second. Responses are not
-        cacheable. ANAS_CONTAINERS_MODE selects simulated, live (container agent) or disabled management.
+        Administrators only; container actions also need the session CSRF token. Running containers include CPU
+        and memory usage sampled over about one second. Responses are not cacheable. ANAS_CONTAINERS_MODE
+        selects simulated, live (container agent) or disabled management.
       responses:
         "200":
           description: One snapshot of the container engine.
@@ -481,8 +482,10 @@ paths:
       operationId: getAppInstallPlan
       summary: Render the install plan the owner must confirm
       description: >-
-        The plan lists images, containers, published host ports and host folders, plus the rendered Compose file
-        and its SHA-256 digest. Manifests that violate the install policy answer 422.
+        Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and
+        host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own
+        folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the
+        install policy answer 422.
       parameters:
         - $ref: "#/components/parameters/AppId"
       responses:
@@ -505,9 +508,12 @@ paths:
       operationId: installApp
       summary: Start installing an app from a confirmed plan
       description: >-
-        The container agent re-renders the plan and refuses with plan_changed unless the digest matches. Only one
-        install or uninstall runs at a time. Requests must target a loopback Host, use a JSON body and, when an
-        Origin is sent, come from the same origin.
+        Administrators only, with the session CSRF token. The plan is re-rendered for the app identity and
+        refused with plan_changed unless the digest matches; the Host Agent then creates the mounted folders
+        (Docker never creates host folders) and grants Shared access if the plan mounts from it. Refused with 423
+        volume_unavailable while the data volume is offline. Only one install or uninstall runs at a time.
+        Requests must also target a loopback Host, use a JSON body and, when an Origin is sent, come from the
+        same origin.
       parameters:
         - $ref: "#/components/parameters/AppId"
       requestBody:
@@ -541,6 +547,8 @@ paths:
           $ref: "#/components/responses/AppConflict"
         "422":
           $ref: "#/components/responses/AppConflict"
+        "423":
+          $ref: "#/components/responses/ProductError"
         "502":
           $ref: "#/components/responses/AppConflict"
         "503":
@@ -549,6 +557,7 @@ paths:
     post:
       operationId: uninstallApp
       summary: Start removing an installed app while keeping its data
+      description: Administrators only, with the session CSRF token. The app identity's Shared access is withdrawn at once.
       parameters:
         - $ref: "#/components/parameters/AppId"
       requestBody:
@@ -1368,7 +1377,7 @@ components:
     AppPlan:
       type: object
       additionalProperties: false
-      required: [appId, title, version, project, images, containers, ports, mounts, digest, compose]
+      required: [appId, title, version, project, identity, images, containers, ports, mounts, digest, compose]
       properties:
         appId:
           type: string
@@ -1378,6 +1387,25 @@ components:
           type: string
         project:
           type: string
+        identity:
+          description: >-
+            The Linux account app-<appId> the app's containers run as (PUID/PGID). A mount of kind shared means
+            the account joins a-nas-users and gains the Shared folder's access.
+          type: object
+          additionalProperties: false
+          required: [username, uid, gid]
+          properties:
+            username:
+              type: string
+              pattern: "^app-[a-z0-9][a-z0-9-]*$"
+            uid:
+              type: integer
+              minimum: 30000
+              maximum: 30999
+            gid:
+              type: integer
+              minimum: 30000
+              maximum: 30999
         images:
           type: array
           items:

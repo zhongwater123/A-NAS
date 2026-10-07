@@ -68,10 +68,11 @@ const memosPlan = {
   title: "Memos",
   version: "0.28.0",
   project: "a-nas-memos",
+  identity: { username: "app-memos", uid: 30000, gid: 30000 },
   images: ["neosmemo/memos:0.28.0"],
   containers: ["memos"],
   ports: [{ hostPort: 5230, containerPort: 5230, protocol: "tcp", purpose: "WebUI 端口" }],
-  mounts: [{ hostPath: "/srv/a-nas/appdata/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false }],
+  mounts: [{ hostPath: "/srv/a-nas/data/apps/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false }],
   digest: "d".repeat(64),
   compose: "name: a-nas-memos\n",
 };
@@ -413,6 +414,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       apps: async (url, init) => {
         if (init?.method === "POST") {
           posts.push({ url, body: JSON.parse(String(init.body)) });
+          expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe(session.csrfToken);
           installed = url.endsWith("/install");
           return { ok: true, status: 202, json: async () => ({ appId: "memos", action: "install", state: "running", startedAt: "2026-10-07T00:00:00Z", output: [] }) } as Response;
         }
@@ -433,7 +435,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     const plan = await within(store).findByRole("region", { name: "安装计划" });
     expect(within(plan).getByText("neosmemo/memos:0.28.0")).toBeTruthy();
     expect(within(plan).getByText("5230/tcp")).toBeTruthy();
-    expect(within(plan).getByText("/srv/a-nas/appdata/memos/memos")).toBeTruthy();
+    expect(within(plan).getByText("/srv/a-nas/data/apps/memos/memos")).toBeTruthy();
+    expect(within(plan).getByText("app-memos")).toBeTruthy();
+    expect(within(plan).getByText(/只访问自己的应用数据/)).toBeTruthy();
     expect(posts).toHaveLength(0);
 
     await user.click(within(plan).getByRole("button", { name: "确认安装" }));
@@ -694,5 +698,15 @@ describe("ADR 0008 account safeguards", () => {
     expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "结束查看" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/viewing/viewing%3A1", expect.objectContaining({ method: "DELETE" }));
+  });
+});
+
+describe("ADR 0008 application access", () => {
+  it("shows Docker and the App Center to administrators only", async () => {
+    installAPI({ session: { ...session, user: { ...session.user, username: "alice", role: "member" } } });
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(within(desktop).queryByRole("button", { name: "打开 Docker" })).toBeNull();
+    expect(within(desktop).queryByRole("button", { name: "打开应用中心" })).toBeNull();
   });
 });

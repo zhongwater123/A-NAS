@@ -43,7 +43,7 @@
 
 - `ANAS_CONTAINERS_MODE` 为 `fake`、`agent` 或 `disabled`；未设置时随宿主机状态模式：模拟模式下为 `fake`，真实模式下为 `disabled`，因此实时部署永远不会显示虚构容器。部署激活脚本仅在真实模式且容器代理 socket 存在时写入 `agent`。
 - 容器只能用完整 64 位引擎 ID 指定，名称和短 ID 被拒绝，避免同名或前缀冲突作用到其他容器。
-- 写请求（`POST /api/v1/containers/{id}/actions`）必须指向回环 Host、使用 `application/json` 请求体，且浏览器 Origin 必须同源；否则返回 403。由于 API 尚无登录，这阻止跨站页面和 DNS rebinding 操作容器。请求体只接受 `action` 字段。
+- Docker 仅管理员可用：`/api/v1/containers` 需要管理员产品会话，写请求（`POST /api/v1/containers/{id}/actions`）还需要会话的 CSRF 令牌；成员看不到“Docker”图标（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。写请求另须指向回环 Host、使用 `application/json` 请求体，且浏览器 Origin 必须同源；否则返回 403。请求体只接受 `action` 字段。
 - 日志单次最多 500 行、1 MiB；资源采样在 3 秒预算内最多并发 8 个容器，超时的容器不显示占用但仍列出。
 - 错误码：`containers_disabled`、`containers_unavailable`（503）、`container_not_found`（404）、`invalid_request`（400）、`container_engine_error`（502）；浏览器只看到通用中文描述，引擎细节只写入服务日志。
 - 产品服务与容器代理对启停请求单独放宽写超时到 30 秒，覆盖 10 秒的停止宽限期。
@@ -53,7 +53,7 @@
 
 - 领域、Fake 与 Docker 适配器：[Docker 适配器测试](../../internal/containers/docker/manager_test.go) 覆盖多路复用日志解析与截断、TTY 日志、CPU/内存计算、端口去重与非法 ID/状态过滤。
 - 代理 IPC：[容器代理测试](../../internal/containers/agent/agent_test.go) 覆盖往返、错误码映射和只开放类型化操作。
-- 产品 API：[容器 API 测试](../../internal/containersapi/handler_test.go)、[同源写检查测试](../../internal/localorigin/localorigin_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
+- 产品 API：[容器 API 测试](../../internal/containersapi/handler_test.go)、[同源写检查测试](../../internal/localorigin/localorigin_test.go)、[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
 - 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖列表、停止需确认、启动、日志、镜像页和未启用状态，并以返回 Promise 的 `scrollIntoView` 复现过日志视图卸载导致整页崩溃的缺陷。
 - 2026-10-07 在 WSL2（Docker 29.1.3，API 1.52）以用户态容器代理和 `ANAS_CONTAINERS_MODE=agent` 运行：列出 5 个容器与 2 个镜像及运行中容器的 CPU/内存；对专用测试容器 `anas-docker-smoke` 执行启动、重启、停止均返回 204 且与 `docker inspect` 一致；读取日志 98 行；`text/plain` 跨站请求返回 403；Chromium 中完成确认停止、启动、查看日志与返回列表。
 

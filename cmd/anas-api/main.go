@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
@@ -119,12 +120,25 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	apiHandler := route(httpapi.NewProduct(httpapi.ProductDependencies{
+	appOptions := appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: logger}
+	if live {
+		host, ok := operations.(appid.Host)
+		if !ok {
+			return errors.New("host agent client cannot prepare apps")
+		}
+		appOptions.Host = host
+		guard := fileOptions.VolumeGuard
+		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, true) }
+	}
+
+	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
-		Terminal: terminals, Logger: logger,
-	}), containersapi.New(containerManager, containerSource, logger),
-		appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), logger))
+		Terminal:   terminals,
+		Containers: containersapi.New(containerManager, containerSource, logger),
+		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		Logger:     logger,
+	})
 	handler, err := webui.New(apiHandler)
 	if err != nil {
 		return err
@@ -320,18 +334,4 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 	default:
 		return nil, nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
 	}
-}
-
-func route(api, containerAPI, appAPI http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if containersapi.Matches(r.URL.Path) {
-			containerAPI.ServeHTTP(w, r)
-			return
-		}
-		if appstoreapi.Matches(r.URL.Path) {
-			appAPI.ServeHTTP(w, r)
-			return
-		}
-		api.ServeHTTP(w, r)
-	})
 }
