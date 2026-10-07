@@ -6,7 +6,7 @@
 
 v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 已运行修复 release `ae4b642fe89d`：系统服务与 Kiosk 指向同一 release，API、Host Agent、Samba 和 Kiosk 均 active，桌面与屏保 byte-range 请求通过。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝。
 
-升级中发现并修复了三个连续阻塞：身份同步前把不存在账号写入 ACL 导致 Host Agent 启动死锁、`build-binaries` 未先生成嵌入式 Web UI、数据卷挂载点缺少 `a-nas-users:--x`。证据与最小回归见 [ADR 0008 首次升级调查](../investigations/2026-10-08-adr0008-bootstrap-private-acl.md)。旧 Samba 凭据已按手册删除，当前唯一升级收尾是管理员在 Web 重置密码以重建 Samba 凭据；完成前不能开始 Windows SMB 双向验收。
+升级中发现并修复了三个连续阻塞：身份同步前把不存在账号写入 ACL 导致 Host Agent 启动死锁、`build-binaries` 未先生成嵌入式 Web UI、数据卷挂载点缺少 `a-nas-users:--x`。证据与最小回归见 [ADR 0008 首次升级调查](../investigations/2026-10-08-adr0008-bootstrap-private-acl.md)。包含管理员自助改密入口的 `c902acded999` 已暂存并启动过，但部署探针写错屏保和代理列表路由，触发回滚；当前待修正探针后重新切换，详见[容器部署调查](../investigations/2026-10-08-experimental-nas-containers-disabled.md)。旧 Samba 凭据已按手册删除，需要管理员改密重建后才能开始 Windows SMB 双向验收。
 
 提交 `4e98e86b77c5` 已重新冻结为 `v1.0.0`。相册规格、ADR、技术设计与模型研究全部保留，实施暂停到基础存储闭环稳定后继续。
 
@@ -29,13 +29,13 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 开发循环使用受影响测试，完整门禁为每个不可变 RC 制品只执行一次；部署按提交、版本和二进制哈希复用验证证明。
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。`/opt/a-nas/current` 已切换到 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`，API、Host Agent、Kiosk 和 Samba 均 active。
-- 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；已在本地 WSL2 Docker 实测，Experimental NAS 尚未安装 Docker。
+- 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 已安装 Docker 26.1.5、独立 CLI、Compose 2.26.1 与容器代理，服务均 active；产品能力因部署探针误判而随 release 回滚，待重新切换后验收。
 - 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；本地已用真实 Compose 验证安装/卸载，镜像拉取因本机无法访问 Docker Hub 未验证。
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 
 ## 下一步
 
-1. 管理员在 Web 账号管理中重置 `admin` 密码，确认 `pdbedit -L -u admin` 出现凭据，再从 Windows 用新密码连接 SMB。
+1. 用真实代理路径 `/v1/snapshot`、`/v1/apps` 完成切换前检查，再恢复 `c902acded999`；验收 Docker/应用中心列表后，管理员在账号管理中修改自己的密码，确认 `pdbedit -L -u admin` 出现凭据，再从 Windows 用新密码连接 SMB。
 2. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
 3. 在直连屏幕完成三分钟闲置屏保与首次输入唤醒的人工验收。
 4. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；基础闭环稳定后恢复相册主线。

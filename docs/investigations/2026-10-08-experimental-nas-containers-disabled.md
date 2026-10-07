@@ -1,6 +1,6 @@
 # Experimental NAS 的 Docker 与应用中心保持禁用
 
-状态：root cause confirmed；安装与部署修复待实机验证
+状态：Docker/CLI/容器代理已安装；发布探针两处错误导致回滚，修正探针后的实机切换待验证
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -45,6 +45,24 @@ test -x /usr/local/lib/a-nas/anas-container-agent && echo present || echo missin
 - 容器代理二进制和单元必须来自与 API 相同的不可变提交并核对 SHA-256；代理通过 `/run/a-nas-container/agent.sock` 暴露类型化接口。
 - 系统服务安装器在代理 socket 已存在时写回 `ANAS_CONTAINERS_MODE=agent`，防止后续升级重建环境文件时意外关闭已经安装的容器能力；socket 缺失时继续 fail closed。
 - 完成证据必须同时覆盖 Docker、容器代理、socket 权限、`a-nas` 可达性、API 环境键和登录后的两个桌面窗口。未带管理员会话的 API 请求不能作为正向验证。
+
+## 首次安装续接
+
+2026-10-08 首次按修订手册安装时，`apt-get install --no-install-recommends docker.io docker-compose` 成功安装并启动了 Docker 26.1.5 与 containerd，但随后的 `docker version` 以 `docker: command not found` 停止。Debian 13 的 `docker.io` 只推荐而不依赖 `docker-cli`；禁止推荐包后不会得到 `/usr/bin/docker`。
+
+停止发生在创建 `anas-container` 身份、安装代理和切换 release 之前，因此系统与 Kiosk 仍指向 `ae4b642fe89d`，`c902acded999` 的系统 release 目录尚未创建，原备份保持可用。续接脚本必须显式安装同源同版本的 `docker-cli`，并从当前半安装状态继续；不得重跑会拒绝覆盖备份的原脚本。
+
+运行手册现把 `docker-cli` 列为显式依赖。使用 `--no-install-recommends` 的所有主机安装步骤都应在目标发行版上核对实际二进制归属，不能只依据上游软件包名称推断客户端随守护进程安装。
+
+补装 CLI 后的第一次续接成功启动 Container Agent、Host Agent、API 与 Kiosk；API 明确记录 `version=c902acded999` 和 `containers=true`，并稳定运行约 32 秒。续接脚本随后把不存在的 `/screensaver.mp4` 当作屏保路由，连续收到 404 后误判整体 HTTP 健康失败并自动回滚。产品和测试共同定义的真实路由是 `/local-console/screensaver.mp4`（`internal/webui/handler.go` 与 `web/src/LocalConsoleScreenSaver.tsx`）。最终切换改为逐项打印 `/healthz`、`/` 和真实屏保路由的状态，避免复合断言隐藏具体失败项。
+
+验证脚本属于产品契约的调用者；路由、环境键或 socket 路径不能凭记忆重复书写。优先复用规格/测试中的同一常量；无法直接复用时，运行手册必须链接定义和回归测试，并让每个探针独立输出结果。
+
+修正屏保路径后，最终切换的所有 HTTP 检查均已通过，但代理检查再次误把 `/v1/containers` 当成列表路由。真实代理的 Client 和 Handler 都使用 `/v1/snapshot`，公开产品接口才使用 `/api/v1/containers`。这是部署探针的第二处错误；404 表明请求已到达代理，不能据此认定 Docker 或授权链损坏。失败后两个 current 再次回到 `ae4b642fe89d`。
+
+现将只读检查集中在 [`verify-container-deployment.py`](../../scripts/verify-container-deployment.py)，先以 `a-nas` 身份读取代理的 snapshot 和 app catalog，全部通过才允许切换；切换后复用同一探针，避免复制路径时再次漂移。失败必须报告具体路由和状态；日志验收限定当前服务 InvocationID，避免旧启动记录造成假成功。
+
+2026-10-08 在本地 WSL Docker 29.8.1 上，使用与 NAS 上传制品相同的 `c902acded999` 二进制运行 [`check-container-deployment-probes.py`](../../scripts/check-container-deployment-probes.py)：两个错误路径均复现 404；`/v1/snapshot`、`/v1/apps` 返回 200（目录 26 项），健康/桌面返回 200，真实屏保路由返回 206 和 1024 字节。API 使用临时模拟状态，代理只读真实 Docker；此结果验证了探针协议，不代替 NAS 上 Debian Docker 26.1.5 与 `a-nas` 组权限的切换前检查。
 
 ## 关联
 
