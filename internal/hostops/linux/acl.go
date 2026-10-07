@@ -104,8 +104,10 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 	if err := e.ensureFixedGroups(ctx); err != nil {
 		return nil, err
 	}
-	if err := e.ensureTraversal(ctx, filepath.Dir(e.mountPoint)); err != nil {
-		return nil, err
+	for _, path := range []string{filepath.Dir(e.mountPoint), e.mountPoint} {
+		if err := e.ensureTraversal(ctx, path); err != nil {
+			return nil, err
+		}
 	}
 	for _, path := range []string{filepath.Join(e.mountPoint, "spaces"), filepath.Join(e.mountPoint, "spaces", "private")} {
 		if err := apply(path, containerACL(), false, false); err != nil {

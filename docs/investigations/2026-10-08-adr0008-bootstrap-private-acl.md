@@ -1,6 +1,6 @@
 # ADR 0008 首次升级时 Host Agent 无法启动
 
-状态：ACL 修复已实机验证；完整恢复因无效 API 构建产物暂停
+状态：启动 ACL 与构建修复已实机验证；数据卷入口遍历修复待实机回归
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -63,6 +63,10 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 第一次修复制品只运行了 `make build-binaries`。该目标原先未依赖 `web-build`，因此 Go 编译成功时 `internal/webui/dist` 仍只有 `.keep`；修复后的 Host Agent 已在实验 NAS 正常监听并成功应用启动期 root-only ACL，但同 release 的 API 持续以 `embedded web UI is not built` 退出。现有 `TestHandlerServesEmbeddedDesktopAndImmutableAssets` 在该源码/产物状态下稳定复现错误。
 
 构建门禁现要求 `build-binaries` 自身依赖 `web-build`，而不是只依赖调用者记住执行顺序。重新生成的不可变 release 必须先让该 Web UI 嵌入测试通过，再用于续接现场；已经安装的不完整 release 不原位覆盖。
+
+完整构建的 `67f6ccd17ff0` 随后成功启动 API、Host Agent、File Broker 与 Kiosk，并重建 `admin` 为 UID/GID 20100；最终权限验收又暴露数据卷入口遗漏：个人空间已含 `user:admin:rwx`，`admin` 也已属于 `a-nas-users`，但以该用户访问仍被拒绝。`namei` 将不可达层级定位到挂载点 `/srv/a-nas/data`。对账此前只给父目录 `/srv/a-nas` 添加了 `a-nas-users:--x`，没有给挂载点本身添加；每一级路径分量都要求执行权限，因此空间根 ACL 正确也不可达。
+
+`TestMaterializeRegisteredSpacesAppliesTheACLLayout` 现同时要求父目录与数据卷挂载点获得仅遍历 ACL。修复让启动对账对两级目录都执行同一幂等操作，不授予列目录权限；实机仍需证明 `admin` 可以进入自己的个人空间，而 Product Service 账号 `a-nas` 继续被内核拒绝。
 
 ## 关联
 

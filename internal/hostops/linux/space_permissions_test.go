@@ -88,8 +88,10 @@ func TestMaterializeRegisteredSpacesAppliesTheACLLayout(t *testing.T) {
 	if runner.ran(spacePermissionCommand{name: "setfacl", args: []string{"--set", userTrashACL("bob"), filepath.Join(privateTrash, "bob")}}) {
 		t.Error("another member received a trash directory inside alice's private space")
 	}
-	if !runner.ran(spacePermissionCommand{name: "setfacl", args: []string{"--modify", "group:a-nas-users:--x", filepath.Dir(mountPoint)}}) {
-		t.Error("A-NAS accounts cannot traverse to the data-volume mount point")
+	for _, path := range []string{filepath.Dir(mountPoint), mountPoint} {
+		if !runner.ran(spacePermissionCommand{name: "setfacl", args: []string{"--modify", "group:a-nas-users:--x", path}}) {
+			t.Errorf("A-NAS accounts cannot traverse %s on the way to their spaces", path)
+		}
 	}
 	for _, command := range runner.commands {
 		joined := strings.Join(command.args, " ")
