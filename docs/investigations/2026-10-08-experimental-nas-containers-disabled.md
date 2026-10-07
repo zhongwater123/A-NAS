@@ -1,6 +1,6 @@
 # Experimental NAS 的 Docker 与应用中心保持禁用
 
-状态：Docker/CLI/容器代理已安装；发布探针两处错误导致回滚，修正探针后的实机切换待验证
+状态：resolved；Docker/CLI/容器代理与 `c902acded999` 已在 Experimental NAS 完成实机切换和验证
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -63,6 +63,18 @@ test -x /usr/local/lib/a-nas/anas-container-agent && echo present || echo missin
 现将只读检查集中在 [`verify-container-deployment.py`](../../scripts/verify-container-deployment.py)，先以 `a-nas` 身份读取代理的 snapshot 和 app catalog，全部通过才允许切换；切换后复用同一探针，避免复制路径时再次漂移。失败必须报告具体路由和状态；日志验收限定当前服务 InvocationID，避免旧启动记录造成假成功。
 
 2026-10-08 在本地 WSL Docker 29.8.1 上，使用与 NAS 上传制品相同的 `c902acded999` 二进制运行 [`check-container-deployment-probes.py`](../../scripts/check-container-deployment-probes.py)：两个错误路径均复现 404；`/v1/snapshot`、`/v1/apps` 返回 200（目录 26 项），健康/桌面返回 200，真实屏保路由返回 206 和 1024 字节。API 使用临时模拟状态，代理只读真实 Docker；此结果验证了探针协议，不代替 NAS 上 Debian Docker 26.1.5 与 `a-nas` 组权限的切换前检查。
+
+## 实机完成证据
+
+2026-10-08，集中式探针先以 `a-nas` 身份完成切换前只读检查，再在切换后复用同一检查；最终现场满足：
+
+- `/opt/a-nas/current` 与 `/home/anas-dev/apps/a-nas/current` 都指向不可变 release `c902acded999`。
+- Docker、containerd、Container Agent、Host Agent、API、Kiosk 与 Samba 全部为 active；Docker Server 为 26.1.5，Compose 为 2.26.1。
+- Container Agent 的 `/v1/snapshot` 与 `/v1/apps` 通过，产品服务以 `containers=true` 启动；桌面 Docker 与应用中心不再显示能力未启用提示。
+- `/healthz` 和嵌入式桌面返回 200，`/local-console/screensaver.mp4` 的 1024 字节 Range 请求返回 206。
+- `a-nas` 只能访问类型化代理 socket，不能读取 Docker socket；`anas-dev` 无权读取两者，符合 ADR 0009 的权限隔离。
+
+两次自动回滚因此不是产品能力连续损坏，而是部署验证代码与真实协议漂移。后续切换必须复用仓库探针，禁止在一次性 shell 中重新手写产品路由；HTTP 404 也必须先按“请求已到达服务但路径不存在”分类，不能直接归因于依赖或权限失败。
 
 ## 关联
 
