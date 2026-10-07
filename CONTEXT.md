@@ -20,6 +20,10 @@ _Avoid_：文件服务、root 代读写、sudo helper
 唯一能访问 Docker Engine socket 的独立服务，以专用系统用户运行，只向产品服务提供类型化的容器查看与生命周期操作。
 _Avoid_：Docker 代理、Portainer、Docker API 网关
 
+**相册服务（Photo Service）**：
+以专用系统身份独占受管图库存储、自行确认会话并在 Catalog 中授权照片资产的独立服务；它不获得个人空间或共享文件夹的访问权。
+_Avoid_：相册后端、图片服务器、产品服务中的相册
+
 **Adapter**：
 把产品定义的能力契约连接到某个运行环境或外部系统的实现。
 _Avoid_：工具类、胶水层

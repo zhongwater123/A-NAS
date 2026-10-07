@@ -21,4 +21,5 @@ A-NAS 相册把导入媒体复制到受管图库，以稳定照片资产 ID 表�
 
 - [相册规格](../specs/photo-library.md)
 - [相册技术设计](../architecture/photo-library.md)
+- [ADR 0011：相册服务身份与 Catalog 授权](0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [领域语言](../../CONTEXT.md)

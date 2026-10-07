@@ -8,7 +8,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 rc.4 已消除空盘计划蓝屏并完成真实格式化。随后实机证据显示 `spaces` 为 `root:root 0770`、`spaces/private` 为 `root:root 0750`，而 Product Service 以 `a-nas` 运行，直接 `stat/find` 即得到 `Permission denied`。rc.5 已安装 `acl` 运行依赖并完成 root 激活：两个空间容器为 `root:a-nas-members 0710`，个人空间及回收站为 `admin:a-nas 2770` 且带访问/默认 ACL，Shared 及回收站为 `root:a-nas-members 2770`；以 `a-nas` 检查四个目录均具备读、写和进入权限。
 
-提交 `4e98e86b77c5` 已重新冻结为 `v1.0.0`。相册规格、ADR、技术设计与模型研究全部保留，实施暂停到基础存储闭环稳定后继续。
+提交 `4e98e86b77c5` 已重新冻结为 `v1.0.0`。相册（[issue #23](https://github.com/zhongwater123/A-NAS/issues/23)）已由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 确定专用服务身份、数据卷上的 Catalog 与按范围授权的管理员查看，并拆为 M1 基础相册、M2 本地 AI 检索与 M3 扩展三个里程碑；部署与实机验收排在基础存储闭环和 ADR 0008 之后。
 
 ## 已就绪
 
@@ -38,7 +38,8 @@ rc.4 已消除空盘计划蓝屏并完成真实格式化。随后实机证据显
 1. 重跑用户原始复现：打开个人空间、Shared、回收站和文件快照，确认四个入口不再返回 `request could not be completed`。
 2. 实现 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（统一 Linux 身份、文件系统 ACL、文件代理与管理员查看模式），取代 rc.5 中由 `a-nas` 与用户共同持有个人空间的过渡模型；实验卷只含可丢弃测试数据，不做迁移。
 3. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
-4. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；基础闭环稳定后恢复相册主线。
+4. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复。
+5. 相册 M1 按[技术设计的开发切片](../architecture/photo-library.md#开发切片)从 Catalog 与受管存储开始，以 ADR 0008 实现栈为基线、先用本地临时目录开发；M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储、账号删除和备份是相册部分验收的前置能力，尚未立项。
 
 ## 外部条件与限制
 
