@@ -77,6 +77,7 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	fileOptions := files.Options{AllowUnverifiedVolume: !live}
+	terminalConfig := terminal.Config{}
 	if live {
 		fileOptions.VolumeGuard = files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
 			volumes, err := storageService.ListVolumes(ctx)
@@ -90,7 +91,10 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		fileOptions.FileSystem = filebroker.NewClient(brokerSocket)
+		broker := filebroker.NewClient(brokerSocket)
+		fileOptions.FileSystem = broker
+		// Terminal shells run as the signed-in administrator, not as a-nas.
+		terminalConfig.Spawner = broker
 	} else if err := os.MkdirAll(volumeRoot, 0o700); err != nil {
 		return err
 	}
@@ -99,7 +103,8 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	terminals := terminal.New(terminal.Config{Enabled: terminalEnabled}, logger)
+	terminalConfig.Enabled = terminalEnabled
+	terminals := terminal.New(terminalConfig, logger)
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,

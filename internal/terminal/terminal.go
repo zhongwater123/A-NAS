@@ -1,9 +1,11 @@
 // Package terminal serves interactive shells for the Web desktop over WebSocket.
 //
-// Shells run as the Product Service user and inherit its sandbox; the package
-// never elevates privileges. Sessions are refused unless the feature is enabled,
-// the peer is a loopback address, the Host names a loopback endpoint and the
-// browser Origin matches that Host.
+// In production the File Broker starts each shell as the signed-in
+// administrator's own Linux account (ADR 0008) and hands back only the PTY;
+// this package forwards bytes and never elevates privileges. Without a
+// Spawner, development shells run as the Product Service user. Sessions are
+// refused unless the feature is enabled, the peer is a loopback address, the
+// Host names a loopback endpoint and the browser Origin matches that Host.
 package terminal
 
 import (
@@ -32,7 +34,10 @@ const (
 
 // Config controls whether and how shells are started.
 type Config struct {
-	Enabled     bool
+	Enabled bool
+	// Spawner starts shells; nil starts local development shells with Shell
+	// in Dir as the Product Service user.
+	Spawner     Spawner
 	Shell       string
 	Dir         string
 	MaxSessions int
@@ -54,7 +59,6 @@ func New(config Config, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	config.Enabled = config.Enabled && ptySupported
 	if config.MaxSessions <= 0 {
 		config.MaxSessions = defaultMaxSessions
 	}
@@ -63,6 +67,10 @@ func New(config Config, logger *slog.Logger) *Handler {
 	}
 	if config.Dir == "" {
 		config.Dir, _ = os.UserHomeDir()
+	}
+	if config.Spawner == nil {
+		config.Enabled = config.Enabled && localShellSupported
+		config.Spawner = localSpawner{shell: config.Shell, dir: config.Dir}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Handler{config: config, logger: logger, ctx: ctx, shutdown: cancel}
@@ -137,11 +145,15 @@ func (h *Handler) serveSession(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(maxClientMessage)
 
-	ctx, cancel := context.WithCancel(h.ctx)
+	// Keep the request's values, such as the session token the File Broker
+	// verifies, but end with Shutdown rather than with the HTTP request.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
 	defer cancel()
+	stop := context.AfterFunc(h.ctx, cancel)
+	defer stop()
 
-	h.logger.InfoContext(ctx, "terminal session started", "shell", h.config.Shell)
-	status, reason := runSession(ctx, conn, h.config, h.logger)
+	h.logger.InfoContext(ctx, "terminal session started")
+	status, reason := runSession(ctx, conn, h.config.Spawner, h.logger)
 	_ = conn.Close(status, reason)
 	h.logger.InfoContext(ctx, "terminal session ended", "reason", reason)
 }

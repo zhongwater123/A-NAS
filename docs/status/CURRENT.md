@@ -18,14 +18,14 @@ rc.4 已消除空盘计划蓝屏并完成真实格式化。随后实机证据显
 - Linux 执行器使用固定命令创建 GPT、单盘 Btrfs、UUID mount unit、空间子卷和卷身份标记；文件服务在缺少真实 Btrfs/标记时拒绝写入。
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
-- Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开以产品服务用户运行的 PTY Shell，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
+- Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
 - Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序和 4:3 深蓝抽象壁纸；指标仍经过现有产品会话鉴权，Experimental NAS 尚未部署这组界面更新。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 - rc.4 已创建 `/dev/sda1` Btrfs 数据卷（UUID `09e275fe-794a-458d-8200-b6e67c55cc22`）并挂载到 `/srv/a-nas/data`；卷 marker 与 UUID 一致，API、Host Agent、Kiosk 和 Samba 服务均 active。
 - 文件闭环权限根因与修复边界已记录在[数据卷空间权限调查](../investigations/2026-10-07-data-volume-space-permissions.md)；父目录、ACL、共用回收站和启动自愈的最小 Go 回归已由红转绿。
-- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 第 1 步已实现：账号获得 20100–29999 内永不复用的 UID，固定组 `a-nas-users`/`a-nas-admins`，Host Agent 拒绝接管区间外同名账号，禁用账号会断开 SMB 会话；root 集成测试在特权 Debian 容器中通过。第 2 步已实现：空间、回收站与容器由 Host Agent 设为 `root:root` 加 POSIX ACL，Samba 以用户身份读写并统一按用户回收。第 3 步已实现：Host Agent 内的文件代理自行校验会话并派生按用户运行的工作进程，Web 文件操作以登录者身份执行，Product Service 不再持有任何空间权限。第 4 步已实现：管理员查看模式经重新验证与原因授予 24 小时只读 ACL，审计并通知所有者，到期（含重启后）自动撤销；管理员重置密码后成员必须先改密，期间 SMB 保持禁用。真实 Btrfs、Samba 与按用户工作进程下的权限矩阵测试通过，尚未在实验 NAS 验证。实验 NAS 上 rc.5 及更早创建的账号需按[手册](../runbooks/provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008)重建。
+- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 第 1 步已实现：账号获得 20100–29999 内永不复用的 UID，固定组 `a-nas-users`/`a-nas-admins`，Host Agent 拒绝接管区间外同名账号，禁用账号会断开 SMB 会话；root 集成测试在特权 Debian 容器中通过。第 2 步已实现：空间、回收站与容器由 Host Agent 设为 `root:root` 加 POSIX ACL，Samba 以用户身份读写并统一按用户回收。第 3 步已实现：Host Agent 内的文件代理自行校验会话并派生按用户运行的工作进程，Web 文件操作以登录者身份执行，Product Service 不再持有任何空间权限。第 4 步已实现：管理员查看模式经重新验证与原因授予 24 小时只读 ACL，审计并通知所有者，到期（含重启后）自动撤销；管理员重置密码后成员必须先改密，期间 SMB 保持禁用。第 5 步已实现：Web 终端以登录管理员本人身份运行。真实 Btrfs、Samba 与按用户工作进程下的权限矩阵测试通过，尚未在实验 NAS 验证。实验 NAS 上 rc.5 及更早创建的账号需按[手册](../runbooks/provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008)重建。
 - 开发循环使用受影响测试，完整门禁为每个不可变 RC 制品只执行一次；部署按提交、版本和二进制哈希复用验证证明。
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。`/opt/a-nas/current` 已切换到 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`，API、Host Agent、Kiosk 和 Samba 均 active。
