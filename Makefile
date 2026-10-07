@@ -5,7 +5,7 @@ VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test root-integration-test build build-binaries check check-steps clean
 
 all: check
 
@@ -51,6 +51,8 @@ ops-check:
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api' deploy/systemd/system/anas-api.service
 	grep -Fq 'ANAS_HOST_AGENT_GROUP=a-nas' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'ReadWritePaths=/var/lib/a-nas' deploy/systemd/system/anas-api.service
 	grep -Fq 'setfacl getfacl' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'acl btrfs-progs' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
@@ -58,6 +60,10 @@ ops-check:
 	grep -Fq 'a-nas-chromium-policy.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
+	grep -Fqx 'User=anas-container' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
 
 vet:
 	$(GO) vet ./...
@@ -65,12 +71,17 @@ vet:
 test:
 	$(GO) test ./...
 
+# Modifies accounts, groups, and Samba state: disposable privileged container only.
+root-integration-test:
+	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
+
 build: web-build build-binaries
 
 build-binaries:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
+	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-container-agent ./cmd/anas-container-agent
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)
@@ -84,5 +95,5 @@ check:
 check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet test build-binaries
 
 clean:
-	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(VALIDATION_MANIFEST)
+	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete

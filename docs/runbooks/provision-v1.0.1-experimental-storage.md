@@ -79,6 +79,18 @@ ip -brief link
 
 完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；两个系统服务 active；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
+## 升级到统一身份（ADR 0008）
+
+rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）。统一身份版本只接管 UID 20100–29999 内由 A-NAS 分配的账号；遇到旧账号时 Product Service 日志出现 `identity synchronization failed` 与 `conflicts with an existing host account`，且不会修改该账号。实验卷只含可丢弃测试数据，不迁移旧 UID 的文件。
+
+1. 激活新版本前停止产品服务：`systemctl stop anas-api`。
+2. 列出旧账号：只处理 `/var/lib/a-nas/space-registry.json` 中个人空间目录名对应、且 `getent passwd <name>` 显示 UID 小于 20000、shell 为 `/usr/sbin/nologin` 的账号。不得删除 `root`、`a-nas`、`anas-dev` 或其他系统账号。
+3. 对每个旧账号执行 `smbpasswd -x <name>`、`userdel <name>`，若存在同名私有组再执行 `groupdel <name>`。
+4. 激活新版本并启动服务后确认：`getent passwd <name>` 的 UID 与 GID 均在 20100–29999；`getent group a-nas-users a-nas-admins` 为 GID 20000/20001；日志不再出现身份冲突。
+5. 管理员登录 Web，为自己和每个成员重置密码，以重建 Samba 凭据。
+
+完成标准：`/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json` 列出全部账号，二者均为 `root:root 0600`。
+
 ## 生成和执行计划
 
 1. 在本地 Kiosk 的“存储初始化”打开候选盘。
@@ -90,18 +102,25 @@ ip -brief link
 
 ## 功能验收
 
-升级修复后先验证权限链。`spaces` 和 `spaces/private` 必须允许 `a-nas` 与成员穿过但不可列出；个人空间及其 `.a-nas-trash` 必须同时授予个人账号和 `a-nas`，Shared 回收站必须属于 `a-nas-members`：
+升级后先按[存储架构中的 ACL 表](../architecture/storage-and-files.md#卷与目录)验证权限链：容器只能穿过、空间与回收站目录为 `root:root` 且只授予对应用户；Product Service 账号 `a-nas` 必须被拒绝，Web 文件操作经 `/run/a-nas/file-broker.sock` 以用户身份执行：
 
 ```bash
 namei -l /srv/a-nas/data/spaces/private/admin
-getfacl -cp \
+getfacl -p \
+  /srv/a-nas \
   /srv/a-nas/data/spaces \
   /srv/a-nas/data/spaces/private \
   /srv/a-nas/data/spaces/private/admin \
-  /srv/a-nas/data/spaces/private/admin/.a-nas-trash \
+  /srv/a-nas/data/spaces/private/admin/.a-nas-trash/admin \
+  /srv/a-nas/data/spaces/shared \
   /srv/a-nas/data/spaces/shared/.a-nas-trash
-runuser -u a-nas -- test -r /srv/a-nas/data/spaces/private/admin
+setpriv --reuid=admin --regid=admin --init-groups -- ls /srv/a-nas/data/spaces/private/admin
+! runuser -u a-nas -- test -r /srv/a-nas/data/spaces/private/admin
+ls -l /run/a-nas/file-broker.sock
+journalctl -u anas-host-agent | grep -E 'repaired drifted|file worker'
 ```
+
+rc.5 及更早版本的 `a-nas-members` 组不再使用；确认无引用后可执行 `gpasswd -d a-nas a-nas-members` 与 `groupdel a-nas-members`。
 
 1. 创建管理员与两个成员，确认 Web 与 Windows SMB 都无法列出或读取另一成员个人空间。
 2. 在个人空间和 `\\<NAS-IP>\Shared` 中分别由 Web 与 SMB 创建文件和子目录，再由另一端读取、改名和删除；用 SHA-256 核对大文件。

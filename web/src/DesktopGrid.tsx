@@ -1,4 +1,5 @@
 import { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { moveItem, useDesktopOrder } from "./useDesktopOrder";
 
@@ -27,6 +28,8 @@ interface DragState {
   grabY: number;
   pointerX: number;
   pointerY: number;
+  width: number;
+  height: number;
   started: boolean;
   originalOrder: string[];
 }
@@ -45,6 +48,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
   const appsByID = new Map(apps.map((app) => [app.id, app]));
   const gridRef = useRef<HTMLElement>(null);
   const slots = useRef(new Map<string, HTMLDivElement>());
+  const previewRef = useRef<HTMLDivElement>(null);
   const positions = useRef(new Map<string, Position>());
   const orderRef = useRef(order);
   const drag = useRef<DragState | null>(null);
@@ -53,19 +57,14 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
   const [announcement, setAnnouncement] = useState("");
   orderRef.current = order;
 
-  const placeDragged = useCallback(() => {
+  const placePreview = useCallback(() => {
     const state = drag.current;
-    const grid = gridRef.current;
-    const slot = state && slots.current.get(state.id);
-    if (!state?.started || !grid || !slot) return;
-    // offsetLeft/offsetTop ignore transforms, so this is the slot's resting place.
-    const gridBox = grid.getBoundingClientRect();
-    const restX = gridBox.left + slot.offsetLeft - grid.scrollLeft;
-    const restY = gridBox.top + slot.offsetTop - grid.scrollTop;
-    slot.style.transform = `translate(${state.pointerX - state.grabX - restX}px, ${state.pointerY - state.grabY - restY}px)`;
+    const preview = previewRef.current;
+    if (!state?.started || !preview) return;
+    preview.style.transform = `translate3d(${state.pointerX - state.grabX}px, ${state.pointerY - state.grabY}px, 0)`;
   }, []);
 
-  // Slide displaced icons from their previous cell (FLIP) and keep the dragged icon under the pointer.
+  // Slide displaced icons from their previous cell (FLIP) and keep the portal preview under the pointer.
   useLayoutEffect(() => {
     const next = new Map<string, Position>();
     slots.current.forEach((slot, id) => {
@@ -81,8 +80,8 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
       }
     });
     positions.current = next;
-    placeDragged();
-  }, [order, placeDragged]);
+    placePreview();
+  }, [draggingID, order, placePreview]);
 
   const announceMove = (id: string, next: string[]) => {
     setAnnouncement(`已将${appsByID.get(id)?.label ?? ""}移动到第 ${next.indexOf(id) + 1} 位`);
@@ -92,8 +91,6 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
     const state = drag.current;
     drag.current = null;
     if (!state?.started) return;
-    const slot = slots.current.get(state.id);
-    if (slot) slot.style.transform = "";
     setDraggingID(undefined);
     if (cancelled) {
       setOrder(state.originalOrder);
@@ -120,6 +117,8 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
       grabY: 0,
       pointerX: event.clientX,
       pointerY: event.clientY,
+      width: 0,
+      height: 0,
       started: false,
       originalOrder: orderRef.current,
     };
@@ -137,6 +136,8 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
         state.started = true;
         state.grabX = state.startX - box.left;
         state.grabY = state.startY - box.top;
+        state.width = box.width;
+        state.height = box.height;
         setDraggingID(state.id);
       }
       moveEvent.preventDefault();
@@ -144,7 +145,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
       if (target !== orderRef.current.indexOf(state.id)) {
         setOrder((current) => moveItem(current, state.id, target));
       } else {
-        placeDragged();
+        placePreview();
       }
     };
     const stop = (cancelled: boolean) => {
@@ -177,7 +178,10 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
     announceMove(id, next);
   };
 
-  return (
+  const draggingApp = draggingID ? appsByID.get(draggingID) : undefined;
+  const draggingState = drag.current;
+
+  return <>
     <section
       ref={gridRef}
       className={`desktop-grid ${draggingID ? "reordering" : ""}`}
@@ -211,9 +215,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
               disabled={app.disabled}
               onClick={app.onClick}
             >
-              <span className={`desktop-icon icon-${app.tone}`}>{app.icon}</span>
-              <span>{app.label}</span>
-              {app.disabled && <small>规划中</small>}
+              <ShortcutContents app={app} />
             </button>
           </div>
         );
@@ -221,7 +223,28 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
       <p id="desktop-reorder-hint" className="sr-only">拖动图标，或按 Alt 加方向键，可以调整图标顺序</p>
       <p className="sr-only" aria-live="polite">{announcement}</p>
     </section>
-  );
+    {draggingApp && draggingState?.started && createPortal(
+      <div
+        ref={previewRef}
+        className="desktop-drag-preview"
+        style={{ width: draggingState.width, height: draggingState.height }}
+        aria-hidden="true"
+      >
+        <div className={`desktop-shortcut ${draggingApp.active ? "running" : ""}`}>
+          <ShortcutContents app={draggingApp} />
+        </div>
+      </div>,
+      document.body,
+    )}
+  </>;
+}
+
+function ShortcutContents({ app }: { app: DesktopApp }) {
+  return <>
+    <span className={`desktop-icon icon-${app.tone}`}>{app.icon}</span>
+    <span>{app.label}</span>
+    {app.disabled && <small>规划中</small>}
+  </>;
 }
 
 // Grid cells keep their positions while items move between them, so the

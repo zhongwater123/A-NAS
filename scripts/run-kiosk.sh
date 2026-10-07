@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-url="${ANAS_KIOSK_URL:-http://127.0.0.1:8080/}"
+url="${ANAS_KIOSK_URL:-http://127.0.0.1:8080/?local-console=1}"
 profile_root="${XDG_STATE_HOME:-$HOME/.local/state}/a-nas/chromium"
 output="${ANAS_KIOSK_OUTPUT:-}"
 transform="${ANAS_KIOSK_TRANSFORM:-normal}"
 scale="${ANAS_KIOSK_SCALE:-1}"
 
-[[ "$url" == "http://127.0.0.1:8080/" ]] || {
-  echo "ANAS_KIOSK_URL must remain http://127.0.0.1:8080/" >&2
+[[ "$url" == "http://127.0.0.1:8080/?local-console=1" ]] || {
+  echo "ANAS_KIOSK_URL must remain http://127.0.0.1:8080/?local-console=1" >&2
   exit 2
 }
 

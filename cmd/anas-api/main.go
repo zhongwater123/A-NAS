@@ -14,6 +14,16 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/appstore"
+	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
+	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
+	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
+	"github.com/zhongwater123/A-NAS/internal/containers"
+	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
+	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
+	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
@@ -76,6 +86,7 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	fileOptions := files.Options{AllowUnverifiedVolume: !live}
+	terminalConfig := terminal.Config{}
 	if live {
 		fileOptions.VolumeGuard = files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
 			volumes, err := storageService.ListVolumes(ctx)
@@ -85,6 +96,14 @@ func run(logger *slog.Logger) error {
 			return volumes[0].FilesystemUUID, nil
 		}}
 		fileOptions.SnapshotBackend = operations
+		brokerSocket, err := fileBrokerSocket()
+		if err != nil {
+			return err
+		}
+		broker := filebroker.NewClient(brokerSocket)
+		fileOptions.FileSystem = broker
+		// Terminal shells run as the signed-in administrator, not as a-nas.
+		terminalConfig.Spawner = broker
 	} else if err := os.MkdirAll(volumeRoot, 0o700); err != nil {
 		return err
 	}
@@ -93,14 +112,36 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	terminals := terminal.New(terminal.Config{Enabled: terminalEnabled}, logger)
+	terminalConfig.Enabled = terminalEnabled
+	terminals := terminal.New(terminalConfig, logger)
+
+	containerManager, appStore, containerSource, err := configuredContainers(dataSource)
+	if err != nil {
+		return err
+	}
+
+	appOptions := appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: logger}
+	if live {
+		host, ok := operations.(appid.Host)
+		if !ok {
+			return errors.New("host agent client cannot prepare apps")
+		}
+		appOptions.Host = host
+		guard := fileOptions.VolumeGuard
+		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, true) }
+	}
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
-		Terminal: terminals, Logger: logger,
+		Terminal:   terminals,
+		Containers: containersapi.New(containerManager, containerSource, logger),
+		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		Logger:     logger,
 	})
-	handler, err := webui.New(apiHandler)
+	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
+		ScreensaverVideoPath: environment("ANAS_SCREENSAVER_VIDEO", "/var/lib/a-nas/screensavers/computer-chip.mp4"),
+	})
 	if err != nil {
 		return err
 	}
@@ -110,10 +151,11 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	listenError := make(chan error, 1)
 	go func() {
-		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled)
+		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled, "containers", containerManager != nil)
 		listenError <- server.ListenAndServe()
 	}()
 	select {
@@ -140,6 +182,16 @@ func run(logger *slog.Logger) error {
 	}
 }
 
+// syncIdentities converges host accounts on the control plane at startup, so
+// accounts created before ADR 0008 receive their A-NAS UID and groups.
+func syncIdentities(ctx context.Context, accountService *accounts.Service, logger *slog.Logger) {
+	syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := accountService.SyncIdentities(syncCtx); err != nil {
+		logger.ErrorContext(ctx, "identity synchronization failed", "error", err)
+	}
+}
+
 func runDirectoryReconciliation(ctx context.Context, accountService *accounts.Service, fileService *files.Service, logger *slog.Logger) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -148,14 +200,13 @@ func runDirectoryReconciliation(ctx context.Context, accountService *accounts.Se
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			users, err := accountService.ActiveUsers(ctx)
-			if err != nil {
-				logger.ErrorContext(ctx, "list users for directory reconciliation failed", "error", err)
-				continue
-			}
-			for _, user := range users {
-				if err := fileService.ReconcileVisibleSpaces(ctx, user); err != nil && !errors.Is(err, files.ErrVolumeUnavailable) {
-					logger.ErrorContext(ctx, "directory reconciliation failed", "user_id", user.ID, "error", err)
+			// File operations run as the user through the File Broker, which
+			// needs a valid session; users without one are reconciled on their
+			// next visit.
+			for _, session := range accountService.RememberedSessions(ctx) {
+				userCtx := accounts.WithSessionToken(ctx, session.Token)
+				if err := fileService.ReconcileVisibleSpaces(userCtx, session.User); err != nil && !errors.Is(err, files.ErrVolumeUnavailable) {
+					logger.ErrorContext(ctx, "directory reconciliation failed", "user_id", session.User.ID, "error", err)
 				}
 			}
 		}
@@ -185,6 +236,21 @@ func configuredServices() (hoststate.Observer, httpapi.DataSource, productOperat
 	}
 }
 
+// fileBrokerSocket defaults to the File Broker socket beside the Host Agent's.
+func fileBrokerSocket() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("ANAS_FILE_BROKER_SOCKET")); configured != "" {
+		if !filepath.IsAbs(configured) {
+			return "", errors.New("ANAS_FILE_BROKER_SOCKET must be an absolute path")
+		}
+		return filepath.Clean(configured), nil
+	}
+	socketPath, err := agent.SocketPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(socketPath), "file-broker.sock"), nil
+}
+
 func stateDirectory() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("ANAS_STATE_DIR")); configured != "" {
 		if !filepath.IsAbs(configured) {
@@ -212,6 +278,12 @@ func (*developmentOperations) SetCredential(context.Context, accounts.Credential
 	return nil
 }
 func (*developmentOperations) DisableCredential(context.Context, string) error { return nil }
+
+// Development volumes have no ACLs; viewing access is decided by the Policy.
+func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequest) error {
+	return nil
+}
+func (*developmentOperations) RevokeViewing(context.Context, string) error { return nil }
 func (*developmentOperations) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
 	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "development", State: storage.VolumeStateAvailable}, nil
 }
@@ -231,5 +303,37 @@ func configuredTerminal() (bool, error) {
 		return true, nil
 	default:
 		return false, errors.New("ANAS_TERMINAL must be enabled or disabled")
+	}
+}
+
+// configuredContainers selects container management and the App Center
+// together, since both run through the container agent. It defaults to the
+// Fake Adapters only alongside simulated host state, so a live deployment
+// never shows invented containers or apps.
+func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, appstore.Store, containersapi.DataSource, error) {
+	mode := os.Getenv("ANAS_CONTAINERS_MODE")
+	if mode == "" {
+		mode = "disabled"
+		if hostSource == httpapi.DataSourceSimulated {
+			mode = "fake"
+		}
+	}
+	switch mode {
+	case "fake":
+		apps, err := fakeappstore.New(700 * time.Millisecond)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return fakecontainers.New(), apps, containersapi.DataSourceSimulated, nil
+	case "agent":
+		socketPath, err := containeragent.SocketPath()
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return containeragent.NewClient(socketPath), appstoreagent.NewClient(socketPath), containersapi.DataSourceLive, nil
+	case "disabled":
+		return nil, nil, containersapi.DataSourceLive, nil
+	default:
+		return nil, nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
 	}
 }

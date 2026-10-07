@@ -5,7 +5,8 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
-    and an opt-in administrator terminal running as the unprivileged Product Service user.
+    an opt-in administrator terminal, and container lifecycle actions that go through the separate
+    container agent.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -103,6 +104,48 @@ paths:
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "204": { description: Session ended }
+  /api/v1/session/password:
+    post:
+      operationId: changePassword
+      description: Replace the signed-in user's password. Required before anything else after an administrator reset it.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PasswordChange" } } } }
+      responses:
+        "204": { description: Password changed and SMB re-enabled }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      description: Unacknowledged notices such as an administrator viewing the user's private space or resetting the password.
+      responses:
+        "200": { description: Notifications, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Notification" } } } } } } }
+  /api/v1/notifications/{notificationId}/acknowledge:
+    post:
+      operationId: acknowledgeNotification
+      parameters: [{ name: notificationId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Notification acknowledged }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/users/{userId}/viewing:
+    post:
+      operationId: startViewing
+      description: Administrative Viewing Mode. An administrator re-enters their password and a reason to read another account's private space for 24 hours; the access is audited and the owner is notified.
+      parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ViewingRequest" } } } }
+      responses:
+        "201": { description: Read-only access granted, content: { application/json: { schema: { $ref: "#/components/schemas/ViewingGrant" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+  /api/v1/viewing/{grantId}:
+    delete:
+      operationId: endViewing
+      parameters: [{ name: grantId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Viewing ended and access revoked }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/users:
     get:
       operationId: listUsers
@@ -305,6 +348,246 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/containers:
+    get:
+      operationId: getContainerSnapshot
+      summary: List containers and images from the container engine
+      description: >-
+        Administrators only; container actions also need the session CSRF token. Running containers include CPU
+        and memory usage sampled over about one second. Responses are not cacheable. ANAS_CONTAINERS_MODE
+        selects simulated, live (container agent) or disabled management.
+      responses:
+        "200":
+          description: One snapshot of the container engine.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerSnapshotResponse"
+        "503":
+          $ref: "#/components/responses/ContainersUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/containers/{containerId}/actions:
+    post:
+      operationId: applyContainerAction
+      summary: Start, stop or restart one container
+      description: >-
+        Only lifecycle actions are accepted; creating, removing or reconfiguring containers is not part of this
+        API. Requests must target a loopback Host, use a JSON body and, when an Origin is sent, come from the same
+        origin. Stop and restart give the container ten seconds to exit before it is killed.
+      parameters:
+        - $ref: "#/components/parameters/ContainerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [start, stop, restart]
+      responses:
+        "204":
+          description: The engine applied the action.
+        "400":
+          $ref: "#/components/responses/ContainerRequestInvalid"
+        "403":
+          description: The request did not come from the local desktop.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ContainerNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "502":
+          $ref: "#/components/responses/ContainerEngineError"
+        "503":
+          $ref: "#/components/responses/ContainersUnavailable"
+  /api/v1/containers/{containerId}/logs:
+    get:
+      operationId: getContainerLogs
+      summary: Read the latest lines a container wrote to stdout and stderr
+      parameters:
+        - $ref: "#/components/parameters/ContainerId"
+        - name: tail
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+      responses:
+        "200":
+          description: Log lines in the order the container wrote them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerLogsResponse"
+        "400":
+          $ref: "#/components/responses/ContainerRequestInvalid"
+        "404":
+          $ref: "#/components/responses/ContainerNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "502":
+          $ref: "#/components/responses/ContainerEngineError"
+        "503":
+          $ref: "#/components/responses/ContainersUnavailable"
+  /api/v1/apps:
+    get:
+      operationId: listApps
+      summary: List App Center catalog apps with their install state
+      responses:
+        "200":
+          description: Every catalog app; installed apps report running and total containers, and the latest job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppListResponse"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/apps/{appId}/icon:
+    get:
+      operationId: getAppIcon
+      summary: Read an app icon from the catalog
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      responses:
+        "200":
+          description: PNG or SVG icon, served with a sandboxing Content-Security-Policy.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/apps/{appId}/plan:
+    get:
+      operationId: getAppInstallPlan
+      summary: Render the install plan the owner must confirm
+      description: >-
+        Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and
+        host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own
+        folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the
+        install policy answer 422.
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      responses:
+        "200":
+          description: The install plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppPlan"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "422":
+          $ref: "#/components/responses/AppConflict"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/apps/{appId}/install:
+    post:
+      operationId: installApp
+      summary: Start installing an app from a confirmed plan
+      description: >-
+        Administrators only, with the session CSRF token. The plan is re-rendered for the app identity and
+        refused with plan_changed unless the digest matches; the Host Agent then creates the mounted folders
+        (Docker never creates host folders) and grants Shared access if the plan mounts from it. Refused with 423
+        volume_unavailable while the data volume is offline. Only one install or uninstall runs at a time.
+        Requests must also target a loopback Host, use a JSON body and, when an Origin is sent, come from the
+        same origin.
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [digest]
+              properties:
+                digest:
+                  type: string
+                  pattern: "^[a-f0-9]{64}$"
+      responses:
+        "202":
+          description: The install job started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppJob"
+        "400":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "403":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "409":
+          $ref: "#/components/responses/AppConflict"
+        "422":
+          $ref: "#/components/responses/AppConflict"
+        "423":
+          $ref: "#/components/responses/ProductError"
+        "502":
+          $ref: "#/components/responses/AppConflict"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/apps/{appId}/uninstall:
+    post:
+      operationId: uninstallApp
+      summary: Start removing an installed app while keeping its data
+      description: Administrators only, with the session CSRF token. The app identity's Shared access is withdrawn at once.
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "202":
+          description: The uninstall job started; containers and the project network are removed, app data is kept.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppJob"
+        "400":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "403":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "409":
+          $ref: "#/components/responses/AppConflict"
+        "502":
+          $ref: "#/components/responses/AppConflict"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
@@ -376,9 +659,75 @@ components:
     FileID: { name: fileId, in: path, required: true, schema: { type: string } }
     TrashID: { name: trashId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
+    AppId:
+      name: appId
+      in: path
+      required: true
+      description: Catalog app ID, also the suffix of its Compose project (a-nas-<appId>).
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{0,40}$"
+    ContainerId:
+      name: containerId
+      in: path
+      required: true
+      description: Full 64-character engine container ID; names and short IDs are rejected.
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{64}$"
   responses:
     ProductError:
       description: Product operation error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppsUnavailable:
+      description: The App Center is disabled (apps_disabled) or the container agent cannot be reached (apps_unavailable).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppNotFound:
+      description: No catalog app has this ID (app_not_found).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppRequestInvalid:
+      description: The request is malformed (invalid_request) or did not come from the local desktop (forbidden).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppConflict:
+      description: >-
+        The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use,
+        name_in_use, policy_violation or app_engine_error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainersUnavailable:
+      description: Container management is disabled (containers_disabled) or the engine cannot be reached (containers_unavailable).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainerRequestInvalid:
+      description: The container ID, action or tail is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainerNotFound:
+      description: No container has this ID.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainerEngineError:
+      description: The container engine rejected the request.
       content:
         application/json:
           schema:
@@ -605,13 +954,50 @@ components:
     User:
       type: object
       additionalProperties: false
-      required: [id, username, role, status, createdAt]
+      required: [id, username, role, status, createdAt, mustChangePassword]
       properties:
         id: { type: string }
         username: { type: string }
         role: { type: string, enum: [admin, member] }
         status: { type: string, enum: [pending, active, disabled, error] }
         createdAt: { type: string, format: date-time }
+        mustChangePassword: { type: boolean }
+    PasswordChange:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string, minLength: 12 }
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, kind, actorUsername, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [admin_viewing, credential_reset] }
+        actorUsername: { type: string }
+        reason: { type: string }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    ViewingRequest:
+      type: object
+      additionalProperties: false
+      required: [password, reason]
+      properties:
+        password: { type: string }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ViewingGrant:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, ownerUserId, reason, grantedAt, expiresAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        ownerUserId: { type: string }
+        reason: { type: string }
+        grantedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
     Session:
       type: object
       additionalProperties: false
@@ -630,6 +1016,14 @@ components:
         name: { type: string }
         ownerUserId: { type: string }
         createdAt: { type: string, format: date-time }
+        viewing:
+          description: Present when an administrator reads this private space through Administrative Viewing Mode; access is read-only.
+          type: object
+          additionalProperties: false
+          required: [grantId, expiresAt]
+          properties:
+            grantId: { type: string }
+            expiresAt: { type: string, format: date-time }
     FileEntry:
       type: object
       additionalProperties: false
@@ -777,6 +1171,291 @@ components:
               type: integer
               format: int64
               minimum: 0
+    ContainerSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [dataSource, observedAt, engine, containers, images]
+      properties:
+        dataSource:
+          $ref: "#/components/schemas/DataSource"
+        observedAt:
+          type: string
+          format: date-time
+        engine:
+          type: object
+          additionalProperties: false
+          required: [version, apiVersion]
+          properties:
+            version:
+              type: string
+            apiVersion:
+              type: string
+        containers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Container"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContainerImage"
+    Container:
+      type: object
+      additionalProperties: false
+      required: [id, name, image, state, status, createdAt, ports]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        name:
+          type: string
+          minLength: 1
+        image:
+          type: string
+        state:
+          type: string
+          enum: [created, running, paused, restarting, removing, exited, dead]
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        project:
+          type: string
+          description: Compose project label, omitted for standalone containers.
+        ports:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [containerPort, protocol]
+            properties:
+              hostIp:
+                type: string
+              hostPort:
+                type: integer
+                minimum: 1
+                maximum: 65535
+              containerPort:
+                type: integer
+                minimum: 0
+                maximum: 65535
+              protocol:
+                type: string
+        usage:
+          type: object
+          additionalProperties: false
+          required: [cpuPercent, memoryBytes, memoryLimitBytes]
+          properties:
+            cpuPercent:
+              type: number
+              minimum: 0
+            memoryBytes:
+              type: integer
+              format: int64
+              minimum: 0
+            memoryLimitBytes:
+              type: integer
+              format: int64
+              minimum: 0
+    ContainerImage:
+      type: object
+      additionalProperties: false
+      required: [id, tags, sizeBytes, createdAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          items:
+            type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+    ContainerLogsResponse:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [stream, text]
+            properties:
+              stream:
+                type: string
+                enum: [stdout, stderr]
+              time:
+                type: string
+                format: date-time
+              text:
+                type: string
+    AppListResponse:
+      type: object
+      additionalProperties: false
+      required: [dataSource, apps]
+      properties:
+        dataSource:
+          $ref: "#/components/schemas/DataSource"
+        apps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppStatus"
+    AppStatus:
+      type: object
+      additionalProperties: false
+      required: [id, title, tagline, description, category, version, author, website, scheme, path, state, running, total]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        tagline:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        version:
+          type: string
+        author:
+          type: string
+        website:
+          type: string
+        webPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        scheme:
+          type: string
+        path:
+          type: string
+        state:
+          type: string
+          enum: [available, installed, installing, uninstalling]
+        running:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+        job:
+          $ref: "#/components/schemas/AppJob"
+    AppJob:
+      type: object
+      additionalProperties: false
+      required: [appId, action, state, startedAt, output]
+      properties:
+        appId:
+          type: string
+        action:
+          type: string
+          enum: [install, uninstall]
+        state:
+          type: string
+          enum: [running, succeeded, failed]
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        output:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+        error:
+          type: string
+    AppPlan:
+      type: object
+      additionalProperties: false
+      required: [appId, title, version, project, identity, images, containers, ports, mounts, digest, compose]
+      properties:
+        appId:
+          type: string
+        title:
+          type: string
+        version:
+          type: string
+        project:
+          type: string
+        identity:
+          description: >-
+            The Linux account app-<appId> the app's containers run as (PUID/PGID). A mount of kind shared means
+            the account joins a-nas-users and gains the Shared folder's access.
+          type: object
+          additionalProperties: false
+          required: [username, uid, gid]
+          properties:
+            username:
+              type: string
+              pattern: "^app-[a-z0-9][a-z0-9-]*$"
+            uid:
+              type: integer
+              minimum: 30000
+              maximum: 30999
+            gid:
+              type: integer
+              minimum: 30000
+              maximum: 30999
+        images:
+          type: array
+          items:
+            type: string
+        containers:
+          type: array
+          items:
+            type: string
+        ports:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [hostPort, containerPort, protocol]
+            properties:
+              hostPort:
+                type: integer
+                minimum: 1024
+                maximum: 65535
+              containerPort:
+                type: integer
+                minimum: 0
+                maximum: 65535
+              protocol:
+                type: string
+              purpose:
+                type: string
+        mounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [hostPath, containerPath, kind, readOnly]
+            properties:
+              hostPath:
+                type: string
+              containerPath:
+                type: string
+              kind:
+                type: string
+                enum: [appdata, shared, system]
+              readOnly:
+                type: boolean
+              purpose:
+                type: string
+        digest:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        compose:
+          type: string
     TerminalStatusResponse:
       type: object
       additionalProperties: false

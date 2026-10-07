@@ -30,7 +30,7 @@ git config core.eol lf
 - `anas-dev` 不复用现有的 `docker-dev` home、Git 配置、SSH 密钥或语言缓存。
 - `anas-dev` 不属于 `sudo` 或 `docker` 组，日常开发默认非特权运行。
 - Windows 已为实验 NAS 创建项目专用 ED25519 密钥，默认路径为 `%USERPROFILE%\.ssh\a-nas-dev_ed25519`；私钥内容和口令不进入仓库。
-- Docker 虽已存在于 WSL，但当前不是已冻结的 A-NAS 依赖，也未向 `anas-dev` 授权。
+- 容器运行时已按 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md) 选定 Docker Engine；`anas-dev` 仍不加入 `docker` 组。本地联调可在具备 Docker 权限的账号下以 `ANAS_CONTAINER_AGENT_SOCKET=/tmp/...` 运行 `build/anas-container-agent`，再以 `ANAS_CONTAINERS_MODE=agent` 启动产品服务；只对专用测试容器执行启停。
 - Git 用户名和邮箱需要由开发者在 `anas-dev` 下自行设置，仓库不记录个人身份。
 - Go 安装在 `/opt/go/1.27.1`，`anas-dev` 使用自己的模块、构建和工具缓存。
 - 前端依赖由 `web/package-lock.json` 固定；不要同时从 Windows 与 WSL 对同一个 `web/node_modules` 执行安装。
@@ -55,6 +55,18 @@ bash scripts/check-dev-env.sh
 ```powershell
 wsl -d Ubuntu-24.04 -u root
 ```
+
+## Root 集成测试
+
+账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行：
+
+```bash
+docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
+  -v "$PWD:/src" -w /src <装有 Go、gcc、acl、btrfs-progs、samba、smbclient 的 Debian 镜像> \
+  make root-integration-test
+```
+
+权限矩阵会挂载 loop 设备上的 Btrfs，因此需要 `--privileged`。bookworm 镜像还需 `samba-vfs-modules`（trixie 的 `samba` 已自带 `recycle.so`）。
 
 ## 实验 NAS 接入
 
@@ -92,7 +104,6 @@ npm run dev
 
 以下项目应在对应 ADR 或技术原型完成后再固定版本：
 
-- Docker/Moby 或 Podman；
 - PostgreSQL 等常驻数据库；
 - OpenAPI、Protobuf 等代码生成器；
 - AI Provider SDK 和本地模型 Runtime。

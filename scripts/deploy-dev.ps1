@@ -13,6 +13,8 @@ param(
 
     [string]$WslUser = 'anas-dev',
 
+    [string]$ScreensaverVideo,
+
     [switch]$StageOnly
 )
 
@@ -53,9 +55,19 @@ try {
     if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
         throw "SSH identity does not exist: $IdentityFile"
     }
+    $screensaverPath = $null
+    $screensaverHash = $null
+    if ($ScreensaverVideo) {
+        if (-not (Test-Path -LiteralPath $ScreensaverVideo -PathType Leaf)) {
+            throw "Screen saver video does not exist: $ScreensaverVideo"
+        }
+        $screensaverPath = (Resolve-Path -LiteralPath $ScreensaverVideo).Path
+        $screensaverHash = (Get-FileHash -LiteralPath $screensaverPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
 
     $action = if ($StageOnly) { 'stage for a root-managed system upgrade without touching running services' } else { "activate in $Mode mode, verify, and rollback on failure" }
-    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts, then $action"
+    $screenSaverSummary = if ($screensaverPath) { ', including the external screen saver video' } else { '' }
+    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts$screenSaverSummary, then $action"
     if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
         Write-Host "Release: $version"
         Write-Host "Product: $productVersion"
@@ -121,13 +133,18 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
     )
+    if ($screensaverPath) {
+        $uploads += @{ Source = $screensaverPath; Destination = "${target}:$release/screensaver.mp4.incoming" }
+    }
     foreach ($upload in $uploads) {
         & scp.exe @sshOptions $upload.Source $upload.Destination
         if ($LASTEXITCODE -ne 0) { throw "Upload failed: $($upload.Source)" }
     }
 
     $remoteAction = if ($StageOnly) { 'stage-only' } else { 'activate' }
-    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $version $apiHash $agentHash $Mode $productVersion $remoteAction"
+    $activateArguments = @($version, $apiHash, $agentHash, $Mode, $productVersion, $remoteAction)
+    if ($screensaverHash) { $activateArguments += $screensaverHash }
+    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $($activateArguments -join ' ')"
     & ssh.exe @sshOptions $target $activate
     if ($LASTEXITCODE -ne 0) { throw 'Remote activation failed; inspect the user journal and release directory.' }
 
@@ -138,6 +155,7 @@ try {
     }
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
+    if ($screensaverHash) { Write-Host "Screen saver SHA-256: $screensaverHash" }
 } finally {
     Pop-Location
 }

@@ -1,16 +1,19 @@
-//go:build !unix
+//go:build !linux
 
 package terminal
 
 import (
 	"context"
-	"log/slog"
-
-	"github.com/coder/websocket"
+	"errors"
 )
 
-const ptySupported = false
+const localShellSupported = false
 
-func runSession(context.Context, *websocket.Conn, Config, *slog.Logger) (websocket.StatusCode, string) {
-	return websocket.StatusInternalError, "terminal requires a Unix PTY"
+type localSpawner struct {
+	shell string
+	dir   string
+}
+
+func (localSpawner) StartShell(context.Context, uint16, uint16) (Shell, error) {
+	return nil, errors.New("terminal requires Linux")
 }

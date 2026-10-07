@@ -47,13 +47,12 @@ for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpass
 done
 
 getent group a-nas >/dev/null || groupadd --system a-nas
-getent group a-nas-members >/dev/null || groupadd --system a-nas-members
 if ! id a-nas >/dev/null 2>&1; then
   useradd --system --gid a-nas --home-dir /var/lib/a-nas --shell /usr/sbin/nologin a-nas
 fi
-usermod --append --groups a-nas-members a-nas
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
+install -d -o root -g a-nas -m 0750 /var/lib/a-nas/screensavers
 install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
 install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
@@ -73,17 +72,25 @@ install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/an
 mv -- "$temporary" "$target"
 trap - EXIT
 
+if [[ -f "$source_release/screensaver.mp4" ]]; then
+  install -o root -g a-nas -m 0640 "$source_release/screensaver.mp4" /var/lib/a-nas/screensavers/computer-chip.mp4
+fi
+
 printf '%s\n' \
   'ANAS_HTTP_ADDR=127.0.0.1:8080' \
   'ANAS_HOSTSTATE_MODE=agent' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
+  'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
+  'ANAS_SCREENSAVER_VIDEO=/var/lib/a-nas/screensavers/computer-chip.mp4' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
 chown root:a-nas /etc/a-nas/anas-api.env
 chmod 0640 /etc/a-nas/anas-api.env
 
 printf '%s\n' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
+  'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
+  'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_HOST_AGENT_GROUP=a-nas' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env

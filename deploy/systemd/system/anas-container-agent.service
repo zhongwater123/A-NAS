@@ -1,0 +1,45 @@
+[Unit]
+Description=A-NAS container agent
+Documentation=https://github.com/zhongwater123/A-NAS
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# The only A-NAS identity in the docker group. Members of the anas-container
+# group (the Product Service user) can reach the typed API, never the Docker socket.
+User=anas-container
+Group=anas-container
+SupplementaryGroups=docker
+ExecStart=/usr/local/lib/a-nas/anas-container-agent
+Environment=ANAS_CONTAINER_AGENT_SOCKET=/run/a-nas-container/agent.sock
+# App Center install policy: per-app data and shared mounts stay below these
+# roots on the data volume. Apps run as their own identity app-<id>, which the
+# Host Agent creates together with the mounted folders (ADR 0008).
+Environment=ANAS_APP_DATA_ROOT=/srv/a-nas/data/apps
+Environment=ANAS_SHARED_DATA_ROOT=/srv/a-nas/data/spaces/shared
+EnvironmentFile=-/etc/a-nas/container-agent.env
+RuntimeDirectory=a-nas-container
+RuntimeDirectoryMode=0750
+# Rendered Compose files and Docker CLI configuration.
+StateDirectory=a-nas-container
+StateDirectoryMode=0750
+UMask=0007
+Restart=on-failure
+RestartSec=2s
+# Lets a running Compose install finish its current step on shutdown.
+TimeoutStopSec=60s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

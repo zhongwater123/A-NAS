@@ -69,6 +69,16 @@ Host Agent IPC 在实机通过后切换实时状态：
 .\scripts\deploy-dev.ps1 -NasHost <NAS_HOST> -Mode agent
 ```
 
+需要同时暂存本地控制台屏保时，显式传入仓库外的视频。脚本计算并验证 SHA-256，把它作为外部资产放进版本目录；后续 root 系统安装会复制到 `/var/lib/a-nas/screensavers/`，不会把视频写入 Git 或二进制：
+
+```powershell
+.\scripts\deploy-dev.ps1 `
+  -NasHost <NAS_HOST> `
+  -Mode agent `
+  -StageOnly `
+  -ScreensaverVideo "E:\SteamLibrary\steamapps\workshop\content\431960\3052905511\Computer Chip Walking To Stayin Alive.mp4"
+```
+
 2026-10-06 实机已验证 Fake 部署、失败自动回滚、修复后的 Live 部署、制品哈希、`0600` UDS、`503` 映射和恢复路径。限定 SSH 配置也已验证：普通公钥命令保持可用，`127.0.0.1:18080 → 127.0.0.1:8080` 返回健康响应，而转发到远端 22 端口被 `administratively prohibited` 拒绝。首次 Live 失败的证据链见[调查记录](../investigations/2026-10-06-host-agent-runtime-directory.md)。
 
 ## 远程浏览与验证
@@ -105,4 +115,5 @@ readlink "$HOME/apps/a-nas/current"
 
 - 规格：[Web 桌面宿主机状态](../specs/web-desktop-host-state.md)
 - ADR：[Web 桌面技术选择](../adr/0003-use-react-typescript-for-web-desktop.md)、[Host Agent IPC](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)、[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
+- 规格：[本地控制台屏幕保护程序](../specs/local-console-screensaver.md)
 - 旧手册：[M1 临时 API 部署](deploy-m1-api-to-experimental-nas.md)

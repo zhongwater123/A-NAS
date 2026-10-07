@@ -138,9 +138,11 @@ function isNumberIn(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && value >= min && value <= max;
 }
 
-export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string }
+export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string; mustChangePassword?: boolean }
 export interface Session { csrfToken: string; expiresAt: string; user: User }
-export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string }
+export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
+export interface Notification { id: string; kind: "admin_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
+export interface ViewingGrant { id: string; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }
 export interface FileEntry { id: string; spaceId: string; parentId?: string; name: string; kind: "file" | "directory"; sizeBytes: number; modifiedAt: string }
 export interface TrashItem { id: string; entryId: string; spaceId: string; name: string; deletedBy: string; deletedAt: string }
 export interface Volume { id: string; diskId: string; filesystemUuid?: string; capacityBytes?: number; availableBytes?: number; state: "creating" | "available" | "unavailable" | "read_only" }
@@ -154,6 +156,8 @@ export class APIError extends Error {
 
 let csrfToken = "";
 export function setSession(session?: Session) { csrfToken = session?.csrfToken ?? ""; }
+// csrfHeaders lets the Docker and App Center clients send the session's CSRF token on writes.
+export function csrfHeaders(): Record<string, string> { return csrfToken ? { "X-CSRF-Token": csrfToken } : {}; }
 
 async function request<T>(path: string, init: RequestInit = {}, mutation = false): Promise<T> {
   const headers = new Headers(init.headers);
@@ -174,6 +178,11 @@ export const getSetupStatus = () => request<{setupRequired: boolean}>("/api/v1/s
 export async function setupAdministrator(username: string, password: string) { const value = await request<Session>("/api/v1/setup/admin", json({ username, password })); setSession(value); return value; }
 export async function login(username: string, password: string) { const value = await request<Session>("/api/v1/session", json({ username, password })); setSession(value); return value; }
 export async function currentSession() { const value = await request<Session>("/api/v1/session"); setSession(value); return value; }
+export const changePassword = (currentPassword: string, newPassword: string) => request<void>("/api/v1/session/password", json({ currentPassword, newPassword }), true);
+export const listNotifications = async () => (await request<{items: Notification[]}>("/api/v1/notifications")).items;
+export const acknowledgeNotification = (id: string) => request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`, json({}), true);
+export const startViewing = (userId: string, password: string, reason: string) => request<ViewingGrant>(`/api/v1/users/${encodeURIComponent(userId)}/viewing`, json({ password, reason }), true);
+export const endViewing = (grantId: string) => request<void>(`/api/v1/viewing/${encodeURIComponent(grantId)}`, { method: "DELETE" }, true);
 export async function logout() { await request<void>("/api/v1/session", { method: "DELETE" }, true); setSession(); }
 export const listSpaces = async () => (await request<{items: Space[]}>("/api/v1/spaces")).items;
 export const listEntries = async (spaceId: string, parentId = "") => (await request<{items: FileEntry[]}>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/entries?parentId=${encodeURIComponent(parentId)}`)).items;

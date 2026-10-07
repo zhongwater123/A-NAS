@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
@@ -23,6 +26,13 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
+		if err := filebroker.RunWorker(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "A-NAS file worker:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
 		logger.Error("A-NAS Host Agent stopped", "error", err)
@@ -47,24 +57,53 @@ func run(logger *slog.Logger) error {
 		_ = os.Remove(socketPath)
 	}()
 	reader := linuxhoststate.New()
+	mountPoint := environment("ANAS_DATA_MOUNT", "/srv/a-nas/data")
 	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
-		MountPoint:   environment("ANAS_DATA_MOUNT", "/srv/a-nas/data"),
+		MountPoint:   mountPoint,
 		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
 	})
-	if err := executor.ReconcileDataVolume(context.Background()); err != nil {
+	repaired, err := executor.ReconcileDataVolume(context.Background())
+	if err != nil {
 		return err
 	}
+	logRepairs(logger, repaired)
+	expireViewing(context.Background(), executor, logger)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
-			Reader: reader, Volume: executor, Credentials: executor, Snapshots: executor,
+			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
+	sessions := accounts.NewSessionDirectory(filepath.Join(environment("ANAS_STATE_DIR", "/var/lib/a-nas"), "control.db"))
+	defer sessions.Close()
+	broker, err := filebroker.NewServer(filebroker.Config{
+		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer broker.Close()
+	brokerSocket := environment("ANAS_FILE_BROKER_SOCKET", filepath.Join(filepath.Dir(socketPath), "file-broker.sock"))
+	brokerListener, err := listen(brokerSocket, strings.TrimSpace(os.Getenv("ANAS_HOST_AGENT_GROUP")))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = brokerListener.Close()
+		_ = os.Remove(brokerSocket)
+	}()
+	go func() {
+		if err := broker.Serve(brokerListener); err != nil {
+			logger.Error("file broker stopped", "error", err)
+		}
+	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go repairPermissionsPeriodically(ctx, executor, logger)
+	go expireViewingPeriodically(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
-		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "version", version)
+		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "file_broker", brokerSocket, "version", version)
 		serveError <- server.Serve(listener)
 	}()
 	select {
@@ -85,6 +124,57 @@ func run(logger *slog.Logger) error {
 			return nil
 		}
 		return err
+	}
+}
+
+// repairPermissionsPeriodically reapplies the space ACL layout so manual
+// chmod/setfacl changes on space roots do not persist silently.
+func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			repaired, err := executor.RepairDataVolumePermissions(ctx)
+			if err != nil {
+				logger.ErrorContext(ctx, "data-volume permission repair failed", "error", err)
+			}
+			logRepairs(logger, repaired)
+		}
+	}
+}
+
+// expireViewingPeriodically revokes Administrative Viewing Mode grants on
+// time; grants that expired while the Host Agent was stopped are revoked at
+// startup.
+func expireViewingPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			expireViewing(ctx, executor, logger)
+		}
+	}
+}
+
+func expireViewing(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	revoked, err := executor.ExpireViewing(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "revoking expired viewing grants failed", "error", err)
+	}
+	for _, id := range revoked {
+		logger.Info("viewing grant expired and revoked", "grant", id)
+	}
+}
+
+func logRepairs(logger *slog.Logger, repaired []string) {
+	for _, path := range repaired {
+		logger.Warn("repaired drifted data-volume permissions", "path", path)
 	}
 }
 

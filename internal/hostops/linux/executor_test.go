@@ -2,7 +2,6 @@ package linux_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +63,7 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	})
 	request := accounts.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleMember,
+		Password: "alice password for testing", Role: accounts.RoleMember, UID: 20100, Enabled: true,
 	}
 
 	if err := executor.SetCredential(context.Background(), request); err != nil {
@@ -106,7 +105,7 @@ func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testin
 	})
 	request := accounts.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleAdmin,
+		Password: "alice password for testing", Role: accounts.RoleAdmin, UID: 20100, Enabled: true,
 	}
 
 	err := executor.SetCredential(context.Background(), request)
@@ -144,10 +143,10 @@ type accountFailureRunner struct{}
 
 func (accountFailureRunner) Run(_ context.Context, name string, _ []string, _ string) ([]byte, error) {
 	switch name {
-	case "id":
-		return nil, errors.New("exit status 1")
+	case "getent":
+		return nil, exitStatus(2)
 	case "useradd":
-		return []byte("useradd: cannot lock /etc/passwd; try again later\n"), errors.New("exit status 1")
+		return []byte("useradd: cannot lock /etc/passwd; try again later\n"), exitStatus(1)
 	default:
 		return nil, nil
 	}
