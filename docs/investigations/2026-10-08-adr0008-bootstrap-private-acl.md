@@ -1,6 +1,6 @@
 # ADR 0008 首次升级时 Host Agent 无法启动
 
-状态：修复已实现；实验 NAS 实机回归待完成
+状态：ACL 修复已实机验证；完整恢复因无效 API 构建产物暂停
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -59,6 +59,10 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 - 管理员查看模式的 viewer 条目也只从已知统一身份生成，避免陈旧查看记录触发相同的命名用户解析失败。
 - `TestMaterializeRegisteredSpacesProtectsPrivateSpaceBeforeIdentitySync` 修复前以同一错误失败，修复后通过；已有完整身份的空间 ACL 布局测试继续覆盖正常稳态。
 - 实验 NAS 仍需用修复制品完成 Host Agent 启动、身份同步、ACL、File Broker、Samba 与 Kiosk 的实机验证。
+
+第一次修复制品只运行了 `make build-binaries`。该目标原先未依赖 `web-build`，因此 Go 编译成功时 `internal/webui/dist` 仍只有 `.keep`；修复后的 Host Agent 已在实验 NAS 正常监听并成功应用启动期 root-only ACL，但同 release 的 API 持续以 `embedded web UI is not built` 退出。现有 `TestHandlerServesEmbeddedDesktopAndImmutableAssets` 在该源码/产物状态下稳定复现错误。
+
+构建门禁现要求 `build-binaries` 自身依赖 `web-build`，而不是只依赖调用者记住执行顺序。重新生成的不可变 release 必须先让该 Web UI 嵌入测试通过，再用于续接现场；已经安装的不完整 release 不原位覆盖。
 
 ## 关联
 
