@@ -7,11 +7,69 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
+
+// countingFileSystem records MkdirAll calls; in production each one is a File
+// Broker round trip.
+type countingFileSystem struct {
+	files.FileSystem
+	mu       sync.Mutex
+	mkdirAll map[string]int
+}
+
+func (c *countingFileSystem) MkdirAll(ctx context.Context, path string) error {
+	c.mu.Lock()
+	c.mkdirAll[path]++
+	c.mu.Unlock()
+	return c.FileSystem.MkdirAll(ctx, path)
+}
+
+func TestSpaceRootIsPreparedOnceRatherThanOnEveryOperation(t *testing.T) {
+	ctx := context.Background()
+	accountStore, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatalf("open account store: %v", err)
+	}
+	t.Cleanup(func() { _ = accountStore.Close() })
+	accountService := accounts.NewService(accountStore, acceptingCredentials{}, accounts.Options{})
+	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("setup administrator: %v", err)
+	}
+	spaces, err := accountService.ListSpaces(ctx, admin)
+	if err != nil {
+		t.Fatalf("list spaces: %v", err)
+	}
+	privateSpace := findPrivateSpace(t, spaces)
+	catalog, err := files.OpenSQLite(filepath.Join(t.TempDir(), "files.db"))
+	if err != nil {
+		t.Fatalf("open file catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = catalog.Close() })
+	volumeRoot := filepath.Join(t.TempDir(), "volume")
+	fsys := &countingFileSystem{FileSystem: files.NewRootFileSystem(volumeRoot, true), mkdirAll: map[string]int{}}
+	service := files.NewService(catalog, volumeRoot, accountService, files.Options{
+		DisableCapacityReserve: true, AllowUnverifiedVolume: true, FileSystem: fsys,
+	})
+
+	for range 3 {
+		if _, err := service.List(ctx, admin, privateSpace.ID, ""); err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+	}
+	if _, err := service.CreateDirectory(ctx, admin, privateSpace.ID, "", "docs"); err != nil {
+		t.Fatalf("CreateDirectory() error = %v", err)
+	}
+	root := filepath.Join(volumeRoot, "spaces", "private", "owner")
+	if got := fsys.mkdirAll[root]; got != 1 {
+		t.Fatalf("space root MkdirAll calls = %d, want 1", got)
+	}
+}
 
 func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	ctx := context.Background()

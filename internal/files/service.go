@@ -1066,12 +1066,20 @@ func (s *Service) authorizedSpace(ctx context.Context, actor accounts.User, spac
 			}
 		}
 		root := s.spaceRoot(space)
-		if err := s.fs.MkdirAll(ctx, root); err != nil {
-			return accounts.Space{}, "", fmt.Errorf("prepare data space: %w", err)
+		s.spaceRootsMu.RLock()
+		prepared := s.spaceRoots[space.ID] == root
+		s.spaceRootsMu.RUnlock()
+		// On the data volume the Host Agent creates space roots; only a fresh
+		// development root needs this. Do it once per space instead of as an
+		// extra File Broker request on every operation.
+		if !prepared {
+			if err := s.fs.MkdirAll(ctx, root); err != nil {
+				return accounts.Space{}, "", fmt.Errorf("prepare data space: %w", err)
+			}
+			s.spaceRootsMu.Lock()
+			s.spaceRoots[space.ID] = root
+			s.spaceRootsMu.Unlock()
 		}
-		s.spaceRootsMu.Lock()
-		s.spaceRoots[space.ID] = root
-		s.spaceRootsMu.Unlock()
 		return space, root, nil
 	}
 	return accounts.Space{}, "", ErrForbidden
