@@ -22,17 +22,19 @@ const healthyState = {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("A-NAS v1.0.1 desktop", () => {
-  it("requires the one-time code for first-run administrator setup", async () => {
+  it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
     const user = userEvent.setup();
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "初始化管理员" })).toBeTruthy();
-    await user.type(screen.getByLabelText("一次性初始化码"), "setup-once");
+    expect(await screen.findByRole("heading", { name: "启用 A-NAS" })).toBeTruthy();
+    expect(screen.queryByLabelText("一次性初始化码")).toBeNull();
     await user.type(screen.getByLabelText("账号"), "owner");
     await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
-    await user.click(screen.getByRole("button", { name: "创建管理员" }));
+    await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
     expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/setup/admin", expect.objectContaining({ method: "POST" }));
+    const setupCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/setup/admin");
+    expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({ username: "owner", password: "correct horse battery staple" });
   });
 
   it("shows authenticated host health and keeps the clock advancing", async () => {

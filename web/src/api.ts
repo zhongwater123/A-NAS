@@ -141,7 +141,7 @@ async function request<T>(path: string, init: RequestInit = {}, mutation = false
 const json = (value: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
 
 export const getSetupStatus = () => request<{setupRequired: boolean}>("/api/v1/setup/status");
-export async function setupAdministrator(setupCode: string, username: string, password: string) { const value = await request<Session>("/api/v1/setup/admin", json({ setupCode, username, password })); setSession(value); return value; }
+export async function setupAdministrator(username: string, password: string) { const value = await request<Session>("/api/v1/setup/admin", json({ username, password })); setSession(value); return value; }
 export async function login(username: string, password: string) { const value = await request<Session>("/api/v1/session", json({ username, password })); setSession(value); return value; }
 export async function currentSession() { const value = await request<Session>("/api/v1/session"); setSession(value); return value; }
 export async function logout() { await request<void>("/api/v1/session", { method: "DELETE" }, true); setSession(); }

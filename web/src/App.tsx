@@ -108,18 +108,18 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 		const data = new FormData(event.currentTarget);
 		try {
 			const session = mode === "setup"
-				? await setupAdministrator(String(data.get("setupCode")), String(data.get("username")), String(data.get("password")))
+				? await setupAdministrator(String(data.get("username")), String(data.get("password")))
 				: await login(String(data.get("username")), String(data.get("password")));
 			onAuthenticated(session);
 		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
 		finally { setSubmitting(false); }
 	};
 	return <main className="auth-shell"><form className="auth-card" onSubmit={(event) => void submit(event)}>
-		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "初始化管理员" : "登录 A-NAS"}</h1>
-		{mode === "setup" && <label>一次性初始化码<input name="setupCode" required autoComplete="one-time-code" /></label>}
+		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "启用 A-NAS" : "登录 A-NAS"}</h1>
+		{mode === "setup" && <p>创建本机管理员账号以启用设备。</p>}
 		<label>账号<input name="username" required autoComplete="username" /></label>
 		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} /></label>
-		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员" : "登录"}</button>
+		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员并启用" : "登录"}</button>
 	</form></main>;
 }
 

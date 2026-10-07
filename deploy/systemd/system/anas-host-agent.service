@@ -21,7 +21,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/etc/samba /etc/systemd/system /etc/passwd /etc/shadow /etc/group /etc/gshadow -/etc/subuid -/etc/subgid /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba
+# shadow-utils creates transient lock and backup files beside passwd/group.
+# The Host Agent is already the typed root trust boundary and writes systemd units.
+ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba
 RestrictAddressFamilies=AF_UNIX
 
 [Install]

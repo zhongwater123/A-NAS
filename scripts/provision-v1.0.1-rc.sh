@@ -281,17 +281,14 @@ say "System services are active and the Product Service remains loopback-only."
 stage "Create the first administrator"
 setup_status=$(python3 -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/api/v1/setup/status", timeout=5).read().decode())')
 if [[ "$setup_status" == *'"setupRequired":true'* ]]; then
-  setup_line=$(journalctl -u anas-api.service -b --no-pager -o cat | grep 'setup_code' | tail -n 1 || true)
-  [[ -n "$setup_line" ]] || { warn "setup code was not found in the Product Service journal"; exit 1; }
-  warn "The following setup code is secret and must not be saved in screenshots or chat logs."
-  say "$setup_line"
-  step "At the local Kiosk, create the first administrator with this one-time code."
-  step "Use a new test-only administrator password; the wizard never reads or stores it."
+  step "At the local Kiosk, create the first administrator with only an account and password."
+  step "The first account is the A-NAS product administrator; it is not the Linux root account."
+  step "Use a new test-only password; the wizard never reads or stores it."
   pause "Press Enter only after the administrator has been created."
   setup_status=$(python3 -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/api/v1/setup/status", timeout=5).read().decode())')
 fi
 [[ "$setup_status" == *'"setupRequired":false'* ]] || { warn "first-run setup is still pending"; exit 1; }
-say "First-run administrator setup is complete."
+say "Local device activation is complete."
 
 stage "Create the confirmed Btrfs data volume"
 if findmnt -rn -T /srv/a-nas/data -o FSTYPE | grep -qx btrfs; then

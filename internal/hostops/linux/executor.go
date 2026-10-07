@@ -102,18 +102,18 @@ func (e *Executor) SetCredential(ctx context.Context, request accounts.Credentia
 	if e.smbInterface != "" && !regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`).MatchString(e.smbInterface) {
 		return errors.New("invalid Samba interface")
 	}
-	if _, err := e.runner.Run(ctx, "groupadd", []string{"--force", "a-nas-members"}, ""); err != nil {
-		return fmt.Errorf("ensure Samba group: %w", err)
+	if output, err := e.runner.Run(ctx, "groupadd", []string{"--force", "a-nas-members"}, ""); err != nil {
+		return commandError("ensure Samba group", err, output)
 	}
 	if _, err := e.runner.Run(ctx, "id", []string{"--user", request.Username}, ""); err != nil {
-		if _, err := e.runner.Run(ctx, "useradd", []string{
+		if output, err := e.runner.Run(ctx, "useradd", []string{
 			"--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", request.Username,
 		}, ""); err != nil {
-			return fmt.Errorf("create locked Samba account: %w", err)
+			return commandError("create locked Samba account", err, output)
 		}
 	}
-	if _, err := e.runner.Run(ctx, "usermod", []string{"--append", "--groups", "a-nas-members", request.Username}, ""); err != nil {
-		return fmt.Errorf("add Samba group membership: %w", err)
+	if output, err := e.runner.Run(ctx, "usermod", []string{"--append", "--groups", "a-nas-members", request.Username}, ""); err != nil {
+		return commandError("add Samba group membership", err, output)
 	}
 	privateRoot := filepath.Join(e.mountPoint, "spaces", "private", request.Username)
 	sharedRoot := filepath.Join(e.mountPoint, "spaces", "shared")
@@ -271,6 +271,14 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 
 func validUsername(username string) bool {
 	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
+}
+
+func commandError(action string, err error, output []byte) error {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return fmt.Errorf("%s: %w: %s", action, err, detail)
 }
 
 func (e *Executor) loadSpaceRegistry() error {

@@ -504,9 +504,8 @@ components:
     SetupRequest:
       type: object
       additionalProperties: false
-      required: [setupCode, username, password]
+      required: [username, password]
       properties:
-        setupCode: { type: string, minLength: 1 }
         username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
         password: { type: string, minLength: 12 }
     CredentialInput:

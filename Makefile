@@ -39,12 +39,15 @@ ops-check:
 	grep -Fqx 'EnvironmentFile=-/etc/a-nas/kiosk.env' deploy/systemd/system/anas-kiosk@.service
 	grep -Fqx 'ReadWritePaths=%h/.config/a-nas/state' deploy/systemd/user/anas-api.service
 	grep -Fq 'install -d -m 0700 "$$config_dir/state"' scripts/remote-activate-release.sh
+	grep -Fq 'stage-only' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'User=root' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-host-agent' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api' deploy/systemd/system/anas-api.service
 	grep -Fq 'ANAS_HOST_AGENT_GROUP=a-nas' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
+	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
 
 vet:
 	$(GO) vet ./...

@@ -28,6 +28,7 @@ var (
 	ErrInvalidCredentials  = errors.New("invalid username or password")
 	ErrSessionNotFound     = errors.New("session is invalid or expired")
 	ErrUsernameUnavailable = errors.New("username is unavailable")
+	ErrCredentialProvision = errors.New("account credential provisioning failed")
 	ErrForbidden           = errors.New("operation is forbidden")
 	ErrUserNotFound        = errors.New("user not found")
 )
@@ -310,7 +311,7 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 func (s *Service) markCredentialFailure(ctx context.Context, user User, cause error) (User, error) {
 	_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ?", user.ID)
 	user.Status = UserStatusError
-	return user, fmt.Errorf("provision account credential: %w", cause)
+	return user, fmt.Errorf("%w: %v", ErrCredentialProvision, cause)
 }
 
 func (s *Service) Authenticate(ctx context.Context, username, password string) (Session, error) {

@@ -27,18 +27,16 @@ type ProductDependencies struct {
 	Accounts       *accounts.Service
 	Files          *files.Service
 	Storage        *storage.Service
-	SetupCode      string
 	Logger         *slog.Logger
 }
 
 type productHandler struct {
-	state     http.Handler
-	accounts  *accounts.Service
-	files     *files.Service
-	storage   *storage.Service
-	setupCode string
-	logger    *slog.Logger
-	mux       *http.ServeMux
+	state    http.Handler
+	accounts *accounts.Service
+	files    *files.Service
+	storage  *storage.Service
+	logger   *slog.Logger
+	mux      *http.ServeMux
 }
 
 func NewProduct(dependencies ProductDependencies) http.Handler {
@@ -48,7 +46,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	}
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
-		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage, setupCode: dependencies.SetupCode, logger: logger,
+		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage, logger: logger,
 		mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -118,16 +116,11 @@ func (h *productHandler) handleSetupStatus(w http.ResponseWriter, r *http.Reques
 
 func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		SetupCode string `json:"setupCode"`
-		Username  string `json:"username"`
-		Password  string `json:"password"`
+		Username string `json:"username"`
+		Password string `json:"password"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
-		return
-	}
-	if h.setupCode == "" || subtle.ConstantTimeCompare([]byte(request.SetupCode), []byte(h.setupCode)) != 1 {
-		writeError(w, http.StatusForbidden, "invalid_setup_code", "setup code is invalid")
 		return
 	}
 	if _, err := h.accounts.SetupAdministrator(r.Context(), request.Username, request.Password); err != nil {
@@ -708,6 +701,8 @@ func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+	case errors.Is(err, accounts.ErrCredentialProvision):
+		writeError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):
 		writeError(w, http.StatusForbidden, "forbidden", "operation is forbidden")
 	case errors.Is(err, accounts.ErrUserNotFound):

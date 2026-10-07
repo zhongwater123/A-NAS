@@ -63,8 +63,8 @@ func TestFirstAdministratorSetupCanRetryAfterCredentialProvisioningFailure(t *te
 	t.Cleanup(func() { _ = store.Close() })
 	credentials := &credentialRecorder{failure: errors.New("Samba unavailable")}
 	service := accounts.NewService(store, credentials, accounts.Options{})
-	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err == nil {
-		t.Fatal("first setup unexpectedly succeeded")
+	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); !errors.Is(err, accounts.ErrCredentialProvision) {
+		t.Fatalf("first setup error = %v, want ErrCredentialProvision", err)
 	}
 	credentials.failure = nil
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ $# -ne 5 ]]; then
-  echo "usage: remote-activate-release.sh VERSION API_SHA AGENT_SHA MODE PRODUCT_VERSION" >&2
+if [[ $# -ne 5 && $# -ne 6 ]]; then
+  echo "usage: remote-activate-release.sh VERSION API_SHA AGENT_SHA MODE PRODUCT_VERSION [activate|stage-only]" >&2
   exit 2
 fi
 
@@ -11,12 +11,14 @@ api_sha="$2"
 agent_sha="$3"
 mode="$4"
 product_version="$5"
+action="${6:-activate}"
 
 [[ "$version" =~ ^[0-9a-f]{7,40}$ ]] || { echo "invalid version" >&2; exit 2; }
 [[ "$api_sha" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid API hash" >&2; exit 2; }
 [[ "$agent_sha" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid Host Agent hash" >&2; exit 2; }
 [[ "$mode" == "fake" || "$mode" == "agent" ]] || { echo "invalid host state mode" >&2; exit 2; }
 [[ "$product_version" =~ ^[0-9a-f]{7,40}$ || "$product_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || { echo "invalid product version" >&2; exit 2; }
+[[ "$action" == "activate" || "$action" == "stage-only" ]] || { echo "invalid release action" >&2; exit 2; }
 
 release="$HOME/apps/a-nas/releases/$version"
 current="$HOME/apps/a-nas/current"
@@ -94,6 +96,17 @@ rm -f \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming
 
+printf 'version=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\nmode=%s\nsource=%s\n' \
+  "$version" "$product_version" "$api_sha" "$agent_sha" "$mode" \
+  "https://github.com/zhongwater123/A-NAS/commit/$version" > RELEASE
+chmod 0640 RELEASE
+
+if [[ "$action" == "stage-only" ]]; then
+  trap - ERR
+  echo "staged A-NAS $version without changing running services"
+  exit 0
+fi
+
 install -d -m 0700 "$config_dir"
 install -d -m 0700 "$config_dir/state"
 install -d -m 0750 "$unit_dir"
@@ -112,11 +125,6 @@ install -m 0644 anas-host-agent.service.incoming "$unit_dir/anas-host-agent.serv
 
 ln -sfn "$release" "$HOME/apps/a-nas/current.next"
 mv -Tf "$HOME/apps/a-nas/current.next" "$current"
-
-printf 'version=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\nmode=%s\nsource=%s\n' \
-  "$version" "$product_version" "$api_sha" "$agent_sha" "$mode" \
-  "https://github.com/zhongwater123/A-NAS/commit/$version" > RELEASE
-chmod 0640 RELEASE
 
 systemctl --user daemon-reload
 if [[ "$mode" == "agent" ]]; then

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
@@ -91,22 +89,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
-	setupCode, err := readOrCreateSetupCode(filepath.Join(stateDirectory, "setup-code"))
-	if err != nil {
-		return err
-	}
-	setupRequired, err := accountService.SetupRequired(context.Background())
-	if err != nil {
-		return err
-	}
-	if setupRequired {
-		logger.Warn("A-NAS first-run setup required", "setup_code", setupCode)
-	}
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
-		SetupCode: setupCode, Logger: logger,
+		Logger: logger,
 	})
 	handler, err := webui.New(apiHandler)
 	if err != nil {
@@ -202,30 +189,6 @@ func stateDirectory() (string, error) {
 		return "", err
 	}
 	return filepath.Join(directory, "a-nas", "state"), nil
-}
-
-func readOrCreateSetupCode(path string) (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("ANAS_SETUP_CODE")); configured != "" {
-		return configured, nil
-	}
-	if contents, err := os.ReadFile(path); err == nil {
-		code := strings.TrimSpace(string(contents))
-		if code == "" {
-			return "", errors.New("persisted setup code is empty")
-		}
-		return code, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	value := make([]byte, 12)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-	code := hex.EncodeToString(value)
-	if err := os.WriteFile(path, []byte(code+"\n"), 0o600); err != nil {
-		return "", err
-	}
-	return code, nil
 }
 
 func environment(name, fallback string) string {

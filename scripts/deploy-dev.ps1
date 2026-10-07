@@ -11,7 +11,9 @@ param(
 
     [string]$WslDistribution = 'Ubuntu-24.04',
 
-    [string]$WslUser = 'anas-dev'
+    [string]$WslUser = 'anas-dev',
+
+    [switch]$StageOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,7 +54,8 @@ try {
         throw "SSH identity does not exist: $IdentityFile"
     }
 
-    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts in $Mode mode, activate, verify, and rollback on failure"
+    $action = if ($StageOnly) { 'stage for a root-managed system upgrade without touching running services' } else { "activate in $Mode mode, verify, and rollback on failure" }
+    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts, then $action"
     if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
         Write-Host "Release: $version"
         Write-Host "Product: $productVersion"
@@ -100,11 +103,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Upload failed: $($upload.Source)" }
     }
 
-    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $version $apiHash $agentHash $Mode $productVersion"
+    $remoteAction = if ($StageOnly) { 'stage-only' } else { 'activate' }
+    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $version $apiHash $agentHash $Mode $productVersion $remoteAction"
     & ssh.exe @sshOptions $target $activate
     if ($LASTEXITCODE -ne 0) { throw 'Remote activation failed; inspect the user journal and release directory.' }
 
-    Write-Host "A-NAS $productVersion ($version) is active on $NasHost in $Mode mode."
+    if ($StageOnly) {
+        Write-Host "A-NAS $productVersion ($version) is staged on $NasHost for root installation."
+    } else {
+        Write-Host "A-NAS $productVersion ($version) is active on $NasHost in $Mode mode."
+    }
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
 } finally {

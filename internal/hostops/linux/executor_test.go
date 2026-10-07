@@ -2,6 +2,7 @@ package linux_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,6 +99,24 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	}
 }
 
+func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testing.T) {
+	executor := linux.NewExecutor(nil, accountFailureRunner{}, linux.Options{
+		SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data"), SMBInterface: "enp3s0",
+	})
+	request := accounts.CredentialRequest{
+		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
+		Password: "alice password for testing", Role: accounts.RoleAdmin,
+	}
+
+	err := executor.SetCredential(context.Background(), request)
+	if err == nil || !strings.Contains(err.Error(), "cannot lock /etc/passwd") {
+		t.Fatalf("SetCredential() error = %v, want useradd diagnostic", err)
+	}
+	if strings.Contains(err.Error(), request.Password) {
+		t.Fatalf("SetCredential() error exposed the password: %v", err)
+	}
+}
+
 type fixedResolver struct{ device linux.BlockDevice }
 
 func (r fixedResolver) ResolveDevice(context.Context, string) (linux.BlockDevice, error) {
@@ -118,4 +137,17 @@ func (r *recordingRunner) Run(_ context.Context, name string, args []string, std
 		return []byte("11111111-2222-3333-4444-555555555555\n"), nil
 	}
 	return nil, nil
+}
+
+type accountFailureRunner struct{}
+
+func (accountFailureRunner) Run(_ context.Context, name string, _ []string, _ string) ([]byte, error) {
+	switch name {
+	case "id":
+		return nil, errors.New("exit status 1")
+	case "useradd":
+		return []byte("useradd: cannot lock /etc/passwd; try again later\n"), errors.New("exit status 1")
+	default:
+		return nil, nil
+	}
 }

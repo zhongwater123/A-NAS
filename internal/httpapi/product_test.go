@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -35,7 +36,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	storageService := storage.NewService(fake.NewHealthy(), apiVolumeExecutor{}, storage.Options{})
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
-		ProductVersion: "v1.0.1-rc.1", Accounts: accountService, Files: fileService, Storage: storageService, SetupCode: "setup-once",
+		ProductVersion: "v1.0.1-rc.1", Accounts: accountService, Files: fileService, Storage: storageService,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
@@ -45,7 +46,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 		t.Fatalf("unauthenticated disks status = %d, want %d", got, want)
 	}
 
-	setupBody := bytes.NewBufferString(`{"setupCode":"setup-once","username":"owner","password":"correct horse battery staple"}`)
+	setupBody := bytes.NewBufferString(`{"username":"owner","password":"correct horse battery staple"}`)
 	setupRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/admin", setupBody)
 	setupRequest.Header.Set("Content-Type", "application/json")
 	setup := httptest.NewRecorder()
@@ -256,10 +257,39 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	}
 }
 
+func TestProductAPIReportsCredentialProvisioningFailure(t *testing.T) {
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
+		Accounts: accounts.NewService(store, failingCredentials{}, accounts.Options{}),
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/setup/admin", bytes.NewBufferString(
+		`{"username":"owner","password":"correct horse battery staple"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if got, want := response.Code, http.StatusServiceUnavailable; got != want || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"credential_provision_failed"`)) {
+		t.Fatalf("setup status/body = %d/%s, want typed credential failure", got, response.Body.String())
+	}
+}
+
 type apiCredentials struct{}
 
 func (apiCredentials) SetCredential(context.Context, accounts.CredentialRequest) error { return nil }
 func (apiCredentials) DisableCredential(context.Context, string) error                 { return nil }
+
+type failingCredentials struct{}
+
+func (failingCredentials) SetCredential(context.Context, accounts.CredentialRequest) error {
+	return errors.New("host account sandbox rejected useradd")
+}
+func (failingCredentials) DisableCredential(context.Context, string) error { return nil }
 
 type apiVolumeExecutor struct{}
 

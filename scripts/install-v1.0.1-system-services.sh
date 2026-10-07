@@ -90,8 +90,8 @@ install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/s
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
-systemctl enable --now anas-host-agent.service anas-api.service
+systemctl enable anas-host-agent.service anas-api.service
+systemctl restart anas-host-agent.service anas-api.service
 
 systemctl --no-pager --full status anas-host-agent.service anas-api.service
-echo "setup code (visible only while first-run setup is pending):"
-journalctl -u anas-api.service -b --no-pager | grep 'setup_code' | tail -n 1 || true
+echo "Open the local A-NAS console to create the first administrator with an account and password."
