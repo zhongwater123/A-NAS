@@ -16,6 +16,10 @@ _Avoid_：root 服务、Shell Agent
 自行校验会话后为每个活跃账号派生以该账号 Linux 身份运行的工作进程，使 Web 文件操作与 SMB 一样由内核按文件系统 ACL 授权的 root 服务。
 _Avoid_：文件服务、root 代读写、sudo helper
 
+**容器代理（Container Agent）**：
+唯一能访问 Docker Engine socket 的独立服务，以专用系统用户运行，只向产品服务提供类型化的容器查看与生命周期操作。
+_Avoid_：Docker 代理、Portainer、Docker API 网关
+
 **Adapter**：
 把产品定义的能力契约连接到某个运行环境或外部系统的实现。
 _Avoid_：工具类、胶水层

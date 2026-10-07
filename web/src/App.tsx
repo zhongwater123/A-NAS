@@ -44,12 +44,13 @@ import {
 } from "./api";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
+import { DockerPanel } from "./DockerPanel";
 import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal";
+type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker";
 
 interface WindowModel {
   id: WindowID;
@@ -85,6 +86,7 @@ const initialWindows: WindowModel[] = [
   { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2, opened: 0 },
   { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1, opened: 0 },
   { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
+  { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 320, y: 82, width: 900, height: 620, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, LucideIcon> = {
@@ -96,6 +98,7 @@ const windowIcons: Record<WindowID, LucideIcon> = {
   resources: Activity,
   settings: Settings,
   terminal: SquareTerminal,
+  docker: Box,
 };
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
@@ -107,6 +110,7 @@ const windowTones: Record<WindowID, string> = {
   resources: "resources",
   settings: "settings",
   terminal: "terminal",
+  docker: "docker",
 };
 
 export default function App() {
@@ -229,7 +233,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
       { id: "accounts", label: "账号管理", ariaLabel: "打开账号管理", tone: "settings", icon: <UserRound />, active: isOpen("accounts"), onClick: () => openWindow("accounts") },
       { id: "storage", label: "存储初始化", ariaLabel: "打开存储初始化", tone: "resources", icon: <Database />, active: isOpen("storage"), onClick: () => openWindow("storage") },
     ] : []),
-    { id: "docker", label: "Docker", ariaLabel: "Docker，规划中", tone: "docker", icon: <Box />, disabled: true },
+    { id: "docker", label: "Docker", ariaLabel: "打开 Docker", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") },
     { id: "photos", label: "相册", ariaLabel: "相册，规划中", tone: "photos", icon: <Image />, disabled: true },
     { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
@@ -281,6 +285,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "accounts" && <AccountsPanel currentUser={session.user} />}
 			  {window.id === "storage" && <StoragePanel state={host.snapshot} />}
 			  {window.id === "terminal" && <TerminalPanel />}
+			  {window.id === "docker" && <DockerPanel />}
             </AppWindow>
           );
         })}

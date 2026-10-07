@@ -60,6 +60,10 @@ ops-check:
 	grep -Fq 'a-nas-chromium-policy.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
+	grep -Fqx 'User=anas-container' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
 
 vet:
 	$(GO) vet ./...
@@ -77,6 +81,7 @@ build-binaries:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
+	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-container-agent ./cmd/anas-container-agent
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)
@@ -90,5 +95,5 @@ check:
 check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet test build-binaries
 
 clean:
-	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(VALIDATION_MANIFEST)
+	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete
