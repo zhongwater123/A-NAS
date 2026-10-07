@@ -211,6 +211,43 @@ describe("A-NAS desktop", () => {
     expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuetext")).toBe("暂无数据");
   });
 
+  it("switches focus between open apps from an icon-only dock", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = screen.getByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开系统设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+    expect(dock.textContent).toBe("");
+    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+
+    await user.click(within(dock).getByRole("button", { name: "切换到系统设置" }));
+    expect(within(dock).getByRole("button", { name: "最小化系统设置" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "切换到终端" })).toBeTruthy();
+
+    await user.click(within(dock).getByRole("button", { name: "最小化系统设置" }));
+    expect(screen.queryByRole("dialog", { name: "系统设置" })).toBeNull();
+    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "恢复系统设置" })).toBeTruthy();
+  });
+
+  it("lists dock icons in launch order and drops closed apps immediately from the accessibility tree", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = screen.getByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
+
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到终端", "最小化资源管理"]);
+
+    await user.click(within(screen.getByRole("dialog", { name: "资源管理" })).getByRole("button", { name: "关闭资源管理" }));
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化终端"]);
+  });
+
   it("opens a terminal session from the desktop icon", async () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();

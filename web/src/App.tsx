@@ -35,6 +35,7 @@ import {
 import { PointerEvent as ReactPointerEvent, ReactNode, useReducer } from "react";
 
 import { DiskRole, Health, HostState } from "./api";
+import { Dock } from "./Dock";
 import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
@@ -53,6 +54,8 @@ interface WindowModel {
   width: number;
   height: number;
   z: number;
+  // Sequence number of the latest open, so the dock lists apps in the order they were launched.
+  opened: number;
 }
 
 type WindowAction =
@@ -66,17 +69,21 @@ type WindowAction =
   | { type: "show-desktop" };
 
 const initialWindows: WindowModel[] = [
-  { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2 },
-  { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1 },
-  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0 },
+  { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2, opened: 0 },
+  { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1, opened: 0 },
+  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, LucideIcon> = { resources: Activity, settings: Settings, terminal: SquareTerminal };
+// Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
+const windowTones: Record<WindowID, string> = { resources: "resources", settings: "settings", terminal: "terminal" };
 
 export default function App() {
   const host = useHostState();
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
+  const visible = windows.filter((window) => window.open && !window.minimized);
+  const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
 
   return (
     <main className="desktop-shell">
@@ -133,22 +140,14 @@ export default function App() {
         })}
       </section>
 
-      <nav className={`task-shelf ${windows.some((window) => window.open) ? "visible" : ""}`} aria-label="已打开窗口">
-        {windows.filter((window) => window.open).map((window) => {
-          const Icon = windowIcons[window.id];
-          return (
-            <button
-              key={window.id}
-              className={window.minimized ? "task-button minimized" : "task-button"}
-              aria-label={window.minimized ? `恢复${window.title}` : `聚焦${window.title}`}
-              onClick={() => dispatch({ type: "open", id: window.id })}
-            >
-              <Icon size={18} />
-              <span>{window.title}</span>
-            </button>
-          );
-        })}
-      </nav>
+      <Dock
+        entries={windows
+          .filter((window) => window.open)
+          .sort((a, b) => a.opened - b.opened)
+          .map((window) => ({ id: window.id, title: window.title, minimized: window.minimized, icon: windowIcons[window.id], tone: windowTones[window.id] }))}
+        focusedID={focusedID}
+        onSelect={(id, state) => dispatch({ type: state === "focused" ? "minimize" : "open", id: id as WindowID })}
+      />
     </main>
   );
 }
@@ -305,10 +304,11 @@ function RoleBadge({ role }: { role: DiskRole }) {
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);
   const top = Math.max(...windows.map((window) => window.z)) + 1;
+  const nextOpened = Math.max(...windows.map((window) => window.opened)) + 1;
   return windows.map((window) => {
     if (window.id !== action.id) return window;
     switch (action.type) {
-      case "open": return { ...window, open: true, minimized: false, z: top };
+      case "open": return { ...window, open: true, minimized: false, z: top, opened: window.open ? window.opened : nextOpened };
       case "close": return { ...window, open: false, minimized: false };
       case "minimize": return { ...window, minimized: true };
       case "focus": return window.z === top - 1 ? window : { ...window, z: top };

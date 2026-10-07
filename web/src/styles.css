@@ -369,11 +369,78 @@ button { font: inherit; }
 .loader { width: 28px; height: 28px; border: 2px solid #d9dee5; border-top-color: #1c9f94; border-radius: 50%; animation: spin .85s linear infinite; }
 .primary { padding: 8px 14px; border: 0; border-radius: 9px; color: white; background: #2679df; font-weight: 700; cursor: pointer; }
 
-.task-shelf { position: absolute; z-index: 95; left: 50%; bottom: 14px; min-height: 54px; display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid rgba(255,255,255,.2); border-radius: 16px; opacity: 0; pointer-events: none; transform: translate(-50%, 18px); background: rgba(255,255,255,.16); box-shadow: 0 18px 50px rgba(33,24,72,.2); backdrop-filter: blur(24px); transition: .18s ease; }
+.task-shelf {
+  --dock-ease: cubic-bezier(.22,1,.36,1);
+  position: absolute;
+  z-index: 95;
+  left: 50%;
+  bottom: 14px;
+  display: flex;
+  align-items: flex-end;
+  padding: 9px 7px 6px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 22px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 18px) scale(.96);
+  background: linear-gradient(135deg, rgba(34,24,72,.5), rgba(20,14,46,.34));
+  box-shadow: 0 18px 46px rgba(22,14,52,.3), inset 0 1px 0 rgba(255,255,255,.2);
+  backdrop-filter: blur(24px) saturate(150%);
+  transition: opacity .34s var(--dock-ease), transform .34s var(--dock-ease);
+}
 .task-shelf.visible { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
-.task-button { height: 39px; display: flex; align-items: center; gap: 8px; padding: 0 13px; border: 1px solid rgba(255,255,255,.24); border-radius: 10px; color: white; background: rgba(255,255,255,.2); cursor: pointer; text-shadow: 0 1px 4px rgba(30,20,60,.38); }
-.task-button span { font-size: 10px; }
-.task-button.minimized { background: rgba(39,29,76,.22); }
+/* Width includes the 5px side spacing, so entering and leaving items resize the dock smoothly. */
+.dock-item {
+  position: relative;
+  width: 54px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  transition: width .34s var(--dock-ease), opacity .34s var(--dock-ease), transform .34s var(--dock-ease);
+  animation: dock-item-enter .34s var(--dock-ease) backwards;
+}
+.dock-item.leaving { width: 0; opacity: 0; transform: translateY(10px) scale(.6); pointer-events: none; }
+@keyframes dock-item-enter { from { width: 0; opacity: 0; transform: translateY(10px) scale(.6); } }
+.dock-item:focus-visible { outline: none; }
+.dock-highlight {
+  position: absolute;
+  inset: -5px 0 -4px;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 16px;
+  opacity: 0;
+  background: rgba(255,255,255,.14);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18);
+  pointer-events: none;
+}
+.dock-highlight::after { content: ""; position: absolute; left: 50%; bottom: 4px; width: 16px; height: 3px; border-radius: 999px; background: #fff; box-shadow: 0 0 8px rgba(255,255,255,.85); transform: translateX(-50%); }
+.dock-item.focused .dock-highlight { opacity: 1; }
+.dock-icon {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  color: white;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.42), 0 8px 18px rgba(20,14,46,.3);
+  transition: transform .34s var(--dock-ease), opacity .34s var(--dock-ease), filter .34s var(--dock-ease), box-shadow .34s var(--dock-ease);
+}
+.dock-icon::before { content: ""; position: absolute; inset: 1px 1px 50%; border-radius: 12px 12px 48% 48%; background: linear-gradient(rgba(255,255,255,.35), transparent); pointer-events: none; }
+.dock-icon svg { position: relative; width: 24px; height: 24px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.14)); }
+.dock-item.focused .dock-icon { transform: translateY(-2px); }
+.dock-item:hover .dock-icon { transform: translateY(-4px) scale(1.08); }
+.dock-item:focus-visible .dock-icon { box-shadow: 0 0 0 2px rgba(255,255,255,.95), 0 8px 18px rgba(20,14,46,.3); }
+.dock-item.minimized .dock-icon { opacity: .5; filter: saturate(.55); transform: scale(.92); }
+.dock-dot { width: 5px; height: 5px; border-radius: 999px; background: rgba(255,255,255,.55); transition: opacity .34s var(--dock-ease), background .34s var(--dock-ease), box-shadow .34s var(--dock-ease); }
+.dock-item.focused .dock-dot { opacity: 0; }
+.dock-item.minimized .dock-dot { background: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,.6); }
+@media (prefers-reduced-motion: reduce) {
+  .task-shelf, .dock-item, .dock-icon, .dock-dot { transition: none; animation: none; }
+}
 
 @media (max-width: 900px) {
   .desktop-grid { grid-template-columns: repeat(2, 88px); width: 215px; }
