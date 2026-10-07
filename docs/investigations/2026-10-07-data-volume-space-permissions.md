@@ -1,6 +1,6 @@
 # 数据卷空间权限阻断文件闭环
 
-状态：fix in progress；自动化最小回归通过，Experimental NAS 待部署验证
+状态：fix deployed；自动化与 Experimental NAS 权限链回归通过，用户闭环待验证
 
 ## 症状与影响
 
@@ -52,10 +52,12 @@ Experimental NAS 安装 `v1.0.1-rc.4` 并成功初始化 Btrfs 数据盘后，�
 - Host Agent 为个人与 Shared 预建 `.a-nas-trash`；Samba recycle 与 Web 删除均使用 `0770` 子目录模式。
 - Host Agent 启动时对已挂载且带身份标记的卷执行幂等空间对账，并原子刷新 Samba 配置，因此 rc.4 数据卷升级后不需重新格式化。
 - 回归测试先在原实现上稳定失败，再在修复后通过：`go test ./internal/hostops/linux ./internal/files -run 'Test(...)' -count=1`。
+- Experimental NAS 已切换到 `v1.0.1-rc.5`（`69c97abe191f`），API、Host Agent、Kiosk 与 Samba 均 active；升级未重新格式化数据盘。
+- 实机自愈结果为：`spaces`、`spaces/private` 是 `root:a-nas-members 0710`；个人空间及回收站是 `admin:a-nas 2770` 且带访问/默认 ACL；Shared 及回收站是 `root:a-nas-members 2770`。以 `a-nas` 对四个叶子目录检查读、写、进入权限均返回成功，原直接文件系统复现已转绿。
 
 ## 后续工作
 
-- 构建并部署下一个不可变 RC；用 `namei`、`getfacl` 和实际 Web/Windows SMB 双向文件操作验证。
+- 重跑最初四个产品入口，确认个人空间、Shared、回收站和文件快照不再返回 `request could not be completed`；这一步完成前不能把原始用户症状标记为已关闭。
 - 必须验证“Web 先删除，再由 SMB 删除”时两个文件都可在 Web 回收站恢复，且 smbd journal 不含 recycle `purging`。
 - rc.4 当前空间被父目录完全阻断，没有形成有效用户数据；若未来迁移已有文件的旧权限模型，需要单独设计一次性递归 ACL 迁移，不能在每次启动扫描整卷。
 
