@@ -3,7 +3,7 @@
 // Root integration tests run the Host Agent executor against real account,
 // ACL, Btrfs, and Samba tools. They modify the host and must only run in a
 // disposable privileged container; see docs/development/LOCAL_ENVIRONMENT.md.
-package linux_test
+package linux
 
 import (
 	"context"
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 )
 
 func TestMain(m *testing.M) {
@@ -30,8 +29,9 @@ func TestMain(m *testing.M) {
 
 func TestRootIdentityLifecycle(t *testing.T) {
 	ctx := context.Background()
+	resetAgentState(t)
 	startSamba(t)
-	executor := linux.NewExecutor(nil, nil, linux.Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline")})
+	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline")})
 	password := "owner password for testing"
 	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
 		UserID: "user:owner", PrivateSpaceID: "space:owner", Username: "owner",
@@ -85,6 +85,15 @@ func TestRootIdentityLifecycle(t *testing.T) {
 	if output, err := exec.Command("smbclient", "//127.0.0.1/IPC$", "--user=owner%"+password,
 		"--client-protection=encrypt", "--command=exit").CombinedOutput(); err == nil {
 		t.Fatalf("disabled account can still open an SMB session: %s", output)
+	}
+}
+
+// resetAgentState gives each test fresh Host Agent registries; the container
+// is disposable, so nothing else depends on them.
+func resetAgentState(t *testing.T) {
+	t.Helper()
+	if err := os.RemoveAll("/var/lib/a-nas"); err != nil {
+		t.Fatal(err)
 	}
 }
 

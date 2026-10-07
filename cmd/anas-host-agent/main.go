@@ -51,9 +51,11 @@ func run(logger *slog.Logger) error {
 		MountPoint:   environment("ANAS_DATA_MOUNT", "/srv/a-nas/data"),
 		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
 	})
-	if err := executor.ReconcileDataVolume(context.Background()); err != nil {
+	repaired, err := executor.ReconcileDataVolume(context.Background())
+	if err != nil {
 		return err
 	}
+	logRepairs(logger, repaired)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
 			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Snapshots: executor,
@@ -62,6 +64,7 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go repairPermissionsPeriodically(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
 		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "version", version)
@@ -85,6 +88,31 @@ func run(logger *slog.Logger) error {
 			return nil
 		}
 		return err
+	}
+}
+
+// repairPermissionsPeriodically reapplies the space ACL layout so manual
+// chmod/setfacl changes on space roots do not persist silently.
+func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			repaired, err := executor.RepairDataVolumePermissions(ctx)
+			if err != nil {
+				logger.ErrorContext(ctx, "data-volume permission repair failed", "error", err)
+			}
+			logRepairs(logger, repaired)
+		}
+	}
+}
+
+func logRepairs(logger *slog.Logger, repaired []string) {
+	for _, path := range repaired {
+		logger.Warn("repaired drifted data-volume permissions", "path", path)
 	}
 }
 

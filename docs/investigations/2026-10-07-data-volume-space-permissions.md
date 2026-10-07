@@ -61,6 +61,15 @@ Experimental NAS 安装 `v1.0.1-rc.4` 并成功初始化 Btrfs 数据盘后，�
 - 必须验证“Web 先删除，再由 SMB 删除”时两个文件都可在 Web 回收站恢复，且 smbd journal 不含 recycle `purging`。
 - rc.4 当前空间被父目录完全阻断，没有形成有效用户数据；若未来迁移已有文件的旧权限模型，需要单独设计一次性递归 ACL 迁移，不能在每次启动扫描整卷。
 
+## 后续结论（ADR 0008）
+
+rc.5 的“`a-nas` 与用户共同持有个人空间”模型已被 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 的纯 ACL 布局取代，见[存储架构](../architecture/storage-and-files.md#卷与目录)。在特权 Debian 容器中以真实 Btrfs 与 Samba 运行[权限矩阵](../../internal/hostops/linux/root_matrix_integration_test.go)时另外发现：
+
+- `/srv/a-nas` 为 `root:a-nas 0750`，smbd 切换到成员身份后无法穿过，所有共享都会失败；Host Agent 现在为挂载点父目录授予 `a-nas-users` 穿过权限。
+- Samba 缺省 `create mask = 0744` 会把继承的写权限截断为只读，Shared 中他人创建的文件不可写；共享必须显式设置 `create mask = 0660`、`directory mask = 0770`。
+- `recycle:keeptree` 会把同一目录下的多次删除合并成一个目录条目；导入改为逐文件。Web 恢复曾删除用户回收目录本身，导致之后 Samba 自建目录失去 ACL；现在只清理其下空目录。
+- 在 trixie 上 `recycle.so` 随 `samba` 包提供；bookworm 需要额外安装 `samba-vfs-modules`，否则所有使用 recycle 的共享返回 `NT_STATUS_BAD_NETWORK_NAME`。
+
 ## 关联
 
 - 规格：[基础存储与共享](../specs/basic-storage-and-sharing.md)

@@ -66,6 +66,8 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
   make root-integration-test
 ```
 
+权限矩阵会挂载 loop 设备上的 Btrfs，因此需要 `--privileged`。bookworm 镜像还需 `samba-vfs-modules`（trixie 的 `samba` 已自带 `recycle.so`）。
+
 ## 实验 NAS 接入
 
 | 项目 | 当前状态 |

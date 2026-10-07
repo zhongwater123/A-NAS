@@ -32,7 +32,7 @@ func TestSetCredentialCreatesIdentityInTheReservedRange(t *testing.T) {
 		"groupadd --gid 20001 a-nas-admins",
 		"groupadd --gid 20100 owner",
 		"useradd --uid 20100 --gid 20100 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin owner",
-		"usermod --groups a-nas-users,a-nas-members,a-nas-admins owner",
+		"usermod --groups a-nas-users,a-nas-admins owner",
 	} {
 		if !host.ran(want) {
 			t.Errorf("missing command %q; got:\n%s", want, strings.Join(host.commands, "\n"))
@@ -158,10 +158,10 @@ func TestSyncIdentitiesContinuesPastAConflictingAccount(t *testing.T) {
 	if !errors.Is(err, accounts.ErrIdentityConflict) {
 		t.Fatalf("SyncIdentities() error = %v, want ErrIdentityConflict", err)
 	}
-	if !host.ran("usermod --groups a-nas-users,a-nas-members alice") {
+	if !host.ran("usermod --groups a-nas-users alice") {
 		t.Fatalf("a conflict stopped other identities from converging:\n%s", strings.Join(host.commands, "\n"))
 	}
-	if host.ran("usermod --groups a-nas-users,a-nas-members,a-nas-admins admin") {
+	if host.ran("usermod --groups a-nas-users,a-nas-admins admin") {
 		t.Fatal("conflicting legacy account was modified")
 	}
 }
@@ -181,9 +181,9 @@ func TestSyncIdentitiesConvergesRolesAndDisabledAccounts(t *testing.T) {
 		t.Fatalf("SyncIdentities() error = %v", err)
 	}
 	for _, want := range []string{
-		"usermod --groups a-nas-users,a-nas-members,a-nas-admins owner",
+		"usermod --groups a-nas-users,a-nas-admins owner",
 		"useradd --uid 20101 --gid 20101 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin bob",
-		"usermod --groups a-nas-users,a-nas-members bob",
+		"usermod --groups a-nas-users bob",
 		"smbpasswd -d bob",
 	} {
 		if !host.ran(want) {

@@ -102,18 +102,24 @@ rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）�
 
 ## 功能验收
 
-升级修复后先验证权限链。`spaces` 和 `spaces/private` 必须允许 `a-nas` 与成员穿过但不可列出；个人空间及其 `.a-nas-trash` 必须同时授予个人账号和 `a-nas`，Shared 回收站必须属于 `a-nas-members`：
+升级后先按[存储架构中的 ACL 表](../architecture/storage-and-files.md#卷与目录)验证权限链：容器只能穿过、空间与回收站目录为 `root:root` 且只授予对应用户（另含过渡条目 `user:a-nas`）：
 
 ```bash
 namei -l /srv/a-nas/data/spaces/private/admin
-getfacl -cp \
+getfacl -p \
+  /srv/a-nas \
   /srv/a-nas/data/spaces \
   /srv/a-nas/data/spaces/private \
   /srv/a-nas/data/spaces/private/admin \
-  /srv/a-nas/data/spaces/private/admin/.a-nas-trash \
+  /srv/a-nas/data/spaces/private/admin/.a-nas-trash/admin \
+  /srv/a-nas/data/spaces/shared \
   /srv/a-nas/data/spaces/shared/.a-nas-trash
+setpriv --reuid=admin --regid=admin --init-groups -- ls /srv/a-nas/data/spaces/private/admin
 runuser -u a-nas -- test -r /srv/a-nas/data/spaces/private/admin
+journalctl -u anas-host-agent | grep 'repaired drifted'
 ```
+
+rc.5 及更早版本的 `a-nas-members` 组不再使用；确认无引用后可执行 `gpasswd -d a-nas a-nas-members` 与 `groupdel a-nas-members`。
 
 1. 创建管理员与两个成员，确认 Web 与 Windows SMB 都无法列出或读取另一成员个人空间。
 2. 在个人空间和 `\\<NAS-IP>\Shared` 中分别由 Web 与 SMB 创建文件和子目录，再由另一端读取、改名和删除；用 SHA-256 核对大文件。

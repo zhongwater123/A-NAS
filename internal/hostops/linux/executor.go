@@ -71,6 +71,7 @@ type Executor struct {
 	identities    map[string]identityRecord
 	identityPath  string
 	identityError error
+	materializeMu sync.Mutex
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -133,7 +134,7 @@ func (e *Executor) SetCredential(ctx context.Context, request accounts.Credentia
 		return err
 	}
 	if e.dataVolumeReady() {
-		if err := e.materializeRegisteredSpaces(ctx); err != nil {
+		if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
 			return err
 		}
 	}
@@ -159,130 +160,32 @@ func (e *Executor) dataVolumeReady() bool {
 }
 
 // ReconcileDataVolume repairs and materializes registered spaces when the
-// intended Btrfs data volume is already mounted. It is safe to call during
-// Host Agent startup: an absent or offline data volume is left untouched.
-func (e *Executor) ReconcileDataVolume(ctx context.Context) error {
-	if e.registryError != nil {
-		return e.registryError
-	}
-	if !e.dataVolumeReady() {
-		return nil
-	}
-	if err := e.materializeRegisteredSpaces(ctx); err != nil {
-		return err
+// intended Btrfs data volume is already mounted, then refreshes the Samba
+// configuration. It is safe to call during Host Agent startup: an absent or
+// offline data volume is left untouched. It returns the pre-existing
+// directories whose ownership or ACL had drifted and were repaired.
+func (e *Executor) ReconcileDataVolume(ctx context.Context) ([]string, error) {
+	repaired, err := e.RepairDataVolumePermissions(ctx)
+	if err != nil {
+		return repaired, err
 	}
 	if err := e.mirrorIdentityManifest(); err != nil {
-		return err
+		return repaired, err
 	}
-	return e.applySambaConfiguration(ctx)
+	return repaired, e.applySambaConfiguration(ctx)
 }
 
-func (e *Executor) materializeRegisteredSpaces(ctx context.Context) error {
-	if err := e.protectSpaceContainers(ctx); err != nil {
-		return err
+// RepairDataVolumePermissions reapplies the ACL layout of ADR 0008 to space
+// roots, trash directories, and their containers. Only those directories
+// carry policy; contents inherit default ACLs and are never walked.
+func (e *Executor) RepairDataVolumePermissions(ctx context.Context) ([]string, error) {
+	if e.registryError != nil {
+		return nil, e.registryError
 	}
-	e.spaceRootsMu.RLock()
-	spaces := make(map[string]string, len(e.spaceRoots))
-	for spaceID, root := range e.spaceRoots {
-		spaces[spaceID] = root
+	if !e.dataVolumeReady() {
+		return nil, nil
 	}
-	e.spaceRootsMu.RUnlock()
-	for spaceID, root := range spaces {
-		if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(filepath.Dir(root), 0o750); err != nil {
-				return err
-			}
-			if _, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "create", root}, ""); err != nil {
-				return fmt.Errorf("create space subvolume: %w", err)
-			}
-			if err := os.MkdirAll(root, 0o770); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
-		owner := "root:a-nas-members"
-		mode := "2770"
-		username := ""
-		if spaceID != "space:shared" {
-			username = filepath.Base(root)
-			if !validUsername(username) {
-				return errors.New("registered private space has an invalid owner")
-			}
-			owner = username + ":a-nas"
-			mode = "2770"
-		}
-		if _, err := e.runner.Run(ctx, "chown", []string{owner, root}, ""); err != nil {
-			return fmt.Errorf("own space: %w", err)
-		}
-		if _, err := e.runner.Run(ctx, "chmod", []string{mode, root}, ""); err != nil {
-			return fmt.Errorf("protect space: %w", err)
-		}
-		if username != "" {
-			if err := e.applyPrivateSpaceACL(ctx, root, username); err != nil {
-				return err
-			}
-		}
-		if err := e.protectTrashRoot(ctx, root, owner, username); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Executor) protectSpaceContainers(ctx context.Context) error {
-	for _, path := range []string{
-		filepath.Join(e.mountPoint, "spaces"),
-		filepath.Join(e.mountPoint, "spaces", "private"),
-	} {
-		if err := os.MkdirAll(path, 0o710); err != nil {
-			return fmt.Errorf("create space container: %w", err)
-		}
-		info, err := os.Lstat(path)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("space container is not a safe directory")
-		}
-		if output, err := e.runner.Run(ctx, "chown", []string{"root:a-nas-members", path}, ""); err != nil {
-			return commandError("own space container", err, output)
-		}
-		if output, err := e.runner.Run(ctx, "chmod", []string{"0710", path}, ""); err != nil {
-			return commandError("protect space container", err, output)
-		}
-	}
-	return nil
-}
-
-func (e *Executor) protectTrashRoot(ctx context.Context, spaceRoot, owner, username string) error {
-	trashRoot := filepath.Join(spaceRoot, ".a-nas-trash")
-	if err := os.MkdirAll(trashRoot, 0o770); err != nil {
-		return fmt.Errorf("create trash root: %w", err)
-	}
-	info, err := os.Lstat(trashRoot)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("trash root is not a safe directory")
-	}
-	if output, err := e.runner.Run(ctx, "chown", []string{owner, trashRoot}, ""); err != nil {
-		return commandError("own trash root", err, output)
-	}
-	if output, err := e.runner.Run(ctx, "chmod", []string{"2770", trashRoot}, ""); err != nil {
-		return commandError("protect trash root", err, output)
-	}
-	if username != "" {
-		return e.applyPrivateSpaceACL(ctx, trashRoot, username)
-	}
-	return nil
-}
-
-func (e *Executor) applyPrivateSpaceACL(ctx context.Context, path, username string) error {
-	acl := fmt.Sprintf(
-		"user::rwx,user:%s:rwx,group::rwx,mask::rwx,other::---,"+
-			"default:user::rwx,default:user:%s:rwx,default:group::rwx,default:mask::rwx,default:other::---",
-		username, username,
-	)
-	if output, err := e.runner.Run(ctx, "setfacl", []string{"--modify", acl, path}, ""); err != nil {
-		return commandError("apply private-space ACL", err, output)
-	}
-	return nil
+	return e.materializeRegisteredSpaces(ctx)
 }
 
 func (e *Executor) DisableCredential(ctx context.Context, username string) error {
@@ -328,34 +231,15 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     valid users = %%S
     read only = no
     browseable = no
-    inherit acls = yes
-    create mask = 0660
-    directory mask = 0770
-    vfs objects = recycle
-    recycle:repository = .a-nas-trash/%%U
-    recycle:directory_mode = 0770
-    recycle:subdir_mode = 0770
-    recycle:keeptree = yes
-    recycle:versions = yes
-
+%s
 [Shared]
     comment = A-NAS shared space
     path = %s/spaces/shared
-    valid users = @a-nas-members
-    force group = a-nas-members
+    valid users = @%s
     read only = no
     browseable = yes
-    create mask = 0660
-    force create mode = 0660
-    directory mask = 2770
-    force directory mode = 2000
-    vfs objects = recycle
-    recycle:repository = .a-nas-trash/%%U
-    recycle:directory_mode = 0770
-    recycle:subdir_mode = 0770
-    recycle:keeptree = yes
-    recycle:versions = yes
-`, interfaces, e.mountPoint, e.mountPoint)
+    access based share enum = yes
+%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accounts.UsersGroup, sambaShareOptions)
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {
@@ -382,6 +266,28 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 	}
 	return nil
 }
+
+// sambaShareOptions keep the kernel's POSIX ACLs authoritative: Samba runs as
+// the signed-in user, new files inherit default ACLs, clients cannot edit
+// ACLs, and recycle moves deletions into the per-user trash directory that
+// the Host Agent prepares (ADR 0008). The create and directory masks become
+// the ACL mask of new entries; Samba's default 0744 would make every
+// inherited write grant read-only. Clients cannot reach the trash directories
+// by name, so a member cannot rename the Shared trash root out of the way;
+// recycle itself is not subject to veto files.
+const sambaShareOptions = `    inherit acls = yes
+    create mask = 0660
+    directory mask = 0770
+    nt acl support = no
+    hide unreadable = yes
+    veto files = /.a-nas-trash/
+    vfs objects = recycle
+    recycle:repository = .a-nas-trash/%U
+    recycle:directory_mode = 0770
+    recycle:subdir_mode = 0770
+    recycle:keeptree = yes
+    recycle:versions = yes
+`
 
 func validUsername(username string) bool {
 	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
@@ -530,7 +436,7 @@ WantedBy=local-fs.target
 	if err := writeAtomic(filepath.Join(e.mountPoint, ".a-nas-volume.json"), append(marker, '\n'), 0o644); err != nil {
 		return storage.Volume{}, fmt.Errorf("write data-volume identity marker: %w", err)
 	}
-	if err := e.materializeRegisteredSpaces(ctx); err != nil {
+	if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
 		return storage.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
 	}
 	return storage.Volume{
