@@ -333,4 +333,23 @@ func (e *Executor) identityUsernames() []string {
 	return usernames
 }
 
+func (e *Executor) identityKnown(username string) bool {
+	e.identitiesMu.Lock()
+	defer e.identitiesMu.Unlock()
+	_, ok := e.identities[username]
+	return ok
+}
+
+func (e *Executor) knownIdentities(usernames []string) []string {
+	e.identitiesMu.Lock()
+	defer e.identitiesMu.Unlock()
+	known := make([]string, 0, len(usernames))
+	for _, username := range usernames {
+		if _, ok := e.identities[username]; ok {
+			known = append(known, username)
+		}
+	}
+	return known
+}
+
 var _ accounts.IdentitySynchronizer = (*Executor)(nil)

@@ -77,7 +77,7 @@ root-integration-test:
 
 build: web-build build-binaries
 
-build-binaries:
+build-binaries: web-build
 	mkdir -p $(BUILD_DIR)
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
