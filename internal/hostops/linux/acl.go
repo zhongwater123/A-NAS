@@ -154,7 +154,11 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 			}
 		}
 	}
-	return repaired, nil
+	drifted, err := e.ensurePhotosStore(ctx)
+	if drifted {
+		repaired = append(repaired, filepath.Join(e.mountPoint, photosDirectory))
+	}
+	return repaired, err
 }
 
 func (e *Executor) ensureSpaceSubvolume(ctx context.Context, root string) (bool, error) {

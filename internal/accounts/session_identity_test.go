@@ -54,11 +54,21 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	user, err := directory.ResolveSessionUser(ctx, ownerSession.Token)
+	if err != nil || user != (accounts.SessionUser{UserID: admin.ID, Username: "owner", Role: accounts.RoleAdmin}) {
+		t.Fatalf("ResolveSessionUser(owner) = %#v, %v", user, err)
+	}
+	if _, err := directory.ResolveSessionUser(ctx, "not-a-session-token"); !errors.Is(err, accounts.ErrSessionNotFound) {
+		t.Fatalf("ResolveSessionUser(forged) error = %v, want ErrSessionNotFound", err)
+	}
 	if err := service.DisableUser(ctx, admin, alice); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := directory.ResolveSessionIdentity(ctx, aliceSession.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
 		t.Fatalf("disabled account's session error = %v, want ErrSessionNotFound", err)
+	}
+	if _, err := directory.ResolveSessionUser(ctx, aliceSession.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
+		t.Fatalf("disabled account's session user error = %v, want ErrSessionNotFound", err)
 	}
 
 	remembered := service.RememberedSessions(ctx)

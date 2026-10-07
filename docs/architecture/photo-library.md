@@ -142,7 +142,13 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 2. **Managed storage**：流式导入、staging 刷新后原子发布并刷新目录、内容对象复用、崩溃对账、容量保护（沿用文件服务“保留 5% 且至少 10 GiB”）、故障注入测试和临时目录 Adapter；不依赖真实数据盘。
 3. **媒体派生与任务表**：缩略图、EXIF 方向与基础元数据，以及后续 AI 共用的持久任务、租约与派生版本。
 4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、相册副本、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件大小上限在上传接口实现前确定；Web 桌面启用现有“相册”入口。`internal/photosapi` 不自行认证，只信任包装它的一方放入的 `photos.Principal`：开发模式下产品服务从会话构造并检查 CSRF；切片 5 起由相册服务经 Host Agent 会话查询构造。原图与缩略图以 `private, no-cache` 返回，访问结束后浏览器必须重新验证。
-5. **服务化与部署**：`anas-photos` 进程与 systemd 单元、`a-nas-photos` 固定身份、Host Agent 创建 `photos` 子卷并修复漂移、会话查询接口、`anas-api` 转发、`make ops-check` 与部署手册。
+5. **服务化与部署**：`anas-photos` 进程与 systemd 单元、`a-nas-photos` 固定身份、Host Agent 创建 `photos` 子卷并修复漂移、会话查询接口、`anas-api` 转发、`make ops-check` 与部署手册。实现要点：
+   - 相册服务是同一 `anas-api` 二进制的 `photo-service` 子命令，由 `anas-photos.service` 以 `a-nas-photos` 运行，因此发布制品仍只校验两个二进制；拒绝以 root 运行。
+   - 安装器以固定 UID/GID 31000 创建 `a-nas-photos`，不接管已被占用的名称或 ID；Host Agent 只在该账号存在时创建 `photos` 子卷。
+   - 相册服务在 `/run/a-nas-photos/photos.sock`（`0660`，目录 `0750`）提供相册 API；产品服务账号属于 `a-nas-photos` 组，只能连接该套接字，进不了存储区。
+   - 产品服务在浏览器边界检查 Cookie 与 CSRF，转发时去掉 Cookie，只附带会话令牌头；相册服务把令牌交给 Host Agent 的 `/run/a-nas-sessions/photos.sock` 换取账号、角色和是否需要改密，不读取 `control.db`。
+   - 存储区未就绪（数据卷未挂载或 `photos` 尚未创建）时相册服务只回答 `photos_unavailable`，从不自行创建目录；就绪后再打开 Catalog 并启动缩略图任务、对账与回收站到期。
+   - 部署与回滚见[启用相册服务](../runbooks/enable-photo-service.md)。
 6. **多用户权限**：私有图库管理员查看、共享图库上传者与管理员权限、跨成员重复提示，以及列表、缩略图、计数和错误信息的泄漏测试。
 7. **M1 实机闸门**：真实数据卷上的强制终止与断电对账、卷离线、容量不足，以及 4 名成员、20,000 张合成照片的列表与权限性能。
 

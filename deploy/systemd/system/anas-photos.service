@@ -1,0 +1,41 @@
+[Unit]
+Description=A-NAS photo service
+Documentation=https://github.com/zhongwater123/A-NAS
+After=anas-host-agent.service
+Wants=anas-host-agent.service
+
+[Service]
+Type=simple
+# Owns the data volume's photos subvolume alone and authorizes photo assets in
+# its Catalog; it confirms every session with the Host Agent (ADR 0011).
+User=a-nas-photos
+Group=a-nas-photos
+ExecStart=/opt/a-nas/current/anas-api photo-service
+Environment=ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos
+Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock
+Environment=ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock
+# Only the Product Service, a member of the a-nas-photos group, reaches the
+# API socket.
+RuntimeDirectory=a-nas-photos
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# The data volume may be mounted after the service starts. Its ACLs keep every
+# space out of reach; the Host Agent makes only photos/ this identity's.
+ReadWritePaths=/srv/a-nas/data
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

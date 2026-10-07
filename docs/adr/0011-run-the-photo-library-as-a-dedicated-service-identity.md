@@ -1,6 +1,6 @@
 # 0011：相册以专用服务身份独占受管存储，并在 Catalog 中授权
 
-状态：accepted（未实现；相册 M1 部署到实验 NAS 前落地）
+状态：accepted（已实现，尚未在 Experimental NAS 部署；见[启用相册服务](../runbooks/enable-photo-service.md)）
 
 [ADR 0006](0006-use-a-managed-photo-library.md) 让相册持有原图身份与生命周期；[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md) 让普通文件只由数据卷 POSIX ACL 授权、以用户本人身份访问，产品服务账号 `a-nas` 不持有任何空间权限。受管图库的几项要求无法用空间根目录 ACL 表达：同一不可变内容对象可同时被私有图库和共享图库的照片资产引用；共享图库按单张照片区分上传者的修改权；回收站到期、缩略图与 AI 任务在没有用户会话时运行，而文件代理只服务有效会话和 20100–29999 的账号。我们决定把受管图库作为 ADR 0008 的限定例外：由独立进程以专用身份独占相册存储，照片资产的授权由相册 Catalog 中的 Policy 判定。
 

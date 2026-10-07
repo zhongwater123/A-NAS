@@ -46,6 +46,12 @@ const (
 	AdminsGID    = 20001
 	FirstUserUID = 20100
 	LastUserUID  = 29999
+	// PhotoServiceUser owns the data volume's photos subvolume alone
+	// (ADR 0011). Its UID sits outside the account (20100–29999) and app
+	// (30000–30999) ranges and is fixed, so a reinstalled system disk owns the
+	// same photos again.
+	PhotoServiceUser = "a-nas-photos"
+	PhotoServiceUID  = 31000
 )
 
 type Role string

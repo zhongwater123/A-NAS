@@ -135,6 +135,47 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&identity.Username, &identity.Ro
 	return identity, nil
 }
 
+// SessionUser is what services outside the Product Service learn about the
+// signed-in user behind a session token.
+type SessionUser struct {
+	UserID             string `json:"userId"`
+	Username           string `json:"username"`
+	Role               Role   `json:"role"`
+	MustChangePassword bool   `json:"mustChangePassword"`
+}
+
+// ResolveSessionUser returns the user of an active, unexpired session. The
+// photo service learns who is asking through it (ADR 0011).
+func (d *SessionDirectory) ResolveSessionUser(ctx context.Context, token string) (SessionUser, error) {
+	if token == "" {
+		return SessionUser{}, ErrSessionNotFound
+	}
+	db, err := d.open()
+	if err != nil {
+		return SessionUser{}, err
+	}
+	var user SessionUser
+	var status UserStatus
+	var expiresAt string
+	err = db.QueryRowContext(ctx, `
+SELECT u.id, u.username, u.role, u.status, u.must_change_password, s.expires_at
+FROM sessions s
+JOIN users u ON u.id = s.user_id
+WHERE s.token_hash = ?`, tokenHash(token)).Scan(&user.UserID, &user.Username, &user.Role, &status, &user.MustChangePassword, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionUser{}, ErrSessionNotFound
+	}
+	if err != nil {
+		d.reset()
+		return SessionUser{}, fmt.Errorf("read session directory: %w", err)
+	}
+	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil || status != UserStatusActive || !d.now().UTC().Before(expires) {
+		return SessionUser{}, ErrSessionNotFound
+	}
+	return user, nil
+}
+
 // open connects read-only, so the root broker never writes the database or
 // creates SQLite side files owned by root next to the Product Service's.
 func (d *SessionDirectory) open() (*sql.DB, error) {

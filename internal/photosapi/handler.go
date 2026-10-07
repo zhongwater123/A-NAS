@@ -52,11 +52,11 @@ func New(service *photos.Service, logger *slog.Logger) http.Handler {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if h.service == nil {
-		writeError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
+		WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 		return
 	}
 	if _, ok := principalFrom(r); !ok {
-		writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+		WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -82,7 +82,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 }
 
@@ -111,7 +111,7 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request) {
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 1 {
-			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+			WriteError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
 			return
 		}
 		limit = parsed
@@ -140,7 +140,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	reader, err := r.MultipartReader()
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
 	var directoryID string
@@ -150,7 +150,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+			WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 			return
 		}
 		switch part.FormName() {
@@ -158,7 +158,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 			value, readErr := io.ReadAll(io.LimitReader(part, 4097))
 			_ = part.Close()
 			if readErr != nil || len(value) > 4096 {
-				writeError(w, http.StatusBadRequest, "invalid_request", "directory ID is invalid")
+				WriteError(w, http.StatusBadRequest, "invalid_request", "directory ID is invalid")
 				return
 			}
 			directoryID = string(value)
@@ -177,7 +177,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 			_ = part.Close()
 		}
 	}
-	writeError(w, http.StatusBadRequest, "file_required", "one file part is required")
+	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
 }
 
 type directoryRequest struct {
@@ -214,7 +214,7 @@ func (h *handler) changeDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.DirectoryID != nil || (request.Name == nil && request.ParentID == nil) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "send name and/or parentId")
+		WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or parentId")
 		return
 	}
 	id := r.PathValue("directoryID")
@@ -259,7 +259,7 @@ func (h *handler) changeAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.ParentID != nil || (request.Name == nil && request.DirectoryID == nil) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "send name and/or directoryId")
+		WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or directoryId")
 		return
 	}
 	id := r.PathValue("assetID")
@@ -390,39 +390,39 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request, content photos.C
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, photos.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "photo library item was not found")
+		WriteError(w, http.StatusNotFound, "not_found", "photo library item was not found")
 	case errors.Is(err, photos.ErrThumbnailUnavailable):
-		writeError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
+		WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
 	case errors.Is(err, photos.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
+		WriteError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
 	case errors.Is(err, photos.ErrConflict):
-		writeError(w, http.StatusConflict, "conflict", "the item conflicts with its current state or an existing name")
+		WriteError(w, http.StatusConflict, "conflict", "the item conflicts with its current state or an existing name")
 	case errors.Is(err, photos.ErrInvalidName):
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, photos.ErrInvalidCursor):
-		writeError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
 	case errors.Is(err, photos.ErrUnsupportedType):
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "only JPEG and PNG photos are supported")
+		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "only JPEG and PNG photos are supported")
 	case errors.Is(err, photos.ErrTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large", err.Error())
+		WriteError(w, http.StatusRequestEntityTooLarge, "too_large", err.Error())
 	case errors.Is(err, photos.ErrInsufficientSpace):
-		writeError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
+		WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
 	default:
 		h.logger.ErrorContext(r.Context(), "photo request failed", "path", r.URL.Path, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
+		WriteError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
 	}
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if mediaType != "application/json" {
-		writeError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/json")
+		WriteError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/json")
 		return false
 	}
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil || decoder.More() {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be one JSON object")
+		WriteError(w, http.StatusBadRequest, "invalid_request", "request body must be one JSON object")
 		return false
 	}
 	return true
@@ -437,7 +437,8 @@ type errorDetail struct {
 	Message string `json:"message"`
 }
 
-func writeError(w http.ResponseWriter, status int, code, message string) {
+// WriteError answers with the product API's error shape.
+func WriteError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
 }
 

@@ -35,7 +35,7 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
+	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh
 	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
@@ -64,6 +64,17 @@ ops-check:
 	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api photo-service' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'RuntimeDirectory=a-nas-photos' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos' deploy/systemd/system/anas-api.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'photos_id=31000' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'PhotoServiceUID  = 31000' internal/accounts/service.go
+	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 
 vet:
 	$(GO) vet ./...

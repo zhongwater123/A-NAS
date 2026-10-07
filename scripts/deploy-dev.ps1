@@ -124,6 +124,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\user\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-api.service'); Destination = "${target}:$release/anas-api-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-photos.service'); Destination = "${target}:$release/anas-photos-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\run-kiosk.sh'); Destination = "${target}:$release/kiosk-launcher.incoming" },
