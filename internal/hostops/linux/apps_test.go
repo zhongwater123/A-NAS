@@ -22,8 +22,11 @@ func TestAppIdentitiesComeFromTheAppRangeAndAreNeverReused(t *testing.T) {
 	if err != nil || memos.Username != "app-memos" || memos.UID != 30000 || memos.GID != 30000 {
 		t.Fatalf("AppIdentity(memos) = %+v, %v", memos, err)
 	}
-	if !host.ran("useradd --uid 30000 --gid 30000 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app-memos") {
-		t.Fatalf("app account not created:\n%s", strings.Join(host.commands, "\n"))
+	// Showing a plan reserves the UID; only PrepareApp creates the account.
+	for _, command := range host.commands {
+		if !strings.HasPrefix(command, "getent ") {
+			t.Fatalf("AppIdentity changed the host: %s", command)
+		}
 	}
 	again, err := executor.AppIdentity(ctx, "memos")
 	if err != nil || again != memos {

@@ -82,7 +82,7 @@
 ## 验收证据
 
 - 自动化：在具备 root 的容器或 CI 环境中，对 {Web, SMB, 终端, 应用} × {个人空间, 可写共享, 只读共享} × {读, 写, 改名, 删除进回收站, 恢复} 运行权限矩阵测试，并覆盖 Web/SMB 两种删除顺序。当前覆盖见 [`root_matrix_integration_test.go`](../../internal/hostops/linux/root_matrix_integration_test.go)：真实 Btrfs 与 Samba 下的 SMB、本地进程（终端入口）与经文件代理的 Web（真实的按用户工作进程），并验证产品服务账号无权访问；应用身份见 [`root_apps_integration_test.go`](../../internal/hostops/linux/root_apps_integration_test.go)。
-- 应用的共享空间授权以 `app-<id>` 加入 `a-nas-users` 实现，即与成员相同的共享空间 ACL；应用数据位于数据卷 `apps/<id>`（仅 root 可列出）。rootful Docker 中以 root 运行的镜像不受 ACL 约束，隔离依赖只挂载被允许的文件夹。
+- 应用的共享空间授权以 `app-<id>` 加入 `a-nas-users` 实现，即与成员相同的共享空间 ACL；应用数据位于数据卷 `apps/<id>`（仅 root 可列出）。rootful Docker 中以 root 运行的镜像不受 ACL 约束，隔离依赖只挂载被允许的文件夹：这些文件夹以 A-NAS 卷的子路径挂载，Docker 每次启动在卷内解析，应用或成员把其中的文件夹换成链接也无法让容器挂载卷外路径。
 - 安全：产品服务进程直接访问任何空间均失败；伪造或过期的会话令牌无法驱动文件代理；系统账号同名被拒绝。
 - 实机：按 v1.0.1 实机手册补充 `getfacl`、`stat`、Samba 日志与审计证据。
 

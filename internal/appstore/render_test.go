@@ -45,8 +45,10 @@ x-casaos:
 	}
 	compose := string(plan.Compose)
 	for _, want := range []string{
-		"source: /srv/a-nas/data/apps/demo/config",
-		"source: /srv/a-nas/data/spaces/shared/Media/Music",
+		"device: /srv/a-nas/data/apps/demo",
+		"device: /srv/a-nas/data/spaces/shared",
+		"subpath: config",
+		"subpath: Media/Music",
 		"PUID: \"30005\"",
 		"PGID: \"30005\"",
 		"io.a-nas.app: demo",
@@ -72,10 +74,26 @@ x-casaos:
 	if err != nil {
 		t.Fatalf("rendered compose does not load: %v", err)
 	}
+	// Data-volume folders are subpaths of A-NAS volumes, which Docker resolves
+	// without following links out of them; only /etc/localtime stays a bind.
 	for _, volume := range reloaded.Services["web"].Volumes {
-		if volume.Bind != nil && bool(volume.Bind.CreateHostPath) {
+		switch {
+		case volume.Type == types.VolumeTypeBind && volume.Source != "/etc/localtime":
+			t.Errorf("%s is a bind mount", volume.Source)
+		case volume.Bind != nil && bool(volume.Bind.CreateHostPath):
 			t.Errorf("%s create_host_path = true", volume.Source)
+		case volume.Type == types.VolumeTypeVolume && (volume.Volume == nil || !volume.Volume.NoCopy || volume.Volume.Subpath == ""):
+			t.Errorf("%s is not a no-copy subpath: %+v", volume.Source, volume.Volume)
 		}
+	}
+	for name, device := range map[string]string{"a-nas-appdata": "/srv/a-nas/data/apps/demo", "a-nas-shared": "/srv/a-nas/data/spaces/shared"} {
+		volume := reloaded.Volumes[name]
+		if volume.Driver != "local" || volume.DriverOpts["o"] != "bind" || volume.DriverOpts["device"] != device {
+			t.Errorf("volume %s = %+v, want a bind of %s", name, volume, device)
+		}
+	}
+	if got := []string{plan.Mounts[0].HostPath, plan.Mounts[1].HostPath}; got[0] != "/srv/a-nas/data/apps/demo/config" || got[1] != "/srv/a-nas/data/spaces/shared/Media/Music" {
+		t.Errorf("plan host paths = %v", got)
 	}
 	if plan.Identity != testIdentity {
 		t.Errorf("plan identity = %+v, want %+v", plan.Identity, testIdentity)
@@ -132,6 +150,23 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 				t.Fatalf("Render() error = %v, want policy error", err)
 			}
 		})
+	}
+}
+
+func TestRenderRefusesReservedVolumeNames(t *testing.T) {
+	// A manifest volume named like the Shared volume would reach Shared
+	// without the plan listing it.
+	_, err := appstore.Render(context.Background(), entry(`
+services:
+  web:
+    image: example/web:1
+    volumes: ["a-nas-shared:/data"]
+volumes:
+  a-nas-shared: {}
+`), testPolicy, testIdentity)
+	var policyError *appstore.PolicyError
+	if !errors.As(err, &policyError) {
+		t.Fatalf("Render() error = %v, want policy error", err)
 	}
 }
 

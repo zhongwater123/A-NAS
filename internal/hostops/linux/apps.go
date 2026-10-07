@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -21,8 +20,10 @@ import (
 
 const appsDirectory = "apps"
 
-// AppIdentity returns the Linux identity of an app, creating it on first use.
-// UIDs come from the app range and are never reused.
+// AppIdentity returns the Linux identity of an app, reserving its UID on first
+// use; PrepareApp creates the account, so showing a plan changes nothing on
+// the host but the registry. UIDs come from the app range and are never
+// reused.
 func (e *Executor) AppIdentity(ctx context.Context, appID string) (appid.Identity, error) {
 	if e.appsError != nil {
 		return appid.Identity{}, e.appsError
@@ -45,7 +46,7 @@ func (e *Executor) AppIdentity(ctx context.Context, appID string) (appid.Identit
 			return appid.Identity{}, errors.New("A-NAS app identity range is exhausted")
 		}
 	}
-	if err := e.ensureSystemAccount(ctx, username, uid); err != nil {
+	if _, _, err := e.accountState(ctx, username, uid); err != nil {
 		return appid.Identity{}, err
 	}
 	if !known {
@@ -86,23 +87,29 @@ func (e *Executor) PrepareApp(ctx context.Context, appID string, folders []strin
 	if err != nil {
 		return err
 	}
+	if err := e.ensureAccount(ctx, identity.Username, identity.UID); err != nil {
+		return err
+	}
 	if err := e.ensureAppsSubvolume(ctx); err != nil {
 		return err
 	}
 	owner := fmt.Sprintf("%d:%d", identity.UID, identity.GID)
-	if err := e.makeOwnedDirectory(ctx, appRoot, owner); err != nil {
+	// The app can rename entries in its data and, like members, in Shared:
+	// every folder is created and owned through descriptors that do not
+	// follow links (Docker mounts them as subpaths for the same reason).
+	if err := e.makeFolder(ctx, appRoot, 0o750, owner); err != nil {
 		return err
 	}
 	for _, folder := range folders {
-		if withinDirectory(appRoot, folder) && folder != appRoot {
-			if err := e.makeOwnedPath(ctx, appRoot, folder, owner); err != nil {
+		switch {
+		case withinDirectory(appRoot, folder) && folder != appRoot:
+			if err := e.makeFolders(ctx, appRoot, folder, 0o750, owner); err != nil {
 				return err
 			}
-			continue
-		}
-		if folder != sharedRoot && withinDirectory(sharedRoot, folder) {
-			// Created by root, a Shared folder inherits the Shared default ACL.
-			if err := os.MkdirAll(folder, 0o770); err != nil {
+		case withinDirectory(sharedRoot, folder) && folder != sharedRoot:
+			// Created by root, a Shared folder inherits the Shared default ACL;
+			// the mode keeps its mask from masking the inherited entries.
+			if err := e.makeFolders(ctx, sharedRoot, folder, 0o770, ""); err != nil {
 				return fmt.Errorf("create Shared folder for app: %w", err)
 			}
 		}
@@ -123,51 +130,6 @@ func (e *Executor) ReleaseApp(ctx context.Context, appID string) error {
 		return nil
 	}
 	return e.setAppSharedAccess(ctx, appid.Username(appID), false)
-}
-
-// ensureSystemAccount creates a no-login account and same-named group with
-// the given ID, refusing names or IDs that belong to anyone else.
-func (e *Executor) ensureSystemAccount(ctx context.Context, username string, uid int) error {
-	id := strconv.Itoa(uid)
-	fields, found, err := e.getent(ctx, "passwd", username)
-	if err != nil {
-		return err
-	}
-	if found {
-		if len(fields) < 4 || fields[2] != id || fields[3] != id {
-			return fmt.Errorf("%w: %s", accounts.ErrIdentityConflict, username)
-		}
-		return nil
-	}
-	if _, taken, err := e.getent(ctx, "passwd", id); err != nil {
-		return err
-	} else if taken {
-		return fmt.Errorf("%w: UID %s", accounts.ErrIdentityConflict, id)
-	}
-	group, groupFound, err := e.getent(ctx, "group", username)
-	if err != nil {
-		return err
-	}
-	if groupFound && (len(group) < 3 || group[2] != id) {
-		return fmt.Errorf("%w: group %s", accounts.ErrIdentityConflict, username)
-	}
-	if !groupFound {
-		if _, taken, err := e.getent(ctx, "group", id); err != nil {
-			return err
-		} else if taken {
-			return fmt.Errorf("%w: GID %s", accounts.ErrIdentityConflict, id)
-		}
-		if output, err := e.runner.Run(ctx, "groupadd", []string{"--gid", id, username}, ""); err != nil {
-			return commandError("create app group", err, output)
-		}
-	}
-	if output, err := e.runner.Run(ctx, "useradd", []string{
-		"--uid", id, "--gid", id, "--no-create-home", "--home-dir", "/nonexistent",
-		"--shell", "/usr/sbin/nologin", username,
-	}, ""); err != nil {
-		return commandError("create app identity", err, output)
-	}
-	return nil
 }
 
 // setAppSharedAccess grants or withdraws the Shared folder ACL, which
@@ -200,31 +162,29 @@ func (e *Executor) ensureAppsSubvolume(ctx context.Context) error {
 		return err
 	}
 	// Only root and Docker reach app data; containers see their own folder.
-	_, _, err := e.ensureDirectoryACL(ctx, apps, strings.Join([]string{"user::rwx", "group::---", "other::---"}, ","))
+	_, _, err := e.ensureDirectoryACL(ctx, apps, strings.Join([]string{"user::rwx", "group::---", "other::---"}, ","), false)
 	return err
 }
 
-// makeOwnedDirectory creates one directory owned by the app.
-func (e *Executor) makeOwnedDirectory(ctx context.Context, path, owner string) error {
-	if info, err := os.Lstat(path); err == nil {
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is not a safe directory", path)
-		}
-	} else if errors.Is(err, os.ErrNotExist) {
-		if err := os.Mkdir(path, 0o750); err != nil {
-			return err
-		}
-	} else {
+// makeFolder opens or creates one folder without following links and, when
+// owner is set, gives it to the app.
+func (e *Executor) makeFolder(ctx context.Context, path string, mode uint32, owner string) error {
+	folder, _, err := e.openVolumeDirectory(path, mode, false)
+	if err != nil {
 		return err
 	}
-	if output, err := e.runner.Run(ctx, "chown", []string{"--no-dereference", owner, path}, ""); err != nil {
+	defer folder.Close()
+	if owner == "" {
+		return nil
+	}
+	if output, err := e.runner.Run(ctx, "chown", []string{owner, openedPath(folder)}, ""); err != nil {
 		return commandError("own app folder", err, output)
 	}
 	return nil
 }
 
-// makeOwnedPath creates each missing directory between root and path.
-func (e *Executor) makeOwnedPath(ctx context.Context, root, path, owner string) error {
+// makeFolders makes each folder between root (exclusive) and path.
+func (e *Executor) makeFolders(ctx context.Context, root, path string, mode uint32, owner string) error {
 	relative, err := filepath.Rel(root, path)
 	if err != nil {
 		return err
@@ -232,7 +192,7 @@ func (e *Executor) makeOwnedPath(ctx context.Context, root, path, owner string) 
 	current := root
 	for _, part := range strings.Split(relative, string(filepath.Separator)) {
 		current = filepath.Join(current, part)
-		if err := e.makeOwnedDirectory(ctx, current, owner); err != nil {
+		if err := e.makeFolder(ctx, current, mode, owner); err != nil {
 			return err
 		}
 	}

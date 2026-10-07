@@ -112,44 +112,8 @@ func (e *Executor) ensureFixedGroups(ctx context.Context) error {
 // ensureIdentity creates or adopts the Linux account for one A-NAS user. It
 // never modifies an account, group, or UID that A-NAS did not allocate.
 func (e *Executor) ensureIdentity(ctx context.Context, identity accounts.Identity) error {
-	uid := strconv.Itoa(identity.UID)
-	fields, found, err := e.getent(ctx, "passwd", identity.Username)
-	if err != nil {
+	if err := e.ensureAccount(ctx, identity.Username, identity.UID); err != nil {
 		return err
-	}
-	if found {
-		if len(fields) < 4 || fields[2] != uid || fields[3] != uid {
-			return fmt.Errorf("%w: %s", accounts.ErrIdentityConflict, identity.Username)
-		}
-	} else {
-		if _, taken, err := e.getent(ctx, "passwd", uid); err != nil {
-			return err
-		} else if taken {
-			return fmt.Errorf("%w: UID %s", accounts.ErrIdentityConflict, uid)
-		}
-		group, groupFound, err := e.getent(ctx, "group", identity.Username)
-		if err != nil {
-			return err
-		}
-		if groupFound && (len(group) < 3 || group[2] != uid) {
-			return fmt.Errorf("%w: group %s", accounts.ErrIdentityConflict, identity.Username)
-		}
-		if !groupFound {
-			if _, taken, err := e.getent(ctx, "group", uid); err != nil {
-				return err
-			} else if taken {
-				return fmt.Errorf("%w: GID %s", accounts.ErrIdentityConflict, uid)
-			}
-			if output, err := e.runner.Run(ctx, "groupadd", []string{"--gid", uid, identity.Username}, ""); err != nil {
-				return commandError("create identity group", err, output)
-			}
-		}
-		if output, err := e.runner.Run(ctx, "useradd", []string{
-			"--uid", uid, "--gid", uid, "--no-create-home", "--home-dir", "/nonexistent",
-			"--shell", "/usr/sbin/nologin", identity.Username,
-		}, ""); err != nil {
-			return commandError("create A-NAS identity", err, output)
-		}
 	}
 	groups := accounts.UsersGroup
 	if identity.Role == accounts.RoleAdmin {
@@ -157,6 +121,67 @@ func (e *Executor) ensureIdentity(ctx context.Context, identity accounts.Identit
 	}
 	if output, err := e.runner.Run(ctx, "usermod", []string{"--groups", groups, identity.Username}, ""); err != nil {
 		return commandError("set identity groups", err, output)
+	}
+	return nil
+}
+
+// accountState reports whether username already is the no-login account with
+// UID and GID uid and whether its same-named group exists. Any other account
+// or group holding the name or the ID is a conflict: A-NAS never adopts what
+// it did not allocate.
+func (e *Executor) accountState(ctx context.Context, username string, uid int) (exists, groupExists bool, err error) {
+	id := strconv.Itoa(uid)
+	fields, found, err := e.getent(ctx, "passwd", username)
+	if err != nil {
+		return false, false, err
+	}
+	if found {
+		if len(fields) < 4 || fields[2] != id || fields[3] != id {
+			return false, false, fmt.Errorf("%w: %s", accounts.ErrIdentityConflict, username)
+		}
+		return true, true, nil
+	}
+	if _, taken, err := e.getent(ctx, "passwd", id); err != nil {
+		return false, false, err
+	} else if taken {
+		return false, false, fmt.Errorf("%w: UID %s", accounts.ErrIdentityConflict, id)
+	}
+	group, groupFound, err := e.getent(ctx, "group", username)
+	if err != nil {
+		return false, false, err
+	}
+	if groupFound {
+		if len(group) < 3 || group[2] != id {
+			return false, false, fmt.Errorf("%w: group %s", accounts.ErrIdentityConflict, username)
+		}
+		return false, true, nil
+	}
+	if _, taken, err := e.getent(ctx, "group", id); err != nil {
+		return false, false, err
+	} else if taken {
+		return false, false, fmt.Errorf("%w: GID %s", accounts.ErrIdentityConflict, id)
+	}
+	return false, false, nil
+}
+
+// ensureAccount creates the no-login account username, with UID and GID uid
+// and a same-named group, unless it already exists exactly so.
+func (e *Executor) ensureAccount(ctx context.Context, username string, uid int) error {
+	exists, groupExists, err := e.accountState(ctx, username, uid)
+	if err != nil || exists {
+		return err
+	}
+	id := strconv.Itoa(uid)
+	if !groupExists {
+		if output, err := e.runner.Run(ctx, "groupadd", []string{"--gid", id, username}, ""); err != nil {
+			return commandError("create account group", err, output)
+		}
+	}
+	if output, err := e.runner.Run(ctx, "useradd", []string{
+		"--uid", id, "--gid", id, "--no-create-home", "--home-dir", "/nonexistent",
+		"--shell", "/usr/sbin/nologin", username,
+	}, ""); err != nil {
+		return commandError("create account", err, output)
 	}
 	return nil
 }

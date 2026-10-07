@@ -4,6 +4,8 @@ package linux
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -42,6 +44,9 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	if err != nil || identity.UID != 30000 {
 		t.Fatalf("AppIdentity() = %+v, %v", identity, err)
 	}
+	if output, err := exec.Command("getent", "passwd", "app-memos").CombinedOutput(); err == nil {
+		t.Fatalf("showing a plan created the account: %s", output)
+	}
 	if err := executor.PrepareApp(ctx, "memos", []string{appData, media}, true); err != nil {
 		t.Fatalf("PrepareApp() error = %v", err)
 	}
@@ -60,6 +65,23 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	expect("apps folder is not listable by members", false, asUser("alice", "ls", filepath.Join(mount, "apps")))
 	if acl := asUser("root", "getfacl", "--omit-header", filepath.Join(media, "song.txt")).output; !strings.Contains(acl, "group:a-nas-users:rw") {
 		t.Errorf("the app's Shared file did not inherit the Shared ACL:\n%s", acl)
+	}
+
+	// The app (or anyone who writes Shared) swaps a folder for a link; root
+	// must not create or own anything through it.
+	victim := t.TempDir()
+	run(t, "ln", "-s", victim, filepath.Join(mount, "spaces", "shared", "Planted"))
+	run(t, "ln", "-s", victim, filepath.Join(mount, "apps", "memos", "cache"))
+	for _, folder := range []string{filepath.Join(mount, "spaces", "shared", "Planted", "x"), filepath.Join(mount, "apps", "memos", "cache", "x")} {
+		if err := executor.PrepareApp(ctx, "memos", []string{folder}, true); err == nil {
+			t.Errorf("PrepareApp(%s) through a planted link succeeded", folder)
+		}
+	}
+	if entries, _ := os.ReadDir(victim); len(entries) != 0 {
+		t.Errorf("PrepareApp created %v through a planted link", entries)
+	}
+	if err := syscall.Stat(victim, &stat); err != nil || stat.Uid != 0 {
+		t.Errorf("PrepareApp gave the link target to UID %d, %v", stat.Uid, err)
 	}
 
 	if err := executor.ReleaseApp(ctx, "memos"); err != nil {
