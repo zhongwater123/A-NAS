@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-06
+更新时间：2026-10-07
 
 ## 当前阶段
 
@@ -18,6 +18,7 @@ v1.0.0 发布候选知识收敛已完成：只读硬件闭环、Web 桌面、Hos
 - `hoststate.Reader`、确定性 Fake Adapter、Debian Linux Adapter 和契约测试可用。
 - `anas-api` 提供存活、系统、磁盘和聚合宿主机状态接口；`/api/v1/host-state` 标明 `simulated` 或 `live`，契约见 [OpenAPI](../../api/openapi.yaml)。
 - React/TypeScript Web 桌面实现资源管理、系统设置、窗口管理、断线保留和 Fake/Live 标识；Vite 资源嵌入 `anas-api`，见 [Web 桌面规格](../specs/web-desktop-host-state.md)。
+- 桌面“终端”应用已实现并在本地 WSL2 验证：PTY Shell 以产品服务用户运行，仅接受回环同源连接，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
 - 原始桌面原型已保存为独立证据提交 `86b034b`，没有进入 main 生产源码。
 - Host Agent 通过权限为 `0600` 的 Unix Socket 暴露原子只读状态，Product Service 通过 Client Adapter 继续使用 `hoststate.Reader`，见 [ADR 0004](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)。
 - 一键部署、用户级 systemd、健康检查、自动回滚和限定 SSH 隧道均已通过实机验收，见 [Web 预览运行手册](../runbooks/deploy-web-preview-to-experimental-nas.md)。
@@ -33,9 +34,10 @@ v1.0.0 发布候选知识收敛已完成：只读硬件闭环、Web 桌面、Hos
 ## 下一步
 
 1. 明确 `v1.0.0` 是否接受当前 Kiosk 已知限制；接受则创建带注释标签、部署并记录最终清单，不接受则先处理[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
-2. 安全关机后拔除 Debian 安装 U 盘，再次确认系统从 NVMe 独立启动。
-3. 在 BIOS 和物理连接层排查 512 GB 机械盘未被 Debian 检测到的原因；检测到后仍不格式化。
-4. 由管理员安装 `smartmontools` 和 `nvme-cli` 后，补充只读 SMART、NVMe 健康与温度基线。
+2. 决定是否在 Experimental NAS 的 `anas-api.env` 中启用 `ANAS_TERMINAL=enabled`（当前由 `remote-activate-release.sh` 生成，尚不写入该项）；启用前评估 Kiosk 浏览器约束和产品服务沙箱下 Shell 的只读 home 是否满足诊断需要。
+3. 安全关机后拔除 Debian 安装 U 盘，再次确认系统从 NVMe 独立启动。
+4. 在 BIOS 和物理连接层排查 512 GB 机械盘未被 Debian 检测到的原因；检测到后仍不格式化。
+5. 由管理员安装 `smartmontools` 和 `nvme-cli` 后，补充只读 SMART、NVMe 健康与温度基线。
 
 ## 尚未阻塞本地开发的外部工作
 

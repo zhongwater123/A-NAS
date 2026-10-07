@@ -14,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -38,7 +39,13 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	apiHandler := httpapi.New(reader, dataSource, version, logger)
+	terminalEnabled, err := configuredTerminal()
+	if err != nil {
+		return err
+	}
+	terminals := terminal.New(terminal.Config{Enabled: terminalEnabled}, logger)
+
+	apiHandler := withTerminal(httpapi.New(reader, dataSource, version, logger), terminals)
 	handler, err := webui.New(apiHandler)
 	if err != nil {
 		return err
@@ -58,7 +65,7 @@ func run(logger *slog.Logger) error {
 
 	listenError := make(chan error, 1)
 	go func() {
-		logger.Info("A-NAS API listening", "address", address, "version", version)
+		logger.Info("A-NAS API listening", "address", address, "version", version, "terminal", terminalEnabled)
 		listenError <- server.ListenAndServe()
 	}()
 
@@ -73,6 +80,9 @@ func run(logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := terminals.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
 		err := <-listenError
@@ -96,4 +106,25 @@ func configuredReader() (hoststate.Reader, httpapi.DataSource, error) {
 	default:
 		return nil, "", errors.New("ANAS_HOSTSTATE_MODE must be fake or agent")
 	}
+}
+
+func configuredTerminal() (bool, error) {
+	switch mode := os.Getenv("ANAS_TERMINAL"); mode {
+	case "", "disabled":
+		return false, nil
+	case "enabled":
+		return true, nil
+	default:
+		return false, errors.New("ANAS_TERMINAL must be enabled or disabled")
+	}
+}
+
+func withTerminal(api http.Handler, terminals http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == terminal.StatusPath || r.URL.Path == terminal.SessionPath {
+			terminals.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 }

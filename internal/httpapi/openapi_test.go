@@ -11,6 +11,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
+	"github.com/zhongwater123/A-NAS/internal/terminal"
 )
 
 func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
@@ -32,6 +33,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		name       string
 		path       string
 		reader     *fake.Reader
+		handler    http.Handler
 		wantStatus int
 	}{
 		{name: "health", path: "/healthz", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
@@ -41,13 +43,19 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "system unavailable", path: "/api/v1/system", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "disks unavailable", path: "/api/v1/disks", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "host state unavailable", path: "/api/v1/host-state", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
+		{name: "terminal status", path: terminal.StatusPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusOK},
+		{name: "terminal disabled", path: terminal.SessionPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusForbidden},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+test.path, nil)
 			recorder := httptest.NewRecorder()
-			newHandler(test.reader).ServeHTTP(recorder, request)
+			handler := test.handler
+			if handler == nil {
+				handler = newHandler(test.reader)
+			}
+			handler.ServeHTTP(recorder, request)
 
 			if got := recorder.Code; got != test.wantStatus {
 				t.Fatalf("status = %d, want %d", got, test.wantStatus)

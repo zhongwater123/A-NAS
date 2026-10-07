@@ -3,7 +3,9 @@ jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: A-NAS Product API
   version: 0.1.0
-  description: Read-only local product API for the A-NAS Web desktop and future product clients.
+  description: >-
+    Local product API for the A-NAS Web desktop and future product clients. Host state is read-only;
+    the opt-in terminal starts shells as the unprivileged Product Service user.
 servers:
   - url: http://127.0.0.1:8080
 security: []
@@ -66,6 +68,57 @@ paths:
           $ref: "#/components/responses/StateUnavailable"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/terminal:
+    get:
+      operationId: getTerminalStatus
+      summary: Report whether interactive terminal sessions are enabled
+      responses:
+        "200":
+          description: Terminal availability configured by ANAS_TERMINAL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalStatusResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/terminal/session:
+    get:
+      operationId: openTerminalSession
+      summary: Upgrade to a WebSocket bridged to a login shell on a new PTY
+      description: >-
+        Only loopback peers with a loopback Host and a same-origin browser Origin are accepted. Binary
+        frames carry raw terminal input and output. The only client text frame is
+        `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell
+        exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
+      responses:
+        "101":
+          description: Switched to the WebSocket terminal protocol.
+        "403":
+          description: The terminal is disabled or the request is not from loopback.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "426":
+          description: The request is not a WebSocket upgrade.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: The concurrent session limit has been reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The Product Service is shutting down.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   responses:
     StateUnavailable:
@@ -245,6 +298,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Disk"
+    TerminalStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
     ErrorDetail:
       type: object
       additionalProperties: false

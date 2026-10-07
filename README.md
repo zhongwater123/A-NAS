@@ -52,6 +52,12 @@ go run ./cmd/anas-api
 
 浏览器访问 `http://127.0.0.1:8080/`。服务默认只监听回环地址，可通过 `ANAS_HTTP_ADDR` 覆盖；聚合状态接口为 `/api/v1/host-state`，完整契约见 [OpenAPI](api/openapi.yaml)。
 
+需要在桌面“终端”应用中打开设备 Shell 时，显式启用终端；Shell 以产品服务用户运行且只接受回环同源连接，边界见[终端规格](docs/specs/web-terminal.md)：
+
+```bash
+ANAS_TERMINAL=enabled go run ./cmd/anas-api
+```
+
 前端单独开发时可运行 `cd web && npm run dev`；Vite 把 `/api` 和 `/healthz` 代理到本地 Go 服务。前端技术原因见 [ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)。
 
 部署 Experimental NAS 和打开限定 SSH 隧道见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md)。NAS 直连屏幕使用 Cage/Chromium 呈现同一个 Web 桌面，安装与恢复步骤见[本地控制台运行手册](docs/runbooks/operate-local-kiosk.md)。

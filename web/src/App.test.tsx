@@ -1,8 +1,25 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { SessionStatus } from "./terminal";
+
+const xterm = vi.hoisted(() => ({ mounts: 0, onStatus: undefined as ((status: SessionStatus) => void) | undefined }));
+
+vi.mock("./XtermSession", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: function MockXtermSession({ onStatus }: { onStatus: (status: SessionStatus) => void }) {
+      useEffect(() => {
+        xterm.mounts += 1;
+        xterm.onStatus = onStatus;
+        onStatus({ state: "connected" });
+      }, []);
+      return <div data-testid="xterm-session" />;
+    },
+  };
+});
 
 const healthyState = {
   dataSource: "simulated",
@@ -29,6 +46,11 @@ const healthyState = {
     },
   ],
 };
+
+beforeEach(() => {
+  xterm.mounts = 0;
+  xterm.onStatus = undefined;
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -159,10 +181,72 @@ describe("A-NAS desktop", () => {
     const notifications = screen.getByRole("button", { name: "通知，规划中" });
     expect(within(notifications).queryByText("2")).toBeNull();
   });
+
+  it("opens a terminal session from the desktop icon", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+
+    const desktop = screen.getByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+
+    const terminal = screen.getByRole("dialog", { name: "终端" });
+    expect(await within(terminal).findByTestId("xterm-session")).toBeTruthy();
+    expect(xterm.mounts).toBe(1);
+  });
+
+  it("keeps the terminal session alive while minimized", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "打开终端" }));
+    await screen.findByTestId("xterm-session");
+
+    await user.click(within(screen.getByRole("dialog", { name: "终端" })).getByRole("button", { name: "最小化终端" }));
+    expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "恢复终端" }));
+
+    expect(screen.getByRole("dialog", { name: "终端" })).toBeTruthy();
+    expect(xterm.mounts).toBe(1);
+  });
+
+  it("offers a new session after the shell exits", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "打开终端" }));
+    await screen.findByTestId("xterm-session");
+
+    act(() => xterm.onStatus?.({ state: "ended", exitCode: 0 }));
+    expect(await screen.findByText("Shell 已退出（代码 0）")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "新建会话" }));
+    expect(screen.queryByText("Shell 已退出（代码 0）")).toBeNull();
+    expect(xterm.mounts).toBe(2);
+  });
+
+  it("explains when the terminal is disabled", async () => {
+    stubDesktopFetch(healthyState, false);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "打开终端" }));
+
+    expect(await screen.findByText("终端未启用")).toBeTruthy();
+    expect(screen.queryByTestId("xterm-session")).toBeNull();
+  });
 });
 
 function stubFetch(state: unknown) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse(state)));
+}
+
+function stubDesktopFetch(state: unknown, terminalEnabled: boolean) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
+      String(input) === "/api/v1/terminal" ? okResponse({ enabled: terminalEnabled }) : okResponse(state),
+    ),
+  );
 }
 
 function okResponse(state: unknown) {

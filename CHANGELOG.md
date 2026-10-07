@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- 桌面“终端”应用：通过回环同源 WebSocket 打开以产品服务用户运行的 PTY Shell，支持窗口自适应、最小化保留会话和退出后新建会话；默认关闭，以 `ANAS_TERMINAL=enabled` 启用。
+
 ### Planned
 
 - 发现并验证当前未被 Debian 识别的 512 GB 数据盘。
