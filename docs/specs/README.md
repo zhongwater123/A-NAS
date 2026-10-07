@@ -12,6 +12,7 @@
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
 - [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
 - [统一身份与文件授权](unified-identity-and-file-acl.md)（draft，ADR 0008 待实现）
+- [容器管理（Docker MVP）](container-management.md)（implemented；Experimental NAS 未部署）
 
 ## 使用方式
 

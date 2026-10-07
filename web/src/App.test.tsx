@@ -42,6 +42,27 @@ beforeEach(() => {
   xterm.onStatus = undefined;
 });
 
+const containerSnapshot = {
+  dataSource: "simulated",
+  observedAt: "2026-10-06T00:00:00Z",
+  engine: { version: "29.1.3", apiVersion: "1.52" },
+  containers: [
+    {
+      id: "a".repeat(64),
+      name: "jellyfin",
+      image: "jellyfin/jellyfin:10.11",
+      state: "running",
+      status: "Up 3 hours",
+      createdAt: "2026-10-03T00:00:00Z",
+      project: "media",
+      ports: [{ hostIp: "0.0.0.0", hostPort: 8096, containerPort: 8096, protocol: "tcp" }],
+      usage: { cpuPercent: 12.4, memoryBytes: 641728512, memoryLimitBytes: 8589934592 },
+    },
+    { id: "b".repeat(64), name: "homeassistant", image: "ghcr.io/home-assistant/home-assistant:stable", state: "exited", status: "Exited (0) 5 hours ago", createdAt: "2026-09-26T00:00:00Z", ports: [] },
+  ],
+  images: [{ id: "sha256:" + "c".repeat(64), tags: ["jellyfin/jellyfin:10.11"], sizeBytes: 1243000000, createdAt: "2026-09-06T00:00:00Z" }],
+};
+
 const metricsState = {
   dataSource: "simulated",
   observedAt: "2026-10-06T00:00:00Z",
@@ -183,6 +204,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(settings).getByRole("button", { name: "最小化系统设置" }));
     await user.click(screen.getByRole("button", { name: "恢复系统设置" }));
     expect(screen.getByRole("dialog", { name: "系统设置" })).toBeTruthy();
+
   });
 
   it("shows utilisation gauges, network rates and the clock in the status bar", async () => {
@@ -299,6 +321,66 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化终端"]);
   });
 
+  it("manages containers from the Docker app", async () => {
+    const scrollIntoView = vi.fn(() => Promise.resolve());
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    const actions: Array<{ id: string; body: unknown }> = [];
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      containers: async (url, init) => {
+        if (init?.method === "POST") {
+          actions.push({ id: url.split("/")[4], body: JSON.parse(String(init.body)) });
+          return { ok: true, status: 204, json: async () => undefined } as Response;
+        }
+        if (url.endsWith("/logs?tail=200")) {
+          return okResponse({ lines: [{ stream: "stdout", time: "2026-10-06T00:00:01Z", text: "server ready" }, { stream: "stderr", text: "warning: low disk" }] });
+        }
+        return okResponse(containerSnapshot);
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开 Docker" }));
+
+    const docker = screen.getByRole("dialog", { name: "Docker" });
+    const jellyfin = await within(docker).findByRole("article", { name: "容器 jellyfin" });
+    expect(within(jellyfin).getByText("运行中")).toBeTruthy();
+    expect(within(jellyfin).getByText("8096→8096/tcp")).toBeTruthy();
+    expect(within(jellyfin).getByText("12.4%")).toBeTruthy();
+
+    await user.click(within(jellyfin).getByRole("button", { name: "停止jellyfin" }));
+    expect(actions).toHaveLength(0);
+    await user.click(within(jellyfin).getByRole("button", { name: "确认停止" }));
+    expect(actions).toEqual([{ id: containerSnapshot.containers[0].id, body: { action: "stop" } }]);
+
+    const stopped = within(docker).getByRole("article", { name: "容器 homeassistant" });
+    await user.click(within(stopped).getByRole("button", { name: "启动homeassistant" }));
+    expect(actions[1]).toEqual({ id: containerSnapshot.containers[1].id, body: { action: "start" } });
+
+    await user.click(within(jellyfin).getByRole("button", { name: "查看jellyfin日志" }));
+    const log = await within(docker).findByRole("log", { name: "jellyfin 日志" });
+    expect(within(log).getByText("server ready")).toBeTruthy();
+    expect(within(log).getByText("warning: low disk").parentElement?.className).toContain("stderr");
+
+    // Chromium's scrollIntoView now returns a Promise; leaving the log view must not crash the desktop.
+    expect(scrollIntoView).toHaveBeenCalled();
+    await user.click(within(docker).getByRole("button", { name: "返回容器列表" }));
+    await user.click(within(docker).getByRole("tab", { name: /镜像/ }));
+    expect(within(docker).getByText("jellyfin/jellyfin:10.11")).toBeTruthy();
+  });
+
+  it("explains when Docker management is disabled", async () => {
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      containers: async () => ({ ok: false, status: 503, json: async () => ({ error: { code: "containers_disabled", message: "disabled" } }) }) as Response,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 Docker" }));
+
+    expect(await within(screen.getByRole("dialog", { name: "Docker" })).findByText("Docker 未启用")).toBeTruthy();
+  });
+
   it("opens a terminal session from the desktop icon", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();
@@ -401,10 +483,16 @@ function layOutGrid(desktop: HTMLElement) {
   });
 }
 
-function routeFetch(routes: { hostState: () => Promise<Response>; metrics?: () => Promise<Response>; terminalEnabled?: boolean }) {
+function routeFetch(routes: {
+  hostState: () => Promise<Response>;
+  metrics?: () => Promise<Response>;
+  terminalEnabled?: boolean;
+  containers?: (url: string, init?: RequestInit) => Promise<Response>;
+}) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith("/api/v1/containers") && routes.containers) return routes.containers(String(input), init);
       switch (String(input)) {
         case "/api/v1/setup/status":
           return okResponse({ setupRequired: false });

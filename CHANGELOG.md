@@ -31,6 +31,12 @@
 - Kiosk 通过 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步，不再依赖 `--password-store` 参数抑制密码提示。
 - 同一提交、版本和二进制哈希已经通过完整门禁时，stage 部署复用验证清单，不再重复执行全量测试。
 
+- 桌面“Docker”应用：查看容器与镜像、运行状态与 CPU/内存占用，启动、停止（需确认）、重启容器并查看日志；新增只持有 Docker socket 的 `anas-container-agent` 与 `/api/v1/containers`。
+
+### Security
+
+- 容器写操作要求回环 Host、JSON 请求体与同源 Origin；产品服务用户不加入 `docker` 组，仅能调用容器代理的类型化接口。
+
 ### Planned
 
 - 在已恢复在线的 Experimental NAS 上完成已确认 500 GB 实验盘、Btrfs、Windows SMB、文件、回收站与快照验收。

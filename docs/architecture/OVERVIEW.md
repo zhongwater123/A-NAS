@@ -25,6 +25,13 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
                          ├── 隐藏回收站
                          └── 不通过 SMB 暴露的只读快照
 
+产品服务 ── containers.Manager ──┬── Fake Adapter
+                                 └── 容器代理客户端
+                                         │ 类型化 UDS（anas-container 组）
+                                         ▼
+                                 容器代理（anas-container，docker 组）
+                                         └── Docker Engine（docker.sock）
+
 照片导入 → 受管对象存储 + Catalog → 派生任务 → AI Provider → Search Index → Policy 过滤 → 照片资产
 ```
 
@@ -32,7 +39,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 
 1. AI 服务停止时，文件共享、权限、快照、备份和恢复仍然工作。
 2. 产品服务以非 root 身份运行；特权操作只进入 Host Agent。
-3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口。
+3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口；容器代理同样只提供类型化容器操作，不透传 Docker Engine API，产品服务用户永不加入 `docker` 组。
 4. 磁盘和文件使用稳定资源 ID；临时路径和 `/dev/sdX` 不是身份。
 5. 修改宿主机状态的操作遵循“规划、确认、执行”三阶段。
 6. 文件浏览、共享、传统搜索和 AI 检索共同使用 Policy。
@@ -48,9 +55,11 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 
 | 路径 | 责任 | 当前状态 |
 |---|---|---|
-| `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、快照与可选终端已接线 |
+| `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、快照、可选终端与容器管理已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态及类型化特权操作 |
-| `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 登录、文件、回收站、快照、账号、存储、资源管理和终端窗口已实现 |
+| `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 登录、文件、回收站、快照、账号、存储、资源管理、终端和 Docker 窗口已实现 |
+| `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
+| `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的回环同源校验 | 已实现 |
 | `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
@@ -83,6 +92,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [相册与本地智能检索规格](../specs/photo-library.md)
+- [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [只读宿主机状态规格](../specs/read-only-host-state.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
 - [状态栏与实时指标规格](../specs/host-metrics-status-bar.md)

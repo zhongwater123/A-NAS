@@ -5,7 +5,8 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
-    and an opt-in administrator terminal running as the unprivileged Product Service user.
+    an opt-in administrator terminal, and container lifecycle actions that go through the separate
+    container agent.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -347,6 +348,96 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/containers:
+    get:
+      operationId: getContainerSnapshot
+      summary: List containers and images from the container engine
+      description: >-
+        Running containers include CPU and memory usage sampled over about one second. Responses are not
+        cacheable. ANAS_CONTAINERS_MODE selects simulated, live (container agent) or disabled management.
+      responses:
+        "200":
+          description: One snapshot of the container engine.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerSnapshotResponse"
+        "503":
+          $ref: "#/components/responses/ContainersUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/containers/{containerId}/actions:
+    post:
+      operationId: applyContainerAction
+      summary: Start, stop or restart one container
+      description: >-
+        Only lifecycle actions are accepted; creating, removing or reconfiguring containers is not part of this
+        API. Requests must target a loopback Host, use a JSON body and, when an Origin is sent, come from the same
+        origin. Stop and restart give the container ten seconds to exit before it is killed.
+      parameters:
+        - $ref: "#/components/parameters/ContainerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [start, stop, restart]
+      responses:
+        "204":
+          description: The engine applied the action.
+        "400":
+          $ref: "#/components/responses/ContainerRequestInvalid"
+        "403":
+          description: The request did not come from the local desktop.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ContainerNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "502":
+          $ref: "#/components/responses/ContainerEngineError"
+        "503":
+          $ref: "#/components/responses/ContainersUnavailable"
+  /api/v1/containers/{containerId}/logs:
+    get:
+      operationId: getContainerLogs
+      summary: Read the latest lines a container wrote to stdout and stderr
+      parameters:
+        - $ref: "#/components/parameters/ContainerId"
+        - name: tail
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+      responses:
+        "200":
+          description: Log lines in the order the container wrote them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerLogsResponse"
+        "400":
+          $ref: "#/components/responses/ContainerRequestInvalid"
+        "404":
+          $ref: "#/components/responses/ContainerNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "502":
+          $ref: "#/components/responses/ContainerEngineError"
+        "503":
+          $ref: "#/components/responses/ContainersUnavailable"
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
@@ -418,9 +509,41 @@ components:
     FileID: { name: fileId, in: path, required: true, schema: { type: string } }
     TrashID: { name: trashId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
+    ContainerId:
+      name: containerId
+      in: path
+      required: true
+      description: Full 64-character engine container ID; names and short IDs are rejected.
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{64}$"
   responses:
     ProductError:
       description: Product operation error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainersUnavailable:
+      description: Container management is disabled (containers_disabled) or the engine cannot be reached (containers_unavailable).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainerRequestInvalid:
+      description: The container ID, action or tail is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainerNotFound:
+      description: No container has this ID.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ContainerEngineError:
+      description: The container engine rejected the request.
       content:
         application/json:
           schema:
@@ -864,6 +987,132 @@ components:
               type: integer
               format: int64
               minimum: 0
+    ContainerSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [dataSource, observedAt, engine, containers, images]
+      properties:
+        dataSource:
+          $ref: "#/components/schemas/DataSource"
+        observedAt:
+          type: string
+          format: date-time
+        engine:
+          type: object
+          additionalProperties: false
+          required: [version, apiVersion]
+          properties:
+            version:
+              type: string
+            apiVersion:
+              type: string
+        containers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Container"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContainerImage"
+    Container:
+      type: object
+      additionalProperties: false
+      required: [id, name, image, state, status, createdAt, ports]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        name:
+          type: string
+          minLength: 1
+        image:
+          type: string
+        state:
+          type: string
+          enum: [created, running, paused, restarting, removing, exited, dead]
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        project:
+          type: string
+          description: Compose project label, omitted for standalone containers.
+        ports:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [containerPort, protocol]
+            properties:
+              hostIp:
+                type: string
+              hostPort:
+                type: integer
+                minimum: 1
+                maximum: 65535
+              containerPort:
+                type: integer
+                minimum: 0
+                maximum: 65535
+              protocol:
+                type: string
+        usage:
+          type: object
+          additionalProperties: false
+          required: [cpuPercent, memoryBytes, memoryLimitBytes]
+          properties:
+            cpuPercent:
+              type: number
+              minimum: 0
+            memoryBytes:
+              type: integer
+              format: int64
+              minimum: 0
+            memoryLimitBytes:
+              type: integer
+              format: int64
+              minimum: 0
+    ContainerImage:
+      type: object
+      additionalProperties: false
+      required: [id, tags, sizeBytes, createdAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          items:
+            type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+    ContainerLogsResponse:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [stream, text]
+            properties:
+              stream:
+                type: string
+                enum: [stdout, stderr]
+              time:
+                type: string
+                format: date-time
+              text:
+                type: string
     TerminalStatusResponse:
       type: object
       additionalProperties: false

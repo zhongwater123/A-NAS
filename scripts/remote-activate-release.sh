@@ -123,6 +123,11 @@ activated=1
 
 printf 'ANAS_HTTP_ADDR=127.0.0.1:8080\nANAS_HOSTSTATE_MODE=%s\nANAS_STATE_DIR=%s/state\n' \
   "$mode" "$config_dir" > "$config_dir/anas-api.env"
+# Container management stays disabled until an administrator has installed the
+# root-owned container agent; its socket is the signal that it is available.
+if [[ "$mode" == "agent" && -S /run/a-nas-container/agent.sock ]]; then
+  printf 'ANAS_CONTAINERS_MODE=agent\n' >> "$config_dir/anas-api.env"
+fi
 chmod 0600 "$config_dir/anas-api.env"
 install -m 0644 anas-api.service "$unit_dir/anas-api.service"
 install -m 0644 anas-host-agent.service "$unit_dir/anas-host-agent.service"

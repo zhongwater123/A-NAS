@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/zhongwater123/A-NAS/internal/localorigin"
 )
 
 const (
@@ -115,7 +117,7 @@ func (h *Handler) serveSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "terminal_disabled", "terminal is disabled")
 		return
 	}
-	if !isLoopbackPeer(r.RemoteAddr) || !isLoopbackHost(r.Host) {
+	if !isLoopbackPeer(r.RemoteAddr) || !localorigin.LoopbackHost(r.Host) {
 		writeError(w, http.StatusForbidden, "terminal_forbidden", "terminal is only available on loopback")
 		return
 	}
@@ -230,21 +232,6 @@ func isLoopbackPeer(remoteAddr string) bool {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
-// isLoopbackHost rejects DNS-rebound names that resolve to loopback but would
-// otherwise satisfy the same-origin check.
-func isLoopbackHost(hostHeader string) bool {
-	host := hostHeader
-	if h, _, err := net.SplitHostPort(hostHeader); err == nil {
-		host = h
-	}
-	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
-	if strings.EqualFold(host, "localhost") {
-		return true
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()

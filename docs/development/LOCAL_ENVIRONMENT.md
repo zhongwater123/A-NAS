@@ -30,7 +30,7 @@ git config core.eol lf
 - `anas-dev` 不复用现有的 `docker-dev` home、Git 配置、SSH 密钥或语言缓存。
 - `anas-dev` 不属于 `sudo` 或 `docker` 组，日常开发默认非特权运行。
 - Windows 已为实验 NAS 创建项目专用 ED25519 密钥，默认路径为 `%USERPROFILE%\.ssh\a-nas-dev_ed25519`；私钥内容和口令不进入仓库。
-- Docker 虽已存在于 WSL，但当前不是已冻结的 A-NAS 依赖，也未向 `anas-dev` 授权。
+- 容器运行时已按 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md) 选定 Docker Engine；`anas-dev` 仍不加入 `docker` 组。本地联调可在具备 Docker 权限的账号下以 `ANAS_CONTAINER_AGENT_SOCKET=/tmp/...` 运行 `build/anas-container-agent`，再以 `ANAS_CONTAINERS_MODE=agent` 启动产品服务；只对专用测试容器执行启停。
 - Git 用户名和邮箱需要由开发者在 `anas-dev` 下自行设置，仓库不记录个人身份。
 - Go 安装在 `/opt/go/1.27.1`，`anas-dev` 使用自己的模块、构建和工具缓存。
 - 前端依赖由 `web/package-lock.json` 固定；不要同时从 Windows 与 WSL 对同一个 `web/node_modules` 执行安装。
@@ -104,7 +104,6 @@ npm run dev
 
 以下项目应在对应 ADR 或技术原型完成后再固定版本：
 
-- Docker/Moby 或 Podman；
 - PostgreSQL 等常驻数据库；
 - OpenAPI、Protobuf 等代码生成器；
 - AI Provider SDK 和本地模型 Runtime。

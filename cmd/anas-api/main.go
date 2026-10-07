@@ -14,6 +14,10 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/containers"
+	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
+	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
+	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -106,11 +110,16 @@ func run(logger *slog.Logger) error {
 	terminalConfig.Enabled = terminalEnabled
 	terminals := terminal.New(terminalConfig, logger)
 
-	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
+	containerManager, containerSource, err := configuredContainers(dataSource)
+	if err != nil {
+		return err
+	}
+
+	apiHandler := route(httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
 		Terminal: terminals, Logger: logger,
-	})
+	}), containersapi.New(containerManager, containerSource, logger))
 	handler, err := webui.New(apiHandler)
 	if err != nil {
 		return err
@@ -125,7 +134,7 @@ func run(logger *slog.Logger) error {
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	listenError := make(chan error, 1)
 	go func() {
-		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled)
+		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled, "containers", containerManager != nil)
 		listenError <- server.ListenAndServe()
 	}()
 	select {
@@ -274,4 +283,40 @@ func configuredTerminal() (bool, error) {
 	default:
 		return false, errors.New("ANAS_TERMINAL must be enabled or disabled")
 	}
+}
+
+// configuredContainers defaults to the Fake Adapter only alongside simulated
+// host state, so a live deployment never shows invented containers.
+func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, containersapi.DataSource, error) {
+	mode := os.Getenv("ANAS_CONTAINERS_MODE")
+	if mode == "" {
+		mode = "disabled"
+		if hostSource == httpapi.DataSourceSimulated {
+			mode = "fake"
+		}
+	}
+	switch mode {
+	case "fake":
+		return fakecontainers.New(), containersapi.DataSourceSimulated, nil
+	case "agent":
+		socketPath, err := containeragent.SocketPath()
+		if err != nil {
+			return nil, "", err
+		}
+		return containeragent.NewClient(socketPath), containersapi.DataSourceLive, nil
+	case "disabled":
+		return nil, containersapi.DataSourceLive, nil
+	default:
+		return nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
+	}
+}
+
+func route(api, containerAPI http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if containersapi.Matches(r.URL.Path) {
+			containerAPI.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 }

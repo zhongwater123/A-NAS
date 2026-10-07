@@ -305,7 +305,7 @@ AI Gateway
 | SMB/NFS | Samba、Linux NFS server |
 | 存储 | Btrfs、mdadm/LVM（按选定存储策略使用） |
 | 磁盘健康 | smartmontools、NVMe 工具、udev |
-| 容器 | Docker/Moby 或 Podman，二选一后冻结 |
+| 容器 | Docker Engine (Moby) + Compose v2，经专用容器代理访问（[ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)） |
 | 媒体 | FFmpeg、ExifTool、ImageMagick/OpenCV（按需） |
 | AI Runtime | 云 API；后续评估 llama.cpp、ONNX Runtime、OpenVINO 等 Adapter |
 | 网络与安全 | Nginx/Caddy、OpenSSH、WireGuard 等成熟实现 |
@@ -492,7 +492,6 @@ E:\A-NAS
 ### 13.3 待决策
 
 - SQLite 或 PostgreSQL；
-- Docker/Moby 或 Podman；
 - Btrfs RAID1，还是 md RAID1 + Btrfs；
 - 身份模型、ACL 映射和远程访问方案；
 - OTA/A-B 更新和恢复分区设计；

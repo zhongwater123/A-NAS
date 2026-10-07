@@ -58,6 +58,8 @@ go run ./cmd/anas-api
 ANAS_TERMINAL=enabled go run ./cmd/anas-api
 ```
 
+桌面“Docker”应用在模拟模式下默认使用确定性的 Fake 容器；连接真实 Docker 需要容器代理，见 [ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md) 与[安装运行手册](docs/runbooks/install-container-agent.md)。
+
 前端单独开发时可运行 `cd web && npm run dev`；Vite 把 `/api` 和 `/healthz` 代理到本地 Go 服务。前端技术原因见 [ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)。
 
 部署 Experimental NAS 和打开限定 SSH 隧道见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md)。v1.0.1 系统服务、破坏性磁盘计划与实机验收使用[基础存储实机手册](docs/runbooks/provision-v1.0.1-experimental-storage.md)。NAS 直连屏幕使用 Cage/Chromium 呈现同一个 Web 桌面。
