@@ -4,7 +4,6 @@ import {
   Bot,
   Box,
   Camera,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   Database,
@@ -43,6 +42,9 @@ import {
   listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
   restoreSnapshotEntry, restoreTrash, setupAdministrator, uploadFile,
 } from "./api";
+import { DesktopApp, DesktopGrid } from "./DesktopGrid";
+import { Dock } from "./Dock";
+import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
@@ -60,6 +62,8 @@ interface WindowModel {
   width: number;
   height: number;
   z: number;
+  // Sequence number of the latest open, so the dock lists apps in the order they were launched.
+  opened: number;
 }
 
 type WindowAction =
@@ -73,14 +77,14 @@ type WindowAction =
   | { type: "show-desktop" };
 
 const initialWindows: WindowModel[] = [
-	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3 },
-	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2 },
-	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2 },
-	{ id: "accounts", title: "账号管理", open: false, minimized: false, maximized: false, x: 330, y: 110, width: 760, height: 540, z: 2 },
-	{ id: "storage", title: "存储初始化", open: false, minimized: false, maximized: false, x: 260, y: 80, width: 850, height: 590, z: 2 },
-  { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2 },
-  { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1 },
-  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0 },
+	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
+	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
+	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2, opened: 0 },
+	{ id: "accounts", title: "账号管理", open: false, minimized: false, maximized: false, x: 330, y: 110, width: 760, height: 540, z: 2, opened: 0 },
+	{ id: "storage", title: "存储初始化", open: false, minimized: false, maximized: false, x: 260, y: 80, width: 850, height: 590, z: 2, opened: 0 },
+  { id: "resources", title: "资源管理", open: false, minimized: false, maximized: false, x: 340, y: 94, width: 880, height: 610, z: 2, opened: 0 },
+  { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1, opened: 0 },
+  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, LucideIcon> = {
@@ -92,6 +96,17 @@ const windowIcons: Record<WindowID, LucideIcon> = {
   resources: Activity,
   settings: Settings,
   terminal: SquareTerminal,
+};
+// Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
+const windowTones: Record<WindowID, string> = {
+  files: "files",
+  trash: "trash",
+  snapshots: "snapshot",
+  accounts: "settings",
+  storage: "resources",
+  resources: "resources",
+  settings: "settings",
+  terminal: "terminal",
 };
 
 export default function App() {
@@ -142,7 +157,31 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const host = useHostState(true);
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
-  const now = useCurrentMinute();
+  const openWindow = (id: WindowID) => dispatch({ type: "open", id });
+  const desktopApps: DesktopApp[] = [
+    { id: "files", label: "文件管理", ariaLabel: "打开文件管理", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
+    { id: "trash", label: "回收站", ariaLabel: "打开回收站", tone: "trash", icon: <Trash2 />, active: isOpen("trash"), onClick: () => openWindow("trash") },
+    { id: "settings", label: "系统设置", ariaLabel: "打开系统设置", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openWindow("settings") },
+    { id: "resources", label: "资源管理", ariaLabel: "打开资源管理", tone: "resources", icon: <Activity />, active: isOpen("resources"), onClick: () => openWindow("resources") },
+    ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
+    { id: "store", label: "应用中心", ariaLabel: "应用中心，规划中", tone: "store", icon: <ShoppingBag />, disabled: true },
+    { id: "video", label: "影视", ariaLabel: "影视，规划中", tone: "video", icon: <PlaySquare />, disabled: true },
+    { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
+    { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
+    ...(session.user.role === "admin" ? [
+      { id: "accounts", label: "账号管理", ariaLabel: "打开账号管理", tone: "settings", icon: <UserRound />, active: isOpen("accounts"), onClick: () => openWindow("accounts") },
+      { id: "storage", label: "存储初始化", ariaLabel: "打开存储初始化", tone: "resources", icon: <Database />, active: isOpen("storage"), onClick: () => openWindow("storage") },
+    ] : []),
+    { id: "docker", label: "Docker", ariaLabel: "Docker，规划中", tone: "docker", icon: <Box />, disabled: true },
+    { id: "photos", label: "相册", ariaLabel: "相册，规划中", tone: "photos", icon: <Image />, disabled: true },
+    { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
+    { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
+    { id: "backup", label: "备份", ariaLabel: "备份，规划中", tone: "backup", icon: <ShieldCheck />, disabled: true },
+    { id: "music", label: "音乐", ariaLabel: "音乐，规划中", tone: "music", icon: <Music2 />, disabled: true },
+    { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+  ];
+  const visible = windows.filter((window) => window.open && !window.minimized);
+  const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
 
   return (
     <main className="desktop-shell">
@@ -165,36 +204,9 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
         </div>
       </aside>
 
-      <section className="desktop-grid" aria-label="桌面应用">
-		<DesktopShortcut label="文件管理" ariaLabel="打开文件管理" tone="files" icon={<FolderClosed />} active={windows.find((item) => item.id === "files")?.open} onClick={() => dispatch({ type: "open", id: "files" })} />
-		<DesktopShortcut label="回收站" ariaLabel="打开回收站" tone="trash" icon={<Trash2 />} active={windows.find((item) => item.id === "trash")?.open} onClick={() => dispatch({ type: "open", id: "trash" })} />
-		<DesktopShortcut label="系统设置" ariaLabel="打开系统设置" tone="settings" icon={<Settings />} active={windows.find((item) => item.id === "settings")?.open} onClick={() => dispatch({ type: "open", id: "settings" })} />
-		<DesktopShortcut label="资源管理" ariaLabel="打开资源管理" tone="resources" icon={<Activity />} active={windows.find((item) => item.id === "resources")?.open} onClick={() => dispatch({ type: "open", id: "resources" })} />
-		{session.user.role === "admin" && <DesktopShortcut label="终端" ariaLabel="打开终端" tone="terminal" icon={<SquareTerminal />} active={isOpen("terminal")} onClick={() => dispatch({ type: "open", id: "terminal" })} />}
-        <DesktopShortcut label="应用中心" ariaLabel="应用中心，规划中" tone="store" icon={<ShoppingBag />} disabled />
-        <DesktopShortcut label="影视" ariaLabel="影视，规划中" tone="video" icon={<PlaySquare />} disabled />
-        <DesktopShortcut label="下载" ariaLabel="下载，规划中" tone="download" icon={<Download />} disabled />
-		<DesktopShortcut label="文件快照" ariaLabel="打开文件快照" tone="snapshot" icon={<Camera />} onClick={() => dispatch({ type: "open", id: "snapshots" })} />
-		{session.user.role === "admin" && <DesktopShortcut label="账号管理" ariaLabel="打开账号管理" tone="settings" icon={<UserRound />} onClick={() => dispatch({ type: "open", id: "accounts" })} />}
-		{session.user.role === "admin" && <DesktopShortcut label="存储初始化" ariaLabel="打开存储初始化" tone="resources" icon={<Database />} onClick={() => dispatch({ type: "open", id: "storage" })} />}
-        <DesktopShortcut label="Docker" ariaLabel="Docker，规划中" tone="docker" icon={<Box />} disabled />
-        <DesktopShortcut label="相册" ariaLabel="相册，规划中" tone="photos" icon={<Image />} disabled />
-        <DesktopShortcut label="日志" ariaLabel="日志，规划中" tone="logs" icon={<FileText />} disabled />
-        <DesktopShortcut label="虚拟机" ariaLabel="虚拟机，规划中" tone="vm" icon={<Monitor />} disabled />
-        <DesktopShortcut label="备份" ariaLabel="备份，规划中" tone="backup" icon={<ShieldCheck />} disabled />
-        <DesktopShortcut label="音乐" ariaLabel="音乐，规划中" tone="music" icon={<Music2 />} disabled />
-        <DesktopShortcut label="AI 助手" ariaLabel="AI 助手，规划中" tone="ai" icon={<Bot />} disabled />
-      </section>
+      <DesktopGrid apps={desktopApps} />
 
-      <div className="resource-pill" aria-label="设备连接状态">
-        <div className={`connection ${host.disconnected ? "offline" : "online"}`}><span className="connection-dot" />{host.disconnected ? "连接中断" : host.snapshot ? "设备在线" : "正在连接"}</div>
-        <div className="resource-divider" />
-        <div className="resource-copy">
-          <SourceBadge state={host.snapshot} />
-          <span className="clock">{now}</span>
-        </div>
-        <ChevronDown className="resource-chevron" />
-      </div>
+      <StatusBar host={host} />
 
       <section className="window-layer" aria-label="A-NAS 桌面窗口">
         {windows.map((window) => {
@@ -215,45 +227,16 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
         })}
       </section>
 
-      <nav className={`task-shelf ${windows.some((window) => window.open) ? "visible" : ""}`} aria-label="已打开窗口">
-        {windows.filter((window) => window.open).map((window) => {
-          const Icon = windowIcons[window.id];
-          return (
-            <button
-              key={window.id}
-              className={window.minimized ? "task-button minimized" : "task-button"}
-              aria-label={window.minimized ? `恢复${window.title}` : `聚焦${window.title}`}
-              onClick={() => dispatch({ type: "open", id: window.id })}
-            >
-              <Icon size={18} />
-              <span>{window.title}</span>
-            </button>
-          );
-        })}
-      </nav>
+      <Dock
+        entries={windows
+          .filter((window) => window.open)
+          .sort((a, b) => a.opened - b.opened)
+          .map((window) => ({ id: window.id, title: window.title, minimized: window.minimized, icon: windowIcons[window.id], tone: windowTones[window.id] }))}
+        focusedID={focusedID}
+        onSelect={(id, state) => dispatch({ type: state === "focused" ? "minimize" : "open", id: id as WindowID })}
+      />
     </main>
   );
-}
-
-function useCurrentMinute(): string {
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    let timeout: number;
-    const scheduleNextMinute = () => {
-      const current = new Date();
-      const millisecondsIntoMinute = current.getSeconds() * 1_000 + current.getMilliseconds();
-      timeout = window.setTimeout(() => {
-        setNow(new Date());
-        scheduleNextMinute();
-      }, 60_000 - millisecondsIntoMinute);
-    };
-
-    scheduleNextMinute();
-    return () => window.clearTimeout(timeout);
-  }, []);
-
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(now);
 }
 
 function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch: (action: WindowAction) => void; children: ReactNode }) {
@@ -498,17 +481,8 @@ function StoragePanel({ state }: { state?: HostState }) {
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : "请求失败"; }
 
-function DesktopShortcut({ label, ariaLabel, tone, icon, onClick, active, disabled }: { label: string; ariaLabel: string; tone: string; icon: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean }) {
-  return <button className={`desktop-shortcut ${active ? "running" : ""}`} aria-label={ariaLabel} title={disabled ? `${label} · 规划中` : label} disabled={disabled} onClick={onClick}><span className={`desktop-icon icon-${tone}`}>{icon}</span><span>{label}</span>{disabled && <small>规划中</small>}</button>;
-}
-
 function MetricCard({ label, value, detail }: { label: string; value: ReactNode; detail: ReactNode }) {
   return <article className="metric-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
-}
-
-function SourceBadge({ state }: { state?: HostState }) {
-  if (!state) return <span className="source-badge pending">等待数据</span>;
-  return <span className={`source-badge ${state.dataSource}`}>{state.dataSource === "live" ? "实时主机" : "模拟数据"}</span>;
 }
 
 function HealthBadge({ value }: { value: Health }) {
@@ -524,10 +498,11 @@ function RoleBadge({ role }: { role: DiskRole }) {
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);
   const top = Math.max(...windows.map((window) => window.z)) + 1;
+  const nextOpened = Math.max(...windows.map((window) => window.opened)) + 1;
   return windows.map((window) => {
     if (window.id !== action.id) return window;
     switch (action.type) {
-      case "open": return { ...window, open: true, minimized: false, z: top };
+      case "open": return { ...window, open: true, minimized: false, z: top, opened: window.open ? window.opened : nextOpened };
       case "close": return { ...window, open: false, minimized: false };
       case "minimize": return { ...window, minimized: true };
       case "focus": return window.z === top - 1 ? window : { ...window, z: top };

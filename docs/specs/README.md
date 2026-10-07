@@ -10,6 +10,7 @@
 - [基础存储与共享](basic-storage-and-sharing.md)（implemented locally；hardware acceptance pending）
 - [相册与本地智能检索](photo-library.md)（draft，核心开发基线已冻结）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
+- [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
 
 ## 使用方式
 

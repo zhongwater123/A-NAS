@@ -108,6 +108,36 @@ function isHealth(value: unknown): value is Health {
   return ["healthy", "warning", "critical", "unknown"].includes(String(value));
 }
 
+export interface HostMetrics {
+  dataSource: DataSource;
+  observedAt: string;
+  cpu: { usagePercent: number; logicalCores: number };
+  memory: { totalBytes: number; usedBytes: number };
+  network: { receiveBytesPerSecond: number; transmitBytesPerSecond: number };
+}
+
+export async function readHostMetrics(signal?: AbortSignal): Promise<HostMetrics> {
+  const response = await fetch("/api/v1/metrics", { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin", signal });
+  if (!response.ok) throw new HostStateError(response.status);
+  const value: unknown = await response.json();
+  if (!isHostMetrics(value)) throw new HostStateError();
+  return value;
+}
+
+function isHostMetrics(value: unknown): value is HostMetrics {
+  if (!isRecord(value) || !["simulated", "live"].includes(String(value.dataSource)) || typeof value.observedAt !== "string") return false;
+  const { cpu, memory, network } = value;
+  return (
+    isRecord(cpu) && isNumberIn(cpu.usagePercent, 0, 100) && isNumberIn(cpu.logicalCores, 1, Infinity) &&
+    isRecord(memory) && isNumberIn(memory.totalBytes, 1, Infinity) && isNumberIn(memory.usedBytes, 0, Number(memory.totalBytes)) &&
+    isRecord(network) && isNumberIn(network.receiveBytesPerSecond, 0, Infinity) && isNumberIn(network.transmitBytesPerSecond, 0, Infinity)
+  );
+}
+
+function isNumberIn(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && value >= min && value <= max;
+}
+
 export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string }
 export interface Session { csrfToken: string; expiresAt: string; user: User }
 export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string }

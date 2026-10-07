@@ -64,27 +64,8 @@ func NewClient(socketPath string) *Client {
 }
 
 func (c *Client) Read(ctx context.Context) (hoststate.State, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent/v1/state", nil)
-	if err != nil {
-		return hoststate.State{}, fmt.Errorf("create host agent request: %w", err)
-	}
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return hoststate.State{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return hoststate.State{}, fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
-	}
-
 	var document stateDocument
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
-		return hoststate.State{}, fmt.Errorf("decode host agent response: %w", err)
-	}
-	if err := ensureEndOfJSON(decoder); err != nil {
+	if err := c.get(ctx, "/v1/state", &document); err != nil {
 		return hoststate.State{}, err
 	}
 	state, err := document.toDomain()
@@ -94,8 +75,44 @@ func (c *Client) Read(ctx context.Context) (hoststate.State, error) {
 	return state, nil
 }
 
+// ReadMetrics returns the Host Agent's latest utilisation observation.
+func (c *Client) ReadMetrics(ctx context.Context) (hoststate.Metrics, error) {
+	var document metricsDocument
+	if err := c.get(ctx, "/v1/metrics", &document); err != nil {
+		return hoststate.Metrics{}, err
+	}
+	metrics, err := document.toDomain()
+	if err != nil {
+		return hoststate.Metrics{}, fmt.Errorf("validate host agent response: %w", err)
+	}
+	return metrics, nil
+}
+
+func (c *Client) get(ctx context.Context, path string, into any) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent"+path, nil)
+	if err != nil {
+		return fmt.Errorf("create host agent request: %w", err)
+	}
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
+	}
+
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(into); err != nil {
+		return fmt.Errorf("decode host agent response: %w", err)
+	}
+	return ensureEndOfJSON(decoder)
+}
+
 type handler struct {
-	reader      hoststate.Reader
+	observer    hoststate.Observer
 	volume      storage.VolumeExecutor
 	credentials accounts.CredentialProvisioner
 	snapshots   files.SnapshotBackend
@@ -103,21 +120,21 @@ type handler struct {
 }
 
 type Services struct {
-	Reader      hoststate.Reader
+	Reader      hoststate.Observer
 	Volume      storage.VolumeExecutor
 	Credentials accounts.CredentialProvisioner
 	Snapshots   files.SnapshotBackend
 }
 
-func NewHandler(reader hoststate.Reader, logger *slog.Logger) http.Handler {
-	return NewOperationsHandler(Services{Reader: reader}, logger)
+func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
+	return NewOperationsHandler(Services{Reader: observer}, logger)
 }
 
 func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &handler{reader: services.Reader, volume: services.Volume, credentials: services.Credentials, snapshots: services.Snapshots, logger: logger}
+	return &handler{observer: services.Reader, volume: services.Volume, credentials: services.Credentials, snapshots: services.Snapshots, logger: logger}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +158,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSnapshotResource(w, r)
 		return
 	}
-	if r.URL.Path != "/v1/state" {
+	if r.URL.Path != "/v1/state" && r.URL.Path != "/v1/metrics" {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
@@ -150,11 +167,25 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
-	if h.reader == nil {
-		writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
+	if h.observer == nil {
+		code, message := "state_unavailable", "host state is unavailable"
+		if r.URL.Path == "/v1/metrics" {
+			code, message = "metrics_unavailable", "host metrics are unavailable"
+		}
+		writeError(w, http.StatusServiceUnavailable, code, message)
 		return
 	}
-	state, err := h.reader.Read(r.Context())
+	if r.URL.Path == "/v1/metrics" {
+		metrics, err := h.observer.ReadMetrics(r.Context())
+		if err != nil {
+			h.logger.ErrorContext(r.Context(), "host metrics read failed", "error", err)
+			writeError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, metricsDocumentFromDomain(metrics))
+		return
+	}
+	state, err := h.observer.Read(r.Context())
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "host state read failed", "error", err)
 		writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
@@ -437,6 +468,60 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 	return ensureEndOfJSON(decoder)
 }
 
+type metricsDocument struct {
+	ObservedAt string                 `json:"observedAt"`
+	CPU        cpuMetricsDocument     `json:"cpu"`
+	Memory     memoryMetricsDocument  `json:"memory"`
+	Network    networkMetricsDocument `json:"network"`
+}
+
+type cpuMetricsDocument struct {
+	UsagePercent float64 `json:"usagePercent"`
+	LogicalCores int     `json:"logicalCores"`
+}
+
+type memoryMetricsDocument struct {
+	TotalBytes uint64 `json:"totalBytes"`
+	UsedBytes  uint64 `json:"usedBytes"`
+}
+
+type networkMetricsDocument struct {
+	ReceiveBytesPerSecond  uint64 `json:"receiveBytesPerSecond"`
+	TransmitBytesPerSecond uint64 `json:"transmitBytesPerSecond"`
+}
+
+func metricsDocumentFromDomain(metrics hoststate.Metrics) metricsDocument {
+	return metricsDocument{
+		ObservedAt: metrics.ObservedAt.UTC().Format(time.RFC3339),
+		CPU:        cpuMetricsDocument{UsagePercent: metrics.CPU.UsagePercent, LogicalCores: metrics.CPU.LogicalCores},
+		Memory:     memoryMetricsDocument{TotalBytes: metrics.Memory.TotalBytes, UsedBytes: metrics.Memory.UsedBytes},
+		Network: networkMetricsDocument{
+			ReceiveBytesPerSecond:  metrics.Network.ReceiveBytesPerSecond,
+			TransmitBytesPerSecond: metrics.Network.TransmitBytesPerSecond,
+		},
+	}
+}
+
+func (document metricsDocument) toDomain() (hoststate.Metrics, error) {
+	observedAt, err := time.Parse(time.RFC3339, document.ObservedAt)
+	if err != nil {
+		return hoststate.Metrics{}, errors.New("invalid observed time")
+	}
+	metrics := hoststate.Metrics{
+		ObservedAt: observedAt.UTC(),
+		CPU:        hoststate.CPUMetrics{UsagePercent: document.CPU.UsagePercent, LogicalCores: document.CPU.LogicalCores},
+		Memory:     hoststate.MemoryMetrics{TotalBytes: document.Memory.TotalBytes, UsedBytes: document.Memory.UsedBytes},
+		Network: hoststate.NetworkMetrics{
+			ReceiveBytesPerSecond:  document.Network.ReceiveBytesPerSecond,
+			TransmitBytesPerSecond: document.Network.TransmitBytesPerSecond,
+		},
+	}
+	if !metrics.Valid() {
+		return hoststate.Metrics{}, errors.New("inconsistent metrics")
+	}
+	return metrics, nil
+}
+
 type stateDocument struct {
 	ObservedAt string         `json:"observedAt"`
 	System     systemDocument `json:"system"`
@@ -636,7 +721,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	}
 }
 
-var _ hoststate.Reader = (*Client)(nil)
+var _ hoststate.Observer = (*Client)(nil)
 var _ storage.VolumeExecutor = (*Client)(nil)
 var _ accounts.CredentialProvisioner = (*Client)(nil)
 var _ files.SnapshotBackend = (*Client)(nil)

@@ -277,6 +277,34 @@ paths:
       parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "204": { description: Snapshot deleted }
+  /api/v1/metrics:
+    get:
+      operationId: getHostMetrics
+      summary: Read current CPU, memory and network utilisation
+      description: >-
+        CPU usage and network rates cover the interval since the previous sample (at least 0.5 seconds);
+        polls arriving sooner receive the previous result. Network rates sum physical interfaces and exclude
+        loopback and virtual links. Memory counts MemTotal minus MemAvailable as used.
+      responses:
+        "200":
+          description: The latest utilisation observation.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "503":
+          description: Host metrics cannot currently be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
@@ -701,6 +729,54 @@ components:
         resourceId: { type: string }
         occurredAt: { type: string, format: date-time }
         detail: { type: string }
+    MetricsResponse:
+      type: object
+      additionalProperties: false
+      required: [dataSource, observedAt, cpu, memory, network]
+      properties:
+        dataSource:
+          $ref: "#/components/schemas/DataSource"
+        observedAt:
+          type: string
+          format: date-time
+        cpu:
+          type: object
+          additionalProperties: false
+          required: [usagePercent, logicalCores]
+          properties:
+            usagePercent:
+              type: number
+              minimum: 0
+              maximum: 100
+            logicalCores:
+              type: integer
+              minimum: 1
+        memory:
+          type: object
+          additionalProperties: false
+          required: [totalBytes, usedBytes]
+          properties:
+            totalBytes:
+              type: integer
+              format: int64
+              minimum: 1
+            usedBytes:
+              type: integer
+              format: int64
+              minimum: 0
+        network:
+          type: object
+          additionalProperties: false
+          required: [receiveBytesPerSecond, transmitBytesPerSecond]
+          properties:
+            receiveBytesPerSecond:
+              type: integer
+              format: int64
+              minimum: 0
+            transmitBytesPerSecond:
+              type: integer
+              format: int64
+              minimum: 0
     TerminalStatusResponse:
       type: object
       additionalProperties: false

@@ -53,8 +53,8 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 | `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 登录、文件、回收站、快照、账号、存储、资源管理和终端窗口已实现 |
 | `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端，以产品服务用户运行 | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
-| `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、卷、凭据与快照 IPC 已实现 |
-| `internal/hoststate` | 只读宿主机状态接口、Fake Adapter 与 Debian Linux Adapter | 已实现并通过本地及实验 NAS 测试 |
+| `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
+| `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md)，尚未在实验 NAS 部署 |
 | `internal/accounts` / `internal/files` / `internal/storage` | 身份 Policy、文件闭环和持久化执行计划 | 本地实现与测试完成，实机验收待进行 |
 | `internal/hostops/linux` | 固定命令的卷、Samba 和 Btrfs 快照执行器 | Fake command 测试完成，实机验收待进行 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
@@ -84,3 +84,4 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 - [相册与本地智能检索规格](../specs/photo-library.md)
 - [只读宿主机状态规格](../specs/read-only-host-state.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
+- [状态栏与实时指标规格](../specs/host-metrics-status-bar.md)

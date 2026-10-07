@@ -34,11 +34,13 @@ type dependencies struct {
 	now              func() time.Time
 	readBlockDevices func(context.Context) ([]byte, error)
 	readSMART        func(context.Context, string) ([]byte, error)
+	sleep            func(context.Context, time.Duration) error
 }
 
 // Reader observes a Debian host without changing its state.
 type Reader struct {
 	dependencies dependencies
+	metrics      metricsSampler
 }
 
 type ResolvedDevice struct {
@@ -54,6 +56,7 @@ func New() *Reader {
 		hostname:     os.Hostname,
 		architecture: runtime.GOARCH,
 		now:          time.Now,
+		sleep:        sleepContext,
 		readBlockDevices: func(ctx context.Context) ([]byte, error) {
 			return exec.CommandContext(
 				ctx,
@@ -474,4 +477,4 @@ func mapTransport(value string) hoststate.Transport {
 	}
 }
 
-var _ hoststate.Reader = (*Reader)(nil)
+var _ hoststate.Observer = (*Reader)(nil)

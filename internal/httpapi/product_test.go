@@ -50,6 +50,11 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	if got, want := unauthorized.Code, http.StatusUnauthorized; got != want {
 		t.Fatalf("unauthenticated disks status = %d, want %d", got, want)
 	}
+	unauthorizedMetrics := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedMetrics, httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil))
+	if got, want := unauthorizedMetrics.Code, http.StatusUnauthorized; got != want {
+		t.Fatalf("unauthenticated metrics status = %d, want %d", got, want)
+	}
 	unauthorizedTerminal := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorizedTerminal, httptest.NewRequest(http.MethodGet, "/api/v1/terminal", nil))
 	if got, want := unauthorizedTerminal.Code, http.StatusUnauthorized; got != want {
@@ -81,6 +86,13 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	handler.ServeHTTP(disks, disksRequest)
 	if got, want := disks.Code, http.StatusOK; got != want {
 		t.Fatalf("authenticated disks status = %d, want %d; body=%s", got, want, disks.Body.String())
+	}
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsRequest.AddCookie(responseCookies[0])
+	metrics := httptest.NewRecorder()
+	handler.ServeHTTP(metrics, metricsRequest)
+	if got, want := metrics.Code, http.StatusOK; got != want {
+		t.Fatalf("authenticated metrics status = %d, want %d; body=%s", got, want, metrics.Body.String())
 	}
 	adminTerminalRequest := httptest.NewRequest(http.MethodGet, "/api/v1/terminal", nil)
 	adminTerminalRequest.AddCookie(responseCookies[0])

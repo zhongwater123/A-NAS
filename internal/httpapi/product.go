@@ -21,7 +21,7 @@ import (
 const sessionCookieName = "anas_session"
 
 type ProductDependencies struct {
-	Reader         hoststate.Reader
+	Reader         hoststate.Observer
 	DataSource     DataSource
 	ProductVersion string
 	Accounts       *accounts.Service
@@ -65,7 +65,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("DELETE /api/v1/session", h.withMutation(h.handleDeleteSession))
 	h.mux.HandleFunc("GET /api/v1/terminal", h.withSession(h.handleTerminal))
 	h.mux.HandleFunc("GET /api/v1/terminal/session", h.withSession(h.handleTerminal))
-	for _, path := range []string{"/api/v1/system", "/api/v1/disks", "/api/v1/host-state"} {
+	for _, path := range []string{"/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics"} {
 		h.mux.HandleFunc("GET "+path, h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 			h.state.ServeHTTP(w, r)
 		}))

@@ -168,7 +168,7 @@ type productOperations interface {
 	files.SnapshotBackend
 }
 
-func configuredServices() (hoststate.Reader, httpapi.DataSource, productOperations, bool, error) {
+func configuredServices() (hoststate.Observer, httpapi.DataSource, productOperations, bool, error) {
 	switch mode := os.Getenv("ANAS_HOSTSTATE_MODE"); mode {
 	case "", "fake":
 		operations := &developmentOperations{}

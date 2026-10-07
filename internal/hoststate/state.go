@@ -92,3 +92,48 @@ type State struct {
 type Reader interface {
 	Read(ctx context.Context) (State, error)
 }
+
+// Metrics is a short-interval utilisation observation. CPU usage and network
+// rates cover the interval between two samples ending at ObservedAt.
+type Metrics struct {
+	ObservedAt time.Time
+	CPU        CPUMetrics
+	Memory     MemoryMetrics
+	Network    NetworkMetrics
+}
+
+type CPUMetrics struct {
+	UsagePercent float64
+	LogicalCores int
+}
+
+// MemoryMetrics counts memory the kernel cannot make available without
+// swapping as used, so reclaimable page cache is not reported as pressure.
+type MemoryMetrics struct {
+	TotalBytes uint64
+	UsedBytes  uint64
+}
+
+// NetworkMetrics sums physical interfaces, excluding loopback and virtual links.
+type NetworkMetrics struct {
+	ReceiveBytesPerSecond  uint64
+	TransmitBytesPerSecond uint64
+}
+
+// Valid reports whether the observation is internally consistent.
+func (m Metrics) Valid() bool {
+	return !m.ObservedAt.IsZero() &&
+		m.CPU.UsagePercent >= 0 && m.CPU.UsagePercent <= 100 && m.CPU.LogicalCores > 0 &&
+		m.Memory.TotalBytes > 0 && m.Memory.UsedBytes <= m.Memory.TotalBytes
+}
+
+// MetricsReader returns the latest utilisation observation of the host.
+type MetricsReader interface {
+	ReadMetrics(ctx context.Context) (Metrics, error)
+}
+
+// Observer provides both host state and utilisation metrics from one source.
+type Observer interface {
+	Reader
+	MetricsReader
+}

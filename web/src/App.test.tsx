@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -37,9 +37,18 @@ const healthyState = {
 };
 
 beforeEach(() => {
+  localStorage.clear();
   xterm.mounts = 0;
   xterm.onStatus = undefined;
 });
+
+const metricsState = {
+  dataSource: "simulated",
+  observedAt: "2026-10-06T00:00:00Z",
+  cpu: { usagePercent: 23.5, logicalCores: 4 },
+  memory: { totalBytes: 8589934592, usedBytes: 3435973837 },
+  network: { receiveBytesPerSecond: 2516582, transmitBytesPerSecond: 327680 },
+};
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -59,6 +68,18 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({ username: "owner", password: "correct horse battery staple" });
   });
 
+  it("shows a loading state while the first host observation is pending", async () => {
+    let finishRequest: ((response: Response) => void) | undefined;
+    routeFetch({ hostState: vi.fn(() => new Promise<Response>((resolve) => { finishRequest = resolve; })) });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    expect(screen.getByText("正在读取设备状态…")).toBeTruthy();
+    await act(async () => finishRequest?.(okResponse(healthyState)));
+    expect(await screen.findByText("anas-fake")).toBeTruthy();
+  });
+
   it("shows authenticated host health and keeps the clock advancing", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-10-07T10:00:00Z"));
@@ -68,9 +89,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
     expect(await screen.findByText("anas-fake")).toBeTruthy();
-    const before = screen.getByText(/\d{2}:\d{2}/, { selector: ".clock" }).textContent;
+    const before = screen.getByText(/\d{2}:\d{2}/, { selector: ".status-time strong" }).textContent;
     act(() => vi.advanceTimersByTime(60_000));
-    expect(screen.getByText(/\d{2}:\d{2}/, { selector: ".clock" }).textContent).not.toBe(before);
+    expect(screen.getByText(/\d{2}:\d{2}/, { selector: ".status-time strong" }).textContent).not.toBe(before);
   });
 
   it("enables file management and lists only the signed-in user's spaces", async () => {
@@ -116,6 +137,44 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.getByRole("region", { name: "桌面应用" })).toBeTruthy();
   });
 
+  it("keeps the last successful state when refresh loses connection", async () => {
+    routeFetch({ hostState: vi.fn().mockResolvedValueOnce(okResponse(healthyState)).mockResolvedValueOnce(errorResponse(503)) });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开资源管理" }));
+    expect(await screen.findByText("anas-fake")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "刷新设备状态" }));
+
+    expect(await screen.findByText("连接中断，正在显示上次成功读取的数据")).toBeTruthy();
+    expect(screen.getByText("anas-fake")).toBeTruthy();
+  });
+
+  it("retries after an initial 503 response", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(errorResponse(503)).mockResolvedValueOnce(okResponse(healthyState));
+    routeFetch({ hostState: fetchMock });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开资源管理" }));
+    expect(await screen.findByText("暂时无法读取设备状态")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "重新连接" }));
+    expect(await screen.findByText("anas-fake")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an explicit empty disk inventory", async () => {
+    stubFetch({ ...healthyState, disks: [] });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开资源管理" }));
+
+    expect(await screen.findByText("未检测到磁盘")).toBeTruthy();
+  });
+
   it("opens, minimizes, and restores system settings", async () => {
     installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -124,6 +183,120 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(settings).getByRole("button", { name: "最小化系统设置" }));
     await user.click(screen.getByRole("button", { name: "恢复系统设置" }));
     expect(screen.getByRole("dialog", { name: "系统设置" })).toBeTruthy();
+  });
+
+  it("shows utilisation gauges, network rates and the clock in the status bar", async () => {
+    stubFetch(healthyState);
+    render(<App />);
+
+    const statusBar = await screen.findByRole("banner", { name: "设备状态" });
+    await within(statusBar).findByText("4 核");
+    expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuenow")).toBe("24");
+    expect(within(statusBar).getByRole("meter", { name: "内存占用" }).getAttribute("aria-valuenow")).toBe("40");
+    expect(within(statusBar).getByText("3.2 / 8.0 GiB")).toBeTruthy();
+    const network = within(statusBar).getByRole("group", { name: "网络速率" });
+    expect(network.textContent).toContain("下行2.5MB/s");
+    expect(network.textContent).toContain("上行328KB/s");
+    expect(within(statusBar).getByText(/^\d{2}:\d{2}$/)).toBeTruthy();
+    expect(within(statusBar).getByText("设备在线")).toBeTruthy();
+  });
+
+  it("marks the status bar disconnected when metrics cannot be read", async () => {
+    routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(healthyState)), metrics: vi.fn().mockResolvedValue(errorResponse(503)) });
+    render(<App />);
+
+    const statusBar = await screen.findByRole("banner", { name: "设备状态" });
+    expect(await within(statusBar).findByText("连接中断", { selector: ".source-badge" })).toBeTruthy();
+    expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuetext")).toBe("暂无数据");
+  });
+
+  it("reorders desktop icons by dragging without opening the app", async () => {
+    stubFetch(healthyState);
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    layOutGrid(desktop);
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["文件管理", "回收站", "系统设置", "资源管理", "终端"]);
+
+    const terminal = within(desktop).getByRole("button", { name: "打开终端" }).parentElement!;
+    fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 150, clientY: 160 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 120, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 50 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 50 });
+    fireEvent.click(within(desktop).getByRole("button", { name: "打开终端" }));
+
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["终端", "文件管理", "回收站", "系统设置", "资源管理"]);
+    expect(JSON.parse(localStorage.getItem("a-nas.desktop-order.v1")!).slice(0, 2)).toEqual(["terminal", "files"]);
+    expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
+    expect(screen.getByText("已将终端移动到第 1 位")).toBeTruthy();
+  });
+
+  it("restores the original order when a drag is cancelled with Escape", async () => {
+    stubFetch(healthyState);
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    layOutGrid(desktop);
+
+    const settings = within(desktop).getByRole("button", { name: "打开系统设置" }).parentElement!;
+    fireEvent.pointerDown(settings, { button: 0, pointerId: 2, pointerType: "mouse", clientX: 250, clientY: 50 });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 40, clientY: 50 });
+    expect(desktopOrder(desktop)[0]).toBe("系统设置");
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(desktopOrder(desktop).slice(0, 3)).toEqual(["文件管理", "回收站", "系统设置"]);
+    expect(localStorage.getItem("a-nas.desktop-order.v1")).toBeNull();
+  });
+
+  it("moves a focused icon with Alt and the arrow keys and restores the saved order", async () => {
+    stubFetch(healthyState);
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+
+    within(desktop).getByRole("button", { name: "打开资源管理" }).focus();
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    expect(desktopOrder(desktop).slice(0, 4)).toEqual(["文件管理", "回收站", "资源管理", "系统设置"]);
+    expect(document.activeElement).toBe(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    unmount();
+
+    render(<App />);
+    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "资源管理", "系统设置"]);
+  });
+
+  it("switches focus between open apps from an icon-only dock", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开系统设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+    expect(dock.textContent).toBe("");
+    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+
+    await user.click(within(dock).getByRole("button", { name: "切换到系统设置" }));
+    expect(within(dock).getByRole("button", { name: "最小化系统设置" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "切换到终端" })).toBeTruthy();
+
+    await user.click(within(dock).getByRole("button", { name: "最小化系统设置" }));
+    expect(screen.queryByRole("dialog", { name: "系统设置" })).toBeNull();
+    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "恢复系统设置" })).toBeTruthy();
+  });
+
+  it("lists dock icons in launch order and drops closed apps immediately from the accessibility tree", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
+
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到终端", "最小化资源管理"]);
+
+    await user.click(within(screen.getByRole("dialog", { name: "资源管理" })).getByRole("button", { name: "关闭资源管理" }));
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化终端"]);
   });
 
   it("opens a terminal session from the desktop icon", async () => {
@@ -187,6 +360,7 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(session);
     if (path === "/api/v1/host-state") return ok(healthyState);
+    if (path === "/api/v1/metrics") return ok(metricsState);
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
@@ -201,3 +375,73 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
 }
 
 function ok(body: unknown, status = 200) { return { ok: true, status, json: async () => body } as Response; }
+
+function desktopOrder(desktop: HTMLElement): string[] {
+  return within(desktop).getAllByRole("button").map((button) => button.textContent!.replace("规划中", ""));
+}
+
+// jsdom has no layout; give each slot the geometry of a 3-column, 100px grid.
+function layOutGrid(desktop: HTMLElement) {
+  const geometry = (slot: Element) => {
+    const index = Array.from(slot.parentElement!.children).filter((child) => child.classList.contains("desktop-slot")).indexOf(slot);
+    return { left: (index % 3) * 100, top: Math.floor(index / 3) * 100 };
+  };
+  desktop.querySelectorAll(".desktop-slot").forEach((slot) => {
+    Object.defineProperties(slot, {
+      offsetLeft: { configurable: true, get: () => geometry(slot).left },
+      offsetTop: { configurable: true, get: () => geometry(slot).top },
+      offsetWidth: { configurable: true, get: () => 100 },
+      offsetHeight: { configurable: true, get: () => 100 },
+    });
+    slot.getBoundingClientRect = () => {
+      const { left, top } = geometry(slot);
+      return { left, top, right: left + 100, bottom: top + 100, width: 100, height: 100, x: left, y: top, toJSON: () => ({}) };
+    };
+  });
+}
+
+function routeFetch(routes: { hostState: () => Promise<Response>; metrics?: () => Promise<Response>; terminalEnabled?: boolean }) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      switch (String(input)) {
+        case "/api/v1/setup/status":
+          return okResponse({ setupRequired: false });
+        case "/api/v1/session":
+          return okResponse(session);
+        case "/api/v1/host-state":
+          return routes.hostState();
+        case "/api/v1/metrics":
+          return routes.metrics ? routes.metrics() : okResponse(metricsState);
+        case "/api/v1/terminal":
+          return okResponse({ enabled: routes.terminalEnabled ?? true });
+        default:
+          return okResponse({ items: [] });
+      }
+    }),
+  );
+}
+
+function stubFetch(state: unknown) {
+  routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(state)) });
+}
+
+function stubDesktopFetch(state: unknown, terminalEnabled: boolean) {
+  routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(state)), terminalEnabled });
+}
+
+function okResponse(state: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => state,
+  } as Response;
+}
+
+function errorResponse(status: number) {
+  return {
+    ok: false,
+    status,
+    json: async () => ({ error: { code: "state_unavailable", message: "host state is unavailable" } }),
+  } as Response;
+}
