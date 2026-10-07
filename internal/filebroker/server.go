@@ -36,6 +36,11 @@ type Config struct {
 	// LookupUID resolves a username to its UID so a worker never starts for an
 	// account the Host Agent did not provision. The default uses os/user.
 	LookupUID func(username string) (int, error)
+	// ShellCommand builds the administrator's terminal shell; the default is
+	// a login bash, or sh where bash is missing.
+	ShellCommand func() *exec.Cmd
+	// TerminalRecheck is how often a running terminal's session is verified.
+	TerminalRecheck time.Duration
 
 	// skipCredentials lets unprivileged tests run workers as the test user.
 	skipCredentials bool
@@ -80,6 +85,17 @@ func NewServer(config Config) (*Server, error) {
 		config.Command = func(volumeRoot string) *exec.Cmd {
 			return exec.Command(executable, WorkerArgument, volumeRoot)
 		}
+	}
+	if config.ShellCommand == nil {
+		config.ShellCommand = func() *exec.Cmd {
+			if _, err := os.Stat("/bin/bash"); err == nil {
+				return exec.Command("/bin/bash", "-l")
+			}
+			return exec.Command("/bin/sh", "-l")
+		}
+	}
+	if config.TerminalRecheck <= 0 {
+		config.TerminalRecheck = 30 * time.Second
 	}
 	if config.LookupUID == nil {
 		config.LookupUID = func(username string) (int, error) {
@@ -137,6 +153,10 @@ func (s *Server) handle(conn *net.UnixConn) {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	if req.Op == opTerminal {
+		s.serveTerminal(conn, req)
+		return
+	}
 	result, file := s.dispatch(context.Background(), req)
 	if err := writeMessage(conn, result, file); err != nil {
 		s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)

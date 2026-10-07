@@ -41,6 +41,8 @@ type request struct {
 	Target string         `json:"target,omitempty"`
 	Prefix string         `json:"prefix,omitempty"`
 	Skip   files.ScanSkip `json:"skip,omitempty"`
+	Cols   uint16         `json:"cols,omitempty"`
+	Rows   uint16         `json:"rows,omitempty"`
 }
 
 type response struct {
@@ -49,6 +51,8 @@ type response struct {
 	Entries []files.ScanEntry `json:"entries,omitempty"`
 	Path    string            `json:"path,omitempty"`
 	Size    int64             `json:"size,omitempty"`
+	// ExitCode ends a terminal session.
+	ExitCode *int `json:"exitCode,omitempty"`
 }
 
 const (
