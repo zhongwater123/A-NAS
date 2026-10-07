@@ -95,6 +95,7 @@ rm -f \
   provision-v1.0.1-rc.sh.incoming
 
 install -d -m 0700 "$config_dir"
+install -d -m 0700 "$config_dir/state"
 install -d -m 0750 "$unit_dir"
 previous="$(readlink "$current" 2>/dev/null || true)"
 rollback_dir="$(mktemp -d "$config_dir/activation-rollback.XXXXXX")"
@@ -103,7 +104,8 @@ rollback_dir="$(mktemp -d "$config_dir/activation-rollback.XXXXXX")"
 [[ ! -f "$unit_dir/anas-host-agent.service" ]] || cp "$unit_dir/anas-host-agent.service" "$rollback_dir/anas-host-agent.service"
 activated=1
 
-printf 'ANAS_HTTP_ADDR=127.0.0.1:8080\nANAS_HOSTSTATE_MODE=%s\n' "$mode" > "$config_dir/anas-api.env"
+printf 'ANAS_HTTP_ADDR=127.0.0.1:8080\nANAS_HOSTSTATE_MODE=%s\nANAS_STATE_DIR=%s/state\n' \
+  "$mode" "$config_dir" > "$config_dir/anas-api.env"
 chmod 0600 "$config_dir/anas-api.env"
 install -m 0644 anas-api.service.incoming "$unit_dir/anas-api.service"
 install -m 0644 anas-host-agent.service.incoming "$unit_dir/anas-host-agent.service"

@@ -20,7 +20,7 @@
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 
 SOURCE_RELEASE="$source_release" \
-RELEASE_ID=v1.0.1-rc.1-<GIT_SHA> \
+RELEASE_ID=v1.0.1-rc.2-<GIT_SHA> \
 SMB_INTERFACE=enp2s0 \
 EXPECTED_DISK_WWN=0x5000c500518d4994 \
 EXPECTED_DISK_SERIAL=Z2AYDZPB \
@@ -35,7 +35,7 @@ apt-get update
 apt-get install --no-install-recommends btrfs-progs parted smartmontools samba libsqlite3-0
 
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
-release_id=v1.0.1-rc.1-<GIT_SHA>
+release_id=v1.0.1-rc.2-<GIT_SHA>
 smb_interface=enp3s0
 
 readlink -f /home/anas-dev/apps/a-nas/current
