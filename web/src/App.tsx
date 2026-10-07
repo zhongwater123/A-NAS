@@ -42,6 +42,7 @@ import {
   listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
   restoreSnapshotEntry, restoreTrash, setupAdministrator, startViewing, uploadFile,
 } from "./api";
+import { AppCenterPanel } from "./AppCenterPanel";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
@@ -50,7 +51,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker";
+type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -87,6 +88,7 @@ const initialWindows: WindowModel[] = [
   { id: "settings", title: "系统设置", open: false, minimized: false, maximized: false, x: 390, y: 126, width: 760, height: 550, z: 1, opened: 0 },
   { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 320, y: 82, width: 900, height: 620, z: 0, opened: 0 },
+  { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, LucideIcon> = {
@@ -99,6 +101,7 @@ const windowIcons: Record<WindowID, LucideIcon> = {
   settings: Settings,
   terminal: SquareTerminal,
   docker: Box,
+  store: ShoppingBag,
 };
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
@@ -111,6 +114,7 @@ const windowTones: Record<WindowID, string> = {
   settings: "settings",
   terminal: "terminal",
   docker: "docker",
+  store: "store",
 };
 
 export default function App() {
@@ -225,7 +229,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     { id: "settings", label: "系统设置", ariaLabel: "打开系统设置", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openWindow("settings") },
     { id: "resources", label: "资源管理", ariaLabel: "打开资源管理", tone: "resources", icon: <Activity />, active: isOpen("resources"), onClick: () => openWindow("resources") },
     ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
-    { id: "store", label: "应用中心", ariaLabel: "应用中心，规划中", tone: "store", icon: <ShoppingBag />, disabled: true },
+    { id: "store", label: "应用中心", ariaLabel: "打开应用中心", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") },
     { id: "video", label: "影视", ariaLabel: "影视，规划中", tone: "video", icon: <PlaySquare />, disabled: true },
     { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
     { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
@@ -286,6 +290,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "storage" && <StoragePanel state={host.snapshot} />}
 			  {window.id === "terminal" && <TerminalPanel />}
 			  {window.id === "docker" && <DockerPanel />}
+			  {window.id === "store" && <AppCenterPanel />}
             </AppWindow>
           );
         })}

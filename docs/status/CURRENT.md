@@ -30,6 +30,7 @@ rc.4 已消除空盘计划蓝屏并完成真实格式化。随后实机证据显
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。`/opt/a-nas/current` 已切换到 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`，API、Host Agent、Kiosk 和 Samba 均 active。
 - 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；已在本地 WSL2 Docker 实测，Experimental NAS 尚未安装 Docker。
+- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；本地已用真实 Compose 验证安装/卸载，镜像拉取因本机无法访问 Docker Hub 未验证。
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 
 ## 下一步

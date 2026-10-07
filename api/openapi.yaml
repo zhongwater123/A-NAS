@@ -438,6 +438,147 @@ paths:
           $ref: "#/components/responses/ContainerEngineError"
         "503":
           $ref: "#/components/responses/ContainersUnavailable"
+  /api/v1/apps:
+    get:
+      operationId: listApps
+      summary: List App Center catalog apps with their install state
+      responses:
+        "200":
+          description: Every catalog app; installed apps report running and total containers, and the latest job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppListResponse"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/apps/{appId}/icon:
+    get:
+      operationId: getAppIcon
+      summary: Read an app icon from the catalog
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      responses:
+        "200":
+          description: PNG or SVG icon, served with a sandboxing Content-Security-Policy.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/apps/{appId}/plan:
+    get:
+      operationId: getAppInstallPlan
+      summary: Render the install plan the owner must confirm
+      description: >-
+        The plan lists images, containers, published host ports and host folders, plus the rendered Compose file
+        and its SHA-256 digest. Manifests that violate the install policy answer 422.
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      responses:
+        "200":
+          description: The install plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppPlan"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "422":
+          $ref: "#/components/responses/AppConflict"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/apps/{appId}/install:
+    post:
+      operationId: installApp
+      summary: Start installing an app from a confirmed plan
+      description: >-
+        The container agent re-renders the plan and refuses with plan_changed unless the digest matches. Only one
+        install or uninstall runs at a time. Requests must target a loopback Host, use a JSON body and, when an
+        Origin is sent, come from the same origin.
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [digest]
+              properties:
+                digest:
+                  type: string
+                  pattern: "^[a-f0-9]{64}$"
+      responses:
+        "202":
+          description: The install job started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppJob"
+        "400":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "403":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "409":
+          $ref: "#/components/responses/AppConflict"
+        "422":
+          $ref: "#/components/responses/AppConflict"
+        "502":
+          $ref: "#/components/responses/AppConflict"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/apps/{appId}/uninstall:
+    post:
+      operationId: uninstallApp
+      summary: Start removing an installed app while keeping its data
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "202":
+          description: The uninstall job started; containers and the project network are removed, app data is kept.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppJob"
+        "400":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "403":
+          $ref: "#/components/responses/AppRequestInvalid"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "409":
+          $ref: "#/components/responses/AppConflict"
+        "502":
+          $ref: "#/components/responses/AppConflict"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
@@ -509,6 +650,14 @@ components:
     FileID: { name: fileId, in: path, required: true, schema: { type: string } }
     TrashID: { name: trashId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
+    AppId:
+      name: appId
+      in: path
+      required: true
+      description: Catalog app ID, also the suffix of its Compose project (a-nas-<appId>).
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{0,40}$"
     ContainerId:
       name: containerId
       in: path
@@ -520,6 +669,32 @@ components:
   responses:
     ProductError:
       description: Product operation error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppsUnavailable:
+      description: The App Center is disabled (apps_disabled) or the container agent cannot be reached (apps_unavailable).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppNotFound:
+      description: No catalog app has this ID (app_not_found).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppRequestInvalid:
+      description: The request is malformed (invalid_request) or did not come from the local desktop (forbidden).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AppConflict:
+      description: >-
+        The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use,
+        name_in_use, policy_violation or app_engine_error.
       content:
         application/json:
           schema:
@@ -1113,6 +1288,146 @@ components:
                 format: date-time
               text:
                 type: string
+    AppListResponse:
+      type: object
+      additionalProperties: false
+      required: [dataSource, apps]
+      properties:
+        dataSource:
+          $ref: "#/components/schemas/DataSource"
+        apps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppStatus"
+    AppStatus:
+      type: object
+      additionalProperties: false
+      required: [id, title, tagline, description, category, version, author, website, scheme, path, state, running, total]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        tagline:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        version:
+          type: string
+        author:
+          type: string
+        website:
+          type: string
+        webPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        scheme:
+          type: string
+        path:
+          type: string
+        state:
+          type: string
+          enum: [available, installed, installing, uninstalling]
+        running:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+        job:
+          $ref: "#/components/schemas/AppJob"
+    AppJob:
+      type: object
+      additionalProperties: false
+      required: [appId, action, state, startedAt, output]
+      properties:
+        appId:
+          type: string
+        action:
+          type: string
+          enum: [install, uninstall]
+        state:
+          type: string
+          enum: [running, succeeded, failed]
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        output:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+        error:
+          type: string
+    AppPlan:
+      type: object
+      additionalProperties: false
+      required: [appId, title, version, project, images, containers, ports, mounts, digest, compose]
+      properties:
+        appId:
+          type: string
+        title:
+          type: string
+        version:
+          type: string
+        project:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+        containers:
+          type: array
+          items:
+            type: string
+        ports:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [hostPort, containerPort, protocol]
+            properties:
+              hostPort:
+                type: integer
+                minimum: 1024
+                maximum: 65535
+              containerPort:
+                type: integer
+                minimum: 0
+                maximum: 65535
+              protocol:
+                type: string
+              purpose:
+                type: string
+        mounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [hostPath, containerPath, kind, readOnly]
+            properties:
+              hostPath:
+                type: string
+              containerPath:
+                type: string
+              kind:
+                type: string
+                enum: [appdata, shared, system]
+              readOnly:
+                type: boolean
+              purpose:
+                type: string
+        digest:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        compose:
+          type: string
     TerminalStatusResponse:
       type: object
       additionalProperties: false

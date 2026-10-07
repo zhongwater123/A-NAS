@@ -30,7 +30,8 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
                                          │ 类型化 UDS（anas-container 组）
                                          ▼
                                  容器代理（anas-container，docker 组）
-                                         └── Docker Engine（docker.sock）
+                                         ├── Docker Engine（docker.sock）
+                                         └── docker compose（仅运行按安装策略渲染、经摘要确认的应用）
 
 照片导入 → 受管对象存储 + Catalog → 派生任务 → AI Provider → Search Index → Policy 过滤 → 照片资产
 ```
@@ -59,6 +60,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态及类型化特权操作 |
 | `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 登录、文件、回收站、快照、账号、存储、资源管理、终端和 Docker 窗口已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
+| `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的回环同源校验 | 已实现 |
 | `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
@@ -93,6 +95,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [相册与本地智能检索规格](../specs/photo-library.md)
 - [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
+- [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
 - [只读宿主机状态规格](../specs/read-only-host-state.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
 - [状态栏与实时指标规格](../specs/host-metrics-status-bar.md)

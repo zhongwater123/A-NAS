@@ -63,6 +63,30 @@ const containerSnapshot = {
   images: [{ id: "sha256:" + "c".repeat(64), tags: ["jellyfin/jellyfin:10.11"], sizeBytes: 1243000000, createdAt: "2026-09-06T00:00:00Z" }],
 };
 
+const memosPlan = {
+  appId: "memos",
+  title: "Memos",
+  version: "0.28.0",
+  project: "a-nas-memos",
+  images: ["neosmemo/memos:0.28.0"],
+  containers: ["memos"],
+  ports: [{ hostPort: 5230, containerPort: 5230, protocol: "tcp", purpose: "WebUI 端口" }],
+  mounts: [{ hostPath: "/srv/a-nas/appdata/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false }],
+  digest: "d".repeat(64),
+  compose: "name: a-nas-memos\n",
+};
+
+function appList(memos: Record<string, unknown>) {
+  const base = { tagline: "", description: "", version: "1", author: "", website: "", scheme: "http", path: "/", state: "available", running: 0, total: 0 };
+  return {
+    dataSource: "simulated",
+    apps: [
+      { ...base, id: "memos", title: "Memos", tagline: "轻量笔记", category: "Productivity", webPort: 5230, ...memos },
+      { ...base, id: "navidrome", title: "Navidrome", tagline: "音乐流媒体", category: "Media", webPort: 4533 },
+    ],
+  };
+}
+
 const metricsState = {
   dataSource: "simulated",
   observedAt: "2026-10-06T00:00:00Z",
@@ -381,6 +405,77 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await within(screen.getByRole("dialog", { name: "Docker" })).findByText("Docker 未启用")).toBeTruthy();
   });
 
+  it("installs an app from the App Center after confirming its plan", async () => {
+    const posts: Array<{ url: string; body: unknown }> = [];
+    let installed = false;
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      apps: async (url, init) => {
+        if (init?.method === "POST") {
+          posts.push({ url, body: JSON.parse(String(init.body)) });
+          installed = url.endsWith("/install");
+          return { ok: true, status: 202, json: async () => ({ appId: "memos", action: "install", state: "running", startedAt: "2026-10-07T00:00:00Z", output: [] }) } as Response;
+        }
+        if (url.endsWith("/plan")) return okResponse(memosPlan);
+        return okResponse(appList(installed ? { state: "installed", running: 1, total: 1, job: { appId: "memos", action: "install", state: "succeeded", startedAt: "2026-10-07T00:00:00Z", output: ["Container memos  Started"] } } : {}));
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开应用中心" }));
+
+    const store = screen.getByRole("dialog", { name: "应用中心" });
+    await user.type(await within(store).findByRole("textbox", { name: "搜索应用" }), "memo");
+    expect(within(store).queryByRole("button", { name: /Navidrome/ })).toBeNull();
+    await user.click(within(store).getByRole("button", { name: "Memos，可安装" }));
+    await user.click(within(store).getByRole("button", { name: "安装" }));
+
+    const plan = await within(store).findByRole("region", { name: "安装计划" });
+    expect(within(plan).getByText("neosmemo/memos:0.28.0")).toBeTruthy();
+    expect(within(plan).getByText("5230/tcp")).toBeTruthy();
+    expect(within(plan).getByText("/srv/a-nas/appdata/memos/memos")).toBeTruthy();
+    expect(posts).toHaveLength(0);
+
+    await user.click(within(plan).getByRole("button", { name: "确认安装" }));
+    expect(posts).toEqual([{ url: "/api/v1/apps/memos/install", body: { digest: memosPlan.digest } }]);
+    expect(await within(store).findByText(/已安装 · 1\/1 个容器运行中/)).toBeTruthy();
+    expect(within(store).getByText(/Container memos\s+Started/)).toBeTruthy();
+
+    await user.click(within(store).getByRole("button", { name: "卸载" }));
+    await user.click(within(store).getByRole("button", { name: "确认卸载" }));
+    expect(posts[1]).toEqual({ url: "/api/v1/apps/memos/uninstall", body: {} });
+  });
+
+  it("explains install conflicts and a disabled App Center", async () => {
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      apps: async (url, init) => {
+        if (init?.method === "POST") {
+          return { ok: false, status: 409, json: async () => ({ error: { code: "port_in_use", message: "a published port is already in use: 5230 is used by other" } }) } as Response;
+        }
+        if (url.endsWith("/plan")) return okResponse(memosPlan);
+        return okResponse(appList({}));
+      },
+    });
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
+    const store = screen.getByRole("dialog", { name: "应用中心" });
+    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
+    await user.click(within(store).getByRole("button", { name: "安装" }));
+    await user.click(await within(store).findByRole("button", { name: "确认安装" }));
+    expect((await within(store).findByRole("alert")).textContent).toContain("端口已被占用（5230 is used by other）");
+    unmount();
+
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      apps: async () => ({ ok: false, status: 503, json: async () => ({ error: { code: "apps_disabled", message: "disabled" } }) }) as Response,
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
+    expect(await screen.findByText("应用中心未启用")).toBeTruthy();
+  });
+
   it("opens a terminal session from the desktop icon", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();
@@ -488,11 +583,13 @@ function routeFetch(routes: {
   metrics?: () => Promise<Response>;
   terminalEnabled?: boolean;
   containers?: (url: string, init?: RequestInit) => Promise<Response>;
+  apps?: (url: string, init?: RequestInit) => Promise<Response>;
 }) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).startsWith("/api/v1/containers") && routes.containers) return routes.containers(String(input), init);
+      if (String(input).startsWith("/api/v1/apps") && routes.apps) return routes.apps(String(input), init);
       switch (String(input)) {
         case "/api/v1/setup/status":
           return okResponse({ setupRequired: false });

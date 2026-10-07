@@ -1,0 +1,72 @@
+# 应用中心
+
+状态：implemented（本地 WSL2 以真实 Docker Compose 验证安装/卸载流程；镜像拉取与 Experimental NAS 未验证）
+更新时间：2026-10-07
+
+## 目标
+
+设备所有者在桌面“应用中心”浏览经过安全审查的应用，看清安装会拉取哪些镜像、开放哪些端口、使用哪些文件夹，确认后一键安装，并能卸载而保留数据。
+
+## 非目标
+
+- 不支持任意 Compose 文件、自定义镜像或运行时联网获取应用清单。
+- 不提供应用参数（端口、环境变量、目录）自定义、升级、备份或多实例安装。
+- 不在 A-NAS 窗口中嵌入应用网页，不配置反向代理或 HTTPS。
+- 不安装需要设备直通、宿主机网络或特权的应用（如 Jellyfin 硬件转码、Home Assistant）。
+
+## 场景
+
+### 浏览与搜索
+
+- Given：产品服务以 `ANAS_CONTAINERS_MODE=agent` 连接容器代理（或模拟模式）。
+- When：用户从桌面打开“应用中心”。
+- Then：显示内置清单中的全部应用卡片（图标、名称、简介、状态徽章），可按名称/简介搜索并按分类筛选；状态为“可安装”“已安装”“安装中”“卸载中”或“安装失败”。
+
+### 规划与确认安装
+
+- Given：应用状态为“可安装”。
+- When：用户在详情页点击“安装”。
+- Then：容器代理渲染安装计划并显示将拉取的镜像、开放的宿主机端口与用途、使用的文件夹（区分应用数据、共享数据、系统只读）、将创建的容器，以及可展开的最终 Compose 文件和计划摘要；未确认前不执行任何操作。
+
+### 执行安装
+
+- Given：用户已查看安装计划。
+- When：点击“确认安装”。
+- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`。界面显示“安装中”与最近的 Compose 输出，每 1.5 秒刷新；成功后显示“已安装 · N/N 个容器运行中”和访问端口，容器同时出现在 Docker 窗口。
+
+### 卸载
+
+- Given：应用已安装。
+- When：用户点击“卸载”并确认。
+- Then：后台运行 `docker compose down`，删除容器与项目网络，保留应用数据目录；完成后应用回到“可安装”。
+
+### 失败与冲突
+
+- Given：安装请求无法执行或执行失败。
+- When：出现计划过期、端口或容器名被占用、另一任务正在运行、容器代理不可达或 Compose 失败。
+- Then：分别提示“应用清单已变化，请重新确认”“端口已被占用（端口与占用者）”“容器名已被占用”“另一个应用正在安装或卸载”“无法连接容器代理”，或在任务日志中显示失败原因与 Compose 输出；未启用时显示“应用中心未启用”。
+
+## 边界与失败
+
+- 清单与安装策略见 [ADR 0010](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)；`catalog_test.go` 渲染每个内置应用，确保列出的应用都能通过策略。当前内置 26 个应用，来源提交为 CasaOS-AppStore `0909364`。
+- 路径：`/DATA/AppData/<app>/…` → `ANAS_APP_DATA_ROOT/<app>/…`（默认 `/srv/a-nas/appdata`）；其余 `/DATA/…`（含整个 `/DATA`）→ `ANAS_SHARED_DATA_ROOT/…`（默认 `/srv/a-nas/data`）；`/etc/localtime` 强制只读且不自动创建，`/etc/timezone` 被移除并以 `TZ` 代替。其他应用的数据目录、相对路径、`..` 逃逸和其余宿主机路径一律拒绝。
+- 可写绑定显式写出 `create_host_path: true`：compose-go 会省略该默认值，而 Docker Compose 2.40 读回长语法时按 false 处理并拒绝启动（本地实测发现）。
+- 环境变量插值只提供 `AppID`、`TZ`、`PUID`、`PGID`，不读取容器代理自身环境；`PUID`/`PGID` 默认为 1000，可由容器代理环境配置。
+- 端口冲突检查基于 Docker 已发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
+- 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出，任务状态保存在容器代理内存中，重启后丢失但已安装状态由容器标签恢复。
+- 写请求要求回环 Host、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
+
+## 验收证据
+
+- 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、标签、`create_host_path` 显式写出（修复前失败、修复后通过）、确定性摘要与 16 类拒绝情形；[清单测试](../../internal/appstore/catalog_test.go)。
+- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出。
+- 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
+- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖搜索、计划确认、按摘要安装、已安装状态、卸载确认、端口冲突提示与未启用状态。
+- 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：通过产品 API 与容器代理安装 Memos——本机 Docker 无法访问 Docker Hub，首次安装如实失败并显示拉取错误；以本地镜像临时标记为 `neosmemo/memos:0.28.0` 后，安装成功（容器带 `a-nas-memos` 项目与 `io.a-nas.app` 标签，绑定目录重写到应用数据根，Docker 窗口可见），重复安装返回 `already_installed`，卸载后容器与网络删除且数据保留；过期摘要返回 `plan_changed`，跨站请求返回 `forbidden`。Chromium 中模拟模式完成浏览、计划、安装、卸载全流程，26 个图标全部加载。临时镜像标签与测试数据已清理。
+
+## 关联
+
+- ADR：[0010 内置清单与安装策略](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)、[0009 Docker Engine 与专用容器代理](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
+- 规格：[容器管理](container-management.md)
+- 运行手册：[安装 Docker 与容器代理](../runbooks/install-container-agent.md)
+- 代码：[`internal/appstore`](../../internal/appstore/appstore.go)、[`internal/appstoreapi`](../../internal/appstoreapi/handler.go)、[`AppCenterPanel`](../../web/src/AppCenterPanel.tsx)
