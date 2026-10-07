@@ -141,8 +141,9 @@ function isNumberIn(value: unknown, min: number, max: number): value is number {
 export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string; mustChangePassword?: boolean }
 export interface Session { csrfToken: string; expiresAt: string; user: User }
 export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
-export interface Notification { id: string; kind: "admin_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
-export interface ViewingGrant { id: string; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }
+export interface Notification { id: string; kind: "admin_viewing" | "admin_library_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
+export type ViewingScope = "space" | "library";
+export interface ViewingGrant { id: string; scope: ViewingScope; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }
 export interface FileEntry { id: string; spaceId: string; parentId?: string; name: string; kind: "file" | "directory"; sizeBytes: number; modifiedAt: string }
 export interface TrashItem { id: string; entryId: string; spaceId: string; name: string; deletedBy: string; deletedAt: string }
 export interface Volume { id: string; diskId: string; filesystemUuid?: string; capacityBytes?: number; availableBytes?: number; state: "creating" | "available" | "unavailable" | "read_only" }
@@ -182,7 +183,7 @@ export async function currentSession() { const value = await request<Session>("/
 export const changePassword = (currentPassword: string, newPassword: string) => request<void>("/api/v1/session/password", json({ currentPassword, newPassword }), true);
 export const listNotifications = async () => (await request<{items: Notification[]}>("/api/v1/notifications")).items;
 export const acknowledgeNotification = (id: string) => request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`, json({}), true);
-export const startViewing = (userId: string, password: string, reason: string) => request<ViewingGrant>(`/api/v1/users/${encodeURIComponent(userId)}/viewing`, json({ password, reason }), true);
+export const startViewing = (userId: string, password: string, reason: string, scope: ViewingScope = "space") => request<ViewingGrant>(`/api/v1/users/${encodeURIComponent(userId)}/viewing`, json({ password, reason, scope }), true);
 export const endViewing = (grantId: string) => request<void>(`/api/v1/viewing/${encodeURIComponent(grantId)}`, { method: "DELETE" }, true);
 export async function logout() { await request<void>("/api/v1/session", { method: "DELETE" }, true); setSession(); }
 export const listSpaces = async () => (await request<{items: Space[]}>("/api/v1/spaces")).items;

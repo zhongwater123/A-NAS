@@ -1116,7 +1116,7 @@ components:
       required: [id, kind, actorUsername, createdAt]
       properties:
         id: { type: string }
-        kind: { type: string, enum: [admin_viewing, credential_reset] }
+        kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset] }
         actorUsername: { type: string }
         reason: { type: string }
         expiresAt: { type: string, format: date-time }
@@ -1128,12 +1128,14 @@ components:
       properties:
         password: { type: string }
         reason: { type: string, minLength: 1, maxLength: 500 }
+        scope: { type: string, enum: [space, library], default: space, description: The member's private space (ACL entries) or private photo library (photo Policy). }
     ViewingGrant:
       type: object
       additionalProperties: false
-      required: [id, spaceId, ownerUserId, reason, grantedAt, expiresAt]
+      required: [id, scope, spaceId, ownerUserId, reason, grantedAt, expiresAt]
       properties:
         id: { type: string }
+        scope: { type: string, enum: [space, library] }
         spaceId: { type: string }
         ownerUserId: { type: string }
         reason: { type: string }
@@ -1605,8 +1607,16 @@ components:
         id: { type: string }
         kind: { type: string, enum: [private, shared] }
         ownerUserId: { type: string }
+        ownerName: { type: string }
         createdAt: { type: string, format: date-time }
-        viewing: { type: boolean, description: True when the caller sees this member library only through Administrative Viewing Mode; read-only. }
+        viewing:
+          description: Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only.
+          type: object
+          additionalProperties: false
+          required: [grantId, expiresAt]
+          properties:
+            grantId: { type: string }
+            expiresAt: { type: string, format: date-time }
     PhotoDirectory:
       type: object
       additionalProperties: false
@@ -1636,6 +1646,10 @@ components:
         height: { type: integer, minimum: 0, description: Upright display height; 0 when unknown. }
         thumbnail: { type: string, enum: [ready, pending, failed] }
         duplicate: { type: string, enum: [first, duplicate], description: Role among assets of the same library with identical originals. }
+        alsoKeptBy:
+          description: Names of other members whose private libraries hold the same original; only the owner of a private library sees it.
+          type: array
+          items: { type: string }
         trash:
           type: object
           additionalProperties: false

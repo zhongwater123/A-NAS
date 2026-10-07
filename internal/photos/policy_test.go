@@ -181,7 +181,7 @@ func TestViewingGrantListsMemberLibraryReadOnlyUntilItExpires(t *testing.T) {
 	}
 	var viewed []photos.Library
 	for _, lib := range all {
-		if lib.Viewing {
+		if lib.Viewing != nil {
 			viewed = append(viewed, lib)
 		}
 	}
@@ -196,7 +196,7 @@ func TestViewingGrantListsMemberLibraryReadOnlyUntilItExpires(t *testing.T) {
 		t.Fatalf("Libraries() error = %v", err)
 	}
 	for _, lib := range all {
-		if lib.Viewing {
+		if lib.Viewing != nil {
 			t.Fatalf("expired grant still lists %+v", lib)
 		}
 	}

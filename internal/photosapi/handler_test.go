@@ -256,3 +256,32 @@ func TestRequiresPrincipalAndService(t *testing.T) {
 		t.Fatalf("disabled status = %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestHiddenItemsAnswerExactlyLikeMissingOnes(t *testing.T) {
+	handler, _ := newAPI(t)
+	owner := client{t: t, handler: handler, as: alice}
+	private, _ := librariesOf(owner)
+	var asset photos.Asset
+	if err := json.Unmarshal(owner.upload(private.ID, "", "secret.png", pngBytes(t, 70)).Body.Bytes(), &asset); err != nil {
+		t.Fatal(err)
+	}
+	stranger := client{t: t, handler: handler, as: bob}
+	for _, path := range []string{
+		"/api/v1/photos/assets/%s",
+		"/api/v1/photos/assets/%s/original",
+		"/api/v1/photos/assets/%s/thumbnail",
+	} {
+		hidden := stranger.do(http.MethodGet, strings.Replace(path, "%s", asset.ID, 1), nil, "")
+		missing := stranger.do(http.MethodGet, strings.Replace(path, "%s", "photo:missing", 1), nil, "")
+		if hidden.Code != missing.Code || hidden.Body.String() != missing.Body.String() {
+			t.Errorf("%s: hidden %d %q, missing %d %q", path, hidden.Code, hidden.Body.String(), missing.Code, missing.Body.String())
+		}
+	}
+	for _, path := range []string{"/api/v1/photos/libraries/%s/timeline", "/api/v1/photos/libraries/%s/entries", "/api/v1/photos/libraries/%s/trash"} {
+		hidden := stranger.do(http.MethodGet, strings.Replace(path, "%s", private.ID, 1), nil, "")
+		missing := stranger.do(http.MethodGet, strings.Replace(path, "%s", "library:missing", 1), nil, "")
+		if hidden.Code != http.StatusNotFound || hidden.Body.String() != missing.Body.String() {
+			t.Errorf("%s: hidden %d %q, missing %d %q", path, hidden.Code, hidden.Body.String(), missing.Code, missing.Body.String())
+		}
+	}
+}

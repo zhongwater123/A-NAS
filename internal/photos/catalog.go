@@ -110,6 +110,10 @@ CREATE INDEX jobs_ready ON jobs(state, not_before);
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT id, 'thumbnail/v1', 'pending', created_at, created_at FROM objects;
 `,
+	// 3: the owner's username, which cross-member duplicate hints show.
+	`
+ALTER TABLE libraries ADD COLUMN owner_name TEXT NOT NULL DEFAULT '';
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
@@ -204,34 +208,42 @@ func (s *Service) ensureSharedLibrary() error {
 }
 
 // ensurePrivateLibrary returns the caller's private library, creating it on
-// first use.
-func (s *Service) ensurePrivateLibrary(ctx context.Context, userID string) (library, error) {
-	lib, err := s.privateLibrary(ctx, s.db, userID)
-	if !errors.Is(err, ErrNotFound) {
+// first use and keeping the owner's name current.
+func (s *Service) ensurePrivateLibrary(ctx context.Context, p Principal) (library, error) {
+	lib, err := s.privateLibrary(ctx, s.db, p.UserID)
+	if errors.Is(err, ErrNotFound) {
+		lib = library{id: s.randomID("library"), kind: LibraryKindPrivate, ownerUserID: p.UserID, ownerName: p.Username, createdAt: s.now().UTC()}
+		if _, err := s.db.ExecContext(ctx,
+			"INSERT INTO libraries(id, kind, owner_user_id, owner_name, created_at) VALUES(?, 'private', ?, ?, ?) ON CONFLICT DO NOTHING",
+			lib.id, p.UserID, p.Username, formatTime(lib.createdAt)); err != nil {
+			return library{}, err
+		}
+		return s.privateLibrary(ctx, s.db, p.UserID)
+	}
+	if err != nil || p.Username == "" || lib.ownerName == p.Username {
 		return lib, err
 	}
-	lib = library{id: s.randomID("library"), kind: LibraryKindPrivate, ownerUserID: userID, createdAt: s.now().UTC()}
-	if _, err := s.db.ExecContext(ctx,
-		"INSERT INTO libraries(id, kind, owner_user_id, created_at) VALUES(?, 'private', ?, ?) ON CONFLICT DO NOTHING",
-		lib.id, userID, formatTime(lib.createdAt)); err != nil {
+	if _, err := s.db.ExecContext(ctx, "UPDATE libraries SET owner_name = ? WHERE id = ?", p.Username, lib.id); err != nil {
 		return library{}, err
 	}
-	return s.privateLibrary(ctx, s.db, userID)
+	lib.ownerName = p.Username
+	return lib, nil
 }
 
 type library struct {
 	id          string
 	kind        LibraryKind
 	ownerUserID string
+	ownerName   string
 	createdAt   time.Time
 }
 
-const libraryColumns = "id, kind, IFNULL(owner_user_id, ''), created_at"
+const libraryColumns = "id, kind, IFNULL(owner_user_id, ''), owner_name, created_at"
 
 func scanLibrary(row rowScanner) (library, error) {
 	var lib library
 	var createdAt string
-	if err := row.Scan(&lib.id, &lib.kind, &lib.ownerUserID, &createdAt); err != nil {
+	if err := row.Scan(&lib.id, &lib.kind, &lib.ownerUserID, &lib.ownerName, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return library{}, ErrNotFound
 		}

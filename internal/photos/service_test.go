@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestImportPersistsOriginalAcrossRestart(t *testing.T) {
 		t.Fatalf("library IDs changed across restart")
 	}
 	got, err := reopened.Get(ctx, alice, asset.ID)
-	if err != nil || got != asset {
+	if err != nil || !reflect.DeepEqual(got, asset) {
 		t.Fatalf("Get() = %+v, %v; want %+v", got, err, asset)
 	}
 	content, err := reopened.Open(ctx, alice, asset.ID)

@@ -359,6 +359,7 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 
 - 内容完全相同由原文件字节哈希判定，不使用文件名、拍摄时间或感知相似度冒充完全重复。
 - 重复组限定在同一图库内，最早导入的为首张；跨图库只提供重复提示，不组成重复组。
+- 跨成员重复提示只出现在私有图库所有者自己的照片上，列出其他私有图库中保存了相同原图的成员用户名；管理员查看模式和共享图库中不显示。另一成员把照片移到回收站后，提示随即消失。
 - 重复组中的照片资产保留独立身份、图库归属、用户元数据、回收站状态和权限。
 - 相册 Module 可以在不改变用户可见复制语义的前提下复用不可变原图字节；只有最后一个引用永久删除后才能回收对应物理对象。
 - 物理对象的引用计数和回收属于相册 Module 的内部 Implementation，图库、文件管理和网络共享只观察照片资产身份及其生命周期。
@@ -411,4 +412,4 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 - 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 研究：[本地照片 AI 模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md)
 - 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/PhotosPanel.tsx)、[相册服务进程](../../internal/photoservice/photoservice.go)；部署见[启用相册服务](../runbooks/enable-photo-service.md)
-- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/PhotosPanel.test.tsx)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[私有图库查看授权](../../internal/accounts/library_viewing_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/PhotosPanel.test.tsx)、[端到端冒烟](../../scripts/smoke-photo-service.sh)

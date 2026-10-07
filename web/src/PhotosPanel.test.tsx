@@ -170,3 +170,41 @@ describe("PhotosPanel", () => {
     expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
   });
 });
+
+describe("PhotosPanel viewing and hints", () => {
+  it("browses a viewed member library read-only and can end the viewing", async () => {
+    const viewed: PhotoLibrary = { id: "library:alice", kind: "private", ownerUserId: "user:alice", ownerName: "alice", createdAt: "2026-10-08T00:00:00Z", viewing: { grantId: "viewing:7", expiresAt: "2026-10-09T09:00:00Z" } };
+    const own: PhotoLibrary = { ...privateLibrary, id: "library:admin", ownerUserId: "user:admin", ownerName: "admin" };
+    let ended = false;
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/libraries") return json({ items: ended ? [own, sharedLibrary] : [own, sharedLibrary, viewed] });
+      if (url === "/api/v1/viewing/viewing%3A7" && init?.method === "DELETE") { ended = true; return new Response(null, { status: 204 }); }
+      if (url.includes("library%3Aalice/timeline")) return json({ items: [asset("photo:w", { libraryId: viewed.id, uploadedBy: "user:alice" })] });
+      if (url.includes("/timeline")) return json({ items: [] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:admin" isAdmin />);
+    const select = await screen.findByRole("combobox", { name: "图库" });
+    expect(screen.getByRole("option", { name: "只读查看 · alice" })).toBeTruthy();
+    await user.selectOptions(select, "library:alice");
+    expect((await screen.findByRole("status")).textContent).toContain("只读查看 alice 的私有图库");
+    expect(screen.queryByLabelText("上传照片")).toBeNull();
+    await user.click(await screen.findByRole("button", { name: "查看 photo:w.jpg" }));
+    expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重命名" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "关闭查看" }));
+    await user.click(screen.getByRole("button", { name: "结束查看" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/viewing/viewing%3A7", expect.objectContaining({ method: "DELETE" }));
+    expect(await screen.findByRole("option", { name: "我的图库" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "只读查看 · alice" })).toBeNull();
+  });
+
+  it("names other members who kept the same photo", async () => {
+    serve((url) => url.includes("/timeline") ? json({ items: [asset("photo:a", { alsoKeptBy: ["bob", "carol"] })] }) : undefined);
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "查看 photo:a.jpg" }));
+    expect(screen.getByText("bob、carol 也保存了相同的照片。")).toBeTruthy();
+  });
+});

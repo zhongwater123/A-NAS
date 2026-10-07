@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/mattn/go-sqlite3"
@@ -17,7 +18,7 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 	if !p.valid() {
 		return nil, ErrForbidden
 	}
-	own, err := s.ensurePrivateLibrary(ctx, p.UserID)
+	own, err := s.ensurePrivateLibrary(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -25,11 +26,11 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 	if err != nil {
 		return nil, err
 	}
-	libraries := []Library{publicLibrary(p, own), publicLibrary(p, shared)}
+	now := s.now()
+	libraries := []Library{publicLibrary(p, own, now), publicLibrary(p, shared, now)}
 	if !p.Admin {
 		return libraries, nil
 	}
-	now := s.now()
 	seen := map[string]bool{p.UserID: true}
 	for _, grant := range p.Viewing {
 		if seen[grant.OwnerUserID] || !grant.ExpiresAt.After(now) {
@@ -43,16 +44,19 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 		if err != nil {
 			return nil, err
 		}
-		libraries = append(libraries, publicLibrary(p, viewed))
+		libraries = append(libraries, publicLibrary(p, viewed, now))
 	}
 	return libraries, nil
 }
 
-func publicLibrary(p Principal, lib library) Library {
-	return Library{
-		ID: lib.id, Kind: lib.kind, OwnerUserID: lib.ownerUserID, CreatedAt: lib.createdAt,
-		Viewing: viewingOnly(p, lib),
+func publicLibrary(p Principal, lib library, now time.Time) Library {
+	public := Library{ID: lib.id, Kind: lib.kind, OwnerUserID: lib.ownerUserID, OwnerName: lib.ownerName, CreatedAt: lib.createdAt}
+	if viewingOnly(p, lib) {
+		if grant, ok := p.viewing(lib.ownerUserID, now); ok {
+			public.Viewing = &LibraryViewing{GrantID: grant.GrantID, ExpiresAt: grant.ExpiresAt}
+		}
 	}
+	return public
 }
 
 func (s *Service) visibleLibrary(ctx context.Context, q queryer, p Principal, libraryID string) (library, error) {
@@ -106,6 +110,9 @@ func (s *Service) ListDirectory(ctx context.Context, p Principal, libraryID, dir
 		"WHERE a.library_id = ? AND IFNULL(a.directory_id, '') = ? AND a.trashed_at IS NULL ORDER BY a.name, a.id",
 		lib.id, directoryID)
 	if err != nil {
+		return DirectoryListing{}, err
+	}
+	if err := s.addDuplicateHints(ctx, s.db, p, records); err != nil {
 		return DirectoryListing{}, err
 	}
 	for _, record := range records {

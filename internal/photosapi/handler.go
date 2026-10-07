@@ -1,8 +1,9 @@
 // Package photosapi exposes the photo library under /api/v1/photos. It does
 // not authenticate: the caller wraps it so that every request carries the
 // Principal confirmed for its session (WithPrincipal) and so that writes have
-// passed CSRF checks. Today the Product Service mounts it in development; the
-// photo service will serve it behind the same wrapper (ADR 0011).
+// passed CSRF checks. The photo service serves it after confirming sessions
+// with the Host Agent; in development the Product Service mounts it directly
+// (ADR 0011).
 package photosapi
 
 import (
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -25,6 +27,18 @@ type principalKey struct{}
 // WithPrincipal attaches the caller confirmed by the session lookup.
 func WithPrincipal(ctx context.Context, principal photos.Principal) context.Context {
 	return context.WithValue(ctx, principalKey{}, principal)
+}
+
+// NewPrincipal builds the photo Principal for a confirmed user and their
+// unexpired grants to view members' private libraries.
+func NewPrincipal(userID, username string, admin bool, viewings []accounts.LibraryViewing) photos.Principal {
+	principal := photos.Principal{UserID: userID, Username: username, Admin: admin}
+	for _, viewing := range viewings {
+		principal.Viewing = append(principal.Viewing, photos.ViewingGrant{
+			GrantID: viewing.GrantID, OwnerUserID: viewing.OwnerUserID, ExpiresAt: viewing.ExpiresAt,
+		})
+	}
+	return principal
 }
 
 func principalFrom(r *http.Request) (photos.Principal, bool) {

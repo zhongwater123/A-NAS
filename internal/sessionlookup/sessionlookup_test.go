@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -38,7 +39,7 @@ func TestClientResolvesThroughTheSocket(t *testing.T) {
 	client := sessionlookup.NewClient(socket)
 	ctx := context.Background()
 
-	if user, err := client.ResolveSessionUser(ctx, "alice-token"); err != nil || user != alice {
+	if user, err := client.ResolveSessionUser(ctx, "alice-token"); err != nil || !reflect.DeepEqual(user, alice) {
 		t.Fatalf("ResolveSessionUser() = %+v, %v", user, err)
 	}
 	if _, err := client.ResolveSessionUser(ctx, "forged"); !errors.Is(err, accounts.ErrSessionNotFound) {

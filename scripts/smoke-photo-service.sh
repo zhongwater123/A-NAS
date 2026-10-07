@@ -84,13 +84,15 @@ check() {
 # denied COMMAND...: succeeds when the command fails, quietly.
 # shellcheck disable=SC2329 # invoked through check
 denied() { ! "$@" >/dev/null 2>&1; }
+# shellcheck disable=SC2329 # invoked through check
+quiet() { "$@" >/dev/null 2>&1; }
 as() { local user=$1; shift; setpriv --reuid="$user" --regid="$user" --init-groups "$@"; }
 mode_of() { stat -c '%a %U:%G' "$1"; }
 status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 api=http://127.0.0.1:8080
 
 check "photos store is a-nas-photos 0700" test "$(mode_of /srv/a-nas/data/photos)" = "700 a-nas-photos:a-nas-photos"
-check "photos store is a Btrfs subvolume" btrfs subvolume show /srv/a-nas/data/photos
+check "photos store is a Btrfs subvolume" quiet btrfs subvolume show /srv/a-nas/data/photos
 check "session socket is root:a-nas-photos 0660" test "$(mode_of /run/a-nas-sessions/photos.sock)" = "660 root:a-nas-photos"
 check "photo socket is a-nas-photos 0660" test "$(mode_of /run/a-nas-photos/photos.sock)" = "660 a-nas-photos:a-nas-photos"
 
@@ -126,6 +128,31 @@ check "forged token at the photo socket is refused" test "$(as a-nas curl -s -o 
 check "members outside the group cannot reach the photo socket" denied as owner curl -fs \
   --unix-socket /run/a-nas-photos/photos.sock http://photos/api/v1/photos/libraries
 check "photo service logged ready" grep -q "photo service ready" /tmp/photos.log
+
+# A member's private library: hidden from the administrator until a
+# library viewing grant, read-only during it, hidden again after it ends.
+json_field() { sed -E "s/.*\"$1\":\"([^\"]+)\".*/\1/"; }
+member=$(curl -fsS -b /tmp/jar -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"alice e2e password"}' "$api/api/v1/users")
+alice_id=$(printf '%s' "$member" | json_field id)
+alice_csrf=$(curl -fsS -c /tmp/alice-jar -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"alice e2e password"}' "$api/api/v1/session" | json_field csrfToken)
+curl -fsS -b /tmp/alice-jar "$api/api/v1/photos/libraries" > /tmp/alice-libraries.json
+alice_library=$(sed -E 's/.*"id":"(library:[0-9a-f]+)","kind":"private".*/\1/' /tmp/alice-libraries.json)
+curl -fsS -o /tmp/alice-upload.json -b /tmp/alice-jar -H "X-CSRF-Token: $alice_csrf" -F file=@/tmp/e2e.png \
+  "$api/api/v1/photos/libraries/$alice_library/uploads"
+alice_asset=$(json_field id < /tmp/alice-upload.json)
+check "duplicate hint names only the other member" grep -q '"alsoKeptBy":\["owner"\]' /tmp/alice-upload.json
+alice_timeline="$api/api/v1/photos/libraries/$alice_library/timeline"
+check "administrator cannot see a member's library" test "$(status_of -b /tmp/jar "$alice_timeline")" = 404
+grant_id=$(curl -fsS -b /tmp/jar -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+  -d '{"password":"e2e owner password","reason":"e2e smoke","scope":"library"}' "$api/api/v1/users/$alice_id/viewing" | json_field id)
+check "library grant opens the member's library" test "$(status_of -b /tmp/jar "$alice_timeline")" = 200
+check "library grant is read-only" test "$(status_of -X DELETE -b /tmp/jar -H "X-CSRF-Token: $csrf" "$api/api/v1/photos/assets/$alice_asset")" = 403
+check "library grant does not open the private space" denied as owner ls "/srv/a-nas/data/spaces/private/alice"
+check "member is told about the viewing" grep -q admin_library_viewing <(curl -fsS -b /tmp/alice-jar "$api/api/v1/notifications")
+curl -fsS -o /dev/null -X DELETE -b /tmp/jar -H "X-CSRF-Token: $csrf" "$api/api/v1/viewing/$grant_id"
+check "ending the grant hides the library again" test "$(status_of -b /tmp/jar "$alice_timeline")" = 404
 
 if [ "$failures" -ne 0 ]; then
   echo "--- host agent"; tail -20 /tmp/host-agent.log

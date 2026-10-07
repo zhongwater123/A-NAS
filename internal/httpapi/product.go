@@ -15,7 +15,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
-	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -767,14 +766,24 @@ func (h *productHandler) handleAcknowledgeNotification(w http.ResponseWriter, r 
 
 func (h *productHandler) handleStartViewing(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
-		Password string `json:"password"`
-		Reason   string `json:"reason"`
+		Password string                `json:"password"`
+		Reason   string                `json:"reason"`
+		Scope    accounts.ViewingScope `json:"scope"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	grant, err := h.accounts.StartViewing(r.Context(), session.User, r.PathValue("userID"), request.Password, request.Reason)
+	start := h.accounts.StartViewing
+	switch request.Scope {
+	case "", accounts.ViewingScopeSpace:
+	case accounts.ViewingScopeLibrary:
+		start = h.accounts.StartLibraryViewing
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "scope must be space or library")
+		return
+	}
+	grant, err := start(r.Context(), session.User, r.PathValue("userID"), request.Password, request.Reason)
 	if err != nil {
 		h.writeAccountError(w, r, err)
 		return
@@ -794,7 +803,12 @@ func (h *productHandler) handleEndViewing(w http.ResponseWriter, r *http.Request
 // its own Policy; writes still need the session's CSRF token.
 func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc {
 	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		principal := photos.Principal{UserID: session.User.ID, Admin: session.User.Role == accounts.RoleAdmin}
+		viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
 		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
 	}
 	read, write := h.withSession(serve), h.withMutation(serve)

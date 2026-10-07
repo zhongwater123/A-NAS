@@ -187,7 +187,7 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handl
 			photosapi.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
-		principal := photos.Principal{UserID: user.UserID, Admin: user.Role == accounts.RoleAdmin}
+		principal := photosapi.NewPrincipal(user.UserID, user.Username, user.Role == accounts.RoleAdmin, user.Viewing)
 		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
 	})
 }

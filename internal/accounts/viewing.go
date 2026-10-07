@@ -28,12 +28,32 @@ type ViewingAccess struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+// ViewingScope is what an Administrative Viewing grant opens: a member's
+// private space (through ACL entries the Host Agent adds) or their private
+// photo library (enforced by the photo service's Policy, ADR 0011). Each
+// scope is granted, audited, notified and ended on its own.
+type ViewingScope string
+
+const (
+	ViewingScopeSpace   ViewingScope = "space"
+	ViewingScopeLibrary ViewingScope = "library"
+)
+
 type ViewingGrant struct {
-	ID          string    `json:"id"`
-	SpaceID     string    `json:"spaceId"`
+	ID          string       `json:"id"`
+	Scope       ViewingScope `json:"scope"`
+	SpaceID     string       `json:"spaceId"`
+	OwnerUserID string       `json:"ownerUserId"`
+	Reason      string       `json:"reason"`
+	GrantedAt   time.Time    `json:"grantedAt"`
+	ExpiresAt   time.Time    `json:"expiresAt"`
+}
+
+// LibraryViewing is an unexpired grant to view one member's private photo
+// library read-only.
+type LibraryViewing struct {
+	GrantID     string    `json:"grantId"`
 	OwnerUserID string    `json:"ownerUserId"`
-	Reason      string    `json:"reason"`
-	GrantedAt   time.Time `json:"grantedAt"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
@@ -55,8 +75,9 @@ type ViewingProvisioner interface {
 type NotificationKind string
 
 const (
-	NotificationAdminViewing    NotificationKind = "admin_viewing"
-	NotificationCredentialReset NotificationKind = "credential_reset"
+	NotificationAdminViewing        NotificationKind = "admin_viewing"
+	NotificationAdminLibraryViewing NotificationKind = "admin_library_viewing"
+	NotificationCredentialReset     NotificationKind = "credential_reset"
 )
 
 type Notification struct {
@@ -78,25 +99,7 @@ type notificationDetail struct {
 // password and states a reason; the access is audited and the owner is
 // notified.
 func (s *Service) StartViewing(ctx context.Context, actor User, ownerUserID, password, reason string) (ViewingGrant, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
-		return ViewingGrant{}, ErrForbidden
-	}
-	reason = strings.TrimSpace(reason)
-	if reason == "" || len([]rune(reason)) > 500 {
-		return ViewingGrant{}, ErrReasonRequired
-	}
-	var encodedHash string
-	if err := s.store.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id = ?", actor.ID).Scan(&encodedHash); err != nil || !verifyPassword(password, encodedHash) {
-		return ViewingGrant{}, ErrInvalidCredentials
-	}
-	if ownerUserID == actor.ID {
-		return ViewingGrant{}, ErrForbidden
-	}
-	var spaceID string
-	err := s.store.db.QueryRowContext(ctx, "SELECT id FROM spaces WHERE kind = 'private' AND owner_user_id = ?", ownerUserID).Scan(&spaceID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ViewingGrant{}, ErrUserNotFound
-	}
+	reason, spaceID, err := s.prepareViewing(ctx, actor, ownerUserID, password, reason)
 	if err != nil {
 		return ViewingGrant{}, err
 	}
@@ -116,12 +119,12 @@ func (s *Service) StartViewing(ctx context.Context, actor User, ownerUserID, pas
 	}
 	now := s.now().UTC()
 	grant := ViewingGrant{
-		ID: s.randomID("viewing"), SpaceID: spaceID, OwnerUserID: ownerID, Reason: reason,
+		ID: s.randomID("viewing"), Scope: ViewingScopeSpace, SpaceID: spaceID, OwnerUserID: ownerID, Reason: reason,
 		GrantedAt: now, ExpiresAt: now.Add(ViewingDuration),
 	}
 	if _, err := s.store.db.ExecContext(ctx, `INSERT INTO viewing_grants
-(id, admin_user_id, space_id, owner_user_id, reason, granted_at, expires_at) VALUES(?,?,?,?,?,?,?)`,
-		grant.ID, actor.ID, spaceID, ownerID, reason, formatTime(now), formatTime(grant.ExpiresAt)); err != nil {
+(id, admin_user_id, space_id, owner_user_id, reason, granted_at, expires_at, scope) VALUES(?,?,?,?,?,?,?,?)`,
+		grant.ID, actor.ID, spaceID, ownerID, reason, formatTime(now), formatTime(grant.ExpiresAt), ViewingScopeSpace); err != nil {
 		return ViewingGrant{}, err
 	}
 	if err := provisioner.GrantViewing(ctx, ViewingRequest{
@@ -146,19 +149,121 @@ func (s *Service) StartViewing(ctx context.Context, actor User, ownerUserID, pas
 	return grant, nil
 }
 
+// StartLibraryViewing opens another account's private photo library
+// read-only to an administrator for ViewingDuration, with the same password
+// check, reason, audit and owner notification as viewing a private space.
+// The photo service enforces it; no ACL changes (ADR 0011).
+func (s *Service) StartLibraryViewing(ctx context.Context, actor User, ownerUserID, password, reason string) (ViewingGrant, error) {
+	reason, spaceID, err := s.prepareViewing(ctx, actor, ownerUserID, password, reason)
+	if err != nil {
+		return ViewingGrant{}, err
+	}
+	now := s.now().UTC()
+	var active int
+	if err := s.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM viewing_grants
+WHERE admin_user_id = ? AND owner_user_id = ? AND scope = ? AND ended_at IS NULL AND expires_at > ?`,
+		actor.ID, ownerUserID, ViewingScopeLibrary, formatTime(now)).Scan(&active); err != nil {
+		return ViewingGrant{}, err
+	}
+	if active > 0 {
+		return ViewingGrant{}, ErrViewingActive
+	}
+	grant := ViewingGrant{
+		ID: s.randomID("viewing"), Scope: ViewingScopeLibrary, SpaceID: spaceID, OwnerUserID: ownerUserID, Reason: reason,
+		GrantedAt: now, ExpiresAt: now.Add(ViewingDuration),
+	}
+	if _, err := s.store.db.ExecContext(ctx, `INSERT INTO viewing_grants
+(id, admin_user_id, space_id, owner_user_id, reason, granted_at, expires_at, scope) VALUES(?,?,?,?,?,?,?,?)`,
+		grant.ID, actor.ID, spaceID, ownerUserID, reason, formatTime(now), formatTime(grant.ExpiresAt), ViewingScopeLibrary); err != nil {
+		return ViewingGrant{}, err
+	}
+	detail := encodeDetail(reason, &grant.ExpiresAt)
+	if err := s.notify(ctx, ownerUserID, NotificationAdminLibraryViewing, actor.Username, detail); err != nil {
+		return ViewingGrant{}, err
+	}
+	if err := s.appendAudit(ctx, actor.ID, "photos.viewing_started", "user", ownerUserID, detail); err != nil {
+		return ViewingGrant{}, err
+	}
+	return grant, nil
+}
+
+// prepareViewing checks what every Administrative Viewing grant requires and
+// returns the trimmed reason and the owner's private space.
+func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, password, reason string) (string, string, error) {
+	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+		return "", "", ErrForbidden
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len([]rune(reason)) > 500 {
+		return "", "", ErrReasonRequired
+	}
+	var encodedHash string
+	if err := s.store.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id = ?", actor.ID).Scan(&encodedHash); err != nil || !verifyPassword(password, encodedHash) {
+		return "", "", ErrInvalidCredentials
+	}
+	if ownerUserID == actor.ID {
+		return "", "", ErrForbidden
+	}
+	var spaceID string
+	err := s.store.db.QueryRowContext(ctx, "SELECT id FROM spaces WHERE kind = 'private' AND owner_user_id = ?", ownerUserID).Scan(&spaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrUserNotFound
+	}
+	return reason, spaceID, err
+}
+
+// LibraryViewings lists the actor's unexpired, unended grants to view
+// members' private photo libraries.
+func (s *Service) LibraryViewings(ctx context.Context, actor User) ([]LibraryViewing, error) {
+	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+		return nil, nil
+	}
+	return queryLibraryViewings(ctx, s.store.db, actor.ID, s.now().UTC())
+}
+
+func queryLibraryViewings(ctx context.Context, db *sql.DB, adminUserID string, now time.Time) ([]LibraryViewing, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id, owner_user_id, expires_at FROM viewing_grants
+WHERE admin_user_id = ? AND scope = ? AND ended_at IS NULL AND expires_at > ? ORDER BY expires_at`,
+		adminUserID, ViewingScopeLibrary, formatTime(now))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var viewings []LibraryViewing
+	for rows.Next() {
+		var viewing LibraryViewing
+		var expiresAt string
+		if err := rows.Scan(&viewing.GrantID, &viewing.OwnerUserID, &expiresAt); err != nil {
+			return nil, err
+		}
+		if viewing.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt); err != nil {
+			return nil, err
+		}
+		viewings = append(viewings, viewing)
+	}
+	return viewings, rows.Err()
+}
+
 // EndViewing revokes an administrator's viewing grant before it expires.
 func (s *Service) EndViewing(ctx context.Context, actor User, grantID string) error {
 	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
 		return ErrForbidden
 	}
-	var spaceID string
-	err := s.store.db.QueryRowContext(ctx, `SELECT space_id FROM viewing_grants
-WHERE id = ? AND admin_user_id = ? AND ended_at IS NULL`, grantID, actor.ID).Scan(&spaceID)
+	var spaceID, ownerUserID string
+	var scope ViewingScope
+	err := s.store.db.QueryRowContext(ctx, `SELECT space_id, owner_user_id, scope FROM viewing_grants
+WHERE id = ? AND admin_user_id = ? AND ended_at IS NULL`, grantID, actor.ID).Scan(&spaceID, &ownerUserID, &scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrUserNotFound
 	}
 	if err != nil {
 		return err
+	}
+	if scope == ViewingScopeLibrary {
+		if _, err := s.store.db.ExecContext(ctx, "UPDATE viewing_grants SET ended_at = ? WHERE id = ?", formatTime(s.now().UTC()), grantID); err != nil {
+			return err
+		}
+		return s.appendAudit(ctx, actor.ID, "photos.viewing_ended", "user", ownerUserID, grantID)
 	}
 	provisioner, ok := s.credentials.(ViewingProvisioner)
 	if !ok {
@@ -182,7 +287,7 @@ func (s *Service) activeGrant(ctx context.Context, actor User, spaceID string) (
 	var grant ViewingGrant
 	var grantedAt, expiresAt string
 	err := s.store.db.QueryRowContext(ctx, `SELECT id, space_id, owner_user_id, reason, granted_at, expires_at
-FROM viewing_grants WHERE admin_user_id = ? AND space_id = ? AND ended_at IS NULL AND expires_at > ?
+FROM viewing_grants WHERE admin_user_id = ? AND space_id = ? AND scope = 'space' AND ended_at IS NULL AND expires_at > ?
 ORDER BY expires_at DESC LIMIT 1`, actor.ID, spaceID, formatTime(s.now().UTC())).Scan(
 		&grant.ID, &grant.SpaceID, &grant.OwnerUserID, &grant.Reason, &grantedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -203,7 +308,7 @@ func (s *Service) viewedSpaces(ctx context.Context, actor User) ([]Space, error)
 	}
 	rows, err := s.store.db.QueryContext(ctx, `SELECT sp.id, sp.kind, sp.name, COALESCE(sp.owner_user_id, ''), sp.created_at, g.id, g.expires_at
 FROM viewing_grants g JOIN spaces sp ON sp.id = g.space_id
-WHERE g.admin_user_id = ? AND g.ended_at IS NULL AND g.expires_at > ?
+WHERE g.admin_user_id = ? AND g.scope = 'space' AND g.ended_at IS NULL AND g.expires_at > ?
 ORDER BY sp.name`, actor.ID, formatTime(s.now().UTC()))
 	if err != nil {
 		return nil, err

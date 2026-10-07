@@ -14,20 +14,27 @@ import "time"
 
 func (p Principal) valid() bool { return p.UserID != "" }
 
-func (p Principal) viewing(ownerUserID string, now time.Time) bool {
+// viewing returns the caller's unexpired grant on a member's private library
+// that lasts longest.
+func (p Principal) viewing(ownerUserID string, now time.Time) (ViewingGrant, bool) {
+	var found ViewingGrant
 	for _, grant := range p.Viewing {
-		if grant.OwnerUserID == ownerUserID && grant.ExpiresAt.After(now) {
-			return true
+		if grant.OwnerUserID == ownerUserID && grant.ExpiresAt.After(now) && grant.ExpiresAt.After(found.ExpiresAt) {
+			found = grant
 		}
 	}
-	return false
+	return found, !found.ExpiresAt.IsZero()
 }
 
 func canView(p Principal, lib library, now time.Time) bool {
 	if lib.kind == LibraryKindShared {
 		return true
 	}
-	return lib.ownerUserID == p.UserID || (p.Admin && p.viewing(lib.ownerUserID, now))
+	if lib.ownerUserID == p.UserID {
+		return true
+	}
+	_, viewing := p.viewing(lib.ownerUserID, now)
+	return p.Admin && viewing
 }
 
 // viewingOnly reports whether p sees lib only through Administrative Viewing

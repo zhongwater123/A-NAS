@@ -1,6 +1,6 @@
 import { request } from "./api";
 
-export interface PhotoLibrary { id: string; kind: "private" | "shared"; ownerUserId?: string; createdAt: string; viewing?: boolean }
+export interface PhotoLibrary { id: string; kind: "private" | "shared"; ownerUserId?: string; ownerName?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
 export interface PhotoTrash { trashedAt: string; trashedBy: string; purgeAfter: string }
 export interface PhotoAsset {
   id: string;
@@ -16,6 +16,8 @@ export interface PhotoAsset {
   height: number;
   thumbnail: "ready" | "pending" | "failed";
   duplicate?: "first" | "duplicate";
+  // Other members whose private libraries hold the same original.
+  alsoKeptBy?: string[];
   trash?: PhotoTrash;
 }
 export interface PhotoPage { items: PhotoAsset[]; next?: string }

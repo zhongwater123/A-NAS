@@ -142,6 +142,9 @@ type SessionUser struct {
 	Username           string `json:"username"`
 	Role               Role   `json:"role"`
 	MustChangePassword bool   `json:"mustChangePassword"`
+	// Viewing lists an administrator's unexpired grants to view members'
+	// private photo libraries.
+	Viewing []LibraryViewing `json:"viewing,omitempty"`
 }
 
 // ResolveSessionUser returns the user of an active, unexpired session. The
@@ -169,9 +172,16 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&user.UserID, &user.Username, &u
 		d.reset()
 		return SessionUser{}, fmt.Errorf("read session directory: %w", err)
 	}
+	now := d.now().UTC()
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
-	if err != nil || status != UserStatusActive || !d.now().UTC().Before(expires) {
+	if err != nil || status != UserStatusActive || !now.Before(expires) {
 		return SessionUser{}, ErrSessionNotFound
+	}
+	if user.Role == RoleAdmin {
+		if user.Viewing, err = queryLibraryViewings(ctx, db, user.UserID, now); err != nil {
+			d.reset()
+			return SessionUser{}, fmt.Errorf("read viewing grants: %w", err)
+		}
 	}
 	return user, nil
 }

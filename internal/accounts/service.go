@@ -245,6 +245,10 @@ CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
 	if err := s.ensureColumn(ctx, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	// Grants made before private libraries could be viewed are for spaces.
+	if err := s.ensureColumn(ctx, "viewing_grants", "scope", "TEXT NOT NULL DEFAULT 'space'"); err != nil {
+		return err
+	}
 	return s.allocateMissingIdentities(ctx)
 }
 

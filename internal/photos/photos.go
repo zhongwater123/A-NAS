@@ -43,13 +43,17 @@ const (
 // service never derives it from request data.
 type Principal struct {
 	UserID string
-	Admin  bool
+	// Username names the caller's private library to other members in
+	// cross-member duplicate hints.
+	Username string
+	Admin    bool
 	// Viewing lists the caller's Administrative Viewing Mode grants for
 	// members' private libraries; each is read-only and expires on its own.
 	Viewing []ViewingGrant
 }
 
 type ViewingGrant struct {
+	GrantID     string
 	OwnerUserID string
 	ExpiresAt   time.Time
 }
@@ -65,10 +69,16 @@ type Library struct {
 	ID          string      `json:"id"`
 	Kind        LibraryKind `json:"kind"`
 	OwnerUserID string      `json:"ownerUserId,omitempty"`
+	OwnerName   string      `json:"ownerName,omitempty"`
 	CreatedAt   time.Time   `json:"createdAt"`
 	// Viewing is set when the caller sees another member's private library
 	// only through Administrative Viewing Mode; access is read-only.
-	Viewing bool `json:"viewing,omitempty"`
+	Viewing *LibraryViewing `json:"viewing,omitempty"`
+}
+
+type LibraryViewing struct {
+	GrantID   string    `json:"grantId"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 type Directory struct {
@@ -107,7 +117,11 @@ type Asset struct {
 	Height    int            `json:"height"`
 	Thumbnail ThumbnailState `json:"thumbnail"`
 	Duplicate DuplicateRole  `json:"duplicate,omitempty"`
-	Trash     *TrashState    `json:"trash,omitempty"`
+	// AlsoKeptBy names other members whose private libraries hold the same
+	// original. Only the owner of a private library sees it, and it reveals
+	// nothing else about those libraries.
+	AlsoKeptBy []string    `json:"alsoKeptBy,omitempty"`
+	Trash      *TrashState `json:"trash,omitempty"`
 }
 
 type TrashState struct {

@@ -52,7 +52,7 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		return Asset{}, err
 	}
 	assetID := s.randomID("photo")
-	var imported Asset
+	var imported assetRecord
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		// The directory may have been deleted while the original streamed in.
 		if err := s.checkDirectory(ctx, tx, lib, request.DirectoryID); err != nil {
@@ -83,7 +83,7 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		if err != nil {
 			return err
 		}
-		imported = record.Asset
+		imported = record
 		return s.audit(ctx, tx, p.UserID, "photo.imported", assetID, name)
 	})
 	if err != nil {
@@ -93,14 +93,25 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		return Asset{}, err
 	}
 	s.wakeMedia()
-	return imported, nil
+	hinted := []assetRecord{imported}
+	if err := s.addDuplicateHints(ctx, s.db, p, hinted); err != nil {
+		return Asset{}, err
+	}
+	return hinted[0].Asset, nil
 }
 
 // Get returns an asset p may see. Trashed assets are visible only to those
 // who may restore them.
 func (s *Service) Get(ctx context.Context, p Principal, assetID string) (Asset, error) {
 	record, err := s.visibleAsset(ctx, s.db, p, assetID)
-	return record.Asset, err
+	if err != nil {
+		return Asset{}, err
+	}
+	hinted := []assetRecord{record}
+	if err := s.addDuplicateHints(ctx, s.db, p, hinted); err != nil {
+		return Asset{}, err
+	}
+	return hinted[0].Asset, nil
 }
 
 func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, assetID string) (assetRecord, error) {
@@ -174,6 +185,9 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	}
 	records, err := s.queryAssets(ctx, s.db, where+" ORDER BY "+sortKey+" DESC, a.id DESC LIMIT ?", append(args, limit+1)...)
 	if err != nil {
+		return Page{}, err
+	}
+	if err := s.addDuplicateHints(ctx, s.db, p, records); err != nil {
 		return Page{}, err
 	}
 	page := Page{Assets: []Asset{}}

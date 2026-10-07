@@ -149,7 +149,10 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
    - 产品服务在浏览器边界检查 Cookie 与 CSRF，转发时去掉 Cookie，只附带会话令牌头；相册服务把令牌交给 Host Agent 的 `/run/a-nas-sessions/photos.sock` 换取账号、角色和是否需要改密，不读取 `control.db`。
    - 存储区未就绪（数据卷未挂载或 `photos` 尚未创建）时相册服务只回答 `photos_unavailable`，从不自行创建目录；就绪后再打开 Catalog 并启动缩略图任务、对账与回收站到期。
    - 部署与回滚见[启用相册服务](../runbooks/enable-photo-service.md)。
-6. **多用户权限**：私有图库管理员查看、共享图库上传者与管理员权限、跨成员重复提示，以及列表、缩略图、计数和错误信息的泄漏测试。
+6. **多用户权限**：私有图库管理员查看、共享图库上传者与管理员权限、跨成员重复提示，以及列表、缩略图、计数和错误信息的泄漏测试。实现要点：
+   - 查看授权与个人空间共用 `viewing_grants` 表，以 `scope` 区分 `space` 与 `library`。私有图库授权不调用 Host Agent 改 ACL。
+   - Host Agent 的会话查询把管理员未过期的私有图库授权随身份一起返回，相册服务据此构造只读 `Principal`；开发模式由产品服务直接读取同一张表。
+   - 图库记录所有者用户名（migration 3），供查看横幅与跨成员重复提示使用。
 7. **M1 实机闸门**：真实数据卷上的强制终止与断电对账、卷离线、容量不足，以及 4 名成员、20,000 张合成照片的列表与权限性能。
 
 **M2 本地 AI 检索**
@@ -201,4 +204,4 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - [本地照片 AI 模型与 Runtime 研究](../research/photo-ai-model-runtime-selection.md)
 - [领域语言](../../CONTEXT.md)
 - 代码：[`internal/photos`](../../internal/photos/photos.go)；Policy 见 [`policy.go`](../../internal/photos/policy.go)，缩略图任务见 [`jobs.go`](../../internal/photos/jobs.go)，崩溃对账见 [`reconcile.go`](../../internal/photos/reconcile.go)；接口见 [`internal/photosapi`](../../internal/photosapi/handler.go) 与 [`api/openapi.yaml`](../../api/openapi.yaml)
-- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[迁移](../../internal/photos/migrate_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[API](../../internal/photosapi/handler_test.go)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[迁移](../../internal/photos/migrate_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[API](../../internal/photosapi/handler_test.go)、[端到端冒烟](../../scripts/smoke-photo-service.sh)

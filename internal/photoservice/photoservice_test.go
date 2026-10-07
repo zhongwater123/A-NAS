@@ -40,6 +40,9 @@ var knownSessions = sessions{
 	"alice-token": {UserID: "user:alice", Username: "alice", Role: accounts.RoleMember},
 	"bob-token":   {UserID: "user:bob", Username: "bob", Role: accounts.RoleMember},
 	"reset-token": {UserID: "user:carol", Username: "carol", Role: accounts.RoleMember, MustChangePassword: true},
+	"viewer-token": {UserID: "user:admin", Username: "admin", Role: accounts.RoleAdmin, Viewing: []accounts.LibraryViewing{
+		{GrantID: "viewing:1", OwnerUserID: "user:alice", ExpiresAt: time.Now().Add(time.Hour)},
+	}},
 }
 
 type running struct {
@@ -223,5 +226,28 @@ func TestRequireOwnedStoreRejectsAnythingButTheVolumeStore(t *testing.T) {
 	// A private directory on the system disk is still not the data volume.
 	if err := photoservice.RequireOwnedStore(missing); !errors.Is(err, photoservice.ErrStoreUnavailable) {
 		t.Fatalf("store outside Btrfs error = %v", err)
+	}
+}
+
+func TestAdministratorSeesOnlyTheGrantedLibraryReadOnly(t *testing.T) {
+	r := start(t)
+	r.ready.Store(true)
+	waitFor(t, func() bool { return r.get(t, "/api/v1/photos/libraries", "alice-token").StatusCode == http.StatusOK })
+	_ = r.get(t, "/api/v1/photos/libraries", "bob-token")
+
+	var list struct {
+		Items []photos.Library `json:"items"`
+	}
+	if err := json.NewDecoder(r.get(t, "/api/v1/photos/libraries", "viewer-token").Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	var viewed []photos.Library
+	for _, lib := range list.Items {
+		if lib.Viewing != nil {
+			viewed = append(viewed, lib)
+		}
+	}
+	if len(viewed) != 1 || viewed[0].OwnerUserID != "user:alice" || viewed[0].OwnerName != "alice" || viewed[0].Viewing.GrantID != "viewing:1" {
+		t.Fatalf("viewed libraries = %+v", viewed)
 	}
 }

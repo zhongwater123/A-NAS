@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, CircleAlert, Copy, Download, ImagePlus, Pencil, RefreshCw, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { APIError } from "./api";
+import { APIError, endViewing } from "./api";
 import {
   PhotoAsset, PhotoLibrary, copyPhoto, emptyPhotoTrash, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
   previewURL, purgePhoto, renamePhoto, restorePhoto, trashPhoto, uploadPhoto,
@@ -27,14 +27,25 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const library = libraries.find((item) => item.id === libraryId);
   const shared = libraries.find((item) => item.kind === "shared");
   const readOnly = Boolean(library?.viewing);
+  const viewingUntil = library?.viewing ? new Date(library.viewing.expiresAt).toLocaleString("zh-CN") : "";
   const canChange = (asset: PhotoAsset) => !readOnly && (library?.kind === "private" || asset.uploadedBy === userId || isAdmin);
 
-  useEffect(() => {
-    void listPhotoLibraries().then((items) => {
+  const loadLibraries = useCallback(async () => {
+    try {
+      const items = await listPhotoLibraries();
       setLibraries(items);
-      setLibraryId((items.find((item) => item.kind === "private" && item.ownerUserId === userId) ?? items[0])?.id ?? "");
-    }).catch((caught) => { setError(messageOf(caught)); setLoading(false); });
+      setLibraryId((current) => items.some((item) => item.id === current)
+        ? current
+        : (items.find((item) => item.kind === "private" && item.ownerUserId === userId) ?? items[0])?.id ?? "");
+    } catch (caught) { setError(messageOf(caught)); setLoading(false); }
   }, [userId]);
+  useEffect(() => { void loadLibraries(); }, [loadLibraries]);
+
+  const stopViewing = async () => {
+    if (!library?.viewing) return;
+    try { await endViewing(library.viewing.grantId); setError(""); await loadLibraries(); }
+    catch (caught) { setError(messageOf(caught)); }
+  };
 
   const loadTimeline = useCallback(async (cursor = "") => {
     if (!libraryId) return;
@@ -105,7 +116,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           <button aria-label="刷新相册" onClick={() => void (view === "timeline" ? loadTimeline() : loadTrash())}><RefreshCw size={14} /></button>
         </div>
       </div>
-      {readOnly && <div className="status-banner viewing-banner" role="status"><ShieldCheck />正在以管理员查看模式只读浏览成员图库。</div>}
+      {readOnly && <div className="status-banner viewing-banner" role="status"><ShieldCheck />只读查看 {library?.ownerName ?? "成员"} 的私有图库，{viewingUntil} 自动结束；本次访问已写入审计并通知所有者。<button onClick={() => void stopViewing()}>结束查看</button></div>}
       {uploading && <div className="status-banner" role="status"><span className="loader" />正在上传 {uploading.done}/{uploading.total}</div>}
       {error && <div className="status-banner error" role="alert"><CircleAlert />{error}</div>}
 
@@ -168,6 +179,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
               <dt>大小</dt><dd>{formatSize(current.sizeBytes)}</dd>
               {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}
             </dl>
+            {current.alsoKeptBy?.length ? <p className="photo-hint">{current.alsoKeptBy.join("、")} 也保存了相同的照片。</p> : null}
             <div className="photo-viewer-actions">
               <a className="upload-button" href={originalURL(current.id, true)}><Download size={14} />下载原图</a>
               {canChange(current) && <button onClick={() => {
@@ -187,7 +199,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
 function libraryLabel(library: PhotoLibrary, userId: string) {
   if (library.kind === "shared") return "共享图库";
   if (library.ownerUserId === userId) return "我的图库";
-  return "成员图库（只读查看）";
+  return `只读查看 · ${library.ownerName ?? "成员"}`;
 }
 
 // groupByDay keeps the timeline order and starts a new section whenever the
