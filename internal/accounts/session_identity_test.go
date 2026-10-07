@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -54,11 +55,29 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	user, err := directory.ResolveSessionUser(ctx, ownerSession.Token)
+	if err != nil || !reflect.DeepEqual(user, accounts.SessionUser{UserID: admin.ID, Username: "owner", Role: accounts.RoleAdmin}) {
+		t.Fatalf("ResolveSessionUser(owner) = %#v, %v", user, err)
+	}
+	grant, err := service.StartLibraryViewing(ctx, admin, alice, "correct horse battery staple", "family album request")
+	if err != nil {
+		t.Fatalf("StartLibraryViewing() error = %v", err)
+	}
+	user, err = directory.ResolveSessionUser(ctx, ownerSession.Token)
+	if err != nil || len(user.Viewing) != 1 || user.Viewing[0].GrantID != grant.ID || user.Viewing[0].OwnerUserID != alice {
+		t.Fatalf("ResolveSessionUser(owner).Viewing = %#v, %v; want the library grant", user.Viewing, err)
+	}
+	if _, err := directory.ResolveSessionUser(ctx, "not-a-session-token"); !errors.Is(err, accounts.ErrSessionNotFound) {
+		t.Fatalf("ResolveSessionUser(forged) error = %v, want ErrSessionNotFound", err)
+	}
 	if err := service.DisableUser(ctx, admin, alice); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := directory.ResolveSessionIdentity(ctx, aliceSession.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
 		t.Fatalf("disabled account's session error = %v, want ErrSessionNotFound", err)
+	}
+	if _, err := directory.ResolveSessionUser(ctx, aliceSession.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
+		t.Fatalf("disabled account's session user error = %v, want ErrSessionNotFound", err)
 	}
 
 	remembered := service.RememberedSessions(ctx)

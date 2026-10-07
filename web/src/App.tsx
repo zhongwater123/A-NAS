@@ -36,7 +36,7 @@ import {
 import { Component, ErrorInfo, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useState } from "react";
 
 import {
-  APIError, DiskRole, FileEntry, Health, HostState, Notification, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User,
+  APIError, DiskRole, FileEntry, Health, HostState, Notification, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User, ViewingScope,
   acknowledgeNotification, changePassword, confirmStoragePlan, createDirectory, createMember, createSnapshot, createStoragePlan, currentSession, deleteFile,
   deleteSnapshot, disableMember, endViewing, executeStoragePlan, fileDownloadURL, getSetupStatus, listEntries, listNotifications, listSnapshots,
   listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
@@ -47,12 +47,13 @@ import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { PhotosPanel } from "./PhotosPanel";
 import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker" | "store";
+type WindowID = "files" | "photos" | "trash" | "snapshots" | "accounts" | "storage" | "resources" | "settings" | "terminal" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -81,6 +82,7 @@ type WindowAction =
 
 const initialWindows: WindowModel[] = [
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
+	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
 	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2, opened: 0 },
 	{ id: "accounts", title: "账号管理", open: false, minimized: false, maximized: false, x: 330, y: 110, width: 760, height: 540, z: 2, opened: 0 },
@@ -94,6 +96,7 @@ const initialWindows: WindowModel[] = [
 
 const windowIcons: Record<WindowID, LucideIcon> = {
   files: FolderClosed,
+  photos: Image,
   trash: Trash2,
   snapshots: Camera,
   accounts: UserRound,
@@ -107,6 +110,7 @@ const windowIcons: Record<WindowID, LucideIcon> = {
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
   files: "files",
+  photos: "photos",
   trash: "trash",
   snapshots: "snapshot",
   accounts: "settings",
@@ -188,9 +192,10 @@ function NotificationCenter() {
 
 function describeNotification(item: Notification): string {
 	const when = new Date(item.createdAt).toLocaleString("zh-CN");
-	if (item.kind === "admin_viewing") {
+	if (item.kind === "admin_viewing" || item.kind === "admin_library_viewing") {
+		const what = item.kind === "admin_library_viewing" ? "私有图库" : "个人空间";
 		const until = item.expiresAt ? `，${new Date(item.expiresAt).toLocaleString("zh-CN")} 自动结束` : "";
-		return `管理员 ${item.actorUsername} 于 ${when} 开启了对你个人空间的只读查看${until}。原因：${item.reason ?? "未填写"}`;
+		return `管理员 ${item.actorUsername} 于 ${when} 开启了对你${what}的只读查看${until}。原因：${item.reason ?? "未填写"}`;
 	}
 	return `管理员 ${item.actorUsername} 于 ${when} 重置了你的密码。`;
 }
@@ -240,7 +245,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
       { id: "storage", label: "存储初始化", ariaLabel: "打开存储初始化", tone: "resources", icon: <Database />, active: isOpen("storage"), onClick: () => openWindow("storage") },
     ] : []),
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
-    { id: "photos", label: "相册", ariaLabel: "相册，规划中", tone: "photos", icon: <Image />, disabled: true },
+    { id: "photos", label: "相册", ariaLabel: "打开相册", tone: "photos", icon: <Image />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "backup", label: "备份", ariaLabel: "备份，规划中", tone: "backup", icon: <ShieldCheck />, disabled: true },
@@ -286,6 +291,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "resources" && <ResourcePanel host={host} />}
 			  {window.id === "settings" && <SettingsPanel state={host.snapshot} />}
 			  {window.id === "files" && <FilePanel />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "trash" && <TrashPanel />}
 			  {window.id === "snapshots" && <SnapshotPanel />}
 			  {window.id === "accounts" && <AccountsPanel currentUser={session.user} />}
@@ -509,15 +515,20 @@ function SnapshotPanel() {
 
 function AccountsPanel({ currentUser }: { currentUser: User }) {
 	const [users, setUsers] = useState<User[]>([]); const [error, setError] = useState("");
-	const [viewingFor, setViewingFor] = useState<User>(); const [notice, setNotice] = useState("");
+	// Viewing a private space and viewing a private photo library are separate grants.
+	const [viewingFor, setViewingFor] = useState<{ user: User; scope: ViewingScope }>(); const [notice, setNotice] = useState("");
+	const viewingWhat = viewingFor?.scope === "library" ? "私有图库" : "个人空间";
 	const [changingOwnPassword, setChangingOwnPassword] = useState(false);
 	const beginViewing = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!viewingFor) return;
 		const data = new FormData(event.currentTarget);
+		const { user, scope } = viewingFor;
 		try {
-			await startViewing(viewingFor.id, String(data.get("password")), String(data.get("reason")));
-			setNotice(`已开启对 ${viewingFor.username} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${viewingFor.username}”。`);
+			await startViewing(user.id, String(data.get("password")), String(data.get("reason")), scope);
+			setNotice(scope === "library"
+				? `已开启对 ${user.username} 私有图库的只读查看，可在相册中选择“只读查看 · ${user.username}”。`
+				: `已开启对 ${user.username} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${user.username}”。`);
 			setViewingFor(undefined); setError("");
 		} catch (caught) { setError(messageOf(caught)); }
 	};
@@ -535,7 +546,8 @@ function AccountsPanel({ currentUser }: { currentUser: User }) {
 			form.reset(); setChangingOwnPassword(false); setError(""); setNotice("密码已更新，SMB 凭据已同步。");
 		} catch (caught) { setError(messageOf(caught)); }
 	};
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id === currentUser.id ? <button onClick={() => { setViewingFor(undefined); setNotice(""); setChangingOwnPassword(true); }}>修改密码</button> : <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button onClick={() => { setChangingOwnPassword(false); setNotice(""); setViewingFor(user); }}>查看个人空间</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div>
+	const beginViewingOf = (user: User, scope: ViewingScope) => { setChangingOwnPassword(false); setNotice(""); setViewingFor({ user, scope }); };
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id === currentUser.id ? <button onClick={() => { setViewingFor(undefined); setNotice(""); setChangingOwnPassword(true); }}>修改密码</button> : <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button onClick={() => beginViewingOf(user, "space")}>查看个人空间</button><button onClick={() => beginViewingOf(user, "library")}>查看私有图库</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div>
 		{changingOwnPassword && <form className="viewing-form" aria-label="修改自己的密码" autoComplete="off" onSubmit={(event) => void changeOwnPassword(event)}>
 			<p>修改后将同时更新网页登录密码与 SMB 共享密码。</p>
 			<input name="currentPassword" aria-label="当前密码" type="password" placeholder="当前密码" autoComplete="current-password" required />
@@ -543,8 +555,8 @@ function AccountsPanel({ currentUser }: { currentUser: User }) {
 			<input name="confirmPassword" aria-label="确认新密码" type="password" minLength={12} placeholder="再次输入新密码" autoComplete="new-password" required />
 			<button>保存新密码</button><button type="button" onClick={() => setChangingOwnPassword(false)}>取消</button>
 		</form>}
-		{viewingFor && <form className="viewing-form" aria-label={`查看 ${viewingFor.username} 的个人空间`} autoComplete="off" onSubmit={(event) => void beginViewing(event)}>
-			<p>查看他人个人空间会写入审计，并在 {viewingFor.username} 下次登录时通知对方。访问为只读，24 小时后自动结束。</p>
+		{viewingFor && <form className="viewing-form" aria-label={`查看 ${viewingFor.user.username} 的${viewingWhat}`} autoComplete="off" onSubmit={(event) => void beginViewing(event)}>
+			<p>查看他人{viewingWhat}会写入审计，并在 {viewingFor.user.username} 下次登录时通知对方。访问为只读，24 小时后自动结束。</p>
 			<input name="reason" aria-label="查看原因" placeholder="查看原因" maxLength={500} required />
 			<input name="password" aria-label="你的密码" type="password" placeholder="你的密码" autoComplete="current-password" required />
 			<button>开始只读查看</button><button type="button" onClick={() => setViewingFor(undefined)}>取消</button>

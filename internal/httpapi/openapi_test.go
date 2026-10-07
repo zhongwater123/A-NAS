@@ -1,7 +1,10 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +20,8 @@ import (
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
+	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 )
 
@@ -35,6 +40,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		t.Fatalf("create OpenAPI router: %v", err)
 	}
 
+	photoHandler, photoLibraryID, photoAssetID := photoAPI(t)
 	tests := []struct {
 		name       string
 		method     string
@@ -42,8 +48,18 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		path       string
 		reader     *fake.Reader
 		handler    http.Handler
+		csrf       bool
 		wantStatus int
 	}{
+		{name: "photo libraries", path: "/api/v1/photos/libraries", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo timeline", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo entries", path: "/api/v1/photos/libraries/" + photoLibraryID + "/entries", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo directory", method: http.MethodPost, body: `{"name":"Trips"}`, path: "/api/v1/photos/libraries/" + photoLibraryID + "/directories", handler: photoHandler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "photo asset", path: "/api/v1/photos/assets/" + photoAssetID, handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo asset missing", path: "/api/v1/photos/assets/photo:missing", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo thumbnail pending", path: "/api/v1/photos/assets/" + photoAssetID + "/thumbnail", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo trash", path: "/api/v1/photos/libraries/" + photoLibraryID + "/trash", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photos unavailable", path: "/api/v1/photos/libraries", handler: withPhotoPrincipal(photosapi.New(nil, nil)), wantStatus: http.StatusServiceUnavailable},
 		{name: "health", path: "/healthz", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "system", path: "/api/v1/system", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "disks", path: "/api/v1/disks", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
@@ -78,6 +94,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 				request.AddCookie(&http.Cookie{Name: "anas_session", Value: "contract-test"})
 				if test.body != "" {
 					request.Header.Set("Content-Type", "application/json")
+				}
+				if test.csrf {
+					request.Header.Set("X-CSRF-Token", "contract-test")
 				}
 				return request
 			}
@@ -123,6 +142,43 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 
 func containerAPI(manager *fakecontainers.Manager) http.Handler {
 	return containersapi.New(manager, containersapi.DataSourceSimulated, nil)
+}
+
+// photoAPI returns the photo API acting for one member, that member's private
+// library and an asset in it whose thumbnail is still pending.
+func photoAPI(t *testing.T) (http.Handler, string, string) {
+	t.Helper()
+	service, err := photos.Open(filepath.Join(t.TempDir(), "photos"), photos.Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatalf("open photos: %v", err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	member := photos.Principal{UserID: "user:contract"}
+	libraries, err := service.Libraries(context.Background(), member)
+	if err != nil {
+		t.Fatalf("list photo libraries: %v", err)
+	}
+	var private string
+	for _, library := range libraries {
+		if library.Kind == photos.LibraryKindPrivate {
+			private = library.ID
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewGray(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatalf("encode PNG: %v", err)
+	}
+	asset, err := service.Import(context.Background(), member, photos.ImportRequest{LibraryID: private, Name: "p.png", Content: &encoded})
+	if err != nil {
+		t.Fatalf("import photo: %v", err)
+	}
+	return withPhotoPrincipal(photosapi.New(service, nil)), private, asset.ID
+}
+
+func withPhotoPrincipal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), photos.Principal{UserID: "user:contract"})))
+	})
 }
 
 func appAPI(t *testing.T) http.Handler {

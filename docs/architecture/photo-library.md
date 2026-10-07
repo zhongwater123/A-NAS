@@ -69,20 +69,20 @@ anas-photos（a-nas-photos）◄──────┘
 
 ### 原图提交
 
-1. 在目标数据卷的 staging 目录流式写入并同时计算 SHA-256，不先把整个文件读入内存。
-2. 校验格式与大小，刷新文件后原子移动到按内容哈希分层的对象路径；已存在时复用对象。
-3. 在单个数据库事务中创建独立照片资产、对象引用、重复组关系与待处理任务。
-4. 崩溃后由对账任务删除超过安全期且没有目录引用的 staging 或孤立对象；任何自动回收都不能触碰仍有引用的对象。
+1. 在 `photos` 子卷的 `staging/` 流式写入并同时计算 SHA-256，不先把整个文件读入内存；写入过程中按块检查大小上限与容量保留，前 8 字节判定 JPEG/PNG。
+2. 刷新文件后只读取图片头校验格式与像素上限，再设为只读并以硬链接发布到 `objects/<2 位>/<2 位>/<SHA-256>`，随后刷新所在目录；同名对象已存在时直接复用，从不覆盖。
+3. 在单个数据库事务中创建对象行与独立照片资产；重复组不单独存表，由同一图库内引用同一对象的未删除资产推导。
+4. 发布对象与引用它的事务、清除最后一个引用与删除对象文件，都在同一把提交锁内成对完成，因此清除不会删掉刚被导入复用的对象。崩溃后由对账删除不在写入中的 staging 文件与没有对象行的对象文件，并报告有引用但文件缺失的原图；任何自动回收都不能触碰仍有引用的对象。
 
-对象路径不是资源身份。备份和恢复必须同时覆盖对象、目录以及二者的校验清单。
+对象路径不是资源身份。备份和恢复必须同时覆盖对象、目录以及二者的校验清单。实现见 [`internal/photos`](../../internal/photos/photos.go)。
 
 ## 后台任务与资源隔离
 
-SQLite 任务表保存 `capability`、输入资产、期望派生版本、状态、尝试次数、`lease_until` 和稳定错误类别。Worker 以短租约领取单张、单能力任务；重复执行必须由 `(asset_id, derivation_id)` 唯一约束收敛为同一当前结果。
+SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、尝试次数、`lease_until`、下次可执行时间和稳定错误类别。Worker 以短租约领取单张、单能力任务；重复执行由唯一约束收敛为同一当前结果。只依赖原图字节的派生（缩略图、基础元数据，以及未来的 Embedding）以 `(object_id, derivation)` 为键，副本与重复照片共用；依赖图库设置或用户数据的派生才以照片资产为键。派生文件位于 `derived/<派生版本>/`，与原图分开统计和清除；最后一个引用被清除时随原图一起删除。
 
 任务分为两类，共用同一张表和租约语义：
 
-- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后以低优先级立即执行，不等待空闲条件，也不依赖 AI Worker。JPEG/PNG 用 Go 标准库在进程内解码，先读取尺寸并拒绝超过像素上限的输入；HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成时，JPEG/PNG 可以直接显示原图。
+- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
 - **AI 任务**：Embedding、标签、OCR、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
 
 默认执行策略：
@@ -138,12 +138,21 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 
 **M1 基础相册（JPEG/PNG）**
 
-1. **Catalog**：图库、资产、对象引用、重复组、虚拟目录、相册、回收站和用户元数据；版本化 migration 与 Policy 表格测试（所有者、其他成员、管理员、持有查看授权的管理员 × 私有图库、共享图库中自己或他人上传的照片 × 各操作）。
+1. **Catalog**：图库、资产、对象引用、重复组、虚拟目录和回收站；版本化 migration 与 Policy 表格测试（所有者、其他成员、管理员、持有查看授权的管理员 × 私有图库、共享图库中自己或他人上传的照片 × 各操作）。
 2. **Managed storage**：流式导入、staging 刷新后原子发布并刷新目录、内容对象复用、崩溃对账、容量保护（沿用文件服务“保留 5% 且至少 10 GiB”）、故障注入测试和临时目录 Adapter；不依赖真实数据盘。
 3. **媒体派生与任务表**：缩略图、EXIF 方向与基础元数据，以及后续 AI 共用的持久任务、租约与派生版本。
-4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、相册副本、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件大小上限在上传接口实现前确定；Web 桌面启用现有“相册”入口。
-5. **服务化与部署**：`anas-photos` 进程与 systemd 单元、`a-nas-photos` 固定身份、Host Agent 创建 `photos` 子卷并修复漂移、会话查询接口、`anas-api` 转发、`make ops-check` 与部署手册。
-6. **多用户权限**：私有图库管理员查看、共享图库上传者与管理员权限、跨成员重复提示，以及列表、缩略图、计数和错误信息的泄漏测试。
+4. **Read path 与 Web**：列表、原图读取（Range）、缩略图、虚拟目录、共享图库复制、回收站与 15 天到期清除 API；更新 OpenAPI 并补充相册路由的契约测试；单文件上限 256 MiB（见规格）；Web 桌面启用现有“相册”入口。`internal/photosapi` 不自行认证，只信任包装它的一方放入的 `photos.Principal`：开发模式下产品服务从会话构造并检查 CSRF；切片 5 起由相册服务经 Host Agent 会话查询构造。原图与缩略图以 `private, no-cache` 返回，访问结束后浏览器必须重新验证；验证器是强 ETag（原图为内容哈希，缩略图另含派生版本），不用导入时间。目录列表与时间线一样按游标分页。
+5. **服务化与部署**：`anas-photos` 进程与 systemd 单元、`a-nas-photos` 固定身份、Host Agent 创建 `photos` 子卷并修复漂移、会话查询接口、`anas-api` 转发、`make ops-check` 与部署手册。实现要点：
+   - 相册服务是同一 `anas-api` 二进制的 `photo-service` 子命令，由 `anas-photos.service` 以 `a-nas-photos` 运行，因此发布制品仍只校验两个二进制；拒绝以 root 运行。
+   - 安装器以固定 UID/GID 31000 创建 `a-nas-photos`，不接管已被占用的名称或 ID；Host Agent 只在该账号存在时创建 `photos` 子卷。存储区修复与空间对账分开执行：账号冲突等失败只记录 `photo store repair failed` 并让相册不可用，不阻止 Host Agent 启动，也不影响空间、账号与查看授权。
+   - 相册服务在 `/run/a-nas-photos/photos.sock`（`0660`，目录 `0750`）提供相册 API；产品服务账号属于 `a-nas-photos` 组，只能连接该套接字，进不了存储区。
+   - 产品服务在浏览器边界检查 Cookie 与 CSRF，转发时去掉 Cookie，只附带会话令牌头；相册服务把令牌交给 Host Agent 的 `/run/a-nas-sessions/photos.sock` 换取账号、角色和是否需要改密，不读取 `control.db`。
+   - 存储区未就绪（数据卷未挂载或 `photos` 尚未创建）时相册服务只回答 `photos_unavailable`，从不自行创建目录；就绪后再打开 Catalog 并启动缩略图任务、对账与回收站到期。
+   - 部署与回滚见[启用相册服务](../runbooks/enable-photo-service.md)。
+6. **多用户权限**：私有图库管理员查看、共享图库上传者与管理员权限、跨成员重复提示，以及列表、缩略图、计数和错误信息的泄漏测试。实现要点：
+   - 查看授权与个人空间共用 `viewing_grants` 表，以 `scope` 区分 `space` 与 `library`。私有图库授权不调用 Host Agent 改 ACL。
+   - Host Agent 的会话查询把管理员未过期的私有图库授权随身份一起返回，相册服务据此构造只读 `Principal`；开发模式由产品服务直接读取同一张表。
+   - 图库记录所有者用户名（migration 3），供查看横幅与跨成员重复提示使用。
 7. **M1 实机闸门**：真实数据卷上的强制终止与断电对账、卷离线、容量不足，以及 4 名成员、20,000 张合成照片的列表与权限性能。
 
 **M2 本地 AI 检索**
@@ -151,17 +160,18 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 8. **AI contract**：Worker 协议与描述符传递、Fake AI Provider、空闲与资源门控，以及“AI 未安装、停止、崩溃或积压”时的基础相册测试；可与切片 3 并行。
 9. **Model benchmark**：先在实验 NAS 的 Debian 13 上完成 LiteRT-LM 离线安装、加载、RSS 与延迟冒烟测试，再用公开中文标注数据集设定标签初始阈值并冻结模型清单；可从现在开始并行。家庭照片的人工标注暂缓，见“模型基准与发布门槛”。
 10. **Worker 打包**：离线依赖、模型清单与 systemd 沙箱。
-11. **Search**：精确向量检索、受控中文标签、用户标签与 AI 纠错、OCR 与文本检索、Policy 前后过滤。
+11. **相册与用户元数据**：相册实体与加入相册（创建独立照片资产副本），以及用户标签、AI 纠错和手工位置的 migration、Policy、API 与 Web；人工人物名称随切片 13 的人物库实现。2026-10-08 从 M1 移出：基础相册不依赖它们，而用户标签与 AI 纠错首先服务于检索。
+12. **Search**：精确向量检索、受控中文标签、用户标签与 AI 纠错、OCR 与文本检索、Policy 前后过滤。
 
 **M3 人物、格式、导入与发布**
 
-12. 人脸 occurrence 与分图库人物库。
-13. HEIC、GIF、RAW、Live Photo 与视频；视频播放兼容与是否转码需先决定。
-14. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
-15. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。
-16. 账号删除时的图库转移、导出与待删除，私有图库 AI 开关与派生数据清除，备份恢复，以及 4 名成员、20,000 张照片、2,000 个视频的完整验收。
+13. 人脸 occurrence 与分图库人物库。
+14. HEIC、GIF、RAW、Live Photo 与视频；视频播放兼容与是否转码需先决定。
+15. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
+16. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。
+17. 账号删除时的图库转移、导出与待删除，私有图库 AI 开关与派生数据清除，备份恢复，以及 4 名成员、20,000 张照片、2,000 个视频的完整验收。
 
-USB 存储识别与挂载、账号删除和备份目前都不是已有产品能力，作为独立前置工作推进；它们未完成时，切片 14 的 USB 部分与切片 16 只能交付不依赖它们的部分。
+USB 存储识别与挂载、账号删除和备份目前都不是已有产品能力，作为独立前置工作推进；它们未完成时，切片 15 的 USB 部分与切片 17 只能交付不依赖它们的部分。
 
 ## 模型基准与发布门槛
 
@@ -194,3 +204,5 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - [统一身份与文件授权规格](../specs/unified-identity-and-file-acl.md)
 - [本地照片 AI 模型与 Runtime 研究](../research/photo-ai-model-runtime-selection.md)
 - [领域语言](../../CONTEXT.md)
+- 代码：[`internal/photos`](../../internal/photos/photos.go)；Policy 见 [`policy.go`](../../internal/photos/policy.go)，缩略图任务见 [`jobs.go`](../../internal/photos/jobs.go)，崩溃对账见 [`reconcile.go`](../../internal/photos/reconcile.go)；接口见 [`internal/photosapi`](../../internal/photosapi/handler.go) 与 [`api/openapi.yaml`](../../api/openapi.yaml)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[迁移](../../internal/photos/migrate_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[API](../../internal/photosapi/handler_test.go)、[端到端冒烟](../../scripts/smoke-photo-service.sh)

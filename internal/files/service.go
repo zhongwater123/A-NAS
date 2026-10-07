@@ -23,6 +23,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
 var (
@@ -1282,18 +1283,11 @@ func (s *Service) ensureCapacity(incoming int64) error {
 	if s.disableCapacityReserve {
 		return nil
 	}
-	var stats syscall.Statfs_t
-	if err := syscall.Statfs(s.volumeRoot, &stats); err != nil {
+	ok, err := capacity.Admits(s.volumeRoot, incoming)
+	if err != nil {
 		return ErrVolumeUnavailable
 	}
-	total := uint64(stats.Blocks) * uint64(stats.Bsize)
-	available := uint64(stats.Bavail) * uint64(stats.Bsize)
-	reserve := total / 20
-	const minimum = uint64(10 * 1024 * 1024 * 1024)
-	if reserve < minimum {
-		reserve = minimum
-	}
-	if uint64(max(incoming, 0)) >= available || available-uint64(max(incoming, 0)) < reserve {
+	if !ok {
 		return ErrInsufficientSpace
 	}
 	return nil

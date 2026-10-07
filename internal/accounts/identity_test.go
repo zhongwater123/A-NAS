@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -156,4 +159,21 @@ func (*identityRecorder) DisableCredential(context.Context, string) error { retu
 func (r *identityRecorder) SyncIdentities(_ context.Context, identities []accounts.Identity) error {
 	r.synced = identities
 	return nil
+}
+
+// The installer creates the photo service identity in shell; the Host Agent
+// recognizes it by these constants, so the two must never drift.
+func TestInstallerCreatesThePhotoServiceIdentity(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install-v1.0.1-system-services.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(script), "\n")
+	if !slices.Contains(lines, "photos_id="+strconv.Itoa(accounts.PhotoServiceUID)) {
+		t.Fatalf("installer does not assign UID/GID %d", accounts.PhotoServiceUID)
+	}
+	if !strings.Contains(string(script), `--gid "$photos_id" `+accounts.PhotoServiceUser+"\n") ||
+		!strings.Contains(string(script), "/usr/sbin/nologin "+accounts.PhotoServiceUser+"\n") {
+		t.Fatalf("installer does not create %s", accounts.PhotoServiceUser)
+	}
 }

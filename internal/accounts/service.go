@@ -46,6 +46,12 @@ const (
 	AdminsGID    = 20001
 	FirstUserUID = 20100
 	LastUserUID  = 29999
+	// PhotoServiceUser owns the data volume's photos subvolume alone
+	// (ADR 0011). Its UID sits outside the account (20100–29999) and app
+	// (30000–30999) ranges and is fixed, so a reinstalled system disk owns the
+	// same photos again.
+	PhotoServiceUser = "a-nas-photos"
+	PhotoServiceUID  = 31000
 )
 
 type Role string
@@ -237,6 +243,10 @@ CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
 		return fmt.Errorf("migrate SQLite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// Grants made before private libraries could be viewed are for spaces.
+	if err := s.ensureColumn(ctx, "viewing_grants", "scope", "TEXT NOT NULL DEFAULT 'space'"); err != nil {
 		return err
 	}
 	return s.allocateMissingIdentities(ctx)

@@ -29,7 +29,7 @@ for binary in anas-api anas-host-agent; do
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -49,6 +49,24 @@ done
 getent group a-nas >/dev/null || groupadd --system a-nas
 if ! id a-nas >/dev/null 2>&1; then
   useradd --system --gid a-nas --home-dir /var/lib/a-nas --shell /usr/sbin/nologin a-nas
+fi
+# The photo service owns the photos subvolume under a fixed UID/GID, so a
+# reinstalled system disk owns the same photos again (ADR 0011). A-NAS never
+# adopts an account or ID it did not create.
+photos_id=31000
+if getent group a-nas-photos >/dev/null; then
+  [[ "$(getent group a-nas-photos | cut -d: -f3)" == "$photos_id" ]] || { echo "group a-nas-photos exists with another GID" >&2; exit 3; }
+elif getent group "$photos_id" >/dev/null; then
+  echo "GID $photos_id is taken by another group" >&2; exit 3
+else
+  groupadd --system --gid "$photos_id" a-nas-photos
+fi
+if getent passwd a-nas-photos >/dev/null; then
+  [[ "$(id -u a-nas-photos):$(id -g a-nas-photos)" == "$photos_id:$photos_id" ]] || { echo "user a-nas-photos exists with another UID or GID" >&2; exit 3; }
+elif getent passwd "$photos_id" >/dev/null; then
+  echo "UID $photos_id is taken by another user" >&2; exit 3
+else
+  useradd --system --uid "$photos_id" --gid "$photos_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-photos
 fi
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
@@ -81,6 +99,7 @@ printf '%s\n' \
   'ANAS_HOSTSTATE_MODE=agent' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
+  'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_VIDEO=/var/lib/a-nas/screensavers/computer-chip.mp4' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
@@ -98,6 +117,8 @@ printf '%s\n' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_HOST_AGENT_GROUP=a-nas' \
+  'ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock' \
+  'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env
 chown root:root /etc/a-nas/host-agent.env
@@ -105,15 +126,16 @@ chmod 0600 /etc/a-nas/host-agent.env
 
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
+install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
-systemctl enable anas-host-agent.service anas-api.service
-systemctl restart anas-host-agent.service anas-api.service
+systemctl enable anas-host-agent.service anas-photos.service anas-api.service
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-api.service
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service
 echo "Open the local A-NAS console to create the first administrator with an account and password."
