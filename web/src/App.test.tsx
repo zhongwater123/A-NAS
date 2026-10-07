@@ -641,6 +641,26 @@ function errorResponse(status: number) {
 }
 
 describe("ADR 0008 account safeguards", () => {
+  it("lets the signed-in administrator change their own password and rebuild SMB credentials", async () => {
+    const fetchMock = installAPI({ users: [session.user] });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
+    await user.click(await screen.findByRole("button", { name: "修改密码" }));
+    const form = screen.getByRole("form", { name: "修改自己的密码" });
+    await user.type(within(form).getByLabelText("当前密码"), "correct horse battery staple");
+    await user.type(within(form).getByLabelText("新密码"), "administrator chosen password");
+    await user.type(within(form).getByLabelText("确认新密码"), "administrator chosen password");
+    await user.click(within(form).getByRole("button", { name: "保存新密码" }));
+    expect(await screen.findByText("密码已更新，SMB 凭据已同步。")).toBeTruthy();
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      currentPassword: "correct horse battery staple",
+      newPassword: "administrator chosen password",
+    });
+  });
+
   it("requires a member whose password was reset to choose a new one first", async () => {
     const fetchMock = installAPI({ session: { ...session, user: { ...session.user, username: "alice", role: "member", mustChangePassword: true } } });
     const user = userEvent.setup();

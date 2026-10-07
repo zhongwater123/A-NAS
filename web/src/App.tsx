@@ -510,6 +510,7 @@ function SnapshotPanel() {
 function AccountsPanel({ currentUser }: { currentUser: User }) {
 	const [users, setUsers] = useState<User[]>([]); const [error, setError] = useState("");
 	const [viewingFor, setViewingFor] = useState<User>(); const [notice, setNotice] = useState("");
+	const [changingOwnPassword, setChangingOwnPassword] = useState(false);
 	const beginViewing = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!viewingFor) return;
@@ -523,7 +524,25 @@ function AccountsPanel({ currentUser }: { currentUser: User }) {
 	const refresh = useCallback(() => listUsers().then(setUsers).catch((caught) => setError(messageOf(caught))), []);
 	useEffect(() => { void refresh(); }, [refresh]);
 	const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { await createMember(String(data.get("username")), String(data.get("password"))); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); } };
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id !== currentUser.id && <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button onClick={() => { setNotice(""); setViewingFor(user); }}>查看个人空间</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div>
+	const changeOwnPassword = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		const form = event.currentTarget;
+		const data = new FormData(form);
+		const next = String(data.get("newPassword"));
+		if (next !== String(data.get("confirmPassword"))) { setError("两次输入的新密码不一致"); return; }
+		try {
+			await changePassword(String(data.get("currentPassword")), next);
+			form.reset(); setChangingOwnPassword(false); setError(""); setNotice("密码已更新，SMB 凭据已同步。");
+		} catch (caught) { setError(messageOf(caught)); }
+	};
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id === currentUser.id ? <button onClick={() => { setViewingFor(undefined); setNotice(""); setChangingOwnPassword(true); }}>修改密码</button> : <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button onClick={() => { setChangingOwnPassword(false); setNotice(""); setViewingFor(user); }}>查看个人空间</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div>
+		{changingOwnPassword && <form className="viewing-form" aria-label="修改自己的密码" autoComplete="off" onSubmit={(event) => void changeOwnPassword(event)}>
+			<p>修改后将同时更新网页登录密码与 SMB 共享密码。</p>
+			<input name="currentPassword" aria-label="当前密码" type="password" placeholder="当前密码" autoComplete="current-password" required />
+			<input name="newPassword" aria-label="新密码" type="password" minLength={12} placeholder="新密码（至少 12 位）" autoComplete="new-password" required />
+			<input name="confirmPassword" aria-label="确认新密码" type="password" minLength={12} placeholder="再次输入新密码" autoComplete="new-password" required />
+			<button>保存新密码</button><button type="button" onClick={() => setChangingOwnPassword(false)}>取消</button>
+		</form>}
 		{viewingFor && <form className="viewing-form" aria-label={`查看 ${viewingFor.username} 的个人空间`} autoComplete="off" onSubmit={(event) => void beginViewing(event)}>
 			<p>查看他人个人空间会写入审计，并在 {viewingFor.username} 下次登录时通知对方。访问为只读，24 小时后自动结束。</p>
 			<input name="reason" aria-label="查看原因" placeholder="查看原因" maxLength={500} required />
