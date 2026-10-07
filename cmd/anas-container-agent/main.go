@@ -16,6 +16,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/moby/moby/client"
+
+	"github.com/zhongwater123/A-NAS/internal/appstore"
+	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
+	"github.com/zhongwater123/A-NAS/internal/appstore/engine"
 	"github.com/zhongwater123/A-NAS/internal/containers/agent"
 	"github.com/zhongwater123/A-NAS/internal/containers/docker"
 )
@@ -41,6 +46,12 @@ func run(logger *slog.Logger) error {
 	}
 	defer manager.Close()
 
+	apps, err := configuredAppStore()
+	if err != nil {
+		return err
+	}
+	defer apps.Wait()
+
 	listener, err := listen(socketPath)
 	if err != nil {
 		return err
@@ -51,7 +62,7 @@ func run(logger *slog.Logger) error {
 	}()
 
 	server := &http.Server{
-		Handler:           agent.NewHandler(manager, logger),
+		Handler:           route(agent.NewHandler(manager, logger), appstoreagent.NewHandler(apps, logger)),
 		ReadHeaderTimeout: 2 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		// Stop and restart wait up to ten seconds for the container to exit.
@@ -86,6 +97,53 @@ func run(logger *slog.Logger) error {
 		}
 		return err
 	}
+}
+
+func route(containerHandler, appHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if appstoreagent.Matches(r.URL.Path) {
+			appHandler.ServeHTTP(w, r)
+			return
+		}
+		containerHandler.ServeHTTP(w, r)
+	})
+}
+
+// configuredAppStore reads the install policy from the environment. systemd
+// sets STATE_DIRECTORY for StateDirectory=; Compose files and the Docker CLI
+// configuration live there.
+func configuredAppStore() (*engine.Store, error) {
+	entries, err := appstore.Catalog()
+	if err != nil {
+		return nil, err
+	}
+	stateDir := valueOr(os.Getenv("STATE_DIRECTORY"), "/var/lib/a-nas-container")
+	policy := appstore.Policy{
+		AppDataRoot:   valueOr(os.Getenv("ANAS_APP_DATA_ROOT"), "/srv/a-nas/appdata"),
+		DataRoot:      valueOr(os.Getenv("ANAS_SHARED_DATA_ROOT"), "/srv/a-nas/data"),
+		PUID:          valueOr(os.Getenv("ANAS_APP_PUID"), "1000"),
+		PGID:          valueOr(os.Getenv("ANAS_APP_PGID"), "1000"),
+		TZ:            valueOr(os.Getenv("TZ"), "Etc/UTC"),
+		ReservedPorts: []uint16{8080},
+	}
+	for _, root := range []string{policy.AppDataRoot, policy.DataRoot, stateDir} {
+		if !filepath.IsAbs(root) {
+			return nil, errors.New("app data roots and state directory must be absolute paths")
+		}
+	}
+	engineClient, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, err
+	}
+	runner := engine.CLIRunner{Environment: []string{"DOCKER_CONFIG=" + filepath.Join(stateDir, "docker-config")}}
+	return engine.New(entries, policy, stateDir, engine.DockerInspector{Client: engineClient}, runner), nil
+}
+
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // listen creates the socket with group read/write so that only members of the

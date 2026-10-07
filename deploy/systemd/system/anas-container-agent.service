@@ -13,12 +13,22 @@ Group=anas-container
 SupplementaryGroups=docker
 ExecStart=/usr/local/lib/a-nas/anas-container-agent
 Environment=ANAS_CONTAINER_AGENT_SOCKET=/run/a-nas-container/agent.sock
+# App Center install policy: per-app data and shared data stay below these roots.
+Environment=ANAS_APP_DATA_ROOT=/srv/a-nas/appdata
+Environment=ANAS_SHARED_DATA_ROOT=/srv/a-nas/data
+Environment=ANAS_APP_PUID=1000
+Environment=ANAS_APP_PGID=1000
+EnvironmentFile=-/etc/a-nas/container-agent.env
 RuntimeDirectory=a-nas-container
 RuntimeDirectoryMode=0750
+# Rendered Compose files and Docker CLI configuration.
+StateDirectory=a-nas-container
+StateDirectoryMode=0750
 UMask=0007
 Restart=on-failure
 RestartSec=2s
-TimeoutStopSec=20s
+# Lets a running Compose install finish its current step on shutdown.
+TimeoutStopSec=60s
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

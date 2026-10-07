@@ -14,6 +14,10 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appstore"
+	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
+	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
+	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -110,7 +114,7 @@ func run(logger *slog.Logger) error {
 	terminalConfig.Enabled = terminalEnabled
 	terminals := terminal.New(terminalConfig, logger)
 
-	containerManager, containerSource, err := configuredContainers(dataSource)
+	containerManager, appStore, containerSource, err := configuredContainers(dataSource)
 	if err != nil {
 		return err
 	}
@@ -119,7 +123,8 @@ func run(logger *slog.Logger) error {
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
 		Terminal: terminals, Logger: logger,
-	}), containersapi.New(containerManager, containerSource, logger))
+	}), containersapi.New(containerManager, containerSource, logger),
+		appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), logger))
 	handler, err := webui.New(apiHandler)
 	if err != nil {
 		return err
@@ -285,9 +290,11 @@ func configuredTerminal() (bool, error) {
 	}
 }
 
-// configuredContainers defaults to the Fake Adapter only alongside simulated
-// host state, so a live deployment never shows invented containers.
-func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, containersapi.DataSource, error) {
+// configuredContainers selects container management and the App Center
+// together, since both run through the container agent. It defaults to the
+// Fake Adapters only alongside simulated host state, so a live deployment
+// never shows invented containers or apps.
+func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, appstore.Store, containersapi.DataSource, error) {
 	mode := os.Getenv("ANAS_CONTAINERS_MODE")
 	if mode == "" {
 		mode = "disabled"
@@ -297,24 +304,32 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, co
 	}
 	switch mode {
 	case "fake":
-		return fakecontainers.New(), containersapi.DataSourceSimulated, nil
+		apps, err := fakeappstore.New(700 * time.Millisecond)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return fakecontainers.New(), apps, containersapi.DataSourceSimulated, nil
 	case "agent":
 		socketPath, err := containeragent.SocketPath()
 		if err != nil {
-			return nil, "", err
+			return nil, nil, "", err
 		}
-		return containeragent.NewClient(socketPath), containersapi.DataSourceLive, nil
+		return containeragent.NewClient(socketPath), appstoreagent.NewClient(socketPath), containersapi.DataSourceLive, nil
 	case "disabled":
-		return nil, containersapi.DataSourceLive, nil
+		return nil, nil, containersapi.DataSourceLive, nil
 	default:
-		return nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
+		return nil, nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
 	}
 }
 
-func route(api, containerAPI http.Handler) http.Handler {
+func route(api, containerAPI, appAPI http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if containersapi.Matches(r.URL.Path) {
 			containerAPI.ServeHTTP(w, r)
+			return
+		}
+		if appstoreapi.Matches(r.URL.Path) {
+			appAPI.ServeHTTP(w, r)
 			return
 		}
 		api.ServeHTTP(w, r)

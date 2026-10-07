@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
+	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
@@ -55,6 +58,11 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "container logs", path: "/api/v1/containers/" + fakecontainers.ID("jellyfin") + "/logs?tail=2", handler: containerAPI(fakecontainers.New()), wantStatus: http.StatusOK},
 		{name: "container action", method: http.MethodPost, body: `{"action":"restart"}`, path: "/api/v1/containers/" + fakecontainers.ID("jellyfin") + "/actions", handler: containerAPI(fakecontainers.New()), wantStatus: http.StatusNoContent},
 		{name: "container missing", method: http.MethodPost, body: `{"action":"start"}`, path: "/api/v1/containers/" + strings.Repeat("0", 64) + "/actions", handler: containerAPI(fakecontainers.New()), wantStatus: http.StatusNotFound},
+		{name: "apps", path: "/api/v1/apps", handler: appAPI(t), wantStatus: http.StatusOK},
+		{name: "app plan", path: "/api/v1/apps/memos/plan", handler: appAPI(t), wantStatus: http.StatusOK},
+		{name: "app install stale", method: http.MethodPost, body: `{"digest":"` + strings.Repeat("a", 64) + `"}`, path: "/api/v1/apps/memos/install", handler: appAPI(t), wantStatus: http.StatusConflict},
+		{name: "app uninstall missing", method: http.MethodPost, body: `{}`, path: "/api/v1/apps/memos/uninstall", handler: appAPI(t), wantStatus: http.StatusConflict},
+		{name: "apps disabled", path: "/api/v1/apps", handler: appstoreapi.New(nil, appstoreapi.DataSourceLive, nil), wantStatus: http.StatusServiceUnavailable},
 		{name: "terminal status", path: terminal.StatusPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusOK},
 		{name: "terminal disabled", path: terminal.SessionPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusForbidden},
 	}
@@ -115,4 +123,12 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 
 func containerAPI(manager *fakecontainers.Manager) http.Handler {
 	return containersapi.New(manager, containersapi.DataSourceSimulated, nil)
+}
+
+func appAPI(t *testing.T) http.Handler {
+	store, err := fakeappstore.New(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, nil)
 }

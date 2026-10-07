@@ -33,8 +33,11 @@
 
 - 桌面“Docker”应用：查看容器与镜像、运行状态与 CPU/内存占用，启动、停止（需确认）、重启容器并查看日志；新增只持有 Docker socket 的 `anas-container-agent` 与 `/api/v1/containers`。
 
+- 桌面“应用中心”：浏览内置的 26 个 CasaOS 应用，查看镜像、端口与文件夹的安装计划，确认后在后台安装并显示进度，卸载保留应用数据。
+
 ### Security
 
+- 应用只能从内置审查清单安装，且必须通过安装策略（禁止特权、设备、宿主机命名空间、Docker socket 与 `/DATA` 以外的宿主机路径）；安装以计划摘要确认，无法提交任意 Compose 内容。
 - 容器写操作要求回环 Host、JSON 请求体与同源 Origin；产品服务用户不加入 `docker` 组，仅能调用容器代理的类型化接口。
 
 ### Planned
