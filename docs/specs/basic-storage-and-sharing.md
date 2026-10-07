@@ -49,5 +49,6 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 
 - [存储与文件架构](../architecture/storage-and-files.md)
 - [ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
+- [统一身份与文件授权规格](unified-identity-and-file-acl.md)：取代本规格中的空间权限实现方式
 - [`internal/httpapi/product_test.go`](../../internal/httpapi/product_test.go)
 - [`internal/files/service_test.go`](../../internal/files/service_test.go)

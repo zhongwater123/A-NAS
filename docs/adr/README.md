@@ -11,6 +11,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0005：本地控制台使用单应用 Wayland Kiosk](0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
 - [0006：相册使用受管图库与不可变内容对象](0006-use-a-managed-photo-library.md)
 - [0007：基础存储使用单盘 Btrfs、SQLite 与类型化特权边界](0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
+- [0008：统一 Linux 身份，以文件系统 ACL 作为唯一授权来源](0008-use-unified-linux-identities-and-filesystem-acls.md)
 
 ## 格式
 
