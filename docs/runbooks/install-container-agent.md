@@ -22,16 +22,22 @@
 ```bash
 test "$(id -u)" -eq 0
 test "$(hostname)" = a-nas-dev
-test "$(readlink -f /opt/a-nas/current)" = "$(readlink -f /home/anas-dev/apps/a-nas/current)"
+system_release=$(readlink -f /opt/a-nas/current)
+kiosk_release=$(readlink -f /home/anas-dev/apps/a-nas/current)
+test "$(dirname "$system_release")" = /opt/a-nas/releases
+test "$(dirname "$kiosk_release")" = /home/anas-dev/apps/a-nas/releases
+test "$(basename "$system_release")" = "$(basename "$kiosk_release")"
 findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
 ! id -nG anas-dev | tr ' ' '\n' | grep -Fx docker
 
-install -D -o root -g root -m 0600 \
+test ! -e /root/a-nas-container-agent-backup
+install -d -o root -g root -m 0700 /root/a-nas-container-agent-backup
+install -o root -g root -m 0600 \
   /etc/a-nas/anas-api.env \
   /root/a-nas-container-agent-backup/anas-api.env
 
 apt-get update
-apt-get install --no-install-recommends docker.io docker-compose
+apt-get install --no-install-recommends docker.io docker-cli docker-compose
 systemctl enable --now docker.service
 
 systemctl is-active --quiet docker.service
@@ -40,7 +46,7 @@ docker info --format 'server={{.ServerVersion}} cgroup={{.CgroupVersion}}'
 docker-compose version
 ```
 
-完成标准：Docker Client 与 Server 都可用，Server 版本不低于 26.0，cgroup 为 2，Compose 命令可用。应用中心优先使用 `docker compose`，不可用时会使用 Debian 的 `docker-compose`。
+完成标准：Docker Client 与 Server 都可用，Server 版本不低于 26.0，cgroup 为 2，Compose 命令可用。Debian 13 把 `/usr/bin/docker` 拆到 `docker-cli` 推荐包；使用 `--no-install-recommends` 时必须显式安装它。应用中心优先使用 `docker compose`，不可用时会使用 Debian 的 `docker-compose`。
 
 ### 2. 创建最小权限身份
 
@@ -90,6 +96,16 @@ stat -c '%a %U:%G %n' \
 
 完成标准：运行目录为 `750 anas-container:anas-container`，socket 为 `660 anas-container:anas-container`，二进制为 `755 root:root`。应用数据根为 `/srv/a-nas/data/apps`，共享根为 `/srv/a-nas/data/spaces/shared`；只有挂载点改变时才通过 `/etc/a-nas/container-agent.env` 修改，并且两个根仍须位于同一数据卷。
 
+启用或切换产品版本之前，从开发机上传并核对 [`scripts/verify-container-deployment.py`](../../scripts/verify-container-deployment.py) 的 SHA-256；在 NAS root 会话以产品身份执行它：
+
+```bash
+# 此路径是已校验的探针副本，不是新的产品 release。
+probe=/home/anas-dev/verify-container-deployment.py
+timeout 45s runuser -u a-nas -- python3 - --agent-only < "$probe"
+```
+
+它只执行 GET，检查 Docker 版本、容器/镜像数组和非空应用目录；失败时停止在切换之前。`anas-dev` 无权穿过代理运行目录，使用该账号检查 socket 得到 Permission denied 不能当成 socket 缺失。
+
 ### 4. 启用产品能力
 
 不要改写环境文件中的其他键。先删除旧能力键，再追加唯一的实时模式配置：
@@ -127,6 +143,18 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 2. 打开“应用中心”，应显示内置目录并可生成安装计划；实际安装前仍须确认镜像、端口与文件夹摘要。
 3. 首次验收可用专用测试容器核对停止、启动和日志，再删除测试容器。应用中心验收按[应用中心规格](../specs/app-center.md)使用一个可丢弃应用，确认应用身份、数据目录和卸载保留数据。
 
+本地屏保的媒体路由是 `/local-console/screensaver.mp4`，不是 `/screensaver.mp4`；如在同一切换脚本中复核 Range 请求，必须使用真实路由并单独打印其 HTTP 状态。
+
+| 检查对象 | 传输和身份 | 路由 |
+|---|---|---|
+| Docker 列表 | 代理 UDS，`a-nas` | `/v1/snapshot` |
+| 应用目录 | 代理 UDS，`a-nas` | `/v1/apps` |
+| 桌面 Docker 列表 | 产品 HTTP，管理员会话 | `/api/v1/containers` |
+| 桌面应用目录 | 产品 HTTP，管理员会话 | `/api/v1/apps` |
+| 屏保媒体 | 产品 HTTP，回环请求 | `/local-console/screensaver.mp4` |
+
+发布探针通过 `--desktop-only` 检查健康 JSON、嵌入式桌面和 1024 字节 Range；通过 `--agent-only` 检查前两行。`bash -n` 和 ShellCheck 不能发现接口路径写错。开发机可先在具备本地 Docker 只读访问权限的环境执行 `python3 scripts/check-container-deployment-probes.py`，它使用已有 `build/anas-api`、`build/anas-container-agent` 和临时状态目录，只读取 Docker；会重现两个错误路径的 404，并用真实二进制验证探针。不要在 NAS 上运行这个开发检查。
+
 `/api/v1/containers` 与 `/api/v1/apps` 需要管理员产品会话；未带会话的 `curl` 返回未授权不能证明能力未启用。以服务、socket、环境键和登录后的 UI 共同作为完成证据。
 
 ## 回滚或恢复
@@ -149,3 +177,5 @@ systemctl restart anas-api.service
 - ADR：[0009 Docker Engine 与专用容器代理](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - 调查：[Experimental NAS 容器能力保持禁用](../investigations/2026-10-08-experimental-nas-containers-disabled.md)
 - 实现：[`deploy/systemd/system/anas-container-agent.service`](../../deploy/systemd/system/anas-container-agent.service)、[`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- 探针与验证：[`verify-container-deployment.py`](../../scripts/verify-container-deployment.py)、[`check-container-deployment-probes.py`](../../scripts/check-container-deployment-probes.py)
+- 协议来源：[`containers/agent`](../../internal/containers/agent/agent.go)、[`appstore/agent`](../../internal/appstore/agent/agent.go)、[`webui`](../../internal/webui/handler.go)
