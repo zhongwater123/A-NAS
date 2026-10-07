@@ -14,6 +14,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0008：统一 Linux 身份，以文件系统 ACL 作为唯一授权来源](0008-use-unified-linux-identities-and-filesystem-acls.md)
 - [0009：容器使用 Docker Engine 并经专用容器代理访问](0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [0010：应用中心使用内置审查清单与安装策略](0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
+- [0011：相册以专用服务身份独占受管存储，并在 Catalog 中授权](0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 
 ## 格式
 

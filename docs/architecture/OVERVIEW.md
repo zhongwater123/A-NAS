@@ -10,8 +10,9 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
   ▼
 产品服务（非特权）
   ├── Auth / Files / Storage / Share / Jobs / Policy
-  ├── Photo Library / Catalog / Search
-  ├── AI Orchestrator
+  ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
+  │                              ├── Photo Library / Catalog / Search / Policy
+  │                              └── AI Orchestrator ──► AI Worker（只读 fd，无网络）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
           └── Host Agent Client Adapter
@@ -51,6 +52,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 11. AI Worker 不能写原图、权限或用户元数据；只有 Photo Library Module 可以提交权威目录状态。
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
 13. Web 与 SMB 共用账号和 Policy，但密码凭据分别以不可逆格式保存，明文只存在于创建或重置调用期间。
+14. 受管图库存储只由相册服务身份访问，照片资产授权由相册 Policy 判定；个人空间与共享文件夹仍只由 ACL 授权，相册服务不获得其访问权（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
 
 ## 当前代码入口
 
@@ -89,6 +91,7 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 - [Host Agent IPC 决策](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
 - [本地控制台决策](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
 - [受管图库决策](../adr/0006-use-a-managed-photo-library.md)
+- [相册服务身份与 Catalog 授权决策](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [相册技术设计](photo-library.md)
 - [存储与文件架构](storage-and-files.md)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)

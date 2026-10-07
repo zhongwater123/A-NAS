@@ -8,7 +8,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 升级中发现并修复了三个连续阻塞：身份同步前把不存在账号写入 ACL 导致 Host Agent 启动死锁、`build-binaries` 未先生成嵌入式 Web UI、数据卷挂载点缺少 `a-nas-users:--x`。证据与最小回归见 [ADR 0008 首次升级调查](../investigations/2026-10-08-adr0008-bootstrap-private-acl.md)。容器部署又暴露出 Debian 13 将 CLI 拆为独立推荐包，以及部署脚本误用 `/screensaver.mp4`、`/v1/containers` 两个路由；集中式只读探针修正为 `/local-console/screensaver.mp4`、`/v1/snapshot` 后已完成实机切换，详见[容器部署调查](../investigations/2026-10-08-experimental-nas-containers-disabled.md)。旧 Samba 凭据已按手册删除，需要管理员通过已部署的自助改密入口重建后才能开始 Windows SMB 双向验收。
 
-提交 `4e98e86b77c5` 已重新冻结为 `v1.0.0`。相册规格、ADR、技术设计与模型研究全部保留，实施暂停到基础存储闭环稳定后继续。
+提交 `4e98e86b77c5` 已重新冻结为 `v1.0.0`。相册（[issue #23](https://github.com/zhongwater123/A-NAS/issues/23)）已由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 确定专用服务身份、数据卷上的 Catalog 与按范围授权的管理员查看，并拆为 M1 基础相册、M2 本地 AI 检索与 M3 扩展三个里程碑；部署与实机验收排在基础存储闭环和 ADR 0008 之后。
 
 ## 已就绪
 
@@ -39,6 +39,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 2. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
 3. 在直连屏幕完成三分钟闲置屏保与首次输入唤醒的人工验收。
 4. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；基础闭环稳定后恢复相册主线。
+5. 相册 M1 按[技术设计的开发切片](../architecture/photo-library.md#开发切片)从 Catalog 与受管存储开始，以已合并的 ADR 0008 为基线、先用本地临时目录开发，部署与实机验收排在基础存储闭环之后；M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储、账号删除和备份是相册部分验收的前置能力，尚未立项。
 
 ## 外部条件与限制
 
