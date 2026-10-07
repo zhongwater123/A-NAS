@@ -267,8 +267,12 @@ describe("A-NAS v1.0.1 desktop", () => {
     const terminal = within(desktop).getByRole("button", { name: "打开终端" }).parentElement!;
     fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 150, clientY: 160 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 120, clientY: 150 });
+    const dragPreview = document.querySelector(".desktop-drag-preview");
+    expect(dragPreview).toBeTruthy();
+    expect(desktop.contains(dragPreview)).toBe(false);
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 50 });
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 50 });
+    expect(document.querySelector(".desktop-drag-preview")).toBeNull();
     fireEvent.click(within(desktop).getByRole("button", { name: "打开终端" }));
 
     expect(desktopOrder(desktop).slice(0, 5)).toEqual(["终端", "文件管理", "回收站", "系统设置", "资源管理"]);

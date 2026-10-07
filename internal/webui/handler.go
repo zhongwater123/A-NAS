@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -15,12 +17,24 @@ import (
 var embedded embed.FS
 
 type handler struct {
-	api    http.Handler
-	assets fs.FS
-	index  []byte
+	api                  http.Handler
+	assets               fs.FS
+	index                []byte
+	screensaverVideoPath string
+}
+
+type Options struct {
+	ScreensaverVideoPath string
 }
 
 func New(api http.Handler) (http.Handler, error) {
+	return NewWithOptions(api, Options{})
+}
+
+func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
+	if options.ScreensaverVideoPath != "" && !filepath.IsAbs(options.ScreensaverVideoPath) {
+		return nil, errors.New("screen saver video path must be absolute")
+	}
 	assets, err := fs.Sub(embedded, "dist")
 	if err != nil {
 		return nil, err
@@ -29,7 +43,7 @@ func New(api http.Handler) (http.Handler, error) {
 	if err != nil {
 		return nil, errors.New("embedded web UI is not built")
 	}
-	return &handler{api: api, assets: assets, index: index}, nil
+	return &handler{api: api, assets: assets, index: index, screensaverVideoPath: options.ScreensaverVideoPath}, nil
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,9 +67,32 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case strings.HasPrefix(r.URL.Path, "/assets/"):
 		h.serveAsset(w, r)
+	case r.URL.Path == "/local-console/screensaver.mp4":
+		h.serveScreensaver(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (h *handler) serveScreensaver(w http.ResponseWriter, r *http.Request) {
+	if h.screensaverVideoPath == "" {
+		http.NotFound(w, r)
+		return
+	}
+	video, err := os.Open(h.screensaverVideoPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer video.Close()
+	info, err := video.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "video/mp4")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), video)
 }
 
 func (h *handler) serveAsset(w http.ResponseWriter, r *http.Request) {
