@@ -1,6 +1,6 @@
 # 配置并验收 v1.0.1 实验数据卷
 
-状态：active；Experimental NAS 已安装 `v1.0.1-rc.4`（`79851b862904`），并把已确认的 500,107,862,016 字节 SATA 实验盘 `ST500DM002-1BD142`（序列号 `Z2AYDZPB`，WWN `0x5000c500518d4994`）初始化为 Btrfs。rc.4 空间父目录权限阻断文件、回收站与快照接口；下一 RC 修复及实机回归尚未完成。运行中热插拔已转为后续任务，不属于本次闭环验收。
+状态：active；Experimental NAS 已安装 `v1.0.1-rc.4`（`79851b862904`），并把已确认的 500,107,862,016 字节 SATA 实验盘 `ST500DM002-1BD142`（序列号 `Z2AYDZPB`，WWN `0x5000c500518d4994`）初始化为 Btrfs。修复空间权限与 Web/SMB 回收站协作的 `v1.0.1-rc.5`（`69c97abe191f`）已经完整验证并暂存，尚待 root 激活和实机回归。运行中热插拔已转为后续任务，不属于本次闭环验收。
 
 本手册只适用于 Experimental NAS 和可丢弃测试数据。格式化动作不可回滚；不要把家庭正式数据放入本版单盘卷。
 
@@ -17,12 +17,36 @@
 2026-10-07 当前待安装值为：
 
 ```bash
-source_release=/home/anas-dev/apps/a-nas/releases/79851b862904
-release_id=v1.0.1-rc.4-79851b862904
+source_release=/home/anas-dev/apps/a-nas/releases/69c97abe191f
+release_id=v1.0.1-rc.5-69c97abe191f
 smb_interface=enp2s0
 ```
 
-首个 RC 推荐以 root 运行发布目录中的交互向导；它会复核稳定磁盘身份、安装依赖、停止旧用户级预览服务、安装系统服务并逐步引导产品初始化：
+从 rc.4 升级时不要重新执行磁盘初始化或首次配置向导；只安装 ACL 运行依赖、核对暂存制品并运行系统服务安装器：
+
+```bash
+source_release=/home/anas-dev/apps/a-nas/releases/69c97abe191f
+release_id=v1.0.1-rc.5-69c97abe191f
+smb_interface=enp2s0
+
+apt-get update
+apt-get install --no-install-recommends acl
+
+printf '%s  %s\n' \
+  350a58c1f510c257fbee309ae8d4a81126db2456ccd6c3bae9cf7fb9dd270513 "$source_release/anas-api" \
+  94ca206e7f4ea0aea568cbc850268bfe00b9d96da446d0f0b584ec4ac9abd744 "$source_release/anas-host-agent" |
+  sha256sum --check
+
+findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
+ip -brief link show dev "$smb_interface"
+
+"$source_release/install-v1.0.1-system-services.sh" \
+  "$source_release" "$release_id" "$smb_interface"
+```
+
+安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。如果哈希、挂载或网卡核对失败，立即停止。
+
+全新实验机首次安装才使用发布目录中的交互向导；它会复核稳定磁盘身份、安装依赖、停止旧用户级预览服务、安装系统服务并逐步引导产品初始化：
 
 ```bash
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
