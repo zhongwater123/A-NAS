@@ -2,6 +2,7 @@ package linux
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,24 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
+
+func TestMaterializeRegisteredSpacesProtectsPrivateSpaceBeforeIdentitySync(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	privateRoot := filepath.Join(mountPoint, "spaces", "private", "bootstrap-admin")
+	if err := os.MkdirAll(privateRoot, 0o750); err != nil {
+		t.Fatalf("create existing private space: %v", err)
+	}
+	runner := &unknownACLUserRunner{username: "bootstrap-admin"}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	executor.spaceRoots = map[string]string{"space:bootstrap-admin": privateRoot}
+
+	if _, err := executor.materializeRegisteredSpaces(context.Background()); err != nil {
+		t.Fatalf("materialize before identity sync: %v", err)
+	}
+	if !runner.ran(spacePermissionCommand{name: "setfacl", args: []string{"--set", inheritedACL(), privateRoot}}) {
+		t.Fatal("the private space was not protected by a root-only inheritable ACL while its identity was unavailable")
+	}
+}
 
 func TestMaterializeRegisteredSpacesAppliesTheACLLayout(t *testing.T) {
 	mountPoint := filepath.Join(t.TempDir(), "data")
@@ -188,6 +207,19 @@ type spacePermissionCommand struct {
 
 type spacePermissionRunner struct {
 	commands []spacePermissionCommand
+}
+
+type unknownACLUserRunner struct {
+	spacePermissionRunner
+	username string
+}
+
+func (r *unknownACLUserRunner) Run(ctx context.Context, name string, args []string, input string) ([]byte, error) {
+	output, err := r.spacePermissionRunner.Run(ctx, name, args, input)
+	if name == "setfacl" && len(args) >= 2 && strings.Contains(args[1], "user:"+r.username+":") {
+		return []byte("setfacl: Option -s: invalid argument near character 48"), errors.New("exit status 2")
+	}
+	return output, err
 }
 
 func (r *spacePermissionRunner) ran(command spacePermissionCommand) bool {
