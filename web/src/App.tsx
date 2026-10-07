@@ -35,6 +35,7 @@ import {
 import { PointerEvent as ReactPointerEvent, ReactNode, useReducer } from "react";
 
 import { DiskRole, Health, HostState } from "./api";
+import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
@@ -82,6 +83,25 @@ export default function App() {
   const host = useHostState();
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
+  const openWindow = (id: WindowID) => dispatch({ type: "open", id });
+  const desktopApps: DesktopApp[] = [
+    { id: "files", label: "文件管理", ariaLabel: "文件管理，规划中", tone: "files", icon: <FolderClosed />, disabled: true },
+    { id: "trash", label: "回收站", ariaLabel: "回收站，规划中", tone: "trash", icon: <Trash2 />, disabled: true },
+    { id: "settings", label: "系统设置", ariaLabel: "打开系统设置", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openWindow("settings") },
+    { id: "resources", label: "资源管理", ariaLabel: "打开资源管理", tone: "resources", icon: <Activity />, active: isOpen("resources"), onClick: () => openWindow("resources") },
+    { id: "terminal", label: "终端", ariaLabel: "打开终端", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") },
+    { id: "store", label: "应用中心", ariaLabel: "应用中心，规划中", tone: "store", icon: <ShoppingBag />, disabled: true },
+    { id: "video", label: "影视", ariaLabel: "影视，规划中", tone: "video", icon: <PlaySquare />, disabled: true },
+    { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
+    { id: "snapshot", label: "文件快照", ariaLabel: "文件快照，规划中", tone: "snapshot", icon: <Camera />, disabled: true },
+    { id: "docker", label: "Docker", ariaLabel: "Docker，规划中", tone: "docker", icon: <Box />, disabled: true },
+    { id: "photos", label: "相册", ariaLabel: "相册，规划中", tone: "photos", icon: <Image />, disabled: true },
+    { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
+    { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
+    { id: "backup", label: "备份", ariaLabel: "备份，规划中", tone: "backup", icon: <ShieldCheck />, disabled: true },
+    { id: "music", label: "音乐", ariaLabel: "音乐，规划中", tone: "music", icon: <Music2 />, disabled: true },
+    { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+  ];
   const visible = windows.filter((window) => window.open && !window.minimized);
   const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
 
@@ -105,24 +125,7 @@ export default function App() {
         </div>
       </aside>
 
-      <section className="desktop-grid" aria-label="桌面应用">
-        <DesktopShortcut label="文件管理" ariaLabel="文件管理，规划中" tone="files" icon={<FolderClosed />} disabled />
-        <DesktopShortcut label="回收站" ariaLabel="回收站，规划中" tone="trash" icon={<Trash2 />} disabled />
-        <DesktopShortcut label="系统设置" ariaLabel="打开系统设置" tone="settings" icon={<Settings />} active={isOpen("settings")} onClick={() => dispatch({ type: "open", id: "settings" })} />
-        <DesktopShortcut label="资源管理" ariaLabel="打开资源管理" tone="resources" icon={<Activity />} active={isOpen("resources")} onClick={() => dispatch({ type: "open", id: "resources" })} />
-        <DesktopShortcut label="终端" ariaLabel="打开终端" tone="terminal" icon={<SquareTerminal />} active={isOpen("terminal")} onClick={() => dispatch({ type: "open", id: "terminal" })} />
-        <DesktopShortcut label="应用中心" ariaLabel="应用中心，规划中" tone="store" icon={<ShoppingBag />} disabled />
-        <DesktopShortcut label="影视" ariaLabel="影视，规划中" tone="video" icon={<PlaySquare />} disabled />
-        <DesktopShortcut label="下载" ariaLabel="下载，规划中" tone="download" icon={<Download />} disabled />
-        <DesktopShortcut label="文件快照" ariaLabel="文件快照，规划中" tone="snapshot" icon={<Camera />} disabled />
-        <DesktopShortcut label="Docker" ariaLabel="Docker，规划中" tone="docker" icon={<Box />} disabled />
-        <DesktopShortcut label="相册" ariaLabel="相册，规划中" tone="photos" icon={<Image />} disabled />
-        <DesktopShortcut label="日志" ariaLabel="日志，规划中" tone="logs" icon={<FileText />} disabled />
-        <DesktopShortcut label="虚拟机" ariaLabel="虚拟机，规划中" tone="vm" icon={<Monitor />} disabled />
-        <DesktopShortcut label="备份" ariaLabel="备份，规划中" tone="backup" icon={<ShieldCheck />} disabled />
-        <DesktopShortcut label="音乐" ariaLabel="音乐，规划中" tone="music" icon={<Music2 />} disabled />
-        <DesktopShortcut label="AI 助手" ariaLabel="AI 助手，规划中" tone="ai" icon={<Bot />} disabled />
-      </section>
+      <DesktopGrid apps={desktopApps} />
 
       <StatusBar host={host} />
 
@@ -281,10 +284,6 @@ function SettingsPanel({ state }: { state?: HostState }) {
       </div>
     </div>
   );
-}
-
-function DesktopShortcut({ label, ariaLabel, tone, icon, onClick, active, disabled }: { label: string; ariaLabel: string; tone: string; icon: ReactNode; onClick?: () => void; active?: boolean; disabled?: boolean }) {
-  return <button className={`desktop-shortcut ${active ? "running" : ""}`} aria-label={ariaLabel} title={disabled ? `${label} · 规划中` : label} disabled={disabled} onClick={onClick}><span className={`desktop-icon icon-${tone}`}>{icon}</span><span>{label}</span>{disabled && <small>规划中</small>}</button>;
 }
 
 function MetricCard({ label, value, detail }: { label: string; value: ReactNode; detail: ReactNode }) {

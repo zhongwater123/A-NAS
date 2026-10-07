@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,6 +48,7 @@ const healthyState = {
 };
 
 beforeEach(() => {
+  localStorage.clear();
   xterm.mounts = 0;
   xterm.onStatus = undefined;
 });
@@ -211,6 +212,58 @@ describe("A-NAS desktop", () => {
     expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuetext")).toBe("暂无数据");
   });
 
+  it("reorders desktop icons by dragging without opening the app", async () => {
+    stubFetch(healthyState);
+    render(<App />);
+    const desktop = screen.getByRole("region", { name: "桌面应用" });
+    layOutGrid(desktop);
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["文件管理", "回收站", "系统设置", "资源管理", "终端"]);
+
+    const terminal = within(desktop).getByRole("button", { name: "打开终端" }).parentElement!;
+    fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 150, clientY: 160 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 120, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 50 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 50 });
+    fireEvent.click(within(desktop).getByRole("button", { name: "打开终端" }));
+
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["终端", "文件管理", "回收站", "系统设置", "资源管理"]);
+    expect(JSON.parse(localStorage.getItem("a-nas.desktop-order.v1")!).slice(0, 2)).toEqual(["terminal", "files"]);
+    expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
+    expect(screen.getByText("已将终端移动到第 1 位")).toBeTruthy();
+  });
+
+  it("restores the original order when a drag is cancelled with Escape", async () => {
+    stubFetch(healthyState);
+    render(<App />);
+    const desktop = screen.getByRole("region", { name: "桌面应用" });
+    layOutGrid(desktop);
+
+    const settings = within(desktop).getByRole("button", { name: "打开系统设置" }).parentElement!;
+    fireEvent.pointerDown(settings, { button: 0, pointerId: 2, pointerType: "mouse", clientX: 250, clientY: 50 });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 40, clientY: 50 });
+    expect(desktopOrder(desktop)[0]).toBe("系统设置");
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(desktopOrder(desktop).slice(0, 3)).toEqual(["文件管理", "回收站", "系统设置"]);
+    expect(localStorage.getItem("a-nas.desktop-order.v1")).toBeNull();
+  });
+
+  it("moves a focused icon with Alt and the arrow keys and restores the saved order", async () => {
+    stubFetch(healthyState);
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const desktop = screen.getByRole("region", { name: "桌面应用" });
+
+    within(desktop).getByRole("button", { name: "打开资源管理" }).focus();
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    expect(desktopOrder(desktop).slice(0, 4)).toEqual(["文件管理", "回收站", "资源管理", "系统设置"]);
+    expect(document.activeElement).toBe(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    unmount();
+
+    render(<App />);
+    expect(desktopOrder(screen.getByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "资源管理", "系统设置"]);
+  });
+
   it("switches focus between open apps from an icon-only dock", async () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();
@@ -301,6 +354,30 @@ describe("A-NAS desktop", () => {
     expect(screen.queryByTestId("xterm-session")).toBeNull();
   });
 });
+
+function desktopOrder(desktop: HTMLElement): string[] {
+  return within(desktop).getAllByRole("button").map((button) => button.textContent!.replace("规划中", ""));
+}
+
+// jsdom has no layout; give each slot the geometry of a 3-column, 100px grid.
+function layOutGrid(desktop: HTMLElement) {
+  const geometry = (slot: Element) => {
+    const index = Array.from(slot.parentElement!.children).filter((child) => child.classList.contains("desktop-slot")).indexOf(slot);
+    return { left: (index % 3) * 100, top: Math.floor(index / 3) * 100 };
+  };
+  desktop.querySelectorAll(".desktop-slot").forEach((slot) => {
+    Object.defineProperties(slot, {
+      offsetLeft: { configurable: true, get: () => geometry(slot).left },
+      offsetTop: { configurable: true, get: () => geometry(slot).top },
+      offsetWidth: { configurable: true, get: () => 100 },
+      offsetHeight: { configurable: true, get: () => 100 },
+    });
+    slot.getBoundingClientRect = () => {
+      const { left, top } = geometry(slot);
+      return { left, top, right: left + 100, bottom: top + 100, width: 100, height: 100, x: left, y: top, toJSON: () => ({}) };
+    };
+  });
+}
 
 function routeFetch(routes: { hostState: () => Promise<Response>; metrics?: () => Promise<Response>; terminalEnabled?: boolean }) {
   vi.stubGlobal(

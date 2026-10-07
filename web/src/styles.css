@@ -141,7 +141,15 @@ button { font: inherit; }
   user-select: none;
 }
 .desktop-shortcut:hover:not(:disabled), .desktop-shortcut:focus-visible { background: rgba(255,255,255,.13); transform: translateY(-1px); outline: none; }
-.desktop-shortcut:disabled { cursor: not-allowed; }
+/* Disabled buttons swallow pointer events in some browsers; let the slot receive them so planned apps can be reordered too. */
+.desktop-shortcut:disabled { pointer-events: none; }
+.desktop-slot { position: relative; display: grid; touch-action: manipulation; }
+.desktop-slot:has(> .desktop-shortcut:disabled) { cursor: not-allowed; }
+.desktop-grid.reordering, .desktop-grid.reordering .desktop-slot { cursor: grabbing; }
+.desktop-grid.reordering .desktop-shortcut { pointer-events: none; }
+.desktop-slot.dragging { z-index: 5; }
+.desktop-slot.dragging .desktop-shortcut { background: rgba(255,255,255,.16); transform: scale(1.06); }
+.desktop-slot.dragging .desktop-icon { box-shadow: inset 0 1px 1px rgba(255,255,255,.42), 0 18px 34px rgba(20,14,46,.45); }
 .desktop-shortcut > span:nth-child(2) { font-size: 12px; font-weight: 720; white-space: nowrap; }
 .desktop-shortcut small { margin-top: -5px; padding: 1px 5px; border-radius: 999px; color: rgba(255,255,255,.78); background: rgba(34,22,70,.28); font-size: 8px; line-height: 14px; }
 .desktop-icon {
