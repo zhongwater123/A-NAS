@@ -20,7 +20,7 @@
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 
 SOURCE_RELEASE="$source_release" \
-RELEASE_ID=v1.0.1-rc.3-<GIT_SHA> \
+RELEASE_ID=v1.0.1-rc.4-<GIT_SHA> \
 SMB_INTERFACE=enp2s0 \
 EXPECTED_DISK_WWN=0x5000c500518d4994 \
 EXPECTED_DISK_SERIAL=Z2AYDZPB \
@@ -35,7 +35,7 @@ apt-get update
 apt-get install --no-install-recommends btrfs-progs parted smartmontools samba libsqlite3-0
 
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
-release_id=v1.0.1-rc.3-<GIT_SHA>
+release_id=v1.0.1-rc.4-<GIT_SHA>
 smb_interface=enp3s0
 
 readlink -f /home/anas-dev/apps/a-nas/current
@@ -45,7 +45,7 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；两个系统服务 active；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
+完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；两个系统服务 active；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
 ## 生成和执行计划
 

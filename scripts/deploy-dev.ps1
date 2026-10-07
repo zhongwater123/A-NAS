@@ -65,11 +65,33 @@ try {
         return
     }
 
-    & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check VERSION=$productVersion"
-    if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
-
     $apiBinary = Join-Path $repoRoot 'build\anas-api'
     $agentBinary = Join-Path $repoRoot 'build\anas-host-agent'
+    $validationManifest = Join-Path $repoRoot 'build\.validated-build'
+    $reuseValidation = $false
+    if ((Test-Path -LiteralPath $validationManifest -PathType Leaf) -and
+        (Test-Path -LiteralPath $apiBinary -PathType Leaf) -and
+        (Test-Path -LiteralPath $agentBinary -PathType Leaf)) {
+        $validation = @{}
+        foreach ($line in Get-Content -LiteralPath $validationManifest) {
+            $parts = $line -split '=', 2
+            if ($parts.Count -eq 2) { $validation[$parts[0]] = $parts[1] }
+        }
+        $currentApiHash = (Get-FileHash -LiteralPath $apiBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+        $currentAgentHash = (Get-FileHash -LiteralPath $agentBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+        $reuseValidation =
+            $validation.commit -eq $version -and
+            $validation.product_version -eq $productVersion -and
+            $validation.api_sha256 -eq $currentApiHash -and
+            $validation.host_agent_sha256 -eq $currentAgentHash
+    }
+    if ($reuseValidation) {
+        Write-Host "Reusing full validation for $productVersion ($version)."
+    } else {
+        & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check VERSION=$productVersion"
+        if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
+    }
+
     $apiHash = (Get-FileHash -LiteralPath $apiBinary -Algorithm SHA256).Hash.ToLowerInvariant()
     $agentHash = (Get-FileHash -LiteralPath $agentBinary -Algorithm SHA256).Hash.ToLowerInvariant()
     $release = "apps/a-nas/releases/$version"
@@ -96,6 +118,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-kiosk@.service'); Destination = "${target}:$release/anas-kiosk@.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\pam\a-nas-kiosk'); Destination = "${target}:$release/a-nas-kiosk.pam.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\config\experimental-nas-kiosk.env'); Destination = "${target}:$release/kiosk.env.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
     )
     foreach ($upload in $uploads) {

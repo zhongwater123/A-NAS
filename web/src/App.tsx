@@ -32,7 +32,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useState } from "react";
+import { Component, ErrorInfo, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useState } from "react";
 
 import {
   APIError, DiskRole, FileEntry, Health, HostState, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User,
@@ -114,7 +114,7 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
 		finally { setSubmitting(false); }
 	};
-	return <main className="auth-shell"><form className="auth-card" onSubmit={(event) => void submit(event)}>
+	return <main className="auth-shell"><form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
 		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "启用 A-NAS" : "登录 A-NAS"}</h1>
 		{mode === "setup" && <p>创建本机管理员账号以启用设备。</p>}
 		<label>账号<input name="username" required autoComplete="username" /></label>
@@ -286,10 +286,25 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
           <button className="close" aria-label={`关闭${model.title}`} onClick={() => dispatch({ type: "close", id: model.id })}><X /></button>
         </div>
       </div>
-      <div className="window-content">{children}</div>
+      <div className="window-content"><PanelErrorBoundary>{children}</PanelErrorBoundary></div>
       {!model.maximized && <div className="resize-handle" aria-hidden="true" onPointerDown={beginResize} />}
     </section>
   );
+}
+
+class PanelErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() { return { failed: true }; }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("A-NAS panel render failed", error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <div className="center-state"><CircleAlert /><h2>这个页面暂时无法显示</h2><p>桌面和后台服务仍在运行，可以重新载入界面后继续。</p><button className="primary" onClick={() => window.location.reload()}>重新载入界面</button></div>;
+  }
 }
 
 function ResourcePanel({ host }: { host: ReturnType<typeof useHostState> }) {
@@ -412,14 +427,49 @@ function AccountsPanel({ currentUser }: { currentUser: User }) {
 	const refresh = useCallback(() => listUsers().then(setUsers).catch((caught) => setError(messageOf(caught))), []);
 	useEffect(() => { void refresh(); }, [refresh]);
 	const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { await createMember(String(data.get("username")), String(data.get("password"))); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); } };
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id !== currentUser.id && <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div></div>;
+	return <div className="product-page"><div className="page-heading"><div><p className="section-label">ACCOUNTS</p><h2>账号与权限</h2></div></div>{error && <PanelNotice error={error} />}<form className="inline-form" autoComplete="off" onSubmit={(event) => void create(event)}><input name="username" placeholder="成员账号" required /><input name="password" type="password" minLength={12} autoComplete="new-password" placeholder="初始密码（至少 12 位）" required /><button>创建成员</button></form><div className="data-list">{users.map((user) => <div className="data-row" key={user.id}><UserRound /><strong>{user.username}</strong><small>{user.role} · {user.status}</small>{user.id !== currentUser.id && <><button onClick={() => { const password = window.prompt("输入至少 12 位的新密码"); if (password) void resetMember(user.id, password).then(refresh).catch((caught) => setError(messageOf(caught))); }}>重置密码</button><button className="danger-link" disabled={user.status === "disabled"} onClick={() => void disableMember(user.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>禁用</button></>}</div>)}</div></div>;
 }
 
 function StoragePanel({ state }: { state?: HostState }) {
-	const [volumes, setVolumes] = useState<Array<{ id: string; state: string; filesystemUuid?: string }>>([]); const [plan, setPlan] = useState<StoragePlan>(); const [phrase, setPhrase] = useState(""); const [error, setError] = useState("");
+	const [volumes, setVolumes] = useState<Array<{ id: string; state: string; filesystemUuid?: string }>>([]);
+	const [plan, setPlan] = useState<StoragePlan>();
+	const [phrase, setPhrase] = useState("");
+	const [error, setError] = useState("");
+	const [busy, setBusy] = useState<"plan" | "confirm" | "execute">();
 	const refresh = useCallback(() => listVolumes().then(setVolumes).catch((caught) => setError(messageOf(caught))), []);
 	useEffect(() => { void refresh(); }, [refresh]);
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">DATA VOLUME</p><h2>存储初始化</h2><p>只允许非系统、非 USB、未占用且身份稳定的磁盘</p></div></div>{error && <PanelNotice error={error} />}<div className="data-list">{volumes.map((volume) => <div className="data-row" key={volume.id}><Database /><strong>{volume.id}</strong><small>{volume.state} · {volume.filesystemUuid ?? "等待 UUID"}</small></div>)}</div>{state?.disks.filter((disk) => disk.role === "unassigned").map((disk) => <div className="danger-zone" key={disk.id}><strong>{disk.model} · {formatCapacity(disk.capacityBytes)}</strong><p>{disk.eligibleForDataVolume ? `稳定 ID：${shortID(disk.id)}` : disk.ineligibleReasons.join("；")}</p><button disabled={!disk.eligibleForDataVolume || Boolean(plan)} onClick={() => void createStoragePlan(disk.id).then(setPlan).catch((caught) => setError(messageOf(caught)))}>生成格式化计划</button></div>)}{plan && <div className="plan-card"><h3>破坏性操作计划</h3><p>身份指纹：<code>{plan.fingerprint}</code></p><p>将清除的已知签名：{plan.signatures.length ? plan.signatures.join("、") : "未检测到文件系统签名"}</p>{plan.actions.map((action) => <p key={action.kind}>• {action.description}</p>)}<p>有效期至 {new Date(plan.expiresAt).toLocaleString("zh-CN")}</p><label>输入确认短语 <code>{plan.confirmationPhrase}</code><input value={phrase} onChange={(event) => setPhrase(event.target.value)} /></label>{plan.state === "planned" && <button disabled={phrase !== plan.confirmationPhrase} onClick={() => void confirmStoragePlan(plan.id, phrase).then(setPlan).catch((caught) => setError(messageOf(caught)))}>确认计划</button>}{plan.state === "confirmed" && <button className="danger-button" onClick={() => void executeStoragePlan(plan.id).then((value) => { setPlan(value); void refresh(); }).catch((caught) => setError(messageOf(caught)))}>执行清除并创建数据卷</button>}<strong>状态：{plan.state}</strong></div>}</div>;
+
+	const generate = async (diskID: string) => {
+		setBusy("plan"); setError("");
+		try { setPlan(await createStoragePlan(diskID)); }
+		catch (caught) { setError(messageOf(caught)); }
+		finally { setBusy(undefined); }
+	};
+	const confirm = async () => {
+		if (!plan) return;
+		setBusy("confirm"); setError("");
+		try { setPlan(await confirmStoragePlan(plan.id, phrase)); }
+		catch (caught) { setError(messageOf(caught)); }
+		finally { setBusy(undefined); }
+	};
+	const execute = async () => {
+		if (!plan) return;
+		setBusy("execute"); setError("");
+		try { setPlan(await executeStoragePlan(plan.id)); await refresh(); }
+		catch (caught) { setError(messageOf(caught)); }
+		finally { setBusy(undefined); }
+	};
+	const signatures = plan?.signatures ?? [];
+	const actions = plan?.actions ?? [];
+
+	return <div className="product-page">
+		<div className="page-heading"><div><p className="section-label">DATA VOLUME</p><h2>存储初始化</h2><p>只允许非系统、非 USB、未占用且身份稳定的磁盘</p></div></div>
+		{error && <PanelNotice error={error} />}
+		{busy && <div className="status-banner"><span className="loader" />{busy === "plan" ? "正在生成计划…" : busy === "confirm" ? "正在确认计划…" : "正在创建数据卷，请勿关闭设备…"}</div>}
+		<div className="data-list">{volumes.map((volume) => <div className="data-row" key={volume.id}><Database /><strong>{volume.id}</strong><small>{volume.state} · {volume.filesystemUuid ?? "等待 UUID"}</small></div>)}</div>
+		{state?.disks.filter((disk) => disk.role === "unassigned").map((disk) => <div className="danger-zone" key={disk.id}><strong>{disk.model} · {formatCapacity(disk.capacityBytes)}</strong><p>{disk.eligibleForDataVolume ? `稳定 ID：${shortID(disk.id)}` : disk.ineligibleReasons.join("；")}</p><button disabled={!disk.eligibleForDataVolume || Boolean(plan) || Boolean(busy)} onClick={() => void generate(disk.id)}>{busy === "plan" ? "正在生成…" : "生成格式化计划"}</button></div>)}
+		{plan && <div className="plan-card"><h3>破坏性操作计划</h3><p>身份指纹：<code>{plan.fingerprint}</code></p><p>将清除的已知签名：{signatures.length ? signatures.join("、") : "未检测到文件系统签名"}</p>{actions.map((action) => <p key={action.kind}>• {action.description}</p>)}<p>有效期至 {new Date(plan.expiresAt).toLocaleString("zh-CN")}</p><label>输入确认短语 <code>{plan.confirmationPhrase}</code><input value={phrase} onChange={(event) => setPhrase(event.target.value)} /></label>{plan.state === "planned" && <button disabled={phrase !== plan.confirmationPhrase || Boolean(busy)} onClick={() => void confirm()}>{busy === "confirm" ? "正在确认…" : "确认计划"}</button>}{plan.state === "confirmed" && <button className="danger-button" disabled={Boolean(busy)} onClick={() => void execute()}>{busy === "execute" ? "正在创建数据卷…" : "执行清除并创建数据卷"}</button>}<strong>状态：{busy === "execute" ? "running" : plan.state}</strong></div>}
+	</div>;
 }
 
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }

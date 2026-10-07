@@ -2,7 +2,9 @@ package storage_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +57,28 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 	}
 	if _, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01"); err != storage.ErrVolumeExists {
 		t.Fatalf("second volume plan error = %v, want ErrVolumeExists", err)
+	}
+}
+
+func TestPlanForBlankDiskSerializesEmptySignaturesArray(t *testing.T) {
+	service := storage.NewService(fake.NewHealthy(), &recordingExecutor{}, storage.Options{
+		Now:   func() time.Time { return time.Date(2026, time.October, 7, 9, 0, 0, 0, time.UTC) },
+		NewID: func() string { return "plan-blank-disk" },
+	})
+
+	plan, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01")
+	if err != nil {
+		t.Fatalf("PlanCreateVolume() error = %v", err)
+	}
+	if plan.Signatures == nil {
+		t.Fatal("blank-disk signatures = nil, want an empty array")
+	}
+	payload, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"signatures":[]`) {
+		t.Fatalf("plan JSON = %s, want signatures array", payload)
 	}
 }
 

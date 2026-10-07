@@ -2,13 +2,18 @@ GO ?= go
 NPM ?= npm
 BUILD_DIR ?= build
 VERSION ?= dev
+WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
+VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test build build-binaries check clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test build build-binaries check check-steps clean
 
 all: check
 
-web-install:
+web-install: $(WEB_DEPS_STAMP)
+
+$(WEB_DEPS_STAMP): web/package.json web/package-lock.json
 	cd web && $(NPM) ci --no-audit --no-fund
+	@test -f $(WEB_DEPS_STAMP)
 
 web-typecheck: web-install
 	cd web && $(NPM) run typecheck
@@ -46,6 +51,9 @@ ops-check:
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api' deploy/systemd/system/anas-api.service
 	grep -Fq 'ANAS_HOST_AGENT_GROUP=a-nas' scripts/install-v1.0.1-system-services.sh
+	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
+	grep -Fq '/etc/chromium/policies/managed/a-nas.json' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'a-nas-chromium-policy.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
 
@@ -62,8 +70,17 @@ build-binaries:
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
 
-check: web-typecheck web-test web-build fmt-check docs-check ops-check vet test build-binaries
+check:
+	@rm -f $(VALIDATION_MANIFEST)
+	@$(MAKE) --no-print-directory check-steps VERSION="$(VERSION)"
+	@commit="$$(git rev-parse --short=12 HEAD)"; \
+	api_sha="$$(sha256sum $(BUILD_DIR)/anas-api | cut -d ' ' -f 1)"; \
+	agent_sha="$$(sha256sum $(BUILD_DIR)/anas-host-agent | cut -d ' ' -f 1)"; \
+	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
+		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
+
+check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet test build-binaries
 
 clean:
-	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent
+	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(VALIDATION_MANIFEST)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete

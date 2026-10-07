@@ -76,10 +76,13 @@ printf '%s  %s\n' "$api_sha" anas-api.incoming | sha256sum -c -
 printf '%s  %s\n' "$agent_sha" anas-host-agent.incoming | sha256sum -c -
 install -m 0750 anas-api.incoming anas-api
 install -m 0750 anas-host-agent.incoming anas-host-agent
+install -m 0644 anas-api.service.incoming anas-api.service
+install -m 0644 anas-host-agent.service.incoming anas-host-agent.service
 install -m 0750 kiosk-launcher.incoming kiosk-launcher
 install -m 0644 anas-kiosk@.service.incoming anas-kiosk@.service
 install -m 0644 a-nas-kiosk.pam.incoming a-nas-kiosk.pam
 install -m 0644 kiosk.env.incoming kiosk.env
+install -m 0644 a-nas-chromium-policy.json.incoming a-nas-chromium-policy.json
 install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
@@ -91,6 +94,7 @@ rm -f \
   anas-kiosk@.service.incoming \
   a-nas-kiosk.pam.incoming \
   kiosk.env.incoming \
+  a-nas-chromium-policy.json.incoming \
   anas-api-system.service.incoming \
   anas-host-agent-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
@@ -120,8 +124,8 @@ activated=1
 printf 'ANAS_HTTP_ADDR=127.0.0.1:8080\nANAS_HOSTSTATE_MODE=%s\nANAS_STATE_DIR=%s/state\n' \
   "$mode" "$config_dir" > "$config_dir/anas-api.env"
 chmod 0600 "$config_dir/anas-api.env"
-install -m 0644 anas-api.service.incoming "$unit_dir/anas-api.service"
-install -m 0644 anas-host-agent.service.incoming "$unit_dir/anas-host-agent.service"
+install -m 0644 anas-api.service "$unit_dir/anas-api.service"
+install -m 0644 anas-host-agent.service "$unit_dir/anas-host-agent.service"
 
 ln -sfn "$release" "$HOME/apps/a-nas/current.next"
 mv -Tf "$HOME/apps/a-nas/current.next" "$current"

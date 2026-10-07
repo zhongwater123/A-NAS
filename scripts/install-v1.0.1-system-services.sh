@@ -35,6 +35,10 @@ for unit in anas-api-system.service anas-host-agent-system.service; do
     exit 2
   fi
 done
+if [[ ! -f "$source_release/a-nas-chromium-policy.json" ]]; then
+  echo "missing Chromium policy: $source_release/a-nas-chromium-policy.json" >&2
+  exit 2
+fi
 for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
@@ -53,6 +57,7 @@ install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
 install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
+install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
 
 target="/opt/a-nas/releases/$release_id"
@@ -87,11 +92,15 @@ chmod 0600 /etc/a-nas/host-agent.env
 
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
+install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
 systemctl enable anas-host-agent.service anas-api.service
 systemctl restart anas-host-agent.service anas-api.service
+if systemctl is-active --quiet anas-kiosk@tty1.service; then
+  systemctl restart anas-kiosk@tty1.service
+fi
 
 systemctl --no-pager --full status anas-host-agent.service anas-api.service
 echo "Open the local A-NAS console to create the first administrator with an account and password."

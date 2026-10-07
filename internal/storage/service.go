@@ -197,7 +197,7 @@ func (s *Service) PlanCreateVolume(ctx context.Context, diskID string) (Executio
 		DiskModel:          disk.Model,
 		CapacityBytes:      disk.CapacityBytes,
 		Fingerprint:        FingerprintDisk(disk),
-		Signatures:         append([]string(nil), disk.Filesystems...),
+		Signatures:         append([]string{}, disk.Filesystems...),
 		ConfirmationPhrase: confirmationPhrase(disk.ID.String()),
 		Actions: []Action{
 			{Kind: "erase_signatures", Description: "清除目标磁盘上现有的分区和文件系统签名"},
@@ -485,8 +485,8 @@ func confirmationPhrase(diskID string) string {
 }
 
 func clonePlan(plan ExecutionPlan) ExecutionPlan {
-	plan.Actions = append([]Action(nil), plan.Actions...)
-	plan.Signatures = append([]string(nil), plan.Signatures...)
+	plan.Actions = append([]Action{}, plan.Actions...)
+	plan.Signatures = append([]string{}, plan.Signatures...)
 	if plan.Volume != nil {
 		volume := *plan.Volume
 		plan.Volume = &volume

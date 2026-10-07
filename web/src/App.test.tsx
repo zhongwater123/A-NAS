@@ -77,6 +77,23 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "相册，规划中" }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("keeps the desktop usable when a blank-disk plan contains legacy null arrays", async () => {
+    installAPI({
+      storagePlan: {
+        id: "plan:blank", diskId: "disk:fake-data-01", diskModel: "A-NAS Fake HDD", capacityBytes: 512000000000,
+        fingerprint: "blank-disk-fingerprint", signatures: null,
+        confirmationPhrase: "ERASE data-01", actions: null, state: "planned", expiresAt: "2026-10-07T10:10:00Z",
+      },
+    });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开存储初始化" }));
+    await user.click(await screen.findByRole("button", { name: "生成格式化计划" }));
+    expect(await screen.findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect(screen.getByText("将清除的已知签名：未检测到文件系统签名")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "桌面应用" })).toBeTruthy();
+  });
+
   it("opens, minimizes, and restores system settings", async () => {
     installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -88,7 +105,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[] } = {}) {
+function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; storagePlan?: unknown } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
@@ -98,6 +115,7 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
     if (path === "/api/v1/volumes") return ok({ items: [] });
+	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
     if (path === "/api/v1/users") return ok({ items: [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
     return ok({ items: [] });

@@ -59,11 +59,13 @@ wsl -d Ubuntu-24.04 -u root
 
 ## Web 桌面
 
-完整检查会自动执行 `npm ci`、类型检查、React 测试和 Vite 构建：
+完整检查在依赖锁变化时执行 `npm ci`，随后运行类型检查、React 测试和 Vite 构建：
 
 ```bash
 make check
 ```
+
+日常迭代先运行受影响的现有目标，例如 `go test ./internal/storage`、`make web-test` 或 `make ops-check`；RC 提交只运行一次完整 `make check VERSION=<RC>`。完整检查会把提交、产品版本和两个二进制哈希写入可丢弃的 `build/.validated-build`，`deploy-dev.ps1` 只有在四者全部一致时才复用结果，否则自动重跑完整门禁。这样不会用“跳过测试”换速度，也不会为同一制品重复执行全量测试。
 
 只开发界面时：
 
