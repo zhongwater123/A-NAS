@@ -84,6 +84,12 @@ printf '%s\n' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_VIDEO=/var/lib/a-nas/screensavers/computer-chip.mp4' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
+# Container management is an optional root-installed capability. Preserve it
+# across system-service upgrades only when the typed agent socket is present;
+# never grant the Product Service direct access to docker.sock.
+if [[ -S /run/a-nas-container/agent.sock ]]; then
+  printf 'ANAS_CONTAINERS_MODE=agent\n' >> /etc/a-nas/anas-api.env
+fi
 chown root:a-nas /etc/a-nas/anas-api.env
 chmod 0640 /etc/a-nas/anas-api.env
 

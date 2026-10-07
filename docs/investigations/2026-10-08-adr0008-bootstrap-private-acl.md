@@ -68,6 +68,15 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 
 `TestMaterializeRegisteredSpacesAppliesTheACLLayout` 现同时要求父目录与数据卷挂载点获得仅遍历 ACL。修复让启动对账对两级目录都执行同一幂等操作，不授予列目录权限。最终实机验收证明：`admin` 可以穿过卷根并进入自己的个人空间、不能列出卷根，Product Service 账号 `a-nas` 继续被内核拒绝；`healthz`、嵌入式桌面和屏保 byte-range 请求均成功。ADR 0008 唯一剩余操作是管理员在 Web 重置密码以重新生成已按手册删除的 Samba 凭据。
 
+## 可复用的升级经验
+
+- 首次升级必须把“身份尚不存在但空间注册表已经存在”作为正常中间状态。启动期对账先 fail closed，再由身份同步收敛到最终 ACL；不能让服务启动依赖尚未开放的同步 API。
+- 不可变 release 的验证对象必须是最终制品而不只是 Go 源码。`build-binaries` 自身负责生成嵌入式 Web UI，避免调用者漏掉隐含构建顺序；每次切换前同时核对版本文件和所有二进制/媒体 SHA-256。
+- systemd 服务刚重启时的瞬时 `activating` 或一次 socket reset 不是最终判据。恢复脚本应等待服务和健康端点稳定，再验证身份、ACL 与 Kiosk；失败时保留备份和现场，不重复执行已经完成的破坏性步骤。
+- 高风险 root 操作使用上传后经过 `bash -n`/`shellcheck` 和哈希核对的脚本，操作者只执行一个短命令。避免把长脚本通过富文本终端粘贴，因为转义、换行和 HTML 实体会使现场不可审计。
+- 运行手册必须随服务边界迁移一起更新。ADR 0008 把产品从 `anas-dev` 用户级服务迁到 `a-nas` 系统服务；任何仍修改 `~/.config/a-nas` 或重启 `systemctl --user` 的后续能力手册都需要重新路由。
+- 删除旧 Samba 身份后，升级完成标准必须包含管理员可见的自助改密入口。后端存在改密 API 不等于用户能够完成凭据重建；UI、API、Samba 三层需要同一条验收路径。
+
 ## 关联
 
 - 决策：[ADR 0008：统一 Linux 身份，以文件系统 ACL 作为唯一授权来源](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)
