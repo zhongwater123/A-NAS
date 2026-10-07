@@ -56,7 +56,13 @@ func (e *Executor) SyncIdentities(ctx context.Context, identities []accounts.Ide
 			failures = append(failures, fmt.Errorf("%s: %w", identity.Username, err))
 		}
 	}
-	return errors.Join(append(failures, e.mirrorIdentityManifest())...)
+	failures = append(failures, e.mirrorIdentityManifest())
+	// An account created here needs its Shared trash directory before Samba
+	// recycle or a Web delete reaches it; without one, recycle purges.
+	if _, err := e.RepairDataVolumePermissions(ctx); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
 }
 
 func (e *Executor) syncIdentity(ctx context.Context, identity accounts.Identity) error {

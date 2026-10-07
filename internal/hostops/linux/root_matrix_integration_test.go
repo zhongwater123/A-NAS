@@ -25,6 +25,18 @@ func TestRootPermissionMatrix(t *testing.T) {
 	setUpDataVolume(t, mount)
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
+	// A volume from an earlier release is reconciled at Host Agent startup,
+	// before any identity, and therefore any fixed group, exists.
+	for _, group := range []string{"a-nas-admins", "a-nas-users"} {
+		_ = exec.Command("groupdel", group).Run()
+	}
+	if err := executor.registerSpaces(map[string]string{sharedSpaceID: filepath.Join(mount, "spaces", "shared")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.ReconcileDataVolume(ctx); err != nil {
+		t.Fatalf("ReconcileDataVolume() before any identity error = %v", err)
+	}
+	run(t, "getent", "group", "a-nas-users")
 	passwords := map[string]string{"keeper": "keeper password for tests", "alice": "alice password for tests", "bob": "bob password for tests"}
 	for i, user := range []struct {
 		name string
@@ -107,10 +119,46 @@ func TestRootPermissionMatrix(t *testing.T) {
 	if listing := smb("alice", "Shared", "ls").output; strings.Contains(listing, ".a-nas-trash") {
 		t.Errorf("SMB shows the trash container:\n%s", listing)
 	}
+	expect("alice SMB renames the Shared trash root", false, smb("alice", "Shared", "rename .a-nas-trash moved"))
+
+	// An identity created by synchronization gets its Shared trash at once.
+	if err := executor.SyncIdentities(ctx, []accounts.Identity{
+		{Username: "keeper", UID: 20110, Role: accounts.RoleAdmin, Enabled: true},
+		{Username: "alice", UID: 20111, Role: accounts.RoleMember, Enabled: true},
+		{Username: "bob", UID: 20112, Role: accounts.RoleMember, Enabled: true},
+		{Username: "carol", UID: 20113, Role: accounts.RoleMember, Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncIdentities() error = %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(shared, ".a-nas-trash", "carol")); err != nil || !info.IsDir() {
+		t.Errorf("synchronized identity has no Shared trash: %v", err)
+	}
+
+	// Whoever can write Shared (an app, or a member outside SMB) replaces the
+	// trash root with a link; repair must not follow it.
+	victim := filepath.Join(payloadDirectory, "victim")
+	run(t, "mkdir", victim)
+	expect("alice renames the Shared trash root locally", true, asUser("alice", "mv", filepath.Join(shared, ".a-nas-trash"), filepath.Join(shared, "moved")))
+	run(t, "ln", "-s", victim, filepath.Join(shared, ".a-nas-trash"))
+	if _, err := executor.RepairDataVolumePermissions(ctx); err != nil {
+		t.Fatalf("RepairDataVolumePermissions() with a planted link error = %v", err)
+	}
+	if acl := run(t, "getfacl", "--omit-header", victim); strings.Contains(acl, "a-nas") {
+		t.Errorf("repair followed the planted link:\n%s", acl)
+	}
+	if info, err := os.Lstat(filepath.Join(shared, ".a-nas-trash", "bob")); err != nil || !info.IsDir() {
+		t.Errorf("repair did not recreate the Shared trash: %v", err)
+	}
+	run(t, "rm", "-rf", filepath.Join(shared, "moved"))
+	if displaced, _ := filepath.Glob(filepath.Join(shared, ".a-nas-trash.displaced-*")); len(displaced) != 1 {
+		t.Errorf("displaced entries = %v", displaced)
+	} else {
+		run(t, "rm", displaced[0])
+	}
 
 	// Read-only shared folder: readable by all, writable only by grantees.
 	media := filepath.Join(mount, "spaces", "media")
-	if _, _, err := executor.ensureDirectoryACL(ctx, media, sharedFolderACL("user:alice")); err != nil {
+	if _, _, err := executor.ensureDirectoryACL(ctx, media, sharedFolderACL("user:alice"), false); err != nil {
 		t.Fatal(err)
 	}
 	expect("alice writes Media", true, asUser("alice", "cp", payload, filepath.Join(media, "m.txt")))

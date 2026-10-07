@@ -130,6 +130,49 @@ func TestMaterializeRegisteredSpacesRejectsSymlinkContainer(t *testing.T) {
 	}
 }
 
+func TestMaterializeRegisteredSpacesMovesAsidePlantedTrashLink(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	sharedRoot := filepath.Join(mountPoint, "spaces", "shared")
+	if err := os.MkdirAll(sharedRoot, 0o750); err != nil {
+		t.Fatalf("create Shared: %v", err)
+	}
+	// A member or an app that can write Shared replaces the trash root.
+	target := t.TempDir()
+	trashRoot := filepath.Join(sharedRoot, ".a-nas-trash")
+	if err := os.Symlink(target, trashRoot); err != nil {
+		t.Fatalf("plant trash link: %v", err)
+	}
+	runner := &spacePermissionRunner{}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	executor.spaceRoots = map[string]string{sharedSpaceID: sharedRoot}
+	executor.identities = map[string]identityRecord{"alice": {UID: 20101, Role: accounts.RoleMember, Enabled: true}}
+
+	repaired, err := executor.materializeRegisteredSpaces(context.Background())
+	if err != nil {
+		t.Fatalf("materializeRegisteredSpaces() error = %v", err)
+	}
+	for _, command := range runner.commands {
+		for _, arg := range command.args {
+			if strings.HasPrefix(arg, target) {
+				t.Fatalf("the link target reached a privileged command: %#v", command)
+			}
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(trashRoot, "alice")); err != nil || !info.IsDir() {
+		t.Fatalf("trash directory was not recreated: %v", err)
+	}
+	displaced, _ := filepath.Glob(trashRoot + ".displaced-*")
+	if len(displaced) != 1 {
+		t.Fatalf("displaced entries = %v, want the planted link kept aside", displaced)
+	}
+	if link, err := os.Readlink(displaced[0]); err != nil || link != target {
+		t.Errorf("displaced link = %q, %v", link, err)
+	}
+	if !slices.Contains(repaired, trashRoot) {
+		t.Errorf("repaired = %v, want %s", repaired, trashRoot)
+	}
+}
+
 func sameStrings(a, b []string) bool {
 	a, b = slices.Clone(a), slices.Clone(b)
 	slices.Sort(a)
@@ -152,7 +195,17 @@ func (r *spacePermissionRunner) ran(command spacePermissionCommand) bool {
 	})
 }
 
+// Run records commands with opened directories replaced by the paths they
+// were opened at, so tests can name the directories they expect.
 func (r *spacePermissionRunner) Run(_ context.Context, name string, args []string, _ string) ([]byte, error) {
-	r.commands = append(r.commands, spacePermissionCommand{name: name, args: append([]string(nil), args...)})
+	recorded := append([]string(nil), args...)
+	for i, arg := range recorded {
+		if strings.HasPrefix(arg, "/proc/") {
+			if target, err := os.Readlink(arg); err == nil {
+				recorded[i] = target
+			}
+		}
+	}
+	r.commands = append(r.commands, spacePermissionCommand{name: name, args: recorded})
 	return nil, nil
 }

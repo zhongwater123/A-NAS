@@ -272,12 +272,15 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 // ACLs, and recycle moves deletions into the per-user trash directory that
 // the Host Agent prepares (ADR 0008). The create and directory masks become
 // the ACL mask of new entries; Samba's default 0744 would make every
-// inherited write grant read-only.
+// inherited write grant read-only. Clients cannot reach the trash directories
+// by name, so a member cannot rename the Shared trash root out of the way;
+// recycle itself is not subject to veto files.
 const sambaShareOptions = `    inherit acls = yes
     create mask = 0660
     directory mask = 0770
     nt acl support = no
     hide unreadable = yes
+    veto files = /.a-nas-trash/
     vfs objects = recycle
     recycle:repository = .a-nas-trash/%U
     recycle:directory_mode = 0770

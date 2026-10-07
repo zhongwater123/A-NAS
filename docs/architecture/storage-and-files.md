@@ -38,9 +38,10 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
   | `<空间>/.a-nas-trash/<username>` | 该用户 `rwx` | 同访问 ACL |
 
   过渡期内每个空间与回收站另含 `user:a-nas`，因为 Web 仍由 Product Service 代为读写；文件代理（[#13](https://github.com/zhongwater123/A-NAS/issues/13)）落地后移除。数据卷挂载点的父目录 `/srv/a-nas` 授予 `a-nas-users` 穿过权限，供 smbd 切换到用户身份后进入共享。
-- Samba 以登录用户身份读写：`inherit acls = yes`、`nt acl support = no`、`hide unreadable = yes`，不使用 `force group`；`create mask = 0660`、`directory mask = 0770` 决定新条目的 ACL mask，缺省 `0744` 会让继承的写权限失效。
+- Samba 以登录用户身份读写：`inherit acls = yes`、`nt acl support = no`、`hide unreadable = yes`、`veto files = /.a-nas-trash/`（客户端无法按名称打开或重命名回收站目录，`recycle` 不受影响），不使用 `force group`；`create mask = 0660`、`directory mask = 0770` 决定新条目的 ACL mask，缺省 `0744` 会让继承的写权限失效。
 - Web 删除与 Samba `recycle`（`keeptree`）统一写入 `<空间>/.a-nas-trash/<username>`：Web 条目为 `<trash-id>/content`，SMB 删除保留原相对路径并按文件导入回收站，原目录仍存在时恢复到原目录。每个用户的回收目录由 Host Agent 预建，恢复或清除只删除其下的空目录，不删除用户回收目录本身。共享空间中他人删除的文件对其他成员不可见。
-- Host Agent 启动时幂等对账已注册空间并刷新经过 `testparm` 的 Samba 配置；之后每 15 分钟以 `getfacl` 比对上述目录，修复属主、setgid 或 ACL 漂移并在 journal 记录 `repaired drifted data-volume permissions`。
+- Host Agent 启动时先创建固定组，再幂等对账已注册空间并刷新经过 `testparm` 的 Samba 配置；Product Service 同步身份后也立即对账，新账号随即拥有回收目录。之后每 15 分钟以 `getfacl` 比对上述目录，修复属主、setgid 或 ACL 漂移并在 journal 记录 `repaired drifted data-volume permissions`。
+- 对账以 `openat2(RESOLVE_NO_SYMLINKS)` 打开每个目录，`chown`、`setfacl` 等只作用于已打开的目录（`/proc/<pid>/fd/<n>`），因此能改写父目录条目的用户无法在检查与修改之间把 root 引到别处。回收站路径上若出现非目录（例如在可写的共享空间中放置的符号链接），将改名为 `<名称>.displaced-<时间>` 后重建，不跟随也不删除。
 - 只读快照位于 `.a-nas-snapshots/<snapshot-hash>`，不由 Samba 发布；恢复复制到普通空间的新位置。
 
 ## 身份与一致性
@@ -66,3 +67,4 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
+- [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)

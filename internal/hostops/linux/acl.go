@@ -9,6 +9,9 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
@@ -77,18 +80,24 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 	e.materializeMu.Lock()
 	defer e.materializeMu.Unlock()
 	var repaired []string
-	apply := func(path, acl string, created bool) error {
-		changed, existed, err := e.ensureDirectoryACL(ctx, path, acl)
+	apply := func(path, acl string, created, reserved bool) error {
+		changed, existed, err := e.ensureDirectoryACL(ctx, path, acl, reserved)
 		if changed && existed && !created {
 			repaired = append(repaired, path)
 		}
 		return err
 	}
+	// The ACLs below name the fixed groups. A volume from an earlier release
+	// reaches this at Host Agent startup, before the Product Service has
+	// synchronized any identity.
+	if err := e.ensureFixedGroups(ctx); err != nil {
+		return nil, err
+	}
 	if err := e.ensureTraversal(ctx, filepath.Dir(e.mountPoint)); err != nil {
 		return nil, err
 	}
 	for _, path := range []string{filepath.Join(e.mountPoint, "spaces"), filepath.Join(e.mountPoint, "spaces", "private")} {
-		if err := apply(path, containerACL(), false); err != nil {
+		if err := apply(path, containerACL(), false, false); err != nil {
 			return repaired, err
 		}
 	}
@@ -121,15 +130,17 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 			principal = "user:" + username
 			trashUsers = []string{username}
 		}
-		if err := apply(root, spaceACL, created); err != nil {
+		if err := apply(root, spaceACL, created, false); err != nil {
 			return repaired, err
 		}
+		// Trash directories sit in folders their users can write, so
+		// anything else found at these names is moved aside.
 		trashRoot := filepath.Join(root, ".a-nas-trash")
-		if err := apply(trashRoot, trashRootACL(principal), false); err != nil {
+		if err := apply(trashRoot, trashRootACL(principal), false, true); err != nil {
 			return repaired, err
 		}
 		for _, username := range trashUsers {
-			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username), false); err != nil {
+			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username), false, true); err != nil {
 				return repaired, err
 			}
 		}
@@ -148,27 +159,24 @@ func (e *Executor) ensureSpaceSubvolume(ctx context.Context, root string) (bool,
 }
 
 // ensureDirectoryACL makes path a root-owned directory with exactly acl. It
-// reports whether anything changed and whether the directory already existed,
-// so callers can log drift repairs separately from first creation.
-func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string) (changed, existed bool, err error) {
-	info, err := os.Lstat(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		if err := os.Mkdir(path, 0o700); err != nil {
-			return false, false, fmt.Errorf("create %s: %w", path, err)
-		}
-		if info, err = os.Lstat(path); err != nil {
-			return false, false, err
-		}
-	case err != nil:
-		return false, false, err
-	default:
-		existed = true
+// reports whether anything changed and whether something already existed at
+// path, so callers can log drift repairs separately from first creation.
+//
+// Every command acts on the directory opened without following symbolic
+// links, never on path again: whoever can rename entries next to it cannot
+// redirect root to another file between the check and the change.
+func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, reserved bool) (changed, existed bool, err error) {
+	directory, existed, err := e.openVolumeDirectory(path, reserved)
+	if err != nil {
+		return false, existed, err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return false, existed, fmt.Errorf("%s is not a safe directory", path)
+	defer directory.Close()
+	info, err := directory.Stat()
+	if err != nil {
+		return false, existed, err
 	}
-	current, err := e.runner.Run(ctx, "getfacl", []string{"--absolute-names", "--omit-header", path}, "")
+	target := openedPath(directory)
+	current, err := e.runner.Run(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
 	if err != nil {
 		return false, existed, commandError("read ACL", err, current)
 	}
@@ -179,8 +187,8 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string) (ch
 		name string
 		args []string
 	}{
-		{name: "chown", args: []string{"root:root", path}},
-		{name: "chmod", args: []string{"g-s", path}},
+		{name: "chown", args: []string{"root:root", target}},
+		{name: "chmod", args: []string{"g-s", target}},
 	}
 	if !strings.Contains(acl, "default:") {
 		// A directory created below a space inherits its default ACL, and
@@ -188,18 +196,79 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string) (ch
 		commands = append(commands, struct {
 			name string
 			args []string
-		}{name: "setfacl", args: []string{"--remove-default", path}})
+		}{name: "setfacl", args: []string{"--remove-default", target}})
 	}
 	commands = append(commands, struct {
 		name string
 		args []string
-	}{name: "setfacl", args: []string{"--set", acl, path}})
+	}{name: "setfacl", args: []string{"--set", acl, target}})
 	for _, command := range commands {
 		if output, err := e.runner.Run(ctx, command.name, command.args, ""); err != nil {
 			return false, existed, commandError("protect "+path, err, output)
 		}
 	}
 	return true, existed, nil
+}
+
+// openVolumeDirectory opens the directory at path below the data-volume mount
+// point without following symbolic links, creating it when nothing is there.
+// existed reports whether anything was at path. When reserved is set, a
+// non-directory at path, such as a symbolic link planted by a user who can
+// write the parent, is renamed aside and replaced by a new directory.
+func (e *Executor) openVolumeDirectory(path string, reserved bool) (*os.File, bool, error) {
+	relative, err := filepath.Rel(e.mountPoint, path)
+	if err != nil || relative == "." || !filepath.IsLocal(relative) {
+		return nil, false, fmt.Errorf("%s is not below the data volume", path)
+	}
+	unsafe := fmt.Errorf("%s is not a safe directory", path)
+	mount, err := os.Open(e.mountPoint)
+	if err != nil {
+		return nil, false, err
+	}
+	defer mount.Close()
+	parentFD, err := unix.Openat2(int(mount.Fd()), filepath.Dir(relative), &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+	})
+	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.EXDEV) {
+		return nil, false, unsafe
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("open the parent of %s: %w", path, err)
+	}
+	defer unix.Close(parentFD)
+	name := filepath.Base(relative)
+	existed := true
+	// A concurrent writer of the parent can keep changing the entry; give up
+	// after a few rounds rather than loop.
+	for attempt := range 3 {
+		fd, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		switch {
+		case err == nil:
+			return os.NewFile(uintptr(fd), path), existed, nil
+		case errors.Is(err, unix.ENOENT):
+			existed = existed && attempt > 0
+			if err := unix.Mkdirat(parentFD, name, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+				return nil, false, fmt.Errorf("create %s: %w", path, err)
+			}
+		case (errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR)) && reserved:
+			aside := fmt.Sprintf("%s.displaced-%d", name, time.Now().UnixNano())
+			if err := unix.Renameat2(parentFD, name, parentFD, aside, unix.RENAME_NOREPLACE); err != nil && !errors.Is(err, unix.ENOENT) {
+				return nil, true, fmt.Errorf("move aside %s: %w", path, err)
+			}
+		case errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR):
+			return nil, true, unsafe
+		default:
+			return nil, existed, fmt.Errorf("open %s: %w", path, err)
+		}
+	}
+	return nil, existed, unsafe
+}
+
+// openedPath names an open file for a command the Host Agent runs. The kernel
+// resolves it to the opened inode instead of walking a path again.
+func openedPath(file *os.File) string {
+	return fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), file.Fd())
 }
 
 // ensureTraversal lets A-NAS accounts pass through the directory that holds
