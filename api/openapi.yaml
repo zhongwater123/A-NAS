@@ -137,6 +137,7 @@ paths:
         "403": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
   /api/v1/viewing/{grantId}:
     delete:
       operationId: endViewing

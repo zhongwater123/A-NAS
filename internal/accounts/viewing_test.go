@@ -10,6 +10,53 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
 
+func TestFailedViewingGrantIsRevokedAndNeitherNotifiedNorActive(t *testing.T) {
+	ctx := context.Background()
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	provisioner := &viewingRecorder{}
+	service := accounts.NewService(store, provisioner, accounts.Options{})
+	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := service.CreateMember(ctx, admin, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceSpace := privateSpaceOf(t, service, alice)
+
+	for _, test := range []struct {
+		failure error
+		want    error
+	}{
+		{accounts.ErrVolumeUnavailable, accounts.ErrVolumeUnavailable},
+		{errors.New("walk failed"), accounts.ErrCredentialProvision},
+	} {
+		provisioner.grantErr = test.failure
+		if _, err := service.StartViewing(ctx, admin, alice.ID, "correct horse battery staple", "recover"); !errors.Is(err, test.want) {
+			t.Fatalf("StartViewing() with %v error = %v, want %v", test.failure, err, test.want)
+		}
+		last := provisioner.granted[len(provisioner.granted)-1].ID
+		if len(provisioner.revoked) == 0 || provisioner.revoked[len(provisioner.revoked)-1] != last {
+			t.Fatalf("failed grant %s was not revoked: %v", last, provisioner.revoked)
+		}
+	}
+	if allowed, _ := service.CanAccessSpace(ctx, admin, aliceSpace, false); allowed {
+		t.Fatal("a failed grant lets the administrator read the space")
+	}
+	if notifications, err := service.Notifications(ctx, alice); err != nil || len(notifications) != 0 {
+		t.Fatalf("owner notifications = %#v, %v; want none for a failed grant", notifications, err)
+	}
+	provisioner.grantErr = nil
+	if _, err := service.StartViewing(ctx, admin, alice.ID, "correct horse battery staple", "recover"); err != nil {
+		t.Fatalf("StartViewing() after failures error = %v", err)
+	}
+}
+
 func TestAdministrativeViewingIsAuthenticatedReadOnlyAuditedAndTemporary(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, time.October, 7, 12, 0, 0, 0, time.UTC)
@@ -231,13 +278,14 @@ func hasAudit(events []accounts.AuditEvent, action, resourceID string) bool {
 
 type viewingRecorder struct {
 	identityRecorder
-	granted []accounts.ViewingRequest
-	revoked []string
+	granted  []accounts.ViewingRequest
+	revoked  []string
+	grantErr error
 }
 
 func (r *viewingRecorder) GrantViewing(_ context.Context, request accounts.ViewingRequest) error {
 	r.granted = append(r.granted, request)
-	return nil
+	return r.grantErr
 }
 
 func (r *viewingRecorder) RevokeViewing(_ context.Context, id string) error {

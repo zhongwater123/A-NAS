@@ -363,7 +363,10 @@ func (h *handler) writeAccountError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
 }
 
-const identityConflictCode = "identity_conflict"
+const (
+	identityConflictCode  = "identity_conflict"
+	volumeUnavailableCode = "volume_unavailable"
+)
 
 func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
@@ -440,6 +443,10 @@ func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {
 			ID: document.ID, SpaceID: document.SpaceID, AdminUsername: document.AdminUsername,
 			AdminUID: document.AdminUID, ExpiresAt: expiresAt,
 		}); err != nil {
+			if errors.Is(err, accounts.ErrVolumeUnavailable) {
+				writeError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+				return
+			}
 			h.logger.ErrorContext(r.Context(), "grant viewing failed", "grant", document.ID, "error", err)
 			writeError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
 			return
@@ -593,6 +600,9 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&failure)
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == identityConflictCode {
 			return accounts.ErrIdentityConflict
+		}
+		if response.StatusCode == http.StatusLocked && failure.Error.Code == volumeUnavailableCode {
+			return accounts.ErrVolumeUnavailable
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}

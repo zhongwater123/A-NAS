@@ -18,6 +18,7 @@ var (
 	ErrReasonRequired    = errors.New("a reason is required to view a member's private space")
 	ErrViewingActive     = errors.New("this private space is already being viewed")
 	ErrPasswordUnchanged = errors.New("the new password must differ from the current one")
+	ErrVolumeUnavailable = errors.New("the data volume is offline")
 )
 
 // ViewingAccess marks a space the actor sees through Administrative Viewing
@@ -127,6 +128,12 @@ func (s *Service) StartViewing(ctx context.Context, actor User, ownerUserID, pas
 		ID: grant.ID, SpaceID: spaceID, AdminUsername: actor.Username, AdminUID: uid, ExpiresAt: grant.ExpiresAt,
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE viewing_grants SET ended_at = ? WHERE id = ?", formatTime(now), grant.ID)
+		// The Host Agent may have applied the grant after this request gave
+		// up waiting; nothing would revoke it before it expires.
+		_ = provisioner.RevokeViewing(context.WithoutCancel(ctx), grant.ID)
+		if errors.Is(err, ErrVolumeUnavailable) {
+			return ViewingGrant{}, err
+		}
 		return ViewingGrant{}, fmt.Errorf("%w: %v", ErrCredentialProvision, err)
 	}
 	if err := s.notify(ctx, ownerID, NotificationAdminViewing, actor.Username, encodeDetail(reason, &grant.ExpiresAt)); err != nil {

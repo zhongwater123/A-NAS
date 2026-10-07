@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -45,27 +46,40 @@ func (e *Executor) GrantViewing(ctx context.Context, request accounts.ViewingReq
 	if !known || identity.Role != accounts.RoleAdmin || identity.UID != request.AdminUID || !identity.Enabled {
 		return errors.New("viewing is only granted to enabled A-NAS administrators")
 	}
+	// Nothing would apply the entries once the volume returns.
+	if !e.dataVolumeReady() {
+		return accounts.ErrVolumeUnavailable
+	}
 	root, err := e.privateSpaceRoot(request.SpaceID)
 	if err != nil {
 		return err
 	}
-	if filepathBase(root) == request.AdminUsername {
+	if filepath.Base(root) == request.AdminUsername {
 		return errors.New("an administrator cannot view their own private space")
 	}
 	// Record first, so a crash part-way through is still revoked on time.
-	if err := e.saveViewing(request.ID, &viewingRecord{
+	record := viewingRecord{
 		SpaceID: request.SpaceID, Admin: request.AdminUsername, UID: request.AdminUID, ExpiresAt: request.ExpiresAt,
-	}); err != nil {
+	}
+	if err := e.saveViewing(request.ID, &record); err != nil {
 		return err
 	}
-	if !e.dataVolumeReady() {
+	err = applyViewerTree(root, uint32(request.AdminUID), true)
+	if err == nil {
+		_, err = e.materializeRegisteredSpaces(ctx)
+	}
+	if err == nil {
 		return nil
 	}
-	if err := applyViewerTree(root, uint32(request.AdminUID), true); err != nil {
-		return fmt.Errorf("grant viewing ACL: %w", err)
+	// The Product Service ends a grant that failed, so the entries already
+	// added must go too. An expired record keeps ExpireViewing retrying if
+	// this revocation fails as well.
+	err = fmt.Errorf("grant viewing ACL: %w", err)
+	record.ExpiresAt = time.Time{}
+	if saveErr := e.saveViewing(request.ID, &record); saveErr != nil {
+		return errors.Join(err, saveErr)
 	}
-	_, err = e.materializeRegisteredSpaces(ctx)
-	return err
+	return errors.Join(err, e.RevokeViewing(ctx, request.ID))
 }
 
 // RevokeViewing removes a grant's ACL entries. With the data volume offline
@@ -185,10 +199,6 @@ func (e *Executor) saveViewing(id string, record *viewingRecord) error {
 		return err
 	}
 	return writeAtomic(e.viewingPath, append(contents, '\n'), 0o600)
-}
-
-func filepathBase(path string) string {
-	return path[strings.LastIndex(path, "/")+1:]
 }
 
 // applyViewerTree adds (grant) or removes the read-only entry for uid on the

@@ -4,6 +4,7 @@ package linux
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -72,8 +73,35 @@ func TestRootAdministrativeViewing(t *testing.T) {
 		"mkdir "+private+"/docs && echo a > "+private+"/docs/a.txt && echo b > "+private+"/b.txt"))
 	maskBefore := maskOf(t, filepath.Join(private, "b.txt"))
 	expect("admin Web reads before viewing", false, webRead("keeper", filepath.Join(private, "b.txt")))
-
 	expiry := clock.Add(accounts.ViewingDuration)
+
+	// Nothing would apply a grant made while the volume is offline.
+	offline := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline"), Now: now})
+	if err := offline.GrantViewing(ctx, accounts.ViewingRequest{
+		ID: "viewing:offline", SpaceID: "space:alice", AdminUsername: "keeper", AdminUID: 20110, ExpiresAt: expiry,
+	}); !errors.Is(err, accounts.ErrVolumeUnavailable) {
+		t.Fatalf("GrantViewing() offline error = %v, want ErrVolumeUnavailable", err)
+	}
+
+	// A walk that fails part-way leaves no entries and no active grant.
+	stuck := filepath.Join(private, "docs", "stuck.txt")
+	expect("alice creates a file", true, asUser("alice", "sh", "-c", "echo s > "+stuck))
+	run(t, "chattr", "+i", stuck)
+	err := executor.GrantViewing(ctx, accounts.ViewingRequest{
+		ID: "viewing:failed", SpaceID: "space:alice", AdminUsername: "keeper", AdminUID: 20110, ExpiresAt: expiry,
+	})
+	run(t, "chattr", "-i", stuck)
+	if err == nil {
+		t.Fatal("GrantViewing() on an immutable file succeeded")
+	}
+	if acl := asUser("root", "getfacl", "--recursive", "--absolute-names", private).output; strings.Contains(acl, "user:keeper") {
+		t.Errorf("a failed grant left ACL entries behind:\n%s", acl)
+	}
+	if viewers := executor.viewersOf("space:alice"); len(viewers) != 0 {
+		t.Errorf("a failed grant is active for %v", viewers)
+	}
+	run(t, "rm", stuck)
+
 	if err := executor.GrantViewing(ctx, accounts.ViewingRequest{
 		ID: "viewing:1", SpaceID: "space:alice", AdminUsername: "keeper", AdminUID: 20110, ExpiresAt: expiry,
 	}); err != nil {

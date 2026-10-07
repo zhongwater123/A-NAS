@@ -805,6 +805,8 @@ func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, accounts.ErrInvalidCredentials):
 		writeError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")
+	case errors.Is(err, accounts.ErrVolumeUnavailable):
+		writeError(w, http.StatusLocked, "volume_unavailable", err.Error())
 	case errors.Is(err, accounts.ErrCredentialProvision):
 		writeError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):
