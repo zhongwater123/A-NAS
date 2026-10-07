@@ -57,7 +57,7 @@ func newStore(t *testing.T, docker *fakeDocker, runner *fakeRunner) (*engine.Sto
 		t.Fatal(err)
 	}
 	state := t.TempDir()
-	policy := appstore.Policy{AppDataRoot: "/srv/a-nas/appdata", DataRoot: "/srv/a-nas/data", PUID: "1000", PGID: "1000", TZ: "UTC", ReservedPorts: []uint16{8080}}
+	policy := appstore.Policy{AppDataRoot: "/srv/a-nas/data/apps", DataRoot: "/srv/a-nas/data/spaces/shared", TZ: "UTC", ReservedPorts: []uint16{8080}}
 	return engine.New(entries, policy, state, docker, runner), state
 }
 
@@ -71,11 +71,11 @@ func TestInstallRunsTheConfirmedComposeFile(t *testing.T) {
 	store, state := newStore(t, docker, runner)
 	ctx := context.Background()
 
-	plan, err := store.Plan(ctx, "uptimekuma")
+	plan, err := store.Plan(ctx, "uptimekuma", identity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := store.Install(ctx, "uptimekuma", plan.Digest)
+	job, err := store.Install(ctx, "uptimekuma", plan.Digest, identity)
 	if err != nil || job.State != appstore.JobRunning {
 		t.Fatalf("Install() = %+v, %v", job, err)
 	}
@@ -104,27 +104,27 @@ func TestInstallRefusesChangedPlansConflictsAndConcurrentJobs(t *testing.T) {
 	store, _ := newStore(t, docker, runner)
 	ctx := context.Background()
 
-	if _, err := store.Install(ctx, "memos", strings.Repeat("0", 64)); !errors.Is(err, appstore.ErrPlanChanged) {
+	if _, err := store.Install(ctx, "memos", strings.Repeat("0", 64), identity); !errors.Is(err, appstore.ErrPlanChanged) {
 		t.Fatalf("stale digest error = %v", err)
 	}
-	navidrome, _ := store.Plan(ctx, "navidrome")
-	if _, err := store.Install(ctx, "navidrome", navidrome.Digest); !errors.Is(err, appstore.ErrPortInUse) {
+	navidrome, _ := store.Plan(ctx, "navidrome", identity)
+	if _, err := store.Install(ctx, "navidrome", navidrome.Digest, identity); !errors.Is(err, appstore.ErrPortInUse) {
 		t.Fatalf("port conflict error = %v", err)
 	}
-	if _, err := store.Install(ctx, "missing", "x"); !errors.Is(err, appstore.ErrNotFound) {
+	if _, err := store.Install(ctx, "missing", "x", identity); !errors.Is(err, appstore.ErrNotFound) {
 		t.Fatalf("missing app error = %v", err)
 	}
 
-	memos, _ := store.Plan(ctx, "memos")
-	if _, err := store.Install(ctx, "memos", memos.Digest); err != nil {
+	memos, _ := store.Plan(ctx, "memos", identity)
+	if _, err := store.Install(ctx, "memos", memos.Digest, identity); err != nil {
 		t.Fatal(err)
 	}
 	apps, _ := store.Apps(ctx)
 	if find(apps, "memos").State != appstore.StateInstalling {
 		t.Fatalf("memos state = %s", find(apps, "memos").State)
 	}
-	uptime, _ := store.Plan(ctx, "uptimekuma")
-	if _, err := store.Install(ctx, "uptimekuma", uptime.Digest); !errors.Is(err, appstore.ErrBusy) {
+	uptime, _ := store.Plan(ctx, "uptimekuma", identity)
+	if _, err := store.Install(ctx, "uptimekuma", uptime.Digest, identity); !errors.Is(err, appstore.ErrBusy) {
 		t.Fatalf("concurrent install error = %v", err)
 	}
 	close(runner.gate)
@@ -163,3 +163,5 @@ func find(apps []appstore.AppStatus, id string) appstore.AppStatus {
 	}
 	return appstore.AppStatus{}
 }
+
+var identity = appstore.Identity{Username: "app-test", UID: 30001, GID: 30001}

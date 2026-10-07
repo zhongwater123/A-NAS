@@ -613,3 +613,4 @@ button { font: inherit; }
 .viewing-form input { min-height: 38px; border: 1px solid #ccd5df; border-radius: 9px; padding: 0 11px; color: #202a35; background: white; }
 .viewing-banner { background: #fff6e5; color: #6b4a00; }
 .viewing-banner button { margin-left: auto; }
+.plan-warning { color: #8a5a00; }

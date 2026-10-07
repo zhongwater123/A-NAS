@@ -12,7 +12,6 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
-	"go.yaml.in/yaml/v4"
 )
 
 // casaosDataRoot is where CasaOS manifests place host data; A-NAS rewrites it.
@@ -22,14 +21,22 @@ const casaosDataRoot = "/DATA"
 // manifest resolve outside the allowed roots and are rejected.
 const projectDir = "/nonexistent/a-nas-app"
 
+// Folders on the data volume are mounted through these volumes, never as
+// bind mounts; manifests cannot declare volumes with the prefix.
+const (
+	reservedVolumePrefix = "a-nas-"
+	appDataVolume        = "a-nas-appdata"
+	sharedVolume         = "a-nas-shared"
+)
+
 // Policy holds the host facts a plan is rendered against.
 type Policy struct {
-	// AppDataRoot receives /DATA/AppData/<app>/...; each app gets its own subdirectory.
+	// AppDataRoot receives /DATA/AppData/<app>/...; each app gets its own
+	// subdirectory on the data volume that SMB does not publish.
 	AppDataRoot string
-	// DataRoot receives every other /DATA/... path, e.g. shared media folders.
+	// DataRoot receives every other /DATA/... path. It is the Shared folder,
+	// never the data-volume root, so an app cannot reach private spaces.
 	DataRoot string
-	PUID     string
-	PGID     string
 	TZ       string
 	// ReservedPorts are host ports A-NAS itself needs.
 	ReservedPorts []uint16
@@ -59,13 +66,15 @@ type PortMapping struct {
 	Purpose       string
 }
 
-// Plan is what the owner confirms before an install: images that will be
-// pulled, host ports that will open and host folders containers can write.
+// Plan is what the owner confirms before an install: the identity the app
+// runs as, images that will be pulled, host ports that will open and host
+// folders containers can write.
 type Plan struct {
 	AppID      string
 	Title      string
 	Version    string
 	Project    string
+	Identity   Identity
 	Images     []string
 	Containers []string
 	Ports      []PortMapping
@@ -84,12 +93,19 @@ func (e *PolicyError) Error() string {
 }
 
 // Render validates a manifest against policy and produces the Compose file
-// that will run, rewritten to A-NAS paths and labelled with the app ID.
-func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
+// that will run as identity, rewritten to A-NAS paths and labelled with the
+// app ID.
+func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) (Plan, error) {
+	if identity.UID <= 0 || identity.GID <= 0 {
+		return Plan{}, &PolicyError{Reasons: []string{"app identity is missing"}}
+	}
 	project, err := loader.LoadWithContext(ctx, types.ConfigDetails{
 		WorkingDir:  projectDir,
 		ConfigFiles: []types.ConfigFile{{Filename: path.Join(projectDir, "docker-compose.yml"), Content: entry.Compose}},
-		Environment: types.Mapping{"AppID": entry.App.ID, "TZ": policy.TZ, "PUID": policy.PUID, "PGID": policy.PGID},
+		Environment: types.Mapping{
+			"AppID": entry.App.ID, "TZ": policy.TZ,
+			"PUID": strconv.Itoa(identity.UID), "PGID": strconv.Itoa(identity.GID),
+		},
 	}, func(options *loader.Options) {
 		options.SetProjectName(ProjectName(entry.App.ID), true)
 		options.SkipResolveEnvironment = true
@@ -110,6 +126,9 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 		if bool(volume.External) || volume.Driver != "" || len(volume.DriverOpts) > 0 {
 			reject("volume %s uses an external or custom driver", name)
 		}
+		if strings.HasPrefix(name, reservedVolumePrefix) {
+			reject("volume %s uses a name A-NAS reserves", name)
+		}
 	}
 	for name, network := range project.Networks {
 		if bool(network.External) || (network.Driver != "" && network.Driver != "bridge") {
@@ -127,7 +146,9 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 		}
 	}
 
-	plan := Plan{AppID: entry.App.ID, Title: entry.App.Title, Version: entry.App.Version, Project: project.Name}
+	plan := Plan{AppID: entry.App.ID, Title: entry.App.Title, Version: entry.App.Version, Project: project.Name, Identity: identity}
+	// Volume name to the folder it is rooted at.
+	bases := map[string]string{}
 	serviceNames := make([]string, 0, len(project.Services))
 	for name := range project.Services {
 		serviceNames = append(serviceNames, name)
@@ -154,18 +175,29 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 					// Absent on current Debian; services receive TZ instead.
 					continue
 				}
-				host, kind, ok := rewriteHostPath(volume.Source, entry.App.ID, policy)
+				base, subpath, kind, ok := rewriteHostPath(volume.Source, entry.App.ID, policy)
 				if !ok {
 					reject("service %s mounts %s, which is outside %s", name, volume.Source, casaosDataRoot)
 					continue
 				}
-				volume.Source = host
-				if volume.Bind == nil {
-					volume.Bind = &types.ServiceVolumeBind{}
+				// Mount through a volume rooted at base, which only root can
+				// rename, with the rest as a subpath. Docker resolves a subpath on
+				// every start without following links out of the volume; a bind
+				// source would be followed, and anyone who can write the Shared
+				// folder or the app's data could swap a folder for a link to the
+				// host. Docker creates neither base nor subpath: the Host Agent
+				// creates the folders, and an offline data volume keeps the app
+				// stopped instead of putting its data on the system disk.
+				source := sharedVolume
+				if kind == MountAppData {
+					source = appDataVolume
 				}
-				volume.Bind.CreateHostPath = true
-				volume.Bind.Propagation = ""
-				plan.Mounts = append(plan.Mounts, Mount{HostPath: host, ContainerPath: volume.Target, Kind: kind, ReadOnly: volume.ReadOnly, Purpose: descriptions.volumes[volume.Target]})
+				bases[source] = base
+				volume.Type = types.VolumeTypeVolume
+				volume.Source = source
+				volume.Bind = nil
+				volume.Volume = &types.ServiceVolumeVolume{NoCopy: true, Subpath: subpath}
+				plan.Mounts = append(plan.Mounts, Mount{HostPath: path.Join(base, subpath), ContainerPath: volume.Target, Kind: kind, ReadOnly: volume.ReadOnly, Purpose: descriptions.volumes[volume.Target]})
 			case types.VolumeTypeVolume, types.VolumeTypeTmpfs:
 			default:
 				reject("service %s uses a %s mount", name, volume.Type)
@@ -218,12 +250,19 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 		return Plan{}, &PolicyError{Reasons: reasons}
 	}
 
+	for name, base := range bases {
+		if project.Volumes == nil {
+			project.Volumes = types.Volumes{}
+		}
+		project.Volumes[name] = types.VolumeConfig{
+			Name:       project.Name + "_" + name,
+			Driver:     "local",
+			DriverOpts: map[string]string{"type": "none", "o": "bind", "device": base},
+		}
+	}
 	project.Extensions = nil
 	rendered, err := project.MarshalYAML()
 	if err != nil {
-		return Plan{}, fmt.Errorf("render compose file: %w", err)
-	}
-	if rendered, err = forceCreateHostPath(rendered); err != nil {
 		return Plan{}, fmt.Errorf("render compose file: %w", err)
 	}
 	sum := sha256.Sum256(rendered)
@@ -233,35 +272,6 @@ func Render(ctx context.Context, entry Entry, policy Policy) (Plan, error) {
 	return plan, nil
 }
 
-// forceCreateHostPath writes create_host_path: true on writable binds.
-// compose-go omits the field when true, but reads an absent field in long
-// syntax as false, so without this Docker refuses to start containers whose
-// app-data folder does not exist yet.
-func forceCreateHostPath(rendered []byte) ([]byte, error) {
-	var document map[string]any
-	if err := yaml.Unmarshal(rendered, &document); err != nil {
-		return nil, err
-	}
-	services, _ := document["services"].(map[string]any)
-	for _, service := range services {
-		volumes, _ := service.(map[string]any)["volumes"].([]any)
-		for _, item := range volumes {
-			volume, _ := item.(map[string]any)
-			if volume["type"] != types.VolumeTypeBind || volume["source"] == "/etc/localtime" {
-				continue
-			}
-			bind, _ := volume["bind"].(map[string]any)
-			if bind == nil {
-				bind = map[string]any{}
-				volume["bind"] = bind
-			}
-			bind["create_host_path"] = true
-		}
-	}
-	return yaml.Marshal(document)
-}
-
-// checkService rejects options that would give a container host privileges.
 func checkService(name string, service types.ServiceConfig, reject func(string, ...any)) {
 	if service.Build != nil {
 		reject("service %s builds an image", name)
@@ -316,21 +326,22 @@ func deployDevices(deploy *types.DeployConfig) bool {
 	return false
 }
 
-// rewriteHostPath maps CasaOS /DATA paths to A-NAS roots and refuses anything
-// that escapes them after cleaning.
-func rewriteHostPath(source, appID string, policy Policy) (string, MountKind, bool) {
+// rewriteHostPath maps a CasaOS /DATA path to an A-NAS root and the relative
+// path below it, refusing anything that escapes them after cleaning.
+func rewriteHostPath(source, appID string, policy Policy) (base, subpath string, kind MountKind, ok bool) {
 	cleaned := path.Clean(source)
 	appData := path.Join(casaosDataRoot, "AppData", appID)
+	below := func(root string) string { return strings.TrimPrefix(strings.TrimPrefix(cleaned, root), "/") }
 	switch {
 	case cleaned == appData || strings.HasPrefix(cleaned, appData+"/"):
-		return path.Join(policy.AppDataRoot, appID, strings.TrimPrefix(cleaned, appData)), MountAppData, true
+		return path.Join(policy.AppDataRoot, appID), below(appData), MountAppData, true
 	case strings.HasPrefix(cleaned, path.Join(casaosDataRoot, "AppData")+"/"):
 		// Another app's data folder.
-		return "", "", false
+		return "", "", "", false
 	case cleaned == casaosDataRoot || strings.HasPrefix(cleaned, casaosDataRoot+"/"):
-		return path.Join(policy.DataRoot, strings.TrimPrefix(cleaned, casaosDataRoot)), MountShared, true
+		return policy.DataRoot, below(casaosDataRoot), MountShared, true
 	default:
-		return "", "", false
+		return "", "", "", false
 	}
 }
 
@@ -363,4 +374,27 @@ func appendUnique(items []string, item string) []string {
 		}
 	}
 	return append(items, item)
+}
+
+// SharesFolders reports whether the plan mounts anything from the Shared
+// folder; the app identity then needs the Shared folder's ACL.
+func (p Plan) SharesFolders() bool {
+	for _, mount := range p.Mounts {
+		if mount.Kind == MountShared {
+			return true
+		}
+	}
+	return false
+}
+
+// HostFolders lists the app-data and Shared folders the Host Agent must
+// create before the install.
+func (p Plan) HostFolders() []string {
+	var folders []string
+	for _, mount := range p.Mounts {
+		if mount.Kind == MountAppData || mount.Kind == MountShared {
+			folders = appendUnique(folders, mount.HostPath)
+		}
+	}
+	return folders
 }

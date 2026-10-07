@@ -1,4 +1,4 @@
-import { DataSource } from "./api";
+import { DataSource, csrfHeaders } from "./api";
 
 export type InstallState = "available" | "installed" | "installing" | "uninstalling";
 
@@ -40,6 +40,8 @@ export interface InstallPlan {
   title: string;
   version: string;
   project: string;
+  // The Linux account app-<id> the app's containers run as.
+  identity: { username: string; uid: number; gid: number };
   images: string[];
   containers: string[];
   ports: Array<{ hostPort: number; containerPort: number; protocol: string; purpose?: string }>;
@@ -79,7 +81,7 @@ export function iconURL(id: string): string {
 }
 
 function post(body: unknown): RequestInit {
-  return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  return { method: "POST", headers: { "Content-Type": "application/json", ...csrfHeaders() }, body: JSON.stringify(body) };
 }
 
 async function request(path: string, init: RequestInit): Promise<unknown> {

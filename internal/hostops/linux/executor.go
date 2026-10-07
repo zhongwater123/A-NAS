@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -79,6 +80,10 @@ type Executor struct {
 	viewingPath   string
 	viewingError  error
 	now           func() time.Time
+	appsMu        sync.Mutex
+	apps          map[string]int
+	appsPath      string
+	appsError     error
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -101,7 +106,7 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 		resolver: resolver, runner: runner, systemRoot: filepath.Clean(systemRoot),
 		mountPoint: filepath.Clean(mountPoint), mountUnitName: unitName, smbInterface: strings.TrimSpace(options.SMBInterface),
 		spaceRoots: make(map[string]string), identities: make(map[string]identityRecord),
-		viewing: make(map[string]viewingRecord), now: options.Now,
+		viewing: make(map[string]viewingRecord), now: options.Now, apps: make(map[string]int),
 	}
 	if executor.now == nil {
 		executor.now = time.Now
@@ -112,6 +117,8 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.identityError = executor.loadIdentityRegistry()
 	executor.viewingPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "viewing-grants.json")
 	executor.viewingError = executor.loadViewingRegistry()
+	executor.appsPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "app-identities.json")
+	executor.appsError = executor.loadAppsRegistry()
 	return executor
 }
 
@@ -517,3 +524,4 @@ func (execCommandRunner) Run(ctx context.Context, name string, args []string, st
 var _ storage.VolumeExecutor = (*Executor)(nil)
 var _ accounts.CredentialProvisioner = (*Executor)(nil)
 var _ accounts.ViewingProvisioner = (*Executor)(nil)
+var _ appid.Host = (*Executor)(nil)

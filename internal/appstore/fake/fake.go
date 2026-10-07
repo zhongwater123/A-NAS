@@ -18,10 +18,8 @@ import (
 
 // Policy mirrors the production defaults so fake plans show realistic paths.
 var Policy = appstore.Policy{
-	AppDataRoot:   "/srv/a-nas/appdata",
-	DataRoot:      "/srv/a-nas/data",
-	PUID:          "1000",
-	PGID:          "1000",
+	AppDataRoot:   "/srv/a-nas/data/apps",
+	DataRoot:      "/srv/a-nas/data/spaces/shared",
 	TZ:            "Asia/Shanghai",
 	ReservedPorts: []uint16{8080},
 }

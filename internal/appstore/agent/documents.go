@@ -9,6 +9,8 @@ import (
 
 type InstallRequest struct {
 	Digest string `json:"digest,omitempty"`
+	UID    int    `json:"uid,omitempty"`
+	GID    int    `json:"gid,omitempty"`
 }
 
 type AppsDocument struct {
@@ -48,12 +50,19 @@ type PlanDocument struct {
 	Title      string         `json:"title"`
 	Version    string         `json:"version"`
 	Project    string         `json:"project"`
+	Identity   IdentityJSON   `json:"identity"`
 	Images     []string       `json:"images"`
 	Containers []string       `json:"containers"`
 	Ports      []PortDocument `json:"ports"`
 	Mounts     []MountJSON    `json:"mounts"`
 	Digest     string         `json:"digest"`
 	Compose    string         `json:"compose"`
+}
+
+type IdentityJSON struct {
+	Username string `json:"username"`
+	UID      int    `json:"uid"`
+	GID      int    `json:"gid"`
 }
 
 type PortDocument struct {
@@ -140,7 +149,8 @@ func (document JobDocument) ToDomain() (appstore.Job, error) {
 func PlanFromDomain(plan appstore.Plan) PlanDocument {
 	document := PlanDocument{
 		AppID: plan.AppID, Title: plan.Title, Version: plan.Version, Project: plan.Project,
-		Images: append([]string{}, plan.Images...), Containers: append([]string{}, plan.Containers...),
+		Identity: IdentityJSON{Username: plan.Identity.Username, UID: plan.Identity.UID, GID: plan.Identity.GID},
+		Images:   append([]string{}, plan.Images...), Containers: append([]string{}, plan.Containers...),
 		Ports: make([]PortDocument, len(plan.Ports)), Mounts: make([]MountJSON, len(plan.Mounts)),
 		Digest: plan.Digest, Compose: string(plan.Compose),
 	}
@@ -156,7 +166,8 @@ func PlanFromDomain(plan appstore.Plan) PlanDocument {
 func (document PlanDocument) ToDomain() appstore.Plan {
 	plan := appstore.Plan{
 		AppID: document.AppID, Title: document.Title, Version: document.Version, Project: document.Project,
-		Images: document.Images, Containers: document.Containers, Digest: document.Digest, Compose: []byte(document.Compose),
+		Identity: appstore.Identity{Username: document.Identity.Username, UID: document.Identity.UID, GID: document.Identity.GID},
+		Images:   document.Images, Containers: document.Containers, Digest: document.Digest, Compose: []byte(document.Compose),
 	}
 	for _, port := range document.Ports {
 		plan.Ports = append(plan.Ports, appstore.PortMapping{HostPort: port.HostPort, ContainerPort: port.ContainerPort, Protocol: port.Protocol, Purpose: port.Purpose})

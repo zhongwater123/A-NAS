@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleAlert, Download, FolderOpen, Network, Search, ShieldCheck, ShoppingBag, Trash2 } from "lucide-react";
+import { ArrowLeft, CircleAlert, Download, FolderOpen, Network, Search, ShieldCheck, ShoppingBag, Trash2, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppJob, AppList, AppsAPIError, CatalogApp, InstallPlan, iconURL, installApp, readApps, readPlan, uninstallApp } from "./appsApi";
@@ -200,6 +200,13 @@ function PlanReview({ plan, onCancel, onConfirm }: { plan: InstallPlan; onCancel
       <h3>安装计划</h3>
       <p>确认后 A-NAS 将执行下列操作。容器不会获得特权、设备或宿主机网络，只能访问下面列出的文件夹。</p>
       <dl>
+        <dt><UserRound />运行身份</dt>
+        <dd>
+          <span className="plan-row"><code>{plan.identity.username}</code>UID {plan.identity.uid}</span>
+          {plan.mounts.some((mount) => mount.kind === "shared")
+            ? <small className="plan-warning">该应用将获得共享空间的读写权限（与成员相同），卸载时撤销；不能访问任何人的个人空间。</small>
+            : <small>只访问自己的应用数据，不能访问共享空间或个人空间。</small>}
+        </dd>
         <dt><Download />拉取镜像</dt>
         <dd>{plan.images.map((image) => <code key={image}>{image}</code>)}</dd>
         <dt><Network />开放端口</dt>

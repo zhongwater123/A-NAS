@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -117,6 +118,7 @@ type handler struct {
 	credentials accounts.CredentialProvisioner
 	identities  accounts.IdentitySynchronizer
 	viewing     accounts.ViewingProvisioner
+	apps        appid.Host
 	snapshots   files.SnapshotBackend
 	logger      *slog.Logger
 }
@@ -127,6 +129,7 @@ type Services struct {
 	Credentials accounts.CredentialProvisioner
 	Identities  accounts.IdentitySynchronizer
 	Viewing     accounts.ViewingProvisioner
+	Apps        appid.Host
 	Snapshots   files.SnapshotBackend
 }
 
@@ -140,7 +143,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	}
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
-		identities: services.Identities, viewing: services.Viewing, snapshots: services.Snapshots, logger: logger,
+		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots, logger: logger,
 	}
 }
 
@@ -151,6 +154,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/v1/accounts/credential" {
 		h.handleSetCredential(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, appsPathPrefix) {
+		h.handleApps(w, r)
 		return
 	}
 	if r.URL.Path == "/v1/viewing-grants" || strings.HasPrefix(r.URL.Path, "/v1/viewing-grants/") {

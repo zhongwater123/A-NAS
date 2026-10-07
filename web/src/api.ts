@@ -156,6 +156,8 @@ export class APIError extends Error {
 
 let csrfToken = "";
 export function setSession(session?: Session) { csrfToken = session?.csrfToken ?? ""; }
+// csrfHeaders lets the Docker and App Center clients send the session's CSRF token on writes.
+export function csrfHeaders(): Record<string, string> { return csrfToken ? { "X-CSRF-Token": csrfToken } : {}; }
 
 async function request<T>(path: string, init: RequestInit = {}, mutation = false): Promise<T> {
   const headers = new Headers(init.headers);

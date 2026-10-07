@@ -13,11 +13,11 @@ Group=anas-container
 SupplementaryGroups=docker
 ExecStart=/usr/local/lib/a-nas/anas-container-agent
 Environment=ANAS_CONTAINER_AGENT_SOCKET=/run/a-nas-container/agent.sock
-# App Center install policy: per-app data and shared data stay below these roots.
-Environment=ANAS_APP_DATA_ROOT=/srv/a-nas/appdata
-Environment=ANAS_SHARED_DATA_ROOT=/srv/a-nas/data
-Environment=ANAS_APP_PUID=1000
-Environment=ANAS_APP_PGID=1000
+# App Center install policy: per-app data and shared mounts stay below these
+# roots on the data volume. Apps run as their own identity app-<id>, which the
+# Host Agent creates together with the mounted folders (ADR 0008).
+Environment=ANAS_APP_DATA_ROOT=/srv/a-nas/data/apps
+Environment=ANAS_SHARED_DATA_ROOT=/srv/a-nas/data/spaces/shared
 EnvironmentFile=-/etc/a-nas/container-agent.env
 RuntimeDirectory=a-nas-container
 RuntimeDirectoryMode=0750

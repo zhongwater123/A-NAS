@@ -1,16 +1,21 @@
 // Package appstoreapi exposes the App Center under /api/v1/apps. Installs and
 // uninstalls are state-changing and pass localorigin.CheckWrite; an install
-// must carry the digest of the plan the owner confirmed.
+// must carry the digest of the plan the owner confirmed. Each app runs as its
+// own Linux identity, whose folders the Host Agent prepares before Docker
+// starts anything (ADR 0008).
 package appstoreapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/appstore/agent"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
@@ -26,17 +31,40 @@ const (
 )
 
 type handler struct {
-	store      appstore.Store
-	dataSource DataSource
-	logger     *slog.Logger
+	store       appstore.Store
+	dataSource  DataSource
+	host        appid.Host
+	volumeReady func(context.Context) error
+	logger      *slog.Logger
+}
+
+type Options struct {
+	// Host allocates app identities and prepares their folders.
+	Host appid.Host
+	// VolumeReady fails while the data volume is unavailable; installs are
+	// refused then. Nil skips the check on development volumes.
+	VolumeReady func(context.Context) error
+	Logger      *slog.Logger
 }
 
 // New returns the App Center API; a nil store disables it.
-func New(store appstore.Store, dataSource DataSource, logger *slog.Logger) http.Handler {
-	if logger == nil {
-		logger = slog.Default()
+func New(store appstore.Store, dataSource DataSource, options Options) http.Handler {
+	if options.Logger == nil {
+		options.Logger = slog.Default()
 	}
-	return &handler{store: store, dataSource: dataSource, logger: logger}
+	return &handler{store: store, dataSource: dataSource, host: options.Host, volumeReady: options.VolumeReady, logger: options.Logger}
+}
+
+// identity asks the Host Agent for the app's Linux identity.
+func (h *handler) identity(ctx context.Context, id string) (appstore.Identity, error) {
+	if h.host == nil {
+		return appstore.Identity{}, fmt.Errorf("%w: no host for app identities", appstore.ErrUnavailable)
+	}
+	identity, err := h.host.AppIdentity(ctx, id)
+	if err != nil {
+		return appstore.Identity{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	return identity, nil
 }
 
 func Matches(path string) bool {
@@ -82,7 +110,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !allow(w, r, http.MethodGet) || !h.enabled(w) {
 			return
 		}
-		plan, err := h.store.Plan(r.Context(), id)
+		identity, err := h.identity(r.Context(), id)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		plan, err := h.store.Plan(r.Context(), id, identity)
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -109,9 +142,18 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var job appstore.Job
 		var err error
 		if operation == "install" {
-			job, err = h.store.Install(r.Context(), id, request.Digest)
+			job, err = h.install(r.Context(), id, request.Digest)
 		} else {
-			job, err = h.store.Uninstall(r.Context(), id)
+			if job, err = h.store.Uninstall(r.Context(), id); err == nil && h.host != nil {
+				// Withdraw Shared access at once; the identity and its data stay.
+				if releaseErr := h.host.ReleaseApp(r.Context(), id); releaseErr != nil {
+					h.logger.ErrorContext(r.Context(), "releasing app access failed", "app", id, "error", releaseErr)
+				}
+			}
+		}
+		if errors.Is(err, errVolumeUnavailable) {
+			writeError(w, http.StatusLocked, "volume_unavailable", "the data volume is not available")
+			return
 		}
 		if err != nil {
 			h.fail(w, r, err)
@@ -122,6 +164,33 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	}
+}
+
+var errVolumeUnavailable = errors.New("data volume is unavailable")
+
+// install checks the confirmed plan against the app's identity, has the Host
+// Agent prepare its folders and Shared access, and only then starts Compose.
+func (h *handler) install(ctx context.Context, id, digest string) (appstore.Job, error) {
+	if h.volumeReady != nil {
+		if err := h.volumeReady(ctx); err != nil {
+			return appstore.Job{}, errVolumeUnavailable
+		}
+	}
+	identity, err := h.identity(ctx, id)
+	if err != nil {
+		return appstore.Job{}, err
+	}
+	plan, err := h.store.Plan(ctx, id, identity)
+	if err != nil {
+		return appstore.Job{}, err
+	}
+	if plan.Digest != digest {
+		return appstore.Job{}, appstore.ErrPlanChanged
+	}
+	if err := h.host.PrepareApp(ctx, id, plan.HostFolders(), plan.SharesFolders()); err != nil {
+		return appstore.Job{}, fmt.Errorf("%w: prepare app folders: %v", appstore.ErrUnavailable, err)
+	}
+	return h.store.Install(ctx, id, digest, identity)
 }
 
 func (h *handler) enabled(w http.ResponseWriter) bool {
@@ -182,3 +251,19 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 		panic(err)
 	}
 }
+
+// DevelopmentHost stands in for the Host Agent with the fake app store: each
+// app gets a stable identity in the app range and nothing is created.
+type DevelopmentHost struct{}
+
+func (DevelopmentHost) AppIdentity(_ context.Context, id string) (appstore.Identity, error) {
+	sum := 0
+	for _, character := range id {
+		sum = (sum*31 + int(character)) % (appid.LastUID - appid.FirstUID + 1)
+	}
+	uid := appid.FirstUID + sum
+	return appstore.Identity{Username: appid.Username(id), UID: uid, GID: uid}, nil
+}
+
+func (DevelopmentHost) PrepareApp(context.Context, string, []string, bool) error { return nil }
+func (DevelopmentHost) ReleaseApp(context.Context, string) error                 { return nil }

@@ -34,15 +34,15 @@ func TestClientRoundTripsTheAppCenter(t *testing.T) {
 	if err != nil || contentType != "image/png" || !bytes.HasPrefix(icon, []byte("\x89PNG")) {
 		t.Fatalf("Icon() = %d bytes %q, %v", len(icon), contentType, err)
 	}
-	plan, err := client.Plan(ctx, "memos")
+	plan, err := client.Plan(ctx, "memos", testIdentity)
 	if err != nil || len(plan.Digest) != 64 || !strings.Contains(string(plan.Compose), "io.a-nas.app: memos") {
 		t.Fatalf("Plan() = %+v, %v", plan, err)
 	}
 
-	if _, err := client.Install(ctx, "memos", strings.Repeat("f", 64)); !errors.Is(err, appstore.ErrPlanChanged) {
+	if _, err := client.Install(ctx, "memos", strings.Repeat("f", 64), testIdentity); !errors.Is(err, appstore.ErrPlanChanged) {
 		t.Fatalf("stale install error = %v", err)
 	}
-	job, err := client.Install(ctx, "memos", plan.Digest)
+	job, err := client.Install(ctx, "memos", plan.Digest, testIdentity)
 	if err != nil || job.State != appstore.JobRunning || job.Action != appstore.JobInstall {
 		t.Fatalf("Install() = %+v, %v", job, err)
 	}
@@ -57,7 +57,7 @@ func TestClientRoundTripsTheAppCenter(t *testing.T) {
 	if _, err := client.Uninstall(ctx, "navidrome"); !errors.Is(err, appstore.ErrNotInstalled) {
 		t.Fatalf("uninstall missing error = %v", err)
 	}
-	if _, err := client.Plan(ctx, "Not Valid"); !errors.Is(err, appstore.ErrNotFound) {
+	if _, err := client.Plan(ctx, "Not Valid", testIdentity); !errors.Is(err, appstore.ErrNotFound) {
 		t.Fatalf("invalid ID error = %v", err)
 	}
 }
@@ -74,3 +74,5 @@ func serve(t *testing.T, handler http.Handler) string {
 	t.Cleanup(func() { _ = server.Close() })
 	return socket
 }
+
+var testIdentity = appstore.Identity{Username: "app-memos", UID: 30002, GID: 30002}

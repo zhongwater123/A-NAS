@@ -175,7 +175,7 @@ func (e *Executor) ensureSpaceSubvolume(ctx context.Context, root string) (bool,
 // links, never on path again: whoever can rename entries next to it cannot
 // redirect root to another file between the check and the change.
 func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, reserved bool) (changed, existed bool, err error) {
-	directory, existed, err := e.openVolumeDirectory(path, reserved)
+	directory, existed, err := e.openVolumeDirectory(path, 0o700, reserved)
 	if err != nil {
 		return false, existed, err
 	}
@@ -220,11 +220,11 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, res
 }
 
 // openVolumeDirectory opens the directory at path below the data-volume mount
-// point without following symbolic links, creating it when nothing is there.
-// existed reports whether anything was at path. When reserved is set, a
-// non-directory at path, such as a symbolic link planted by a user who can
-// write the parent, is renamed aside and replaced by a new directory.
-func (e *Executor) openVolumeDirectory(path string, reserved bool) (*os.File, bool, error) {
+// point without following symbolic links, creating it with mode when nothing
+// is there. existed reports whether anything was at path. When reserved is
+// set, a non-directory at path, such as a symbolic link planted by a user who
+// can write the parent, is renamed aside and replaced by a new directory.
+func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) (*os.File, bool, error) {
 	relative, err := filepath.Rel(e.mountPoint, path)
 	if err != nil || relative == "." || !filepath.IsLocal(relative) {
 		return nil, false, fmt.Errorf("%s is not below the data volume", path)
@@ -257,7 +257,7 @@ func (e *Executor) openVolumeDirectory(path string, reserved bool) (*os.File, bo
 			return os.NewFile(uintptr(fd), path), existed, nil
 		case errors.Is(err, unix.ENOENT):
 			existed = existed && attempt > 0
-			if err := unix.Mkdirat(parentFD, name, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+			if err := unix.Mkdirat(parentFD, name, mode); err != nil && !errors.Is(err, unix.EEXIST) {
 				return nil, false, fmt.Errorf("create %s: %w", path, err)
 			}
 		case (errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR)) && reserved:
