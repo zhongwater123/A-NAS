@@ -39,7 +39,7 @@ if [[ ! -f "$source_release/a-nas-chromium-policy.json" ]]; then
   echo "missing Chromium policy: $source_release/a-nas-chromium-policy.json" >&2
   exit 2
 fi
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol; do
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3

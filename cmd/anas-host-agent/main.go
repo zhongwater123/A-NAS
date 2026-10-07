@@ -51,6 +51,9 @@ func run(logger *slog.Logger) error {
 		MountPoint:   environment("ANAS_DATA_MOUNT", "/srv/a-nas/data"),
 		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
 	})
+	if err := executor.ReconcileDataVolume(context.Background()); err != nil {
+		return err
+	}
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
 			Reader: reader, Volume: executor, Credentials: executor, Snapshots: executor,

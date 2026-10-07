@@ -9,6 +9,7 @@
 - [2026-10-06：桌面时钟持续落后于系统时间](2026-10-06-system-clock-drift-and-network-sync.md)（resolved in code；deployment pending）
 - [2026-10-07：RC 激活与回滚后用户 API 无法启动](2026-10-07-user-service-state-directory.md)（resolved）
 - [2026-10-07：首次管理员创建在 Samba 系统账号边界失败](2026-10-07-samba-account-sandbox.md)（fix ready；Experimental NAS verification pending）
+- [2026-10-07：数据卷空间权限阻断文件闭环](2026-10-07-data-volume-space-permissions.md)（fix in progress；Experimental NAS verification pending）
 
 ## 使用方式
 

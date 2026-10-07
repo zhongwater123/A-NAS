@@ -92,6 +92,7 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	for _, required := range []string{
 		"server min protocol = SMB3_00", "map to guest = Never", "smb encrypt = required",
 		"interfaces = lo enp3s0", "[homes]", "[Shared]", "vfs objects = recycle",
+		"inherit acls = yes", "recycle:directory_mode = 0770", "recycle:subdir_mode = 0770",
 	} {
 		if !strings.Contains(string(configuration), required) {
 			t.Fatalf("Samba configuration is missing %q:\n%s", required, configuration)

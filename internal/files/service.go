@@ -357,8 +357,26 @@ func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entr
 	}
 	trashID := s.randomID("trash")
 	trashRelative := filepath.ToSlash(filepath.Join(".a-nas-trash", safeSegment(trashID), "content"))
+	trashRoot := filepath.Join(root, ".a-nas-trash")
 	trashContainer := filepath.Join(root, filepath.FromSlash(filepath.Dir(trashRelative)))
-	if err := os.MkdirAll(trashContainer, 0o700); err != nil {
+	trashRootCreated := false
+	if info, err := os.Lstat(trashRoot); errors.Is(err, os.ErrNotExist) {
+		trashRootCreated = true
+	} else if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return TrashItem{}, ErrUnsupportedType
+	}
+	if err := os.MkdirAll(trashContainer, 0o770); err != nil {
+		return TrashItem{}, err
+	}
+	if trashRootCreated {
+		if err := os.Chmod(trashRoot, 0o770); err != nil {
+			return TrashItem{}, err
+		}
+	}
+	if info, err := os.Lstat(trashContainer); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return TrashItem{}, ErrUnsupportedType
+	}
+	if err := os.Chmod(trashContainer, 0o770); err != nil {
 		return TrashItem{}, err
 	}
 	destination := filepath.Join(root, filepath.FromSlash(trashRelative))

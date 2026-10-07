@@ -1,6 +1,6 @@
 # 配置并验收 v1.0.1 实验数据卷
 
-状态：active；`v1.0.1-rc.4`（`79851b862904`）已完整验证并 stage，等待 root 安装。用户已确认 500,107,862,016 字节的 SATA 盘 `ST500DM002-1BD142`（序列号 `Z2AYDZPB`，WWN `0x5000c500518d4994`）是可清除实验盘；该盘没有现有签名且尚未格式化。运行中热插拔已转为后续任务，不属于本次闭环验收。
+状态：active；Experimental NAS 已安装 `v1.0.1-rc.4`（`79851b862904`），并把已确认的 500,107,862,016 字节 SATA 实验盘 `ST500DM002-1BD142`（序列号 `Z2AYDZPB`，WWN `0x5000c500518d4994`）初始化为 Btrfs。rc.4 空间父目录权限阻断文件、回收站与快照接口；下一 RC 修复及实机回归尚未完成。运行中热插拔已转为后续任务，不属于本次闭环验收。
 
 本手册只适用于 Experimental NAS 和可丢弃测试数据。格式化动作不可回滚；不要把家庭正式数据放入本版单盘卷。
 
@@ -40,7 +40,7 @@ EXPECTED_DISK_SERIAL=Z2AYDZPB \
 ```bash
 # 仅在仓库源可达时安装一次；若 apt 失败，停止，不进入格式化流程。
 apt-get update
-apt-get install --no-install-recommends btrfs-progs parted smartmontools samba libsqlite3-0
+apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0
 
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 release_id=v1.0.1-rc.4-<GIT_SHA>
@@ -66,9 +66,22 @@ ip -brief link
 
 ## 功能验收
 
+升级修复后先验证权限链。`spaces` 和 `spaces/private` 必须允许 `a-nas` 与成员穿过但不可列出；个人空间及其 `.a-nas-trash` 必须同时授予个人账号和 `a-nas`，Shared 回收站必须属于 `a-nas-members`：
+
+```bash
+namei -l /srv/a-nas/data/spaces/private/admin
+getfacl -cp \
+  /srv/a-nas/data/spaces \
+  /srv/a-nas/data/spaces/private \
+  /srv/a-nas/data/spaces/private/admin \
+  /srv/a-nas/data/spaces/private/admin/.a-nas-trash \
+  /srv/a-nas/data/spaces/shared/.a-nas-trash
+runuser -u a-nas -- test -r /srv/a-nas/data/spaces/private/admin
+```
+
 1. 创建管理员与两个成员，确认 Web 与 Windows SMB 都无法列出或读取另一成员个人空间。
-2. 分别通过 Web 与 `\\<NAS-IP>\Shared` 写入大文件，双方读取并用 SHA-256 核对。
-3. 双向执行创建、重命名、删除；确认 Web 回收站可见 Samba 删除并能恢复相同哈希。
+2. 在个人空间和 `\\<NAS-IP>\Shared` 中分别由 Web 与 SMB 创建文件和子目录，再由另一端读取、改名和删除；用 SHA-256 核对大文件。
+3. 先由 Web 删除一个文件，再由 SMB 删除另一个文件；确认两者都进入 Web 回收站、均可恢复相同哈希，并确认 smbd journal 没有 recycle `purging`。
 4. 为个人空间和 Shared 创建只读快照；验证浏览、重名 `409`、按文件恢复和删除，不执行整卷回滚。
 5. 验证禁用账号、guest/SMB1 拒绝、SMB3 加密与签名，以及无效 Samba candidate 不替换旧配置。
 6. 保持数据盘连接并正常重启，验证数据卷按 UUID 自动挂载，空间和 SMB 自动恢复；本版不执行运行中热拔插。

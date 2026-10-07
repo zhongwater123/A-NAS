@@ -69,6 +69,13 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
+	trashRootInfo, err := os.Stat(filepath.Join(volumeRoot, "spaces", "private", "alice", ".a-nas-trash"))
+	if err != nil {
+		t.Fatalf("stat shared Web/SMB trash root: %v", err)
+	}
+	if got, want := trashRootInfo.Mode().Perm(), os.FileMode(0o770); got != want {
+		t.Fatalf("trash root mode = %04o, want %04o", got, want)
+	}
 	entries, err = service.List(ctx, alice, privateSpace.ID, directory.ID)
 	if err != nil {
 		t.Fatalf("List() after delete error = %v", err)

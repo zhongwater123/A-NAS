@@ -27,7 +27,9 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec`。
 - 根目录必须同时是 Btrfs 且存在 root 创建的 `.a-nas-volume.json`。缺少任一证据时，文件服务返回 `volume_unavailable`，不会创建空间目录。
 - 个人空间位于 `spaces/private/<username>`，共享空间位于 `spaces/shared`；公开接口只使用不透明空间 ID。
+- `spaces` 与 `spaces/private` 使用 `root:a-nas-members 0710`，允许 Product Service 和已注册 SMB 账号穿过但不能列出个人空间容器。个人空间使用 `username:a-nas 2770` 与访问/默认 POSIX ACL，让该用户和 `a-nas` 对新文件保持共同读写；Shared 使用 `root:a-nas-members 2770`。
 - Web 删除移动到空间内 `.a-nas-trash/<trash-id>/content`；Samba `recycle` 写入 `.a-nas-trash/<username>`，目录对账把它导入同一回收目录。
+- `.a-nas-trash` 由 Host Agent 在 materialize 时预建并保护；Web 与 Samba 的回收站子目录均使用 `0770`，不得由任一写入方独占为 `0700`。Host Agent 启动时幂等对账已注册空间，修复已初始化卷的容器权限并刷新经过 `testparm` 的 Samba 配置。
 - 只读快照位于 `.a-nas-snapshots/<snapshot-hash>`，不由 Samba 发布；恢复复制到普通空间的新位置。
 
 ## 身份与一致性
@@ -51,4 +53,3 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
-
