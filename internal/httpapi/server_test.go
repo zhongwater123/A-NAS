@@ -80,6 +80,34 @@ func TestHostStateEndpointReturnsOneObservedSnapshot(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointReturnsUncachedUtilisation(t *testing.T) {
+	handler := newHandler(fake.NewHealthy())
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil))
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d; body = %s", got, want, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	const want = "{\"dataSource\":\"simulated\",\"observedAt\":\"2026-10-06T00:00:00Z\",\"cpu\":{\"usagePercent\":23.5,\"logicalCores\":4},\"memory\":{\"totalBytes\":8589934592,\"usedBytes\":3435973837},\"network\":{\"receiveBytesPerSecond\":2516582,\"transmitBytesPerSecond\":327680}}\n"
+	if got := recorder.Body.String(); got != want {
+		t.Fatalf("body = %s, want %s", got, want)
+	}
+}
+
+func TestMetricsEndpointHidesReaderFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	newHandler(fake.NewUnavailable()).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil))
+
+	const want = "{\"error\":{\"code\":\"metrics_unavailable\",\"message\":\"host metrics are unavailable\"}}\n"
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Body.String() != want {
+		t.Fatalf("got %d %q, want 503 %q", recorder.Code, recorder.Body.String(), want)
+	}
+}
+
 func TestStateEndpointsHideReaderFailure(t *testing.T) {
 	for _, path := range []string{"/api/v1/system", "/api/v1/disks", "/api/v1/host-state"} {
 		t.Run(path, func(t *testing.T) {

@@ -13,8 +13,9 @@ import (
 var errUnavailable = errors.New("fake host state is unavailable")
 
 type Reader struct {
-	state hoststate.State
-	err   error
+	state   hoststate.State
+	metrics hoststate.Metrics
+	err     error
 }
 
 func NewHealthy() *Reader {
@@ -37,7 +38,7 @@ func newReader(state hoststate.State) *Reader {
 	sort.Slice(state.Disks, func(i, j int) bool {
 		return state.Disks[i].ID.String() < state.Disks[j].ID.String()
 	})
-	return &Reader{state: cloneState(state)}
+	return &Reader{state: cloneState(state), metrics: baseMetrics()}
 }
 
 func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
@@ -48,6 +49,26 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 		return hoststate.State{}, r.err
 	}
 	return cloneState(r.state), nil
+}
+
+// ReadMetrics returns fixed utilisation so screenshots and tests are stable.
+func (r *Reader) ReadMetrics(ctx context.Context) (hoststate.Metrics, error) {
+	if err := ctx.Err(); err != nil {
+		return hoststate.Metrics{}, err
+	}
+	if r.err != nil {
+		return hoststate.Metrics{}, r.err
+	}
+	return r.metrics, nil
+}
+
+func baseMetrics() hoststate.Metrics {
+	return hoststate.Metrics{
+		ObservedAt: time.Date(2026, time.October, 6, 0, 0, 0, 0, time.UTC),
+		CPU:        hoststate.CPUMetrics{UsagePercent: 23.5, LogicalCores: 4},
+		Memory:     hoststate.MemoryMetrics{TotalBytes: 8 << 30, UsedBytes: 3_435_973_837},
+		Network:    hoststate.NetworkMetrics{ReceiveBytesPerSecond: 2_516_582, TransmitBytesPerSecond: 327_680},
+	}
 }
 
 func baseState() hoststate.State {
@@ -109,3 +130,5 @@ func mustResourceID(value string) hoststate.ResourceID {
 func intPointer(value int) *int {
 	return &value
 }
+
+var _ hoststate.Observer = (*Reader)(nil)

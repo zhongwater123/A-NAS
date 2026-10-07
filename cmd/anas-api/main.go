@@ -93,7 +93,7 @@ func run(logger *slog.Logger) error {
 	}
 }
 
-func configuredReader() (hoststate.Reader, httpapi.DataSource, error) {
+func configuredReader() (hoststate.Observer, httpapi.DataSource, error) {
 	switch mode := os.Getenv("ANAS_HOSTSTATE_MODE"); mode {
 	case "", "fake":
 		return fake.NewHealthy(), httpapi.DataSourceSimulated, nil

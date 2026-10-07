@@ -52,6 +52,14 @@ beforeEach(() => {
   xterm.onStatus = undefined;
 });
 
+const metricsState = {
+  dataSource: "simulated",
+  observedAt: "2026-10-06T00:00:00Z",
+  cpu: { usagePercent: 23.5, logicalCores: 4 },
+  memory: { totalBytes: 8589934592, usedBytes: 3435973837 },
+  network: { receiveBytesPerSecond: 2516582, transmitBytesPerSecond: 327680 },
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -59,7 +67,7 @@ afterEach(() => {
 describe("A-NAS desktop", () => {
   it("shows a loading state while the first host observation is pending", async () => {
     let finishRequest: ((response: Response) => void) | undefined;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { finishRequest = resolve; })));
+    routeFetch({ hostState: vi.fn(() => new Promise<Response>((resolve) => { finishRequest = resolve; })) });
     const user = userEvent.setup();
 
     render(<App />);
@@ -103,11 +111,7 @@ describe("A-NAS desktop", () => {
   });
 
   it("keeps the last successful state when refresh loses connection", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse(healthyState))
-      .mockResolvedValueOnce(errorResponse(503));
-    vi.stubGlobal("fetch", fetchMock);
+    routeFetch({ hostState: vi.fn().mockResolvedValueOnce(okResponse(healthyState)).mockResolvedValueOnce(errorResponse(503)) });
     const user = userEvent.setup();
 
     render(<App />);
@@ -122,7 +126,7 @@ describe("A-NAS desktop", () => {
 
   it("retries after an initial 503 response", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(errorResponse(503)).mockResolvedValueOnce(okResponse(healthyState));
-    vi.stubGlobal("fetch", fetchMock);
+    routeFetch({ hostState: fetchMock });
     const user = userEvent.setup();
 
     render(<App />);
@@ -182,6 +186,31 @@ describe("A-NAS desktop", () => {
     expect(within(notifications).queryByText("2")).toBeNull();
   });
 
+  it("shows utilisation gauges, network rates and the clock in the status bar", async () => {
+    stubFetch(healthyState);
+    render(<App />);
+
+    const statusBar = screen.getByRole("banner", { name: "设备状态" });
+    await within(statusBar).findByText("4 核");
+    expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuenow")).toBe("24");
+    expect(within(statusBar).getByRole("meter", { name: "内存占用" }).getAttribute("aria-valuenow")).toBe("40");
+    expect(within(statusBar).getByText("3.2 / 8.0 GiB")).toBeTruthy();
+    const network = within(statusBar).getByRole("group", { name: "网络速率" });
+    expect(network.textContent).toContain("下行2.5MB/s");
+    expect(network.textContent).toContain("上行328KB/s");
+    expect(within(statusBar).getByText(/^\d{2}:\d{2}$/)).toBeTruthy();
+    expect(within(statusBar).getByText("设备在线")).toBeTruthy();
+  });
+
+  it("marks the status bar disconnected when metrics cannot be read", async () => {
+    routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(healthyState)), metrics: vi.fn().mockResolvedValue(errorResponse(503)) });
+    render(<App />);
+
+    const statusBar = screen.getByRole("banner", { name: "设备状态" });
+    expect(await within(statusBar).findByText("连接中断", { selector: ".source-badge" })).toBeTruthy();
+    expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuetext")).toBe("暂无数据");
+  });
+
   it("opens a terminal session from the desktop icon", async () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();
@@ -236,17 +265,30 @@ describe("A-NAS desktop", () => {
   });
 });
 
+function routeFetch(routes: { hostState: () => Promise<Response>; metrics?: () => Promise<Response>; terminalEnabled?: boolean }) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      switch (String(input)) {
+        case "/api/v1/host-state":
+          return routes.hostState();
+        case "/api/v1/metrics":
+          return routes.metrics ? routes.metrics() : okResponse(metricsState);
+        case "/api/v1/terminal":
+          return okResponse({ enabled: routes.terminalEnabled ?? true });
+        default:
+          throw new Error(`unexpected request ${String(input)}`);
+      }
+    }),
+  );
+}
+
 function stubFetch(state: unknown) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse(state)));
+  routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(state)) });
 }
 
 function stubDesktopFetch(state: unknown, terminalEnabled: boolean) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
-      String(input) === "/api/v1/terminal" ? okResponse({ enabled: terminalEnabled }) : okResponse(state),
-    ),
-  );
+  routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(state)), terminalEnabled });
 }
 
 function okResponse(state: unknown) {

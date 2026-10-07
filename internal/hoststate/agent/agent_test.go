@@ -110,3 +110,35 @@ func serve(t *testing.T, handler http.Handler) string {
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
+
+func TestClientReadsMetricsOverUnixSocket(t *testing.T) {
+	client := agent.NewClient(serve(t, agent.NewHandler(fake.NewHealthy(), discardLogger())))
+
+	metrics, err := client.ReadMetrics(context.Background())
+	if err != nil {
+		t.Fatalf("ReadMetrics() error = %v", err)
+	}
+	if metrics.CPU.UsagePercent != 23.5 || metrics.CPU.LogicalCores != 4 || metrics.Memory.TotalBytes != 8<<30 || metrics.Network.ReceiveBytesPerSecond != 2_516_582 {
+		t.Fatalf("metrics = %+v", metrics)
+	}
+}
+
+func TestClientRejectsInconsistentMetrics(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"observedAt":"2026-10-07T00:00:00Z","cpu":{"usagePercent":12,"logicalCores":4},"memory":{"totalBytes":10,"usedBytes":11},"network":{"receiveBytesPerSecond":0,"transmitBytesPerSecond":0}}`)
+	})
+	client := agent.NewClient(serve(t, handler))
+
+	if _, err := client.ReadMetrics(context.Background()); err == nil {
+		t.Fatal("ReadMetrics() error = nil, want validation error")
+	}
+}
+
+func TestClientReportsUnavailableMetrics(t *testing.T) {
+	client := agent.NewClient(serve(t, agent.NewHandler(fake.NewUnavailable(), discardLogger())))
+
+	if _, err := client.ReadMetrics(context.Background()); err == nil {
+		t.Fatal("ReadMetrics() error = nil, want unavailable error")
+	}
+}

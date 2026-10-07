@@ -4,7 +4,6 @@ import {
   Bot,
   Box,
   Camera,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   Database,
@@ -33,9 +32,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { PointerEvent as ReactPointerEvent, ReactNode, useMemo, useReducer } from "react";
+import { PointerEvent as ReactPointerEvent, ReactNode, useReducer } from "react";
 
 import { DiskRole, Health, HostState } from "./api";
+import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
@@ -77,7 +77,6 @@ export default function App() {
   const host = useHostState();
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
-  const now = useMemo(() => new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date()), []);
 
   return (
     <main className="desktop-shell">
@@ -118,15 +117,7 @@ export default function App() {
         <DesktopShortcut label="AI 助手" ariaLabel="AI 助手，规划中" tone="ai" icon={<Bot />} disabled />
       </section>
 
-      <div className="resource-pill" aria-label="设备连接状态">
-        <div className={`connection ${host.disconnected ? "offline" : "online"}`}><span className="connection-dot" />{host.disconnected ? "连接中断" : host.snapshot ? "设备在线" : "正在连接"}</div>
-        <div className="resource-divider" />
-        <div className="resource-copy">
-          <SourceBadge state={host.snapshot} />
-          <span className="clock">{now}</span>
-        </div>
-        <ChevronDown className="resource-chevron" />
-      </div>
+      <StatusBar host={host} />
 
       <section className="window-layer" aria-label="A-NAS 桌面窗口">
         {windows.map((window) => {
@@ -299,11 +290,6 @@ function DesktopShortcut({ label, ariaLabel, tone, icon, onClick, active, disabl
 
 function MetricCard({ label, value, detail }: { label: string; value: ReactNode; detail: ReactNode }) {
   return <article className="metric-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
-}
-
-function SourceBadge({ state }: { state?: HostState }) {
-  if (!state) return <span className="source-badge pending">等待数据</span>;
-  return <span className={`source-badge ${state.dataSource}`}>{state.dataSource === "live" ? "实时主机" : "模拟数据"}</span>;
 }
 
 function HealthBadge({ value }: { value: Health }) {

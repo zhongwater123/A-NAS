@@ -43,8 +43,8 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
 | `web` / `internal/webui` | React Web 桌面与嵌入式静态资源 Handler | 资源管理、系统设置和终端窗口已实现 |
 | `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端，以产品服务用户运行 | 默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
-| `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 只读状态 IPC 已实现 |
-| `internal/hoststate` | 只读宿主机状态接口、Fake Adapter 与 Debian Linux Adapter | 已实现并通过本地及实验 NAS 测试 |
+| `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 只读状态与指标 IPC 已实现 |
+| `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已在实验 NAS 验证；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md)，尚未在实验 NAS 部署 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
@@ -66,3 +66,4 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
 - [本地控制台决策](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
 - [只读宿主机状态规格](../specs/read-only-host-state.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
+- [状态栏与实时指标规格](../specs/host-metrics-status-bar.md)

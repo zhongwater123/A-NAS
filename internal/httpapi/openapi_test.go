@@ -43,6 +43,8 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "system unavailable", path: "/api/v1/system", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "disks unavailable", path: "/api/v1/disks", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "host state unavailable", path: "/api/v1/host-state", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
+		{name: "metrics", path: "/api/v1/metrics", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
+		{name: "metrics unavailable", path: "/api/v1/metrics", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "terminal status", path: terminal.StatusPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusOK},
 		{name: "terminal disabled", path: terminal.SessionPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusForbidden},
 	}

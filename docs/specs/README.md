@@ -8,6 +8,7 @@
 - [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）
 - [Web 桌面宿主机状态](web-desktop-host-state.md)（implemented）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
+- [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
 
 ## 使用方式
 

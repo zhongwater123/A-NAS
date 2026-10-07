@@ -19,6 +19,7 @@ v1.0.0 发布候选知识收敛已完成：只读硬件闭环、Web 桌面、Hos
 - `anas-api` 提供存活、系统、磁盘和聚合宿主机状态接口；`/api/v1/host-state` 标明 `simulated` 或 `live`，契约见 [OpenAPI](../../api/openapi.yaml)。
 - React/TypeScript Web 桌面实现资源管理、系统设置、窗口管理、断线保留和 Fake/Live 标识；Vite 资源嵌入 `anas-api`，见 [Web 桌面规格](../specs/web-desktop-host-state.md)。
 - 桌面“终端”应用已实现并在本地 WSL2 验证：PTY Shell 以产品服务用户运行，仅接受回环同源连接，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
+- 桌面状态栏已重新设计为 CPU/内存仪表盘、网速与时间，指标经 Host Agent 采样并在本地 WSL2 Live 模式验证，见[状态栏规格](../specs/host-metrics-status-bar.md)；尚未部署到 Experimental NAS。
 - 原始桌面原型已保存为独立证据提交 `86b034b`，没有进入 main 生产源码。
 - Host Agent 通过权限为 `0600` 的 Unix Socket 暴露原子只读状态，Product Service 通过 Client Adapter 继续使用 `hoststate.Reader`，见 [ADR 0004](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)。
 - 一键部署、用户级 systemd、健康检查、自动回滚和限定 SSH 隧道均已通过实机验收，见 [Web 预览运行手册](../runbooks/deploy-web-preview-to-experimental-nas.md)。

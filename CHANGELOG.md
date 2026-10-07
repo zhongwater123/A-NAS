@@ -7,6 +7,7 @@
 ### Added
 
 - 桌面“终端”应用：通过回环同源 WebSocket 打开以产品服务用户运行的 PTY Shell，支持窗口自适应、最小化保留会话和退出后新建会话；默认关闭，以 `ANAS_TERMINAL=enabled` 启用。
+- 重新设计桌面右上角状态栏：CPU 与内存速度仪表盘、上下行网速、实时更新的时间日期与连接状态；新增 `/api/v1/metrics` 及 Host Agent `/v1/metrics` 采样。
 
 ### Planned
 
