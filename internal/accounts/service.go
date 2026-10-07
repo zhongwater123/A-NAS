@@ -70,6 +70,9 @@ type User struct {
 	Role      Role       `json:"role"`
 	Status    UserStatus `json:"status"`
 	CreatedAt time.Time  `json:"createdAt"`
+	// MustChangePassword is set after an administrator resets the password;
+	// the user can do nothing else until choosing a new one.
+	MustChangePassword bool `json:"mustChangePassword"`
 }
 
 type SpaceKind string
@@ -85,6 +88,9 @@ type Space struct {
 	Name        string    `json:"name"`
 	OwnerUserID string    `json:"ownerUserId,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
+	// Viewing is set when an administrator sees another member's private
+	// space through Administrative Viewing Mode; access is read-only.
+	Viewing *ViewingAccess `json:"viewing,omitempty"`
 }
 
 type Session struct {
@@ -205,13 +211,58 @@ CREATE TABLE IF NOT EXISTS linux_identities (
     user_id TEXT NOT NULL UNIQUE,
     allocated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS viewing_grants (
+    id TEXT PRIMARY KEY,
+    admin_user_id TEXT NOT NULL,
+    space_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    granted_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    actor_username TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    acknowledged_at TEXT
+);
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate SQLite: %w", err)
 	}
+	if err := s.ensureColumn(ctx, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	return s.allocateMissingIdentities(ctx)
+}
+
+// ensureColumn adds a column that databases created by earlier versions lack.
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
 }
 
 // allocateMissingIdentities gives accounts created before ADR 0008 a UID in
@@ -455,8 +506,8 @@ func (s *Service) Authenticate(ctx context.Context, username, password string) (
 	var user User
 	var encodedHash, createdAt string
 	err := s.store.db.QueryRowContext(ctx,
-		"SELECT id, username, role, status, password_hash, created_at FROM users WHERE username = ?", username,
-	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt)
+		"SELECT id, username, role, status, password_hash, created_at, must_change_password FROM users WHERE username = ?", username,
+	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt, &user.MustChangePassword)
 	if err != nil || user.Status != UserStatusActive || !verifyPassword(password, encodedHash) {
 		return Session{}, ErrInvalidCredentials
 	}
@@ -478,11 +529,11 @@ func (s *Service) ResolveSession(ctx context.Context, token string) (Session, er
 	var session Session
 	var expiresAt, createdAt string
 	err := s.store.db.QueryRowContext(ctx, `
-SELECT s.csrf_token, s.expires_at, u.id, u.username, u.role, u.status, u.created_at
+SELECT s.csrf_token, s.expires_at, u.id, u.username, u.role, u.status, u.created_at, u.must_change_password
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = ?`, tokenHash(token)).Scan(
 		&session.CSRFToken, &expiresAt, &session.User.ID, &session.User.Username,
-		&session.User.Role, &session.User.Status, &createdAt,
+		&session.User.Role, &session.User.Status, &createdAt, &session.User.MustChangePassword,
 	)
 	if err != nil {
 		return Session{}, ErrSessionNotFound
@@ -508,7 +559,7 @@ func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
 	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
 		return nil, ErrForbidden
 	}
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role, status, created_at FROM users ORDER BY username")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role, status, created_at, must_change_password FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +568,7 @@ func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
 	for rows.Next() {
 		var user User
 		var createdAt string
-		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &createdAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &createdAt, &user.MustChangePassword); err != nil {
 			return nil, err
 		}
 		user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
@@ -527,7 +578,7 @@ func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
 }
 
 func (s *Service) ActiveUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role, status, created_at FROM users WHERE status = 'active' ORDER BY username")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role, status, created_at, must_change_password FROM users WHERE status = 'active' ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +587,7 @@ func (s *Service) ActiveUsers(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var user User
 		var createdAt string
-		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &createdAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &createdAt, &user.MustChangePassword); err != nil {
 			return nil, err
 		}
 		user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
@@ -593,10 +644,17 @@ ORDER BY kind, name`, actor.ID)
 		space.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 		spaces = append(spaces, space)
 	}
-	return spaces, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	viewing, err := s.viewedSpaces(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	return append(spaces, viewing...), nil
 }
 
-func (s *Service) CanAccessSpace(ctx context.Context, actor User, spaceID string, _ bool) (bool, error) {
+func (s *Service) CanAccessSpace(ctx context.Context, actor User, spaceID string, write bool) (bool, error) {
 	if actor.Status != UserStatusActive {
 		return false, nil
 	}
@@ -611,7 +669,14 @@ func (s *Service) CanAccessSpace(ctx context.Context, actor User, spaceID string
 	if err != nil {
 		return false, err
 	}
-	return kind == SpaceKindShared || (kind == SpaceKindPrivate && ownerID == actor.ID), nil
+	if kind == SpaceKindShared || (kind == SpaceKindPrivate && ownerID == actor.ID) {
+		return true, nil
+	}
+	if write {
+		return false, nil
+	}
+	grant, err := s.activeGrant(ctx, actor, spaceID)
+	return err == nil && grant.ID != "", err
 }
 
 func (s *Service) UserIDForUsername(ctx context.Context, username string) (string, error) {
@@ -678,10 +743,13 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	if err != nil {
 		return err
 	}
-	// Resetting a password never re-enables a disabled account.
+	// Resetting a password never re-enables a disabled account. A member whose
+	// password an administrator chose keeps SMB disabled until choosing a new
+	// one, so the administrator never knows a usable password.
+	mustChange := userID != actor.ID
 	if err := s.credentials.SetCredential(ctx, CredentialRequest{
 		UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role,
-		UID: uid, Enabled: user.Status != UserStatusDisabled,
+		UID: uid, Enabled: user.Status != UserStatusDisabled && !mustChange,
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
@@ -693,8 +761,8 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?,
-status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = ?,
+status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, mustChange, userID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
@@ -704,6 +772,11 @@ status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE i
 		return err
 	}
 	s.sessions.forgetUser(userID)
+	if mustChange {
+		if err := s.notify(ctx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
+			return err
+		}
+	}
 	return s.appendAudit(ctx, actor.ID, "user.credential_reset", "user", userID, "")
 }
 
@@ -715,7 +788,7 @@ func (s *Service) SyncIdentities(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT u.username, u.role, u.status, i.uid
+	rows, err := s.store.db.QueryContext(ctx, `SELECT u.username, u.role, u.status, u.must_change_password, i.uid
 FROM users u JOIN linux_identities i ON i.user_id = u.id
 WHERE u.status IN ('active', 'disabled') ORDER BY i.uid`)
 	if err != nil {
@@ -726,10 +799,11 @@ WHERE u.status IN ('active', 'disabled') ORDER BY i.uid`)
 	for rows.Next() {
 		var identity Identity
 		var status UserStatus
-		if err := rows.Scan(&identity.Username, &identity.Role, &status, &identity.UID); err != nil {
+		var mustChange bool
+		if err := rows.Scan(&identity.Username, &identity.Role, &status, &mustChange, &identity.UID); err != nil {
 			return err
 		}
-		identity.Enabled = status == UserStatusActive
+		identity.Enabled = status == UserStatusActive && !mustChange
 		identities = append(identities, identity)
 	}
 	if err := rows.Err(); err != nil {

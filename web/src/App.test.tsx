@@ -353,12 +353,13 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean } = {}) {
+function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[] } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
-    if (path === "/api/v1/session") return ok(session);
+    if (path === "/api/v1/session") return ok(options.session ?? session);
+    if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
     if (path === "/api/v1/host-state") return ok(healthyState);
     if (path === "/api/v1/metrics") return ok(metricsState);
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
@@ -366,7 +367,7 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
     if (path === "/api/v1/volumes") return ok({ items: [] });
 	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
-    if (path === "/api/v1/users") return ok({ items: [session.user] });
+    if (path === "/api/v1/users") return ok({ items: options.users ?? [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
     return ok({ items: [] });
   });
@@ -445,3 +446,68 @@ function errorResponse(status: number) {
     json: async () => ({ error: { code: "state_unavailable", message: "host state is unavailable" } }),
   } as Response;
 }
+
+describe("ADR 0008 account safeguards", () => {
+  it("requires a member whose password was reset to choose a new one first", async () => {
+    const fetchMock = installAPI({ session: { ...session, user: { ...session.user, username: "alice", role: "member", mustChangePassword: true } } });
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "设置新密码" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "桌面应用" })).toBeNull();
+    await user.type(screen.getByLabelText("当前密码"), "temporary password 1");
+    await user.type(screen.getByLabelText("新密码"), "alice chosen password");
+    await user.type(screen.getByLabelText("确认新密码"), "alice chosen password");
+    await user.click(screen.getByRole("button", { name: "保存新密码" }));
+    expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ currentPassword: "temporary password 1", newPassword: "alice chosen password" });
+  });
+
+  it("tells the owner when an administrator viewed the private space", async () => {
+    const fetchMock = installAPI({ notifications: [{
+      id: "notification:1", kind: "admin_viewing", actorUsername: "owner", reason: "找回照片",
+      expiresAt: "2026-10-08T10:00:00Z", createdAt: "2026-10-07T10:00:00Z",
+    }] });
+    const user = userEvent.setup();
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(within(notice).getByText(/管理员 owner .*只读查看.*原因：找回照片/)).toBeTruthy();
+    await user.click(within(notice).getByRole("button", { name: "知道了" }));
+    expect(screen.queryByRole("alertdialog", { name: "账号通知" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/notifications/notification%3A1/acknowledge", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("lets an administrator start read-only viewing with a reason and password", async () => {
+    const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+    const fetchMock = installAPI({ users: [session.user, alice] });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
+    await user.click(await screen.findByRole("button", { name: "查看个人空间" }));
+    const form = screen.getByRole("form", { name: "查看 alice 的个人空间" });
+    await user.type(within(form).getByLabelText("查看原因"), "Alice 请求找回文件");
+    await user.type(within(form).getByLabelText("你的密码"), "correct horse battery staple");
+    await user.click(within(form).getByRole("button", { name: "开始只读查看" }));
+    expect(await screen.findByText(/已开启对 alice 个人空间的只读查看/)).toBeTruthy();
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/users/user%3Aalice/viewing");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "correct horse battery staple", reason: "Alice 请求找回文件" });
+  });
+
+  it("shows a viewed private space read-only and can end the viewing", async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:alice", kind: "private", name: "alice", ownerUserId: "user:alice", createdAt: "2026-10-07T10:00:00Z", viewing: { grantId: "viewing:1", expiresAt: "2026-10-08T10:00:00Z" } }],
+      entries: [{ id: "file:1", spaceId: "space:alice", name: "photo.jpg", kind: "file", sizeBytes: 10, modifiedAt: "2026-10-07T10:00:00Z" }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    expect(await screen.findByText("photo.jpg")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("只读查看他人个人空间");
+    expect(screen.queryByRole("button", { name: "新建目录" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "结束查看" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/viewing/viewing%3A1", expect.objectContaining({ method: "DELETE" }));
+  });
+});

@@ -116,6 +116,7 @@ type handler struct {
 	volume      storage.VolumeExecutor
 	credentials accounts.CredentialProvisioner
 	identities  accounts.IdentitySynchronizer
+	viewing     accounts.ViewingProvisioner
 	snapshots   files.SnapshotBackend
 	logger      *slog.Logger
 }
@@ -125,6 +126,7 @@ type Services struct {
 	Volume      storage.VolumeExecutor
 	Credentials accounts.CredentialProvisioner
 	Identities  accounts.IdentitySynchronizer
+	Viewing     accounts.ViewingProvisioner
 	Snapshots   files.SnapshotBackend
 }
 
@@ -138,7 +140,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	}
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
-		identities: services.Identities, snapshots: services.Snapshots, logger: logger,
+		identities: services.Identities, viewing: services.Viewing, snapshots: services.Snapshots, logger: logger,
 	}
 }
 
@@ -149,6 +151,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/v1/accounts/credential" {
 		h.handleSetCredential(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/viewing-grants" || strings.HasPrefix(r.URL.Path, "/v1/viewing-grants/") {
+		h.handleViewing(w, r)
 		return
 	}
 	if r.URL.Path == "/v1/accounts/identities" {
@@ -357,7 +363,10 @@ func (h *handler) writeAccountError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
 }
 
-const identityConflictCode = "identity_conflict"
+const (
+	identityConflictCode  = "identity_conflict"
+	volumeUnavailableCode = "volume_unavailable"
+)
 
 func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
@@ -405,6 +414,61 @@ type identityDocument struct {
 	Enabled  bool          `json:"enabled"`
 }
 
+type viewingDocument struct {
+	ID            string `json:"id"`
+	SpaceID       string `json:"spaceId"`
+	AdminUsername string `json:"adminUsername"`
+	AdminUID      int    `json:"adminUid"`
+	ExpiresAt     string `json:"expiresAt"`
+}
+
+func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {
+	if h.viewing == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "viewing operation is unavailable")
+		return
+	}
+	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/viewing-grants":
+		var document viewingDocument
+		if err := decodeRequest(r, &document); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+			return
+		}
+		expiresAt, err := time.Parse(time.RFC3339Nano, document.ExpiresAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "expiry is invalid")
+			return
+		}
+		if err := h.viewing.GrantViewing(r.Context(), accounts.ViewingRequest{
+			ID: document.ID, SpaceID: document.SpaceID, AdminUsername: document.AdminUsername,
+			AdminUID: document.AdminUID, ExpiresAt: expiresAt,
+		}); err != nil {
+			if errors.Is(err, accounts.ErrVolumeUnavailable) {
+				writeError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+				return
+			}
+			h.logger.ErrorContext(r.Context(), "grant viewing failed", "grant", document.ID, "error", err)
+			writeError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/viewing-grants/"):
+		id := strings.TrimPrefix(r.URL.Path, "/v1/viewing-grants/")
+		if id == "" || strings.Contains(id, "/") {
+			writeError(w, http.StatusBadRequest, "invalid_request", "grant is invalid")
+			return
+		}
+		if err := h.viewing.RevokeViewing(r.Context(), id); err != nil {
+			h.logger.ErrorContext(r.Context(), "revoke viewing failed", "grant", id, "error", err)
+			writeError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	}
+}
+
 type identitiesDocument struct {
 	Identities []identityDocument `json:"identities"`
 }
@@ -440,6 +504,17 @@ func (c *Client) SetCredential(ctx context.Context, request accounts.CredentialR
 		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
 		Password: request.Password, Role: request.Role, UID: request.UID, Enabled: request.Enabled,
 	}, nil)
+}
+
+func (c *Client) GrantViewing(ctx context.Context, request accounts.ViewingRequest) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/viewing-grants", viewingDocument{
+		ID: request.ID, SpaceID: request.SpaceID, AdminUsername: request.AdminUsername,
+		AdminUID: request.AdminUID, ExpiresAt: request.ExpiresAt.UTC().Format(time.RFC3339Nano),
+	}, nil)
+}
+
+func (c *Client) RevokeViewing(ctx context.Context, id string) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodDelete, "/v1/viewing-grants/"+url.PathEscape(id), nil, nil)
 }
 
 func (c *Client) SyncIdentities(ctx context.Context, identities []accounts.Identity) error {
@@ -525,6 +600,9 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&failure)
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == identityConflictCode {
 			return accounts.ErrIdentityConflict
+		}
+		if response.StatusCode == http.StatusLocked && failure.Error.Code == volumeUnavailableCode {
+			return accounts.ErrVolumeUnavailable
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
@@ -796,4 +874,5 @@ var _ hoststate.Observer = (*Client)(nil)
 var _ storage.VolumeExecutor = (*Client)(nil)
 var _ accounts.CredentialProvisioner = (*Client)(nil)
 var _ accounts.IdentitySynchronizer = (*Client)(nil)
+var _ accounts.ViewingProvisioner = (*Client)(nil)
 var _ files.SnapshotBackend = (*Client)(nil)

@@ -103,6 +103,48 @@ paths:
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "204": { description: Session ended }
+  /api/v1/session/password:
+    post:
+      operationId: changePassword
+      description: Replace the signed-in user's password. Required before anything else after an administrator reset it.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PasswordChange" } } } }
+      responses:
+        "204": { description: Password changed and SMB re-enabled }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      description: Unacknowledged notices such as an administrator viewing the user's private space or resetting the password.
+      responses:
+        "200": { description: Notifications, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Notification" } } } } } } }
+  /api/v1/notifications/{notificationId}/acknowledge:
+    post:
+      operationId: acknowledgeNotification
+      parameters: [{ name: notificationId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Notification acknowledged }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/users/{userId}/viewing:
+    post:
+      operationId: startViewing
+      description: Administrative Viewing Mode. An administrator re-enters their password and a reason to read another account's private space for 24 hours; the access is audited and the owner is notified.
+      parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ViewingRequest" } } } }
+      responses:
+        "201": { description: Read-only access granted, content: { application/json: { schema: { $ref: "#/components/schemas/ViewingGrant" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+  /api/v1/viewing/{grantId}:
+    delete:
+      operationId: endViewing
+      parameters: [{ name: grantId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Viewing ended and access revoked }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/users:
     get:
       operationId: listUsers
@@ -605,13 +647,50 @@ components:
     User:
       type: object
       additionalProperties: false
-      required: [id, username, role, status, createdAt]
+      required: [id, username, role, status, createdAt, mustChangePassword]
       properties:
         id: { type: string }
         username: { type: string }
         role: { type: string, enum: [admin, member] }
         status: { type: string, enum: [pending, active, disabled, error] }
         createdAt: { type: string, format: date-time }
+        mustChangePassword: { type: boolean }
+    PasswordChange:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string, minLength: 12 }
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, kind, actorUsername, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [admin_viewing, credential_reset] }
+        actorUsername: { type: string }
+        reason: { type: string }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    ViewingRequest:
+      type: object
+      additionalProperties: false
+      required: [password, reason]
+      properties:
+        password: { type: string }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ViewingGrant:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, ownerUserId, reason, grantedAt, expiresAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        ownerUserId: { type: string }
+        reason: { type: string }
+        grantedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
     Session:
       type: object
       additionalProperties: false
@@ -630,6 +709,14 @@ components:
         name: { type: string }
         ownerUserId: { type: string }
         createdAt: { type: string, format: date-time }
+        viewing:
+          description: Present when an administrator reads this private space through Administrative Viewing Mode; access is read-only.
+          type: object
+          additionalProperties: false
+          required: [grantId, expiresAt]
+          properties:
+            grantId: { type: string }
+            expiresAt: { type: string, format: date-time }
     FileEntry:
       type: object
       additionalProperties: false

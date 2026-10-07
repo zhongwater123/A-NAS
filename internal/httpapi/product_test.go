@@ -323,6 +323,8 @@ type apiCredentials struct{}
 
 func (apiCredentials) SetCredential(context.Context, accounts.CredentialRequest) error { return nil }
 func (apiCredentials) DisableCredential(context.Context, string) error                 { return nil }
+func (apiCredentials) GrantViewing(context.Context, accounts.ViewingRequest) error     { return nil }
+func (apiCredentials) RevokeViewing(context.Context, string) error                     { return nil }
 
 type failingCredentials struct{}
 

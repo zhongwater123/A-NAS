@@ -40,8 +40,18 @@ func inheritedACL(entries ...string) string {
 	return strings.Join(all, ",")
 }
 
-func privateSpaceACL(username string) string {
-	return inheritedACL("user:" + username + ":rwx")
+// privateSpaceACL grants the owner, plus read-only access for administrators
+// in Administrative Viewing Mode.
+func privateSpaceACL(username string, viewers ...string) string {
+	return inheritedACL(append([]string{"user:" + username + ":rwx"}, viewerEntries(viewers)...)...)
+}
+
+func viewerEntries(viewers []string) []string {
+	entries := make([]string, 0, len(viewers))
+	for _, viewer := range viewers {
+		entries = append(entries, "user:"+viewer+":r-x")
+	}
+	return entries
 }
 
 // sharedFolderACL lets every A-NAS account read a shared folder and grants
@@ -60,15 +70,17 @@ func sharedFolderACL(writers ...string) string {
 
 // trashRootACL lets the space's users reach their own trash directory without
 // listing other users' deleted files.
-func trashRootACL(principal string) string {
-	return strings.Join([]string{
-		"user::rwx", "group::---", "other::---",
-		principal + ":--x", "mask::--x",
-	}, ",")
+func trashRootACL(principal string, viewers ...string) string {
+	mask := "mask::--x"
+	if len(viewers) > 0 {
+		mask = "mask::r-x"
+	}
+	entries := append([]string{"user::rwx", "group::---", "other::---", principal + ":--x"}, viewerEntries(viewers)...)
+	return strings.Join(append(entries, mask), ",")
 }
 
-func userTrashACL(username string) string {
-	return inheritedACL("user:" + username + ":rwx")
+func userTrashACL(username string, viewers ...string) string {
+	return inheritedACL(append([]string{"user:" + username + ":rwx"}, viewerEntries(viewers)...)...)
 }
 
 func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, error) {
@@ -116,12 +128,14 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		spaceACL := sharedFolderACL("group:" + accounts.UsersGroup)
 		principal := "group:" + accounts.UsersGroup
 		trashUsers := e.identityUsernames()
+		var viewers []string
 		if spaceID != sharedSpaceID {
 			username := filepath.Base(root)
 			if !validUsername(username) {
 				return repaired, errors.New("registered private space has an invalid owner")
 			}
-			spaceACL = privateSpaceACL(username)
+			viewers = e.viewersOf(spaceID)
+			spaceACL = privateSpaceACL(username, viewers...)
 			principal = "user:" + username
 			trashUsers = []string{username}
 		}
@@ -131,11 +145,11 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		// Trash directories sit in folders their users can write, so
 		// anything else found at these names is moved aside.
 		trashRoot := filepath.Join(root, ".a-nas-trash")
-		if err := apply(trashRoot, trashRootACL(principal), false, true); err != nil {
+		if err := apply(trashRoot, trashRootACL(principal, viewers...), false, true); err != nil {
 			return repaired, err
 		}
 		for _, username := range trashUsers {
-			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username), false, true); err != nil {
+			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username, viewers...), false, true); err != nil {
 				return repaired, err
 			}
 		}
