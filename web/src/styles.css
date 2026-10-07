@@ -453,6 +453,10 @@ button { font: inherit; }
   .task-shelf, .dock-item, .dock-icon, .dock-dot { transition: none; animation: none; }
 }
 
+/* Startup ident: a 4:3 CRT letterboxed on black above everything else. */
+.boot-splash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: #000; cursor: pointer; }
+.boot-splash canvas { display: block; width: min(100vw, calc(100vh * 4 / 3)); height: min(100vh, calc(100vw * 3 / 4)); }
+
 @media (max-width: 900px) {
   .desktop-grid { grid-template-columns: repeat(2, 88px); width: 215px; }
   .status-bar { right: 14px; top: 14px; gap: 10px; padding-right: 14px; }
