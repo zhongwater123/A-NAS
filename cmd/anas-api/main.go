@@ -110,6 +110,7 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	listenError := make(chan error, 1)
 	go func() {
@@ -137,6 +138,16 @@ func run(logger *slog.Logger) error {
 			return nil
 		}
 		return err
+	}
+}
+
+// syncIdentities converges host accounts on the control plane at startup, so
+// accounts created before ADR 0008 receive their A-NAS UID and groups.
+func syncIdentities(ctx context.Context, accountService *accounts.Service, logger *slog.Logger) {
+	syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := accountService.SyncIdentities(syncCtx); err != nil {
+		logger.ErrorContext(ctx, "identity synchronization failed", "error", err)
 	}
 }
 

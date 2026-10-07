@@ -2,6 +2,8 @@ package agent_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -71,13 +73,13 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}
 	credential := accounts.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleMember,
+		Password: "alice password for testing", Role: accounts.RoleMember, UID: 20101, Enabled: true,
 	}
 	if err := client.SetCredential(context.Background(), credential); err != nil {
 		t.Fatalf("SetCredential() error = %v", err)
 	}
-	if credentials.request.Username != "alice" || credentials.request.Password != credential.Password {
-		t.Fatalf("credential request = %#v", credentials.request)
+	if credentials.request != credential {
+		t.Fatalf("credential request = %#v, want %#v", credentials.request, credential)
 	}
 	objects, err := client.Create(context.Background(), "space:alice", "snapshot:1")
 	if err != nil || len(objects) != 1 || objects[0].Name != "photo.jpg" {
@@ -97,6 +99,36 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}
 }
 
+func TestClientSynchronizesIdentitiesAndReportsConflicts(t *testing.T) {
+	credentials := &agentCredentialProvisioner{}
+	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{
+		Reader: fake.NewHealthy(), Credentials: credentials, Identities: credentials,
+	}, discardLogger())))
+	identities := []accounts.Identity{
+		{Username: "owner", UID: 20100, Role: accounts.RoleAdmin, Enabled: true},
+		{Username: "bob", UID: 20101, Role: accounts.RoleMember, Enabled: false},
+	}
+	if err := client.SyncIdentities(context.Background(), identities); err != nil {
+		t.Fatalf("SyncIdentities() error = %v", err)
+	}
+	if !reflect.DeepEqual(credentials.identities, identities) {
+		t.Fatalf("synchronized identities = %#v, want %#v", credentials.identities, identities)
+	}
+
+	credentials.failure = fmt.Errorf("%w: anas-dev", accounts.ErrIdentityConflict)
+	err := client.SetCredential(context.Background(), accounts.CredentialRequest{
+		UserID: "user:x", PrivateSpaceID: "space:x", Username: "anas-dev", Password: "a password for testing",
+		Role: accounts.RoleMember, UID: 20102, Enabled: true,
+	})
+	if !errors.Is(err, accounts.ErrIdentityConflict) {
+		t.Fatalf("SetCredential() conflict error = %v, want ErrIdentityConflict", err)
+	}
+	credentials.failure = errors.New("useradd failed")
+	if err := client.SyncIdentities(context.Background(), identities); errors.Is(err, accounts.ErrIdentityConflict) || err == nil {
+		t.Fatalf("generic failure error = %v, want a non-conflict failure", err)
+	}
+}
+
 type agentVolumeExecutor struct{ request storage.CreateVolumeRequest }
 
 func (e *agentVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
@@ -104,11 +136,20 @@ func (e *agentVolumeExecutor) CreateVolume(_ context.Context, request storage.Cr
 	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, State: storage.VolumeStateAvailable}, nil
 }
 
-type agentCredentialProvisioner struct{ request accounts.CredentialRequest }
+type agentCredentialProvisioner struct {
+	request    accounts.CredentialRequest
+	identities []accounts.Identity
+	failure    error
+}
 
 func (p *agentCredentialProvisioner) SetCredential(_ context.Context, request accounts.CredentialRequest) error {
 	p.request = request
-	return nil
+	return p.failure
+}
+
+func (p *agentCredentialProvisioner) SyncIdentities(_ context.Context, identities []accounts.Identity) error {
+	p.identities = identities
+	return p.failure
 }
 
 func (*agentCredentialProvisioner) DisableCredential(context.Context, string) error { return nil }

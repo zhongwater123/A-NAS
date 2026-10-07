@@ -713,7 +713,8 @@ func decodeJSON(r *http.Request, target any) error {
 
 func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrUsernameUnavailable):
+	case errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrUsernameUnavailable),
+		errors.Is(err, accounts.ErrIdentityConflict):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
