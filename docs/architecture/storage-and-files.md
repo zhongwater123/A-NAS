@@ -44,8 +44,9 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
   | `<空间>/.a-nas-trash` | 该空间的用户仅 `--x` | 无 |
   | `<空间>/.a-nas-trash/<username>` | 该用户 `rwx` | 同访问 ACL |
   | `apps`、`apps/<id>` | `apps` 仅 root；`apps/<id>` 属主为应用身份 `app-<id>` | 无 |
+  | `photos` | 属主为相册服务身份 `a-nas-photos`（UID/GID 31000），`0700`，无扩展 ACL（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | 无 |
 
-  Product Service 账号 `a-nas` 不在任何 ACL 中。数据卷挂载点的父目录 `/srv/a-nas` 授予 `a-nas-users` 穿过权限，供 smbd 与文件工作进程以用户身份进入空间。
+  Product Service 账号 `a-nas` 不在任何 ACL 中。数据卷挂载点的父目录 `/srv/a-nas` 与挂载点 `/srv/a-nas/data` 均授予 `a-nas-users` 穿过权限，供 smbd 与文件工作进程以用户身份进入空间；该权限不允许列出卷根。相册服务身份在这两级另有一条穿过权限。`photos` 只在 `a-nas-photos` 账号以固定 UID 存在时由 Host Agent 创建，属主、模式或 ACL 漂移在启动时和每 15 分钟修复，内容从不遍历。它与空间对账分开执行，失败只记录日志，不阻止空间修复。
 - Samba 以登录用户身份读写：`inherit acls = yes`、`nt acl support = no`、`hide unreadable = yes`、`veto files = /.a-nas-trash/`（客户端无法按名称打开或重命名回收站目录，`recycle` 不受影响），不使用 `force group`；`create mask = 0660`、`directory mask = 0770` 决定新条目的 ACL mask，缺省 `0744` 会让继承的写权限失效。
 - Web 删除与 Samba `recycle`（`keeptree`）统一写入 `<空间>/.a-nas-trash/<username>`：Web 条目为 `<trash-id>/content`，SMB 删除保留原相对路径并按文件导入回收站，原目录仍存在时恢复到原目录。每个用户的回收目录由 Host Agent 预建，恢复或清除只删除其下的空目录，不删除用户回收目录本身。共享空间中他人删除的文件对其他成员不可见。
 - Host Agent 启动时先创建固定组，再幂等对账已注册空间并刷新经过 `testparm` 的 Samba 配置；Product Service 同步身份后也立即对账，新账号随即拥有回收目录。之后每 15 分钟以 `getfacl` 比对上述目录，修复属主、setgid 或 ACL 漂移并在 journal 记录 `repaired drifted data-volume permissions`。
@@ -79,7 +80,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 失败语义
 
 - 计划十分钟过期；执行期间重启会把 `running` 恢复为 `needs_attention`，不自动重新格式化。
-- 可用空间必须保留容量的 5%，且至少 10 GiB；不足、只读或离线卷拒绝写入。
+- 可用空间必须保留容量的 5%，且至少 10 GiB；不足、只读或离线卷拒绝写入。文件与相册共用 [`internal/capacity`](../../internal/capacity/capacity.go) 中的同一规则。
 - Samba 配置先由 `testparm` 验证，再原子替换；reload 失败恢复旧配置。
 - 创建或重置 Samba 凭据失败时账号进入 `error` 或保持不可登录，旧会话失效。
 - 数据盘移除后系统盘上的控制面仍可启动；文件与快照接口拒绝访问，绝不回退到系统盘。
@@ -92,3 +93,4 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
+- [相册存储区修复](../../internal/hostops/linux/photos.go)

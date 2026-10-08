@@ -21,6 +21,7 @@ import (
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
+	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 )
 
 var version = "dev"
@@ -67,6 +68,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logRepairs(logger, repaired)
+	ensurePhotosStore(context.Background(), executor, logger)
 	expireViewing(context.Background(), executor, logger)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
@@ -97,6 +99,11 @@ func run(logger *slog.Logger) error {
 			logger.Error("file broker stopped", "error", err)
 		}
 	}()
+	stopSessionLookup, err := serveSessionLookup(sessions, logger)
+	if err != nil {
+		return err
+	}
+	defer stopSessionLookup()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go repairPermissionsPeriodically(ctx, executor, logger)
@@ -127,6 +134,37 @@ func run(logger *slog.Logger) error {
 	}
 }
 
+// serveSessionLookup lets the photo service confirm who stands behind a
+// session token (ADR 0011). Only the photo service's group can reach the
+// socket; without that group the photo service is not installed and nothing
+// is served.
+func serveSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+	group := environment("ANAS_PHOTO_SESSION_GROUP", accounts.PhotoServiceUser)
+	if _, err := user.LookupGroup(group); err != nil {
+		logger.Info("photo service is not installed; session lookup is off", "group", group)
+		return func() {}, nil
+	}
+	socketPath := environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")
+	listener, err := listen(socketPath, group)
+	if err != nil {
+		return nil, fmt.Errorf("listen for photo session lookups: %w", err)
+	}
+	server := &http.Server{
+		Handler:           sessionlookup.NewHandler(sessions, logger),
+		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
+	}
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("photo session lookup stopped", "error", err)
+		}
+	}()
+	logger.Info("photo session lookup listening", "socket", socketPath)
+	return func() {
+		_ = server.Close()
+		_ = os.Remove(socketPath)
+	}, nil
+}
+
 // repairPermissionsPeriodically reapplies the space ACL layout so manual
 // chmod/setfacl changes on space roots do not persist silently.
 func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
@@ -142,8 +180,20 @@ func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.E
 				logger.ErrorContext(ctx, "data-volume permission repair failed", "error", err)
 			}
 			logRepairs(logger, repaired)
+			ensurePhotosStore(ctx, executor, logger)
 		}
 	}
+}
+
+// ensurePhotosStore keeps the photo service's store in shape. A failure, such
+// as another account holding the photo service's UID, only leaves photos
+// unavailable; the Host Agent keeps serving everything else.
+func ensurePhotosStore(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	repaired, err := executor.EnsurePhotosStore(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
+	}
+	logRepairs(logger, repaired)
 }
 
 // expireViewingPeriodically revokes Administrative Viewing Mode grants on

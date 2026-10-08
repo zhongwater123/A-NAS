@@ -29,6 +29,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/webui"
@@ -38,10 +42,35 @@ var version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// The photo service runs from the same binary as its own process and
+	// identity (ADR 0011), so releases keep two hashed binaries.
+	if len(os.Args) == 2 && os.Args[1] == photoServiceCommand {
+		if err := runPhotoService(logger); err != nil {
+			logger.Error("A-NAS photo service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(logger); err != nil {
 		logger.Error("A-NAS API stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+const photoServiceCommand = "photo-service"
+
+func runPhotoService(logger *slog.Logger) error {
+	if os.Geteuid() == 0 {
+		return errors.New("the photo service must run as its own identity, never root")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return photoservice.Run(ctx, photoservice.Config{
+		Root:       environment("ANAS_PHOTOS_ROOT", "/srv/a-nas/data/photos"),
+		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
+		Sessions:   sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")),
+		Logger:     logger,
+	})
 }
 
 func run(logger *slog.Logger) error {
@@ -108,6 +137,20 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
+	// The Product Service cannot reach the data volume in production; there
+	// the photo service owns the photos subvolume under its own identity and
+	// the Product Service only forwards the photo API to it (ADR 0011).
+	// Development opens the library in this process.
+	var photoService *photos.Service
+	var photoAPI http.Handler = photosapi.NewProxy(environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"), logger)
+	if !live {
+		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{})
+		if err != nil {
+			return err
+		}
+		defer photoService.Close()
+		photoAPI = photosapi.New(photoService, logger)
+	}
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -128,7 +171,7 @@ func run(logger *slog.Logger) error {
 		}
 		appOptions.Host = host
 		guard := fileOptions.VolumeGuard
-		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, true) }
+		appOptions.VolumeReady = func(ctx context.Context) error { return checkAppVolume(ctx, guard, volumeRoot) }
 	}
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
@@ -137,6 +180,7 @@ func run(logger *slog.Logger) error {
 		Terminal:   terminals,
 		Containers: containersapi.New(containerManager, containerSource, logger),
 		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		Photos:     photoAPI,
 		Logger:     logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
@@ -153,6 +197,18 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
+	if photoService != nil {
+		background := make(chan struct{})
+		go func() {
+			defer close(background)
+			photoservice.RunBackground(ctx, photoService, logger)
+		}()
+		// Runs before the deferred photoService.Close.
+		defer func() {
+			stop()
+			<-background
+		}()
+	}
 	listenError := make(chan error, 1)
 	go func() {
 		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled, "containers", containerManager != nil)
@@ -180,6 +236,13 @@ func run(logger *slog.Logger) error {
 		}
 		return err
 	}
+}
+
+func checkAppVolume(ctx context.Context, guard files.VolumeGuard, volumeRoot string) error {
+	// The Product Service runs with ProtectSystem=strict and never writes the
+	// data volume directly. The Host Agent rechecks real writability before it
+	// prepares app folders, so this boundary only proves identity and presence.
+	return guard.Check(ctx, volumeRoot, false)
 }
 
 // syncIdentities converges host accounts on the control plane at startup, so

@@ -156,14 +156,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.getByRole("option", { name: "共享空间" })).toBeTruthy();
   });
 
-  it("keeps photos planned while enabling trash, snapshots, accounts, and storage", async () => {
-    installAPI(); render(<App />);
+  it("enables photos, trash, snapshots, accounts, and storage", async () => {
+    installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开文件快照" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开账号管理" })).toBeTruthy();
     expect(within(desktop).getByRole("button", { name: "打开存储初始化" })).toBeTruthy();
-    expect(within(desktop).getByRole("button", { name: "相册，规划中" }).hasAttribute("disabled")).toBe(true);
+    await user.click(within(desktop).getByRole("button", { name: "打开相册" }));
+    expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
   it("keeps the desktop usable when a blank-disk plan contains legacy null arrays", async () => {
@@ -484,6 +485,27 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByText("应用中心未启用")).toBeTruthy();
   });
 
+  it("explains when app installation is blocked by an unavailable data volume", async () => {
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      apps: async (url, init) => {
+        if (init?.method === "POST") {
+          return { ok: false, status: 423, json: async () => ({ error: { code: "volume_unavailable", message: "the data volume is not available" } }) } as Response;
+        }
+        if (url.endsWith("/plan")) return okResponse(memosPlan);
+        return okResponse(appList({}));
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
+    const store = screen.getByRole("dialog", { name: "应用中心" });
+    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
+    await user.click(within(store).getByRole("button", { name: "安装" }));
+    await user.click(await within(store).findByRole("button", { name: "确认安装" }));
+    expect((await within(store).findByRole("alert")).textContent).toContain("数据卷当前不可用");
+  });
+
   it("opens a terminal session from the desktop icon", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();
@@ -641,6 +663,26 @@ function errorResponse(status: number) {
 }
 
 describe("ADR 0008 account safeguards", () => {
+  it("lets the signed-in administrator change their own password and rebuild SMB credentials", async () => {
+    const fetchMock = installAPI({ users: [session.user] });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
+    await user.click(await screen.findByRole("button", { name: "修改密码" }));
+    const form = screen.getByRole("form", { name: "修改自己的密码" });
+    await user.type(within(form).getByLabelText("当前密码"), "correct horse battery staple");
+    await user.type(within(form).getByLabelText("新密码"), "administrator chosen password");
+    await user.type(within(form).getByLabelText("确认新密码"), "administrator chosen password");
+    await user.click(within(form).getByRole("button", { name: "保存新密码" }));
+    expect(await screen.findByText("密码已更新，SMB 凭据已同步。")).toBeTruthy();
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      currentPassword: "correct horse battery staple",
+      newPassword: "administrator chosen password",
+    });
+  });
+
   it("requires a member whose password was reset to choose a new one first", async () => {
     const fetchMock = installAPI({ session: { ...session, user: { ...session.user, username: "alice", role: "member", mustChangePassword: true } } });
     const user = userEvent.setup();
@@ -684,7 +726,35 @@ describe("ADR 0008 account safeguards", () => {
     await user.click(within(form).getByRole("button", { name: "开始只读查看" }));
     expect(await screen.findByText(/已开启对 alice 个人空间的只读查看/)).toBeTruthy();
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/users/user%3Aalice/viewing");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "correct horse battery staple", reason: "Alice 请求找回文件" });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "correct horse battery staple", reason: "Alice 请求找回文件", scope: "space" });
+  });
+
+  it("lets an administrator view a member's private photo library as its own grant", async () => {
+    const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+    const fetchMock = installAPI({ users: [session.user, alice] });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
+    await user.click(await screen.findByRole("button", { name: "查看私有图库" }));
+    const form = screen.getByRole("form", { name: "查看 alice 的私有图库" });
+    expect(within(form).getByText(/查看他人私有图库会写入审计/)).toBeTruthy();
+    await user.type(within(form).getByLabelText("查看原因"), "找婚礼照片");
+    await user.type(within(form).getByLabelText("你的密码"), "correct horse battery staple");
+    await user.click(within(form).getByRole("button", { name: "开始只读查看" }));
+    expect(await screen.findByText(/已开启对 alice 私有图库的只读查看，可在相册中选择/)).toBeTruthy();
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/users/user%3Aalice/viewing");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "correct horse battery staple", reason: "找婚礼照片", scope: "library" });
+  });
+
+  it("tells the owner when an administrator viewed the private photo library", async () => {
+    installAPI({ notifications: [{
+      id: "notification:2", kind: "admin_library_viewing", actorUsername: "owner", reason: "找婚礼照片",
+      expiresAt: "2026-10-08T10:00:00Z", createdAt: "2026-10-07T10:00:00Z",
+    }] });
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(within(notice).getByText(/管理员 owner .*开启了对你私有图库的只读查看.*原因：找婚礼照片/)).toBeTruthy();
   });
 
   it("shows a viewed private space read-only and can end the viewing", async () => {

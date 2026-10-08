@@ -93,6 +93,7 @@ install -m 0644 kiosk.env.incoming kiosk.env
 install -m 0644 a-nas-chromium-policy.json.incoming a-nas-chromium-policy.json
 install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
+install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 if [[ -n "$screensaver_sha" ]]; then
@@ -108,6 +109,7 @@ rm -f \
   a-nas-chromium-policy.json.incoming \
   anas-api-system.service.incoming \
   anas-host-agent-system.service.incoming \
+  anas-photos-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
   screensaver.mp4.incoming

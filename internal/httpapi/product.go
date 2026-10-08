@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
@@ -32,7 +33,12 @@ type ProductDependencies struct {
 	// manage Docker, so only administrators reach them (ADR 0008).
 	Containers http.Handler
 	Apps       http.Handler
-	Logger     *slog.Logger
+	// Photos serves /api/v1/photos to every signed-in user and enforces the
+	// photo Policy itself. A *photosapi.Proxy confirms the session in the
+	// photo service; any other handler receives the caller as a
+	// photos.Principal.
+	Photos http.Handler
+	Logger *slog.Logger
 }
 
 type productHandler struct {
@@ -43,6 +49,7 @@ type productHandler struct {
 	terminal   http.Handler
 	containers http.Handler
 	apps       http.Handler
+	photos     http.Handler
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -55,8 +62,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
-		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, logger: logger,
-		mux: http.NewServeMux(),
+		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
+		photos: dependencies.Photos, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -69,6 +76,9 @@ func (h *productHandler) routes() {
 			h.mux.Handle(prefix, h.withAdministrator(handler))
 			h.mux.Handle(prefix+"/", h.withAdministrator(handler))
 		}
+	}
+	if h.photos != nil {
+		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
 	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)
@@ -758,14 +768,24 @@ func (h *productHandler) handleAcknowledgeNotification(w http.ResponseWriter, r 
 
 func (h *productHandler) handleStartViewing(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
-		Password string `json:"password"`
-		Reason   string `json:"reason"`
+		Password string                `json:"password"`
+		Reason   string                `json:"reason"`
+		Scope    accounts.ViewingScope `json:"scope"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	grant, err := h.accounts.StartViewing(r.Context(), session.User, r.PathValue("userID"), request.Password, request.Reason)
+	start := h.accounts.StartViewing
+	switch request.Scope {
+	case "", accounts.ViewingScopeSpace:
+	case accounts.ViewingScopeLibrary:
+		start = h.accounts.StartLibraryViewing
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "scope must be space or library")
+		return
+	}
+	grant, err := start(r.Context(), session.User, r.PathValue("userID"), request.Password, request.Reason)
 	if err != nil {
 		h.writeAccountError(w, r, err)
 		return
@@ -779,6 +799,33 @@ func (h *productHandler) handleEndViewing(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// withPhotoPrincipal admits signed-in users to the photo API, which applies
+// its own Policy; writes still need the session's CSRF token. An in-process
+// photo API receives the caller as a Principal, while a Proxy forwards only
+// the session token for the photo service to confirm.
+func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc {
+	serve := func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { next.ServeHTTP(w, r) }
+	if _, proxied := next.(*photosapi.Proxy); !proxied {
+		serve = func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+			viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
+			if err != nil {
+				h.internalError(w, r, err)
+				return
+			}
+			principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
+			next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
+		}
+	}
+	read, write := h.withSession(serve), h.withMutation(serve)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			read(w, r)
+			return
+		}
+		write(w, r)
+	}
 }
 
 func (h *productHandler) withMutation(next func(http.ResponseWriter, *http.Request, accounts.Session)) http.HandlerFunc {

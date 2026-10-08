@@ -84,12 +84,32 @@ void main(){
 const uniformNames = ["uScene", "uGlow", "uRes", "uTime", "uAberr", "uBloom", "uOpen", "uOpenX", "uBeam", "uFlash", "uNoise", "uRoll", "uStatic", "uScanP"] as const;
 
 export function createRenderer(canvas: HTMLCanvasElement): Renderer | null {
-  return createCrtRenderer(canvas) ?? createPlainRenderer(canvas);
+  const output = canvas.getContext("2d");
+  if (!output) return null;
+
+  // Keep WebGL on a private canvas. Once a canvas has acquired a WebGL context,
+  // browsers will not let it switch to 2D, so using the visible canvas for the
+  // probe would make shader compilation failures impossible to recover from.
+  const webglCanvas = document.createElement("canvas");
+  const crt = createCrtRenderer(webglCanvas);
+  if (!crt) return createPlainRenderer(canvas, output);
+  return {
+    get lost() { return crt.lost; },
+    render(scene, glow, params, now) {
+      if (webglCanvas.width !== canvas.width || webglCanvas.height !== canvas.height) {
+        webglCanvas.width = canvas.width;
+        webglCanvas.height = canvas.height;
+      }
+      crt.render(scene, glow, params, now);
+      if (crt.lost) return;
+      output.fillStyle = "#000";
+      output.fillRect(0, 0, canvas.width, canvas.height);
+      output.drawImage(webglCanvas, 0, 0, canvas.width, canvas.height);
+    },
+  };
 }
 
-function createPlainRenderer(canvas: HTMLCanvasElement): Renderer | null {
-  const context = canvas.getContext("2d");
-  if (!context) return null;
+function createPlainRenderer(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D): Renderer {
   return {
     lost: false,
     render(scene) {

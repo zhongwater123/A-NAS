@@ -68,6 +68,19 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
 
 权限矩阵会挂载 loop 设备上的 Btrfs，因此需要 `--privileged`。bookworm 镜像还需 `samba-vfs-modules`（trixie 的 `samba` 已自带 `recycle.so`）。
 
+相册服务的端到端冒烟在同一类容器中进行：
+
+- 运行真实 Host Agent（root）、以 `a-nas-photos` 运行的相册服务和以 `a-nas` 运行的产品服务。
+- 经产品服务完成启用管理员、上传、缩略图和原图读取。
+- 检查存储区与套接字的属主、权限和隔离。
+
+容器缺少 `curl` 时脚本会临时安装：
+
+```bash
+docker run --rm --privileged -e CGO_ENABLED=1 \
+  -v "$PWD:/src" <同上镜像> bash /src/scripts/smoke-photo-service.sh
+```
+
 ## 实验 NAS 接入
 
 | 项目 | 当前状态 |
