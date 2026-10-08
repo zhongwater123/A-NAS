@@ -12,7 +12,7 @@
 - [2026-10-07：数据卷空间权限阻断文件闭环](2026-10-07-data-volume-space-permissions.md)（fix in progress；Experimental NAS verification pending）
 - [2026-10-08：ADR 0008 首次升级时 Host Agent 无法启动](2026-10-08-adr0008-bootstrap-private-acl.md)（resolved）
 - [2026-10-08：Experimental NAS 的 Docker 与应用中心保持禁用](2026-10-08-experimental-nas-containers-disabled.md)（root cause confirmed；installation pending）
-- [2026-10-08：OpenList 安装后因数据目录权限反复重启](2026-10-08-openlist-runtime-identity.md)（root cause confirmed；fix in progress）
+- [2026-10-08：OpenList 安装后因数据目录权限反复重启](2026-10-08-openlist-runtime-identity.md)（resolved）
 
 ## 使用方式
 

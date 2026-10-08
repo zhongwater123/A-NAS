@@ -1,6 +1,6 @@
 # OpenList 安装后因数据目录权限反复重启
 
-状态：root cause confirmed；fix in progress
+状态：resolved；release `ed5368ba998e` 已在 Experimental NAS 完成实机验证
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -42,13 +42,14 @@ ADR 0008 要求每个应用以独立 `app-<id>` 身份访问文件，但应用�
 
 - 修复：[计划渲染](../../internal/appstore/render.go)在服务显式声明 `user` 时改为已分配的应用 UID/GID，并强制改写已声明的 `PUID`/`PGID`，无论原值是插值还是字面量。
 - 测试：[渲染回归](../../internal/appstore/render_test.go)以 `user: 999:1000` 和字面量 `PUID`/`PGID=1000` 验证输出统一为测试应用身份。
-- 实机：pending；须用新 release 重新创建 OpenList 容器，确认其 `Config.User=30002:30002`、停止重启且数据目录可写。
+- 实机：2026-10-08 将系统服务、Kiosk 与 Container Agent 切换到合并后的 release `ed5368ba998e`，通过类型化 Container Agent 先卸载容器（保留应用数据）、再按新摘要安装。新容器 `Config.User=30002:30002`、状态 `running`、十秒观察窗内重启计数保持 0，权限错误不再出现，`http://127.0.0.1:5244/` 返回 200。产品健康、桌面与屏保 Range 请求分别返回 200、200、206；相关八个系统服务均为 active。
 
 ## 后续工作
 
 - 为目录增加逐服务的运行身份策略词汇；固定镜像 UID、root 初始化等模式必须显式评审，不能用 `chmod 777` 或通用递归 `chown` 兜底。
 - 目录升级时增加运行身份与挂载目录兼容性检查，避免只验证 Compose 可以解析。
 - 安装任务后续应观察容器短期退出/重启并把错误反馈到应用中心，而不是把 `compose up -d` 成功当作应用已就绪。
+- 已安装应用不会因 Container Agent 二进制升级而自动重写保存在 `/var/lib/a-nas-container/apps/<id>/docker-compose.yml` 的旧计划。涉及运行契约的目录升级必须显式执行“保留数据的卸载→重新规划→重新安装”，并在执行前备份旧 Compose 以便回滚。
 
 ## 关联
 

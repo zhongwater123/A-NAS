@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 已运行 release `c902acded999`：系统服务与 Kiosk 指向同一 release，Docker、containerd、Container Agent、Host Agent、API、Samba 和 Kiosk 均 active，桌面与屏保 byte-range 请求通过，Docker 与应用中心的实时代理模式已经启用。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝。
+v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 已运行合并后的 release `ed5368ba998e`：系统服务与 Kiosk 指向同一 release，Docker、containerd、Container Agent、Host Agent、相册服务、API、Samba 和 Kiosk 均 active，桌面与屏保 byte-range 请求通过，Docker 与应用中心的实时代理模式已经启用。OpenList 已按 `app-openlist` 的 UID/GID 30002 重建，状态 running、重启计数 0、HTTP 返回 200。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝。
 
 升级中发现并修复了三个连续阻塞：身份同步前把不存在账号写入 ACL 导致 Host Agent 启动死锁、`build-binaries` 未先生成嵌入式 Web UI、数据卷挂载点缺少 `a-nas-users:--x`。证据与最小回归见 [ADR 0008 首次升级调查](../investigations/2026-10-08-adr0008-bootstrap-private-acl.md)。容器部署又暴露出 Debian 13 将 CLI 拆为独立推荐包，以及部署脚本误用 `/screensaver.mp4`、`/v1/containers` 两个路由；集中式只读探针修正为 `/local-console/screensaver.mp4`、`/v1/snapshot` 后已完成实机切换，详见[容器部署调查](../investigations/2026-10-08-experimental-nas-containers-disabled.md)。旧 Samba 凭据已按手册删除，需要管理员通过已部署的自助改密入口重建后才能开始 Windows SMB 双向验收。
 
@@ -19,7 +19,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
 - Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
-- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序和 4:3 深蓝抽象壁纸；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音视频屏保，媒体缺失或失败时保留静态壁纸。2026-10-08 已随当前 `c902acded999` 验收 API、Host Agent、Kiosk、嵌入式桌面和视频 Range 请求；仍待直连屏幕完成三分钟闲置及首次输入的人工验收。
+- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序和 4:3 深蓝抽象壁纸；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音视频屏保，媒体缺失或失败时保留静态壁纸。2026-10-08 已随当前 `ed5368ba998e` 验收 API、Host Agent、Kiosk、嵌入式桌面和视频 Range 请求；仍待直连屏幕完成三分钟闲置及首次输入的人工验收。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
@@ -29,8 +29,8 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 开发循环使用受影响测试，完整门禁为每个不可变 RC 制品只执行一次；部署按提交、版本和二进制哈希复用验证证明。
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。`/opt/a-nas/current` 已切换到 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`，API、Host Agent、Kiosk 和 Samba 均 active。
-- 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 已安装 Docker 26.1.5、独立 CLI、Compose 2.26.1 与容器代理，`c902acded999` 已在代理模式下完成切换，真实代理路径和桌面 HTTP 路径均通过实机验证。
-- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；本地已用真实 Compose 验证安装/卸载，镜像拉取因本机无法访问 Docker Hub 未验证。
+- 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 已安装 Docker 26.1.5、独立 CLI、Compose 2.26.1 与容器代理，`ed5368ba998e` 已在代理模式下完成切换，真实代理路径和桌面 HTTP 路径均通过实机验证。
+- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 
 ## 下一步
@@ -39,11 +39,11 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 2. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
 3. 在直连屏幕完成三分钟闲置屏保与首次输入唤醒的人工验收。
 4. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；基础闭环稳定后恢复相册主线。
-5. 相册 M1 的切片 1–6 已实现并通过测试，尚未部署：[`internal/photos`](../../internal/photos/photos.go)、[`/api/v1/photos`](../../internal/photosapi/handler.go)、桌面“相册”窗口、以 `a-nas-photos`（UID 31000）运行的[相册服务](../../internal/photoservice/photoservice.go)，以及按范围授权的私有图库管理员查看、跨成员重复提示和多用户泄漏测试；相册实体与用户元数据已移至 M2；[端到端冒烟](../../scripts/smoke-photo-service.sh)覆盖真实 Host Agent、相册服务与产品服务。基础存储闭环（上面 1–2）通过后，按[启用相册服务](../runbooks/enable-photo-service.md)部署并完成切片 7 的实机闸门（强制终止与断电对账、卷离线、容量、4 名成员与 20,000 张合成照片）。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
+5. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；桌面上传、跨成员隔离、管理员查看、强制终止与断电对账、卷离线、容量、4 名成员与 20,000 张合成照片等切片 7 实机闸门仍待按[启用相册服务](../runbooks/enable-photo-service.md)完成。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
 
 ## 外部条件与限制
 
-- Experimental NAS 当前在线并运行 `c902acded999`；统一身份、权限链、Docker 与容器代理实机检查已通过，但 Samba 凭据尚未重建，文件和共享用户闭环仍未完成。
+- Experimental NAS 当前在线并运行 `ed5368ba998e`；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，但 Samba 凭据尚未重建，文件和共享用户闭环及相册用户功能验收仍未完成。
 - v1.0.1 只使用可丢弃测试数据。单盘 Btrfs 不提供冗余、备份或家庭生产数据可靠性承诺。
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
