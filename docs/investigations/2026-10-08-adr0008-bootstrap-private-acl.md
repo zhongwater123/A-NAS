@@ -77,7 +77,7 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 - 运行手册必须随服务边界迁移一起更新。ADR 0008 把产品从 `anas-dev` 用户级服务迁到 `a-nas` 系统服务；任何仍修改 `~/.config/a-nas` 或重启 `systemctl --user` 的后续能力手册都需要重新路由。
 - 删除旧 Samba 身份后，升级完成标准必须包含管理员可见的自助改密入口。后端存在改密 API 不等于用户能够完成凭据重建；UI、API、Samba 三层需要同一条验收路径。
 - 使用 `apt-get --no-install-recommends` 时必须显式枚举运行时二进制所在的软件包，并在目标 Debian 版本验证。Debian 13 将 Docker CLI 拆为 `docker-cli` 推荐包；只安装 `docker.io` 会启动 daemon，却没有脚本所需的 `docker` 命令。
-- 恢复脚本的健康探针必须引用产品真实契约并逐项报告。把屏保路由凭记忆写成 `/screensaver.mp4`，会在 API 已以 `containers=true` 稳定运行时制造假失败；权威路由 `/local-console/screensaver.mp4` 由 Handler 测试和前端常量共同约束。
+- 恢复脚本的健康探针必须引用产品真实契约并逐项报告。把屏保路由凭记忆写成 `/screensaver.mp4`，会在 API 已以 `containers=true` 稳定运行时制造假失败；事故当时的权威路由是 `/local-console/screensaver.mp4`。视频池实现后，探针由 Handler 测试和前端常量共同约束为先读取 `/local-console/screensavers`，再请求清单中的媒体 URL；旧路由只保留兼容。
 
 ## 关联
 
