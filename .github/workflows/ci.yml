@@ -30,3 +30,31 @@ jobs:
 
       - name: Run checks
         run: make check
+
+  system:
+    name: System test (Debian 13, systemd)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.9.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the Debian 13 systemd image
+        run: |
+          sudo modprobe btrfs
+          scripts/build-system-test-image.sh anas-systemd:trixie debian:bookworm
+
+      - name: Install the release under systemd and check every entry point
+        run: make system-test

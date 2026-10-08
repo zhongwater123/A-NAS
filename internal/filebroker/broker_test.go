@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,6 +24,13 @@ func TestMain(m *testing.M) {
 	// The test binary doubles as the worker the broker spawns.
 	if len(os.Args) == 3 && os.Args[1] == WorkerArgument {
 		if err := RunWorker(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == ProbeArgument {
+		if err := RunProbe(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -284,3 +292,33 @@ func (acceptingCredentials) SetCredential(context.Context, accounts.CredentialRe
 	return nil
 }
 func (acceptingCredentials) DisableCredential(context.Context, string) error { return nil }
+
+// Without CAP_SETUID and CAP_SETGID, as for a non-root test run or a Host
+// Agent whose sandbox took them (issue #38), the startup probe must fail.
+// The root integration test covers the probe succeeding.
+func TestIdentitySwitchProbeFailsWithoutTheCapabilities(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can switch identities")
+	}
+	server, err := NewServer(Config{
+		Sessions:     resolverFunc(func(string) (accounts.Identity, error) { return accounts.Identity{}, accounts.ErrSessionNotFound }),
+		VolumeRoot:   t.TempDir(),
+		VolumeReady:  func() bool { return true },
+		ProbeCommand: func() *exec.Cmd { return exec.Command(os.Args[0], ProbeArgument) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.VerifyIdentitySwitch(); !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("VerifyIdentitySwitch() error = %v, want EPERM", err)
+	}
+}
+
+// Only the worker sees the real mount, so a read-only volume reaches the
+// Product Service as unavailable rather than as a generic failure.
+func TestReadOnlyVolumeIsReportedAsUnavailable(t *testing.T) {
+	err := encodeError(&fs.PathError{Op: "open", Path: "spaces/shared/a.txt", Err: syscall.EROFS})
+	if !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("encodeError(EROFS) = %v, want files.ErrVolumeUnavailable", err)
+	}
+}

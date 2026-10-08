@@ -1,11 +1,12 @@
 GO ?= go
+SYSTEM_TEST_IMAGE ?= anas-systemd:trixie
 NPM ?= npm
 BUILD_DIR ?= build
 VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test root-integration-test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test root-integration-test system-test build build-binaries check check-steps clean
 
 all: check
 
@@ -35,7 +36,7 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh
+	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh
 	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
@@ -45,7 +46,6 @@ ops-check:
 	grep -Fqx 'ReadWritePaths=%h/.config/a-nas/state' deploy/systemd/user/anas-api.service
 	grep -Fq 'install -d -m 0700 "$$config_dir/state"' scripts/remote-activate-release.sh
 	grep -Fq 'stage-only' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
-	grep -Fqx 'User=root' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-host-agent' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
@@ -75,6 +75,7 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'SupplementaryGroups=a-nas-photos' deploy/systemd/system/anas-api.service
+	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
@@ -88,6 +89,11 @@ test:
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
 	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
+
+# Installs the release into a disposable Debian 13 systemd container; needs
+# Docker and the image from scripts/build-system-test-image.sh.
+system-test: build-binaries
+	scripts/system-test.sh $(SYSTEM_TEST_IMAGE)
 
 build: web-build build-binaries
 

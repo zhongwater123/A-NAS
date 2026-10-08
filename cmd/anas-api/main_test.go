@@ -16,15 +16,18 @@ func (g *recordingVolumeGuard) Check(_ context.Context, root string, write bool)
 	return nil
 }
 
-func TestAppVolumeCheckDoesNotRequireProductServiceWriteAccess(t *testing.T) {
-	guard := &recordingVolumeGuard{}
-	if err := checkAppVolume(context.Background(), guard, "/srv/a-nas/data"); err != nil {
+// File writes and app folders both go through the Host Agent; the Product
+// Service's sandbox shows the volume read-only (issue #38 follow-up).
+func TestVolumeChecksNeverRequireProductServiceWriteAccess(t *testing.T) {
+	recorder := &recordingVolumeGuard{}
+	guard := sandboxedVolumeGuard{recorder}
+	if err := guard.Check(context.Background(), "/srv/a-nas/data", true); err != nil {
 		t.Fatal(err)
 	}
-	if guard.root != "/srv/a-nas/data" {
-		t.Fatalf("guard root = %q", guard.root)
+	if recorder.root != "/srv/a-nas/data" {
+		t.Fatalf("guard root = %q", recorder.root)
 	}
-	if guard.write {
-		t.Fatal("app volume check required direct Product Service write access")
+	if recorder.write {
+		t.Fatal("a write check required direct Product Service write access")
 	}
 }

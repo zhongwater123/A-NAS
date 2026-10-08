@@ -33,6 +33,9 @@ type Config struct {
 	// Command builds a worker process. The default re-executes the running
 	// binary with WorkerArgument.
 	Command func(volumeRoot string) *exec.Cmd
+	// ProbeCommand builds the identity switch probe. The default re-executes
+	// the running binary with ProbeArgument.
+	ProbeCommand func() *exec.Cmd
 	// LookupUID resolves a username to its UID so a worker never starts for an
 	// account the Host Agent did not provision. The default uses os/user.
 	LookupUID func(username string) (int, error)
@@ -77,13 +80,18 @@ func NewServer(config Config) (*Server, error) {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
-	if config.Command == nil {
+	if config.Command == nil || config.ProbeCommand == nil {
 		executable, err := os.Executable()
 		if err != nil {
 			return nil, fmt.Errorf("locate file worker binary: %w", err)
 		}
-		config.Command = func(volumeRoot string) *exec.Cmd {
-			return exec.Command(executable, WorkerArgument, volumeRoot)
+		if config.Command == nil {
+			config.Command = func(volumeRoot string) *exec.Cmd {
+				return exec.Command(executable, WorkerArgument, volumeRoot)
+			}
+		}
+		if config.ProbeCommand == nil {
+			config.ProbeCommand = func() *exec.Cmd { return exec.Command(executable, ProbeArgument) }
 		}
 	}
 	if config.ShellCommand == nil {
@@ -248,10 +256,10 @@ func (s *Server) spawn(key workerKey, credential *syscall.Credential) (*worker, 
 	cmd.Env = []string{}
 	cmd.Dir = "/"
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL}
-	if !s.config.skipCredentials {
-		cmd.SysProcAttr.Credential = credential
+	if s.config.skipCredentials {
+		credential = nil
 	}
+	cmd.SysProcAttr = launchAttributes(credential)
 	if err := cmd.Start(); err != nil {
 		_ = parent.Close()
 		return nil, fmt.Errorf("start file worker: %w", err)

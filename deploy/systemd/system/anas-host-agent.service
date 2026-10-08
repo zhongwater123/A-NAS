@@ -6,8 +6,9 @@ Wants=smbd.service
 
 [Service]
 Type=simple
-User=root
-Group=root
+# Runs as root without User=/Group=. With an explicit User= and a seccomp
+# filter (RestrictAddressFamilies), systemd 257 drops CAP_SETUID, and the File
+# Broker could no longer start workers as the signed-in user (issue #38).
 EnvironmentFile=/etc/a-nas/host-agent.env
 ExecStart=/opt/a-nas/current/anas-host-agent
 Restart=on-failure

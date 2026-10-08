@@ -274,9 +274,13 @@ func startFileBroker(t *testing.T, mount string, executor *Executor, identities 
 		Command: func(volumeRoot string) *exec.Cmd {
 			return exec.Command(worker, filebroker.WorkerArgument, volumeRoot)
 		},
+		ProbeCommand: func() *exec.Cmd { return exec.Command(worker, filebroker.ProbeArgument) },
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := server.VerifyIdentitySwitch(); err != nil {
+		t.Fatalf("VerifyIdentitySwitch() as root error = %v", err)
 	}
 	socket := filepath.Join(t.TempDir(), "file-broker.sock")
 	listener, err := net.Listen("unix", socket)

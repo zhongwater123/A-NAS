@@ -27,7 +27,7 @@
 - **停止条件**（出现任一项立即停止）：
   - 主机或指纹不符，或数据卷 UUID、挂载与记录不一致。
   - UID 或 GID 31000 已被其他账号或组占用。
-  - 安装器以退出码 3 结束。
+  - 安装器以退出码 3 结束（身份冲突），或以退出码 5 结束（Host Agent 无法以用户身份启动文件 Worker，见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
   - `anas-photos` 无法以 `a-nas-photos` 启动。
   - `photos` 不是 `a-nas-photos 0700`，或产品服务账号 `a-nas` 能列出它。
 

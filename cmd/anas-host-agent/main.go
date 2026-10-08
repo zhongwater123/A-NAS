@@ -34,6 +34,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
+		if err := filebroker.RunProbe(); err != nil {
+			fmt.Fprintln(os.Stderr, "A-NAS file worker probe:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
 		logger.Error("A-NAS Host Agent stopped", "error", err)
@@ -85,6 +92,14 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer broker.Close()
+	// Web files and the terminal run as the signed-in user. A sandbox that
+	// took the capabilities for that (issue #38) leaves the rest of the Host
+	// Agent working, so it is reported, not fatal.
+	if err := broker.VerifyIdentitySwitch(); err != nil {
+		logger.Error("file broker cannot switch to user identities; Web files and the terminal are unavailable", "error", err)
+	} else {
+		logger.Info("file broker identity switch verified")
+	}
 	brokerSocket := environment("ANAS_FILE_BROKER_SOCKET", filepath.Join(filepath.Dir(socketPath), "file-broker.sock"))
 	brokerListener, err := listen(brokerSocket, strings.TrimSpace(os.Getenv("ANAS_HOST_AGENT_GROUP")))
 	if err != nil {
