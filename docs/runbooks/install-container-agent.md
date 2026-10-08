@@ -143,7 +143,7 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 2. 打开“应用中心”，应显示内置目录并可生成安装计划；实际安装前仍须确认镜像、端口与文件夹摘要。
 3. 首次验收可用专用测试容器核对停止、启动和日志，再删除测试容器。应用中心验收按[应用中心规格](../specs/app-center.md)使用一个可丢弃应用，确认应用身份、数据目录和卸载保留数据。
 
-本地屏保的媒体路由是 `/local-console/screensaver.mp4`，不是 `/screensaver.mp4`；如在同一切换脚本中复核 Range 请求，必须使用真实路由并单独打印其 HTTP 状态。
+本地屏保先从 `/local-console/screensavers` 读取匿名视频清单，再对清单中的 URL 发起 Range 请求；`/screensaver.mp4` 从来不是产品路由，`/local-console/screensaver.mp4` 只保留单视频兼容。切换脚本必须从清单取得媒体 URL 并单独打印每个 HTTP 状态，不能拼接或凭记忆写路径。
 
 | 检查对象 | 传输和身份 | 路由 |
 |---|---|---|
@@ -151,9 +151,9 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 | 应用目录 | 代理 UDS，`a-nas` | `/v1/apps` |
 | 桌面 Docker 列表 | 产品 HTTP，管理员会话 | `/api/v1/containers` |
 | 桌面应用目录 | 产品 HTTP，管理员会话 | `/api/v1/apps` |
-| 屏保媒体 | 产品 HTTP，回环请求 | `/local-console/screensaver.mp4` |
+| 屏保清单与媒体 | 产品 HTTP，回环请求 | `/local-console/screensavers` → 清单内 URL |
 
-发布探针通过 `--desktop-only` 检查健康 JSON、嵌入式桌面和 1024 字节 Range；通过 `--agent-only` 检查前两行。`bash -n` 和 ShellCheck 不能发现接口路径写错。开发机可先在具备本地 Docker 只读访问权限的环境执行 `python3 scripts/check-container-deployment-probes.py`，它使用已有 `build/anas-api`、`build/anas-container-agent` 和临时状态目录，只读取 Docker；会重现两个错误路径的 404，并用真实二进制验证探针。不要在 NAS 上运行这个开发检查。
+发布探针通过 `--desktop-only` 检查健康 JSON、嵌入式桌面、非空视频清单和首条媒体的 1024 字节 Range；通过 `--agent-only` 检查前两行。`bash -n` 和 ShellCheck 不能发现接口路径写错。开发机可先在具备本地 Docker 只读访问权限的环境执行 `python3 scripts/check-container-deployment-probes.py`，它使用已有 `build/anas-api`、`build/anas-container-agent` 和临时状态目录，只读取 Docker；会重现两个错误路径的 404，并用真实二进制验证探针。不要在 NAS 上运行这个开发检查。
 
 `/api/v1/containers` 与 `/api/v1/apps` 需要管理员产品会话；未带会话的 `curl` 返回未授权不能证明能力未启用。以服务、socket、环境键和登录后的 UI 共同作为完成证据。
 

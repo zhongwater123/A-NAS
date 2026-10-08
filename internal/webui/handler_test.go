@@ -1,6 +1,7 @@
 package webui_test
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
@@ -63,13 +65,46 @@ func TestHandlerKeepsUnknownAPIErrorsAsJSON(t *testing.T) {
 	}
 }
 
-func TestHandlerServesConfiguredScreenSaverWithByteRanges(t *testing.T) {
-	videoPath := filepath.Join(t.TempDir(), "screen-saver.mp4")
-	if err := os.WriteFile(videoPath, []byte("0123456789"), 0o600); err != nil {
+func TestHandlerListsConfiguredScreenSaverPoolAndServesByteRanges(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "alpha.mp4"), []byte("0123456789"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandlerWithOptions(t, webui.Options{ScreensaverVideoPath: videoPath})
-	request := httptest.NewRequest(http.MethodGet, "/local-console/screensaver.mp4", nil)
+	if err := os.WriteFile(filepath.Join(directory, "beta.MP4"), []byte("abcdefghij"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "notes.txt"), []byte("not a video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(directory, "nested.mp4"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandlerWithOptions(t, webui.Options{ScreensaverDirectory: directory})
+	manifestRequest := httptest.NewRequest(http.MethodGet, "/local-console/screensavers", nil)
+	manifestRecorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(manifestRecorder, manifestRequest)
+
+	if got, want := manifestRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("manifest status = %d, want %d; body = %s", got, want, manifestRecorder.Body.String())
+	}
+	if got := manifestRecorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("manifest Content-Type = %q, want application/json", got)
+	}
+	var manifest struct {
+		Videos []string `json:"videos"`
+	}
+	if err := json.Unmarshal(manifestRecorder.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(manifest.Videos), 2; got != want {
+		t.Fatalf("manifest videos = %v, want %d entries", manifest.Videos, want)
+	}
+	if strings.Contains(manifestRecorder.Body.String(), "alpha") || strings.Contains(manifestRecorder.Body.String(), "beta") {
+		t.Fatalf("manifest leaks host filenames: %s", manifestRecorder.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, manifest.Videos[0], nil)
 	request.Header.Set("Range", "bytes=2-5")
 	recorder := httptest.NewRecorder()
 
@@ -87,17 +122,46 @@ func TestHandlerServesConfiguredScreenSaverWithByteRanges(t *testing.T) {
 	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", got)
 	}
+
+	legacyRequest := httptest.NewRequest(http.MethodGet, "/local-console/screensaver.mp4", nil)
+	legacyRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(legacyRecorder, legacyRequest)
+	if got, want := legacyRecorder.Code, http.StatusOK; got != want {
+		t.Fatalf("legacy status = %d, want %d", got, want)
+	}
+}
+
+func TestHandlerRejectsRelativeScreenSaverDirectory(t *testing.T) {
+	_, err := webui.NewWithOptions(http.NotFoundHandler(), webui.Options{ScreensaverDirectory: "relative"})
+	if err == nil || !strings.Contains(err.Error(), "must be absolute") {
+		t.Fatalf("NewWithOptions() error = %v, want absolute-directory error", err)
+	}
 }
 
 func TestHandlerReturnsNotFoundWhenScreenSaverIsUnavailable(t *testing.T) {
-	handler := newHandlerWithOptions(t, webui.Options{ScreensaverVideoPath: filepath.Join(t.TempDir(), "missing.mp4")})
-	request := httptest.NewRequest(http.MethodGet, "/local-console/screensaver.mp4", nil)
+	handler := newHandlerWithOptions(t, webui.Options{ScreensaverDirectory: filepath.Join(t.TempDir(), "missing")})
+	request := httptest.NewRequest(http.MethodGet, "/local-console/screensavers/not-a-video.mp4", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
 
 	if got, want := recorder.Code, http.StatusNotFound; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
+	}
+}
+
+func TestHandlerReturnsAnEmptyManifestWhenScreenSaverPoolIsMissing(t *testing.T) {
+	handler := newHandlerWithOptions(t, webui.Options{ScreensaverDirectory: filepath.Join(t.TempDir(), "missing")})
+	request := httptest.NewRequest(http.MethodGet, "/local-console/screensavers", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := recorder.Body.String(), "{\"videos\":[]}\n"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
 	}
 }
 

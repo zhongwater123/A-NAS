@@ -19,7 +19,9 @@ spec.loader.exec_module(probe)
 
 with tempfile.TemporaryDirectory(prefix="anas-probe-") as folder:
     base = Path(folder)
-    media = base / "fixture.mp4"
+    media_directory = base / "screensavers"
+    media_directory.mkdir()
+    media = media_directory / "fixture.mp4"
     media.write_bytes(b"\0" * 4096)
     sock = str(base / "agent.sock")
     with socket.socket() as listener:
@@ -58,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="anas-probe-") as folder:
             "ANAS_CONTAINERS_MODE": "disabled",
             "ANAS_STATE_DIR": str(base / "api-state"),
             "ANAS_DATA_MOUNT": str(base / "data"),
-            "ANAS_SCREENSAVER_VIDEO": str(media),
+            "ANAS_SCREENSAVER_DIRECTORY": str(media_directory),
         })
         for _ in range(100):
             if agent.poll() is not None or api.poll() is not None:
