@@ -251,3 +251,70 @@ func TestAdministratorSeesOnlyTheGrantedLibraryReadOnly(t *testing.T) {
 		t.Fatalf("viewed libraries = %+v", viewed)
 	}
 }
+
+// privateLibrary returns the caller's private library ID, or "" while the
+// photo API is unavailable.
+func (r running) privateLibrary(t *testing.T, token string) string {
+	t.Helper()
+	response := r.get(t, "/api/v1/photos/libraries", token)
+	if response.StatusCode != http.StatusOK {
+		return ""
+	}
+	var list struct {
+		Items []photos.Library `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	for _, lib := range list.Items {
+		if lib.Kind == photos.LibraryKindPrivate && lib.Viewing == nil {
+			return lib.ID
+		}
+	}
+	return ""
+}
+
+func TestClosesTheStoreWhileItIsLostAndReopensIt(t *testing.T) {
+	r := start(t)
+	r.ready.Store(true)
+	var library string
+	waitFor(t, func() bool { library = r.privateLibrary(t, "alice-token"); return library != "" })
+
+	// The volume goes offline: requests stop reaching the Catalog.
+	r.ready.Store(false)
+	waitFor(t, func() bool {
+		response := r.get(t, "/api/v1/photos/libraries", "alice-token")
+		return response.StatusCode == http.StatusServiceUnavailable && errorCode(t, response) == "photos_unavailable"
+	})
+
+	// It returns: the same Catalog is opened again.
+	r.ready.Store(true)
+	var reopened string
+	waitFor(t, func() bool { reopened = r.privateLibrary(t, "alice-token"); return reopened != "" })
+	if reopened != library {
+		t.Fatalf("library after the store returned = %s, want %s", reopened, library)
+	}
+}
+
+func TestFollowsTheStorePathWhenItNamesAnotherDirectory(t *testing.T) {
+	r := start(t)
+	r.ready.Store(true)
+	var library string
+	waitFor(t, func() bool { library = r.privateLibrary(t, "alice-token"); return library != "" })
+
+	// The volume is remounted elsewhere and another one takes its place: the
+	// open Catalog must not keep serving from the old directory.
+	if err := os.Rename(r.root, r.root+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(r.root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		current := r.privateLibrary(t, "alice-token")
+		return current != "" && current != library
+	})
+	if _, err := os.Stat(filepath.Join(r.root, "catalog.db")); err != nil {
+		t.Fatalf("the new store was not opened: %v", err)
+	}
+}

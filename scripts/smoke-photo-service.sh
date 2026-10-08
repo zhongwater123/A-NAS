@@ -12,7 +12,9 @@ if [[ $EUID -ne 0 || ! -f /.dockerenv ]]; then
 fi
 export PATH=/usr/local/go/bin:$PATH
 cd /src
-command -v curl >/dev/null || { apt-get update -qq >/dev/null && apt-get install -y -qq curl >/dev/null 2>&1; }
+if ! command -v curl >/dev/null || ! command -v dmsetup >/dev/null; then
+  apt-get update -qq >/dev/null && apt-get install -y -qq curl dmsetup >/dev/null 2>&1
+fi
 go build -o /tmp/bin/ ./cmd/anas-api ./cmd/anas-host-agent
 cat > /tmp/genpng.go <<'GO'
 package main
@@ -47,8 +49,28 @@ install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
 # Larger than the 10 GiB capacity reserve; sparse, so it costs little disk.
 truncate --size=64G /tmp/data.img
-mkfs.btrfs --quiet /tmp/data.img
-mount -o loop /tmp/data.img /srv/a-nas/data
+# The volume sits on a device-mapper device so that a disk failure can be
+# injected later. Device-mapper and loop devices belong to the host kernel,
+# not the container: remove them on every exit.
+loop=$(losetup --find --show /tmp/data.img)
+volume=anas-smoke-$(hostname)
+# shellcheck disable=SC2317,SC2329 # invoked by the EXIT trap (SC2317 in older shellcheck)
+cleanup() {
+  # Stop everything that holds the volume, then release it. A deferred
+  # removal finishes on its own once the last holder is gone.
+  pkill -KILL -f /tmp/bin/ 2>/dev/null || true
+  pkill -KILL smbd 2>/dev/null || true
+  sleep 0.5
+  umount /srv/a-nas/data 2>/dev/null || umount --lazy /srv/a-nas/data 2>/dev/null || true
+  dmsetup remove "$volume" 2>/dev/null || dmsetup remove --deferred "$volume" 2>/dev/null || true
+  losetup --detach "$loop" 2>/dev/null || true
+}
+trap cleanup EXIT
+linear_table="0 $(blockdev --getsz "$loop") linear $loop 0"
+dmsetup create --noudevsync "$volume" --table "$linear_table"
+dmsetup mknodes "$volume"
+mkfs.btrfs --quiet "/dev/mapper/$volume"
+mount "/dev/mapper/$volume" /srv/a-nas/data
 # Like the Experimental NAS, the volume root lets nobody else pass through.
 chmod 0750 /srv/a-nas/data
 btrfs subvolume create /srv/a-nas/data/spaces >/dev/null
@@ -65,10 +87,14 @@ env ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock ANAS_FILE_BROKER_SOCKET=/r
   /tmp/bin/anas-host-agent > /tmp/host-agent.log 2>&1 &
 for _ in $(seq 1 100); do [ -S /run/a-nas-sessions/photos.sock ] && break; sleep 0.2; done
 
-setpriv --reuid=a-nas-photos --regid=a-nas-photos --init-groups env \
-  ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock \
-  ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock \
-  /tmp/bin/anas-api photo-service > /tmp/photos.log 2>&1 &
+start_photo_service() {
+  setpriv --reuid=a-nas-photos --regid=a-nas-photos --init-groups env \
+    ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock \
+    ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock \
+    /tmp/bin/anas-api photo-service >> /tmp/photos.log 2>&1 &
+  photo_service=$!
+}
+start_photo_service
 setpriv --reuid=a-nas --regid=a-nas --init-groups env \
   ANAS_HTTP_ADDR=127.0.0.1:8080 ANAS_HOSTSTATE_MODE=agent ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock \
   ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock ANAS_STATE_DIR=/var/lib/a-nas ANAS_DATA_MOUNT=/srv/a-nas/data \
@@ -158,6 +184,68 @@ check "library grant does not open the private space" denied as owner ls "/srv/a
 check "member is told about the viewing" grep -q admin_library_viewing <(curl -fsS -b /tmp/alice-jar "$api/api/v1/notifications")
 curl -fsS -o /dev/null -X DELETE -b /tmp/jar -H "X-CSRF-Token: $csrf" "$api/api/v1/viewing/$grant_id"
 check "ending the grant hides the library again" test "$(status_of -b /tmp/jar "$alice_timeline")" = 404
+
+# Volume outages: the photo service closes its Catalog while the data volume
+# has failed or is gone, writes nothing to the system disk, and reopens and
+# reconciles the Catalog when the volume returns.
+# wait_status WANT: waits up to 15 s for the photo API to answer WANT.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+wait_status() {
+  for _ in $(seq 1 75); do
+    [ "$(status_of -b /tmp/jar "$api/api/v1/photos/libraries")" = "$1" ] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+original_intact() { curl -fsS -b /tmp/jar "$api/api/v1/photos/assets/$asset/original" | cmp -s - /tmp/e2e.png; }
+# remount_volume: mounts the volume again once nothing holds the old one.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+remount_volume() {
+  for _ in $(seq 1 50); do
+    umount /srv/a-nas/data 2>/dev/null || true
+    mount "/dev/mapper/$volume" /srv/a-nas/data 2>/dev/null && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+# The disk starts failing every request; the next write makes Btrfs abort and
+# turn the volume read-only.
+dmsetup suspend "$volume"
+dmsetup load "$volume" --table "0 $(blockdev --getsz "$loop") error"
+dmsetup resume "$volume"
+{ echo probe > /srv/a-nas/data/.probe && sync --file-system /srv/a-nas/data/.probe; } 2>/dev/null || true
+check "failed disk makes photos unavailable" wait_status 503
+check "photo service logged the lost store" grep -q "photo store lost" /tmp/photos.log
+dmsetup suspend "$volume"
+dmsetup load "$volume" --table "$linear_table"
+dmsetup resume "$volume"
+check "volume mounts again once the disk is back" remount_volume
+check "photos return after the disk failure" wait_status 200
+check "photo survives the disk failure" original_intact
+
+umount --lazy /srv/a-nas/data
+check "unmounted volume makes photos unavailable" wait_status 503
+check "nothing is written to the system disk" test -z "$(ls -A /srv/a-nas/data)"
+# The detached volume is released once the photo service closes its Catalog.
+check "volume mounts again after the unmount" remount_volume
+check "photos return once the volume is mounted again" wait_status 200
+check "photo survives the unmount" original_intact
+
+# The photo service is killed in the middle of an upload.
+{ printf '\211PNG\r\n\032\n'; head -c 8M /dev/urandom; } > /tmp/big.png
+curl -s -o /dev/null --limit-rate 1M -b /tmp/jar -H "X-CSRF-Token: $csrf" -F file=@/tmp/big.png "$uploads" &
+upload=$!
+for _ in $(seq 1 50); do [ -n "$(ls -A /srv/a-nas/data/photos/staging)" ] && break; sleep 0.1; done
+check "upload is in progress" test -n "$(ls -A /srv/a-nas/data/photos/staging)"
+kill -KILL "$photo_service"
+wait "$upload" || true
+start_photo_service
+check "photos return after the photo service was killed" wait_status 200
+check "interrupted upload was cleaned up" test -z "$(ls -A /srv/a-nas/data/photos/staging)"
+check "photo service reported the repair" grep -q "photo store reconciled" /tmp/photos.log
+check "photo survives the kill" original_intact
 
 if [ "$failures" -ne 0 ]; then
   echo "--- host agent"; tail -20 /tmp/host-agent.log

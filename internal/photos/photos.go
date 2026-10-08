@@ -247,3 +247,7 @@ func Open(root string, options Options) (*Service, error) {
 func (s *Service) Close() error {
 	return errors.Join(s.db.Close(), s.root.Close())
 }
+
+// StoreInfo describes the store directory the service holds open, so a
+// caller can tell whether the store's path still names it.
+func (s *Service) StoreInfo() (os.FileInfo, error) { return s.root.Stat(".") }

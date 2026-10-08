@@ -175,6 +175,23 @@ describe("PhotosPanel", () => {
   });
 });
 
+describe("PhotosPanel availability", () => {
+  it("reports an unavailable photo service and recovers on refresh", async () => {
+    let available = false;
+    serve((url) => url === "/api/v1/photos/libraries" && !available
+      ? json({ error: { code: "photos_unavailable", message: "the photo library is not available on this device" } }, 503)
+      : undefined);
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("相册暂时不可用");
+
+    available = true;
+    await user.click(screen.getByRole("button", { name: "刷新相册" }));
+    expect(await screen.findByRole("option", { name: "我的图库" })).toBeTruthy();
+    await vi.waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
 describe("PhotosPanel viewing and hints", () => {
   it("browses a viewed member library read-only and can end the viewing", async () => {
     const viewed: PhotoLibrary = { id: "library:alice", kind: "private", ownerUserId: "user:alice", ownerName: "alice", createdAt: "2026-10-08T00:00:00Z", viewing: { grantId: "viewing:7", expiresAt: "2026-10-09T09:00:00Z" } };

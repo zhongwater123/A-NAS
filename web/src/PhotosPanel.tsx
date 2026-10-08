@@ -69,6 +69,9 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     if (view === "timeline") void loadTimeline();
     else void loadTrash();
   }, [view, loadTimeline, loadTrash]);
+  // Until the libraries have loaded, as while the photo service is
+  // unavailable, refreshing loads them; selecting one then loads its view.
+  const refresh = () => !libraryId ? loadLibraries() : view === "timeline" ? loadTimeline() : loadTrash();
 
   const upload = async (files: File[]) => {
     if (!libraryId || readOnly || !files.length) return;
@@ -113,7 +116,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
             <button role="tab" aria-selected={view === "trash"} className={view === "trash" ? "active" : ""} onClick={() => setView("trash")}>回收站</button>
           </div>
           {view === "timeline" && !readOnly && <label className="upload-button"><ImagePlus size={14} />上传照片<input type="file" aria-label="上传照片" accept="image/jpeg,image/png" multiple onChange={(event: ChangeEvent<HTMLInputElement>) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} /></label>}
-          <button aria-label="刷新相册" onClick={() => void (view === "timeline" ? loadTimeline() : loadTrash())}><RefreshCw size={14} /></button>
+          <button aria-label="刷新相册" onClick={() => void refresh()}><RefreshCw size={14} /></button>
         </div>
       </div>
       {readOnly && <div className="status-banner viewing-banner" role="status"><ShieldCheck />只读查看 {library?.ownerName ?? "成员"} 的私有图库，{viewingUntil} 自动结束；本次访问已写入审计并通知所有者。<button onClick={() => void stopViewing()}>结束查看</button></div>}
@@ -236,7 +239,7 @@ const photoErrors: Record<string, string> = {
   forbidden: "你不能修改这张照片",
   conflict: "名称已存在，或照片状态已经变化",
   validation_failed: "名称无效",
-  photos_unavailable: "此设备暂未启用相册",
+  photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册。恢复后点击刷新。",
 };
 
 function messageOf(error: unknown) {

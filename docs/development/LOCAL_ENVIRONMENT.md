@@ -134,8 +134,9 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
 - 运行真实 Host Agent（root）、以 `a-nas-photos` 运行的相册服务和以 `a-nas` 运行的产品服务。
 - 经产品服务完成启用管理员、上传、缩略图和原图读取。
 - 检查存储区与套接字的属主、权限和隔离。
+- 注入数据卷故障：把卷建在 device-mapper 设备上，换成 `error` 目标使 Btrfs 转为只读，再懒卸载与重新挂载，并在上传中途强制终止相册服务，确认相册暂停服务、不写系统盘并在卷恢复后自行重新打开。
 
-容器缺少 `curl` 时脚本会临时安装：
+device-mapper 与 loop 设备属于宿主内核而不是容器，脚本退出时会停止服务并删除自己的 `anas-smoke-<容器名>` 设备。若脚本被强行中断，用 `ls /dev/mapper` 检查残留，再在特权容器中执行 `dmsetup remove <名称>`。容器缺少 `curl` 或 `dmsetup` 时脚本会临时安装：
 
 ```bash
 docker run --rm --privileged -e CGO_ENABLED=1 \

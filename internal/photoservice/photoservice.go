@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -34,21 +36,24 @@ type Config struct {
 	SocketPath string
 	Sessions   SessionResolver
 	Logger     *slog.Logger
-	// CheckStore proves Root is the photo store on the mounted data volume;
-	// it defaults to RequireOwnedStore. Until it passes, requests answer
-	// photos_unavailable and nothing is created.
+	// CheckStore proves Root is the photo store on the mounted, writable data
+	// volume; it defaults to RequireOwnedStore. While it fails, requests
+	// answer photos_unavailable and nothing is created.
 	CheckStore func(string) error
-	// RetryInterval is how often an unavailable store is checked again.
+	// RetryInterval is how often the store is checked, both while it is
+	// unavailable and while it is open.
 	RetryInterval time.Duration
 	Photos        photos.Options
 }
 
 var ErrStoreUnavailable = errors.New("the photo store is not available")
 
-// RequireOwnedStore accepts root only when it is a directory on the mounted
-// Btrfs data volume, owned by this process's user and private to it. The
-// Host Agent creates it only on a verified volume, so a missing store means
-// the volume is offline and the system disk must not be used instead.
+// RequireOwnedStore accepts root only when it is a directory on the mounted,
+// writable Btrfs data volume, owned by this process's user and private to
+// it. The Host Agent creates it only on a verified volume, so a missing store
+// means the volume is offline and the system disk must not be used instead.
+// Btrfs turns read-only after a device error, so a read-only store means the
+// volume is failing.
 func RequireOwnedStore(root string) error {
 	info, err := os.Lstat(root)
 	if err != nil {
@@ -62,6 +67,9 @@ func RequireOwnedStore(root string) error {
 	if err := syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != 0x9123683e {
 		return fmt.Errorf("%w: %s is not on the Btrfs data volume", ErrStoreUnavailable, root)
 	}
+	if fs.Flags&unix.ST_RDONLY != 0 {
+		return fmt.Errorf("%w: the data volume is read-only", ErrStoreUnavailable)
+	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {
 		return fmt.Errorf("%w: the data volume marker is missing", ErrStoreUnavailable)
 	}
@@ -69,7 +77,7 @@ func RequireOwnedStore(root string) error {
 }
 
 // Run serves until ctx ends.
-func Run(ctx context.Context, config Config) error {
+func Run(parent context.Context, config Config) error {
 	if config.Sessions == nil || config.Root == "" || config.SocketPath == "" {
 		return errors.New("photo service needs a store, a socket and a session lookup")
 	}
@@ -89,8 +97,9 @@ func Run(ctx context.Context, config Config) error {
 		return err
 	}
 	var api atomic.Pointer[http.Handler]
+	serve := func(handler http.Handler) { api.Store(&handler) }
 	unavailable := photosapi.New(nil, config.Logger)
-	api.Store(&unavailable)
+	serve(unavailable)
 	server := &http.Server{
 		Handler: authenticate(config.Sessions, config.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			(*api.Load()).ServeHTTP(w, r)
@@ -100,24 +109,18 @@ func Run(ctx context.Context, config Config) error {
 	serveError := make(chan error, 1)
 	go func() { serveError <- server.Serve(listener) }()
 
-	service, err := openWhenReady(ctx, config)
-	if err == nil {
-		workers, stopWorkers := context.WithCancel(ctx)
-		background := make(chan struct{})
-		go func() {
-			defer close(background)
-			RunBackground(workers, service, config.Logger)
-		}()
-		// The Catalog closes only after the workers using it have stopped.
-		defer func() {
-			stopWorkers()
-			<-background
-			_ = service.Close()
-		}()
-		ready := photosapi.New(service, config.Logger)
-		api.Store(&ready)
-		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
-	}
+	ctx, stop := context.WithCancel(parent)
+	supervised := make(chan struct{})
+	go func() {
+		defer close(supervised)
+		supervise(ctx, config, serve, unavailable)
+	}()
+	// The Catalog closes only after requests and workers using it have
+	// stopped.
+	defer func() {
+		stop()
+		<-supervised
+	}()
 
 	select {
 	case err := <-serveError:
@@ -131,6 +134,67 @@ func Run(ctx context.Context, config Config) error {
 	}
 	_ = os.Remove(config.SocketPath)
 	return nil
+}
+
+// supervise keeps the photo API backed by an open store until ctx ends. It
+// opens the store once it passes its check and closes it again as soon as it
+// stops passing or its path names another directory, as when the data volume
+// goes offline, turns read-only or is remounted. The open Catalog never
+// follows the path onto the system disk, and reopening reconciles whatever an
+// abrupt loss left behind. Requests in between answer photos_unavailable.
+func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
+	for {
+		service, err := openWhenReady(ctx, config)
+		if err != nil {
+			return
+		}
+		workers, stopWorkers := context.WithCancel(ctx)
+		background := make(chan struct{})
+		go func() {
+			defer close(background)
+			RunBackground(workers, service, config.Logger)
+		}()
+		serve(photosapi.New(service, config.Logger))
+		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
+
+		lost := watchStore(ctx, config, service)
+		serve(unavailable)
+		stopWorkers()
+		<-background
+		_ = service.Close()
+		if lost == nil {
+			return
+		}
+		config.Logger.Error("photo store lost; photos are unavailable until it returns", "error", lost)
+	}
+}
+
+// watchStore returns nil when ctx ends, or why the open store can no longer
+// be used.
+func watchStore(ctx context.Context, config Config, service *photos.Service) error {
+	ticker := time.NewTicker(config.RetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+		if err := config.CheckStore(config.Root); err != nil {
+			return err
+		}
+		opened, err := service.StoreInfo()
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
+		}
+		current, err := os.Lstat(config.Root)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
+		}
+		if !os.SameFile(opened, current) {
+			return fmt.Errorf("%w: %s now names another directory", ErrStoreUnavailable, config.Root)
+		}
+	}
 }
 
 // openWhenReady waits until the store passes its check, then opens it. It
