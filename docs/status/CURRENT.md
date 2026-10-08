@@ -19,7 +19,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
 - Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
-- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序和 4:3 深蓝抽象壁纸；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音视频屏保，媒体缺失或失败时保留静态壁纸。2026-10-08 已随当前 `ed5368ba998e` 验收 API、Host Agent、Kiosk、嵌入式桌面和视频 Range 请求；仍待直连屏幕完成三分钟闲置及首次输入的人工验收。
+- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)（开机动画尚未部署）；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音视频屏保，媒体缺失或失败时保留静态壁纸。2026-10-08 已随当前 `ed5368ba998e` 验收 API、Host Agent、Kiosk、嵌入式桌面和视频 Range 请求；仍待直连屏幕完成三分钟闲置及首次输入的人工验收。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。

@@ -15,6 +15,7 @@
 - [容器管理（Docker MVP）](container-management.md)（implemented；Experimental NAS 未部署）
 - [应用中心](app-center.md)（implemented；镜像拉取与 Experimental NAS 未验证）
 - [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented locally；hardware acceptance pending）
+- [开机动画](boot-ident.md)（implemented，尚未部署）
 
 ## 使用方式
 
