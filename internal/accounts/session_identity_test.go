@@ -14,7 +14,7 @@ import (
 func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "control.db")
-	now := time.Date(2026, time.October, 7, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	store, err := accounts.OpenSQLite(path)
 	if err != nil {
 		t.Fatal(err)
