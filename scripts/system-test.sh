@@ -36,6 +36,11 @@ if [[ $EUID -ne 0 || "$(cat /proc/1/comm)" != systemd || ! -f /.dockerenv ]]; th
   exit 2
 fi
 
+# A Debian host's mounts are shared, so mounting or unmounting the data volume
+# reaches the services' private mount namespaces; the container starts with
+# private mounts, which would hide that.
+mount --make-rshared /
+
 # The release as scripts/deploy-dev.ps1 stages it.
 release=/tmp/release
 install -d "$release"
@@ -265,6 +270,17 @@ check "Host Agent proves the identity switch again after a restart" \
     grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+
+# --- Last, because other services keep the detached volume busy: the
+# unmount reaches the photo service's private mount namespace, and it stops
+# serving from the lost store instead of following the path.
+lost_at=$(date '+%Y-%m-%d %H:%M:%S')
+umount --lazy "$data"
+check "photo service notices the data volume is gone" \
+  bash -c "for _ in \$(seq 1 15); do journalctl -u anas-photos --since '$lost_at' -o cat --no-pager |
+    grep -Fq 'photo store lost' && exit 0; sleep 1; done; exit 1"
+check "photos answer unavailable while the volume is gone" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/libraries")" = 503
 
 echo "failures=$failures"
 [[ $failures -eq 0 ]]

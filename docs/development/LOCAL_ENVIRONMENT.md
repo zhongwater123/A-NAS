@@ -153,7 +153,8 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
 - SMB 与 Web 互相可见对方写入的文件，使用同一组 ACL、同一个回收站和同一个密码；
 - 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
-- 重启 Host Agent 后以上行为保持。
+- 重启 Host Agent 后以上行为保持；
+- 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 ```bash
 scripts/build-system-test-image.sh anas-systemd:trixie <本地任一 Debian 镜像>
