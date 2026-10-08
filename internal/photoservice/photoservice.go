@@ -79,8 +79,10 @@ func Run(ctx context.Context, config Config) error {
 	if config.CheckStore == nil {
 		config.CheckStore = RequireOwnedStore
 	}
+	// The service usually starts before the Host Agent has prepared the
+	// store; checking is a few stat calls, so photos come up within seconds.
 	if config.RetryInterval <= 0 {
-		config.RetryInterval = 30 * time.Second
+		config.RetryInterval = 2 * time.Second
 	}
 	listener, err := listen(config.SocketPath)
 	if err != nil {

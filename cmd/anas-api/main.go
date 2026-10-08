@@ -117,13 +117,13 @@ func run(logger *slog.Logger) error {
 	fileOptions := files.Options{AllowUnverifiedVolume: !live}
 	terminalConfig := terminal.Config{}
 	if live {
-		fileOptions.VolumeGuard = files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
+		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
 			volumes, err := storageService.ListVolumes(ctx)
 			if err != nil || len(volumes) != 1 || volumes[0].State != storage.VolumeStateAvailable {
 				return "", err
 			}
 			return volumes[0].FilesystemUUID, nil
-		}}
+		}}}
 		fileOptions.SnapshotBackend = operations
 		brokerSocket, err := fileBrokerSocket()
 		if err != nil {
@@ -171,7 +171,7 @@ func run(logger *slog.Logger) error {
 		}
 		appOptions.Host = host
 		guard := fileOptions.VolumeGuard
-		appOptions.VolumeReady = func(ctx context.Context) error { return checkAppVolume(ctx, guard, volumeRoot) }
+		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, false) }
 	}
 
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
@@ -238,11 +238,15 @@ func run(logger *slog.Logger) error {
 	}
 }
 
-func checkAppVolume(ctx context.Context, guard files.VolumeGuard, volumeRoot string) error {
-	// The Product Service runs with ProtectSystem=strict and never writes the
-	// data volume directly. The Host Agent rechecks real writability before it
-	// prepares app folders, so this boundary only proves identity and presence.
-	return guard.Check(ctx, volumeRoot, false)
+// sandboxedVolumeGuard proves only that the intended data volume is mounted.
+// The Product Service's ProtectSystem=strict view always shows the volume
+// read-only, and it never writes there: File Broker workers report a
+// read-only volume as unavailable, and the Host Agent rechecks writability
+// before it prepares app folders.
+type sandboxedVolumeGuard struct{ files.VolumeGuard }
+
+func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bool) error {
+	return g.VolumeGuard.Check(ctx, volumeRoot, false)
 }
 
 // syncIdentities converges host accounts on the control plane at startup, so

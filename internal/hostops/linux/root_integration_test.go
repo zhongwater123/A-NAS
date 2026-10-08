@@ -29,6 +29,13 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
+		if err := filebroker.RunProbe(); err != nil {
+			os.Stderr.WriteString(err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if os.Geteuid() != 0 || os.Getenv("ANAS_ROOT_INTEGRATION") != "1" {
 		// Refuse to touch a developer machine by accident.
 		os.Stderr.WriteString("root integration tests require root and ANAS_ROOT_INTEGRATION=1 in a disposable container\n")

@@ -128,6 +128,10 @@ func encodeError(err error) *wireError {
 		code = codeInvalidName
 	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
 		code = codeNoSpace
+	case errors.Is(err, syscall.EROFS):
+		// Only the worker sees the real mount: the Product Service's sandbox
+		// shows the volume read-only even when it is writable.
+		code = codeVolumeUnavailable
 	case errors.Is(err, syscall.ENOTEMPTY):
 		code = codeExists
 	}

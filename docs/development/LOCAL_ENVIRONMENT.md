@@ -81,6 +81,25 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
   -v "$PWD:/src" <同上镜像> bash /src/scripts/smoke-photo-service.sh
 ```
 
+## 系统测试
+
+root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，用真实安装器、unit 与发布二进制安装 A-NAS，再按用户检查：
+
+- Host Agent 保留 `CAP_SETUID`/`CAP_SETGID` 并通过启动自检；
+- Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
+- SMB 与 Web 互相可见对方写入的文件，使用同一组 ACL、同一个回收站和同一个密码；
+- 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
+- 重启 Host Agent 后以上行为保持。
+
+```bash
+scripts/build-system-test-image.sh anas-systemd:trixie <本地任一 Debian 镜像>
+make system-test
+```
+
+- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。
+- 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
+- CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
+
 ## 实验 NAS 接入
 
 | 项目 | 当前状态 |

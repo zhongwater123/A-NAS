@@ -132,10 +132,28 @@ ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
 systemctl enable anas-host-agent.service anas-photos.service anas-api.service
+restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
 
 systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service
+
+# Web files and the terminal run as the signed-in user, so the Host Agent must
+# keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup
+# (issue #38). A release that cannot is installed but must be rolled back.
+identity_switch=
+for _ in $(seq 1 30); do
+  identity_switch=$(journalctl -u anas-host-agent.service --since "$restarted_at" -o cat --no-pager |
+    grep -Eo 'file broker (identity switch verified|cannot switch to user identities)' | tail -n 1 || true)
+  [[ -n "$identity_switch" ]] && break
+  sleep 1
+done
+host_agent_pid=$(systemctl show -p MainPID --value anas-host-agent.service)
+cap_eff=$(awk '/^CapEff:/ {print $2}' "/proc/$host_agent_pid/status" 2>/dev/null || true)
+if [[ "$identity_switch" != "file broker identity switch verified" || -z "$cap_eff" ]] || (((16#$cap_eff >> 6 & 3) != 3)); then
+  echo "anas-host-agent cannot start file workers as users (CapEff=${cap_eff:-unknown}; ${identity_switch:-no identity probe result}); roll back this release" >&2
+  exit 5
+fi
 echo "Open the local A-NAS console to create the first administrator with an account and password."
