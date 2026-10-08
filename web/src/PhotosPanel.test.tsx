@@ -92,6 +92,7 @@ describe("PhotosPanel", () => {
   it("shows details in the viewer and moves a photo to the trash", async () => {
     let trashed = false;
     const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/assets/photo%3Aa/copies" && init?.method === "POST") return json(asset("photo:copy", { libraryId: sharedLibrary.id }), 201);
       if (url === "/api/v1/photos/assets/photo%3Aa" && init?.method === "DELETE") { trashed = true; return json(asset("photo:a")); }
       if (url.includes("/timeline")) return json({ items: trashed ? [] : [asset("photo:a")] });
       return undefined;
@@ -103,7 +104,9 @@ describe("PhotosPanel", () => {
     const viewer = screen.getByRole("dialog", { name: "查看 photo:a.jpg" });
     expect(within(viewer).getByText("4000 × 3000")).toBeTruthy();
     expect(within(viewer).getByRole("link", { name: "下载原图" }).getAttribute("href")).toBe("/api/v1/photos/assets/photo%3Aa/original?download=1");
-    expect(within(viewer).getByRole("button", { name: "复制到共享图库" })).toBeTruthy();
+    await user.click(within(viewer).getByRole("button", { name: "复制到共享图库" }));
+    expect((await within(viewer).findByRole("status")).textContent).toBe("已复制到共享图库");
+    expect(within(viewer).queryByRole("button", { name: "复制到我的图库" })).toBeNull();
     await user.click(within(viewer).getByRole("button", { name: "移到回收站" }));
 
     expect(await screen.findByText(/还没有照片/)).toBeTruthy();
@@ -137,6 +140,57 @@ describe("PhotosPanel", () => {
     await user.selectOptions(await screen.findByRole("combobox", { name: "图库" }), "library:shared");
     await user.click(await screen.findByRole("button", { name: "查看 photo:s.jpg" }));
     expect(screen.getByRole("button", { name: "移到回收站" })).toBeTruthy();
+  });
+
+  it("lets any member copy a shared photo into their own library", async () => {
+    const shared = asset("photo:s", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" });
+    const fetchMock = serve((url, init) => {
+      if (url.endsWith("/copies") && init?.method === "POST") return json(asset("photo:mine"), 201);
+      return url.includes("library%3Ashared/timeline") ? json({ items: [shared] }) : url.includes("/timeline") ? json({ items: [] }) : undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "图库" }), "library:shared");
+    await user.click(await screen.findByRole("button", { name: "查看 photo:s.jpg" }));
+    expect(screen.queryByRole("button", { name: "复制到共享图库" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "复制到我的图库" }));
+
+    expect((await screen.findByRole("status")).textContent).toBe("已复制到我的图库");
+    const copy = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/copies"));
+    expect(JSON.parse(String(copy?.[1]?.body))).toEqual({ libraryId: privateLibrary.id });
+  });
+
+  it("asks before permanently deleting a single photo", async () => {
+    const trashed = asset("photo:t", { trash: { trashedAt: "2026-10-08T09:00:00Z", trashedBy: "user:alice", purgeAfter: "2026-10-23T09:00:00Z" } });
+    const fetchMock = serve((url) => url.endsWith("/trash") ? json({ items: [trashed] }) : undefined);
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("tab", { name: "回收站" }));
+    await user.click(await screen.findByRole("button", { name: "永久删除" }));
+
+    expect(confirm).toHaveBeenCalledWith("永久删除“photo:t.jpg”？此操作无法撤销。");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/v1/photos/trash/"))).toBe(false);
+  });
+
+  it("switches a tile to its thumbnail once the thumbnail is ready", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let ready = false;
+      serve((url) => {
+        if (url === "/api/v1/photos/assets/photo%3Ap") return json(asset("photo:p", { thumbnail: ready ? "ready" : "pending" }));
+        return url.includes("/timeline") ? json({ items: [asset("photo:p", { thumbnail: "pending" })] }) : undefined;
+      });
+      render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+      expect((await screen.findByRole("img", { name: "photo:p.jpg" })).getAttribute("src")).toBe("/api/v1/photos/assets/photo%3Ap/original");
+
+      ready = true;
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.waitFor(() => expect(screen.getByRole("img", { name: "photo:p.jpg" }).getAttribute("src")).toBe("/api/v1/photos/assets/photo%3Ap/thumbnail"));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("restores, purges and empties the trash", async () => {
@@ -184,6 +238,7 @@ describe("PhotosPanel availability", () => {
     const user = userEvent.setup();
     render(<PhotosPanel userId="user:alice" isAdmin={false} />);
     expect((await screen.findByRole("alert")).textContent).toContain("相册暂时不可用");
+    expect(screen.queryByText(/还没有照片/)).toBeNull();
 
     available = true;
     await user.click(screen.getByRole("button", { name: "刷新相册" }));
@@ -211,6 +266,7 @@ describe("PhotosPanel viewing and hints", () => {
     await user.selectOptions(select, "library:alice");
     expect((await screen.findByRole("status")).textContent).toContain("只读查看 alice 的私有图库");
     expect(screen.queryByLabelText("上传照片")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "回收站" })).toBeNull();
     await user.click(await screen.findByRole("button", { name: "查看 photo:w.jpg" }));
     expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重命名" })).toBeNull();
