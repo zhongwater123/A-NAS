@@ -21,21 +21,13 @@ export async function loadScreenSaverVideos(): Promise<string[]> {
   ))];
 }
 
-export function shuffleScreenSaverVideos(
+export function selectScreenSaverVideo(
   videos: readonly string[],
   random: () => number = Math.random,
-  previous?: string,
-): string[] {
-  const shuffled = [...videos];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapWith = Math.floor(random() * (index + 1));
-    [shuffled[index], shuffled[swapWith]] = [shuffled[swapWith], shuffled[index]];
-  }
-  if (previous && shuffled.length > 1 && shuffled[0] === previous) {
-    const different = shuffled.findIndex((video) => video !== previous);
-    [shuffled[0], shuffled[different]] = [shuffled[different], shuffled[0]];
-  }
-  return shuffled;
+): string | undefined {
+  if (videos.length === 0) return undefined;
+  const index = Math.min(videos.length - 1, Math.max(0, Math.floor(random() * videos.length)));
+  return videos[index];
 }
 
 export function LocalConsoleScreenSaver({
@@ -52,12 +44,10 @@ export function LocalConsoleScreenSaver({
   const timer = useRef<number | undefined>(undefined);
   const video = useRef<HTMLVideoElement>(null);
   const playlist = useRef<string[]>([]);
-  const queue = useRef<string[]>([]);
   const current = useRef<string | undefined>(undefined);
   const activeRef = useRef(false);
   const [active, setActive] = useState(false);
   const [currentSrc, setCurrentSrc] = useState<string>();
-  const [poolSize, setPoolSize] = useState(0);
   const [ready, setReady] = useState(false);
 
   const hide = useCallback(() => {
@@ -65,28 +55,23 @@ export function LocalConsoleScreenSaver({
     setActive(false);
   }, []);
 
-  const nextVideo = useCallback(() => {
-    if (queue.current.length === 0) {
-      queue.current = shuffleScreenSaverVideos(playlist.current, random, current.current);
-    }
-    const next = queue.current.shift();
-    if (!next) return false;
-    current.current = next;
-    setCurrentSrc(next);
+  const selectVideo = useCallback(() => {
+    const selected = selectScreenSaverVideo(playlist.current, random);
+    if (!selected) return false;
+    current.current = selected;
+    setCurrentSrc(selected);
     return true;
   }, [random]);
 
   const disableVideo = useCallback((failed: string) => {
     if (current.current !== failed) return;
     playlist.current = playlist.current.filter((candidate) => candidate !== failed);
-    queue.current = queue.current.filter((candidate) => candidate !== failed);
-    setPoolSize(playlist.current.length);
-    if (playlist.current.length > 0 && nextVideo()) return;
+    if (playlist.current.length > 0 && selectVideo()) return;
     current.current = undefined;
     setCurrentSrc(undefined);
     setReady(false);
     hide();
-  }, [hide, nextVideo]);
+  }, [hide, selectVideo]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -95,10 +80,8 @@ export function LocalConsoleScreenSaver({
     void loadVideos().then((videos) => {
       if (cancelled) return;
       playlist.current = videos;
-      queue.current = [];
       current.current = undefined;
       setCurrentSrc(undefined);
-      setPoolSize(videos.length);
       setReady(videos.length > 0);
     }).catch(() => {
       if (!cancelled) setReady(false);
@@ -106,7 +89,6 @@ export function LocalConsoleScreenSaver({
     return () => {
       cancelled = true;
       playlist.current = [];
-      queue.current = [];
       current.current = undefined;
     };
   }, [enabled, loadVideos]);
@@ -122,7 +104,7 @@ export function LocalConsoleScreenSaver({
       clearTimer();
       if (document.hidden) return;
       timer.current = window.setTimeout(() => {
-        if (!nextVideo()) return;
+        if (!selectVideo()) return;
         activeRef.current = true;
         setActive(true);
       }, idleMs);
@@ -151,7 +133,7 @@ export function LocalConsoleScreenSaver({
       document.removeEventListener("visibilitychange", visibilityChanged);
       activeRef.current = false;
     };
-  }, [enabled, hide, idleMs, nextVideo, ready]);
+  }, [enabled, hide, idleMs, ready, selectVideo]);
 
   useEffect(() => {
     if (!active || !currentSrc || !video.current) return;
@@ -167,11 +149,10 @@ export function LocalConsoleScreenSaver({
         ref={video}
         src={currentSrc}
         autoPlay
-        loop={poolSize === 1}
+        loop
         muted
         playsInline
         preload="auto"
-        onEnded={() => nextVideo()}
         onError={() => disableVideo(currentSrc)}
       />
       <p className="sr-only">移动鼠标、按键或触摸屏幕即可返回桌面</p>

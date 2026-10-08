@@ -6,7 +6,7 @@ import {
   isLocalConsole,
   loadScreenSaverVideos,
   localConsoleScreenSaverIdleMs,
-  shuffleScreenSaverVideos,
+  selectScreenSaverVideo,
 } from "./LocalConsoleScreenSaver";
 
 const videos = [
@@ -33,8 +33,11 @@ describe("local console screen saver", () => {
     expect(isLocalConsole("")).toBe(false);
   });
 
-  it("shuffles without repeating the last video at a pool boundary", () => {
-    expect(shuffleScreenSaverVideos(videos, () => 0.99, videos[0])).toEqual([videos[1], videos[0], videos[2]]);
+  it("selects one video uniformly from the pool", () => {
+    expect(selectScreenSaverVideo(videos, () => 0)).toBe(videos[0]);
+    expect(selectScreenSaverVideo(videos, () => 0.5)).toBe(videos[1]);
+    expect(selectScreenSaverVideo(videos, () => 0.99)).toBe(videos[2]);
+    expect(selectScreenSaverVideo([], () => 0)).toBeUndefined();
   });
 
   it("accepts only unique anonymous same-origin video URLs from the manifest", async () => {
@@ -48,8 +51,9 @@ describe("local console screen saver", () => {
     expect(fetch).toHaveBeenCalledWith("/local-console/screensavers", { cache: "no-store" });
   });
 
-  it("starts after three idle minutes, plays every video without repeats, and consumes the first activity", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} random={() => 0.99} />);
+  it("loops one random video per idle activation and samples again after activity", async () => {
+    const random = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(0.99);
+    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} random={random} />);
     await act(async () => undefined);
 
     act(() => vi.advanceTimersByTime(localConsoleScreenSaverIdleMs - 1));
@@ -60,22 +64,21 @@ describe("local console screen saver", () => {
     const video = saver.querySelector("video")!;
     expect(video.getAttribute("src")).toBe(videos[0]);
     expect(video.autoplay).toBe(true);
-    expect(video.loop).toBe(false);
+    expect(video.loop).toBe(true);
     expect(video.muted).toBe(true);
 
-    fireEvent.ended(video);
-    expect(video.getAttribute("src")).toBe(videos[1]);
-    fireEvent.ended(video);
-    expect(video.getAttribute("src")).toBe(videos[2]);
     fireEvent.ended(video);
     expect(video.getAttribute("src")).toBe(videos[0]);
 
     expect(fireEvent.keyDown(window, { key: "Enter" })).toBe(false);
     expect(screen.queryByRole("dialog", { name: "屏幕保护程序" })).toBeNull();
+    act(() => vi.advanceTimersByTime(localConsoleScreenSaverIdleMs));
+    expect(screen.getByRole("dialog", { name: "屏幕保护程序" }).querySelector("video")?.getAttribute("src")).toBe(videos[2]);
+    expect(random).toHaveBeenCalledTimes(2);
   });
 
-  it("resets on activity and skips failed videos until the pool is exhausted", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos.slice(0, 2)} random={() => 0.99} />);
+  it("resets on activity and replaces failed videos until the pool is exhausted", async () => {
+    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos.slice(0, 2)} random={() => 0} />);
     await act(async () => undefined);
 
     act(() => vi.advanceTimersByTime(120_000));
