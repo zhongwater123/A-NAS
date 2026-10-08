@@ -77,6 +77,33 @@ install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
 
+screensaver_directory=/var/lib/a-nas/screensavers
+shopt -s nullglob
+screensaver_sources=("$source_release"/screensavers/*.mp4)
+shopt -u nullglob
+screensaver_hash_count=0
+if [[ -f "$source_release/RELEASE" ]]; then
+  screensaver_hash_count=$(grep -Ec '^screensaver_[0-9]{3}_sha256=[0-9a-f]{64}$' "$source_release/RELEASE" || true)
+fi
+if (( screensaver_hash_count != ${#screensaver_sources[@]} )); then
+  echo "screen saver pool does not match the release hash records" >&2
+  exit 2
+fi
+if (( ${#screensaver_sources[@]} > 0 )); then
+  screensaver_directory="/var/lib/a-nas/screensavers/$release_id"
+  if [[ -e "$screensaver_directory" ]]; then
+    echo "screen saver pool already exists: $screensaver_directory" >&2
+    exit 4
+  fi
+  for index in "${!screensaver_sources[@]}"; do
+    filename=$(printf 'screensaver-%03d.mp4' "$index")
+    [[ "$(basename "${screensaver_sources[$index]}")" == "$filename" ]] || { echo "screen saver pool filenames are not contiguous" >&2; exit 2; }
+    hash=$(sed -n "s/^screensaver_$(printf '%03d' "$index")_sha256=//p" "$source_release/RELEASE")
+    [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || { echo "missing screen saver hash: $filename" >&2; exit 2; }
+    printf '%s  %s\n' "$hash" "${screensaver_sources[$index]}" | sha256sum -c -
+  done
+fi
+
 target="/opt/a-nas/releases/$release_id"
 if [[ -e "$target" ]]; then
   echo "target release already exists: $target" >&2
@@ -90,8 +117,11 @@ install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/an
 mv -- "$temporary" "$target"
 trap - EXIT
 
-if [[ -f "$source_release/screensaver.mp4" ]]; then
-  install -o root -g a-nas -m 0640 "$source_release/screensaver.mp4" /var/lib/a-nas/screensavers/computer-chip.mp4
+if (( ${#screensaver_sources[@]} > 0 )); then
+  install -d -o root -g a-nas -m 0750 "$screensaver_directory"
+  for video in "${screensaver_sources[@]}"; do
+    install -o root -g a-nas -m 0640 "$video" "$screensaver_directory/$(basename "$video")"
+  done
 fi
 
 printf '%s\n' \
@@ -101,7 +131,7 @@ printf '%s\n' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
-  'ANAS_SCREENSAVER_VIDEO=/var/lib/a-nas/screensavers/computer-chip.mp4' \
+  "ANAS_SCREENSAVER_DIRECTORY=$screensaver_directory" \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
 # Container management is an optional root-installed capability. Preserve it
 # across system-service upgrades only when the typed agent socket is present;

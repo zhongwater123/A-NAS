@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 if [[ $# -lt 5 || $# -gt 7 ]]; then
-  echo "usage: remote-activate-release.sh VERSION API_SHA AGENT_SHA MODE PRODUCT_VERSION [activate|stage-only] [SCREENSAVER_SHA]" >&2
+  echo "usage: remote-activate-release.sh VERSION API_SHA AGENT_SHA MODE PRODUCT_VERSION [activate|stage-only] [SCREENSAVER_SHA_LIST]" >&2
   exit 2
 fi
 
@@ -12,7 +12,7 @@ agent_sha="$3"
 mode="$4"
 product_version="$5"
 action="${6:-activate}"
-screensaver_sha="${7:-}"
+screensaver_hashes="${7:-}"
 
 [[ "$version" =~ ^[0-9a-f]{7,40}$ ]] || { echo "invalid version" >&2; exit 2; }
 [[ "$api_sha" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid API hash" >&2; exit 2; }
@@ -20,7 +20,14 @@ screensaver_sha="${7:-}"
 [[ "$mode" == "fake" || "$mode" == "agent" ]] || { echo "invalid host state mode" >&2; exit 2; }
 [[ "$product_version" =~ ^[0-9a-f]{7,40}$ || "$product_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || { echo "invalid product version" >&2; exit 2; }
 [[ "$action" == "activate" || "$action" == "stage-only" ]] || { echo "invalid release action" >&2; exit 2; }
-[[ -z "$screensaver_sha" || "$screensaver_sha" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid screen saver hash" >&2; exit 2; }
+screensaver_hash_list=()
+if [[ -n "$screensaver_hashes" ]]; then
+  IFS=',' read -r -a screensaver_hash_list <<< "$screensaver_hashes"
+  (( ${#screensaver_hash_list[@]} <= 32 )) || { echo "too many screen saver hashes" >&2; exit 2; }
+  for hash in "${screensaver_hash_list[@]}"; do
+    [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid screen saver hash" >&2; exit 2; }
+  done
+fi
 
 release="$HOME/apps/a-nas/releases/$version"
 current="$HOME/apps/a-nas/current"
@@ -76,10 +83,19 @@ trap rollback ERR
 cd "$release"
 printf '%s  %s\n' "$api_sha" anas-api.incoming | sha256sum -c -
 printf '%s  %s\n' "$agent_sha" anas-host-agent.incoming | sha256sum -c -
-if [[ -n "$screensaver_sha" ]]; then
-  printf '%s  %s\n' "$screensaver_sha" screensaver.mp4.incoming | sha256sum -c -
-elif [[ -e screensaver.mp4.incoming ]]; then
-  echo "unverified screen saver video" >&2
+shopt -s nullglob
+screensaver_incoming=(screensaver-*.mp4.incoming)
+shopt -u nullglob
+if (( ${#screensaver_incoming[@]} != ${#screensaver_hash_list[@]} )); then
+  echo "screen saver upload count does not match the verified hash list" >&2
+  exit 2
+fi
+for index in "${!screensaver_hash_list[@]}"; do
+  filename=$(printf 'screensaver-%03d.mp4' "$index")
+  printf '%s  %s\n' "${screensaver_hash_list[$index]}" "$filename.incoming" | sha256sum -c -
+done
+if (( ${#screensaver_hash_list[@]} == 0 )) && [[ -e screensavers ]]; then
+  echo "screen saver pool exists without a verified hash list" >&2
   exit 2
 fi
 install -m 0750 anas-api.incoming anas-api
@@ -96,8 +112,14 @@ install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.s
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
-if [[ -n "$screensaver_sha" ]]; then
-  install -m 0640 screensaver.mp4.incoming screensaver.mp4
+if (( ${#screensaver_hash_list[@]} > 0 )); then
+  [[ ! -e screensavers ]] || { echo "screen saver pool is already staged" >&2; exit 2; }
+  install -d -m 0750 screensavers.incoming
+  for index in "${!screensaver_hash_list[@]}"; do
+    filename=$(printf 'screensaver-%03d.mp4' "$index")
+    install -m 0640 "$filename.incoming" "screensavers.incoming/$filename"
+  done
+  mv -- screensavers.incoming screensavers
 fi
 rm -f \
   anas-api.incoming \
@@ -112,13 +134,15 @@ rm -f \
   anas-photos-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
-  screensaver.mp4.incoming
+  "${screensaver_incoming[@]}"
 
 {
   printf 'version=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\nmode=%s\nsource=%s\n' \
     "$version" "$product_version" "$api_sha" "$agent_sha" "$mode" \
     "https://github.com/zhongwater123/A-NAS/commit/$version"
-  [[ -z "$screensaver_sha" ]] || printf 'screensaver_sha256=%s\n' "$screensaver_sha"
+  for index in "${!screensaver_hash_list[@]}"; do
+    printf 'screensaver_%03d_sha256=%s\n' "$index" "${screensaver_hash_list[$index]}"
+  done
 } > RELEASE
 chmod 0640 RELEASE
 
@@ -145,8 +169,8 @@ printf 'ANAS_HTTP_ADDR=127.0.0.1:8080\nANAS_HOSTSTATE_MODE=%s\nANAS_STATE_DIR=%s
 if [[ "$mode" == "agent" && -S /run/a-nas-container/agent.sock ]]; then
   printf 'ANAS_CONTAINERS_MODE=agent\n' >> "$config_dir/anas-api.env"
 fi
-if [[ -f "$release/screensaver.mp4" ]]; then
-  printf 'ANAS_SCREENSAVER_VIDEO=%s/screensaver.mp4\n' "$release" >> "$config_dir/anas-api.env"
+if [[ -d "$release/screensavers" ]]; then
+  printf 'ANAS_SCREENSAVER_DIRECTORY=%s/screensavers\n' "$release" >> "$config_dir/anas-api.env"
 fi
 chmod 0600 "$config_dir/anas-api.env"
 install -m 0644 anas-api.service "$unit_dir/anas-api.service"

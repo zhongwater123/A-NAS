@@ -19,7 +19,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
 - Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
-- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)（开机动画尚未部署）；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音视频屏保，媒体缺失或失败时保留静态壁纸。2026-10-08 已随当前 `ed5368ba998e` 验收 API、Host Agent、Kiosk、嵌入式桌面和视频 Range 请求；仍待直连屏幕完成三分钟闲置及首次输入的人工验收。
+- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)（开机动画尚未部署）；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音屏保。视频池已在本地实现为每次进入屏保时随机选择一条并持续循环、退出后下次闲置重新选择、单条失败补选和按 release 隔离的外部资产；Experimental NAS 的当前 `ed5368ba998e` 仍运行原单视频实现，已验收 API、Host Agent、Kiosk、嵌入式桌面和旧兼容路由的 Range 请求。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
@@ -39,7 +39,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 1. 部署 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 的修复：Experimental NAS 上 Web 文件管理与终端因 Host Agent 在 systemd 下丢失 `CAP_SETUID` 而不可用，修复后的 Web 写入也不再被产品服务沙箱误判为卷不可用。安装器核对通过后在 Web 打开个人空间与 Shared 并上传、删除、恢复，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从 Windows 用新密码连接 SMB。
 3. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
-4. 在直连屏幕完成三分钟闲置屏保与首次输入唤醒的人工验收。
+4. 合并并部署视频池后，在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
 5. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；基础闭环稳定后恢复相册主线。
 6. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；桌面上传、跨成员隔离、管理员查看、强制终止与断电对账、卷离线、容量、4 名成员与 20,000 张合成照片等切片 7 实机闸门仍待按[启用相册服务](../runbooks/enable-photo-service.md)完成。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
 

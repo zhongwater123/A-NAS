@@ -70,11 +70,17 @@ def verify_desktop(port):
     body, _ = request(connection(), "/")
     if b"<html" not in body or b"/assets/" not in body:
         raise ValueError("/: embedded desktop document missing")
-    body, headers = request(connection(), "/local-console/screensaver.mp4", expected=206,
+    body, _ = request(connection(), "/local-console/screensavers")
+    manifest = json.loads(body)
+    videos = manifest.get("videos") if isinstance(manifest, dict) else None
+    if not isinstance(videos, list) or not videos or not isinstance(videos[0], str):
+        raise ValueError("/local-console/screensavers: missing video pool")
+    video_path = videos[0]
+    body, headers = request(connection(), video_path, expected=206,
                             headers={"Range": "bytes=0-1023"}, limit=1024)
     response_headers = {key.lower(): value for key, value in headers.items()}
     if len(body) != 1024 or not response_headers.get("content-range", "").startswith("bytes 0-1023/"):
-        raise ValueError("/local-console/screensaver.mp4: invalid byte range response")
+        raise ValueError(f"{video_path}: invalid byte range response")
 
 
 def main():

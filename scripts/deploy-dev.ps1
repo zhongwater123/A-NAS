@@ -13,7 +13,7 @@ param(
 
     [string]$WslUser = 'anas-dev',
 
-    [string]$ScreensaverVideo,
+    [string[]]$ScreensaverVideo,
 
     [switch]$StageOnly
 )
@@ -55,18 +55,33 @@ try {
     if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
         throw "SSH identity does not exist: $IdentityFile"
     }
-    $screensaverPath = $null
-    $screensaverHash = $null
+    $screensaverAssets = @()
     if ($ScreensaverVideo) {
-        if (-not (Test-Path -LiteralPath $ScreensaverVideo -PathType Leaf)) {
-            throw "Screen saver video does not exist: $ScreensaverVideo"
+        if ($ScreensaverVideo.Count -gt 32) {
+            throw 'A screen saver pool cannot contain more than 32 videos.'
         }
-        $screensaverPath = (Resolve-Path -LiteralPath $ScreensaverVideo).Path
-        $screensaverHash = (Get-FileHash -LiteralPath $screensaverPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        for ($index = 0; $index -lt $ScreensaverVideo.Count; $index++) {
+            $candidate = $ScreensaverVideo[$index]
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                throw "Screen saver video does not exist: $candidate"
+            }
+            $resolvedPath = (Resolve-Path -LiteralPath $candidate).Path
+            if ([System.IO.Path]::GetExtension($resolvedPath) -ine '.mp4') {
+                throw "Screen saver video must be an MP4 file: $resolvedPath"
+            }
+            if ($screensaverAssets.Path -contains $resolvedPath) {
+                throw "Screen saver video was provided more than once: $resolvedPath"
+            }
+            $screensaverAssets += [PSCustomObject]@{
+                Path = $resolvedPath
+                Hash = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                FileName = ('screensaver-{0:D3}.mp4' -f $index)
+            }
+        }
     }
 
     $action = if ($StageOnly) { 'stage for a root-managed system upgrade without touching running services' } else { "activate in $Mode mode, verify, and rollback on failure" }
-    $screenSaverSummary = if ($screensaverPath) { ', including the external screen saver video' } else { '' }
+    $screenSaverSummary = if ($screensaverAssets.Count -gt 0) { ", including $($screensaverAssets.Count) external screen saver videos" } else { '' }
     $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts$screenSaverSummary, then $action"
     if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
         Write-Host "Release: $version"
@@ -134,8 +149,8 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
     )
-    if ($screensaverPath) {
-        $uploads += @{ Source = $screensaverPath; Destination = "${target}:$release/screensaver.mp4.incoming" }
+    foreach ($asset in $screensaverAssets) {
+        $uploads += @{ Source = $asset.Path; Destination = "${target}:$release/$($asset.FileName).incoming" }
     }
     foreach ($upload in $uploads) {
         & scp.exe @sshOptions $upload.Source $upload.Destination
@@ -144,7 +159,9 @@ try {
 
     $remoteAction = if ($StageOnly) { 'stage-only' } else { 'activate' }
     $activateArguments = @($version, $apiHash, $agentHash, $Mode, $productVersion, $remoteAction)
-    if ($screensaverHash) { $activateArguments += $screensaverHash }
+    if ($screensaverAssets.Count -gt 0) {
+        $activateArguments += (($screensaverAssets | ForEach-Object { $_.Hash }) -join ',')
+    }
     $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $($activateArguments -join ' ')"
     & ssh.exe @sshOptions $target $activate
     if ($LASTEXITCODE -ne 0) { throw 'Remote activation failed; inspect the user journal and release directory.' }
@@ -156,7 +173,9 @@ try {
     }
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
-    if ($screensaverHash) { Write-Host "Screen saver SHA-256: $screensaverHash" }
+    foreach ($asset in $screensaverAssets) {
+        Write-Host "$($asset.FileName) SHA-256: $($asset.Hash)"
+    }
 } finally {
     Pop-Location
 }
