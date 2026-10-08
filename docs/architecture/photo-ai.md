@@ -1,0 +1,127 @@
+# 相册本地 AI（M2）实施方案
+
+状态：draft（方案；尚未实现，开发期只在开发机验证，不部署到 Experimental NAS）
+更新时间：2026-10-08
+
+本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 为照片生成向量，在此基础上提供 AI 标签与中文语义搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
+
+## 目标与范围
+
+M2 交付后，成员可以：
+
+- 在相册里用中文搜索“海边的猫”“车库里的电动车”，结果只含自己有权查看的照片；
+- 在查看器里看到少量高置信 AI 标签，并能隐藏错误标签、添加自己的标签；
+- 在 AI 组件未安装、停止、崩溃或积压时照常使用 M1 的全部功能。
+
+不在 M2 首轮内：人脸与人物库（M3 切片 13）、按需中文描述、视频内容分析，以及 OCR。OCR 需要另一套模型与 Runtime（PP-OCRv6 + OpenVINO），建议在标签与语义搜索稳定后作为 M2 的后续步骤，见“待确认”。
+
+## 已核实的 Runtime 事实（2026-10-08）
+
+- EmbeddingGemma 2 由文本 270M、视觉 170M 与音频 300M 三个编码器组成，可只加载需要的部分；统一输出 768 维向量，支持截断到 512/256/128 维（截断后需重新归一化，128 维对多模态检索损失明显）。[模型卡](https://huggingface.co/google/embeddinggemma-2)
+- 官方 LiteRT 包：文本 270M 165 MB、文本+视觉 440M 388 MB、全模态 740M 485 MB。440M 包的文本权重 INT4、视觉权重 INT8；官方在 Linux Arm CPU 上测得文本 105 ms、文本+视觉 825 ms、内存约 647 MB，没有 x86 数据。[LiteRT 包](https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm)
+- MediaPipe 的 Universal Embedder 直接加载上述 `.litertlm` 文件，Python 接口提供 `embed_text` 与 `embed_image`，可选 L2 归一化、`visionTokensPerImage`、`maxInputLength` 与 CPU 后端；MediaPipe Python 包支持桌面 Linux 与 Python 3.9+。官方文档没有单列 Linux x86_64 的结果，需实测。[Universal Embedder](https://developers.google.com/edge/mediapipe/solutions/retrieval/universal_embedder/index)、[Python 指南](https://developers.google.com/edge/mediapipe/solutions/retrieval/universal_embedder/python)
+- LiteRT-LM 自己的 Python API 目前只面向生成式对话，没有公开的向量接口，因此 Worker 使用 MediaPipe 而不是直接调用 LiteRT-LM。[LiteRT-LM Python](https://developers.google.com/edge/litert-lm/python)
+- 模型卡元数据标注 Apache-2.0，但许可证链接与 MediaPipe 页面写的是 Gemma 许可。发行前必须核对权重文件实际附带的许可证；开发机试验不受影响。
+
+## 整体结构
+
+```text
+浏览器 ── anas-api ──► anas-photos（a-nas-photos）──UDS + 只读 fd──► anas-ai（a-nas-ai）
+                          │  Catalog：任务、向量、标签、搜索索引              │  MediaPipe Universal Embedder
+                          │  空闲与资源门控、Policy 过滤                      │  EmbeddingGemma 2 440M（.litertlm）
+                          └──会话套接字──► Host Agent：前台活动与资源信号      └  无网络、无数据卷访问
+```
+
+相册服务仍是唯一的权威写入方：它决定何时处理哪张照片、保存结果并按 Policy 过滤。AI Worker 只把收到的图片或文字变成向量，不知道照片属于谁，也看不到数据卷。
+
+## 组件
+
+### AI Worker（`anas-ai`）
+
+- 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载 440M `.litertlm`。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
+- 以专用身份 `a-nas-ai` 运行；systemd 约束沿用技术设计：`PrivateNetwork=yes`、`InaccessiblePaths=/srv/a-nas`、`MemoryMax`（起点 2G，按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。
+- 按需启动：`anas-ai.socket` 监听 `/run/a-nas-ai/ai.sock`（组 `a-nas-photos`、`0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
+- 模型文件随清单（来源 URL、revision、SHA-256、许可证）安装在 `/opt/a-nas/models/` 下；AI 组件可以不安装，此时套接字不存在，相册显示“智能处理不可用”。
+
+### 协议
+
+- 相册服务是客户端，Worker 是串行服务端（并发 1）。消息为长度前缀的 JSON；图片以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
+- 请求：`info`（模型 ID、维度、预处理版本）、`embed_image`（fd）、`embed_text`（文本与用途：`query` 或 `label`）。响应携带模型 ID 与归一化后的 768 维 float32 向量。
+- 每个请求有超时；Worker 崩溃或超时由相册服务按现有任务租约与尝试上限处理（解码异常记为永久失败，见 M1 切片 7）。
+
+### 输入图片
+
+AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 EXIF 方向转正、透明区域合成白底，大小有界。这样 Worker 不必解码任意尺寸的原图，也不会因超大图片耗尽内存。切片 9 用同一测试集比较 512 px 与 1024 px 输入的质量，差距明显时再增加专用的 AI 输入派生。
+
+### 任务与调度
+
+- 复用 M1 的持久任务表：缩略图完成后，为同一原图对象排入 `embedding/<模型 ID>` 任务。向量只依赖原图字节，以对象为键，副本与重复照片共用。
+- 缩略图任务照旧立即执行；AI 任务只在门控允许时领取：
+  - 最近 5 分钟没有前台活动；
+  - 系统压力低：CPU、I/O、内存 PSI（`/proc/pressure/*` 的 `avg10`）都低于阈值；
+  - CPU 温度低于上限。
+- 前台活动与温度由 Host Agent 提供：它已经知道 Web 文件操作（文件代理）、相册会话查询与磁盘、网卡吞吐（SMB 传输体现在这里），在相册会话套接字上增加只读的 `GET /v1/activity`。相册服务运行在 `PrivateNetwork` 中，看不到宿主机网卡，因此不自行采样。
+- 门控关闭时只停止领取新任务，进行中的单张推理允许完成。
+
+### 存储（Catalog migration 4）
+
+- `embeddings(object_id, model_id, vector, created_at)`：每个对象每个模型一行，768 维 float32 约 3 KB；20,000 张约 60 MB。
+- `label_vectors(label_set, label_id, model_id, vector)`：标签词表的文本向量缓存。
+- `ai_tags(object_id, label_set, label_id, score)`：由向量与标签向量在相册服务内计算（Go，无需模型），词表或阈值更新时可整体重算。
+- 切片 11 的用户元数据以照片资产为键：`user_tags(asset_id, name, created_by, created_at)`、`ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at)`。重算 AI 标签永远不改动它们。
+
+### AI 标签
+
+- 版本化的中文标签词表随代码发布（`internal/photos/labels/`）：每项有稳定 ID、显示名、同义词、分类与提示词模板，覆盖规格点名的“猫”“电动车”“3D 打印机”等常见物体、动物、场景、食物、文档与活动。
+- 标签分数是照片向量与标签文本向量的余弦相似度。每个标签有自己的阈值；只展示超过阈值、且与次优标签拉开差距的最多 5 个，并标明来源为 AI。
+- 阈值由切片 9 用公开中文数据集校准（COCO-CN、Flickr30K-CN 及带中文类别名的 ImageNet，只在开发机使用，不随发行包分发）。校准完成前所有阈值取保守高值，宁可少标不错标。
+- 用户隐藏的 AI 标签写入纠错表，之后任何重算都不再展示；用户标签优先显示。
+
+### 语义搜索
+
+- `GET /api/v1/photos/search?q=&cursor=&limit=`：相册服务请 Worker 编码查询文本，再对调用方可访问图库中的照片做精确余弦扫描（向量常驻内存，20,000 张约 60 MB），与文件名、用户标签和 AI 标签的文字匹配合并排序后分页返回。
+- 范围与 Policy 和时间线一致：自己的私有图库与共享图库；管理员只在查看授权有效期间加入对应成员的私有图库。候选生成前限定图库，返回前再逐条校验可见性。
+- AI 不可用时，搜索退化为文件名与标签的文字匹配，并提示“语义搜索暂不可用”。
+
+### 失败、版本与重建
+
+- AI 处理状态与照片状态分离：`pending → running → ready / failed`，失败保存稳定错误类别。
+- 每条向量记录模型 ID（含权重哈希与预处理版本）。更换模型或预处理后，旧结果标记为 `stale`，后台重建；重建期间旧向量是否继续参与搜索是规格中的待定项，建议继续参与直到新向量就绪。
+- 删除最后一个引用时，向量与 AI 标签随对象删除；用户元数据随照片资产删除。
+
+## 切片与顺序
+
+每步一个 PR，按顺序合并；全部只在开发机验证。
+
+| 步骤 | 对应切片 | 内容 | 完成标准 |
+|---|---|---|---|
+| 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 用 Fake Provider 跑通“上传 → 缩略图 → 向量”；AI 缺失、停止、崩溃、积压时 M1 测试全部照常通过 |
+| 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | Worker 在 Debian 13 容器中以 Fake Provider 通过协议测试 |
+| 3 | 9 | 开发机模型实测：下载 440M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
+| 4 | 12 | 搜索接口、内存索引、Policy 过滤与桌面搜索框 | 本地 systemd 环境中用真实模型完成中文搜索，泄漏测试覆盖搜索结果 |
+| 5 | 12 | AI 标签计算、查看器标签展示、按标签筛选 | 标签只在阈值之上出现；隐藏后重算不复现 |
+| 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
+| 7 | 10 | 打包：离线 wheel 与哈希、模型清单、`anas-ai` 单元与安装器、系统测试 | 系统测试在无网络下安装并运行 Worker；不部署到 NAS，等你决定 |
+
+## 待确认
+
+1. **模型包**：建议 440M 文本+视觉包（388 MB）。全模态 740M 包（485 MB）多出的音频编码器相册用不上，只增加内存。
+2. **许可**：发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并保存清单与 NOTICE。
+3. **下载**：步骤 3 需要在开发机下载模型包（约 388 MB）与公开中文数据集（体积在下载前逐个列出）。
+4. **OCR**：放在 M2 首轮，还是标签与语义搜索稳定后再做。
+5. **标签词表**：首版约 200–300 个常用标签；如有必须识别的类别请补充。
+
+## 风险
+
+- MediaPipe 的 Linux x86 wheel 与 Debian 13 的 Python 版本是否匹配尚未验证；不匹配时改用 Debian 12 基础的独立 Python 运行环境，或改用研究文档中的备选 Runtime。
+- 官方只公布了 Arm Linux 的性能；i3-12100 的单张耗时、按需启动的加载时间与前台影响都需实测，结论只来自开发机时须注明，实机数字在部署后补充。
+- 512 px 输入可能损失细节；以实测决定是否增加 AI 输入派生。
+- 开发期不碰 NAS，因此规模、温度与真实前台干扰的结论只能在之后部署时得出。
+
+## 关联
+
+- 技术设计：[相册技术设计](photo-library.md)（切片 8–12）
+- 规格：[相册](../specs/photo-library.md)
+- 研究：[本地照片 AI 模型与 Runtime](../research/photo-ai-model-runtime-selection.md)
+- ADR：[0006 受管图库](../adr/0006-use-a-managed-photo-library.md)、[0011 相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
+- 代码：[`internal/photos/jobs.go`](../../internal/photos/jobs.go)（复用的持久任务表）
