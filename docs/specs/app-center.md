@@ -1,6 +1,6 @@
 # 应用中心
 
-状态：implemented（本地 WSL2 以真实 Docker Compose 验证安装/卸载流程；镜像拉取与 Experimental NAS 未验证）
+状态：implemented
 更新时间：2026-10-07
 
 ## 目标
@@ -64,7 +64,8 @@
 
 - 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、显式 `user` 及字面量 `PUID`/`PGID` 改为应用身份、不让 Docker 创建宿主机文件夹、`/DATA` 只映射到共享空间、缺少身份时拒绝、确定性摘要与 16 类拒绝情形；[清单测试](../../internal/appstore/catalog_test.go)。
 - 身份与文件夹：[Host Agent 应用身份测试](../../internal/hostops/linux/apps_test.go)（查看计划不改动宿主机账号）；root 集成测试 [`root_apps_integration_test.go`](../../internal/hostops/linux/root_apps_integration_test.go) 在真实 Btrfs 上以绑定挂载模拟容器，验证账号在预建文件夹时才创建、应用数据属主、共享空间读写与 ACL 继承、无法读取个人空间、经植入的符号链接预建文件夹被拒绝、撤销后不可写共享空间但保留自身数据。
-- 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：以渲染结果运行一次性 Compose 项目，共享空间中被换成指向卷外目录的链接的文件夹使容器拒绝启动（`path concatenation escapes the base directory`），换回真实文件夹后正常挂载，写入文件属主为应用 UID；卷根不存在时挂载失败且 Docker 不创建它。Debian 13 自带的 Compose 2.26.1 尚未实测。
+- 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：以渲染结果运行一次性 Compose 项目，共享空间中被换成指向卷外目录的链接的文件夹使容器拒绝启动（`path concatenation escapes the base directory`），换回真实文件夹后正常挂载，写入文件属主为应用 UID；卷根不存在时挂载失败且 Docker 不创建它。
+- 2026-10-08 Experimental NAS（Debian 13 自带 Docker 26.1.5、Compose 2.26.1）：真实拉取并安装 OpenList 4.2.2，以 `app-openlist` 运行，见 [OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
 - 产品接口：[应用中心 API 测试](../../internal/appstoreapi/handler_test.go) 覆盖安装前预建文件夹、卸载撤销与数据卷离线拒绝；[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go)。
 - 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出。
 - 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。

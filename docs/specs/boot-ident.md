@@ -1,6 +1,6 @@
 # 开机动画
 
-状态：implemented（尚未在 Experimental NAS 部署）
+状态：implemented
 更新时间：2026-10-08
 
 ## 目标

@@ -1,6 +1,6 @@
 # 本地控制台屏幕保护程序
 
-状态：implemented locally；hardware acceptance pending
+状态：implemented
 更新时间：2026-10-07
 
 ## 目标

@@ -5,13 +5,13 @@
 ## 索引
 
 - [配置实验 NAS 的 SSH 开发账号](bootstrap-experimental-nas-ssh.md)（verified）
-- [部署 M1 API 到实验 NAS](deploy-m1-api-to-experimental-nas.md)（verified）
+- [部署 M1 API 到实验 NAS](deploy-m1-api-to-experimental-nas.md)（historical；已被系统服务部署取代）
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）
-- [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（verified）
+- [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（superseded；仅 SSH 隧道与 `-StageOnly` 暂存仍适用）
 - [运行实验 NAS 本地控制台](operate-local-kiosk.md)（display/pointer verified；confinement/VT pending）
-- [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（draft；NAS offline）
-- [安装 Docker 与容器代理](install-container-agent.md)（draft；未在实验 NAS 执行）
-- [启用相册服务](enable-photo-service.md)（draft；未在实验 NAS 执行）
+- [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
+- [安装 Docker 与容器代理](install-container-agent.md)（verified）
+- [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
 
 ## 使用方式
 

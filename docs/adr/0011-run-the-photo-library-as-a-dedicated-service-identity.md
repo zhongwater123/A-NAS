@@ -1,12 +1,12 @@
 # 0011：相册以专用服务身份独占受管存储，并在 Catalog 中授权
 
-状态：accepted（已实现，尚未在 Experimental NAS 部署；见[启用相册服务](../runbooks/enable-photo-service.md)）
+状态：accepted；已实现（M1 切片 1–6）。部署与验收进度见[当前状态](../status/CURRENT.md)，部署步骤见[启用相册服务](../runbooks/enable-photo-service.md)。
 
 [ADR 0006](0006-use-a-managed-photo-library.md) 让相册持有原图身份与生命周期；[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md) 让普通文件只由数据卷 POSIX ACL 授权、以用户本人身份访问，产品服务账号 `a-nas` 不持有任何空间权限。受管图库的几项要求无法用空间根目录 ACL 表达：同一不可变内容对象可同时被私有图库和共享图库的照片资产引用；共享图库按单张照片区分上传者的修改权；回收站到期、缩略图与 AI 任务在没有用户会话时运行，而文件代理只服务有效会话和 20100–29999 的账号。我们决定把受管图库作为 ADR 0008 的限定例外：由独立进程以专用身份独占相册存储，照片资产的授权由相册 Catalog 中的 Policy 判定。
 
 ## 决定
 
-1. **独立进程与身份**：相册服务 `anas-photos` 以专用系统身份 `a-nas-photos` 运行，是数据卷 `photos` 子卷的唯一访问者。子卷由 Host Agent 在数据卷就绪时创建并修复漂移，属主为 `a-nas-photos`、仅属主可访问，不进入任何账号、`a-nas`、应用身份或终端可读的 ACL。`a-nas-photos` 使用重装系统盘后保持不变的固定 UID，并与账号身份一起镜像到数据卷。
+1. **独立进程与身份**：相册服务 `anas-photos` 以专用系统身份 `a-nas-photos` 运行，是数据卷 `photos` 子卷的唯一访问者。子卷由 Host Agent 在数据卷就绪时创建并修复漂移，属主为 `a-nas-photos`、仅属主可访问，不进入任何账号、`a-nas`、应用身份或终端可读的 ACL。`a-nas-photos` 使用固定的 UID/GID 31000，由系统服务安装器创建；重装系统盘后重新运行安装器即得到同一身份。它不在账号身份的数据卷镜像中。
 2. **Catalog 在数据卷上**：Catalog SQLite（WAL、外键、版本化 migration）、不可变内容对象、staging 与派生数据都位于 `photos` 子卷。这是 [ADR 0007](0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md) “SQLite 位于系统盘”的例外：Catalog 中的相册、虚拟目录、用户标签与 AI 纠错是用户数据，必须与原图同卷、同快照才能构成一致的备份单元。数据卷离线时相册整体不可用，不在系统盘创建替代 Catalog 或对象。
 3. **照片资产授权在 Catalog**：私有图库所有者、共享图库成员、照片上传者、设备管理员与管理员查看授权由相册 Policy 判定，同一规则约束列表、原图、缩略图、搜索、计数、重复提示和错误信息。内核只负责把整个相册存储与其他身份隔离。个人空间与共享文件夹仍以 ACL 为唯一授权来源，不受本例外影响。
 4. **自行确认身份**：`anas-api` 负责浏览器边界（Cookie、CSRF、回环同源），把 `/api/v1/photos` 请求连同会话令牌转发给 `anas-photos`。`anas-photos` 不信任 `anas-api` 声明的身份，而是经 Host Agent 的会话查询接口确认账号、角色、状态与有效的管理员查看授权；它不直接读取存有密码摘要的 `control.db`。

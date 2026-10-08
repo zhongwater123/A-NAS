@@ -1,17 +1,17 @@
 # 相册技术设计
 
-状态：核心链路可开始本地实现；模型质量与资源参数待基准冻结
+状态：M1 切片 1–6 已实现；切片 7 实机闸门、M2 与 M3 未开始；模型质量与资源参数待基准冻结。部署与验收进度见[当前状态](../status/CURRENT.md)。
 
 本设计落实[相册规格](../specs/photo-library.md)。受管图库的长期边界由 [ADR 0006](../adr/0006-use-a-managed-photo-library.md) 决定，相册服务的身份、存储位置与授权方式由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定；模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
 ## 开发就绪结论
 
-当前粒度足以实现目录、原图存储、导入、浏览、回收站、重复组、派生任务和 Fake AI Provider。这些能力只依赖已经确认的照片资产、图库归属、稳定 ID 与生命周期，不需要等待真实数据盘或最终模型。`internal/photos` 先作为与进程无关的库开发，进程接线和部署在 M1 后段完成。
+当前粒度足以实现目录、原图存储、导入、浏览、回收站、重复组、派生任务和 Fake AI Provider。这些能力只依赖已经确认的照片资产、图库归属、稳定 ID 与生命周期，不需要等待真实数据盘或最终模型。`internal/photos` 是与进程无关的库，开发模式由产品服务进程内运行，生产由相册服务进程运行。
 
 以下事项作为发布闸门并行推进，不阻塞核心链路编码：
 
-- 账号、会话、角色和管理员查看授权由 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 实现栈提供；相册服务还需要 Host Agent 的会话查询接口。本地实现先使用显式 `Principal` 和 Fake Policy，不能据此宣称私有图库权限已经可发布。
-- Experimental NAS 已有真实 Btrfs 数据卷，但尚未部署统一身份；本地目录 Adapter 和临时卷只验证契约，不能替代真实数据卷、断盘和恢复验收。
+- 账号、会话、角色和管理员查看授权由 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 提供，相册服务经 Host Agent 的会话查询接口（`internal/sessionlookup`）确认身份，照片资产权限由 Catalog Policy（`internal/photos/policy.go`）判定。
+- 本地目录 Adapter、临时卷与系统测试只验证契约，不能替代 Experimental NAS 真实数据卷上的断盘和恢复验收（切片 7）。
 - AI 模型已有基线候选，但质量、处理速度、峰值内存、温度和前台影响必须通过代表性图库基准后才能成为发布默认值。
 - RAW、Live Photo 和视频的完整格式矩阵仍需样本验证；不影响 JPEG/PNG 核心切片。
 
@@ -43,13 +43,13 @@ anas-photos（a-nas-photos）◄──────┘
 
 ## 模块接口
 
-首个代码入口计划放在 `internal/photos`，由一个较深的 Module 封装以下 Implementation：
+`internal/photos` 由一个较深的 Module 封装以下 Implementation：
 
 - `Import`：流式校验、计算内容哈希、持久化不可变原图，并原子创建照片资产和派生任务。
-- `Get`、`List`、`Search`：只接受调用方身份与稳定 ID，不接受调用方拼接的底层路径。
-- `Move`、`Rename`、`CopyToAlbum`、`CopyToShared`：实施虚拟组织与独立照片资产语义。
-- `Trash`、`Restore`、`Purge`：实施图库与上传者权限、15 天期限和最后引用回收。
-- `RecordUserMetadata`：保存用户标签、AI 纠错、人物名称和手工位置，不与派生结果混写。
+- `Get`、`Open`、`Thumbnail`、`Timeline`、`ListDirectory`：只接受调用方身份与稳定 ID，不接受调用方拼接的底层路径；列表按游标分页。
+- `Update`、`Copy` 与目录的 `CreateDirectory`、`UpdateDirectory`、`DeleteDirectory`：实施虚拟组织与独立照片资产语义，改名与移动在一个事务中完成。
+- `Trash`、`Restore`、`Purge`、`EmptyTrash`：实施图库与上传者权限、15 天期限和最后引用回收。
+- M2 计划：`Search`、相册与加入相册，以及保存用户标签、AI 纠错和手工位置的用户元数据接口（切片 11），不与派生结果混写；人物名称随 M3 的人物库实现。
 
 首版不为目录表、对象路径、SQLite、OpenVINO 或某个向量扩展建立公共 Interface。真正需要 Adapter 的边界只有外部环境或昂贵依赖：受管存储目录、媒体解码、AI Provider、时钟和 Policy。
 
@@ -134,7 +134,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 
 ## 开发切片
 
-按三个可分别验收的里程碑推进。M1 不含 AI，可以独立发布；ADR 0008 实现栈合并后，相册代码以其为基线。
+按三个可分别验收的里程碑推进。M1 不含 AI，可以独立发布；相册代码以已合并的 ADR 0008 为基线。
 
 **M1 基础相册（JPEG/PNG）**
 

@@ -7,15 +7,17 @@
 - [只读宿主机状态](read-only-host-state.md)（implemented）
 - [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）
 - [Web 桌面宿主机状态](web-desktop-host-state.md)（implemented）
-- [基础存储与共享](basic-storage-and-sharing.md)（implemented locally；hardware acceptance pending）
-- [相册与本地智能检索](photo-library.md)（draft，核心开发基线已冻结）
+- [基础存储与共享](basic-storage-and-sharing.md)（implemented）
+- [相册与本地智能检索](photo-library.md)（M1 切片 1–6 implemented；M2、M3 draft）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
 - [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
-- [统一身份与文件授权](unified-identity-and-file-acl.md)（draft，ADR 0008 待实现）
-- [容器管理（Docker MVP）](container-management.md)（implemented；Experimental NAS 未部署）
-- [应用中心](app-center.md)（implemented；镜像拉取与 Experimental NAS 未验证）
-- [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented locally；hardware acceptance pending）
-- [开机动画](boot-ident.md)（implemented，尚未部署）
+- [统一身份与文件授权](unified-identity-and-file-acl.md)（implemented）
+- [容器管理（Docker MVP）](container-management.md)（implemented）
+- [应用中心](app-center.md)（implemented）
+- [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented）
+- [开机动画](boot-ident.md)（implemented）
+
+状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 
 ## 使用方式
 

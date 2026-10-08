@@ -33,7 +33,7 @@
 
 ## 步骤
 
-1. 在开发机对候选提交完整运行门禁和[相册服务冒烟](../development/LOCAL_ENVIRONMENT.md#root-集成测试)，并只暂存、不激活：`scripts/deploy-dev.ps1 -StageOnly`。
+1. 在开发机对候选提交完整运行门禁、[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)和[相册服务冒烟](../development/LOCAL_ENVIRONMENT.md#root-集成测试)，并只暂存、不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。
    - 预期：输出 API 与 Host Agent 的 SHA-256。发布目录包含 `anas-photos-system.service` 与新的安装器。
    - 完成标准：在 NAS 上用 `sha256sum --check` 核对两个二进制，与门禁输出一致。
 2. 核对固定身份未被占用。
@@ -43,7 +43,7 @@
 3. 核对数据卷与网卡。
    - 命令：`findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS`、`ip -brief link show dev "$smb_interface"`
    - 完成标准：挂载为 `btrfs`，来源与记录的分区一致，网卡存在。
-4. 运行系统服务安装器（参数与 [实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务) 相同）。
+4. 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对制品并运行系统服务安装器，包括切换本地控制台链接。
    - 命令：`"$source_release/install-v1.0.1-system-services.sh" "$source_release" "$release_id" "$smb_interface"`
    - 预期：安装器依次完成以下动作：
      - 创建 `a-nas-photos`；
@@ -58,7 +58,7 @@
 
 - **身份**：
   - `id a-nas-photos` 为 `uid=31000(a-nas-photos) gid=31000(a-nas-photos)`。
-  - `id a-nas` 的组包含 `a-nas-photos`。
+  - 产品服务带有 `a-nas-photos` 附加组：`systemctl show anas-api -p SupplementaryGroups` 含 `a-nas-photos`，且 `/proc/$(systemctl show -p MainPID --value anas-api)/status` 的 `Groups:` 含 31000。该组只由单元授予，`id a-nas` 中不会出现。
 - **套接字**：`stat -c '%a %U:%G %n' /run/a-nas-photos /run/a-nas-photos/photos.sock /run/a-nas-sessions /run/a-nas-sessions/photos.sock` 依次输出：
   - `750 a-nas-photos:a-nas-photos`
   - `660 a-nas-photos:a-nas-photos`

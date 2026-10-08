@@ -66,7 +66,7 @@ Host Agent 启动时先执行 `ReconcileDataVolume`，再开放身份同步 API�
 
 完整构建的 `67f6ccd17ff0` 随后成功启动 API、Host Agent、File Broker 与 Kiosk，并重建 `admin` 为 UID/GID 20100；最终权限验收又暴露数据卷入口遗漏：个人空间已含 `user:admin:rwx`，`admin` 也已属于 `a-nas-users`，但以该用户访问仍被拒绝。`namei` 将不可达层级定位到挂载点 `/srv/a-nas/data`。对账此前只给父目录 `/srv/a-nas` 添加了 `a-nas-users:--x`，没有给挂载点本身添加；每一级路径分量都要求执行权限，因此空间根 ACL 正确也不可达。
 
-`TestMaterializeRegisteredSpacesAppliesTheACLLayout` 现同时要求父目录与数据卷挂载点获得仅遍历 ACL。修复让启动对账对两级目录都执行同一幂等操作，不授予列目录权限。最终实机验收证明：`admin` 可以穿过卷根并进入自己的个人空间、不能列出卷根，Product Service 账号 `a-nas` 继续被内核拒绝；`healthz`、嵌入式桌面和屏保 byte-range 请求均成功。ADR 0008 唯一剩余操作是管理员在 Web 重置密码以重新生成已按手册删除的 Samba 凭据。
+`TestMaterializeRegisteredSpacesAppliesTheACLLayout` 现同时要求父目录与数据卷挂载点获得仅遍历 ACL。修复让启动对账对两级目录都执行同一幂等操作，不授予列目录权限。最终实机验收证明：`admin` 可以穿过卷根并进入自己的个人空间、不能列出卷根，Product Service 账号 `a-nas` 继续被内核拒绝；`healthz`、嵌入式桌面和屏保 byte-range 请求均成功。当时认为 ADR 0008 只剩管理员在 Web 改密以重新生成已按手册删除的 Samba 凭据；后来发现正式服务单元下 Web 文件从未可用，见 [issue #38 调查](2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 
 ## 可复用的升级经验
 

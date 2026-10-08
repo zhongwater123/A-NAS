@@ -1,6 +1,6 @@
 # 容器管理（Docker MVP）
 
-状态：implemented（本地 WSL2 Docker 验证；未部署到 Experimental NAS）
+状态：implemented
 更新时间：2026-10-07
 
 ## 目标

@@ -2,13 +2,13 @@
 
 A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储、权限、备份与恢复可靠；AI 是可关闭、可审计、可替换的上层能力。
 
-项目决策与当前背景以 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) 为准。
+当前状态与下一步见 [docs/status/CURRENT.md](docs/status/CURRENT.md)，架构决策见 [ADR](docs/adr/README.md)；[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) 保存早期产品背景与研究，不代表当前状态。
 
-当前开发基线为 [v1.0.1 实验 NAS 基础存储与共享闭环](docs/releases/v1.0.1.md)：本地实现已完成，版本保持 `v1.0.1-rc.N`，正在在线 Experimental NAS 上进行真实 Btrfs、SMB、文件、回收站和快照验收。它只允许可丢弃测试数据，不是家庭生产版；运行中 SATA 热插拔作为后续任务，不属于本次发布门禁。版本变化见 [CHANGELOG](CHANGELOG.md)。
+当前开发基线为 [v1.0.1 实验 NAS 基础存储与共享闭环](docs/releases/v1.0.1.md)：本地实现已完成，实机验收进行中，验收完成前只发布 `v1.0.1-rc.N`。它只允许可丢弃测试数据，不是家庭生产版；运行中 SATA 热插拔作为后续任务，不属于本次发布门禁。版本变化见 [CHANGELOG](CHANGELOG.md)。
 
 ## 本地开发入口
 
-当前推荐环境是 Windows 主机加 WSL2 Ubuntu。源码保存在 `E:\A-NAS`，WSL 中通过专用用户访问：
+当前推荐环境是 Windows 主机加 WSL2 Ubuntu。项目有两台开发机，差异见[本地开发环境](docs/development/LOCAL_ENVIRONMENT.md)；以下是源码在 `E:\A-NAS`、使用专用 WSL 用户的那一台：
 
 ```bash
 wsl -d Ubuntu-24.04
@@ -28,7 +28,7 @@ wsl -d Ubuntu-24.04 -u root
 
 ## 开发与检查
 
-运行前端类型检查与测试、生产资源构建、文档检查、Go 检查，并构建两个 Linux 命令：
+运行前端类型检查与测试、生产资源构建、文档检查、Go 检查，并构建三个 Linux 命令：
 
 ```bash
 make check
@@ -39,7 +39,10 @@ make check
 ```text
 build/anas-api
 build/anas-host-agent
+build/anas-container-agent
 ```
+
+修改服务单元、安装器、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/LOCAL_ENVIRONMENT.md#系统测试)：`make system-test`。
 
 Go 模块路径为 `github.com/zhongwater123/A-NAS`。架构语言决策记录在 [ADR 0001](docs/adr/0001-use-go-for-product-services.md)。
 
@@ -52,7 +55,7 @@ go run ./cmd/anas-api
 
 浏览器访问 `http://127.0.0.1:8080/`。服务默认只监听回环地址，可通过 `ANAS_HTTP_ADDR` 覆盖；聚合状态接口为 `/api/v1/host-state`，完整契约见 [OpenAPI](api/openapi.yaml)。
 
-需要由设备管理员在桌面“终端”应用中打开设备 Shell 时，显式启用终端；Shell 以产品服务用户运行，只接受已认证管理员的回环同源连接，边界见[终端规格](docs/specs/web-terminal.md)：
+需要由设备管理员在桌面“终端”应用中打开设备 Shell 时，显式启用终端；生产中 Shell 经文件代理以该管理员本人的 Linux 账号运行（本地模拟模式下以开发进程用户运行），只接受已认证管理员的回环同源连接，边界见[终端规格](docs/specs/web-terminal.md)：
 
 ```bash
 ANAS_TERMINAL=enabled go run ./cmd/anas-api
@@ -62,7 +65,7 @@ ANAS_TERMINAL=enabled go run ./cmd/anas-api
 
 前端单独开发时可运行 `cd web && npm run dev`；Vite 把 `/api` 和 `/healthz` 代理到本地 Go 服务。前端技术原因见 [ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)。
 
-部署 Experimental NAS 和打开限定 SSH 隧道见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md)。v1.0.1 系统服务、破坏性磁盘计划与实机验收使用[基础存储实机手册](docs/runbooks/provision-v1.0.1-experimental-storage.md)。NAS 直连屏幕使用 Cage/Chromium 呈现同一个 Web 桌面。
+部署、回滚、破坏性磁盘计划与实机验收使用[实机配置手册](docs/runbooks/provision-v1.0.1-experimental-storage.md)；限定 SSH 隧道见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md#远程浏览与验证)，该手册的其余步骤已被系统服务部署取代。NAS 直连屏幕使用 Cage/Chromium 呈现同一个 Web 桌面。
 
 ## 项目文档
 

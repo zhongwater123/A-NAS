@@ -1,6 +1,6 @@
 # 数据卷空间权限阻断文件闭环
 
-状态：fix deployed；自动化与 Experimental NAS 权限链回归通过，用户闭环待验证
+状态：superseded by [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)。rc.5 的修复（`a-nas` 与用户共同持有空间）已部署后被统一身份取代，下文描述的是该过渡模型。
 
 ## 症状与影响
 
@@ -57,7 +57,7 @@ Experimental NAS 安装 `v1.0.1-rc.4` 并成功初始化 Btrfs 数据盘后，�
 
 ## 后续工作
 
-- 重跑最初四个产品入口，确认个人空间、Shared、回收站和文件快照不再返回 `request could not be completed`；这一步完成前不能把原始用户症状标记为已关闭。
+- 重跑最初四个产品入口，确认个人空间、Shared、回收站和文件快照不再返回 `request could not be completed`；这一步完成前不能把原始用户症状标记为已关闭。ADR 0008 之后该症状由 [issue #38](2026-10-08-host-agent-loses-setuid-under-systemd.md) 继续跟踪。
 - 必须验证“Web 先删除，再由 SMB 删除”时两个文件都可在 Web 回收站恢复，且 smbd journal 不含 recycle `purging`。
 - rc.4 当前空间被父目录完全阻断，没有形成有效用户数据；若未来迁移已有文件的旧权限模型，需要单独设计一次性递归 ACL 迁移，不能在每次启动扫描整卷。
 

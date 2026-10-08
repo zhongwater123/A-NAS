@@ -1,6 +1,6 @@
 # Host Agent 在 systemd 沙箱下丢失 CAP_SETUID
 
-状态：fixed in code；Experimental NAS verification pending
+状态：fix in [PR #39](https://github.com/zhongwater123/A-NAS/pull/39)；Experimental NAS verification pending
 更新时间：2026-10-08
 
 ## 症状与影响
@@ -66,7 +66,8 @@ systemd v257 的 `exec-invoke.c`：服务带 seccomp 过滤（`RestrictAddressFa
 ## 后续工作
 
 - 在 Experimental NAS 部署修复并完成 issue #38 的验收标准。
-- 把系统测试接入 CI，见 [本地环境](../development/LOCAL_ENVIRONMENT.md#系统测试)。
+- 确认 CI 作业 `System test (Debian 13, systemd)` 在 GitHub 托管机器上稳定通过。
+- 系统测试尚未覆盖 Web 终端、管理员查看模式与应用身份；终端与文件 Worker 共用身份切换，启动探针已覆盖其前提。
 
 ## 关联
 

@@ -38,7 +38,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
   | 目录 | 访问 ACL | 默认 ACL |
   |---|---|---|
-  | `spaces`、`spaces/private` | `a-nas-users` 与 `a-nas` 仅 `--x`（可穿过、不可列出） | 无 |
+  | `spaces`、`spaces/private` | `a-nas-users` 仅 `--x`（可穿过、不可列出） | 无 |
   | `spaces/private/<username>` | 所有者 `rwx` | 同访问 ACL |
   | `spaces/shared` | `a-nas-users` `rwx`（只读共享文件夹为 `r-x`，另授写入者 `rwx`） | 同访问 ACL |
   | `<空间>/.a-nas-trash` | 该空间的用户仅 `--x` | 无 |
@@ -69,6 +69,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 下载与上传的文件内容不经过 root：工作进程打开或新建文件后经 `SCM_RIGHTS` 把描述符交回 Product Service。容量检查在 Product Service 中对数据卷根目录执行；复制目录按其中文件总大小检查，上传只检查下一块数据。
 - 回收站条目只对删除者可见并只能由其恢复或清除，因为每个用户的回收目录只授予本人。
 - 例外：只读快照仍由 root Host Agent 创建、列出并读出对象内容；恢复时由工作进程以用户身份写入目标空间。
+- 派生工作进程要求 Host Agent 保留 `CAP_SETUID`/`CAP_SETGID`。systemd 257 在单元同时写 `User=` 与 seccomp 过滤（`RestrictAddressFamilies`）时会拿走 `CAP_SETUID`，所以 `anas-host-agent.service` 不写 `User=`/`Group=`，由 `make ops-check` 保证。Broker 启动时以 `nobody` 身份按工作进程相同的参数运行探针，记录 `file broker identity switch verified` 或失败原因；安装器在探针未通过或能力缺失时以退出码 5 结束。
+- Product Service 以 `ProtectSystem=strict` 运行，它看到的数据卷挂载始终是只读的。它在文件操作前只确认挂载的是预期的数据卷（Btrfs、卷标记与已初始化卷的 UUID 一致），不判断可写性；真正只读的数据卷由执行写入的工作进程以 `EROFS` 报告为卷不可用。
 
 ## 管理员查看模式
 
@@ -88,7 +90,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 关联
 
 - [ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
-- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)：本页的身份与写入路径将由文件代理和文件系统 ACL 取代（尚未实现）
+- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)：本页描述的身份与授权模型
+- [Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md) 与[系统测试](../../scripts/system-test.sh)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
