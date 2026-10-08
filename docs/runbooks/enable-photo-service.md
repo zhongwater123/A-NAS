@@ -1,6 +1,6 @@
 # 启用相册服务
 
-状态：draft（未在 Experimental NAS 执行）
+状态：服务身份、存储与 IPC 已在 Experimental NAS 部署；用户功能验收待完成
 更新时间：2026-10-08
 
 ## 目的
@@ -52,6 +52,7 @@
      - 依次重启 Host Agent、相册服务和产品服务。
    - 预期：Debian 的 `useradd` 会提示 `uid 31000 is greater than SYS_UID_MAX`。该 UID 是有意固定的，此提示不影响安装。
    - 完成标准：`systemctl is-active anas-host-agent anas-photos anas-api` 全为 `active`。
+   - 启动协调：安装器并行启动 Host Agent 与相册服务时，相册服务可能先记录一次 `photo store unavailable; waiting`；Host Agent 创建并授权 `photos` 子卷后，它必须自行进入 `photo service ready`，无需重启。只有持续等待或最终未 ready 才算失败。
 
 ## 验证
 
@@ -70,7 +71,7 @@
   - `getfacl -p /srv/a-nas /srv/a-nas/data` 两者都含 `user:a-nas-photos:--x`。
   - `setpriv --reuid=a-nas-photos --regid=a-nas-photos --init-groups ls /srv/a-nas/data` 因权限失败（只能穿过，不能列出卷根）。
 - **日志**：
-  - `journalctl -u anas-photos -b --no-pager` 出现 `photo service ready`，没有 `photo store unavailable`。
+  - `journalctl -u anas-photos -b --no-pager` 最终出现 `photo service ready`；允许启动竞态期间先出现一次 `photo store unavailable; waiting`，但不能持续等待。
   - `journalctl -u anas-host-agent -b --no-pager` 没有 `photo store repair failed`。
 - **隔离**：
   - `setpriv --reuid=a-nas --regid=a-nas --init-groups ls /srv/a-nas/data/photos` 因权限失败。
@@ -84,6 +85,16 @@
   6. 成员下次登录看到“管理员……开启了对你私有图库的只读查看”通知；管理员点击“结束查看”后，该图库立即从列表消失。
   7. 文件管理中不会因此出现该成员的个人空间。
 - **审计与对账**：`journalctl -u anas-photos` 中启动时的 `photo store reconciled` 报告只在异常停止后出现，正常重启后为空。
+
+## 首次实机部署证据
+
+2026-10-08，合并提交 `ed5368ba998e` 在 Experimental NAS 完成服务边界部署：
+
+- 系统服务与 Kiosk 指向同一不可变 release，Docker、containerd、Container Agent、Host Agent、相册服务、Product Service、Kiosk 与 Samba 全部 active。
+- `a-nas-photos` 使用固定 UID/GID 31000；照片存储为 `0700 a-nas-photos:a-nas-photos` 的 Btrfs 子卷。
+- 相册 API socket 为 `0660 a-nas-photos:a-nas-photos`，会话查询 socket 为 `0660 root:a-nas-photos`；Product Service 不能列出照片存储，相册服务不能列出 Shared。
+- 相册服务首次启动先因 Host Agent 尚未完成子卷准备记录等待，约一秒后自行进入 `photo service ready`；Host Agent 没有 `photo store repair failed`。
+- 本节只证明身份、存储、IPC 与服务生命周期边界；“验证”中的上传、跨成员隔离、管理员查看、重启持久性和 20,000 张规模验收仍未完成。
 
 ## 回滚或恢复
 
