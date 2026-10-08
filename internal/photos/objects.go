@@ -13,8 +13,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
 // Content objects are immutable originals stored once per SHA-256 under
@@ -219,10 +217,7 @@ func (s *Service) openObject(id string) (*os.File, error) { return s.root.Open(o
 
 // ensureCapacity keeps the same data-volume reserve as ordinary files.
 func (s *Service) ensureCapacity(incoming int64) error {
-	if s.disableCapacityReserve {
-		return nil
-	}
-	ok, err := capacity.Admits(s.rootPath, incoming)
+	ok, err := s.admits(s.rootPath, incoming)
 	if err != nil {
 		return err
 	}

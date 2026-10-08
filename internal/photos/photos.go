@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
 var (
@@ -162,16 +164,18 @@ type Options struct {
 // owned by the photo service identity; the caller proves the volume is
 // mounted before calling Open.
 type Service struct {
-	db                     *sql.DB
-	root                   *os.Root
-	rootPath               string
-	now                    func() time.Time
-	random                 io.Reader
-	trashRetention         time.Duration
-	maxImportBytes         int64
-	disableCapacityReserve bool
-	location               *time.Location
-	sharedLibraryID        string
+	db             *sql.DB
+	root           *os.Root
+	rootPath       string
+	now            func() time.Time
+	random         io.Reader
+	trashRetention time.Duration
+	maxImportBytes int64
+	// admits reports whether incoming bytes still leave the data-volume
+	// reserve free.
+	admits          func(path string, incoming int64) (bool, error)
+	location        *time.Location
+	sharedLibraryID string
 	// mediaWake tells RunMedia that an import queued work.
 	mediaWake chan struct{}
 
@@ -219,8 +223,11 @@ func Open(root string, options Options) (*Service, error) {
 		db: db, root: opened, rootPath: root,
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
-		disableCapacityReserve: options.DisableCapacityReserve, location: options.Location,
+		admits: capacity.Admits, location: options.Location,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
+	}
+	if options.DisableCapacityReserve {
+		service.admits = func(string, int64) (bool, error) { return true, nil }
 	}
 	if service.now == nil {
 		service.now = time.Now
