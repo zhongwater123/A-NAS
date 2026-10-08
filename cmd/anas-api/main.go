@@ -184,7 +184,7 @@ func run(logger *slog.Logger) error {
 		Logger:     logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
-		ScreensaverVideoPath: environment("ANAS_SCREENSAVER_VIDEO", "/var/lib/a-nas/screensavers/computer-chip.mp4"),
+		ScreensaverDirectory: configuredScreensaverDirectory(),
 	})
 	if err != nil {
 		return err
@@ -333,6 +333,16 @@ func environment(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func configuredScreensaverDirectory() string {
+	if directory := strings.TrimSpace(os.Getenv("ANAS_SCREENSAVER_DIRECTORY")); directory != "" {
+		return directory
+	}
+	if legacyVideo := strings.TrimSpace(os.Getenv("ANAS_SCREENSAVER_VIDEO")); legacyVideo != "" {
+		return filepath.Dir(legacyVideo)
+	}
+	return "/var/lib/a-nas/screensavers"
 }
 
 type developmentOperations struct{}
