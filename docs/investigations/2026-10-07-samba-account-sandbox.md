@@ -1,6 +1,6 @@
 # 首次管理员创建在 Samba 系统账号边界失败
 
-状态：fix ready；Experimental NAS verification pending
+状态：resolved；`v1.0.1-rc.3` 在实机完成首个管理员创建。Samba 登录检查并入 v1.0.1 的 SMB 验收（ADR 0008 升级时旧凭据已删除，需改密重建）
 更新时间：2026-10-07
 
 ## 症状与影响

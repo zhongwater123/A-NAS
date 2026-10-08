@@ -1538,8 +1538,10 @@ components:
           type: string
         identity:
           description: >-
-            The Linux account app-<appId> the app's containers run as (PUID/PGID). A mount of kind shared means
-            the account joins a-nas-users and gains the Shared folder's access.
+            The Linux account app-<appId> allocated for the app. It replaces the manifest's Compose user or
+            PUID/PGID when the manifest declares them; an image that uses neither keeps its own default user,
+            which may be root, and is then confined only by the folders mounted for it. A mount of kind shared
+            means the account joins a-nas-users and gains the Shared folder's access.
           type: object
           additionalProperties: false
           required: [username, uid, gid]

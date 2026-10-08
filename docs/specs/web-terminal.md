@@ -1,6 +1,6 @@
 # Web 桌面终端
 
-状态：implemented（opt-in，尚未在 Experimental NAS 启用）
+状态：implemented（opt-in，默认关闭）
 更新时间：2026-10-07
 
 ## 目标

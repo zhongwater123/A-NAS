@@ -1,6 +1,6 @@
 # 基础存储与共享
 
-状态：implemented locally；Experimental NAS acceptance pending
+状态：implemented
 
 ## 目标
 
@@ -38,12 +38,12 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 
 ## 验收
 
-- 自动化：Policy 隔离、计划过期/身份变化/拒绝/重启恢复、上传与恢复、Samba 回收站导入、快照、IPC、HTTP/CSRF/OpenAPI 和 React 工作流通过 `make check`。
+- 自动化：空间隔离由内核 ACL 执行，见 root 权限矩阵与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)；计划过期/身份变化/拒绝/重启恢复、上传与恢复、Samba 回收站导入、快照、IPC、HTTP/CSRF/OpenAPI 和 React 工作流通过 `make check`。
 - 实机：按 [v1.0.1 实机手册](../runbooks/provision-v1.0.1-experimental-storage.md)验证 UUID 重启挂载、Web/Windows SMB 大文件哈希、权限、删除/恢复/快照、SMART 和审计证据。
 
 ## 非目标
 
-相册与 AI、NFS、多共享空间、配额、外链、定时快照、外接盘备份、整卷回滚、RAID、Scrub 修复、运行中 SATA 热插拔与自动恢复、局域网 Web、TLS、远程访问、OTA、应用中心及生产数据迁移均不属于 v1.0.1。数据卷离线拒写仍是本版安全要求，但完整热插拔生命周期留待后续实现。
+相册与 AI、NFS、多共享空间、配额、外链、定时快照、外接盘备份、整卷回滚、RAID、Scrub 修复、运行中 SATA 热插拔与自动恢复、局域网 Web、TLS、远程访问、OTA、应用中心及生产数据迁移均不属于 v1.0.1 的验收范围；其中相册、Docker 与应用中心已合入主干并部署在实验 NAS，但不作为 v1.0.1 发布闸门。数据卷离线拒写仍是本版安全要求，但完整热插拔生命周期留待后续实现。
 
 ## 关联
 

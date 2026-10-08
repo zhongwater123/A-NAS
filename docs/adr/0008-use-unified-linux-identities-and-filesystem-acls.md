@@ -1,8 +1,8 @@
 # 0008：统一 Linux 身份，以文件系统 ACL 作为唯一授权来源
 
-状态：accepted（未实现；在 v1.0.1 存储闭环验收前落地）
+状态：accepted；已实现（[#11–#16](https://github.com/zhongwater123/A-NAS/issues?q=is%3Aissue+%5BADR+0008%5D)，2026-10-07 合并）。实机部署与验收进度见[当前状态](../status/CURRENT.md)。
 
-v1.0.1 中 Web 由产品服务账号 `a-nas` 代为读写、SMB 以每个用户自己的 UID 读写，两个入口没有共同的写入身份，授权只存在于产品服务的应用层（见 [issue #9](https://github.com/zhongwater123/A-NAS/issues/9)）。我们决定采用 DSM 式模型：一套身份、一个授权来源、所有入口以用户本人身份访问磁盘。
+决定前（v1.0.1-rc.5 及更早），Web 由产品服务账号 `a-nas` 代为读写、SMB 以每个用户自己的 UID 读写，两个入口没有共同的写入身份，授权只存在于产品服务的应用层（见 [issue #9](https://github.com/zhongwater123/A-NAS/issues/9)）。我们决定采用 DSM 式模型：一套身份、一个授权来源、所有入口以用户本人身份访问磁盘。
 
 ## 决定
 
@@ -25,11 +25,11 @@ v1.0.1 中 Web 由产品服务账号 `a-nas` 代为读写、SMB 以每个用户�
 - 由于只在共享文件夹根目录授权，同一共享文件夹内的改名与移动保持一致权限；跨共享文件夹在 Windows 中表现为复制再删除，新文件继承目标文件夹的 ACL。Web 跨文件夹移动后重新应用目标继承 ACL；后台 ACL 一致性任务修复漂移。
 - 未来的搜索、缩略图与 AI 索引需要一个可读全部的索引身份；任何查询结果在返回前都必须以请求者身份做访问检查。
 - 文件属主以 UID 记录在数据卷上：重装系统盘后必须按原 UID 恢复账号。Host Agent 把身份表镜像到数据卷的 `.a-nas-identities.json`（仅 root 可读），供恢复使用。
-- v1.0.1 实验卷只含可丢弃测试数据，不做迁移；rc.5 让 `a-nas` 与用户共同持有个人空间的过渡 ACL 由本决定取代，本决定在 SMB 与权限矩阵验收前实现。
+- v1.0.1 实验卷只含可丢弃测试数据，不做迁移；rc.5 让 `a-nas` 与用户共同持有个人空间的过渡 ACL 已由本决定取代。
 
 ## 未选择
 
-- 产品服务代为读写、授权留在应用层（v1.0.1 现状）：Web 与 SMB 身份分裂，权限不由内核强制，产品服务被攻破即可读写全部数据。
+- 产品服务代为读写、授权留在应用层（rc.5 及更早的做法）：Web 与 SMB 身份分裂，权限不由内核强制，产品服务被攻破即可读写全部数据。
 - Samba `vfs_acl_xattr` 保存 NT ACL：只有 Samba 执行，Web 与应用绕过它。
 - 产品服务持有 `CAP_DAC_OVERRIDE` 后自行判定：授权重新回到应用层。
 - 文件代理信任产品服务声明的用户身份：产品服务被攻破即可冒充任何账号。
@@ -43,4 +43,5 @@ v1.0.1 中 Web 由产品服务账号 `a-nas` 代为读写、SMB 以每个用户�
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [存储与文件架构](../architecture/storage-and-files.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
-- 被替代的现状实现：[`internal/hostops/linux/executor.go`](../../internal/hostops/linux/executor.go)、[`internal/files/service.go`](../../internal/files/service.go)
+- 实现：[`internal/hostops/linux`](../../internal/hostops/linux/acl.go)（身份、ACL 与查看授权）、[`internal/filebroker`](../../internal/filebroker/server.go)（按用户运行的文件 Worker）、[`internal/files/service.go`](../../internal/files/service.go)
+- 部署约束：[Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)

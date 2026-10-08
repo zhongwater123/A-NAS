@@ -12,7 +12,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
   ├── Auth / Files / Storage / Share / Jobs / Policy
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
-  │                              └── AI Orchestrator ──► AI Worker（只读 fd，无网络）
+  │                              └── AI Orchestrator ──► AI Worker（M2 规划；只读 fd，无网络）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
           └── Host Agent Client Adapter
@@ -20,9 +20,11 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
                     ▼
                 Host Agent（root 系统服务、受限 UDS）
                     ├── Linux 状态 Adapter
-                    └── 类型化卷、Samba 与 Btrfs 快照操作
+                    ├── 类型化身份、ACL、卷、Samba 与 Btrfs 快照操作
+                    ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
+                    └── 会话查询（供相册服务确认身份）
 
-Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
+Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内核 POSIX ACL → 个人空间或 Shared → Btrfs 数据卷
                          ├── 隐藏回收站
                          └── 不通过 SMB 暴露的只读快照
 
@@ -41,47 +43,47 @@ Web / SMB3 → Policy → 个人空间或 Shared → Btrfs 数据卷
 
 1. AI 服务停止时，文件共享、权限、快照、备份和恢复仍然工作。
 2. 产品服务以非 root 身份运行；特权操作只进入 Host Agent。
-3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口；容器代理同样只提供类型化容器操作，不透传 Docker Engine API，产品服务用户永不加入 `docker` 组。
+3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口；唯一例外是管理员的 Web 终端，Shell 在该管理员本人的 Linux 账号（UID 20100–29999）下运行，从不以 root 运行；容器代理同样只提供类型化容器操作，不透传 Docker Engine API，产品服务用户永不加入 `docker` 组。
 4. 磁盘和文件使用稳定资源 ID；临时路径和 `/dev/sdX` 不是身份。
 5. 修改宿主机状态的操作遵循“规划、确认、执行”三阶段。
-6. 文件浏览、共享、传统搜索和 AI 检索共同使用 Policy。
+6. 文件数据只由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权，搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
 9. 本地控制台与远程浏览器使用同一 Web UI 和产品 API；Kiosk 不获得额外宿主机权限。
 10. 受管图库以稳定照片资产 ID 表达用户可见身份；内容对象路径和内容哈希不成为公共文件身份。
 11. AI Worker 不能写原图、权限或用户元数据；只有 Photo Library Module 可以提交权威目录状态。
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
-13. Web 与 SMB 共用账号和 Policy，但密码凭据分别以不可逆格式保存，明文只存在于创建或重置调用期间。
+13. Web 与 SMB 共用同一个 Linux 账号与 ACL，但密码凭据分别以不可逆格式保存，明文只存在于创建或重置调用期间。
 14. 受管图库存储只由相册服务身份访问，照片资产授权由相册 Policy 判定；个人空间与共享文件夹仍只由 ACL 授权，相册服务不获得其访问权（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
 
 ## 当前代码入口
 
-| 路径 | 责任 | 当前状态 |
+| 路径 | 责任 | 实现状态 |
 |---|---|---|
 | `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、快照、可选终端与容器管理已接线 |
-| `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态及类型化特权操作 |
+| `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
 | `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、快照、账号、存储、资源管理、终端、Docker 窗口与随机单视频循环屏保已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的回环同源校验 | 已实现 |
 | `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
-| `deploy/systemd/system` / `deploy/pam` / `deploy/config` | 直连屏幕的非特权 Cage/Chromium 会话与设备配置 | 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
+| `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
-| `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md)，尚未在实验 NAS 部署 |
-| `internal/accounts` / `internal/files` / `internal/storage` | 身份 Policy、文件闭环和持久化执行计划 | 本地实现与测试完成，实机验收待进行 |
-| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 本地与特权容器测试完成，实机验收待进行 |
-| `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | Fake command 测试完成，实机验收待进行 |
+| `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md) |
+| `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性，文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
+| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
+| `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
-| `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话的查询接口 | 本地与特权容器测试完成，尚未在实验 NAS 部署 |
+| `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
-| `docs/specs` | 可验收的产品行为 | 已记录首个只读状态规格 |
-| `docs/investigations` | 复杂缺陷的证据和根因 | 已记录并关闭首个实机部署调查 |
-| `docs/runbooks` | 可重复且可验证的操作 | SSH、用户态部署与 Linux Adapter 验收手册已验证 |
+| `docs/specs` | 可验收的产品行为 | 见[规格索引](../specs/README.md) |
+| `docs/investigations` | 复杂缺陷的证据和根因 | 见[调查索引](../investigations/README.md) |
+| `docs/runbooks` | 可重复且可验证的操作 | 见[手册索引](../runbooks/README.md) |
 
-新增模块时，应在其代码附近放置包级说明和测试；只有跨模块关系或系统不变量才更新本页。
+新增模块时，应在其代码附近放置包级说明和测试；只有跨模块关系或系统不变量才更新本页。部署与实机验收进度只记录在[当前状态](../status/CURRENT.md)。
 
 ## 关联
 

@@ -65,7 +65,7 @@ _Avoid_：已删除文件、备份
 _Avoid_：备份、整卷还原点、定时快照
 
 **Policy**：
-文件访问、共享、搜索和 AI 检索共同使用的授权规则来源。
+产品层的访问规则：决定空间、图库与照片资产对谁可见、允许哪些操作。文件数据的最终授权由内核按 POSIX ACL 执行（ADR 0008），文件侧 Policy 只决定可见范围并读写 ACL；照片资产由相册 Catalog Policy 授权（ADR 0011）。搜索与 AI 检索在返回前按 Policy 过滤。
 _Avoid_：AI 权限、搜索 ACL
 
 **派生数据（Derived Data）**：

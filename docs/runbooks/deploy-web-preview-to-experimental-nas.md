@@ -1,7 +1,9 @@
 # 部署 Web 桌面预览到实验 NAS
 
-状态：implemented, remote verified
-更新时间：2026-10-06
+状态：superseded（2026-10-08）
+更新时间：2026-10-08
+
+> ADR 0008 之后 A-NAS 以 root 管理的系统服务运行（`/etc/systemd/system`、`/opt/a-nas/current`）。本手册的激活、诊断与回滚步骤只适用于旧的 `anas-dev` 用户级部署，**不得再执行**：用户级 Host Agent 会因不是 root 而退出，用户级 `anas-api` 会与系统服务争用 8080 端口。仍然有效的只有“远程浏览与验证”中的 SSH 隧道，以及 `deploy-dev.ps1 -StageOnly` 暂存；部署、诊断与回滚见[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)。
 
 ## 目的
 

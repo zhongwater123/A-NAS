@@ -17,7 +17,7 @@
 
 ## 前提
 
-先按[Web 桌面部署手册](deploy-web-preview-to-experimental-nas.md)至少部署一次，使以下版本化文件出现在 `~/apps/a-nas/current/`：
+按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装一个 release，并把 `~anas-dev/apps/a-nas/current` 切到该 release，使以下版本化文件出现在其中：
 
 - `kiosk-launcher`
 - `anas-kiosk@.service`
