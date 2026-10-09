@@ -6,5 +6,6 @@
   "sizeBytes": 484622336,
   "sha256": "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c",
   "license": "apache-2.0 per the repository metadata; the model card links the Gemma license text, which must be checked before release",
+  "stagingPath": "/home/anas-dev/apps/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm",
   "installPath": "/opt/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm"
 }
