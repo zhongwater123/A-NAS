@@ -34,7 +34,7 @@ class RealModelTest(unittest.TestCase):
         cls.provider = providers.MediaPipeProvider(MODEL, MANIFEST)
 
     def text(self, label):
-        return self.provider.embed_text(f"task: search result | query: {label}")
+        return self.provider.embed_query(label)
 
     def test_describes_itself(self):
         self.assertEqual(self.provider.dimensions, 768)

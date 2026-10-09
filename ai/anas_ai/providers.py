@@ -47,6 +47,11 @@ VISION_TOKENS = (70, 140)
 class MediaPipeProvider:
     """EmbeddingGemma 2 through MediaPipe's Universal Embedder."""
 
+    # EmbeddingGemma's retrieval prompt; images get none. The label
+    # calibration (docs/research/photo-ai-label-calibration.md) found it the
+    # better of the prompts tried for Chinese search.
+    QUERY_PROMPT = "task: search result | query: {}"
+
     def __init__(self, model_path, manifest_path, vision_tokens=70, cache_dir=None):
         if vision_tokens not in VISION_TOKENS:
             raise ValueError(f"vision tokens must be one of {VISION_TOKENS}")
@@ -86,6 +91,9 @@ class MediaPipeProvider:
     def embed_text(self, text):
         return self._vector(self._embedder.embed_text(text))
 
+    def embed_query(self, text):
+        return self.embed_text(self.QUERY_PROMPT.format(text))
+
     def close(self):
         self._embedder.close()
 
@@ -104,6 +112,12 @@ class FakeProvider:
     def embed_image(self, data):
         if not data:
             raise InvalidInput("empty image")
+        return self._vector(data)
+
+    def embed_query(self, text):
+        return self._vector(text.encode())
+
+    def _vector(self, data):
         values = []
         counter = 0
         while len(values) < self.dimensions:

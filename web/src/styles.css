@@ -628,6 +628,9 @@ button { font: inherit; }
 .window-content-photos { position: relative; overflow: hidden; }
 .photos-page { height: 100%; overflow: auto; }
 .photos-actions { display: flex; align-items: center; gap: 8px; }
+.photos-search { display: flex; align-items: center; }
+.photos-search input { width: 180px; min-height: 30px; padding: 0 8px; border: 1px solid #cbd7e3; border-right: 0; border-radius: 8px 0 0 8px; font: inherit; font-size: 12px; }
+.product-page .photos-search button { border-radius: 0 8px 8px 0; }
 .photos-actions .upload-button { gap: 5px; }
 .segmented { display: inline-flex; padding: 2px; border: 1px solid #cbd7e3; border-radius: 9px; background: #fff; }
 .product-page .segmented button { min-height: 26px; border: 0; border-radius: 7px; background: transparent; }

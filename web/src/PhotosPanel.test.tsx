@@ -287,3 +287,50 @@ describe("PhotosPanel viewing and hints", () => {
     expect(screen.getByText("bob、carol 也保存了相同的照片。")).toBeTruthy();
   });
 });
+
+describe("PhotosPanel search", () => {
+  it("searches the caller's and the shared library, says when only names matched and returns to the timeline", async () => {
+    const fetchMock = serve((url) => {
+      if (url.startsWith("/api/v1/photos/search")) return json({ items: [asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" })], semantic: false });
+      if (url.includes("/timeline")) return json({ items: [asset("photo:home")] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:home.jpg" });
+
+    await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "海边的猫{Enter}");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB&limit=120", expect.anything());
+    await user.click(await screen.findByRole("button", { name: "查看 photo:sea.jpg" }));
+    expect(screen.getByText("智能搜索暂不可用，只按照片名称匹配。")).toBeTruthy();
+    // A shared photo someone else uploaded: Alice may copy it but not change it.
+    expect(screen.getByRole("button", { name: "复制到我的图库" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "关闭查看" }));
+
+    await user.click(screen.getByRole("button", { name: "清除搜索" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:home.jpg" })).toBeTruthy();
+    expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("adds the viewed member library only while viewing it", async () => {
+    const viewed: PhotoLibrary = { id: "library:alice", kind: "private", ownerUserId: "user:alice", ownerName: "alice", createdAt: "2026-10-08T00:00:00Z", viewing: { grantId: "viewing:7", expiresAt: "2026-10-09T09:00:00Z" } };
+    const own: PhotoLibrary = { ...privateLibrary, id: "library:admin", ownerUserId: "user:admin" };
+    const fetchMock = serve((url) => {
+      if (url === "/api/v1/photos/libraries") return json({ items: [own, sharedLibrary, viewed] });
+      if (url.startsWith("/api/v1/photos/search")) return json({ items: [], semantic: true });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:admin" isAdmin />);
+    const box = await screen.findByRole("searchbox", { name: "搜索照片" });
+    await user.type(box, "猫{Enter}");
+    expect(await screen.findByText("没有找到相关照片")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120", expect.anything());
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "图库" }), "library:alice");
+    await user.type(box, "猫{Enter}");
+    expect(await screen.findByText(/alice 的私有图库中搜索/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120&viewing=library%3Aalice", expect.anything());
+  });
+});

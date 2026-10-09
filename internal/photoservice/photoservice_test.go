@@ -75,6 +75,8 @@ func start(t *testing.T, configure ...func(*photoservice.Config)) running {
 			return nil
 		},
 		Photos: photos.Options{DisableCapacityReserve: true},
+		// A busy test machine must not keep AI work waiting.
+		AIPressure: func(string) (float64, error) { return 0, nil },
 	}
 	for _, change := range configure {
 		change(&config)

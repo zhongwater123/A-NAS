@@ -157,6 +157,8 @@ type Options struct {
 	// Location interprets EXIF capture times recorded without an offset;
 	// it defaults to time.Local.
 	Location *time.Location
+	// AI encodes search queries; nil leaves search to photo names.
+	AI Embedder
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -185,6 +187,10 @@ type Service struct {
 	ai        aiProgress
 	aiModelMu sync.Mutex
 	aiModel   string
+	// embedder encodes search queries, and index holds image vectors for
+	// search.
+	embedder Embedder
+	index    vectorIndex
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -230,7 +236,7 @@ func Open(root string, options Options) (*Service, error) {
 		db: db, root: opened, rootPath: root,
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
-		admits: capacity.Admits, location: options.Location,
+		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
 	}
 	if options.DisableCapacityReserve {

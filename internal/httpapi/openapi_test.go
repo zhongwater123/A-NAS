@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,6 +61,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo thumbnail pending", path: "/api/v1/photos/assets/" + photoAssetID + "/thumbnail", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo trash", path: "/api/v1/photos/libraries/" + photoLibraryID + "/trash", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo AI status", path: "/api/v1/photos/ai", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo search", path: "/api/v1/photos/search?q=" + url.QueryEscape("海边的猫"), handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photos unavailable", path: "/api/v1/photos/libraries", handler: withPhotoPrincipal(photosapi.New(nil, nil)), wantStatus: http.StatusServiceUnavailable},
 		{name: "health", path: "/healthz", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "system", path: "/api/v1/system", reader: fake.NewHealthy(), wantStatus: http.StatusOK},

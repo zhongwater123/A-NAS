@@ -78,7 +78,7 @@ M2 交付后，成员可以：
 客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
 
 - 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）。`embed_text` 随搜索步骤加入。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。
 - 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
 - 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 
@@ -114,9 +114,12 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 ### 语义搜索
 
-- `GET /api/v1/photos/search?q=&cursor=&limit=`：相册服务请 Worker 编码查询文本，再对调用方可访问图库中的照片做精确余弦扫描（向量常驻内存，20,000 张约 60 MB），与文件名、用户标签和 AI 标签的文字匹配合并排序后分页返回。
-- 范围与 Policy 和时间线一致：自己的私有图库与共享图库；管理员只在查看授权有效期间加入对应成员的私有图库。候选生成前限定图库，返回前再逐条校验可见性。
-- AI 不可用时，搜索退化为文件名与标签的文字匹配，并提示“语义搜索暂不可用”。
+已实现于 [`photos/search.go`](../../internal/photos/search.go)，桌面相册窗口提供搜索框。
+
+- `GET /api/v1/photos/search?q=&viewing=&cursor=&limit=`：查询 1–200 字符。相册服务请 Worker 编码查询，再对范围内未进回收站的照片做精确余弦扫描。图片向量按内容对象常驻内存（20,000 张约 60 MB）：第一次搜索时按当前模型载入，之后随新向量写入与对象清除同步更新，换模型时整体重载。
+- 排序：名称包含查询（不区分大小写）的照片排在最前，其余按相似度降序，语义结果最多 500 张；不设分数下限。公开数据集上，短查询的正例与其他照片的相似度大面积重叠（[校准报告](../research/photo-ai-label-calibration.md)），截断只会漏掉真实结果，排序才是区分手段。用户标签与 AI 标签的文字匹配随步骤 5、6 加入。分页游标记录上一页最后一项的分数与 ID。
+- 范围按[规格](../specs/photo-library.md)：普通搜索覆盖自己的私有图库与共享图库，不混入任何查看中的成员图库；管理员在查看模式下用 `viewing` 指定所查看的成员私有图库，经有效授权校验后加入，授权过期或无权时与不存在的图库一样返回 404。候选只从范围内的图库查询，结果来自 Catalog 当前记录。
+- AI 不可用（未安装、未运行、模型不符或编码失败）时只按名称匹配，响应的 `semantic` 为 `false`，窗口提示“智能搜索暂不可用”。
 
 ### 失败、版本与重建
 
@@ -133,7 +136,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 | 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 已实现：用 Fake Provider 跑通“上传 → 缩略图 → 向量”；没有 Worker 时冒烟与系统测试照常通过。Host Agent 活动信号移入后续步骤 |
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | 已实现：[`ai/`](../../ai/anas_ai/worker.py) 的协议测试只需标准库并纳入 `make check`；Go 客户端与 Python Worker 的互通测试通过；真实模型测试在 Debian 13 容器中通过 |
 | 3 | 9 | 进行中（中文检索已测完；词表 v1、校准脚本已完成，全量阈值在开发机后台计算，见[校准报告](../research/photo-ai-label-calibration.md)）：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
-| 4 | 12 | 搜索接口、内存索引、Policy 过滤与桌面搜索框 | 本地 systemd 环境中用真实模型完成中文搜索，泄漏测试覆盖搜索结果 |
+| 4 | 12 | 已实现：搜索接口、内存索引、搜索范围与桌面搜索框；Worker 增加 `embed_query` | 单元与泄漏测试覆盖范围、查看授权、回收站与分页；本地 systemd 环境中真实模型的中文搜索结果见[校准报告](../research/photo-ai-label-calibration.md#端到端搜索本地-systemd-环境) |
 | 5 | 12 | AI 标签计算、查看器标签展示、按标签筛选 | 标签只在阈值之上出现；隐藏后重算不复现 |
 | 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
 | 7 | 10 | 打包：离线 wheel 与哈希、模型清单、`anas-ai` 单元与安装器、系统测试 | 系统测试在无网络下安装并运行 Worker；不部署到 NAS，等你决定 |

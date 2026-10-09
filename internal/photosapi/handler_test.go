@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -319,5 +320,33 @@ func TestAIStatusReportsProgressOverVisiblePhotos(t *testing.T) {
 	stranger.json(http.MethodGet, "/api/v1/photos/ai", nil, http.StatusOK, &status)
 	if status.Pending != 0 {
 		t.Fatalf("another member's AI status counts alice's photo: %+v", status)
+	}
+}
+
+func TestSearchMatchesNamesWithoutLocalAI(t *testing.T) {
+	handler, _ := newAPI(t)
+	owner := client{t: t, handler: handler, as: alice}
+	private, _ := librariesOf(owner)
+	for _, name := range []string{"海边的猫.png", "garage.png"} {
+		if response := owner.upload(private.ID, "", name, pngBytes(t, uint8(len(name)))); response.Code != http.StatusCreated {
+			t.Fatalf("upload %s status = %d", name, response.Code)
+		}
+	}
+	var results struct {
+		Items    []photos.Asset `json:"items"`
+		Semantic bool           `json:"semantic"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/search?q="+url.QueryEscape("海边"), nil, http.StatusOK, &results)
+	if results.Semantic || len(results.Items) != 1 || results.Items[0].Name != "海边的猫.png" {
+		t.Fatalf("search without an AI Worker = %+v", results)
+	}
+	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/search?q="+url.QueryEscape("海边"), nil, http.StatusOK, &results)
+	if len(results.Items) != 0 {
+		t.Fatalf("another member finds %+v", results.Items)
+	}
+	for _, query := range []string{"", "?q=", "?q=" + strings.Repeat("猫", photos.MaxQueryRunes+1)} {
+		if response := owner.do(http.MethodGet, "/api/v1/photos/search"+query, nil, ""); response.Code != http.StatusBadRequest {
+			t.Fatalf("search%s status = %d, want 400", query, response.Code)
+		}
 	}
 }

@@ -25,6 +25,11 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 			}
 			content, _ := io.ReadAll(file)
 			return &aiworker.Response{OK: true, Vector: aiworkertest.Encode([]float32{float32(len(content)), 0.5})}
+		case aiworker.OpEmbedQuery:
+			if file != nil {
+				return nil
+			}
+			return &aiworker.Response{OK: true, Vector: aiworkertest.Encode([]float32{float32(len([]rune(request.Text))), 1})}
 		}
 		return nil
 	})
@@ -46,6 +51,10 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	vector, err := client.EmbedImage(context.Background(), file)
 	if err != nil || len(vector) != 2 || vector[0] != 7 || vector[1] != 0.5 {
 		t.Fatalf("EmbedImage() = %v, %v; want the Worker to read the 7 bytes behind the descriptor", vector, err)
+	}
+	vector, err = client.EmbedQuery(context.Background(), "海边的猫")
+	if err != nil || len(vector) != 2 || vector[0] != 4 {
+		t.Fatalf("EmbedQuery() = %v, %v; want the Worker to receive the four characters", vector, err)
 	}
 }
 
