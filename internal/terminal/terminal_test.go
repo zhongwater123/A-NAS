@@ -46,6 +46,7 @@ func TestSessionRequestsAreRejectedBeforeUpgrade(t *testing.T) {
 		{name: "remote peer", enabled: true, remoteAddr: "192.0.2.10:40000", host: "127.0.0.1:8080", upgrade: true, wantStatus: http.StatusForbidden, wantCode: "terminal_forbidden"},
 		{name: "rebound host", enabled: true, remoteAddr: "127.0.0.1:40000", host: "attacker.example:8080", upgrade: true, wantStatus: http.StatusForbidden, wantCode: "terminal_forbidden"},
 		{name: "plain request", enabled: true, remoteAddr: "[::1]:40000", host: "localhost:8080", upgrade: false, wantStatus: http.StatusUpgradeRequired, wantCode: "upgrade_required"},
+		{name: "LAN browser through the entry", enabled: true, remoteAddr: "127.0.0.1:40000", host: "172.18.45.48", upgrade: false, wantStatus: http.StatusUpgradeRequired, wantCode: "upgrade_required"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

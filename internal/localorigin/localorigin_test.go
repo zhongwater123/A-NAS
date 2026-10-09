@@ -24,6 +24,24 @@ func TestLoopbackHost(t *testing.T) {
 	}
 }
 
+func TestDeviceHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"127.0.0.1:8080":      true,
+		"localhost:8080":      true,
+		"[::1]:8080":          true,
+		"172.18.45.48":        true,
+		"172.18.45.48:80":     true,
+		"[fe80::1]:80":        true,
+		"attacker.example:80": false,
+		"a-nas.local":         false,
+		"":                    false,
+	} {
+		if got := localorigin.DeviceHost(host); got != want {
+			t.Errorf("DeviceHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
 func TestCheckWrite(t *testing.T) {
 	tests := []struct {
 		name, host, contentType, origin string
@@ -31,6 +49,8 @@ func TestCheckWrite(t *testing.T) {
 	}{
 		{name: "desktop request", host: "127.0.0.1:8080", contentType: "application/json; charset=utf-8", origin: "http://127.0.0.1:8080"},
 		{name: "no origin from local tool", host: "localhost:8080", contentType: "application/json"},
+		{name: "LAN desktop request", host: "172.18.45.48", contentType: "application/json", origin: "http://172.18.45.48"},
+		{name: "LAN request from another device's page", host: "172.18.45.48", contentType: "application/json", origin: "http://172.18.45.9", want: localorigin.ErrOrigin},
 		{name: "rebound host", host: "attacker.example:8080", contentType: "application/json", want: localorigin.ErrHost},
 		{name: "form post", host: "127.0.0.1:8080", contentType: "text/plain", origin: "http://127.0.0.1:8080", want: localorigin.ErrContentType},
 		{name: "cross origin", host: "127.0.0.1:8080", contentType: "application/json", origin: "http://attacker.example", want: localorigin.ErrOrigin},
