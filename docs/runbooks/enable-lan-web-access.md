@@ -1,6 +1,6 @@
 # 启用局域网 Web 访问
 
-状态：draft（尚未在实验 NAS 执行）
+状态：verified（2026-10-09 已在 Experimental NAS 执行）
 更新时间：2026-10-09
 
 ## 目的
@@ -30,9 +30,11 @@
 
 ## 验证
 
-- NAS 上：`curl -fsS http://127.0.0.1/healthz` 返回 `{"status":"ok"}`；`ss -ltn 'sport = :8080'` 只显示 `127.0.0.1:8080`。
-- 另一台内网电脑：PowerShell 中 `Test-NetConnection 172.18.45.48 -Port 80` 的 `TcpTestSucceeded` 为 `True`；浏览器打开 `http://172.18.45.48`，用成员账号登录，上传并下载一个文件。
+- NAS 上：`ss -ltn '( sport = :80 or sport = :8080 )'` 显示 `*:80`，产品服务只有 `127.0.0.1:8080`。NAS 默认没有安装 `curl`，HTTP 检查在另一台电脑上做。
+- 另一台内网电脑：PowerShell 中 `curl.exe -sS http://172.18.45.48/healthz` 返回 `{"status":"ok"}`，`Test-NetConnection 172.18.45.48 -Port 80` 的 `TcpTestSucceeded` 为 `True`；浏览器打开 `http://172.18.45.48`，用成员账号登录，上传并下载一个文件。
 - 本地控制台仍为已登录桌面；Windows 仍能用同一账号打开 `\\172.18.45.48\Shared`。
+
+2026-10-09 使用本手册在 `64f0e26d8349` 上启用：安装 Caddy 2.6.2，Debian 默认配置备份为 `Caddyfile.before-a-nas`；NAS 上 `*:80` 与 `127.0.0.1:8080` 监听正确；从公司 WiFi 上的开发机访问健康检查返回 `ok`、首页 `200`、未登录接口 `401`。浏览器登录与上传由设备所有者后续确认。
 
 ## 回滚或恢复
 

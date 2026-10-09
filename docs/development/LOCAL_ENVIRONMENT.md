@@ -114,7 +114,10 @@ bash scripts/system-test.sh
 ### 与实验 NAS 联调
 
 - SSH 别名 `a-nas` 写在 `%USERPROFILE%\.ssh\config`，以 Debian 安装时创建的普通账号 `guoyi` 登录，密钥为 `%USERPROFILE%\.ssh\a-nas-guoyi_ed25519`（无口令，只授权给本机）。该账号不属于 `sudo`，只用于只读检查与联调；任何 root 操作仍由管理员按运行手册执行。
-- 本机没有 `anas-dev` 的密钥，而 `deploy-dev.ps1` 会在 `~/workspace/A-NAS` 中运行 `make check`（本机缺 gcc），所以不能直接用它暂存 release。要在本机暂存，先按 [SSH 手册](../runbooks/bootstrap-experimental-nas-ssh.md)为 `anas-dev` 授权本机密钥，并补齐 WSL 中的 gcc；否则在开发机 A 暂存。
+- SSH 别名 `a-nas-dev` 以 `anas-dev` 登录，密钥为 `%USERPROFILE%\.ssh\a-nas-dev_ed25519`（无口令，只授权给本机），用于暂存 release。
+- `deploy-dev.ps1` 只有在 `build/.validated-build` 与提交、产品版本和两个二进制哈希都一致时才跳过 WSL 中的 `make check`。本机缺 gcc，不能原生运行 `make check`：2026-10-09 暂存 `64f0e26d8349` 时，按[运行检查](#运行检查)逐项运行 `check-steps` 的全部目标（cgo 部分在容器中，`go build` 加 `-trimpath -ldflags "-X main.version=<12 位提交>"`），全部通过后按 Makefile `check` 目标的格式写入该文件，再运行 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户> -ScreensaverVideo <视频>`。在 WSL 中补齐 gcc 后即可改用原生 `make check`。
+- 屏保视频池随每个 release 暂存，不传 `-ScreensaverVideo` 的新 release 不含屏保。本机没有原始视频时，先从上一 release 下载到空目录：`scp 'a-nas-dev:apps/a-nas/releases/<上一 release>/screensavers/screensaver-00[0-4].mp4' <目录>`，用该 release 的 `RELEASE` 中的哈希核对后再按编号传入。
+- 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。
 - 撤销本机访问：删除 NAS 上 `/home/guoyi/.ssh/authorized_keys` 中注释为 `claude-code@SKZ00011303->guoyi@a-nas` 的一行。
 
 ## Root 集成测试
