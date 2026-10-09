@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 于 2026-10-09 部署主干合并提交 `64f0e26d8349`，包含 PR #39 的 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复、#40 屏保视频池、#45 本机会话与 #47 局域网 Web 入口，不含之后合并的相册 #42–#46：系统服务与 Kiosk 指向同一 release，Host Agent 启动自检记录 `file broker identity switch verified`，相册服务就绪，Caddy 在 80 端口提供局域网入口，产品服务仍只监听 `127.0.0.1:8080`。Docker 与应用中心的实时代理模式自 2026-10-08 起启用。OpenList 已按 `app-openlist` 的 UID/GID 30002 重建，状态 running、重启计数 0、HTTP 返回 200。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝，遗留的 `a-nas-members` 组已不存在。Web 文件在新版本上的用户级实机验收（上传、删除、恢复）尚未执行。
+v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 于 2026-10-09 部署 PR #50 的候选提交 `6941733d3134`，包含文件管理三栏布局、可调栏宽、列表/图标视图、文件夹优先排序、成熟图标工具栏与当前目录上传入口：系统服务与 Kiosk 指向同一 release，Host Agent 启动自检记录 `file broker identity switch verified`，相册服务就绪，Caddy 在 80 端口提供局域网入口，产品服务仍只监听 `127.0.0.1:8080`。Docker 与应用中心的实时代理模式自 2026-10-08 起启用。OpenList 已按 `app-openlist` 的 UID/GID 30002 重建，状态 running、重启计数 0、HTTP 返回 200。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝，遗留的 `a-nas-members` 组已不存在。新文件管理界面的用户级实机验收（布局交互、上传、删除、恢复）尚未执行。
 
 升级中发现并修复了三个连续阻塞：身份同步前把不存在账号写入 ACL 导致 Host Agent 启动死锁、`build-binaries` 未先生成嵌入式 Web UI、数据卷挂载点缺少 `a-nas-users:--x`。证据与最小回归见 [ADR 0008 首次升级调查](../investigations/2026-10-08-adr0008-bootstrap-private-acl.md)。容器部署又暴露出 Debian 13 将 CLI 拆为独立推荐包，以及部署脚本误用 `/screensaver.mp4`、`/v1/containers` 两个路由；集中式只读探针修正为 `/local-console/screensaver.mp4`、`/v1/snapshot` 后已完成实机切换，详见[容器部署调查](../investigations/2026-10-08-experimental-nas-containers-disabled.md)。旧 Samba 凭据已按手册删除，需要管理员通过已部署的自助改密入口重建后才能开始 Windows SMB 双向验收。
 
@@ -19,13 +19,14 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
 - Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
-- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音屏保。视频池为每次进入屏保时随机选择一条并持续循环、退出后下次闲置重新选择、单条失败补选和按 release 隔离的外部资产；`64f0e26d8349` 已带五条视频部署，安装器逐条核对了哈希，直连屏幕上的轮换行为尚未核对。2026-10-08 已在 `ed5368ba998e` 上验收 API、Host Agent、Kiosk、嵌入式桌面和旧兼容路由的 Range 请求，开机动画随 `946638851c7c` 部署。
+- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音屏保。视频池为每次进入屏保时随机选择一条并持续循环、退出后下次闲置重新选择、单条失败补选和按 release 隔离的外部资产；`6941733d3134` 已带五条视频部署，安装器逐条核对了哈希，直连屏幕上的轮换行为尚未核对。2026-10-08 已在 `ed5368ba998e` 上验收 API、Host Agent、Kiosk、嵌入式桌面和旧兼容路由的 Range 请求，开机动画随 `946638851c7c` 部署。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 - rc.4 已创建 `/dev/sda1` Btrfs 数据卷（UUID `09e275fe-794a-458d-8200-b6e67c55cc22`）并挂载到 `/srv/a-nas/data`；卷 marker 与 UUID 一致，API、Host Agent、Kiosk 和 Samba 服务均 active。
 - 文件闭环权限根因与修复边界已记录在[数据卷空间权限调查](../investigations/2026-10-07-data-volume-space-permissions.md)；父目录、ACL、共用回收站和启动自愈的最小 Go 回归已由红转绿。该 rc.5 方案已被 ADR 0008 取代。
-- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 六个实现步骤均已完成；实验 NAS 的旧 `admin` 已按[手册](../runbooks/provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008)重建为统一 Linux 身份，ACL、身份镜像与 Product Service 隔离已实机验证；issue #38 的修复已随 `64f0e26d8349` 部署且 Host Agent 启动自检通过，Web 文件的用户级实机验收尚未执行。Samba 凭据需管理员与成员各自改密后重建，之后再做客户端验收。
+- [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 六个实现步骤均已完成；实验 NAS 的旧 `admin` 已按[手册](../runbooks/provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008)重建为统一 Linux 身份，ACL、身份镜像与 Product Service 隔离已实机验证；issue #38 的修复已随 `6941733d3134` 部署且 Host Agent 启动自检通过，Web 文件的用户级实机验收尚未执行。Samba 凭据需管理员与成员各自改密后重建，之后再做客户端验收。
+- PR #50 候选提交 `6941733d3134` 已通过 `make check VERSION=6941733d3134` 和 Debian 13 systemd 容器系统测试；部署制品的 API SHA-256 为 `b3f23d831a3e3eacf540a9adf3fab94bf7a558541a960f367e81b8898b2487c6`，Host Agent SHA-256 为 `40bd005683890fab8db6ba6da795b45def653f0c4714e327b02f1aef2098eb1a`。实验 NAS 切换后两个 current 链接一致，六个相关服务 active，回环与局域网健康检查均返回 `ok`，五条屏保资源可列出。
 - 开发循环使用受影响测试，完整门禁为每个不可变 RC 制品只执行一次；部署按提交、版本和二进制哈希复用验证证明。
 - [系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)在 Debian 13 systemd 容器中用真实安装器、unit 与二进制按用户检查 Web、SMB、相册、服务身份的权限与局域网 Web 入口，共 46 项，并作为 CI 作业运行。
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
@@ -37,7 +38,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 ## 下一步
 
-1. 在 Web 中打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `64f0e26d8349` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
+1. 在 Web 中验收 PR #50 的文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口和资源文件夹跳转，再打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `6941733d3134` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
 3. 恢复应用中心：按[安装手册第 2 步](../runbooks/install-container-agent.md#2-配置-docker-网络地址池)在 Experimental NAS 配置 Docker 地址池 `10.96.64.0/18`，按第 4 步把容器代理更新到包含 ADR 0013 检查的版本，再从应用中心重新安装 Immich（数据保留），见[调查](../investigations/2026-10-09-app-network-cut-off-wifi-clients.md)。
 4. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
@@ -48,7 +49,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 ## 外部条件与限制
 
-- Experimental NAS 当前在线并运行 `64f0e26d8349`；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，Web 文件、文件和共享用户闭环及相册用户功能验收仍未完成。
+- Experimental NAS 当前在线并运行 PR #50 候选提交 `6941733d3134`；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、文件和共享用户闭环及相册用户功能验收仍未完成。
 - v1.0.1 只使用可丢弃测试数据。单盘 Btrfs 不提供冗余、备份或家庭生产数据可靠性承诺。
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
