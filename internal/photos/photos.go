@@ -176,8 +176,15 @@ type Service struct {
 	admits          func(path string, incoming int64) (bool, error)
 	location        *time.Location
 	sharedLibraryID string
-	// mediaWake tells RunMedia that an import queued work.
+	// mediaWake tells RunMedia that an import queued work, and aiWake tells
+	// RunAI that a thumbnail did.
 	mediaWake chan struct{}
+	aiWake    chan struct{}
+	// ai is what RunAI last observed; aiModel is the model whose stale
+	// vectors have already been queued again.
+	ai        aiProgress
+	aiModelMu sync.Mutex
+	aiModel   string
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -224,7 +231,7 @@ func Open(root string, options Options) (*Service, error) {
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
 		admits: capacity.Admits, location: options.Location,
-		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
+		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
 	}
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }

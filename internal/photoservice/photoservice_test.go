@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/aiworker"
+	"github.com/zhongwater123/A-NAS/internal/aiworker/aiworkertest"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
@@ -53,7 +55,7 @@ type running struct {
 	cancel context.CancelFunc
 }
 
-func start(t *testing.T) running {
+func start(t *testing.T, configure ...func(*photoservice.Config)) running {
 	t.Helper()
 	// Unix socket paths are short; t.TempDir can exceed the limit.
 	dir, err := os.MkdirTemp("", "photos")
@@ -64,18 +66,20 @@ func start(t *testing.T) running {
 	r := running{socket: filepath.Join(dir, "photos.sock"), root: filepath.Join(dir, "store"), ready: &atomic.Bool{}, done: make(chan error, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
-	go func() {
-		r.done <- photoservice.Run(ctx, photoservice.Config{
-			Root: r.root, SocketPath: r.socket, Sessions: knownSessions, RetryInterval: 10 * time.Millisecond,
-			CheckStore: func(string) error {
-				if !r.ready.Load() {
-					return photoservice.ErrStoreUnavailable
-				}
-				return nil
-			},
-			Photos: photos.Options{DisableCapacityReserve: true},
-		})
-	}()
+	config := photoservice.Config{
+		Root: r.root, SocketPath: r.socket, Sessions: knownSessions, RetryInterval: 10 * time.Millisecond,
+		CheckStore: func(string) error {
+			if !r.ready.Load() {
+				return photoservice.ErrStoreUnavailable
+			}
+			return nil
+		},
+		Photos: photos.Options{DisableCapacityReserve: true},
+	}
+	for _, change := range configure {
+		change(&config)
+	}
+	go func() { r.done <- photoservice.Run(ctx, config) }()
 	t.Cleanup(func() { cancel(); <-r.done })
 	waitFor(t, func() bool { _, err := os.Stat(r.socket); return err == nil })
 	return r
@@ -317,4 +321,74 @@ func TestFollowsTheStorePathWhenItNamesAnotherDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(r.root, "catalog.db")); err != nil {
 		t.Fatalf("the new store was not opened: %v", err)
 	}
+}
+
+// upload sends one PNG through the Product Service's proxy as token's user.
+func (r running) upload(t *testing.T, token, libraryID, name string) *httptest.ResponseRecorder {
+	t.Helper()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewGray(image.Rect(0, 0, 3, 3))); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", name)
+	_, _ = part.Write(encoded.Bytes())
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/photos/libraries/"+libraryID+"/uploads", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request = request.WithContext(accounts.WithSessionToken(request.Context(), token))
+	recorder := httptest.NewRecorder()
+	photosapi.NewProxy(r.socket, nil).ServeHTTP(recorder, request)
+	return recorder
+}
+
+func (r running) aiStatus(t *testing.T, token string) photos.AIStatus {
+	t.Helper()
+	var status photos.AIStatus
+	if err := json.NewDecoder(r.get(t, photosapi.AIStatusPath, token).Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func TestUploadsGetVectorsOnceTheLibraryIsQuiet(t *testing.T) {
+	worker := aiworkertest.Serve(t, aiworkertest.Deterministic("fake-1", 8))
+	r := start(t, func(config *photoservice.Config) {
+		config.AI = aiworker.Client{SocketPath: worker}
+		config.AIQuietPeriod = 300 * time.Millisecond
+	})
+	r.ready.Store(true)
+	var library string
+	waitFor(t, func() bool { library = r.privateLibrary(t, "alice-token"); return library != "" })
+	if response := r.upload(t, "alice-token", library, "cat.png"); response.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", response.Code, response.Body.String())
+	}
+
+	// Polling the status does not count as use, so the vector arrives while
+	// the window is open.
+	waitFor(t, func() bool { return r.aiStatus(t, "alice-token").Ready == 1 })
+	if status := r.aiStatus(t, "alice-token"); status.Model != "fake-1" || status.Pending != 0 {
+		t.Fatalf("AI status = %+v", status)
+	}
+	if status := r.aiStatus(t, "bob-token"); status.Ready != 0 {
+		t.Fatalf("bob's AI status counts alice's photo: %+v", status)
+	}
+}
+
+func TestPhotosWorkWithoutTheAIWorker(t *testing.T) {
+	r := start(t, func(config *photoservice.Config) {
+		config.AI = aiworker.Client{SocketPath: filepath.Join(t.TempDir(), "absent.sock")}
+		config.AIQuietPeriod = time.Millisecond
+	})
+	r.ready.Store(true)
+	var library string
+	waitFor(t, func() bool { library = r.privateLibrary(t, "alice-token"); return library != "" })
+	if response := r.upload(t, "alice-token", library, "cat.png"); response.Code != http.StatusCreated {
+		t.Fatalf("upload without the AI Worker = %d %s", response.Code, response.Body.String())
+	}
+	waitFor(t, func() bool {
+		status := r.aiStatus(t, "alice-token")
+		return status.State == photos.AIUnavailable && status.Pending == 1
+	})
 }

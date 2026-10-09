@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/aiworker"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
@@ -70,6 +71,8 @@ func runPhotoService(logger *slog.Logger) error {
 		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
 		Sessions:   sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")),
 		Logger:     logger,
+		// Without the AI component the socket is absent and photos wait for it.
+		AI: aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
 	})
 }
 
@@ -201,7 +204,7 @@ func run(logger *slog.Logger) error {
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			photoservice.RunBackground(ctx, photoService, logger)
+			photoservice.RunBackground(ctx, photoService, logger, developmentAI(), photoservice.NewGate(photoservice.QuietPeriod))
 		}()
 		// Runs before the deferred photoService.Close.
 		defer func() {
@@ -247,6 +250,15 @@ type sandboxedVolumeGuard struct{ files.VolumeGuard }
 
 func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bool) error {
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
+}
+
+// developmentAI reaches an AI Worker only when ANAS_AI_SOCKET names one, so
+// development without the AI component keeps local AI off.
+func developmentAI() photos.Embedder {
+	if socket := os.Getenv("ANAS_AI_SOCKET"); socket != "" {
+		return aiworker.Client{SocketPath: socket}
+	}
+	return nil
 }
 
 // syncIdentities converges host accounts on the control plane at startup, so

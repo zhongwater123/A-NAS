@@ -299,3 +299,25 @@ func TestHiddenItemsAnswerExactlyLikeMissingOnes(t *testing.T) {
 		}
 	}
 }
+
+func TestAIStatusReportsProgressOverVisiblePhotos(t *testing.T) {
+	handler, service := newAPI(t)
+	owner := client{t: t, handler: handler, as: alice}
+	private, _ := librariesOf(owner)
+	if response := owner.upload(private.ID, "", "cat.png", pngBytes(t, 40)); response.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d", response.Code)
+	}
+	if _, err := service.ProcessMediaJob(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var status photos.AIStatus
+	owner.json(http.MethodGet, "/api/v1/photos/ai", nil, http.StatusOK, &status)
+	if status.State != photos.AIUnavailable || status.Pending != 1 || status.Ready != 0 {
+		t.Fatalf("AI status without a Worker = %+v", status)
+	}
+	stranger := client{t: t, handler: handler, as: bob}
+	stranger.json(http.MethodGet, "/api/v1/photos/ai", nil, http.StatusOK, &status)
+	if status.Pending != 0 {
+		t.Fatalf("another member's AI status counts alice's photo: %+v", status)
+	}
+}

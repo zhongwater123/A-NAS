@@ -44,6 +44,11 @@ type Config struct {
 	// unavailable and while it is open.
 	RetryInterval time.Duration
 	Photos        photos.Options
+	// AI reaches the AI Worker; nil leaves local AI off.
+	AI photos.Embedder
+	// AIQuietPeriod is how long the photo library must go unused before AI
+	// work starts; it defaults to QuietPeriod.
+	AIQuietPeriod time.Duration
 }
 
 var ErrStoreUnavailable = errors.New("the photo store is not available")
@@ -100,8 +105,12 @@ func Run(parent context.Context, config Config) error {
 	serve := func(handler http.Handler) { api.Store(&handler) }
 	unavailable := photosapi.New(nil, config.Logger)
 	serve(unavailable)
+	if config.AIQuietPeriod <= 0 {
+		config.AIQuietPeriod = QuietPeriod
+	}
+	gate := NewGate(config.AIQuietPeriod)
 	server := &http.Server{
-		Handler: authenticate(config.Sessions, config.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Handler: authenticate(config.Sessions, config.Logger, gate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			(*api.Load()).ServeHTTP(w, r)
 		})),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
@@ -113,7 +122,7 @@ func Run(parent context.Context, config Config) error {
 	supervised := make(chan struct{})
 	go func() {
 		defer close(supervised)
-		supervise(ctx, config, serve, unavailable)
+		supervise(ctx, config, gate, serve, unavailable)
 	}()
 	// The Catalog closes only after requests and workers using it have
 	// stopped.
@@ -142,7 +151,7 @@ func Run(parent context.Context, config Config) error {
 // goes offline, turns read-only or is remounted. The open Catalog never
 // follows the path onto the system disk, and reopening reconciles whatever an
 // abrupt loss left behind. Requests in between answer photos_unavailable.
-func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
+func supervise(ctx context.Context, config Config, gate *Gate, serve func(http.Handler), unavailable http.Handler) {
 	for {
 		service, err := openWhenReady(ctx, config)
 		if err != nil {
@@ -152,7 +161,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			RunBackground(workers, service, config.Logger)
+			RunBackground(workers, service, config.Logger, config.AI, gate)
 		}()
 		serve(photosapi.New(service, config.Logger))
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
@@ -222,16 +231,25 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 	}
 }
 
-// RunBackground renders media and maintains the store until ctx ends. It
-// returns only once both have stopped, so the caller may then close service.
-// Neither needs a user session.
-func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger) {
+// RunBackground renders media, runs local AI through ai while gate allows
+// it, and maintains the store until ctx ends. It returns only once all of
+// them have stopped, so the caller may then close service. None needs a user
+// session; a nil ai leaves local AI off.
+func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate) {
 	var workers sync.WaitGroup
 	workers.Go(func() {
 		service.RunMedia(ctx, time.Minute, func(err error) {
 			logger.ErrorContext(ctx, "photo media job failed", "error", err)
 		})
 	})
+	if ai != nil {
+		workers.Go(func() {
+			// Check again no later than the quiet period could have passed.
+			service.RunAI(ctx, ai, gate, min(time.Minute, gate.quiet), func(err error) {
+				logger.ErrorContext(ctx, "photo AI job failed", "error", err)
+			})
+		})
+	}
 	workers.Go(func() { maintain(ctx, service, logger) })
 	workers.Wait()
 }
@@ -260,7 +278,9 @@ func maintain(ctx context.Context, service *photos.Service, logger *slog.Logger)
 
 // authenticate turns the forwarded session token into the caller's
 // Principal. It trusts the Host Agent's answer, never the Product Service.
-func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handler) http.Handler {
+// Each request by a signed-in person keeps background AI work waiting,
+// except reading the AI status, which a window may poll while left open.
+func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, err := sessions.ResolveSessionUser(r.Context(), r.Header.Get(photosapi.SessionHeader))
 		switch {
@@ -274,6 +294,9 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handl
 		case user.MustChangePassword:
 			photosapi.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
+		}
+		if r.URL.Path != photosapi.AIStatusPath {
+			gate.Touch()
 		}
 		principal := photosapi.NewPrincipal(user.UserID, user.Username, user.Role == accounts.RoleAdmin, user.Viewing)
 		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))

@@ -131,7 +131,7 @@ type claimedJob struct {
 // A job whose original cannot be processed is retried with a delay and then
 // marked failed; the error returned is only for Catalog or storage faults.
 func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
-	job, err := s.claimJob(ctx)
+	job, err := s.claimJob(ctx, thumbnailDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -145,13 +145,15 @@ func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 	return true, s.completeJob(ctx, job, thumbnail, width, height)
 }
 
-func (s *Service) claimJob(ctx context.Context) (claimedJob, error) {
+// claimJob leases the next ready job of one derivation; thumbnails and AI
+// work run in separate loops with different rules.
+func (s *Service) claimJob(ctx context.Context, derivation string) (claimedJob, error) {
 	// Every claim counts as an attempt, so a job that never finishes stops
 	// being reclaimed once its attempts are used up.
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE jobs SET state = 'failed', lease_until = NULL, error_class = ?
-WHERE state = 'running' AND lease_until <= ? AND attempts >= ?`,
-		jobErrorInterrupted, formatTime(s.now()), jobMaxAttempts); err != nil {
+WHERE derivation = ? AND state = 'running' AND lease_until <= ? AND attempts >= ?`,
+		jobErrorInterrupted, derivation, formatTime(s.now()), jobMaxAttempts); err != nil {
 		return claimedJob{}, err
 	}
 	var job claimedJob
@@ -160,9 +162,9 @@ WHERE state = 'running' AND lease_until <= ? AND attempts >= ?`,
 		if err := tx.QueryRowContext(ctx, `
 SELECT j.object_id, j.derivation, j.attempts, o.orientation
 FROM jobs j JOIN objects o ON o.id = j.object_id
-WHERE (j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?)
+WHERE j.derivation = ? AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
 ORDER BY j.not_before, j.object_id
-LIMIT 1`, now, now).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation); err != nil {
+LIMIT 1`, derivation, now, now).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation); err != nil {
 			return err
 		}
 		job.attempts++
@@ -213,7 +215,7 @@ func (s *Service) completeJob(ctx context.Context, job claimedJob, thumbnail []b
 	if err := s.writeDerived(target, thumbnail); err != nil {
 		return errors.Join(err, s.failJob(ctx, job, jobErrorIO))
 	}
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO derived_files(object_id, derivation, media_type, width, height, size_bytes, created_at)
 VALUES(?, ?, 'image/jpeg', ?, ?, ?, ?)
@@ -222,13 +224,20 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			job.objectID, job.derivation, width, height, len(thumbnail), formatTime(s.now())); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
+		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
+			return err
+		}
+		// The thumbnail is the AI input.
+		return s.enqueueEmbedding(ctx, tx, job.objectID)
+	}); err != nil {
 		return err
-	})
+	}
+	s.wakeAI()
+	return nil
 }
 
 func (s *Service) failJob(ctx context.Context, job claimedJob, class string) error {
-	permanent := class == jobErrorUndecodable || class == jobErrorMissingOriginal
+	permanent := class == jobErrorUndecodable || class == jobErrorMissingOriginal || class == jobErrorInvalidResult
 	if permanent || job.attempts >= jobMaxAttempts {
 		_, err := s.db.ExecContext(ctx,
 			"UPDATE jobs SET state = 'failed', lease_until = NULL, error_class = ? WHERE object_id = ? AND derivation = ?",

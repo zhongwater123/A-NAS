@@ -114,6 +114,23 @@ SELECT id, 'thumbnail/v1', 'pending', created_at, created_at FROM objects;
 	`
 ALTER TABLE libraries ADD COLUMN owner_name TEXT NOT NULL DEFAULT '';
 `,
+	// 4: image vectors from the AI Worker, one per content object and
+	// derivation, with the model that produced them. Originals that already
+	// have thumbnails are queued for a vector.
+	`
+CREATE TABLE embeddings (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    derivation TEXT NOT NULL,
+    model TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, derivation)
+);
+
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+SELECT object_id, 'embedding/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
+ON CONFLICT(object_id, derivation) DO NOTHING;
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
