@@ -36,8 +36,8 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh
-	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
+	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh
+	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
@@ -60,9 +60,12 @@ ops-check:
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
 	grep -Fq '/etc/chromium/policies/managed/a-nas.json' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'a-nas-chromium-policy.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
-	grep -Fq 'ANAS_SCREENSAVER_DIRECTORY' cmd/anas-api/main.go scripts/remote-activate-release.sh scripts/install-v1.0.1-system-services.sh
-	grep -Fq 'screensaver_hash_list' scripts/remote-activate-release.sh
-	grep -Fq 'screensaver_hash_count' scripts/install-v1.0.1-system-services.sh
+	grep -Fq "'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current'" scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"/var/lib/a-nas/screensavers/current"' cmd/anas-api/main.go
+	grep -Fq 'install-screensavers.sh.incoming' scripts/deploy-dev.ps1
+	grep -Fq 'install-screensavers.sh.incoming' scripts/remote-activate-release.sh
+	grep -Fq '"$$source_release/install-screensavers.sh" "$$temporary/install-screensavers.sh"' scripts/install-v1.0.1-system-services.sh
+	! grep -Eq 'screensaver_[0-9a-z]*_sha256|ScreensaverVideo' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
 	grep -Fqx 'User=anas-container' deploy/systemd/system/anas-container-agent.service

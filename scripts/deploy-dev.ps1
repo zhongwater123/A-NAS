@@ -13,8 +13,6 @@ param(
 
     [string]$WslUser = 'anas-dev',
 
-    [string[]]$ScreensaverVideo,
-
     [switch]$StageOnly
 )
 
@@ -55,34 +53,9 @@ try {
     if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
         throw "SSH identity does not exist: $IdentityFile"
     }
-    $screensaverAssets = @()
-    if ($ScreensaverVideo) {
-        if ($ScreensaverVideo.Count -gt 32) {
-            throw 'A screen saver pool cannot contain more than 32 videos.'
-        }
-        for ($index = 0; $index -lt $ScreensaverVideo.Count; $index++) {
-            $candidate = $ScreensaverVideo[$index]
-            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-                throw "Screen saver video does not exist: $candidate"
-            }
-            $resolvedPath = (Resolve-Path -LiteralPath $candidate).Path
-            if ([System.IO.Path]::GetExtension($resolvedPath) -ine '.mp4') {
-                throw "Screen saver video must be an MP4 file: $resolvedPath"
-            }
-            if ($screensaverAssets.Path -contains $resolvedPath) {
-                throw "Screen saver video was provided more than once: $resolvedPath"
-            }
-            $screensaverAssets += [PSCustomObject]@{
-                Path = $resolvedPath
-                Hash = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-                FileName = ('screensaver-{0:D3}.mp4' -f $index)
-            }
-        }
-    }
 
     $action = if ($StageOnly) { 'stage for a root-managed system upgrade without touching running services' } else { "activate in $Mode mode, verify, and rollback on failure" }
-    $screenSaverSummary = if ($screensaverAssets.Count -gt 0) { ", including $($screensaverAssets.Count) external screen saver videos" } else { '' }
-    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts$screenSaverSummary, then $action"
+    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts, then $action"
     if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
         Write-Host "Release: $version"
         Write-Host "Product: $productVersion"
@@ -142,6 +115,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-photos.service'); Destination = "${target}:$release/anas-photos-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
+        @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Destination = "${target}:$release/install-screensavers.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\run-kiosk.sh'); Destination = "${target}:$release/kiosk-launcher.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-kiosk@.service'); Destination = "${target}:$release/anas-kiosk@.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\pam\a-nas-kiosk'); Destination = "${target}:$release/a-nas-kiosk.pam.incoming" },
@@ -150,9 +124,6 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile'); Destination = "${target}:$release/Caddyfile.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
     )
-    foreach ($asset in $screensaverAssets) {
-        $uploads += @{ Source = $asset.Path; Destination = "${target}:$release/$($asset.FileName).incoming" }
-    }
     foreach ($upload in $uploads) {
         & scp.exe @sshOptions $upload.Source $upload.Destination
         if ($LASTEXITCODE -ne 0) { throw "Upload failed: $($upload.Source)" }
@@ -160,9 +131,6 @@ try {
 
     $remoteAction = if ($StageOnly) { 'stage-only' } else { 'activate' }
     $activateArguments = @($version, $apiHash, $agentHash, $Mode, $productVersion, $remoteAction)
-    if ($screensaverAssets.Count -gt 0) {
-        $activateArguments += (($screensaverAssets | ForEach-Object { $_.Hash }) -join ',')
-    }
     $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $($activateArguments -join ' ')"
     & ssh.exe @sshOptions $target $activate
     if ($LASTEXITCODE -ne 0) { throw 'Remote activation failed; inspect the user journal and release directory.' }
@@ -174,9 +142,6 @@ try {
     }
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
-    foreach ($asset in $screensaverAssets) {
-        Write-Host "$($asset.FileName) SHA-256: $($asset.Hash)"
-    }
 } finally {
     Pop-Location
 }

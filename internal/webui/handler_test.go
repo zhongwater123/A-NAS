@@ -131,6 +131,58 @@ func TestHandlerListsConfiguredScreenSaverPoolAndServesByteRanges(t *testing.T) 
 	}
 }
 
+// The Product Service reads a "current" link that install-screensavers.sh
+// moves between pools (ADR 0014); a move must take effect without a restart.
+func TestHandlerFollowsTheCurrentScreenSaverPoolLink(t *testing.T) {
+	root := t.TempDir()
+	for pool, videos := range map[string][]string{"old": {"a.mp4"}, "new": {"a.mp4", "b.mp4"}} {
+		if err := os.Mkdir(filepath.Join(root, pool), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, video := range videos {
+			if err := os.WriteFile(filepath.Join(root, pool, video), []byte(pool), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	current := filepath.Join(root, "current")
+	if err := os.Symlink("old", current); err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandlerWithOptions(t, webui.Options{ScreensaverDirectory: current})
+	manifest := func() []string {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/local-console/screensavers", nil))
+		var body struct {
+			Videos []string `json:"videos"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Videos
+	}
+
+	if got := manifest(); len(got) != 1 {
+		t.Fatalf("manifest through current -> old = %v, want 1 entry", got)
+	}
+	if err := os.Symlink("new", filepath.Join(root, ".current.next")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, ".current.next"), current); err != nil {
+		t.Fatal(err)
+	}
+	videos := manifest()
+	if len(videos) != 2 {
+		t.Fatalf("manifest through current -> new = %v, want 2 entries", videos)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, videos[0], nil))
+	if got, want := recorder.Body.String(), "new"; got != want {
+		t.Fatalf("video body = %q, want %q", got, want)
+	}
+}
+
 func TestHandlerRejectsRelativeScreenSaverDirectory(t *testing.T) {
 	_, err := webui.NewWithOptions(http.NotFoundHandler(), webui.Options{ScreensaverDirectory: "relative"})
 	if err == nil || !strings.Contains(err.Error(), "must be absolute") {

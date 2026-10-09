@@ -360,7 +360,7 @@ func configuredScreensaverDirectory() string {
 	if legacyVideo := strings.TrimSpace(os.Getenv("ANAS_SCREENSAVER_VIDEO")); legacyVideo != "" {
 		return filepath.Dir(legacyVideo)
 	}
-	return "/var/lib/a-nas/screensavers"
+	return "/var/lib/a-nas/screensavers/current"
 }
 
 type developmentOperations struct{}
