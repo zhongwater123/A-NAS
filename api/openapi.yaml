@@ -858,7 +858,8 @@ components:
     AppConflict:
       description: >-
         The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use,
-        name_in_use, policy_violation or app_engine_error.
+        name_in_use, address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool),
+        policy_violation or app_engine_error.
       content:
         application/json:
           schema:
@@ -1547,7 +1548,7 @@ components:
     AppPlan:
       type: object
       additionalProperties: false
-      required: [appId, title, version, project, identity, images, containers, ports, mounts, digest, compose]
+      required: [appId, title, version, project, identity, images, containers, ports, mounts, networks, addressPools, digest, compose]
       properties:
         appId:
           type: string
@@ -1623,6 +1624,19 @@ components:
                 type: boolean
               purpose:
                 type: string
+        networks:
+          description: >-
+            Compose networks the install creates, including the implicit default network; empty when every
+            service uses Docker's default bridge. An install whose network Docker places outside addressPools
+            is rolled back.
+          type: array
+          items:
+            type: string
+        addressPools:
+          description: The Docker address pools the networks come from, as CIDR prefixes; empty when there are no networks.
+          type: array
+          items:
+            type: string
         digest:
           type: string
           pattern: "^[a-f0-9]{64}$"

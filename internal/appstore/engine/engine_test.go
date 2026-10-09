@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,12 +20,22 @@ import (
 type fakeDocker struct {
 	mu         sync.Mutex
 	containers []engine.ContainerInfo
+	pools      []netip.Prefix
+	networks   []engine.NetworkInfo
 }
 
 func (f *fakeDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]engine.ContainerInfo(nil), f.containers...), nil
+}
+
+func (f *fakeDocker) AddressPools(context.Context) ([]netip.Prefix, error) {
+	return f.pools, nil
+}
+
+func (f *fakeDocker) ProjectNetworks(context.Context, string) ([]engine.NetworkInfo, error) {
+	return f.networks, nil
 }
 
 type fakeRunner struct {
@@ -152,6 +164,80 @@ func TestUninstallKeepsDataAndReportsFailures(t *testing.T) {
 	apps, _ := store.Apps(ctx)
 	if job := find(apps, "memos").Job; job.State != appstore.JobFailed || !strings.Contains(job.Error, "exit status 1") {
 		t.Fatalf("job = %+v", job)
+	}
+}
+
+// On 2026-10-09 an app network got 172.19.0.0/16 from Docker's built-in
+// pools and the NAS stopped answering every Wi-Fi client in that range.
+func TestAppNetworksNeedAnAddressPool(t *testing.T) {
+	docker := &fakeDocker{}
+	store, _ := newStore(t, docker, &fakeRunner{})
+	ctx := context.Background()
+
+	if _, err := store.Plan(ctx, "audiobookshelf", identity); !errors.Is(err, appstore.ErrAddressPoolMissing) {
+		t.Fatalf("plan without a pool error = %v, want ErrAddressPoolMissing", err)
+	}
+	if _, err := store.Install(ctx, "audiobookshelf", strings.Repeat("0", 64), identity); !errors.Is(err, appstore.ErrAddressPoolMissing) {
+		t.Fatalf("install without a pool error = %v, want ErrAddressPoolMissing", err)
+	}
+	if plan, err := store.Plan(ctx, "memos", identity); err != nil || len(plan.Networks) != 0 {
+		t.Fatalf("an app on the default bridge = %v networks, %v; it creates none and needs no pool", plan.Networks, err)
+	}
+
+	docker.pools = []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}
+	plan, err := store.Plan(ctx, "audiobookshelf", identity)
+	if err != nil || !slices.Equal(plan.Networks, []string{"default"}) || !slices.Equal(plan.AddressPools, docker.pools) {
+		t.Fatalf("plan = networks %v pools %v, %v", plan.Networks, plan.AddressPools, err)
+	}
+}
+
+func TestInstallRollsBackANetworkOutsideThePool(t *testing.T) {
+	docker := &fakeDocker{
+		pools:    []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")},
+		networks: []engine.NetworkInfo{{Name: "a-nas-audiobookshelf_default", Subnets: []netip.Prefix{netip.MustParsePrefix("172.19.0.0/16")}}},
+	}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+
+	plan, err := store.Plan(ctx, "audiobookshelf", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(ctx, "audiobookshelf", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+
+	if len(runner.calls) != 2 || !strings.Contains(strings.Join(runner.calls[1], " "), "-p a-nas-audiobookshelf -f ") ||
+		!strings.HasSuffix(strings.Join(runner.calls[1], " "), "down --remove-orphans") {
+		t.Fatalf("runner calls = %v, want up then a rollback down", runner.calls)
+	}
+	apps, _ := store.Apps(ctx)
+	job := find(apps, "audiobookshelf").Job
+	if job.State != appstore.JobFailed || !strings.Contains(job.Error, "172.19.0.0/16") || !strings.Contains(job.Error, "rolled back") {
+		t.Fatalf("job = %+v, want a failed install naming the network", job)
+	}
+}
+
+func TestInstallKeepsANetworkInsideThePool(t *testing.T) {
+	docker := &fakeDocker{
+		pools:    []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")},
+		networks: []engine.NetworkInfo{{Name: "a-nas-audiobookshelf_default", Subnets: []netip.Prefix{netip.MustParsePrefix("10.96.64.0/24")}}},
+	}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+
+	plan, _ := store.Plan(ctx, "audiobookshelf", identity)
+	if _, err := store.Install(ctx, "audiobookshelf", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+
+	apps, _ := store.Apps(ctx)
+	if job := find(apps, "audiobookshelf").Job; len(runner.calls) != 1 || job.State != appstore.JobSucceeded {
+		t.Fatalf("calls = %v job = %+v, want one up and success", runner.calls, job)
 	}
 }
 

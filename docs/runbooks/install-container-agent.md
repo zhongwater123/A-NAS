@@ -1,7 +1,7 @@
 # 安装 Docker 与容器代理
 
 状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证）
-更新时间：2026-10-08
+更新时间：2026-10-09
 
 ## 目的
 
@@ -12,7 +12,7 @@
 - 必须在主机名为 `a-nas-dev` 的 Debian 13 amd64 Experimental NAS 上以 root 执行；先按 [SSH 手册](bootstrap-experimental-nas-ssh.md)核对主机指纹。
 - `/opt/a-nas/current` 与 `/home/anas-dev/apps/a-nas/current` 必须指向同一个已验证 release；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。
 - 当前架构的产品服务身份是系统账号 `a-nas`。不得沿用 ADR 0008 以前的用户级预览步骤给 `anas-dev` 授权，也不得把 `a-nas`、`anas-dev` 或 Kiosk 账号加入 `docker` 组。
-- Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态。安装失败、Docker Server 低于 26、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
+- Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态；它新建的网络会改变宿主机路由，所以必须先配置地址池。安装失败、Docker Server 低于 26、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
 - 升级前备份 `/etc/a-nas/anas-api.env`；回滚只停用能力，不自动删除 `/var/lib/docker`、应用数据、镜像或容器。
 
 ## 安装
@@ -48,7 +48,34 @@ docker-compose version
 
 完成标准：Docker Client 与 Server 都可用，Server 版本不低于 26.0，cgroup 为 2，Compose 命令可用。Debian 13 把 `/usr/bin/docker` 拆到 `docker-cli` 推荐包；使用 `--no-install-recommends` 时必须显式安装它。应用中心优先使用 `docker compose`，不可用时会使用 Debian 的 `docker-compose`。
 
-### 2. 创建最小权限身份
+### 2. 配置 Docker 网络地址池
+
+应用中心的部分应用会新建 Docker 网络。Docker 默认从 172.17–172.31 与 192.168 分配地址，只避开宿主机直连的网段；与公司网段重叠时，宿主机会把那些客户端的回包送进应用网桥（[调查](../investigations/2026-10-09-app-network-cut-off-wifi-clients.md)）。在启用代理前，把 Docker 的全部网络地址固定在 IT 确认空闲的网段（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。未配置时，应用中心拒绝安装会新建网络的应用。
+
+Experimental NAS 使用 IT 确认空闲的 `10.96.64.0/18`：应用网络取 `10.96.64.0/19`，每个网络一个 /24（共 32 个）；`docker0` 使用 `10.96.127.0/24`；`10.96.96.0` 至 `10.96.126.255` 预留。
+
+```bash
+cat /etc/docker/daemon.json   # 应提示文件不存在；已存在时停止，手工合并而不是覆盖
+ip route | grep '^10\.96\.'   # 应无输出
+
+cat > /etc/docker/daemon.json <<'JSON'
+{
+  "bip": "10.96.127.1/24",
+  "default-address-pools": [{ "base": "10.96.64.0/19", "size": 24 }]
+}
+JSON
+dockerd --validate --config-file /etc/docker/daemon.json
+systemctl restart docker.service
+
+docker info --format '{{json .DefaultAddressPools}}'
+ip route | grep -E 'docker0|br-'
+```
+
+完成标准：`DefaultAddressPools` 为 `10.96.64.0/19`；`docker0` 的路由为 `10.96.127.0/24`；没有任何 172.17–172.31 的 Docker 路由。重启 Docker 会让全部容器短暂中断。
+
+已有应用的主机：重启 Docker 不会迁移已存在的应用网络。使用 `network_mode: bridge` 的应用随 `docker0` 迁移，无需处理；新建过网络的应用在应用中心卸载后重新安装（数据保留），或以 root 执行 `docker compose -p a-nas-<id> -f /var/lib/a-nas-container/apps/<id>/docker-compose.yml down`，再以同一参数执行 `up --detach --remove-orphans`。
+
+### 3. 创建最小权限身份
 
 ```bash
 getent group anas-container >/dev/null || groupadd --system anas-container
@@ -67,7 +94,7 @@ id anas-dev
 
 完成标准：只有 `anas-container` 是 `docker` 组成员；`a-nas` 只新增 `anas-container` 组以连接类型化代理；`anas-dev` 不属于 `docker` 或 `anas-container`。
 
-### 3. 安装不可变代理制品
+### 4. 安装不可变代理制品
 
 开发机必须先从要部署的提交运行 `make build-binaries VERSION=<GIT_SHA>`，上传 `anas-container-agent` 与匹配的 systemd 单元到同一个不可变 source release，并核对发布清单中的 SHA-256。随后在 NAS 上执行：
 
@@ -106,7 +133,7 @@ timeout 45s runuser -u a-nas -- python3 - --agent-only < "$probe"
 
 它只执行 GET，检查 Docker 版本、容器/镜像数组和非空应用目录；失败时停止在切换之前。`anas-dev` 无权穿过代理运行目录，使用该账号检查 socket 得到 Permission denied 不能当成 socket 缺失。
 
-### 4. 启用产品能力
+### 5. 启用产品能力
 
 不要改写环境文件中的其他键。先删除旧能力键，再追加唯一的实时模式配置：
 

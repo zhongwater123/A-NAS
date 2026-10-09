@@ -16,6 +16,7 @@
 - [2026-10-08：OpenList 安装后因数据目录权限反复重启](2026-10-08-openlist-runtime-identity.md)（resolved）
 - [2026-10-08：Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](2026-10-08-host-agent-loses-setuid-under-systemd.md)（fix in PR #39；Experimental NAS verification pending）
 - [2026-10-09：本地控制台过夜后显示“连接中断”，需重启恢复](2026-10-09-local-console-disconnected-after-session-expiry.md)（fixed locally；Experimental NAS verification pending）
+- [2026-10-09：安装 Immich 后内网 WiFi 客户端全部无法访问 NAS](2026-10-09-app-network-cut-off-wifi-clients.md)（fixed locally；Experimental NAS pool configuration pending）
 
 ## 使用方式
 

@@ -31,7 +31,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。当时 `/opt/a-nas/current` 指向 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`（ADR 0008 之前的模型，已被取代）。
 - 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 已安装 Docker 26.1.5、独立 CLI、Compose 2.26.1 与容器代理，`ed5368ba998e` 已在代理模式下完成切换，真实代理路径和桌面 HTTP 路径均通过实机验证。
-- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
+- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。会新建 Docker 网络的应用要求 Docker 配置专用地址池，安装后核对网络地址，不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。
 - 局域网 Web 入口已实现：安装 Caddy 后，内网浏览器经 `http://<NAS 地址>` 使用全部功能，明文 HTTP 作为 HTTPS 前的过渡（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。2026-10-09 已在实验 NAS 启用（Caddy 2.6.2），从公司 WiFi 上的开发机访问 `http://172.18.45.48` 的健康检查、首页与未登录 `401` 均正常。
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 
@@ -39,11 +39,12 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 1. 在 Web 中打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `64f0e26d8349` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
-3. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
-4. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
-5. 首次部署包含 issue #49 修复的 release 时不传 `-ScreensaverVideo`，确认 `/var/lib/a-nas/screensavers/current` 指向原五条视频的池且清单仍为五条。再在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
-6. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。
-7. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；运行期数据卷故障（离线、只读、重新挂载）、上传中途强制终止与导入中途卷满的处理已通过本地故障注入（均尚未部署）；下一步先跑通整体闭环：部署后按[验收相册 M1](../runbooks/accept-photo-library-m1.md)完成桌面上传、跨成员隔离、管理员查看、强制终止与断电；20,000 张规模与缩略图积压测试暂缓。M2 按[实施方案](../architecture/photo-ai.md)只在开发机上推进并以 PR 提交，暂不部署到 NAS：先用 Fake Provider 打通任务与存储，再经 MediaPipe Universal Embedder 实测 EmbeddingGemma 2 全模态 740M 包（2026-10-09 决定；不做 OCR），并用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。M2 步骤 1 已在本地实现：缩略图完成后排入向量任务，按前台空闲与 CPU/I/O/内存压力门控，经 Worker 客户端以只读描述符传图，向量存入 Catalog，并提供 `/api/v1/photos/ai` 状态；步骤 2 的 Python Worker 经 MediaPipe 加载全模态 740M 包，已在开发机 Debian 13 容器中通过真实模型测试（4 核时图片约 0.6 s/张、峰值约 1.4 GiB，见[实测](../architecture/photo-ai.md#开发机首轮实测2026-10-09)）；下一步用公开中文数据集评估质量并校准标签阈值。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
+3. 恢复应用中心：按[安装手册第 2 步](../runbooks/install-container-agent.md#2-配置-docker-网络地址池)在 Experimental NAS 配置 Docker 地址池 `10.96.64.0/18`，按第 4 步把容器代理更新到包含 ADR 0013 检查的版本，再从应用中心重新安装 Immich（数据保留），见[调查](../investigations/2026-10-09-app-network-cut-off-wifi-clients.md)。
+4. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
+5. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
+6. 首次部署包含 issue #49 修复的 release 时不传 `-ScreensaverVideo`，确认 `/var/lib/a-nas/screensavers/current` 指向原五条视频的池且清单仍为五条。再在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
+7. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。
+8. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；运行期数据卷故障（离线、只读、重新挂载）、上传中途强制终止与导入中途卷满的处理已通过本地故障注入（均尚未部署）；下一步先跑通整体闭环：部署后按[验收相册 M1](../runbooks/accept-photo-library-m1.md)完成桌面上传、跨成员隔离、管理员查看、强制终止与断电；20,000 张规模与缩略图积压测试暂缓。M2 按[实施方案](../architecture/photo-ai.md)只在开发机上推进并以 PR 提交，暂不部署到 NAS：先用 Fake Provider 打通任务与存储，再经 MediaPipe Universal Embedder 实测 EmbeddingGemma 2 全模态 740M 包（2026-10-09 决定；不做 OCR），并用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。M2 步骤 1 已在本地实现：缩略图完成后排入向量任务，按前台空闲与 CPU/I/O/内存压力门控，经 Worker 客户端以只读描述符传图，向量存入 Catalog，并提供 `/api/v1/photos/ai` 状态；步骤 2 的 Python Worker 经 MediaPipe 加载全模态 740M 包，已在开发机 Debian 13 容器中通过真实模型测试（4 核时图片约 0.6 s/张、峰值约 1.4 GiB，见[实测](../architecture/photo-ai.md#开发机首轮实测2026-10-09)）；下一步用公开中文数据集评估质量并校准标签阈值。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
 
 ## 外部条件与限制
 
@@ -52,6 +53,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
 - 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB。当天部署后已重启 smbd 并确认监听 `172.18.45.48:445`，但下次重启仍会复现；根治前每次重启后需 root 执行 `systemctl restart smbd`。
+- 2026-10-09 经应用中心安装的 Immich 新建的 Docker 网络推断占用了 `172.19.0.0/16`，所有 172.19.x 的 WiFi 客户端都无法访问 NAS；已在本机屏幕卸载，数据保留。Experimental NAS 配置地址池并更新容器代理之前，不要安装会新建网络的应用（audiobookshelf、excalidraw、filedrop、immich、linkwarden、psitransfer）。
 - 2026-10-09 从公司 WiFi 上的开发机（`172.19.172.225`）到 NAS 与网关的 TCP 445 均不通，而 80 端口正常；连接期间 NAS 上没有任何来自该网段的 445 连接状态，说明拦截发生在公司网络或该电脑的安全策略，不在 NAS。跨网段访问目前使用局域网 Web；SMB 需从 `172.18.45.x` 有线网段复测，或请 IT 放行到 NAS 的 TCP 445。
 
 ## 验证基线

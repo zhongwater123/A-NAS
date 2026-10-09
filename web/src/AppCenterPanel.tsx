@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleAlert, Download, FolderOpen, Network, Search, ShieldCheck, ShoppingBag, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, CircleAlert, Download, FolderOpen, Network, Search, ShieldCheck, ShoppingBag, Trash2, UserRound, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppJob, AppList, AppsAPIError, CatalogApp, InstallPlan, iconURL, installApp, readApps, readPlan, uninstallApp } from "./appsApi";
@@ -216,6 +216,12 @@ function PlanReview({ plan, onCancel, onConfirm }: { plan: InstallPlan; onCancel
             <span key={`${port.hostPort}/${port.protocol}`} className="plan-row"><code>{port.hostPort}/{port.protocol}</code>→ 容器 {port.containerPort}{port.purpose && <small>{port.purpose}</small>}</span>
           ))}
         </dd>
+        <dt><Waypoints />Docker 网络</dt>
+        <dd>
+          {plan.networks.length === 0 && <span>使用 Docker 默认网桥，不新建网络</span>}
+          {plan.networks.map((name) => <code key={name}>{name}</code>)}
+          {plan.networks.length > 0 && <small>地址只从 {plan.addressPools.join("、")} 分配，不占用局域网网段</small>}
+        </dd>
         <dt><FolderOpen />使用文件夹</dt>
         <dd>
           {plan.mounts.length === 0 && <span>不使用宿主机文件夹</span>}
@@ -318,6 +324,7 @@ function describeError(error: unknown): string {
     port_in_use: `端口已被占用${taken ? `（${taken}）` : ""}`,
     name_in_use: `容器名已被占用${taken ? `（${taken}）` : ""}`,
     policy_violation: "该应用不符合安装安全策略",
+    address_pool_missing: "Docker 尚未配置 A-NAS 网络地址池，暂不能安装会新建网络的应用",
     volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
     apps_unavailable: "无法连接容器代理",
     network_error: "无法连接 A-NAS",
