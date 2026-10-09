@@ -28,6 +28,21 @@ M2 交付后，成员可以：
 - LiteRT-LM 自己的 Python API 目前只面向生成式对话，没有公开的向量接口，因此 Worker 使用 MediaPipe 而不是直接调用 LiteRT-LM。[LiteRT-LM Python](https://developers.google.com/edge/litert-lm/python)
 - 模型卡元数据标注 Apache-2.0，但许可证链接与 MediaPipe 页面写的是 Gemma 许可。发行前必须核对权重文件实际附带的许可证；开发机试验不受影响。
 
+## 开发机首轮实测（2026-10-09）
+
+在开发机的 Debian 13 容器中（Python 3.13.5、MediaPipe 1.1.0，`--cpuset-cpus=0-3` 限定 4 个核，用以近似 i3-12100 的 4 核；实机数字仍需部署后测量）加载全模态 740M 包：
+
+| 视觉 token | 加载 | 加载后 / 峰值内存 | 文本编码（中位） | 512 px 图片编码（中位 / 最大） | 零样本 |
+|---|---|---|---|---|---|
+| 70 | 5.3 s | 1231 / 1383 MiB | 73 ms | 613 / 756 ms | 4/4 |
+| 140（默认） | 4.0–5.7 s | 1442 / 1779 MiB | 71–98 ms | 1698–1737 / 2513 ms | 4/4 |
+
+- 包内只有 70 与 140 两种图片签名；请求 280 会报错 `exceeds maximum available signature length (140)`。Worker 默认 70，并把 token 数写入模型 ID，改动后旧向量自动重建；70 还是 140 由步骤 3 的数据集评估决定。
+- 输出 768 维、已归一化；`embed_image` 直接接受编码后的图片字节，因此 Worker 不需要自己的解码器，传入缩略图 JPEG 即可。无法解码的字节以 `ValueError` 报错，Worker 记为 `invalid_input`。
+- 零样本只是冒烟：三幅纯色图形与 matplotlib 自带的一张人物照片，对 7 个中文标签取最高分全部正确，但最高分与次高分只差 0.07–0.15，不能据此设定阈值。三种提示词模板（裸标签、`task: search result | query: …`、`…一张…的照片`）结果相近。
+- 依赖：`import mediapipe` 会加载 OpenCV 的绘图工具，图形界面版 OpenCV 需要 X 库，因此换用同版本的 `opencv-contrib-python-headless`；MediaPipe 的 C 库还链接 `libEGL.so.1` 与 `libGLESv2.so.2`，安装 Debian 的 `libegl1`、`libgles2`（只是分发库，不带 GPU 驱动）即可。完整依赖的虚拟环境约 509 MB，打包时（步骤 7）再精简。
+- 按 70 token 估算，2 万张照片约需 3.4 小时的空闲 CPU 时间；实机与温度影响待部署后验证。
+
 ## 模型文件位置
 
 模型文件不进仓库，也不进发行包；位置与校验值固定在清单 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 中：
@@ -116,8 +131,8 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 | 步骤 | 对应切片 | 内容 | 完成标准 |
 |---|---|---|---|
 | 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 已实现：用 Fake Provider 跑通“上传 → 缩略图 → 向量”；没有 Worker 时冒烟与系统测试照常通过。Host Agent 活动信号移入后续步骤 |
-| 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | Worker 在 Debian 13 容器中以 Fake Provider 通过协议测试 |
-| 3 | 9 | 开发机模型实测：使用你传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
+| 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | 已实现：[`ai/`](../../ai/anas_ai/worker.py) 的协议测试只需标准库并纳入 `make check`；Go 客户端与 Python Worker 的互通测试通过；真实模型测试在 Debian 13 容器中通过 |
+| 3 | 9 | 开发机模型实测（加载、内存、延迟与零样本冒烟已完成，见上文）：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 搜索接口、内存索引、Policy 过滤与桌面搜索框 | 本地 systemd 环境中用真实模型完成中文搜索，泄漏测试覆盖搜索结果 |
 | 5 | 12 | AI 标签计算、查看器标签展示、按标签筛选 | 标签只在阈值之上出现；隐藏后重算不复现 |
 | 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
@@ -131,8 +146,8 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 ## 风险
 
-- MediaPipe 的 Linux x86 wheel 与 Debian 13 的 Python 版本是否匹配尚未验证；不匹配时改用 Debian 12 基础的独立 Python 运行环境，或改用研究文档中的备选 Runtime。
-- 全模态包比 440M 包多 300M 的音频编码器；若 MediaPipe 总是整体加载，常驻内存与加载时间都会增加，`MemoryMax` 与按需启动策略以实测为准。
+- MediaPipe 1.1.0 只发布一个通用的 `py3-none-manylinux_2_28_x86_64` wheel，已在 Debian 13 的 Python 3.13 上验证可用；升级 MediaPipe 前须重跑真实模型测试。
+- 全模态包加载后约 1.2–1.4 GiB，峰值 1.4–1.8 GiB（取决于视觉 token），`MemoryMax=2G` 余量有限；打包时以长时间运行的峰值确定上限。
 - 官方只公布了 Arm Linux 的性能；i3-12100 的单张耗时、按需启动的加载时间与前台影响都需实测，结论只来自开发机时须注明，实机数字在部署后补充。
 - 512 px 输入可能损失细节；以实测决定是否增加 AI 输入派生。
 - 开发期不碰 NAS，因此规模、温度与真实前台干扰的结论只能在之后部署时得出。

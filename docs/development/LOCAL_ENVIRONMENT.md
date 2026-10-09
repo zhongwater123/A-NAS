@@ -136,6 +136,16 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
 - 检查存储区与套接字的属主、权限和隔离。
 - 注入数据卷故障：把卷建在 device-mapper 设备上，换成 `error` 目标使 Btrfs 转为只读，再懒卸载与重新挂载，并在上传中途强制终止相册服务，确认相册暂停服务、不写系统盘并在卷恢复后自行重新打开。
 
+相册 AI Worker（`ai/`）的协议测试只需 Python 标准库：`make ai-test`。使用真实 EmbeddingGemma 2 的测试需要 MediaPipe，在 Debian 13 开发镜像中运行，模型从开发机预留位置只读挂载（见 [M2 实施方案](../architecture/photo-ai.md#模型文件位置)）：
+
+```bash
+docker build -t anas-ai-dev:trixie -f ai/dev.Dockerfile ai      # 基于 anas-systemd:trixie
+docker run --rm --cpuset-cpus=0-3 -v "$PWD:/src:ro" -w /src/ai \
+  -v /mnt/d/A-NAS-models/embeddinggemma-2-740m:/models:ro \
+  -e ANAS_AI_MODEL=/models/embeddinggemma-2-740m.litertlm -e PYTHONDONTWRITEBYTECODE=1 \
+  anas-ai-dev:trixie /opt/anas-ai/bin/python -m unittest discover -s tests -t .
+```
+
 相册的规模基线（4 名成员、20,000 张，约 5 分钟）与 12 MP 缩略图计时默认跳过，在同一 cgo 容器中加 `-e ANAS_PHOTO_SCALE=1` 运行 `go test -count=1 -timeout 60m -run 'TestScale' -v ./internal/photos/`；结果的解读见[相册技术设计](../architecture/photo-library.md)切片 7。
 
 device-mapper 与 loop 设备属于宿主内核而不是容器，脚本退出时会停止服务并删除自己的 `anas-smoke-<容器名>` 设备。若脚本被强行中断，用 `ls /dev/mapper` 检查残留，再在特权容器中执行 `dmsetup remove <名称>`。容器缺少 `curl` 或 `dmsetup` 时脚本会临时安装：
