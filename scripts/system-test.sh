@@ -41,15 +41,18 @@ fi
 # private mounts, which would hide that.
 mount --make-rshared /
 
-# The release as scripts/deploy-dev.ps1 stages it.
+# stage DIR: a release as scripts/deploy-dev.ps1 stages it.
+stage() {
+  install -d "$1"
+  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh "$1/"
+  for unit in anas-api anas-host-agent anas-photos; do
+    install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
+  done
+  install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
+  install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
+}
 release=/tmp/release
-install -d "$release"
-install -m 0755 /src/build/anas-api /src/build/anas-host-agent "$release/"
-for unit in anas-api anas-host-agent anas-photos; do
-  install -m 0644 "/src/deploy/systemd/system/$unit.service" "$release/$unit-system.service"
-done
-install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$release/a-nas-chromium-policy.json"
-install -m 0644 /src/deploy/caddy/Caddyfile "$release/Caddyfile"
+stage "$release"
 
 # A data volume as storage initialization leaves it, mounted before the
 # installer runs, as on the Experimental NAS. Larger than the 10 GiB reserve;
@@ -294,6 +297,101 @@ check "Host Agent proves the identity switch again after a restart" \
     grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+
+# --- Screen saver videos are long-lived media, not part of a release (ADR 0014).
+pools=/var/lib/a-nas/screensavers
+media=/opt/a-nas/current/install-screensavers.sh
+stager=/tmp/anas-dev # the staging account's home
+staged=$stager/apps/a-nas/screensavers
+uploads=0
+# install_release NAME: the real installer on the release staged in /tmp/NAME,
+# then wait until the restarted Product Service answers and the photo service
+# is ready again.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+install_release() {
+  local since
+  since=$(date '+%Y-%m-%d %H:%M:%S')
+  bash /src/scripts/install-v1.0.1-system-services.sh "/tmp/$1" "$1" "$iface" >"/tmp/$1.log" 2>&1 || return
+  for _ in $(seq 1 150); do
+    curl -fsS "$api/healthz" >/dev/null 2>&1 &&
+      journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
+    sleep 0.2
+  done
+  return 1
+}
+pool_size() { curl -fsS "$api/local-console/screensavers" | jq '.videos | length'; }
+current_pool() { readlink "$pools/current" || true; }
+# new_video: a stand-in video at /tmp/HASH.mp4; prints HASH.
+new_video() {
+  local file hash
+  file=$(mktemp /tmp/video.XXXXXX)
+  head -c 4096 /dev/urandom > "$file"
+  hash=$(sha256sum "$file" | cut -d ' ' -f 1)
+  mv "$file" "/tmp/$hash.mp4"
+  echo "$hash"
+}
+# stage_pool HASH...: stages a pool as scripts/deploy-screensavers.ps1 does,
+# uploading only the videos the staging area lacks; sets pool to its ID.
+stage_pool() {
+  local hash
+  for hash in $(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh missing "$@"); do
+    cp "/tmp/$hash.mp4" "$staged/objects/$hash.mp4.incoming"
+    uploads=$((uploads + 1))
+  done
+  pool=$(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh commit "$@")
+}
+check "a first install plays no screen saver" test "$(current_pool):$(pool_size)" = :0
+v1=$(new_video)
+v2=$(new_video)
+v3=$(new_video)
+# A release staged v1 the way deploy-dev.ps1 did before issue #49.
+install -d "$stager/apps/a-nas/releases/old/screensavers"
+cp "/tmp/$v1.mp4" "$stager/apps/a-nas/releases/old/screensavers/screensaver-000.mp4"
+printf 'screensaver_000_sha256=%s\n' "$v1" > "$stager/apps/a-nas/releases/old/RELEASE"
+stage_pool "$v1" "$v2"
+pool_a=$pool
+check "staging uploads only the videos the NAS lacks" test "$uploads" = 1
+check "a staged pool installs" quiet "$media" "$pool_a" "$staged"
+check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
+stage /tmp/upgrade
+check "a release installs" install_release upgrade
+check "the upgrade keeps the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
+stage_pool "$v2" "$v3"
+pool_b=$pool
+check "a new pool uploads only its new video" test "$uploads" = 2
+check "the new pool installs" quiet "$media" "$pool_b" "$staged"
+check "it replaces the current pool" test "$(current_pool)" = "pools/$pool_b"
+check "a video both pools hold is stored once" \
+  test "$(find "$pools/objects" -type f | wc -l):$(stat -c %h "$pools/objects/$v2.mp4")" = 3:3
+check "installing the same pool again changes nothing" quiet "$media" "$pool_b" "$staged"
+check "switching back to an installed pool needs no staging" quiet "$media" "$pool_a" /nonexistent
+check "the media rollback plays the old pool" test "$(current_pool)" = "pools/$pool_a"
+v4=$(new_video)
+stage_pool "$v4"
+printf x >> "$staged/objects/$v4.mp4"
+check "a video that does not match its hash is refused" denied "$media" "$pool" "$staged"
+check "the refused pool changes nothing" \
+  test "$(current_pool)" = "pools/$pool_a" -a ! -e "$pools/objects/$v4.mp4" -a ! -e "$pools/pools/$pool"
+cp "$staged/pools/$pool_b.sums" "$staged/pools/0123456789abcdef.sums"
+check "a manifest that is not the named pool is refused" denied "$media" 0123456789abcdef "$staged"
+# An installer before issue #49 left a pool named after its release, and no
+# "current".
+legacy=$pools/legacy-release
+install -d -o root -g a-nas -m 0750 "$legacy"
+v5=$(new_video)
+v6=$(new_video)
+install -o root -g a-nas -m 0640 "/tmp/$v5.mp4" "$legacy/screensaver-000.mp4"
+install -o root -g a-nas -m 0640 "/tmp/$v6.mp4" "$legacy/screensaver-001.mp4"
+rm "$pools/current"
+stage /tmp/first-upgrade
+check "the first upgrade from an older installer installs" install_release first-upgrade
+check "it adopts the pool that installer left, by linking" \
+  test "$(pool_size):$(stat -c %h "$legacy/screensaver-000.mp4")" = 2:3
+check "the adopted pool is the current one" grep -q "$v6" "$pools/current/SHA256SUMS"
+check "the Product Service reads the current pool" \
+  grep -Fqx "ANAS_SCREENSAVER_DIRECTORY=$pools/current" /etc/a-nas/anas-api.env
+video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
+check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

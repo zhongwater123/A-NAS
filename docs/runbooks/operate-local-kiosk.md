@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; confinement and VT recovery pending
-更新时间：2026-10-06
+更新时间：2026-10-09
 
 ## 目的
 
@@ -23,7 +23,8 @@
 - `anas-kiosk@.service`
 - `a-nas-kiosk.pam`
 - `kiosk.env`（Experimental NAS 已实机校准的输出配置）
-- `screensavers/`（可选；由部署命令以逐文件 SHA-256 验证的匿名 MP4 构成，不进入 Git）
+
+屏保视频不在 release 中，见[屏保视频](#屏保视频)。
 
 2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成。重装或新设备由管理员执行：
 
@@ -69,8 +70,6 @@ systemctl enable anas-kiosk@tty1.service
 
 本机屏幕已在 `DP-2` 的原生 `1536x2048@60.6Hz` 模式下实机校准为逆时针 `90` 度、缩放 `1.5`。这些硬件相关值位于 root 管理的 `/etc/a-nas/kiosk.env`；启动器会先校验配置，再在 Chromium 启动前原子应用 transform 和 scale。其他硬件不得直接复用 connector 名称。
 
-屏保池由系统安装脚本从版本目录可选复制到 `/var/lib/a-nas/screensavers/<release-id>/`：目录为 `root:a-nas 0750`，视频为 `root:a-nas 0640`。`/etc/a-nas/anas-api.env` 只把这个版本目录交给产品服务只读扫描，Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件名。池缺失不会阻止产品服务或 Kiosk 启动；未随本次 release 提供新池时，默认目录仍兼容已安装的单视频资产。
-
 保持 SSH 恢复会话后，首次验证可执行：
 
 ```bash
@@ -80,6 +79,62 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
 ```
 
 服务与 `getty@tty1` 冲突并接管该虚拟终端。启动器最多等待产品 `/healthz` 30 秒；产品尚未就绪时退出，由 systemd 自动重试，而不是把 Chromium 错误页留在屏幕上。
+
+## 屏保视频
+
+屏保视频是系统盘上的长期媒体，不随 release 发布，升级和产品回滚都不改变正在播放的池（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：
+
+| 路径 | 内容 |
+| --- | --- |
+| `/var/lib/a-nas/screensavers/objects/<SHA-256>.mp4` | 每个视频只存一份，`root:a-nas 0640` |
+| `/var/lib/a-nas/screensavers/pools/<池 ID>/` | 指向对象的 `screensaver-NNN.mp4` 硬链接与 `SHA256SUMS`，目录 `root:a-nas 0750` |
+| `/var/lib/a-nas/screensavers/current` | 指向当前池的链接；`/etc/a-nas/anas-api.env` 固定把它交给产品服务只读扫描 |
+| `/home/anas-dev/apps/a-nas/screensavers/` | 暂存区：按哈希保存的视频与各池清单 `pools/<池 ID>.sums` |
+
+Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件名。池缺失不会阻止产品服务或 Kiosk 启动。
+
+### 更换屏保视频
+
+1. 在开发机暂存新池。脚本只上传 NAS 暂存区还没有的视频；早先随 release 暂存过的视频会直接复用。`-WhatIf` 只做本地校验并列出哈希，不联网：
+
+   ```powershell
+   .\scripts\deploy-screensavers.ps1 `
+     -NasHost <NAS_HOST> `
+     -Video @(
+       "E:\SteamLibrary\steamapps\workshop\content\431960\3667411885\BMW M5.mp4",
+       "E:\SteamLibrary\steamapps\workshop\content\431960\3556095996\Penguins.mp4",
+       "E:\SteamLibrary\steamapps\workshop\content\431960\3666233105\1771036359365.mp4",
+       "E:\SteamLibrary\steamapps\workshop\content\431960\3679705103\妄想天使直播.mp4",
+       "E:\SteamLibrary\steamapps\workshop\content\431960\3743343692\ЭКСПОНАТ - MIA BOYKA (TikTok Homelander Edit) HARDSTYLE REMIX by MilWo - MilWo (1080p, h264) (1).mp4"
+     )
+   ```
+
+   单个池最多 32 条，重复内容、非 MP4 或缺失文件会在联网前拒绝。脚本输出每个视频的 SHA-256 与池 ID。不得把 Steam Workshop 目录直接授予产品服务读取权限。
+2. 以 root 核对输出的池 ID 后安装：
+
+   ```bash
+   /opt/a-nas/current/install-screensavers.sh <池 ID>
+   ```
+
+   脚本把暂存的视频复制进对象库并逐个复核 SHA-256，任一不符即在改动前停止。池 ID 由清单内容计算，暂存清单与命令中的 ID 不符时拒绝。全部通过后建池、原子切换 `current`，并重启 Kiosk 让页面重新读取清单；产品服务无需重启。再次安装同一个池不会产生变化。
+3. 按验收第 7 项复核清单数量和 Range 请求。
+
+### 首次升级
+
+[issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 之前的安装器把每个池放在 `/var/lib/a-nas/screensavers/<release>/`，没有 `current`。首次安装包含 ADR 0014 的 release 时，系统安装器把其中最近安装的池以硬链接导入对象库并设为当前池，既不复制也不需要重新上传；导入失败时只打印警告，升级照常完成，本地控制台显示壁纸。
+
+此后若又用不含 ADR 0014 的旧安装器装过带视频的 release，新视频只在 `/var/lib/a-nas/screensavers/<release>/` 中，不会播放。以 root 导入：`/opt/a-nas/current/install-screensavers.sh --import /var/lib/a-nas/screensavers/<release>`。
+
+导入后，按 release 存放的旧池都是多余副本。清理前先确认当前池可用，并列出候选目录：
+
+```bash
+pools=/var/lib/a-nas/screensavers
+readlink "$pools/current"                              # 必须是 pools/<池 ID>
+(cd "$pools/current" && sha256sum --check --quiet SHA256SUMS)
+find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
+```
+
+确认列表中只有旧 release 目录、且清单与 Range 请求都正常后，才逐个 `rm -r -- "$pools/<release>"`。被导入的池与对象共享数据，删除它的目录不影响播放；其他目录是独立副本，删除后释放空间。不要删除 `objects`、`pools` 或 `current`。
 
 ## 验收
 
@@ -109,7 +164,15 @@ systemctl reset-failed
 
 这只移除本地显示会话，不停止 A-NAS API、Host Agent 或 SSH。
 
-屏保池是按 release ID 隔离的持久外部资产，产品回滚时保留所有旧池。需要回滚媒体时，先从 `/etc/a-nas/anas-api.env` 和已验证的旧 `RELEASE` 记录确认两个绝对目录都位于 `/var/lib/a-nas/screensavers/` 下，再把 `ANAS_SCREENSAVER_DIRECTORY` 切回旧目录、重启 API，并复核清单数量和 Range 请求；不要删除当前池作为回滚手段。旧池清理不属于常规回滚，必须另行确认精确 release 目录、备份需求和当前环境引用后才能执行。
+按[实机配置手册](provision-v1.0.1-experimental-storage.md#回滚)回滚产品不会改变正在播放的屏保池。媒体回滚就是重新安装一个已安装的池，不需要暂存区：
+
+```bash
+ls -l --time-style=long-iso /var/lib/a-nas/screensavers/pools
+cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
+/opt/a-nas/current/install-screensavers.sh <池 ID>
+```
+
+之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
 
 ## 依据
 
@@ -117,3 +180,4 @@ systemctl reset-failed
 - [Debian 13 Cage 手册](https://manpages.debian.org/trixie/cage/cage.1.en.html)
 - [systemd.exec 对 PAM、TTY 和运行时目录的说明](https://manpages.debian.org/trixie/systemd/systemd.exec.5.en.html)
 - [本地控制台屏保规格](../specs/local-console-screensaver.md)
+- [ADR 0014：屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
