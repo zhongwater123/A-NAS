@@ -3,7 +3,7 @@ import { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, use
 
 import { APIError, endViewing } from "./api";
 import {
-  PhotoAsset, PhotoLibrary, copyPhoto, emptyPhotoTrash, getPhoto, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
+  PhotoAsset, PhotoLibrary, PhotoSearch, copyPhoto, emptyPhotoTrash, getPhoto, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
   previewURL, purgePhoto, renamePhoto, restorePhoto, searchPhotos, trashPhoto, uploadPhoto,
 } from "./photosApi";
 
@@ -19,7 +19,8 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const [libraryId, setLibraryId] = useState("");
   const [view, setView] = useState<"timeline" | "trash" | "search">("timeline");
   const [query, setQuery] = useState("");
-  const [searched, setSearched] = useState("");
+  const [searched, setSearched] = useState<PhotoSearch>();
+  const [details, setDetails] = useState<PhotoAsset>();
   const [semantic, setSemantic] = useState(true);
   const [assets, setAssets] = useState<PhotoAsset[]>([]);
   const [next, setNext] = useState<string>();
@@ -99,15 +100,19 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   // Until the libraries have loaded, as while the photo service is
   // unavailable, refreshing loads them; selecting one then loads its view.
   const refresh = () => !libraryId ? loadLibraries() : view === "trash" ? loadTrash() : reload();
-  const clearSearch = () => { setQuery(""); setSearched(""); setView("timeline"); };
+  const clearSearch = () => { setQuery(""); setSearched(undefined); setView("timeline"); };
+  const startSearch = (search: PhotoSearch) => {
+    setSelected(undefined);
+    setLoading(true);
+    setSearched(search);
+    setView("search");
+  };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
     const text = query.trim();
     if (!text) { clearSearch(); return; }
-    if (text === searched && view === "search") { void loadSearch(); return; }
-    setLoading(true);
-    setSearched(text);
-    setView("search");
+    if (searched && "query" in searched && text === searched.query && view === "search") { void loadSearch(); return; }
+    startSearch({ query: text });
   };
   // Administrative viewing never includes the member's trash.
   useEffect(() => { if (readOnly) setView("timeline"); }, [readOnly]);
@@ -152,6 +157,16 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
 
   const current = selected === undefined ? undefined : assets[selected];
   const currentLibrary = current ? libraryOf(current) : undefined;
+  // Lists leave AI labels out; the viewer asks for the photo's details.
+  const currentID = current?.id;
+  useEffect(() => {
+    setDetails(undefined);
+    if (!currentID) return;
+    let live = true;
+    getPhoto(currentID).then((asset) => { if (live) setDetails(asset); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [currentID]);
+  const aiLabels = details?.id === currentID ? details?.aiLabels ?? [] : [];
   // Copying again would only add another independent copy, so say it worked.
   const copyTo = (target: PhotoLibrary, label: string) => {
     if (current) void act(() => copyPhoto(current.id, target.id), async () => { setError(""); setNotice(`已复制到${label}`); });
@@ -195,10 +210,12 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       {view === "search" ? (
         <>
           <div className="inline-form">
-            <span className="photos-note">在我的图库{readOnly ? `、共享图库和 ${library?.ownerName ?? "成员"} 的私有图库` : "和共享图库"}中搜索“{searched}”，最相关的排在前面。</span>
+            <span className="photos-note">{searched && "label" in searched
+              ? `本地 AI 识别为“${searched.name}”的照片，可能有误。`
+              : `在我的图库${readOnly ? `、共享图库和 ${library?.ownerName ?? "成员"} 的私有图库` : "和共享图库"}中搜索“${searched && "query" in searched ? searched.query : ""}”，最相关的排在前面。`}</span>
             <button onClick={clearSearch}><X size={13} />清除搜索</button>
           </div>
-          {!semantic && <div className="status-banner" role="status"><CircleAlert />智能搜索暂不可用，只按照片名称匹配。</div>}
+          {!semantic && <div className="status-banner" role="status"><CircleAlert />{searched && "label" in searched ? "AI 标签暂不可用。" : "智能搜索暂不可用，只按照片名称匹配。"}</div>}
           {loading ? <div className="empty-compact">正在搜索…</div> : !assets.length && !error && <div className="empty-compact">没有找到相关照片</div>}
           <div className="photo-grid">
             {assets.map((asset, index) => (
@@ -269,6 +286,14 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
               {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}
             </dl>
             {current.alsoKeptBy?.length ? <p className="photo-hint">{current.alsoKeptBy.join("、")} 也保存了相同的照片。</p> : null}
+            {aiLabels.length > 0 && (
+              <div className="photo-labels" aria-label="AI 标签">
+                <span>本地 AI 识别</span>
+                {aiLabels.map((label) => (
+                  <button key={label.id} title={`相似度 ${label.score.toFixed(2)}，点击查看同类照片`} onClick={() => startSearch({ label: label.id, name: label.name })}>{label.name}</button>
+                ))}
+              </div>
+            )}
             <div className="photo-viewer-actions">
               <a className="upload-button" href={originalURL(current.id, true)}><Download size={14} />下载原图</a>
               {canChange(current) && <button onClick={() => {

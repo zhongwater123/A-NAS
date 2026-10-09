@@ -179,7 +179,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	page, err := h.service.Search(r.Context(), principal, photos.SearchRequest{
-		Query: query.Get("q"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+		Query: query.Get("q"), Label: query.Get("label"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
 	})
 	if err != nil {
 		h.fail(w, r, err)
@@ -458,7 +458,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, photos.ErrInvalidCursor):
 		WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
 	case errors.Is(err, photos.ErrInvalidQuery):
-		WriteError(w, http.StatusBadRequest, "invalid_query", "the search query must have 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters")
+		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters or a label photos can show, not both")
 	case errors.Is(err, photos.ErrUnsupportedType):
 		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "only JPEG and PNG photos are supported")
 	case errors.Is(err, photos.ErrTooLarge):

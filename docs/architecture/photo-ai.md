@@ -98,19 +98,23 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 门控关闭时只停止领取新任务，进行中的单张推理允许完成；关闭期间至多每分钟（不长于空闲期）复查一次。
 - 更换模型后，第一次见到新模型 ID 时把旧模型的向量全部重新排队；旧向量在新向量写入前继续保留。
 
-### 存储（Catalog migration 4）
+### 存储（Catalog migration 4、5）
 
-- `embeddings(object_id, model_id, vector, created_at)`：每个对象每个模型一行，768 维 float32 约 3 KB；20,000 张约 60 MB。
-- `label_vectors(label_set, label_id, model_id, vector)`：标签词表的文本向量缓存。
-- `ai_tags(object_id, label_set, label_id, score)`：由向量与标签向量在相册服务内计算（Go，无需模型），词表或阈值更新时可整体重算。
-- 切片 11 的用户元数据以照片资产为键：`user_tags(asset_id, name, created_by, created_at)`、`ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at)`。重算 AI 标签永远不改动它们。
+- `embeddings(object_id, derivation, model, vector, created_at)`：每个对象一行，记录产生它的模型，768 维 float32 约 3 KB；20,000 张约 60 MB。
+- `query_vectors(model, text, vector, created_at)`：Worker 为标签文本编码的向量，按模型与文本缓存，重启后无需 Worker 即可显示标签。
+- 不保存 AI 标签：标签分数在读取时由图片向量与标签向量算出，阈值或词表随新版本更新后立即生效，无需重算任务。
+- 切片 11 的用户元数据以照片资产为键：`user_tags(asset_id, name, created_by, created_at)`、`ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at)`。AI 标签的计算永远不改动它们。
 
 ### AI 标签
 
-- 版本化的中文标签词表随代码发布（`internal/photos/labels/`）：每项有稳定 ID、显示名、同义词、分类与提示词模板，覆盖规格点名的“猫”“电动车”“3D 打印机”等常见物体、动物、场景、食物、文档与活动。
-- 标签分数是照片向量与标签文本向量的余弦相似度。每个标签有自己的阈值；只展示超过阈值、且与次优标签拉开差距的最多 5 个，并标明来源为 AI。
-- 阈值由切片 9 用公开数据集校准（COCO、COCO-CN 与 Open Images，只在开发机使用，不随发行包分发；方法与结果见[标签校准报告](../research/photo-ai-label-calibration.md)）。没有可靠真值的标签只参与搜索，宁可少标不错标。
-- 用户隐藏的 AI 标签写入纠错表，之后任何重算都不再展示；用户标签优先显示。
+已实现于 [`photos/ailabels.go`](../../internal/photos/ailabels.go)，词表与校准随程序发布（[`photos/labels`](../../internal/photos/labels/labels.go)）。
+
+- 词表 v1（[`v1.json`](../../internal/photos/labels/v1.json)）共 330 个中文标签，每项有稳定 ID、显示名、同义词与分类，覆盖规格点名的“猫”“电动车”“3D 打印机”等物体、动物、场景、食物、文档与活动。
+- 校准（[`v1.calibration.json`](../../internal/photos/labels/v1.calibration.json)）记录模型 ID、标签短语（v1 为标签名本身）与每个可展示标签的阈值；方法与结果见[标签校准报告](../research/photo-ai-label-calibration.md)。v1 有 73 个标签可展示，其余只参与搜索，宁可少标不错标。
+- 标签向量：AI 后台任务在处理照片之前，逐条请 Worker 用 `embed_query` 编码可展示标签的文本，存入 `query_vectors`；全部就绪后才显示标签。
+- 标签分数是照片向量与标签向量的余弦相似度。照片详情只显示达到阈值的标签，按超出阈值的幅度排序，最多 5 个，标明“本地 AI 识别”并附相似度。阈值只对校准时的模型成立：Worker 的模型 ID 与校准不符时不显示任何标签，也不编码标签文本。
+- 按标签筛选：`GET /api/v1/photos/search?label=` 在搜索范围内返回显示该标签的照片，按相似度排序；查看器中点击标签即进入。
+- 用户隐藏的 AI 标签写入纠错表，之后不再展示；用户标签优先显示（步骤 6）。
 
 ### 语义搜索
 
@@ -135,9 +139,9 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 |---|---|---|---|
 | 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 已实现：用 Fake Provider 跑通“上传 → 缩略图 → 向量”；没有 Worker 时冒烟与系统测试照常通过。Host Agent 活动信号移入后续步骤 |
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | 已实现：[`ai/`](../../ai/anas_ai/worker.py) 的协议测试只需标准库并纳入 `make check`；Go 客户端与 Python Worker 的互通测试通过；真实模型测试在 Debian 13 容器中通过 |
-| 3 | 9 | 进行中（中文检索已测完；词表 v1、校准脚本已完成，全量阈值在开发机后台计算，见[校准报告](../research/photo-ai-label-calibration.md)）：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
+| 3 | 9 | 70 视觉 token 的阈值已冻结（73 个可展示标签），140 token 与 1024 px 输入的对比在开发机后台运行，见[校准报告](../research/photo-ai-label-calibration.md)：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 已实现：搜索接口、内存索引、搜索范围与桌面搜索框；Worker 增加 `embed_query` | 单元与泄漏测试覆盖范围、查看授权、回收站与分页；本地 systemd 环境中真实模型的中文搜索结果见[校准报告](../research/photo-ai-label-calibration.md#端到端搜索本地-systemd-环境) |
-| 5 | 12 | AI 标签计算、查看器标签展示、按标签筛选 | 标签只在阈值之上出现；隐藏后重算不复现 |
+| 5 | 12 | 已实现：标签向量缓存、读取时计算 AI 标签、查看器标签展示、按标签筛选 | 标签只在阈值之上、且只对校准模型出现；隐藏随步骤 6 |
 | 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
 | 7 | 10 | 打包：离线 wheel 与哈希、模型清单、`anas-ai` 单元与安装器、系统测试 | 系统测试在无网络下安装并运行 Worker；不部署到 NAS，等你决定 |
 
@@ -145,7 +149,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 1. **许可**：发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并保存清单与 NOTICE。
 2. **下载**：模型包由你从其他设备传到开发机的预留位置；步骤 3 的公开中文数据集仍需下载，体积在下载前逐个列出。
-3. **标签词表**：首版约 200–300 个常用标签；如有必须识别的类别请补充。
+3. **标签词表**：v1 共 330 个标签，其中 73 个可展示；如有必须识别的类别请补充。
 
 ## 风险
 

@@ -19,7 +19,10 @@ export interface PhotoAsset {
   // Other members whose private libraries hold the same original.
   alsoKeptBy?: string[];
   trash?: PhotoTrash;
+  // What local AI sees in the photo; only a single photo's details carry it.
+  aiLabels?: PhotoAILabel[];
 }
+export interface PhotoAILabel { id: string; name: string; score: number }
 export interface PhotoPage { items: PhotoAsset[]; next?: string }
 // semantic is false when local AI could not encode the query and only names
 // were matched.
@@ -32,9 +35,11 @@ const json = (method: string, value: unknown): RequestInit => ({ method, headers
 export const listPhotoLibraries = async () => (await request<{ items: PhotoLibrary[] }>(`${base}/libraries`)).items;
 export const listTimeline = (libraryId: string, cursor = "", limit = 120) =>
   request<PhotoPage>(`${base}/libraries/${id(libraryId)}/timeline?limit=${limit}${cursor ? `&cursor=${id(cursor)}` : ""}`);
-// viewing adds a member library the caller is viewing read-only.
-export const searchPhotos = (query: string, viewing = "", cursor = "", limit = 120) =>
-  request<PhotoSearchPage>(`${base}/search?q=${id(query)}&limit=${limit}${viewing ? `&viewing=${id(viewing)}` : ""}${cursor ? `&cursor=${id(cursor)}` : ""}`);
+// A search is by query or by AI label; viewing adds a member library the
+// caller is viewing read-only.
+export type PhotoSearch = { query: string } | { label: string; name: string };
+export const searchPhotos = (search: PhotoSearch, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoSearchPage>(`${base}/search?${"label" in search ? `label=${id(search.label)}` : `q=${id(search.query)}`}&limit=${limit}${viewing ? `&viewing=${id(viewing)}` : ""}${cursor ? `&cursor=${id(cursor)}` : ""}`);
 export function uploadPhoto(libraryId: string, file: File) {
   const body = new FormData();
   body.set("file", file);

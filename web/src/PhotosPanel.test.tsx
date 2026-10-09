@@ -313,6 +313,25 @@ describe("PhotosPanel search", () => {
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
   });
 
+  it("shows what local AI sees and lists the photos with the same label", async () => {
+    const fetchMock = serve((url) => {
+      if (url === "/api/v1/photos/assets/photo%3Acat") return json(asset("photo:cat", { aiLabels: [{ id: "cat", name: "猫", score: 0.76 }] }));
+      if (url.startsWith("/api/v1/photos/search?label=cat")) return json({ items: [asset("photo:cat"), asset("photo:kitten")], semantic: true });
+      if (url.includes("/timeline")) return json({ items: [asset("photo:cat")] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "查看 photo:cat.jpg" }));
+    const labels = await screen.findByLabelText("AI 标签");
+    expect(within(labels).getByText("本地 AI 识别")).toBeTruthy();
+
+    await user.click(within(labels).getByRole("button", { name: "猫" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?label=cat&limit=120", expect.anything());
+    expect(await screen.findByRole("button", { name: "查看 photo:kitten.jpg" })).toBeTruthy();
+    expect(screen.getByText("本地 AI 识别为“猫”的照片，可能有误。")).toBeTruthy();
+  });
+
   it("adds the viewed member library only while viewing it", async () => {
     const viewed: PhotoLibrary = { id: "library:alice", kind: "private", ownerUserId: "user:alice", ownerName: "alice", createdAt: "2026-10-08T00:00:00Z", viewing: { grantId: "viewing:7", expiresAt: "2026-10-09T09:00:00Z" } };
     const own: PhotoLibrary = { ...privateLibrary, id: "library:admin", ownerUserId: "user:admin" };

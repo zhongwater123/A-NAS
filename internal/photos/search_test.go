@@ -26,6 +26,7 @@ import (
 type colorEmbedder struct {
 	mu          sync.Mutex
 	unavailable bool
+	queries     []string
 }
 
 func (c *colorEmbedder) Info(context.Context) (photos.EmbedderInfo, error) {
@@ -55,6 +56,9 @@ func (c *colorEmbedder) EmbedQuery(_ context.Context, text string) ([]float32, e
 	if c.isUnavailable() {
 		return nil, photos.ErrAIUnavailable
 	}
+	c.mu.Lock()
+	c.queries = append(c.queries, text)
+	c.mu.Unlock()
 	switch {
 	case strings.Contains(text, "红"):
 		return unit(1, 0, 0), nil

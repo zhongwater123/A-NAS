@@ -127,8 +127,8 @@ func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle 
 	}
 }
 
-// ProcessAIJob runs one ready embedding job and reports whether it finished
-// one. It does nothing while gate is closed or the Worker is away; the error
+// ProcessAIJob fetches one missing label text vector or runs one ready
+// embedding job, and reports whether it did. It does nothing while gate is closed or the Worker is away; the error
 // returned is only for Catalog or storage faults.
 func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (bool, error) {
 	if open, reason := gate.Open(ctx); !open {
@@ -145,6 +145,13 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	}
 	if err := s.requeueStale(ctx, info.Model); err != nil {
 		return false, err
+	}
+	// Label texts are few and short; they come before photos.
+	if fetched, err := s.embedLabelText(ctx, embedder, info); fetched || err != nil {
+		if fetched {
+			s.ai.set(AIWorking, "", info.Model)
+		}
+		return fetched, err
 	}
 	job, err := s.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {

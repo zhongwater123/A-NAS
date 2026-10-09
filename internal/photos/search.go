@@ -20,6 +20,7 @@ import (
 // Semantic results are ranked by similarity without a cut-off: public
 // datasets show the scores of matching and other photos overlapping too much
 // for one threshold to separate them (docs/research/photo-ai-label-calibration.md).
+// A search by AI label instead returns the photos that show the label.
 
 var ErrInvalidQuery = errors.New("invalid photo search query")
 
@@ -33,8 +34,11 @@ const (
 	nameMatch = 2
 )
 
+// SearchRequest asks for either a Query or a Label.
 type SearchRequest struct {
 	Query string
+	// Label is the ID of a label that photos show (AILabel.ID).
+	Label string
 	// Viewing names a member's private library the caller is viewing through
 	// an unexpired grant, to search it as well.
 	Viewing string
@@ -48,7 +52,8 @@ type SearchPage struct {
 	// Next continues the results; empty on the last page.
 	Next string
 	// Semantic is false when the AI Worker could not encode the query; the
-	// results then match names only.
+	// results then match names only. For a label it is false while label
+	// vectors are not available, and there are no results.
 	Semantic bool
 }
 
@@ -57,11 +62,17 @@ type searchHit struct {
 	score float64
 }
 
-// Search returns photos matching the query by name or meaning. Trashed photos
-// are never included.
+type candidate struct{ id, objectID, name string }
+
+// Search returns photos matching the query by name or meaning, or showing the
+// label. Trashed photos are never included.
 func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest) (SearchPage, error) {
 	query := strings.TrimSpace(request.Query)
-	if query == "" || utf8.RuneCountInString(query) > MaxQueryRunes {
+	if request.Label != "" {
+		if _, shown := s.labels.Thresholds[request.Label]; !shown || query != "" {
+			return SearchPage{}, ErrInvalidQuery
+		}
+	} else if query == "" || utf8.RuneCountInString(query) > MaxQueryRunes {
 		return SearchPage{}, ErrInvalidQuery
 	}
 	after, err := decodeSearchCursor(request.Cursor)
@@ -77,7 +88,6 @@ WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat(
 	if err != nil {
 		return SearchPage{}, err
 	}
-	type candidate struct{ id, objectID, name string }
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
@@ -92,30 +102,15 @@ WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat(
 	}
 
 	page := SearchPage{Assets: []Asset{}}
-	queryVector, model := s.embedQuery(ctx, query)
-	page.Semantic = queryVector != nil
-	var named, similar []searchHit
-	folded := strings.ToLower(query)
-	err = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			vector, embedded := vectors[c.objectID]
-			score := 0.0
-			if embedded && queryVector != nil {
-				score = dot(vector, queryVector)
-			}
-			switch {
-			case strings.Contains(strings.ToLower(c.name), folded):
-				named = append(named, searchHit{c.id, nameMatch + score})
-			case embedded && queryVector != nil:
-				similar = append(similar, searchHit{c.id, score})
-			}
-		}
-	})
+	var hits []searchHit
+	if request.Label != "" {
+		hits, page.Semantic, err = s.labelHits(ctx, request.Label, candidates)
+	} else {
+		hits, page.Semantic, err = s.queryHits(ctx, query, candidates)
+	}
 	if err != nil {
 		return SearchPage{}, err
 	}
-	sortHits(similar)
-	hits := append(named, similar[:min(len(similar), maxSemanticResults)]...)
 	sortHits(hits)
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
@@ -155,6 +150,51 @@ WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat(
 		page.Assets = append(page.Assets, record.Asset)
 	}
 	return page, nil
+}
+
+// queryHits scores candidates against a query: name matches, then the
+// closest by meaning.
+func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate) ([]searchHit, bool, error) {
+	queryVector, model := s.embedQuery(ctx, query)
+	var named, similar []searchHit
+	folded := strings.ToLower(query)
+	err := s.index.read(ctx, s, model, func(vectors map[string][]float32) {
+		for _, c := range candidates {
+			vector, embedded := vectors[c.objectID]
+			score := 0.0
+			if embedded && queryVector != nil {
+				score = dot(vector, queryVector)
+			}
+			switch {
+			case strings.Contains(strings.ToLower(c.name), folded):
+				named = append(named, searchHit{c.id, nameMatch + score})
+			case embedded && queryVector != nil:
+				similar = append(similar, searchHit{c.id, score})
+			}
+		}
+	})
+	sortHits(similar)
+	return append(named, similar[:min(len(similar), maxSemanticResults)]...), queryVector != nil, err
+}
+
+// labelHits returns the candidates that show the label.
+func (s *Service) labelHits(ctx context.Context, label string, candidates []candidate) ([]searchHit, bool, error) {
+	labelVectors, err := s.labelVectors(ctx)
+	if err != nil || labelVectors == nil {
+		return nil, false, err
+	}
+	threshold := s.labels.Thresholds[label]
+	var hits []searchHit
+	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
+		for _, c := range candidates {
+			if vector, ok := vectors[c.objectID]; ok {
+				if score := dot(vector, labelVectors[label]); score >= threshold {
+					hits = append(hits, searchHit{c.id, score})
+				}
+			}
+		}
+	})
+	return hits, true, err
 }
 
 // searchScope returns the IDs of the libraries a search covers.

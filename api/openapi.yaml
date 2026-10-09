@@ -605,9 +605,10 @@ paths:
   /api/v1/photos/search:
     get:
       operationId: searchPhotos
-      summary: Find untrashed photos in the caller's private and the shared library by name or meaning; name matches first, then by similarity
+      summary: Find untrashed photos in the caller's private and the shared library by name or meaning (name matches first, then by similarity), or the photos that show an AI label
       parameters:
-        - { name: q, in: query, required: true, description: "1 to 200 characters, such as 海边的猫.", schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: q, in: query, description: "1 to 200 characters, such as 海边的猫; give q or label.", schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: label, in: query, description: "The ID of an AI label photos can show, such as cat; give q or label.", schema: { type: string } }
         - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to search it as well.", schema: { type: string } }
         - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
@@ -1701,6 +1702,17 @@ components:
             trashedAt: { type: string, format: date-time }
             trashedBy: { type: string }
             purgeAfter: { type: string, format: date-time }
+        aiLabels:
+          description: What local AI sees in the photo, clearest first, at most 5; only a single photo's details carry them.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, score]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              score: { type: number, description: Similarity of the photo to the label; at least the label's calibrated threshold. }
     PhotoTimeline:
       type: object
       additionalProperties: false

@@ -111,7 +111,11 @@ func (s *Service) Get(ctx context.Context, p Principal, assetID string) (Asset, 
 	if err := s.addDuplicateHints(ctx, s.db, p, hinted); err != nil {
 		return Asset{}, err
 	}
-	return hinted[0].Asset, nil
+	asset := hinted[0].Asset
+	if asset.AILabels, err = s.labelsOf(ctx, record.objectID); err != nil {
+		return Asset{}, err
+	}
+	return asset, nil
 }
 
 func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, assetID string) (assetRecord, error) {
