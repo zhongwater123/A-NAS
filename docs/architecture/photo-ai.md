@@ -33,8 +33,9 @@ M2 交付后，成员可以：
 模型文件不进仓库，也不进发行包；位置与校验值固定在清单 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 中：
 
 - **文件**：官方仓库 `litert-community/embeddinggemma-2-740m-litert-lm`（revision `24d962e9…`）中的通用 CPU/GPU 文件 `embeddinggemma-2-740m.litertlm`，484,622,336 字节，SHA-256 `e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c`。同一仓库中带厂商后缀的文件（Qualcomm、MediaTek、Tensor、Intel PTL）是特定 NPU 的编译版本，不适用于 i3-12100。
-- **开发机**：`D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。
-- **发行（之后部署时）**：`/opt/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，`root:root 0644`，由 AI 组件的安装步骤放置。
+- **Experimental NAS 暂存**：`/home/anas-dev/apps/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，与发行制品一样由开发机以 `anas-dev` 经 SSH 传入（目录已于 2026-10-09 创建）：`scp embeddinggemma-2-740m.litertlm anas-dev@<NAS>:apps/a-nas/models/embeddinggemma-2-740m/`，传完在 NAS 上用 `sha256sum` 核对。暂存只放文件，不启用任何 AI 组件。
+- **Experimental NAS 安装（之后部署 AI 时）**：`/opt/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，`root:root 0644`。root 执行的安装步骤先按清单核对暂存文件的大小与 SHA-256，再复制到这里；`anas-dev` 无权写入该目录。
+- **开发机**：`D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。开发期的实测副本从 NAS 暂存目录复制过来。
 - Worker 加载前核对文件大小与 SHA-256，不符时拒绝加载并报告 AI 不可用。
 
 ## 整体结构
