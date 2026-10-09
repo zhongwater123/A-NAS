@@ -617,6 +617,105 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/libraries/{libraryId}/albums:
+    get:
+      operationId: listPhotoAlbums
+      summary: List a library's albums, newest first
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }]
+      responses:
+        "200": { description: Albums, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PhotoAlbum" } } } } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+    post:
+      operationId: createPhotoAlbum
+      summary: Create an album in a library the caller may add to
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoNameRequest" } } } }
+      responses:
+        "201": { description: Album created, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAlbum" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/albums/{albumId}:
+    patch:
+      operationId: renamePhotoAlbum
+      summary: Rename an album; its creator, the library owner or an administrator of the shared library may
+      parameters: [{ $ref: "#/components/parameters/PhotoAlbumID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoNameRequest" } } } }
+      responses:
+        "200": { description: Album renamed, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAlbum" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deletePhotoAlbum
+      summary: Delete an album; its photos stay in the library
+      parameters: [{ $ref: "#/components/parameters/PhotoAlbumID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Album deleted }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/albums/{albumId}/assets:
+    get:
+      operationId: listPhotoAlbumAssets
+      summary: List an album's photos outside the trash, newest capture time first
+      parameters:
+        - { $ref: "#/components/parameters/PhotoAlbumID" }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+    post:
+      operationId: addPhotoToAlbum
+      summary: Add a photo to an album; a photo of another library is copied into the album's library first
+      parameters: [{ $ref: "#/components/parameters/PhotoAlbumID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [assetId], properties: { assetId: { type: string } } } } } }
+      responses:
+        "200": { description: "The photo the album now holds, with its details", content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/albums/{albumId}/assets/{assetId}:
+    delete:
+      operationId: removePhotoFromAlbum
+      summary: Take a photo out of an album without deleting it
+      parameters: [{ $ref: "#/components/parameters/PhotoAlbumID" }, { $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Photo removed from the album }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/tags:
+    post:
+      operationId: addPhotoTag
+      summary: Add a user tag of at most 30 characters; whoever may rename the photo may tag it
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoNameRequest" } } } }
+      responses:
+        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/tags/{name}:
+    delete:
+      operationId: removePhotoTag
+      summary: Remove a user tag
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: name, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/ai-labels/{labelId}:
+    delete:
+      operationId: hidePhotoAILabel
+      summary: Hide a wrong AI label on this photo only; the correction outlives model upgrades
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: labelId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/timeline:
     get:
       operationId: listPhotoTimeline
@@ -828,6 +927,7 @@ components:
     PhotoLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
     PhotoDirectoryID: { name: directoryId, in: path, required: true, schema: { type: string } }
     PhotoAssetID: { name: assetId, in: path, required: true, schema: { type: string } }
+    PhotoAlbumID: { name: albumId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
     AppId:
       name: appId
@@ -1716,8 +1816,16 @@ components:
             trashedAt: { type: string, format: date-time }
             trashedBy: { type: string }
             purgeAfter: { type: string, format: date-time }
+        tags:
+          description: User tags; only a single photo's details carry them.
+          type: array
+          items: { type: string }
+        albums:
+          description: Albums the photo is in; only a single photo's details carry them.
+          type: array
+          items: { type: object, additionalProperties: false, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
         aiLabels:
-          description: What local AI sees in the photo, clearest first, at most 5; only a single photo's details carry them.
+          description: What local AI sees in the photo, less labels hidden on it, clearest first, at most 5; only a single photo's details carry them.
           type: array
           items:
             type: object
@@ -1734,6 +1842,24 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string, description: Cursor for the next page; absent on the last page. }
+    PhotoAlbum:
+      type: object
+      additionalProperties: false
+      required: [id, libraryId, name, createdBy, createdAt, photos]
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        name: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        photos: { type: integer, minimum: 0, description: Photos outside the trash. }
+        coverId: { type: string, description: The newest of them. }
+    PhotoNameRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string }
     PhotoSearchResults:
       type: object
       additionalProperties: false

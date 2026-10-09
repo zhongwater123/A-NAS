@@ -114,9 +114,9 @@ func (s *Service) labelVectors(ctx context.Context) (map[string][]float32, error
 	return vectors, nil
 }
 
-// labelsOf returns the labels the photo with this original shows, the
-// clearest first: by how far each score passes its threshold.
-func (s *Service) labelsOf(ctx context.Context, objectID string) ([]AILabel, error) {
+// labelsOf returns the labels a photo with this original shows, less the
+// hidden ones, the clearest first: by how far each score passes its threshold.
+func (s *Service) labelsOf(ctx context.Context, objectID string, hidden map[string]bool) ([]AILabel, error) {
 	labelVectors, err := s.labelVectors(ctx)
 	if err != nil || labelVectors == nil {
 		return nil, err
@@ -128,6 +128,9 @@ func (s *Service) labelsOf(ctx context.Context, objectID string) ([]AILabel, err
 			return
 		}
 		for _, label := range s.labels.Shown() {
+			if hidden[label.ID] {
+				continue
+			}
 			if score := dot(vector, labelVectors[label.ID]); score >= s.labels.Thresholds[label.ID] {
 				found = append(found, AILabel{ID: label.ID, Name: label.Name, Score: score})
 			}

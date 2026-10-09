@@ -62,7 +62,8 @@ type searchHit struct {
 	score float64
 }
 
-type candidate struct{ id, objectID, name string }
+// A candidate's tags are its user tags joined by unit separators.
+type candidate struct{ id, objectID, name, tags string }
 
 // Search returns photos matching the query by name or meaning, or showing the
 // label. Trashed photos are never included.
@@ -83,15 +84,17 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	if err != nil {
 		return SearchPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, object_id, name FROM assets
-WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+`)`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.name, IFNULL(group_concat(t.name, char(31)), '')
+FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
+WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+`)
+GROUP BY a.id`, args...)
 	if err != nil {
 		return SearchPage{}, err
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.objectID, &c.name); err != nil {
+		if err := rows.Scan(&c.id, &c.objectID, &c.name, &c.tags); err != nil {
 			_ = rows.Close()
 			return SearchPage{}, err
 		}
@@ -152,8 +155,8 @@ WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat(
 	return page, nil
 }
 
-// queryHits scores candidates against a query: name matches, then the
-// closest by meaning.
+// queryHits scores candidates against a query: name or user tag matches,
+// then the closest by meaning.
 func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate) ([]searchHit, bool, error) {
 	queryVector, model := s.embedQuery(ctx, query)
 	var named, similar []searchHit
@@ -166,7 +169,7 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 				score = dot(vector, queryVector)
 			}
 			switch {
-			case strings.Contains(strings.ToLower(c.name), folded):
+			case strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded):
 				named = append(named, searchHit{c.id, nameMatch + score})
 			case embedded && queryVector != nil:
 				similar = append(similar, searchHit{c.id, score})
@@ -177,17 +180,26 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 	return append(named, similar[:min(len(similar), maxSemanticResults)]...), queryVector != nil, err
 }
 
-// labelHits returns the candidates that show the label.
+// labelHits returns the candidates that show the label and have not hidden
+// it.
 func (s *Service) labelHits(ctx context.Context, label string, candidates []candidate) ([]searchHit, bool, error) {
 	labelVectors, err := s.labelVectors(ctx)
 	if err != nil || labelVectors == nil {
 		return nil, false, err
 	}
+	hiding, err := s.strings(ctx, "SELECT asset_id FROM ai_tag_corrections WHERE label_id = ?", label)
+	if err != nil {
+		return nil, false, err
+	}
+	hidden := make(map[string]bool, len(hiding))
+	for _, id := range hiding {
+		hidden[id] = true
+	}
 	threshold := s.labels.Thresholds[label]
 	var hits []searchHit
 	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
 		for _, c := range candidates {
-			if vector, ok := vectors[c.objectID]; ok {
+			if vector, ok := vectors[c.objectID]; ok && !hidden[c.id] {
 				if score := dot(vector, labelVectors[label]); score >= threshold {
 					hits = append(hits, searchHit{c.id, score})
 				}

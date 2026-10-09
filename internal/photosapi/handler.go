@@ -101,6 +101,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/copies", h.copyAsset)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
+	h.metadataRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})

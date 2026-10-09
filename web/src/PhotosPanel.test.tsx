@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -351,5 +351,57 @@ describe("PhotosPanel search", () => {
     await user.type(box, "猫{Enter}");
     expect(await screen.findByText(/alice 的私有图库中搜索/)).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120&viewing=library%3Aalice", expect.anything());
+  });
+});
+
+describe("PhotosPanel albums and tags", () => {
+  const album = { id: "album:trip", libraryId: privateLibrary.id, name: "旅行", createdBy: "user:alice", createdAt: "2026-10-09T00:00:00Z", photos: 1, coverId: "photo:a" };
+
+  it("lists albums, opens one and takes a photo out of it", async () => {
+    setSession({ csrfToken: "csrf-photo", expiresAt: "", user: { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "" } });
+    let removed = false;
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/libraries/library%3Amine/albums") return json({ items: [album] });
+      if (url.startsWith("/api/v1/photos/albums/album%3Atrip/assets?")) return json({ items: removed ? [] : [asset("photo:a")] });
+      if (url === "/api/v1/photos/albums/album%3Atrip/assets/photo%3Aa" && init?.method === "DELETE") { removed = true; return new Response(null, { status: 204 }); }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("tab", { name: "相册" }));
+    await user.click(await screen.findByRole("button", { name: "打开相册 旅行" }));
+    await user.click(await screen.findByRole("button", { name: "查看 photo:a.jpg" }));
+    await user.click(screen.getByRole("button", { name: "从相册移除" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/albums/album%3Atrip/assets/photo%3Aa", expect.objectContaining({ method: "DELETE" }));
+    expect(await screen.findByText("相册里还没有照片。在照片的查看页选择“加入相册”。")).toBeTruthy();
+  });
+
+  it("tags a photo, hides a wrong AI label and adds a shared photo to an album as a copy", async () => {
+    setSession({ csrfToken: "csrf-photo", expiresAt: "", user: { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "" } });
+    const sharedPhoto = asset("photo:s", { libraryId: sharedLibrary.id, uploadedBy: "user:alice", aiLabels: [{ id: "dog", name: "狗", score: 0.7 }] });
+    let details: PhotoAsset = sharedPhoto;
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/libraries/library%3Ashared/timeline?limit=120") return json({ items: [sharedPhoto] });
+      if (url === "/api/v1/photos/assets/photo%3As") return json(details);
+      if (url === "/api/v1/photos/assets/photo%3As/tags" && init?.method === "POST") { details = { ...details, tags: ["小黑"] }; return json(details); }
+      if (url === "/api/v1/photos/assets/photo%3As/ai-labels/dog" && init?.method === "DELETE") { details = { ...details, aiLabels: [] }; return json(details); }
+      if (url === "/api/v1/photos/libraries/library%3Amine/albums") return json({ items: [album] });
+      if (url === "/api/v1/photos/libraries/library%3Ashared/albums") return json({ items: [] });
+      if (url === "/api/v1/photos/albums/album%3Atrip/assets" && init?.method === "POST") return json(asset("photo:copy"));
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "图库" }), "library:shared");
+    await user.click(await screen.findByRole("button", { name: "查看 photo:s.jpg" }));
+
+    await user.type(await screen.findByRole("textbox", { name: "添加标签" }), "小黑{Enter}");
+    expect(await within(screen.getByLabelText("标签")).findByRole("button", { name: "小黑" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "隐藏 AI 标签 狗" }));
+    await waitFor(() => expect(screen.queryByLabelText("AI 标签")).toBeNull());
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "加入相册" }), "album:trip");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/albums/album%3Atrip/assets", expect.objectContaining({ method: "POST" }));
+    expect(await screen.findByText("已复制到我的图库并加入相册“我的图库 · 旅行”")).toBeTruthy();
   });
 });

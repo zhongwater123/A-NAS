@@ -142,6 +142,46 @@ CREATE TABLE query_vectors (
     PRIMARY KEY (model, text)
 );
 `,
+	// 6: user metadata. Albums group photo assets of their own library;
+	// user tags and AI corrections belong to one photo asset. All of it is
+	// user data, kept apart from derived results and never rebuilt.
+	`
+CREATE TABLE albums (
+    id TEXT PRIMARY KEY,
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    name TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (library_id, name)
+);
+
+CREATE TABLE album_assets (
+    album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    added_by TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (album_id, asset_id)
+);
+CREATE INDEX album_assets_by_asset ON album_assets(asset_id);
+
+CREATE TABLE user_tags (
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (asset_id, name)
+);
+
+CREATE TABLE ai_tag_corrections (
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    label_id TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('hidden')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (asset_id, label_id)
+);
+CREATE INDEX ai_tag_corrections_by_label ON ai_tag_corrections(label_id);
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
