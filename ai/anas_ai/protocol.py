@@ -14,6 +14,8 @@ MAX_FRAME = 1 << 20
 
 OP_INFO = "info"
 OP_EMBED_IMAGE = "embed_image"
+# Encodes "text" as a search query; the provider adds the model's prompt.
+OP_EMBED_QUERY = "embed_query"
 
 # The input cannot be processed; the same input would fail again.
 CODE_INVALID_INPUT = "invalid_input"

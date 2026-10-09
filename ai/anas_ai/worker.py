@@ -21,6 +21,8 @@ from anas_ai import protocol, providers
 IDLE_SECONDS = 600
 # Thumbnails are small; anything larger is not what the photo service sends.
 MAX_IMAGE_BYTES = 32 << 20
+# The photo service sends queries of at most 200 characters.
+MAX_QUERY_CHARS = 1000
 SYSTEMD_FIRST_FD = 3
 
 log = logging.getLogger("anas-ai")
@@ -81,22 +83,31 @@ def respond(request, fds, provider, unavailable_reason):
     if op == protocol.OP_EMBED_IMAGE:
         if len(fds) != 1:
             return protocol.failure(protocol.CODE_INVALID_INPUT, "embed_image needs exactly one image descriptor")
-        try:
-            data = read_limited(fds[0], MAX_IMAGE_BYTES)
-            vector = provider.embed_image(data)
-        except providers.InvalidInput as error:
-            return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
-        except providers.Unavailable as error:
-            return protocol.failure(protocol.CODE_UNAVAILABLE, str(error))
-        except Exception as error:  # pylint: disable=broad-except
-            log.exception("embed_image failed")
-            return protocol.failure(protocol.CODE_INTERNAL, type(error).__name__)
-        return protocol.ok(
-            model=provider.model,
-            dimensions=len(vector),
-            vector=base64.b64encode(providers.encode_vector(vector)).decode("ascii"),
-        )
+        return embedded(op, provider, lambda: provider.embed_image(read_limited(fds[0], MAX_IMAGE_BYTES)))
+    if op == protocol.OP_EMBED_QUERY:
+        text = request.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_QUERY_CHARS:
+            return protocol.failure(protocol.CODE_INVALID_INPUT, f"embed_query needs text of 1 to {MAX_QUERY_CHARS} characters")
+        return embedded(op, provider, lambda: provider.embed_query(text))
     return protocol.failure(protocol.CODE_INTERNAL, f"unknown operation {op!r}")
+
+
+def embedded(op, provider, embed):
+    """Answers with the vector embed returns, or with why it failed."""
+    try:
+        vector = embed()
+    except providers.InvalidInput as error:
+        return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
+    except providers.Unavailable as error:
+        return protocol.failure(protocol.CODE_UNAVAILABLE, str(error))
+    except Exception as error:  # pylint: disable=broad-except
+        log.exception("%s failed", op)
+        return protocol.failure(protocol.CODE_INTERNAL, type(error).__name__)
+    return protocol.ok(
+        model=provider.model,
+        dimensions=len(vector),
+        vector=base64.b64encode(providers.encode_vector(vector)).decode("ascii"),
+    )
 
 
 def read_limited(fd, limit):
@@ -117,6 +128,7 @@ def main(argv=None):
     parser.add_argument("--model", help="the .litertlm model file")
     parser.add_argument("--manifest", help="the model manifest that pins its size and SHA-256")
     parser.add_argument("--vision-tokens", type=int, default=70, choices=providers.VISION_TOKENS)
+    parser.add_argument("--cache-dir", help="a writable directory for the runtime's weight cache")
     parser.add_argument("--fake", action="store_true", help="serve deterministic fake vectors")
     parser.add_argument("--idle-seconds", type=int, default=IDLE_SECONDS)
     args = parser.parse_args(argv)
@@ -127,7 +139,7 @@ def main(argv=None):
         provider = providers.FakeProvider()
     elif args.model and args.manifest:
         try:
-            provider = providers.MediaPipeProvider(args.model, args.manifest, args.vision_tokens)
+            provider = providers.MediaPipeProvider(args.model, args.manifest, args.vision_tokens, args.cache_dir)
         except providers.Unavailable as error:
             # Answer "unavailable" instead of exiting, so socket activation
             # does not restart a Worker that cannot load its model.
@@ -139,6 +151,8 @@ def main(argv=None):
         log.info("serving %s (%d dimensions)", provider.model, provider.dimensions)
     with listening_socket(args.socket) as listener:
         serve(listener, provider, reason, args.idle_seconds)
+    if provider is not None:
+        provider.close()
 
 
 if __name__ == "__main__":

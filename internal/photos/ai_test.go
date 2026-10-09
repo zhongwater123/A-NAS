@@ -56,6 +56,20 @@ func (f *fakeEmbedder) EmbedImage(_ context.Context, image *os.File) ([]float32,
 	return vector, nil
 }
 
+func (f *fakeEmbedder) EmbedQuery(_ context.Context, text string) ([]float32, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unavailable {
+		return nil, photos.ErrAIUnavailable
+	}
+	sum := sha256.Sum256([]byte(text))
+	vector := make([]float32, f.dimensions)
+	for i := range vector {
+		vector[i] = float32(sum[i]) / 255
+	}
+	return vector, nil
+}
+
 type fakeGate struct {
 	open   bool
 	reason string

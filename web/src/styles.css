@@ -862,6 +862,12 @@ button { font: inherit; }
 .window-content-photos { position: relative; overflow: hidden; }
 .photos-page { height: 100%; overflow: auto; }
 .photos-actions { display: flex; align-items: center; gap: 8px; }
+.photos-search { display: flex; align-items: center; }
+.photo-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; }
+.photo-labels span { width: 100%; color: rgba(238, 242, 247, .6); font-size: 11px; }
+.photo-viewer .photo-labels button { min-height: 24px; padding: 0 9px; border-radius: 12px; }
+.photos-search input { width: 180px; min-height: 30px; padding: 0 8px; border: 1px solid #cbd7e3; border-right: 0; border-radius: 8px 0 0 8px; font: inherit; font-size: 12px; }
+.product-page .photos-search button { border-radius: 0 8px 8px 0; }
 .photos-actions .upload-button { gap: 5px; }
 .segmented { display: inline-flex; padding: 2px; border: 1px solid #cbd7e3; border-radius: 9px; background: #fff; }
 .product-page .segmented button { min-height: 26px; border: 0; border-radius: 7px; background: transparent; }

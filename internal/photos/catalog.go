@@ -131,6 +131,17 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, 'embedding/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
 ON CONFLICT(object_id, derivation) DO NOTHING;
 `,
+	// 5: text vectors the AI Worker made for label texts, per model, so
+	// labels survive a restart without the Worker.
+	`
+CREATE TABLE query_vectors (
+    model TEXT NOT NULL,
+    text TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (model, text)
+);
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

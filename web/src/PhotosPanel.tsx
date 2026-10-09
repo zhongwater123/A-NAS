@@ -1,21 +1,27 @@
-import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Copy, Download, ImagePlus, Pencil, RefreshCw, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
-import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Copy, Download, ImagePlus, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError, endViewing } from "./api";
 import {
-  PhotoAsset, PhotoLibrary, copyPhoto, emptyPhotoTrash, getPhoto, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
-  previewURL, purgePhoto, renamePhoto, restorePhoto, trashPhoto, uploadPhoto,
+  PhotoAsset, PhotoLibrary, PhotoSearch, copyPhoto, emptyPhotoTrash, getPhoto, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
+  previewURL, purgePhoto, renamePhoto, restorePhoto, searchPhotos, trashPhoto, uploadPhoto,
 } from "./photosApi";
 
 interface Props { userId: string; isAdmin: boolean }
 
-// PhotosPanel is the managed photo library: a timeline per library, a viewer
-// and the library's trash. All rules live in the photo service; the panel
-// only hides actions the caller could not perform anyway.
+// PhotosPanel is the managed photo library: a timeline per library, search
+// over the caller's and the shared library (plus a member library while
+// viewing it), a viewer and the library's trash.
+// All rules live in the photo service; the panel only hides actions the
+// caller could not perform anyway.
 export function PhotosPanel({ userId, isAdmin }: Props) {
   const [libraries, setLibraries] = useState<PhotoLibrary[]>([]);
   const [libraryId, setLibraryId] = useState("");
-  const [view, setView] = useState<"timeline" | "trash">("timeline");
+  const [view, setView] = useState<"timeline" | "trash" | "search">("timeline");
+  const [query, setQuery] = useState("");
+  const [searched, setSearched] = useState<PhotoSearch>();
+  const [details, setDetails] = useState<PhotoAsset>();
+  const [semantic, setSemantic] = useState(true);
   const [assets, setAssets] = useState<PhotoAsset[]>([]);
   const [next, setNext] = useState<string>();
   const [trash, setTrash] = useState<PhotoAsset[]>([]);
@@ -30,7 +36,13 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const mine = libraries.find((item) => item.kind === "private" && item.ownerUserId === userId && !item.viewing);
   const readOnly = Boolean(library?.viewing);
   const viewingUntil = library?.viewing ? new Date(library.viewing.expiresAt).toLocaleString("zh-CN") : "";
-  const canChange = (asset: PhotoAsset) => !readOnly && (library?.kind === "private" || asset.uploadedBy === userId || isAdmin);
+  // Search results come from several libraries, so actions follow each
+  // photo's own library.
+  const libraryOf = (asset: PhotoAsset) => libraries.find((item) => item.id === asset.libraryId);
+  const canChange = (asset: PhotoAsset) => {
+    const owner = libraryOf(asset);
+    return Boolean(owner && !owner.viewing && (owner.kind === "private" || asset.uploadedBy === userId || isAdmin));
+  };
 
   const loadLibraries = useCallback(async () => {
     try {
@@ -60,6 +72,18 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     finally { setLoading(false); }
   }, [libraryId]);
 
+  const loadSearch = useCallback(async (cursor = "") => {
+    if (!searched) return;
+    try {
+      const page = await searchPhotos(searched, readOnly ? libraryId : "", cursor);
+      setAssets((current) => cursor ? [...current, ...page.items] : page.items);
+      setNext(page.next);
+      setSemantic(page.semantic);
+      setError("");
+    } catch (caught) { setError(messageOf(caught)); }
+    finally { setLoading(false); }
+  }, [searched, readOnly, libraryId]);
+
   const loadTrash = useCallback(async () => {
     if (!libraryId) return;
     try { setTrash(await listPhotoTrash(libraryId)); setError(""); }
@@ -69,11 +93,27 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   useEffect(() => {
     setSelected(undefined);
     if (view === "timeline") void loadTimeline();
+    else if (view === "search") void loadSearch();
     else void loadTrash();
-  }, [view, loadTimeline, loadTrash]);
+  }, [view, loadTimeline, loadSearch, loadTrash]);
+  const reload = () => view === "search" ? loadSearch() : loadTimeline();
   // Until the libraries have loaded, as while the photo service is
   // unavailable, refreshing loads them; selecting one then loads its view.
-  const refresh = () => !libraryId ? loadLibraries() : view === "timeline" ? loadTimeline() : loadTrash();
+  const refresh = () => !libraryId ? loadLibraries() : view === "trash" ? loadTrash() : reload();
+  const clearSearch = () => { setQuery(""); setSearched(undefined); setView("timeline"); };
+  const startSearch = (search: PhotoSearch) => {
+    setSelected(undefined);
+    setLoading(true);
+    setSearched(search);
+    setView("search");
+  };
+  const submitSearch = (event: FormEvent) => {
+    event.preventDefault();
+    const text = query.trim();
+    if (!text) { clearSearch(); return; }
+    if (searched && "query" in searched && text === searched.query && view === "search") { void loadSearch(); return; }
+    startSearch({ query: text });
+  };
   // Administrative viewing never includes the member's trash.
   useEffect(() => { if (readOnly) setView("timeline"); }, [readOnly]);
 
@@ -116,6 +156,17 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   };
 
   const current = selected === undefined ? undefined : assets[selected];
+  const currentLibrary = current ? libraryOf(current) : undefined;
+  // Lists leave AI labels out; the viewer asks for the photo's details.
+  const currentID = current?.id;
+  useEffect(() => {
+    setDetails(undefined);
+    if (!currentID) return;
+    let live = true;
+    getPhoto(currentID).then((asset) => { if (live) setDetails(asset); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [currentID]);
+  const aiLabels = details?.id === currentID ? details?.aiLabels ?? [] : [];
   // Copying again would only add another independent copy, so say it worked.
   const copyTo = (target: PhotoLibrary, label: string) => {
     if (current) void act(() => copyPhoto(current.id, target.id), async () => { setError(""); setNotice(`已复制到${label}`); });
@@ -136,7 +187,11 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       <div className="page-heading">
         <div><p className="section-label">PHOTOS</p><h2>相册</h2><p>{readOnly ? "只读查看，访问已写入审计" : "照片保存在数据卷上的受管图库，AI 不可用时也能浏览"}</p></div>
         <div className="photos-actions">
-          <select aria-label="图库" value={libraryId} onChange={(event) => { setLoading(true); setLibraryId(event.target.value); }}>
+          <form className="photos-search" role="search" onSubmit={submitSearch}>
+            <input type="search" aria-label="搜索照片" placeholder="搜索，如：海边的猫" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
+            <button type="submit" aria-label="搜索"><Search size={14} /></button>
+          </form>
+          <select aria-label="图库" value={libraryId} onChange={(event) => { setLoading(true); setLibraryId(event.target.value); if (view === "search") clearSearch(); }}>
             {libraries.map((item) => <option key={item.id} value={item.id}>{libraryLabel(item, userId)}</option>)}
           </select>
           <div className="segmented" role="tablist" aria-label="相册视图">
@@ -152,7 +207,26 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       {error && <div className="status-banner error" role="alert"><CircleAlert />{error}</div>}
       {notice && !current && <div className="status-banner" role="status"><CircleCheck />{notice}</div>}
 
-      {view === "timeline" ? (
+      {view === "search" ? (
+        <>
+          <div className="inline-form">
+            <span className="photos-note">{searched && "label" in searched
+              ? `本地 AI 识别为“${searched.name}”的照片，可能有误。`
+              : `在我的图库${readOnly ? `、共享图库和 ${library?.ownerName ?? "成员"} 的私有图库` : "和共享图库"}中搜索“${searched && "query" in searched ? searched.query : ""}”，最相关的排在前面。`}</span>
+            <button onClick={clearSearch}><X size={13} />清除搜索</button>
+          </div>
+          {!semantic && <div className="status-banner" role="status"><CircleAlert />{searched && "label" in searched ? "AI 标签暂不可用。" : "智能搜索暂不可用，只按照片名称匹配。"}</div>}
+          {loading ? <div className="empty-compact">正在搜索…</div> : !assets.length && !error && <div className="empty-compact">没有找到相关照片</div>}
+          <div className="photo-grid">
+            {assets.map((asset, index) => (
+              <button key={asset.id} className="photo-tile" aria-label={`查看 ${asset.name}`} onClick={() => setSelected(index)}>
+                <img src={previewURL(asset)} alt={asset.name} loading="lazy" onError={(event) => showOriginal(event.currentTarget, asset.id)} />
+              </button>
+            ))}
+          </div>
+          {next && <button className="photos-more" onClick={() => void loadSearch(next)}>加载更多</button>}
+        </>
+      ) : view === "timeline" ? (
         <>
           {loading ? <div className="empty-compact">正在载入照片…</div> : !assets.length && !error && <div className="empty-compact">还没有照片。{readOnly ? "" : "点击“上传照片”或把 JPEG、PNG 拖到这里。"}</div>}
           {groups.map((group) => (
@@ -212,15 +286,23 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
               {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}
             </dl>
             {current.alsoKeptBy?.length ? <p className="photo-hint">{current.alsoKeptBy.join("、")} 也保存了相同的照片。</p> : null}
+            {aiLabels.length > 0 && (
+              <div className="photo-labels" aria-label="AI 标签">
+                <span>本地 AI 识别</span>
+                {aiLabels.map((label) => (
+                  <button key={label.id} title={`相似度 ${label.score.toFixed(2)}，点击查看同类照片`} onClick={() => startSearch({ label: label.id, name: label.name })}>{label.name}</button>
+                ))}
+              </div>
+            )}
             <div className="photo-viewer-actions">
               <a className="upload-button" href={originalURL(current.id, true)}><Download size={14} />下载原图</a>
               {canChange(current) && <button onClick={() => {
                 const name = window.prompt("新的照片名称", current.name);
-                if (name && name !== current.name) void act(() => renamePhoto(current.id, name), () => loadTimeline());
+                if (name && name !== current.name) void act(() => renamePhoto(current.id, name), reload);
               }}><Pencil size={13} />重命名</button>}
-              {library?.kind === "private" && !readOnly && shared && <button onClick={() => copyTo(shared, "共享图库")}><Copy size={13} />复制到共享图库</button>}
-              {library?.kind === "shared" && mine && <button onClick={() => copyTo(mine, "我的图库")}><Copy size={13} />复制到我的图库</button>}
-              {canChange(current) && <button className="danger-link" onClick={() => void act(() => trashPhoto(current.id), async () => { setSelected(undefined); await loadTimeline(); })}><Trash2 size={13} />移到回收站</button>}
+              {currentLibrary?.kind === "private" && !currentLibrary.viewing && shared && <button onClick={() => copyTo(shared, "共享图库")}><Copy size={13} />复制到共享图库</button>}
+              {currentLibrary?.kind === "shared" && mine && <button onClick={() => copyTo(mine, "我的图库")}><Copy size={13} />复制到我的图库</button>}
+              {canChange(current) && <button className="danger-link" onClick={() => void act(() => trashPhoto(current.id), async () => { setSelected(undefined); await reload(); })}><Trash2 size={13} />移到回收站</button>}
             </div>
             {/* The viewer covers the panel's banners, so its outcome shows here. */}
             {notice && <p className="photo-notice" role="status">{notice}</p>}

@@ -66,6 +66,17 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 		}
 		return vector
 	}
+	query := func(text string) []float32 {
+		t.Helper()
+		vector, err := client.EmbedQuery(context.Background(), text)
+		if err != nil || len(vector) != 768 {
+			t.Fatalf("EmbedQuery(%q) = %d values, %v", text, len(vector), err)
+		}
+		return vector
+	}
+	if a, b, c := query("海边的猫"), query("海边的猫"), query("车库里的电动车"); a[0] != b[0] || a[0] == c[0] {
+		t.Fatal("equal queries must give equal vectors and different queries different ones")
+	}
 	first, again, other := embed("thumbnail"), embed("thumbnail"), embed("another thumbnail")
 	var norm float64
 	for _, value := range first {

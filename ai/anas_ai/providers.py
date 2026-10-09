@@ -47,7 +47,12 @@ VISION_TOKENS = (70, 140)
 class MediaPipeProvider:
     """EmbeddingGemma 2 through MediaPipe's Universal Embedder."""
 
-    def __init__(self, model_path, manifest_path, vision_tokens=70):
+    # EmbeddingGemma's retrieval prompt; images get none. The label
+    # calibration (docs/research/photo-ai-label-calibration.md) found it the
+    # better of the prompts tried for Chinese search.
+    QUERY_PROMPT = "task: search result | query: {}"
+
+    def __init__(self, model_path, manifest_path, vision_tokens=70, cache_dir=None):
         if vision_tokens not in VISION_TOKENS:
             raise ValueError(f"vision tokens must be one of {VISION_TOKENS}")
         manifest = verify_model(model_path, manifest_path)
@@ -63,6 +68,9 @@ class MediaPipeProvider:
                 base_options=BaseOptions(model_asset_path=model_path),
                 l2_normalize=True,
                 vision_tokens_per_image=vision_tokens,
+                # XNNPack keeps repacked weights here; by default it tries the
+                # model's own directory, which is read-only in deployment.
+                cache_dir=cache_dir,
             )
         )
         self.dimensions = len(self._vector(self._embedder.embed_text("probe")))
@@ -80,6 +88,15 @@ class MediaPipeProvider:
             raise InvalidInput(str(error)) from error
         return self._vector(result)
 
+    def embed_text(self, text):
+        return self._vector(self._embedder.embed_text(text))
+
+    def embed_query(self, text):
+        return self.embed_text(self.QUERY_PROMPT.format(text))
+
+    def close(self):
+        self._embedder.close()
+
     @staticmethod
     def _vector(result):
         return [float(value) for value in result.embeddings[0].embedding]
@@ -95,6 +112,12 @@ class FakeProvider:
     def embed_image(self, data):
         if not data:
             raise InvalidInput("empty image")
+        return self._vector(data)
+
+    def embed_query(self, text):
+        return self._vector(text.encode())
+
+    def _vector(self, data):
         values = []
         counter = 0
         while len(values) < self.dimensions:
@@ -104,6 +127,9 @@ class FakeProvider:
         values = values[: self.dimensions]
         norm = math.sqrt(sum(value * value for value in values)) or 1.0
         return [value / norm for value in values]
+
+    def close(self):
+        pass
 
 
 def encode_vector(vector):

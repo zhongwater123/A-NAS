@@ -81,8 +81,8 @@ func serveOne(conn *net.UnixConn, handle Handler) {
 	_, _ = conn.Write(append(binary.BigEndian.AppendUint32(nil, uint32(len(payload))), payload...))
 }
 
-// Deterministic is a Worker whose image vectors come from the image bytes,
-// so equal images get equal vectors.
+// Deterministic is a Worker whose vectors come from the image bytes or the
+// query text, so equal inputs get equal vectors.
 func Deterministic(model string, dimensions int) Handler {
 	return func(request aiworker.Request, file *os.File) *aiworker.Response {
 		switch request.Op {
@@ -96,15 +96,24 @@ func Deterministic(model string, dimensions int) Handler {
 			if err != nil {
 				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: err.Error()}}
 			}
-			sum := sha256.Sum256(content)
-			vector := make([]float32, dimensions)
-			for i := range vector {
-				vector[i] = float32(sum[i%len(sum)]) / 255
+			return &aiworker.Response{OK: true, Model: model, Dimensions: dimensions, Vector: Encode(hashVector(content, dimensions))}
+		case aiworker.OpEmbedQuery:
+			if request.Text == "" {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no text"}}
 			}
-			return &aiworker.Response{OK: true, Model: model, Dimensions: dimensions, Vector: Encode(vector)}
+			return &aiworker.Response{OK: true, Model: model, Dimensions: dimensions, Vector: Encode(hashVector([]byte(request.Text), dimensions))}
 		}
 		return &aiworker.Response{Error: &aiworker.WireError{Code: "unknown_op", Message: request.Op}}
 	}
+}
+
+func hashVector(content []byte, dimensions int) []float32 {
+	sum := sha256.Sum256(content)
+	vector := make([]float32, dimensions)
+	for i := range vector {
+		vector[i] = float32(sum[i%len(sum)]) / 255
+	}
+	return vector
 }
 
 // Encode returns a vector as the protocol carries it.
