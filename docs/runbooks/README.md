@@ -13,6 +13,7 @@
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
 - [启用局域网 Web 访问](enable-lan-web-access.md)（draft；尚未在实验 NAS 执行）
+- [验收相册 M1](accept-photo-library-m1.md)（draft；切片 7 实机闸门）
 
 ## 使用方式
 

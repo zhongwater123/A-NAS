@@ -6,7 +6,7 @@ VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test root-integration-test system-test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test ai-test root-integration-test system-test build build-binaries check check-steps clean
 
 all: check
 
@@ -86,6 +86,11 @@ vet:
 test:
 	$(GO) test ./...
 
+# The AI Worker's tests need only the Python standard library; tests with the
+# real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
+ai-test:
+	cd ai && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .
+
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
 	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
@@ -112,7 +117,7 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet test build-binaries
+check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet test ai-test build-binaries
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)

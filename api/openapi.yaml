@@ -595,6 +595,13 @@ paths:
       responses:
         "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PhotoLibrary" } } } } } } }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/ai:
+    get:
+      operationId: getPhotoAIStatus
+      summary: Report local AI progress over the caller's visible photos; polling it does not count as activity
+      responses:
+        "200": { description: Local AI status, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAIStatus" } } } }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/libraries/{libraryId}/timeline:
     get:
       operationId: listPhotoTimeline
@@ -1687,6 +1694,17 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string, description: Cursor for the next page; absent on the last page. }
+    PhotoAIStatus:
+      type: object
+      additionalProperties: false
+      required: [state, ready, pending, failed]
+      properties:
+        state: { type: string, enum: [unavailable, paused, working, idle], description: "unavailable: the AI Worker is not installed or not running; paused: waiting for the device to be idle" }
+        reason: { type: string, description: "Why work is paused, such as foreground or cpu_pressure." }
+        model: { type: string }
+        ready: { type: integer, minimum: 0, description: Originals with a vector of the current pipeline. }
+        pending: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
     PhotoDirectoryListing:
       type: object
       additionalProperties: false

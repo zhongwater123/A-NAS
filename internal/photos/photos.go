@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
 var (
@@ -162,18 +164,27 @@ type Options struct {
 // owned by the photo service identity; the caller proves the volume is
 // mounted before calling Open.
 type Service struct {
-	db                     *sql.DB
-	root                   *os.Root
-	rootPath               string
-	now                    func() time.Time
-	random                 io.Reader
-	trashRetention         time.Duration
-	maxImportBytes         int64
-	disableCapacityReserve bool
-	location               *time.Location
-	sharedLibraryID        string
-	// mediaWake tells RunMedia that an import queued work.
+	db             *sql.DB
+	root           *os.Root
+	rootPath       string
+	now            func() time.Time
+	random         io.Reader
+	trashRetention time.Duration
+	maxImportBytes int64
+	// admits reports whether incoming bytes still leave the data-volume
+	// reserve free.
+	admits          func(path string, incoming int64) (bool, error)
+	location        *time.Location
+	sharedLibraryID string
+	// mediaWake tells RunMedia that an import queued work, and aiWake tells
+	// RunAI that a thumbnail did.
 	mediaWake chan struct{}
+	aiWake    chan struct{}
+	// ai is what RunAI last observed; aiModel is the model whose stale
+	// vectors have already been queued again.
+	ai        aiProgress
+	aiModelMu sync.Mutex
+	aiModel   string
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -219,8 +230,11 @@ func Open(root string, options Options) (*Service, error) {
 		db: db, root: opened, rootPath: root,
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
-		disableCapacityReserve: options.DisableCapacityReserve, location: options.Location,
-		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
+		admits: capacity.Admits, location: options.Location,
+		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
+	}
+	if options.DisableCapacityReserve {
+		service.admits = func(string, int64) (bool, error) { return true, nil }
 	}
 	if service.now == nil {
 		service.now = time.Now
@@ -247,3 +261,7 @@ func Open(root string, options Options) (*Service, error) {
 func (s *Service) Close() error {
 	return errors.Join(s.db.Close(), s.root.Close())
 }
+
+// StoreInfo describes the store directory the service holds open, so a
+// caller can tell whether the store's path still names it.
+func (s *Service) StoreInfo() (os.FileInfo, error) { return s.root.Stat(".") }

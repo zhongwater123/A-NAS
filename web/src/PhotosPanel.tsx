@@ -1,9 +1,9 @@
-import { ChevronLeft, ChevronRight, CircleAlert, Copy, Download, ImagePlus, Pencil, RefreshCw, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Copy, Download, ImagePlus, Pencil, RefreshCw, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError, endViewing } from "./api";
 import {
-  PhotoAsset, PhotoLibrary, copyPhoto, emptyPhotoTrash, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
+  PhotoAsset, PhotoLibrary, copyPhoto, emptyPhotoTrash, getPhoto, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
   previewURL, purgePhoto, renamePhoto, restorePhoto, trashPhoto, uploadPhoto,
 } from "./photosApi";
 
@@ -22,10 +22,12 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const [selected, setSelected] = useState<number>();
   const [uploading, setUploading] = useState<{ done: number; total: number }>();
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
 
   const library = libraries.find((item) => item.id === libraryId);
   const shared = libraries.find((item) => item.kind === "shared");
+  const mine = libraries.find((item) => item.kind === "private" && item.ownerUserId === userId && !item.viewing);
   const readOnly = Boolean(library?.viewing);
   const viewingUntil = library?.viewing ? new Date(library.viewing.expiresAt).toLocaleString("zh-CN") : "";
   const canChange = (asset: PhotoAsset) => !readOnly && (library?.kind === "private" || asset.uploadedBy === userId || isAdmin);
@@ -69,9 +71,32 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     if (view === "timeline") void loadTimeline();
     else void loadTrash();
   }, [view, loadTimeline, loadTrash]);
+  // Until the libraries have loaded, as while the photo service is
+  // unavailable, refreshing loads them; selecting one then loads its view.
+  const refresh = () => !libraryId ? loadLibraries() : view === "timeline" ? loadTimeline() : loadTrash();
+  // Administrative viewing never includes the member's trash.
+  useEffect(() => { if (readOnly) setView("timeline"); }, [readOnly]);
+
+  // Thumbnails render in the background after an upload, and the grid shows
+  // the original meanwhile; recheck the pending ones for about a minute so
+  // the grid does not keep loading full-size originals.
+  const pending = useMemo(() => assets.filter((asset) => asset.thumbnail === "pending").map((asset) => asset.id).join(","), [assets]);
+  useEffect(() => {
+    if (!pending) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      if (++attempts >= thumbnailChecks) window.clearInterval(timer);
+      void Promise.all(pending.split(",").map((assetId) => getPhoto(assetId).catch(() => undefined))).then((checked) => {
+        const settled = new Map(checked.filter((asset): asset is PhotoAsset => asset !== undefined && asset.thumbnail !== "pending").map((asset) => [asset.id, asset]));
+        if (settled.size) setAssets((current) => current.map((asset) => settled.get(asset.id) ?? asset));
+      });
+    }, thumbnailCheckInterval);
+    return () => window.clearInterval(timer);
+  }, [pending]);
 
   const upload = async (files: File[]) => {
     if (!libraryId || readOnly || !files.length) return;
+    setNotice("");
     const failures: string[] = [];
     setUploading({ done: 0, total: files.length });
     for (const [index, file] of files.entries()) {
@@ -85,11 +110,17 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   };
 
   const act = async (action: () => Promise<unknown>, after: () => Promise<void>) => {
+    setNotice("");
     try { await action(); await after(); }
     catch (caught) { setError(messageOf(caught)); }
   };
 
   const current = selected === undefined ? undefined : assets[selected];
+  // Copying again would only add another independent copy, so say it worked.
+  const copyTo = (target: PhotoLibrary, label: string) => {
+    if (current) void act(() => copyPhoto(current.id, target.id), async () => { setError(""); setNotice(`已复制到${label}`); });
+  };
+  useEffect(() => setNotice(""), [selected]);
   const groups = useMemo(() => groupByDay(assets), [assets]);
   // Focus the viewer when it opens so Escape and the arrow keys work at once.
   const viewer = useRef<HTMLDivElement>(null);
@@ -110,19 +141,20 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           </select>
           <div className="segmented" role="tablist" aria-label="相册视图">
             <button role="tab" aria-selected={view === "timeline"} className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}>照片</button>
-            <button role="tab" aria-selected={view === "trash"} className={view === "trash" ? "active" : ""} onClick={() => setView("trash")}>回收站</button>
+            {!readOnly && <button role="tab" aria-selected={view === "trash"} className={view === "trash" ? "active" : ""} onClick={() => setView("trash")}>回收站</button>}
           </div>
           {view === "timeline" && !readOnly && <label className="upload-button"><ImagePlus size={14} />上传照片<input type="file" aria-label="上传照片" accept="image/jpeg,image/png" multiple onChange={(event: ChangeEvent<HTMLInputElement>) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} /></label>}
-          <button aria-label="刷新相册" onClick={() => void (view === "timeline" ? loadTimeline() : loadTrash())}><RefreshCw size={14} /></button>
+          <button aria-label="刷新相册" onClick={() => void refresh()}><RefreshCw size={14} /></button>
         </div>
       </div>
       {readOnly && <div className="status-banner viewing-banner" role="status"><ShieldCheck />只读查看 {library?.ownerName ?? "成员"} 的私有图库，{viewingUntil} 自动结束；本次访问已写入审计并通知所有者。<button onClick={() => void stopViewing()}>结束查看</button></div>}
       {uploading && <div className="status-banner" role="status"><span className="loader" />正在上传 {uploading.done}/{uploading.total}</div>}
       {error && <div className="status-banner error" role="alert"><CircleAlert />{error}</div>}
+      {notice && !current && <div className="status-banner" role="status"><CircleCheck />{notice}</div>}
 
       {view === "timeline" ? (
         <>
-          {loading ? <div className="empty-compact">正在载入照片…</div> : !assets.length && <div className="empty-compact">还没有照片。{readOnly ? "" : "点击“上传照片”或把 JPEG、PNG 拖到这里。"}</div>}
+          {loading ? <div className="empty-compact">正在载入照片…</div> : !assets.length && !error && <div className="empty-compact">还没有照片。{readOnly ? "" : "点击“上传照片”或把 JPEG、PNG 拖到这里。"}</div>}
           {groups.map((group) => (
             <section className="photo-day" key={group.label} aria-label={group.label}>
               <h3>{group.label}</h3>
@@ -150,7 +182,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
                 <Trash2 /><strong>{asset.name}</strong>
                 <small>{asset.trash ? `${formatDate(asset.trash.purgeAfter)} 永久删除` : ""}</small>
                 <button onClick={() => void act(() => restorePhoto(asset.id), loadTrash)}><RotateCcw size={13} />恢复</button>
-                <button className="danger-link" onClick={() => void act(() => purgePhoto(asset.id), loadTrash)}>永久删除</button>
+                <button className="danger-link" onClick={() => { if (window.confirm(`永久删除“${asset.name}”？此操作无法撤销。`)) void act(() => purgePhoto(asset.id), loadTrash); }}>永久删除</button>
               </div>
             ))}
           </div>
@@ -186,9 +218,13 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
                 const name = window.prompt("新的照片名称", current.name);
                 if (name && name !== current.name) void act(() => renamePhoto(current.id, name), () => loadTimeline());
               }}><Pencil size={13} />重命名</button>}
-              {library?.kind === "private" && !readOnly && shared && <button onClick={() => void act(() => copyPhoto(current.id, shared.id), async () => setError(""))}><Copy size={13} />复制到共享图库</button>}
+              {library?.kind === "private" && !readOnly && shared && <button onClick={() => copyTo(shared, "共享图库")}><Copy size={13} />复制到共享图库</button>}
+              {library?.kind === "shared" && mine && <button onClick={() => copyTo(mine, "我的图库")}><Copy size={13} />复制到我的图库</button>}
               {canChange(current) && <button className="danger-link" onClick={() => void act(() => trashPhoto(current.id), async () => { setSelected(undefined); await loadTimeline(); })}><Trash2 size={13} />移到回收站</button>}
             </div>
+            {/* The viewer covers the panel's banners, so its outcome shows here. */}
+            {notice && <p className="photo-notice" role="status">{notice}</p>}
+            {error && <p className="photo-notice failed">{error}</p>}
           </aside>
         </div>
       )}
@@ -222,6 +258,9 @@ function showOriginal(image: HTMLImageElement, assetId: string) {
   if (image.getAttribute("src") !== original) image.src = original;
 }
 
+const thumbnailCheckInterval = 3000;
+const thumbnailChecks = 20;
+
 function formatDate(value: string) { return new Date(value).toLocaleString("zh-CN"); }
 
 function formatSize(bytes: number) {
@@ -236,7 +275,7 @@ const photoErrors: Record<string, string> = {
   forbidden: "你不能修改这张照片",
   conflict: "名称已存在，或照片状态已经变化",
   validation_failed: "名称无效",
-  photos_unavailable: "此设备暂未启用相册",
+  photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册。恢复后点击刷新。",
 };
 
 function messageOf(error: unknown) {

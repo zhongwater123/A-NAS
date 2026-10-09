@@ -23,6 +23,9 @@ import (
 
 const PathPrefix = "/api/v1/photos"
 
+// AIStatusPath reports local AI progress; windows may poll it.
+const AIStatusPath = PathPrefix + "/ai"
+
 type principalKey struct{}
 
 // WithPrincipal attaches the caller confirmed by the session lookup.
@@ -80,6 +83,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *handler) routes() {
 	p := PathPrefix
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
+	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline", h.timeline)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/entries", h.entries)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/uploads", h.upload)
@@ -118,6 +122,16 @@ func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, itemsResponse[photos.Library]{Items: libraries})
+}
+
+func (h *handler) aiStatus(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	status, err := h.service.AIStatus(r.Context(), principal)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 // pageLimit reads the optional limit query parameter; 0 means the default.

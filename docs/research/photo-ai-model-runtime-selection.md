@@ -4,6 +4,8 @@
 > 更新日期：2026-10-07  
 > 适用范围：Intel Core i3-12100、8 GB 内存、Debian 13、无独立显卡的 A-NAS 相册  
 > 关联规格：[相册功能规格](../specs/photo-library.md)
+>
+> 2026-10-09 决定：发行使用 EmbeddingGemma 2 全模态 740M 官方包，不做 OCR；运行方式改为 MediaPipe Universal Embedder。本文其余部分保留为选型证据，现行方案见 [M2 实施方案](../architecture/photo-ai.md)。
 
 ## 结论
 

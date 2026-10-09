@@ -34,6 +34,7 @@ export function uploadPhoto(libraryId: string, file: File) {
   body.set("file", file);
   return request<PhotoAsset>(`${base}/libraries/${id(libraryId)}/uploads`, { method: "POST", body }, true);
 }
+export const getPhoto = (assetId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`);
 export const renamePhoto = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`, json("PATCH", { name }), true);
 export const copyPhoto = (assetId: string, libraryId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/copies`, json("POST", { libraryId }), true);
 export const trashPhoto = (assetId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`, { method: "DELETE" }, true);

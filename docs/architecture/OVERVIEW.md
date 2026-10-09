@@ -102,6 +102,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [受管图库决策](../adr/0006-use-a-managed-photo-library.md)
 - [相册服务身份与 Catalog 授权决策](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [相册技术设计](photo-library.md)
+- [相册本地 AI（M2）实施方案](photo-ai.md)
 - [存储与文件架构](storage-and-files.md)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)

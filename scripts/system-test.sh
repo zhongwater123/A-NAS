@@ -36,6 +36,11 @@ if [[ $EUID -ne 0 || "$(cat /proc/1/comm)" != systemd || ! -f /.dockerenv ]]; th
   exit 2
 fi
 
+# A Debian host's mounts are shared, so mounting or unmounting the data volume
+# reaches the services' private mount namespaces; the container starts with
+# private mounts, which would hide that.
+mount --make-rshared /
+
 # The release as scripts/deploy-dev.ps1 stages it.
 release=/tmp/release
 install -d "$release"
@@ -89,7 +94,9 @@ if ! bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test 
 fi
 
 # Record the volume as storage initialization would have, so the Product
-# Service's volume guard accepts it, then restart it to load the record.
+# Service's volume guard accepts it, then restart it to load the record. It
+# creates its databases before it answers, so wait for that first.
+for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
 systemctl stop anas-api
 setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$data_disk" "$volume_uuid" <<'PY'
 import json, sqlite3, sys
@@ -287,6 +294,17 @@ check "Host Agent proves the identity switch again after a restart" \
     grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+
+# --- Last, because other services keep the detached volume busy: the
+# unmount reaches the photo service's private mount namespace, and it stops
+# serving from the lost store instead of following the path.
+lost_at=$(date '+%Y-%m-%d %H:%M:%S')
+umount --lazy "$data"
+check "photo service notices the data volume is gone" \
+  bash -c "for _ in \$(seq 1 15); do journalctl -u anas-photos --since '$lost_at' -o cat --no-pager |
+    grep -Fq 'photo store lost' && exit 0; sleep 1; done; exit 1"
+check "photos answer unavailable while the volume is gone" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/libraries")" = 503
 
 echo "failures=$failures"
 [[ $failures -eq 0 ]]

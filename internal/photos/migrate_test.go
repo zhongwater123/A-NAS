@@ -48,6 +48,40 @@ func TestMigrationFromFirstSchemaQueuesThumbnails(t *testing.T) {
 	}
 }
 
+// Originals that already had thumbnails before vectors existed are queued
+// for one.
+func TestMigrationQueuesVectorsForExistingThumbnails(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	db, err := sql.Open("sqlite3", filepath.Join(mustMkdir(t, root), catalogFile)+"?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	statements := append([]string{}, migrations[:3]...)
+	statements = append(statements,
+		"PRAGMA user_version = 3",
+		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('"+zeroObjectID+"', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
+		"INSERT INTO derived_files(object_id, derivation, media_type, width, height, size_bytes, created_at) VALUES('"+zeroObjectID+"', 'thumbnail/v1', 'image/jpeg', 4, 3, 10, '2026-10-01T00:00:00.000000000Z')",
+		"DELETE FROM jobs",
+	)
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare schema 3: %v", err)
+		}
+	}
+	_ = db.Close()
+
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer service.Close()
+	var derivation string
+	if err := service.db.QueryRowContext(ctx, "SELECT derivation FROM jobs WHERE object_id = ?", zeroObjectID).Scan(&derivation); err != nil || derivation != embeddingDerivation {
+		t.Fatalf("queued job = %q, %v; want %s", derivation, err, embeddingDerivation)
+	}
+}
+
 const zeroObjectID = "0000000000000000000000000000000000000000000000000000000000000000"
 
 func mustMkdir(t *testing.T, path string) string {
