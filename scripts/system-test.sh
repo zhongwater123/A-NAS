@@ -2,10 +2,10 @@
 # System test of the multi-user permission model. It installs the built
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
-# touches the data volume: Web files (File Broker workers), SMB and the photo
-# API. Unlike tests that start the daemons by hand, it runs them under the
-# production sandboxes, so it catches a unit that takes the Host Agent's
-# CAP_SETUID (issue #38).
+# touches the data volume: Web files (File Broker workers), SMB, the photo API
+# and the LAN Web entry that Caddy serves on port 80. Unlike tests that start
+# the daemons by hand, it runs them under the production sandboxes, so it
+# catches a unit that takes the Host Agent's CAP_SETUID (issue #38).
 #
 # Usage: make build-binaries && scripts/build-system-test-image.sh &&
 #        scripts/system-test.sh [IMAGE]
@@ -49,6 +49,7 @@ for unit in anas-api anas-host-agent anas-photos; do
   install -m 0644 "/src/deploy/systemd/system/$unit.service" "$release/$unit-system.service"
 done
 install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$release/a-nas-chromium-policy.json"
+install -m 0644 /src/deploy/caddy/Caddyfile "$release/Caddyfile"
 
 # A data volume as storage initialization leaves it, mounted before the
 # installer runs, as on the Experimental NAS. Larger than the 10 GiB reserve;
@@ -198,6 +199,27 @@ shared_file=$(upload /tmp/alice.jar "$alice_csrf" "$shared" /tmp/shared.txt shar
 check "Shared upload is owned by the member's UID" test "$(owner_uid "$data/spaces/shared/shared.txt")" = "$alice_id"
 check "administrator reads the member's Shared file" \
   cmp -s /tmp/shared.txt <(curl -fsS -b /tmp/owner.jar "$api/api/v1/files/$shared_file/content")
+
+# --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
+lan=http://$ip
+lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
+  curl -fsS -c "$4" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$2\",\"password\":\"$3\",\"localConsole\":true}" "$1/api/v1/session"
+}
+check "Caddy serves the LAN entry" systemctl is-active --quiet caddy
+check "installer replaced Caddy's own configuration" grep -Fqx '# Managed by A-NAS.' /etc/caddy/Caddyfile
+check "LAN entry reaches the Product Service" test "$(curl -fsS "$lan/healthz" | jq -r .status)" = ok
+check "local console login lasts until sign-out" \
+  test "$(lasting_login "$api" alice "$alice_password" /tmp/console.jar | jq -r .expiresAt)" = 9999-12-31T23:59:59Z
+lan_session=$(lasting_login "$lan" alice "$alice_password" /tmp/lan.jar || true)
+lan_expiry=$(jq -r .expiresAt <<<"$lan_session" 2>/dev/null || true)
+lan_csrf=$(jq -r .csrfToken <<<"$lan_session" 2>/dev/null || true)
+check "LAN login is an ordinary session even when it asks to last" \
+  test -n "$lan_expiry" -a "$lan_expiry" != null -a "$lan_expiry" != 9999-12-31T23:59:59Z
+printf 'lan %s\n' "$(secret)" > /tmp/lan.txt
+curl -fsS -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" \
+  -F "file=@/tmp/lan.txt;filename=lan.txt" "$lan/api/v1/spaces/$alice_private/uploads" || true
+check "LAN upload is owned by the member's UID" test "$(owner_uid "$data/spaces/private/alice/lan.txt" 2>/dev/null)" = "$alice_id"
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"

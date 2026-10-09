@@ -1,0 +1,13 @@
+# Managed by A-NAS.
+# LAN Web entry (ADR 0012): plain HTTP on port 80 of every address, proxied to
+# the Product Service, which listens on loopback only. Caddy sets
+# X-Forwarded-For from the client's address, so LAN browsers never receive the
+# local console's lasting session. The system services installer replaces this
+# file on each release.
+{
+	auto_https off
+}
+
+:80 {
+	reverse_proxy 127.0.0.1:8080
+}

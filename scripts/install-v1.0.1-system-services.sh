@@ -39,12 +39,24 @@ if [[ ! -f "$source_release/a-nas-chromium-policy.json" ]]; then
   echo "missing Chromium policy: $source_release/a-nas-chromium-policy.json" >&2
   exit 2
 fi
+if [[ ! -f "$source_release/Caddyfile" ]]; then
+  echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
+  exit 2
+fi
 for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3
   fi
 done
+# The LAN Web entry is optional: installing Caddy enables it (ADR 0012).
+# Validate before changing anything, so a bad configuration stops the upgrade.
+lan_entry=false
+if command -v caddy >/dev/null; then
+  caddy validate --adapter caddyfile --config "$source_release/Caddyfile" >/dev/null 2>&1 ||
+    { echo "LAN Web entry configuration does not validate: $source_release/Caddyfile" >&2; exit 2; }
+  lan_entry=true
+fi
 
 getent group a-nas >/dev/null || groupadd --system a-nas
 if ! id a-nas >/dev/null 2>&1; then
@@ -158,6 +170,15 @@ install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service"
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
+if [[ "$lan_entry" == true ]]; then
+  # Keep the administrator's own configuration the first time A-NAS replaces it.
+  if [[ -f /etc/caddy/Caddyfile && ! -e /etc/caddy/Caddyfile.before-a-nas ]] &&
+    ! grep -Fqx '# Managed by A-NAS.' /etc/caddy/Caddyfile; then
+    cp -p /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-a-nas
+  fi
+  install -d -o root -g root -m 0755 /etc/caddy
+  install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
+fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
@@ -166,6 +187,10 @@ restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
+fi
+if [[ "$lan_entry" == true ]]; then
+  systemctl enable caddy.service
+  systemctl reload-or-restart caddy.service
 fi
 
 systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service

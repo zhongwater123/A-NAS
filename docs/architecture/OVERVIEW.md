@@ -5,10 +5,13 @@
 ## 系统边界
 
 ```text
-NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器
-  │ 回环地址上的同源 HTTP / REST
-  ▼
-产品服务（非特权）
+NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局域网浏览器
+  │ 回环地址上的同源 HTTP / REST                          │ 明文 HTTP，TCP 80
+  │                                                       ▼
+  │                                       Caddy 局域网 Web 入口（可选；附加 X-Forwarded-For）
+  │                                                       │ 回环
+  ▼                                                       ▼
+产品服务（非特权，只监听 127.0.0.1:8080）
   ├── Auth / Files / Storage / Share / Jobs / Policy
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
@@ -49,7 +52,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 6. 文件数据只由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权，搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
-9. 本地控制台与远程浏览器使用同一 Web UI 和产品 API；Kiosk 不获得额外宿主机权限。
+9. 本地控制台、隧道与局域网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。
 10. 受管图库以稳定照片资产 ID 表达用户可见身份；内容对象路径和内容哈希不成为公共文件身份。
 11. AI Worker 不能写原图、权限或用户元数据；只有 Photo Library Module 可以提交权威目录状态。
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
@@ -65,8 +68,9 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、快照、账号、存储、资源管理、终端、Docker 窗口与随机单视频循环屏保已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
-| `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的回环同源校验 | 已实现 |
-| `internal/terminal` | 回环同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
+| `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
+| `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
+| `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
 | `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md) |
@@ -107,4 +111,6 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
 - [只读宿主机状态规格](../specs/read-only-host-state.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
+- [局域网 Web 入口决策](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)
+- [局域网 Web 访问规格](../specs/lan-web-access.md)
 - [状态栏与实时指标规格](../specs/host-metrics-status-bar.md)

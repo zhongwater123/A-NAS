@@ -212,8 +212,9 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 }
 
 // authenticate grants a local console session, which never expires on its
-// own, only to a direct loopback connection that asked for one. Today only the
-// Kiosk and SSH tunnels reach the API; a LAN proxy would add forwarding headers.
+// own, only to a direct loopback connection that asked for one. The Kiosk and
+// SSH tunnels connect directly; the LAN entry (Caddy, ADR 0012) always adds
+// X-Forwarded-For, so LAN browsers get ordinary sessions.
 func (h *productHandler) authenticate(r *http.Request, username, password string, localConsole bool) (accounts.Session, error) {
 	if localConsole && directLoopback(r) {
 		return h.accounts.AuthenticateLocalConsole(r.Context(), username, password)

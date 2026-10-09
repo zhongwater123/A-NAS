@@ -46,7 +46,7 @@
    test "$(basename "$(readlink -f /opt/a-nas/current)")" = "$(basename "$(readlink -f /home/anas-dev/apps/a-nas/current)")"
    ```
 
-安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。如果哈希、挂载或网卡核对失败，立即停止。
+安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
 
 安装器最后核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时以退出码 5 结束，此时新版本已切换但 Web 文件与终端不可用，按[回滚](#回滚)恢复上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 

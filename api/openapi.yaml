@@ -373,8 +373,8 @@ paths:
       summary: Start, stop or restart one container
       description: >-
         Only lifecycle actions are accepted; creating, removing or reconfiguring containers is not part of this
-        API. Requests must target a loopback Host, use a JSON body and, when an Origin is sent, come from the same
-        origin. Stop and restart give the container ten seconds to exit before it is killed.
+        API. Requests must name this device by localhost or IP address in the Host header, use a JSON body and,
+        when an Origin is sent, come from the same origin. Stop and restart give the container ten seconds to exit before it is killed.
       parameters:
         - $ref: "#/components/parameters/ContainerId"
       requestBody:
@@ -512,8 +512,8 @@ paths:
         refused with plan_changed unless the digest matches; the Host Agent then creates the mounted folders
         (Docker never creates host folders) and grants Shared access if the plan mounts from it. Refused with 423
         volume_unavailable while the data volume is offline. Only one install or uninstall runs at a time.
-        Requests must also target a loopback Host, use a JSON body and, when an Origin is sent, come from the
-        same origin.
+        Requests must also name this device by localhost or IP address in the Host header, use a JSON body and,
+        when an Origin is sent, come from the same origin.
       parameters:
         - $ref: "#/components/parameters/AppId"
       requestBody:
@@ -761,7 +761,8 @@ paths:
       operationId: openTerminalSession
       summary: Upgrade to a WebSocket bridged to a login shell on a new PTY
       description: >-
-        Only loopback peers with a loopback Host and a same-origin browser Origin are accepted. Binary
+        Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this
+        device by localhost or IP address and whose browser Origin is the same origin are accepted. Binary
         frames carry raw terminal input and output. The only client text frame is
         `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell
         exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
@@ -771,7 +772,7 @@ paths:
         "401":
           $ref: "#/components/responses/ProductError"
         "403":
-          description: The terminal is disabled or the request is not from loopback.
+          description: The terminal is disabled or the request did not come through this device's Web entry.
           content:
             application/json:
               schema:
