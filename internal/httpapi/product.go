@@ -350,16 +350,16 @@ func (h *productHandler) handleDownload(w http.ResponseWriter, r *http.Request, 
 	}
 	defer content.Reader.Close()
 	disposition := "attachment"
-	if r.URL.Query().Get("disposition") == "inline" && browserPreviewableImage(content.Name) {
+	if r.URL.Query().Get("disposition") == "inline" && browserPreviewableContent(content.Name) {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": content.Name}))
 	http.ServeContent(w, r, content.Name, content.ModifiedAt, content.Reader)
 }
 
-func browserPreviewableImage(name string) bool {
+func browserPreviewableContent(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	for _, suffix := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"} {
+	for _, suffix := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif", ".pdf"} {
 		if strings.HasSuffix(lower, suffix) {
 			return true
 		}

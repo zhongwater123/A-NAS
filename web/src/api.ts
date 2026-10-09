@@ -215,6 +215,11 @@ export const copyFile = (fileId: string, parentId: string, name: string) => requ
 export const deleteFile = (fileId: string) => request<TrashItem>(`/api/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
 export const fileDownloadURL = (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/content`;
 export const filePreviewURL = (fileId: string) => `${fileDownloadURL(fileId)}?disposition=inline`;
+export async function readFileTextPreview(fileId: string) {
+  const response = await fetch(fileDownloadURL(fileId));
+  if (!response.ok) throw new APIError(response.status, "preview_failed", "无法读取文件预览");
+  return response.text();
+}
 export const listTrash = async () => (await request<{items: TrashItem[]}>("/api/v1/trash")).items;
 export const restoreTrash = (id: string, name: string) => request<FileEntry>(`/api/v1/trash/${encodeURIComponent(id)}/restore`, json({ parentId: "", name }), true);
 export const purgeTrash = (id: string) => request<void>(`/api/v1/trash/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
