@@ -1,9 +1,14 @@
 """Calibrates the AI label thresholds and measures label and search quality.
 
 Reads the vectors cached by eval.embed. Each label's threshold is the lowest
-score whose false-positive rate on the calibration half stays within
---max-fpr; a label without enough known negatives, positives or recall stays
-search-only. The test half is never used to choose anything.
+score whose false-positive rate on the calibration half's COCO negatives
+stays within a limit; a label without enough known negatives, positives or
+recall stays search-only. The limit is the loosest one in a sweep at which
+the labels shown on the calibration half's COCO photos are still right at
+least --min-precision of the time; --max-fpr fixes it instead. COCO negatives follow how photos occur; Open
+Images negatives were picked because a model mistook them, so they are
+reported separately as hard negatives instead of setting thresholds. Recall
+counts positives from both. The test half is never used to choose anything.
 
     python -m eval.calibrate --cache /datasets/cache/<model>-e512 [--write]
 
@@ -20,7 +25,7 @@ import numpy as np
 from sklearn.metrics import average_precision_score
 
 from eval import datasets
-from eval.embed import CAPTION_TEMPLATES, LABEL_TEMPLATES, load_vectors
+from eval.embed import CAPTION_TEMPLATES, LABEL_PHRASES, LABEL_TEMPLATES, QUERY_PROMPT, load_vectors
 
 MIN_POSITIVES = 20  # in the calibration half
 MIN_RECALL = 0.2  # a label that rarely fires is not worth showing
@@ -59,13 +64,22 @@ def mean_ap(scores, truth, rows):
     return (float(np.mean(values)) if values else float("nan")), len(values)
 
 
-def thresholds_for(scores, truth, rows, max_fpr):
-    """Returns {column: threshold} and {column: reason} for the skipped ones."""
+def thresholds_for(scores, truth, rows, natural, max_fpr, subclasses=frozenset()):
+    """Returns {column: threshold} and {column: reason} for the skipped ones.
+
+    Positives come from rows; negatives only from rows that are also natural.
+    Subclass labels, whose COCO negatives leave out every photo of their
+    parent class, never had the photos they are most easily mistaken for
+    (other birds for 鹦鹉) among their negatives, so they stay search-only.
+    """
     chosen, skipped = {}, {}
     min_negatives = math.ceil(2 / max_fpr)  # enough to see two false positives at the limit
     for column in range(scores.shape[1]):
+        if column in subclasses:
+            skipped[column] = "subclass without sibling negatives"
+            continue
         positive = scores[rows & (truth[:, column] == 1), column]
-        negative = np.sort(scores[rows & (truth[:, column] == 0), column])[::-1]
+        negative = np.sort(scores[rows & natural & (truth[:, column] == 0), column])[::-1]
         if len(positive) < MIN_POSITIVES:
             skipped[column] = f"{len(positive)} positives"
             continue
@@ -115,14 +129,14 @@ def display_quality(scores, truth, rows, thresholds):
     }
 
 
-def label_quality(scores, truth, rows, thresholds, ids):
+def label_quality(scores, truth, rows, natural, thresholds, ids):
     report = {}
     for column, threshold in thresholds.items():
         positive = scores[rows & (truth[:, column] == 1), column]
-        negative = scores[rows & (truth[:, column] == 0), column]
-        tp, fp = int((positive >= threshold).sum()), int((negative >= threshold).sum())
-        recall = tp / len(positive) if len(positive) else float("nan")
-        fpr = fp / len(negative) if len(negative) else float("nan")
+        negative = scores[rows & natural & (truth[:, column] == 0), column]
+        hard = scores[rows & ~natural & (truth[:, column] == 0), column]
+        recall = float(np.mean(positive >= threshold)) if len(positive) else float("nan")
+        fpr = float(np.mean(negative >= threshold)) if len(negative) else float("nan")
         reference = REFERENCE_PREVALENCE * recall
         report[ids[column]] = {
             "threshold": round(threshold, 4),
@@ -132,6 +146,8 @@ def label_quality(scores, truth, rows, thresholds, ids):
             "falsePositiveRate": round(fpr, 4),
             "precisionAt5Percent": round(reference / (reference + (1 - REFERENCE_PREVALENCE) * fpr), 3)
             if reference + fpr > 0 else None,
+            "hardNegatives": len(hard),
+            "hardFalsePositiveRate": round(float(np.mean(hard >= threshold)), 3) if len(hard) else None,
         }
     return report
 
@@ -162,10 +178,11 @@ def compare(cache, other_cache, calibration_path):
         result = {}
         if any(key.startswith(("coco:", "oi:")) for key in subset):
             _samples, vectors, truth = labelled(subset, vocabulary, ground_truth)
-            scores = vectors @ label_matrix(vocabulary, texts, calibrated["template"], calibrated["synonyms"]).T
+            template = QUERY_PROMPT.format(calibrated["phrase"])
+            scores = vectors @ label_matrix(vocabulary, texts, template, calibrated["synonyms"]).T
             result["meanAP"], result["labels"] = mean_ap(scores, truth, np.ones(len(vectors), dtype=bool))
         if any(key.startswith("coco-cn:") for key in subset):
-            result["search"] = retrieval(subset, texts, "test", "written", calibrated["template"])
+            result["search"] = retrieval(subset, texts, "test", "written", CAPTION_TEMPLATES["query"])
         print(f"{name:8s} {result}")
 
 
@@ -188,7 +205,9 @@ def retrieval(images, texts, split, kind, template):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--cache", required=True, help="directory eval.embed wrote")
-    parser.add_argument("--max-fpr", type=float, default=0.002)
+    parser.add_argument("--min-precision", type=float, default=0.9,
+                        help="share of shown labels that must be right on the calibration half's COCO photos")
+    parser.add_argument("--max-fpr", type=float, help="fix the per-label false-positive limit instead")
     parser.add_argument("--write", nargs="?", const=CALIBRATION, metavar="PATH",
                         help=f"write the thresholds (default {os.path.relpath(CALIBRATION, datasets.REPO)})")
     parser.add_argument("--calibration", default=CALIBRATION, help="thresholds whose template --compare-with uses")
@@ -207,6 +226,7 @@ def main():
     ground_truth = datasets.load_ground_truth()
     samples, vectors, truth = labelled(images, vocabulary, ground_truth)
     calibration = np.array([sample.split == "calibration" for sample in samples])
+    subclasses = frozenset(i for i, label in enumerate(ids) if ground_truth.get(label, {}).get("cocoAbsentUnless"))
     test = ~calibration
     coco = np.array([sample.key.startswith("coco:") for sample in samples])
     report = {"model": model, "images": {"coco": int(coco.sum()), "openimages": int((~coco).sum())}}
@@ -223,28 +243,35 @@ def main():
             report["templates"][key] = {"meanAP": round(value, 4), "labels": count,
                                         "cocoMeanAP": round(mean_ap(scores, truth, calibration & coco)[0], 4)}
             print(f"template {key:16s} mean AP {value:.4f} over {count} labels")
-            if best is None or value > best[0]:
+            # Only phrases the Worker can reproduce are eligible.
+            if name in LABEL_PHRASES and (best is None or value > best[0]):
                 best = (value, name, template, synonyms)
     _value, template_name, template, synonyms = best
     scores = vectors @ label_matrix(vocabulary, texts, template, synonyms).T
-    report["template"] = {"name": template_name, "text": template, "synonyms": synonyms}
+    report["template"] = {"name": template_name, "phrase": LABEL_PHRASES[template_name], "synonyms": synonyms}
 
-    # The false-positive limit: a sweep shows the trade-off; --max-fpr decides.
+    # The false-positive limit: the loosest that keeps shown labels right.
     report["sweep"] = {}
-    for max_fpr in (0.0005, 0.001, 0.002, 0.005, 0.01):
-        chosen, _skipped = thresholds_for(scores, truth, calibration, max_fpr)
+    max_fpr_chosen = args.max_fpr
+    for max_fpr in (0.0005, 0.001, 0.0015, 0.002, 0.003, 0.005, 0.01):
+        chosen, _skipped = thresholds_for(scores, truth, calibration, coco, max_fpr, subclasses)
         quality = display_quality(scores, truth, calibration & coco, chosen)
         report["sweep"][str(max_fpr)] = {"labels": len(chosen), "cocoCalibration": quality}
+        if args.max_fpr is None and quality["judged"] and quality["precision"] >= args.min_precision:
+            max_fpr_chosen = max_fpr
         print(f"max FPR {max_fpr:<6} {len(chosen):3d} labels; COCO calibration: {quality['precision']:.3f} precision "
               f"of {quality['judged']} judged, {quality['photosWithLabels']}/{quality['photos']} photos labelled")
 
-    chosen, skipped = thresholds_for(scores, truth, calibration, args.max_fpr)
-    report["maxFalsePositiveRate"] = args.max_fpr
+    if max_fpr_chosen is None:
+        raise SystemExit(f"no false-positive limit keeps {args.min_precision:.0%} of shown labels right")
+    chosen, skipped = thresholds_for(scores, truth, calibration, coco, max_fpr_chosen, subclasses)
+    report["maxFalsePositiveRate"] = max_fpr_chosen
+    print(f"chosen max FPR {max_fpr_chosen}")
     report["test"] = {
         "coco": display_quality(scores, truth, test & coco, chosen),
         "openimages": display_quality(scores, truth, test & ~coco, chosen),
     }
-    report["labels"] = label_quality(scores, truth, test, chosen, ids)
+    report["labels"] = label_quality(scores, truth, test, coco, chosen, ids)
     report["searchOnly"] = {ids[column]: reason for column, reason in skipped.items()}
     report["searchOnly"].update({label: "no ground truth" for label in ids if label not in ground_truth})
     for name, quality in report["test"].items():
@@ -267,9 +294,9 @@ def main():
         calibrated = {
             "labels": 1,
             "model": model.rsplit("-e", 1)[0],
-            "template": template,
+            "phrase": LABEL_PHRASES[template_name],
             "synonyms": synonyms,
-            "maxFalsePositiveRate": args.max_fpr,
+            "maxFalsePositiveRate": max_fpr_chosen,
             "thresholds": {ids[column]: round(value, 4) for column, value in sorted(chosen.items())},
         }
         with open(args.write, "w", encoding="utf-8", newline="\n") as file:

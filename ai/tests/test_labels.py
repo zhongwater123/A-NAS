@@ -43,7 +43,7 @@ class VocabularyTest(unittest.TestCase):
             calibration = json.load(file)
         self.assertEqual(calibration["labels"], 1)
         self.assertRegex(calibration["model"], r"^embeddinggemma-2-740m@[0-9a-f]{12}\+")
-        self.assertEqual(calibration["template"].count("{}"), 1)
+        self.assertEqual(calibration["phrase"].count("{}"), 1)
         for label, threshold in calibration["thresholds"].items():
             self.assertIn(label, self.ids)
             self.assertTrue(-1 < threshold < 1, label)

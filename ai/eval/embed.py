@@ -27,13 +27,13 @@ from eval import datasets
 
 MANIFEST = os.path.join(datasets.REPO, "deploy", "models", "embeddinggemma-2-740m.json")
 
-# Text templates compared by the calibration; images get no prompt.
-LABEL_TEMPLATES = {
-    "plain": "{}",
-    "query": "task: search result | query: {}",
-    "photo": "task: search result | query: 一张{}的照片",
-}
-CAPTION_TEMPLATES = {"plain": "{}", "query": "task: search result | query: {}"}
+# The Worker sends every query through EmbeddingGemma's retrieval prompt
+# (embed_query), so a label phrase is all the product chooses; the prompt-less
+# baseline is only compared. Images get no prompt.
+QUERY_PROMPT = providers.MediaPipeProvider.QUERY_PROMPT
+LABEL_PHRASES = {"query": "{}", "photo": "一张{}的照片"}
+LABEL_TEMPLATES = {"plain": "{}", **{name: QUERY_PROMPT.format(phrase) for name, phrase in LABEL_PHRASES.items()}}
+CAPTION_TEMPLATES = {"plain": "{}", "query": QUERY_PROMPT}
 
 
 def thumbnail(path, edge):
