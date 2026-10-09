@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -316,6 +317,90 @@ func TestProductAPIReportsCredentialProvisioningFailure(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if got, want := response.Code, http.StatusServiceUnavailable; got != want || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"credential_provision_failed"`)) {
 		t.Fatalf("setup status/body = %d/%s, want typed credential failure", got, response.Body.String())
+	}
+}
+
+func TestProductAPIKeepsLocalConsoleSessionsUntilSignOut(t *testing.T) {
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	now := time.Date(2026, 10, 8, 18, 15, 0, 0, time.UTC)
+	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
+		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{Now: func() time.Time { return now }}),
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	send := func(method, path, body string, prepare func(*http.Request)) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		if body != "" {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		if prepare != nil {
+			prepare(request)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	kiosk := func(r *http.Request) { r.RemoteAddr, r.Host = "127.0.0.1:41234", "127.0.0.1:8080" }
+	type session struct {
+		CSRFToken string `json:"csrfToken"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	sessionOf := func(response *httptest.ResponseRecorder) (*http.Cookie, session) {
+		t.Helper()
+		var body session
+		cookies := response.Result().Cookies()
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || len(cookies) != 1 {
+			t.Fatalf("session response = %d %s, cookies %#v", response.Code, response.Body.String(), cookies)
+		}
+		return cookies[0], body
+	}
+	metricsStatus := func(cookie *http.Cookie) int {
+		return send(http.MethodGet, "/api/v1/metrics", "", func(r *http.Request) { r.AddCookie(cookie) }).Code
+	}
+	credentials := `{"username":"owner","password":"correct horse battery staple","localConsole":true}`
+
+	console, consoleSession := sessionOf(send(http.MethodPost, "/api/v1/setup/admin", credentials, kiosk))
+	if consoleSession.ExpiresAt != "9999-12-31T23:59:59Z" || time.Until(console.Expires) < 300*24*time.Hour {
+		t.Fatalf("local console session expires %s with cookie expiry %s, want no expiry", consoleSession.ExpiresAt, console.Expires)
+	}
+	remote, remoteSession := sessionOf(send(http.MethodPost, "/api/v1/session", credentials, nil))
+	proxied, proxiedSession := sessionOf(send(http.MethodPost, "/api/v1/session", credentials, func(r *http.Request) {
+		kiosk(r)
+		r.Header.Set("X-Forwarded-For", "192.0.2.10")
+	}))
+	if want := now.Add(12 * time.Hour).Format(time.RFC3339); remoteSession.ExpiresAt != want || proxiedSession.ExpiresAt != want {
+		t.Fatalf("remote/proxied session expiry = %s/%s, want %s", remoteSession.ExpiresAt, proxiedSession.ExpiresAt, want)
+	}
+
+	now = now.Add(30 * 24 * time.Hour)
+	if got := metricsStatus(remote); got != http.StatusUnauthorized {
+		t.Fatalf("remote session after 30 days = %d, want 401", got)
+	}
+	if got := metricsStatus(proxied); got != http.StatusUnauthorized {
+		t.Fatalf("proxied session after 30 days = %d, want 401", got)
+	}
+	if got := metricsStatus(console); got != http.StatusOK {
+		t.Fatalf("local console session after 30 days = %d, want 200", got)
+	}
+	renewed, current := sessionOf(send(http.MethodGet, "/api/v1/session", "", func(r *http.Request) { r.AddCookie(console) }))
+	if renewed.Value != console.Value || time.Until(renewed.Expires) < 399*24*time.Hour {
+		t.Fatalf("reading the session renewed cookie %#v, want the same token for another 400 days", renewed)
+	}
+
+	signOut := send(http.MethodDelete, "/api/v1/session", "", func(r *http.Request) {
+		r.AddCookie(console)
+		r.Header.Set("X-CSRF-Token", current.CSRFToken)
+	})
+	if signOut.Code != http.StatusNoContent {
+		t.Fatalf("sign out = %d %s", signOut.Code, signOut.Body.String())
+	}
+	if got := metricsStatus(console); got != http.StatusUnauthorized {
+		t.Fatalf("local console session after sign out = %d, want 401", got)
 	}
 }
 

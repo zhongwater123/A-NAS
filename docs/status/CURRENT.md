@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-08
+更新时间：2026-10-09
 
 ## 当前阶段
 
@@ -37,11 +37,12 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 ## 下一步
 
 1. 合并 PR #39 并按[实机配置手册](../runbooks/provision-v1.0.1-experimental-storage.md#安装系统服务)部署 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 的修复，同时移除遗留的 `a-nas-members` 组：Experimental NAS 上 Web 文件管理（以及启用后的终端）因 Host Agent 在 systemd 下丢失 `CAP_SETUID` 而不可用，修复后的 Web 写入也不再被产品服务沙箱误判为卷不可用。安装器核对通过后在 Web 打开个人空间与 Shared 并上传、删除、恢复，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
-2. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从 Windows 用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
-3. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
-4. 合并并部署视频池后，在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
-5. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。
-6. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；桌面上传、跨成员隔离、管理员查看、强制终止与断电对账、卷离线、容量、4 名成员与 20,000 张合成照片等切片 7 实机闸门仍待按[启用相册服务](../runbooks/enable-photo-service.md)完成。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
+2. 随下次部署验证会话处理：本机屏幕重新登录一次后跨夜和重启仍保持登录；SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
+3. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从 Windows 用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
+4. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
+5. 合并并部署视频池后，在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
+6. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。
+7. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；桌面上传、跨成员隔离、管理员查看、强制终止与断电对账、卷离线、容量、4 名成员与 20,000 张合成照片等切片 7 实机闸门仍待按[启用相册服务](../runbooks/enable-photo-service.md)完成。M2 的模型基准可并行，先在实验 NAS 的 Debian 13 上完成 EmbeddingGemma 2 LiteRT-LM 冒烟测试，再用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
 
 ## 外部条件与限制
 
@@ -49,6 +50,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - v1.0.1 只使用可丢弃测试数据。单盘 Btrfs 不提供冗余、备份或家庭生产数据可靠性承诺。
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
+- 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB；根治前每次重启后需 root 执行 `systemctl restart smbd`，再开始 SMB 验收。
 
 ## 验证基线
 

@@ -1,4 +1,4 @@
-import { DataSource, csrfHeaders } from "./api";
+import { DataSource, apiFetch, csrfHeaders } from "./api";
 
 export type InstallState = "available" | "installed" | "installing" | "uninstalling";
 
@@ -87,7 +87,7 @@ function post(body: unknown): RequestInit {
 async function request(path: string, init: RequestInit): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
+    response = await apiFetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new AppsAPIError("network_error");
