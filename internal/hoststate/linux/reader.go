@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -28,13 +29,14 @@ const (
 )
 
 type dependencies struct {
-	root             fs.FS
-	hostname         func() (string, error)
-	architecture     string
-	now              func() time.Time
-	readBlockDevices func(context.Context) ([]byte, error)
-	readSMART        func(context.Context, string) ([]byte, error)
-	sleep            func(context.Context, time.Duration) error
+	root                fs.FS
+	hostname            func() (string, error)
+	architecture        string
+	now                 func() time.Time
+	readBlockDevices    func(context.Context) ([]byte, error)
+	readSMART           func(context.Context, string) ([]byte, error)
+	readFilesystemUsage func(string) (uint64, uint64, error)
+	sleep               func(context.Context, time.Duration) error
 }
 
 // Reader observes a Debian host without changing its state.
@@ -77,6 +79,14 @@ func New() *Reader {
 				return nil, err
 			}
 			return output, nil
+		},
+		readFilesystemUsage: func(path string) (uint64, uint64, error) {
+			var stats syscall.Statfs_t
+			if err := syscall.Statfs(path, &stats); err != nil {
+				return 0, 0, err
+			}
+			blockSize := uint64(stats.Bsize)
+			return uint64(stats.Blocks) * blockSize, uint64(stats.Bavail) * blockSize, nil
 		},
 	})
 }
@@ -126,6 +136,7 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
+	observeDataVolumeUsage(disks, r.dependencies.readFilesystemUsage)
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
 	if err != nil {
@@ -144,6 +155,24 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 		},
 		Disks: disks,
 	}, nil
+}
+
+func observeDataVolumeUsage(disks []hoststate.Disk, readUsage func(string) (uint64, uint64, error)) {
+	if readUsage == nil {
+		return
+	}
+	for index := range disks {
+		if disks[index].Role != hoststate.DiskRoleData {
+			continue
+		}
+		total, available, err := readUsage("/srv/a-nas/data")
+		if err != nil || total == 0 || available > total {
+			return
+		}
+		disks[index].FilesystemCapacityBytes = &total
+		disks[index].FilesystemAvailableBytes = &available
+		return
+	}
 }
 
 // ResolveDevice maps an opaque disk ID to a current kernel device path for the

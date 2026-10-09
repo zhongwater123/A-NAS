@@ -259,6 +259,7 @@ var errorCodes = []struct {
 	{appstore.ErrNotInstalled, http.StatusConflict, "not_installed"},
 	{appstore.ErrPortInUse, http.StatusConflict, "port_in_use"},
 	{appstore.ErrNameInUse, http.StatusConflict, "name_in_use"},
+	{appstore.ErrAddressPoolMissing, http.StatusConflict, "address_pool_missing"},
 	{appstore.ErrUnavailable, http.StatusServiceUnavailable, "apps_unavailable"},
 }
 

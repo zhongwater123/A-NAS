@@ -119,6 +119,14 @@ func cloneState(state hoststate.State) hoststate.State {
 		if disk.TemperatureCelsius != nil {
 			cloned.Disks[i].TemperatureCelsius = intPointer(*disk.TemperatureCelsius)
 		}
+		if disk.FilesystemCapacityBytes != nil {
+			value := *disk.FilesystemCapacityBytes
+			cloned.Disks[i].FilesystemCapacityBytes = &value
+		}
+		if disk.FilesystemAvailableBytes != nil {
+			value := *disk.FilesystemAvailableBytes
+			cloned.Disks[i].FilesystemAvailableBytes = &value
+		}
 		cloned.Disks[i].Filesystems = append([]string(nil), disk.Filesystems...)
 	}
 	return cloned

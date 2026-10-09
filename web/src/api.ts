@@ -210,8 +210,16 @@ export const listSpaces = async () => (await request<{items: Space[]}>("/api/v1/
 export const listEntries = async (spaceId: string, parentId = "") => (await request<{items: FileEntry[]}>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/entries?parentId=${encodeURIComponent(parentId)}`)).items;
 export const createDirectory = (spaceId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/directories`, json({ parentId, name }), true);
 export function uploadFile(spaceId: string, parentId: string, file: File) { const body = new FormData(); body.set("parentId", parentId); body.set("file", file); return request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/uploads`, { method: "POST", body }, true); }
+export const moveFile = (fileId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}`, { ...json({ parentId, name }), method: "PATCH" }, true);
+export const copyFile = (fileId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}/copies`, json({ parentId, name }), true);
 export const deleteFile = (fileId: string) => request<TrashItem>(`/api/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
 export const fileDownloadURL = (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/content`;
+export const filePreviewURL = (fileId: string) => `${fileDownloadURL(fileId)}?disposition=inline`;
+export async function readFileTextPreview(fileId: string) {
+  const response = await fetch(fileDownloadURL(fileId));
+  if (!response.ok) throw new APIError(response.status, "preview_failed", "无法读取文件预览");
+  return response.text();
+}
 export const listTrash = async () => (await request<{items: TrashItem[]}>("/api/v1/trash")).items;
 export const restoreTrash = (id: string, name: string) => request<FileEntry>(`/api/v1/trash/${encodeURIComponent(id)}/restore`, json({ parentId: "", name }), true);
 export const purgeTrash = (id: string) => request<void>(`/api/v1/trash/${encodeURIComponent(id)}`, { method: "DELETE" }, true);

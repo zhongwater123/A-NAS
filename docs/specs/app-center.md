@@ -1,7 +1,7 @@
 # 应用中心
 
 状态：implemented
-更新时间：2026-10-07
+更新时间：2026-10-09
 
 ## 目标
 
@@ -26,7 +26,7 @@
 
 - Given：应用状态为“可安装”。
 - When：用户在详情页点击“安装”。
-- Then：容器代理渲染安装计划并显示将拉取的镜像、开放的宿主机端口与用途、使用的文件夹（区分应用数据、共享数据、系统只读）、将创建的容器，以及可展开的最终 Compose 文件和计划摘要；未确认前不执行任何操作。
+- Then：容器代理渲染安装计划并显示将拉取的镜像、开放的宿主机端口与用途、使用的文件夹（区分应用数据、共享数据、系统只读）、将新建的 Docker 网络及其地址池、将创建的容器，以及可展开的最终 Compose 文件和计划摘要；未确认前不执行任何操作。
 
 ### 执行安装
 
@@ -55,21 +55,22 @@
 - **共享空间授权**：计划挂载共享空间内的文件夹时，计划明示“该应用将获得共享空间的读写权限（与成员相同）”；确认安装后 `app-<id>` 加入 `a-nas-users`，从而经共享空间的 ACL 获得访问，新文件继承该 ACL，成员可读写。卸载时立即撤销该成员资格，应用身份与其数据保留。应用身份永远无法访问任何个人空间。
 - **文件夹由 Host Agent 预建**：安装前 Host Agent 校验计划中的每个宿主机文件夹只在 `apps/<app>` 或（已同意时）共享空间内，创建 `apps` 子卷（仅 root）、应用数据文件夹（属主 `app-<id>`）与共享空间文件夹（继承 ACL）；每一级都经不跟随符号链接的描述符创建并改属主，路径中出现链接时拒绝。Docker 不会创建任何宿主机文件夹，数据卷离线时应用无法启动，也绝不会把数据写到系统盘。
 - 数据卷离线时安装返回 `423 volume_unavailable`，不预建任何文件夹。
+- **Docker 网络**（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）：计划列出 Compose 将新建的网络，包括服务未设 `network_mode: bridge` 时的隐式 `default` 网络。清单自带 `ipam` 子网或驱动的网络被拒绝。应用有网络而 Docker 未配置 `default-address-pools` 时，规划与安装都返回 `409 address_pool_missing`。安装后，项目网络的每个子网都必须落在地址池内；有任一不在池内或无法检查时，立即 `compose down` 回滚，任务失败并写明网络与网段。
 - 局限：rootful Docker 中既未声明 `user` 也不支持 `PUID`/`PGID`、因而仍以 root 运行的镜像会以 root 写入其挂载的文件夹；隔离依赖“只挂载被允许的文件夹”。
 - 端口冲突检查基于 Docker 已发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
 - 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出，任务状态保存在容器代理内存中，重启后丢失但已安装状态由容器标签恢复。
-- 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求回环 Host、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
+- 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求 Host 为 `localhost` 或 IP 地址（[局域网 Web 访问](lan-web-access.md)）、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
 
 ## 验收证据
 
-- 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、显式 `user` 及字面量 `PUID`/`PGID` 改为应用身份、不让 Docker 创建宿主机文件夹、`/DATA` 只映射到共享空间、缺少身份时拒绝、确定性摘要与 16 类拒绝情形；[清单测试](../../internal/appstore/catalog_test.go)。
+- 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、显式 `user` 及字面量 `PUID`/`PGID` 改为应用身份、不让 Docker 创建宿主机文件夹、`/DATA` 只映射到共享空间、缺少身份时拒绝、确定性摘要与 16 类拒绝情形，以及计划列出隐式 `default` 网络、默认网桥不新建网络、清单自带子网被拒绝；[清单测试](../../internal/appstore/catalog_test.go)。
 - 身份与文件夹：[Host Agent 应用身份测试](../../internal/hostops/linux/apps_test.go)（查看计划不改动宿主机账号）；root 集成测试 [`root_apps_integration_test.go`](../../internal/hostops/linux/root_apps_integration_test.go) 在真实 Btrfs 上以绑定挂载模拟容器，验证账号在预建文件夹时才创建、应用数据属主、共享空间读写与 ACL 继承、无法读取个人空间、经植入的符号链接预建文件夹被拒绝、撤销后不可写共享空间但保留自身数据。
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：以渲染结果运行一次性 Compose 项目，共享空间中被换成指向卷外目录的链接的文件夹使容器拒绝启动（`path concatenation escapes the base directory`），换回真实文件夹后正常挂载，写入文件属主为应用 UID；卷根不存在时挂载失败且 Docker 不创建它。
 - 2026-10-08 Experimental NAS（Debian 13 自带 Docker 26.1.5、Compose 2.26.1）：真实拉取并安装 OpenList 4.2.2，以 `app-openlist` 运行，见 [OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
 - 产品接口：[应用中心 API 测试](../../internal/appstoreapi/handler_test.go) 覆盖安装前预建文件夹、卸载撤销与数据卷离线拒绝；[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go)。
-- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出。
+- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。
 - 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖搜索、计划确认、按摘要安装、已安装状态、卸载确认、端口冲突提示与未启用状态。
+- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖搜索、计划确认、按摘要安装、已安装状态、卸载确认、端口冲突提示、未启用状态、Docker 网络与地址池显示，以及地址池缺失提示。
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：通过产品 API 与容器代理安装 Memos——本机 Docker 无法访问 Docker Hub，首次安装如实失败并显示拉取错误；以本地镜像临时标记为 `neosmemo/memos:0.28.0` 后，安装成功（容器带 `a-nas-memos` 项目与 `io.a-nas.app` 标签，绑定目录重写到应用数据根，Docker 窗口可见），重复安装返回 `already_installed`，卸载后容器与网络删除且数据保留；过期摘要返回 `plan_changed`，跨站请求返回 `forbidden`。Chromium 中模拟模式完成浏览、计划、安装、卸载全流程，26 个图标全部加载。临时镜像标签与测试数据已清理。
 
 ## 关联

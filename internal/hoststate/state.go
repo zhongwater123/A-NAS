@@ -68,18 +68,20 @@ type System struct {
 }
 
 type Disk struct {
-	ID                 ResourceID
-	Model              string
-	Transport          Transport
-	CapacityBytes      uint64
-	Rotational         bool
-	Removable          bool
-	InUse              bool
-	Filesystems        []string
-	Role               DiskRole
-	Health             Health
-	SMARTStatus        Health
-	TemperatureCelsius *int
+	ID                       ResourceID
+	Model                    string
+	Transport                Transport
+	CapacityBytes            uint64
+	FilesystemCapacityBytes  *uint64
+	FilesystemAvailableBytes *uint64
+	Rotational               bool
+	Removable                bool
+	InUse                    bool
+	Filesystems              []string
+	Role                     DiskRole
+	Health                   Health
+	SMARTStatus              Health
+	TemperatureCelsius       *int
 }
 
 type State struct {
