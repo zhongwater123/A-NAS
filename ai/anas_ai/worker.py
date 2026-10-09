@@ -117,6 +117,7 @@ def main(argv=None):
     parser.add_argument("--model", help="the .litertlm model file")
     parser.add_argument("--manifest", help="the model manifest that pins its size and SHA-256")
     parser.add_argument("--vision-tokens", type=int, default=70, choices=providers.VISION_TOKENS)
+    parser.add_argument("--cache-dir", help="a writable directory for the runtime's weight cache")
     parser.add_argument("--fake", action="store_true", help="serve deterministic fake vectors")
     parser.add_argument("--idle-seconds", type=int, default=IDLE_SECONDS)
     args = parser.parse_args(argv)
@@ -127,7 +128,7 @@ def main(argv=None):
         provider = providers.FakeProvider()
     elif args.model and args.manifest:
         try:
-            provider = providers.MediaPipeProvider(args.model, args.manifest, args.vision_tokens)
+            provider = providers.MediaPipeProvider(args.model, args.manifest, args.vision_tokens, args.cache_dir)
         except providers.Unavailable as error:
             # Answer "unavailable" instead of exiting, so socket activation
             # does not restart a Worker that cannot load its model.
@@ -139,6 +140,8 @@ def main(argv=None):
         log.info("serving %s (%d dimensions)", provider.model, provider.dimensions)
     with listening_socket(args.socket) as listener:
         serve(listener, provider, reason, args.idle_seconds)
+    if provider is not None:
+        provider.close()
 
 
 if __name__ == "__main__":

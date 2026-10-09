@@ -47,7 +47,7 @@ VISION_TOKENS = (70, 140)
 class MediaPipeProvider:
     """EmbeddingGemma 2 through MediaPipe's Universal Embedder."""
 
-    def __init__(self, model_path, manifest_path, vision_tokens=70):
+    def __init__(self, model_path, manifest_path, vision_tokens=70, cache_dir=None):
         if vision_tokens not in VISION_TOKENS:
             raise ValueError(f"vision tokens must be one of {VISION_TOKENS}")
         manifest = verify_model(model_path, manifest_path)
@@ -63,6 +63,9 @@ class MediaPipeProvider:
                 base_options=BaseOptions(model_asset_path=model_path),
                 l2_normalize=True,
                 vision_tokens_per_image=vision_tokens,
+                # XNNPack keeps repacked weights here; by default it tries the
+                # model's own directory, which is read-only in deployment.
+                cache_dir=cache_dir,
             )
         )
         self.dimensions = len(self._vector(self._embedder.embed_text("probe")))
@@ -79,6 +82,12 @@ class MediaPipeProvider:
         except (RuntimeError, ValueError) as error:
             raise InvalidInput(str(error)) from error
         return self._vector(result)
+
+    def embed_text(self, text):
+        return self._vector(self._embedder.embed_text(text))
+
+    def close(self):
+        self._embedder.close()
 
     @staticmethod
     def _vector(result):
@@ -104,6 +113,9 @@ class FakeProvider:
         values = values[: self.dimensions]
         norm = math.sqrt(sum(value * value for value in values)) or 1.0
         return [value / norm for value in values]
+
+    def close(self):
+        pass
 
 
 def encode_vector(vector):

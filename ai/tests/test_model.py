@@ -32,11 +32,9 @@ class RealModelTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.provider = providers.MediaPipeProvider(MODEL, MANIFEST)
-        cls.embedder = cls.provider._embedder  # pylint: disable=protected-access
 
     def text(self, label):
-        result = self.embedder.embed_text(f"task: search result | query: {label}")
-        return [float(value) for value in result.embeddings[0].embedding]
+        return self.provider.embed_text(f"task: search result | query: {label}")
 
     def test_describes_itself(self):
         self.assertEqual(self.provider.dimensions, 768)
