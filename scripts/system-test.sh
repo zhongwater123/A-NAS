@@ -93,7 +93,9 @@ if ! bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test 
 fi
 
 # Record the volume as storage initialization would have, so the Product
-# Service's volume guard accepts it, then restart it to load the record.
+# Service's volume guard accepts it, then restart it to load the record. It
+# creates its databases before it answers, so wait for that first.
+for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
 systemctl stop anas-api
 setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$data_disk" "$volume_uuid" <<'PY'
 import json, sqlite3, sys
