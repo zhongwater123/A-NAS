@@ -83,7 +83,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 任务分为两类，共用同一张表和租约语义：
 
 - **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
-- **AI 任务**：Embedding、标签、OCR、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
+- **AI 任务**：Embedding、标签、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
 
 默认执行策略：
 
@@ -98,14 +98,13 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 
 | 能力 | 首选基线 | 选择理由 | 冻结条件 |
 |---|---|---|---|
-| 中文语义向量与开放标签 | 已选定 Google EmbeddingGemma 2 文本+视觉 440M；官方 LiteRT QAT 包 | Google DeepMind 于 2026-10-06 发布、Apache-2.0、支持 100+ 语言；文本 INT4、视觉 INT8 的官方包约 388 MB，官方列出图片检索与图片分类用途；零样本标签依赖图文同一向量空间的相似度，官方未给出中文图文指标 | 作为首个集成目标；中文家庭照片质量、Debian x86 Runtime、RSS、查询延迟与吞吐达标后冻结为发行默认；发布过新必须保留回退 |
-| OCR | PP-OCRv6 small detection + recognition | Apache-2.0，覆盖简繁中文与英文；官方定位于移动端/桌面端并提供 OpenVINO CPU 路径 | 与 tiny 对比家庭照片文字质量、方向、长图、模糊、吞吐和峰值内存 |
+| 中文语义向量与开放标签 | 已选定 Google EmbeddingGemma 2 全模态 740M 官方 LiteRT 包（2026-10-09 决定） | Google DeepMind 于 2026-10-06 发布、支持 100+ 语言，许可待核对（见 [M2 实施方案](photo-ai.md)）；全模态包约 485 MB，440M 文本+视觉包约 388 MB，官方列出图片检索与图片分类用途；零样本标签依赖图文同一向量空间的相似度，官方未给出中文图文指标 | 作为首个集成目标；中文家庭照片质量、Debian x86 Runtime、RSS、查询延迟与吞吐达标后冻结为发行默认；发布过新必须保留回退 |
 | 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
-| 按需中文描述 | 高置信标签、OCR、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
+| 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
 
 图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
 
-Google EmbeddingGemma 2 已选定为首个集成目标：它在本设计更新前一天发布，支持中文在内的 100+ 语言，并能只加载文本与图像模块；其规模与官方本地 CPU 定位都比 2B/3B 候选更符合 8 GB NAS。但“适合消费硬件”不等于已经在 Debian 13 x86 上通过 A-NAS 门禁；官方跨平台量化内存数字也不能代替本机加载、吞吐和长时间运行实测。因此 SigLIP2 Base 保留为成熟回退，EmbeddingGemma 2 通过门禁后才冻结为发行默认。
+Google EmbeddingGemma 2 已选定为首个集成目标：它在本设计更新前一天发布，支持中文在内的 100+ 语言；2026-10-09 决定使用包含音频编码器的全模态 740M 包；其规模与官方本地 CPU 定位都比 2B/3B 候选更符合 8 GB NAS。但“适合消费硬件”不等于已经在 Debian 13 x86 上通过 A-NAS 门禁；官方跨平台量化内存数字也不能代替本机加载、吞吐和长时间运行实测。因此 SigLIP2 Base 保留为成熟回退，EmbeddingGemma 2 通过门禁后才冻结为发行默认。
 
 Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量与 Runtime 对照。腾讯微信视觉团队于 2026-08 发布的 WeMM-Embedding-2B 基于 Qwen3.5，并报告了高于 Qwen3-VL-Embedding-2B 的 MMEB-v2 结果，但模型仓库实际标为约 3B、BF16 权重约 5.44 GB，官方示例以 CUDA 为主，尚无适合本项目的 x86 CPU 量化交付路线，所以只在开发机上定义新一代质量上限，不要求安装到目标 NAS。Chinese-CLIP RN50 只保留为轻量中文对照。
 
@@ -118,19 +117,19 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
 - Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级。
 - Worker 的 Python 依赖以锁定哈希的离线 wheel 随发行制品分发，模型文件附带来源、许可证、SHA-256 与预处理版本清单；AI 组件可以未安装，此时相册显示“智能处理不可用”，基础相册不受影响。
-- EmbeddingGemma 2 以官方 LiteRT-LM 文本+视觉 QAT 包作为首选发行路径，并用 Transformers/Sentence Transformers FP32 结果抽样核对量化正确性；人脸模型和 PP-OCRv6 优先使用 OpenVINO CPU Provider。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
+- EmbeddingGemma 2 的全模态 740M 官方 LiteRT 包经 MediaPipe Universal Embedder 运行（LiteRT-LM 自身的 Python API 没有向量接口，见 [M2 实施方案](photo-ai.md)），并用 Transformers/Sentence Transformers 结果抽样核对量化正确性；人脸模型优先使用 OpenVINO CPU Provider。不做 OCR（2026-10-09 决定）。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
 - Debian 13 不在当前 OpenVINO 官方支持发行版列表中，因此必须在目标系统完成离线安装、模型加载、连续运行和服务重启测试；失败时回退 ONNX Runtime CPU，不能让 Runtime 兼容性阻塞基础相册。
 - 模型文件必须随清单记录来源、许可证、SHA-256、预处理版本与输出 schema；安装后离线运行，不在推理时访问互联网。
 
 ## 搜索设计
 
-结构化查询、文件名、用户标签、AI 标签和 OCR 使用 SQLite 与 FTS5。语义向量按 `derivation_id` 分代保存；在 20,000 张照片基线下，首版把当前代归一化向量加载到进程内，针对调用方有权访问的图库执行精确余弦扫描，不引入独立向量数据库。
+结构化查询、文件名、用户标签和 AI 标签使用 SQLite 与 FTS5。语义向量按 `derivation_id` 分代保存；在 20,000 张照片基线下，首版把当前代归一化向量加载到进程内，针对调用方有权访问的图库执行精确余弦扫描，不引入独立向量数据库。
 
 以 768 维 `float32` 估算，20,000 个图片向量原始数据约 59 MiB；即使候选使用 2,048 维也约 156 MiB，仍适合以简单、可校验的精确索引起步。模型进程内存而不是向量表大小才是 8 GB 设备的主要约束。只有实测规模或延迟不达标时，才在相册 Module 内增加 ANN Adapter。
 
-排序组合语义分数、用户标签、AI 标签、OCR、时间与地点过滤。Policy 必须在候选生成前约束图库范围，并在返回前再次验证资产可见性，索引命中本身不构成授权。
+排序组合语义分数、用户标签、AI 标签、时间与地点过滤。Policy 必须在候选生成前约束图库范围，并在返回前再次验证资产可见性，索引命中本身不构成授权。
 
-FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要在所有构建、测试与 vet 目标中加入 `sqlite_fts5` 构建标签；默认 `unicode61` 分词不切分中文，`trigram` 又无法匹配“猫”“海边”这类一至两个字的查询。标签使用独立的关系表精确匹配；OCR 与文件名在 2 万张规模下可以先用 Go 侧中文二元切分或直接扫描，延迟不达标时再引入 FTS5。
+FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要在所有构建、测试与 vet 目标中加入 `sqlite_fts5` 构建标签；默认 `unicode61` 分词不切分中文，`trigram` 又无法匹配“猫”“海边”这类一至两个字的查询。标签使用独立的关系表精确匹配；文件名在 2 万张规模下可以先用 Go 侧中文二元切分或直接扫描，延迟不达标时再引入 FTS5。
 
 ## 开发切片
 
@@ -163,7 +162,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 9. **Model benchmark**：先在开发机的 Debian 13 环境中经 MediaPipe Universal Embedder 完成模型离线加载、编码、RSS 与延迟冒烟测试，再用公开中文标注数据集设定标签初始阈值并冻结模型清单；实机数字在部署后补充。家庭照片的人工标注暂缓，见“模型基准与发布门槛”。
 10. **Worker 打包**：离线依赖、模型清单与 systemd 沙箱。
 11. **相册与用户元数据**：相册实体与加入相册（创建独立照片资产副本），以及用户标签、AI 纠错和手工位置的 migration、Policy、API 与 Web；人工人物名称随切片 13 的人物库实现。2026-10-08 从 M1 移出：基础相册不依赖它们，而用户标签与 AI 纠错首先服务于检索。
-12. **Search**：精确向量检索、受控中文标签、用户标签与 AI 纠错、OCR 与文本检索、Policy 前后过滤。
+12. **Search**：精确向量检索、受控中文标签、用户标签与 AI 纠错、文本检索、Policy 前后过滤。
 
 **M3 人物、格式、导入与发布**
 
@@ -190,7 +189,6 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 
 - 语义检索 `Recall@10`、人工可接受率和典型失败查询。
 - 每个可见 AI 标签的 precision/recall 与独立阈值，重点控制错误标签展示率。
-- OCR 字符准确性与无文字照片误检率。
 - 人脸漏检、误检、同人拆分和异人误合并；误合并权重高于漏合并。
 - 单张与整库照片/分钟、首轮建库时间、Worker 峰值 RSS、CPU、I/O、温度与功耗。
 - Worker 空闲、运行、停止领取任务和完成当前原子任务时的前台 API p95 延迟。

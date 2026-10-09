@@ -1,9 +1,9 @@
 # 相册本地 AI（M2）实施方案
 
 状态：draft（方案；尚未实现，开发期只在开发机验证，不部署到 Experimental NAS）
-更新时间：2026-10-08
+更新时间：2026-10-09
 
-本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 为照片生成向量，在此基础上提供 AI 标签与中文语义搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
+本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供 AI 标签与中文语义搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
 ## 目标与范围
 
@@ -13,7 +13,12 @@ M2 交付后，成员可以：
 - 在查看器里看到少量高置信 AI 标签，并能隐藏错误标签、添加自己的标签；
 - 在 AI 组件未安装、停止、崩溃或积压时照常使用 M1 的全部功能。
 
-不在 M2 首轮内：人脸与人物库（M3 切片 13）、按需中文描述、视频内容分析，以及 OCR。OCR 需要另一套模型与 Runtime（PP-OCRv6 + OpenVINO），建议在标签与语义搜索稳定后作为 M2 的后续步骤，见“待确认”。
+不在 M2 内：人脸与人物库（M3 切片 13）、按需中文描述与视频内容分析。不做 OCR（2026-10-09 决定）。
+
+## 已确认的决定
+
+- **模型包**：使用全模态 740M 官方包（约 485 MB，2026-10-09 决定）。相册只调用文本与图片编码；包内的音频编码器保留，不为相册单独裁剪。
+- **OCR**：不做（2026-10-09 决定）。
 
 ## 已核实的 Runtime 事实（2026-10-08）
 
@@ -28,7 +33,7 @@ M2 交付后，成员可以：
 ```text
 浏览器 ── anas-api ──► anas-photos（a-nas-photos）──UDS + 只读 fd──► anas-ai（a-nas-ai）
                           │  Catalog：任务、向量、标签、搜索索引              │  MediaPipe Universal Embedder
-                          │  空闲与资源门控、Policy 过滤                      │  EmbeddingGemma 2 440M（.litertlm）
+                          │  空闲与资源门控、Policy 过滤                      │  EmbeddingGemma 2 740M（.litertlm）
                           └──会话套接字──► Host Agent：前台活动与资源信号      └  无网络、无数据卷访问
 ```
 
@@ -38,7 +43,7 @@ M2 交付后，成员可以：
 
 ### AI Worker（`anas-ai`）
 
-- 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载 440M `.litertlm`。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
+- 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm`。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
 - 以专用身份 `a-nas-ai` 运行；systemd 约束沿用技术设计：`PrivateNetwork=yes`、`InaccessiblePaths=/srv/a-nas`、`MemoryMax`（起点 2G，按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。
 - 按需启动：`anas-ai.socket` 监听 `/run/a-nas-ai/ai.sock`（组 `a-nas-photos`、`0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
 - 模型文件随清单（来源 URL、revision、SHA-256、许可证）安装在 `/opt/a-nas/models/` 下；AI 组件可以不安装，此时套接字不存在，相册显示“智能处理不可用”。
@@ -97,7 +102,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 |---|---|---|---|
 | 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 用 Fake Provider 跑通“上传 → 缩略图 → 向量”；AI 缺失、停止、崩溃、积压时 M1 测试全部照常通过 |
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | Worker 在 Debian 13 容器中以 Fake Provider 通过协议测试 |
-| 3 | 9 | 开发机模型实测：下载 440M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
+| 3 | 9 | 开发机模型实测：下载全模态 740M 包（约 485 MB），验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 搜索接口、内存索引、Policy 过滤与桌面搜索框 | 本地 systemd 环境中用真实模型完成中文搜索，泄漏测试覆盖搜索结果 |
 | 5 | 12 | AI 标签计算、查看器标签展示、按标签筛选 | 标签只在阈值之上出现；隐藏后重算不复现 |
 | 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
@@ -105,15 +110,14 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 ## 待确认
 
-1. **模型包**：建议 440M 文本+视觉包（388 MB）。全模态 740M 包（485 MB）多出的音频编码器相册用不上，只增加内存。
-2. **许可**：发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并保存清单与 NOTICE。
-3. **下载**：步骤 3 需要在开发机下载模型包（约 388 MB）与公开中文数据集（体积在下载前逐个列出）。
-4. **OCR**：放在 M2 首轮，还是标签与语义搜索稳定后再做。
-5. **标签词表**：首版约 200–300 个常用标签；如有必须识别的类别请补充。
+1. **许可**：发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并保存清单与 NOTICE。
+2. **下载**：步骤 3 需要在开发机下载模型包（约 485 MB）与公开中文数据集（体积在下载前逐个列出）。
+3. **标签词表**：首版约 200–300 个常用标签；如有必须识别的类别请补充。
 
 ## 风险
 
 - MediaPipe 的 Linux x86 wheel 与 Debian 13 的 Python 版本是否匹配尚未验证；不匹配时改用 Debian 12 基础的独立 Python 运行环境，或改用研究文档中的备选 Runtime。
+- 全模态包比 440M 包多 300M 的音频编码器；若 MediaPipe 总是整体加载，常驻内存与加载时间都会增加，`MemoryMax` 与按需启动策略以实测为准。
 - 官方只公布了 Arm Linux 的性能；i3-12100 的单张耗时、按需启动的加载时间与前台影响都需实测，结论只来自开发机时须注明，实机数字在部署后补充。
 - 512 px 输入可能损失细节；以实测决定是否增加 AI 输入派生。
 - 开发期不碰 NAS，因此规模、温度与真实前台干扰的结论只能在之后部署时得出。
