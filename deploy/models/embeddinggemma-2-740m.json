@@ -1,0 +1,10 @@
+{
+  "name": "embeddinggemma-2-740m",
+  "source": "https://huggingface.co/litert-community/embeddinggemma-2-740m-litert-lm",
+  "revision": "24d962e906c7d332c6428e71c9676855024569e2",
+  "file": "embeddinggemma-2-740m.litertlm",
+  "sizeBytes": 484622336,
+  "sha256": "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c",
+  "license": "apache-2.0 per the repository metadata; the model card links the Gemma license text, which must be checked before release",
+  "installPath": "/opt/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm"
+}
