@@ -59,9 +59,12 @@ M2 交付后，成员可以：
 
 ### 协议
 
-- 相册服务是客户端，Worker 是串行服务端（并发 1）。消息为长度前缀的 JSON；图片以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求：`info`（模型 ID、维度、预处理版本）、`embed_image`（fd）、`embed_text`（文本与用途：`query` 或 `label`）。响应携带模型 ID 与归一化后的 768 维 float32 向量。
-- 每个请求有超时；Worker 崩溃或超时由相册服务按现有任务租约与尝试上限处理（解码异常记为永久失败，见 M1 切片 7）。
+客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
+
+- 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）。`embed_text` 随搜索步骤加入。
+- 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
+- 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 
 ### 输入图片
 
@@ -69,13 +72,15 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 ### 任务与调度
 
-- 复用 M1 的持久任务表：缩略图完成后，为同一原图对象排入 `embedding/<模型 ID>` 任务。向量只依赖原图字节，以对象为键，副本与重复照片共用。
+- 复用 M1 的持久任务表：缩略图完成后，在同一事务中为该原图对象排入 `embedding/v1` 任务（`v1` 是处理流程版本，模型 ID 随向量保存）。向量只依赖原图字节，以对象为键，副本与重复照片共用。缩略图与 AI 任务由两个循环分别领取。
 - 缩略图任务照旧立即执行；AI 任务只在门控允许时领取：
   - 最近 5 分钟没有前台活动；
   - 系统压力低：CPU、I/O、内存 PSI（`/proc/pressure/*` 的 `avg10`）都低于阈值；
   - CPU 温度低于上限。
 - 前台活动与温度由 Host Agent 提供：它已经知道 Web 文件操作（文件代理）、相册会话查询与磁盘、网卡吞吐（SMB 传输体现在这里），在相册会话套接字上增加只读的 `GET /v1/activity`。相册服务运行在 `PrivateNetwork` 中，看不到宿主机网卡，因此不自行采样。
-- 门控关闭时只停止领取新任务，进行中的单张推理允许完成。
+- 已实现部分（[`photoservice/gate.go`](../../internal/photoservice/gate.go)）：相册服务自己的请求计入前台活动，但读取 AI 状态不计入，窗口可以一直轮询；CPU、I/O、内存压力经 `prometheus/procfs` 读取，内核没有压力信息时只看活动。Host Agent 的活动信号与温度尚未实现，在此之前 Web 文件与 SMB 只通过系统压力影响门控。
+- 门控关闭时只停止领取新任务，进行中的单张推理允许完成；关闭期间至多每分钟（不长于空闲期）复查一次。
+- 更换模型后，第一次见到新模型 ID 时把旧模型的向量全部重新排队；旧向量在新向量写入前继续保留。
 
 ### 存储（Catalog migration 4）
 
@@ -109,7 +114,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 | 步骤 | 对应切片 | 内容 | 完成标准 |
 |---|---|---|---|
-| 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 用 Fake Provider 跑通“上传 → 缩略图 → 向量”；AI 缺失、停止、崩溃、积压时 M1 测试全部照常通过 |
+| 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 已实现：用 Fake Provider 跑通“上传 → 缩略图 → 向量”；没有 Worker 时冒烟与系统测试照常通过。Host Agent 活动信号移入后续步骤 |
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | Worker 在 Debian 13 容器中以 Fake Provider 通过协议测试 |
 | 3 | 9 | 开发机模型实测：使用你传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 搜索接口、内存索引、Policy 过滤与桌面搜索框 | 本地 systemd 环境中用真实模型完成中文搜索，泄漏测试覆盖搜索结果 |
