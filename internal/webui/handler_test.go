@@ -131,8 +131,8 @@ func TestHandlerListsConfiguredScreenSaverPoolAndServesByteRanges(t *testing.T) 
 	}
 }
 
-// The installer points the Product Service at a "current" link and moves it
-// between pools (issue #49); a move must take effect without a restart.
+// The Product Service reads a "current" link that install-screensavers.sh
+// moves between pools (ADR 0014); a move must take effect without a restart.
 func TestHandlerFollowsTheCurrentScreenSaverPoolLink(t *testing.T) {
 	root := t.TempDir()
 	for pool, videos := range map[string][]string{"old": {"a.mp4"}, "new": {"a.mp4", "b.mp4"}} {
