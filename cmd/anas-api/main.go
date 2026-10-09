@@ -145,9 +145,11 @@ func run(logger *slog.Logger) error {
 	// the Product Service only forwards the photo API to it (ADR 0011).
 	// Development opens the library in this process.
 	var photoService *photos.Service
+	var photoAI photos.Embedder
 	var photoAPI http.Handler = photosapi.NewProxy(environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"), logger)
 	if !live {
-		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{})
+		photoAI = developmentAI()
+		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{AI: photoAI})
 		if err != nil {
 			return err
 		}
@@ -204,7 +206,7 @@ func run(logger *slog.Logger) error {
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			photoservice.RunBackground(ctx, photoService, logger, developmentAI(), photoservice.NewGate(photoservice.QuietPeriod))
+			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod))
 		}()
 		// Runs before the deferred photoService.Close.
 		defer func() {

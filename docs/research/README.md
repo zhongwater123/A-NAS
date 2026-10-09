@@ -5,3 +5,4 @@
 ## 索引
 
 - [本地照片 AI 模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
+- [相册 AI 标签校准与中文检索评估](photo-ai-label-calibration.md)（进行中）

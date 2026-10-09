@@ -160,19 +160,135 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("enables file management and lists only the signed-in user's spaces", async () => {
-    installAPI({
+    const fetchMock = installAPI({
       spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }, { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [{ id: "file:1", spaceId: "space:owner", name: "家庭", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" }],
+      entries: [
+        { id: "file:1", spaceId: "space:owner", name: "家庭", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" },
+        { id: "file:2", spaceId: "space:owner", name: "A.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" },
+      ],
+      volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 480 * 1024 ** 3, availableBytes: 278 * 1024 ** 3, state: "available" }],
     });
     const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     const fileButton = within(desktop).getByRole("button", { name: "打开文件管理" });
     expect(fileButton.hasAttribute("disabled")).toBe(false);
     await user.click(fileButton);
-    expect(await screen.findByRole("dialog", { name: "文件管理" })).toBeTruthy();
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     expect(await screen.findByText("家庭")).toBeTruthy();
-    expect(screen.getByRole("option", { name: "个人空间 · owner" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "共享空间" })).toBeTruthy();
+    const managerStyle = getComputedStyle(dialog.querySelector<HTMLElement>(".file-manager")!);
+    const commandStyle = getComputedStyle(within(dialog).getByRole("button", { name: "新建" }));
+    expect(getComputedStyle(dialog.querySelector<HTMLElement>(".file-action-bar")!).overflowX).not.toBe("visible");
+    expect(managerStyle.getPropertyValue("--file-font-command").trim()).toBe("12px");
+    expect(commandStyle.fontSize).toBe("var(--file-font-command)");
+    expect(commandStyle.lineHeight).toBe("16px");
+    const commandIcon = within(dialog).getByRole("button", { name: "新建" }).querySelector("svg")!;
+    const commandLabel = within(dialog).getByRole("button", { name: "新建" }).querySelector("span")!;
+    expect(getComputedStyle(commandIcon).display).toBe("block");
+    expect(getComputedStyle(commandLabel).alignItems).toBe("center");
+    expect(getComputedStyle(commandLabel).height).toBe("16px");
+    expect(within(dialog).getByRole("button", { name: "个人空间owner" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "共享空间共享" })).toBeTruthy();
+    expect(within(dialog).getAllByRole("separator")).toHaveLength(2);
+    expect(within(dialog).getByText("202 GB")).toBeTruthy();
+    const rows = within(dialog).getAllByRole("row");
+    expect(rows[1].textContent).toContain("家庭");
+    expect(rows[1].querySelector(".file-type-cell .directory")).toBeTruthy();
+    await user.click(rows.find((row) => row.textContent?.includes("A.txt"))!);
+    await user.click(within(dialog).getByRole("button", { name: "复制" }));
+    await user.click(within(dialog).getByRole("button", { name: "粘贴" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/file%3A2/copies", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ parentId: "", name: "A - 副本.txt" }),
+    }));
+    const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
+    expect(within(inspector).queryByRole("button")).toBeNull();
+    await user.dblClick(within(dialog).getAllByRole("row").find((row) => row.textContent?.includes("图库"))!);
+    expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
+  });
+
+  it("downloads files only on double click and exposes the file edit context menu", async () => {
+    installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [{ id: "file:note", spaceId: "space:owner", name: "notes.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" }],
+      textPreview: "hello",
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("notes.txt"))!;
+
+    await user.click(row);
+    expect(click).not.toHaveBeenCalled();
+    expect(await within(dialog).findByText("hello")).toBeTruthy();
+    await user.dblClick(row);
+    expect(click).toHaveBeenCalledTimes(1);
+    const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
+    manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 160 });
+    const menu = await screen.findByRole("menu", { name: "文件操作" });
+    expect(menu.getAttribute("style")).toContain("left: 70px");
+    expect(menu.getAttribute("style")).toContain("top: 90px");
+    expect(within(menu).getByRole("menuitem", { name: "下载" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitem", { name: /重命名/ })).toBeTruthy();
+    expect(within(menu).getByRole("menuitem", { name: /移到回收站/ })).toBeTruthy();
+  });
+
+  it("selects multiple files with a pointer selection box", async () => {
+    installAPI({
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [
+        { id: "file:a", spaceId: "space:shared", name: "A.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" },
+        { id: "file:b", spaceId: "space:shared", name: "B.txt", kind: "file", sizeBytes: 18, modifiedAt: "2026-10-08T10:00:00Z" },
+      ],
+      textPreview: "hello",
+    });
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const shell = dialog.querySelector<HTMLElement>(".file-list-shell")!;
+    shell.getBoundingClientRect = () => ({ left: 0, top: 0, right: 500, bottom: 500, width: 500, height: 500, x: 0, y: 0, toJSON: () => ({}) });
+    Array.from(shell.querySelectorAll<HTMLElement>("[data-file-item]")).forEach((row, index) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: 40 + index * 50, right: 500, bottom: 88 + index * 50, width: 500, height: 48, x: 0, y: 40 + index * 50, toJSON: () => ({}) });
+    });
+
+    fireEvent.pointerDown(shell, { button: 0, clientX: 480, clientY: 25 });
+    fireEvent.pointerMove(window, { clientX: 10, clientY: 150 });
+    expect(await within(dialog).findByText("已选择 2 个项目")).toBeTruthy();
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 150 });
+  });
+
+  it("previews an image file in the details pane", async () => {
+    installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [{ id: "file:photo", spaceId: "space:owner", name: "family-photo.jpg", kind: "file", sizeBytes: 2048, modifiedAt: "2026-10-08T10:00:00Z" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("family-photo.jpg"));
+    const thumbnail = row?.querySelector(".file-type-icon img");
+    expect(thumbnail?.getAttribute("src")).toBe("/api/v1/files/file%3Aphoto/content?disposition=inline");
+    await user.click(row!);
+
+    const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
+    const preview = within(inspector).getByRole("img", { name: "family-photo.jpg 的预览" });
+    expect(preview.getAttribute("src")).toBe("/api/v1/files/file%3Aphoto/content?disposition=inline");
+  });
+
+  it("does not report the whole data volume as used when usage is unavailable", async () => {
+    installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 500_107_862_016, state: "available" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const values = dialog.querySelectorAll(".file-volume-values strong");
+
+    expect(values[0]?.textContent).toBe("—");
+    expect(values[1]?.textContent).toBe("466 GB");
   });
 
   it("enables photos, trash, snapshots, accounts, and storage", async () => {
@@ -632,7 +748,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[] } = {}) {
+function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
@@ -644,7 +760,8 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
-    if (path === "/api/v1/volumes") return ok({ items: [] });
+    if (path.startsWith("/api/v1/files/") && path.includes("/content")) return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
+    if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
 	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
     if (path === "/api/v1/users") return ok({ items: options.users ?? [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
@@ -848,8 +965,8 @@ describe("ADR 0008 account safeguards", () => {
     await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
     expect(await screen.findByText("photo.jpg")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("只读查看他人个人空间");
-    expect(screen.queryByRole("button", { name: "新建目录" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
+    expect(screen.getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "删除" }).hasAttribute("disabled")).toBe(true);
     await user.click(screen.getByRole("button", { name: "结束查看" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/viewing/viewing%3A1", expect.objectContaining({ method: "DELETE" }));
   });

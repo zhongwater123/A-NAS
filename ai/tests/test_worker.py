@@ -78,11 +78,19 @@ class WorkerTest(unittest.TestCase):
         vector = struct.unpack("<8f", base64.b64decode(first["vector"]))
         self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=5)
 
+        query = call(path, {"op": "embed_query", "text": "海边的猫"})
+        self.assertTrue(query["ok"])
+        self.assertEqual(query["vector"], call(path, {"op": "embed_query", "text": "海边的猫"})["vector"])
+        self.assertNotEqual(query["vector"], call(path, {"op": "embed_query", "text": "车库里的电动车"})["vector"])
+
     def test_rejects_requests_it_cannot_serve(self):
         path, _ = self.start(providers.FakeProvider())
         self.assertEqual(call(path, {"op": "embed_image"})["error"]["code"], protocol.CODE_INVALID_INPUT)
         self.assertEqual(call(path, {"op": "embed_image"}, self.image(b""))["error"]["code"], protocol.CODE_INVALID_INPUT)
         self.assertEqual(call(path, {"op": "embed_text"})["error"]["code"], protocol.CODE_INTERNAL)
+        for request in ({"op": "embed_query"}, {"op": "embed_query", "text": "  "},
+                        {"op": "embed_query", "text": 7}, {"op": "embed_query", "text": "猫" * (worker.MAX_QUERY_CHARS + 1)}):
+            self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_INVALID_INPUT, request)
 
         failing, _ = self.start(Failing(providers.InvalidInput("not an image")))
         self.assertEqual(call(failing, {"op": "embed_image"}, self.image(b"x"))["error"]["code"], protocol.CODE_INVALID_INPUT)
@@ -92,7 +100,7 @@ class WorkerTest(unittest.TestCase):
 
     def test_answers_unavailable_without_its_model(self):
         path, _ = self.start(None, reason="model file missing")
-        for request in ({"op": "info"}, {"op": "embed_image"}):
+        for request in ({"op": "info"}, {"op": "embed_image"}, {"op": "embed_query", "text": "猫"}):
             self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_UNAVAILABLE)
 
     def test_exits_when_idle_and_survives_bad_frames(self):

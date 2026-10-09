@@ -24,6 +24,9 @@ type Embedder interface {
 	Info(ctx context.Context) (EmbedderInfo, error)
 	// EmbedImage returns the normalized vector of an upright image.
 	EmbedImage(ctx context.Context, image *os.File) ([]float32, error)
+	// EmbedQuery returns the normalized vector of a search query, comparable
+	// with image vectors of the same model.
+	EmbedQuery(ctx context.Context, text string) ([]float32, error)
 }
 
 type EmbedderInfo struct {
@@ -124,8 +127,8 @@ func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle 
 	}
 }
 
-// ProcessAIJob runs one ready embedding job and reports whether it finished
-// one. It does nothing while gate is closed or the Worker is away; the error
+// ProcessAIJob fetches one missing label text vector or runs one ready
+// embedding job, and reports whether it did. It does nothing while gate is closed or the Worker is away; the error
 // returned is only for Catalog or storage faults.
 func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (bool, error) {
 	if open, reason := gate.Open(ctx); !open {
@@ -142,6 +145,13 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	}
 	if err := s.requeueStale(ctx, info.Model); err != nil {
 		return false, err
+	}
+	// Label texts are few and short; they come before photos.
+	if fetched, err := s.embedLabelText(ctx, embedder, info); fetched || err != nil {
+		if fetched {
+			s.ai.set(AIWorking, "", info.Model)
+		}
+		return fetched, err
 	}
 	job, err := s.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -206,7 +216,8 @@ func (s *Service) releaseJob(ctx context.Context, job claimedJob) error {
 }
 
 func (s *Service) completeEmbedding(ctx context.Context, job claimedJob, model string, vector []float32) error {
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	stored := false
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE object_id = ? AND derivation = ?)",
 			job.objectID, job.derivation).Scan(&exists); err != nil || !exists {
@@ -220,8 +231,13 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, vector 
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
+		stored = err == nil
 		return err
 	})
+	if err == nil && stored {
+		s.index.put(job.objectID, model, vector)
+	}
+	return err
 }
 
 // enqueueEmbedding schedules the vector of an object whose thumbnail has

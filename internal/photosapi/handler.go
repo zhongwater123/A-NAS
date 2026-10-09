@@ -84,6 +84,7 @@ func (h *handler) routes() {
 	p := PathPrefix
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
+	h.mux.HandleFunc("GET "+p+"/search", h.search)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline", h.timeline)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/entries", h.entries)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/uploads", h.upload)
@@ -112,6 +113,14 @@ type itemsResponse[T any] struct {
 type timelineResponse struct {
 	Items []photos.Asset `json:"items"`
 	Next  string         `json:"next,omitempty"`
+}
+
+type searchResponse struct {
+	Items []photos.Asset `json:"items"`
+	Next  string         `json:"next,omitempty"`
+	// Semantic is false when only names were matched because local AI could
+	// not encode the query.
+	Semantic bool `json:"semantic"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +169,23 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+}
+
+func (h *handler) search(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	page, err := h.service.Search(r.Context(), principal, photos.SearchRequest{
+		Query: query.Get("q"), Label: query.Get("label"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
@@ -431,6 +457,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, photos.ErrInvalidCursor):
 		WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+	case errors.Is(err, photos.ErrInvalidQuery):
+		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters or a label photos can show, not both")
 	case errors.Is(err, photos.ErrUnsupportedType):
 		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "only JPEG and PNG photos are supported")
 	case errors.Is(err, photos.ErrTooLarge):

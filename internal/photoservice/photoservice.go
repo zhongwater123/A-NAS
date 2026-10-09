@@ -44,11 +44,16 @@ type Config struct {
 	// unavailable and while it is open.
 	RetryInterval time.Duration
 	Photos        photos.Options
-	// AI reaches the AI Worker; nil leaves local AI off.
+	// AI reaches the AI Worker for background vectors and search; nil leaves
+	// local AI off. It replaces Photos.AI.
 	AI photos.Embedder
 	// AIQuietPeriod is how long the photo library must go unused before AI
 	// work starts; it defaults to QuietPeriod.
 	AIQuietPeriod time.Duration
+	// AIPressure reports a resource's recent stall share in percent; it
+	// defaults to the kernel's pressure stall information. Tests replace it
+	// so that load on the machine running them cannot hold AI work back.
+	AIPressure func(resource string) (float64, error)
 }
 
 var ErrStoreUnavailable = errors.New("the photo store is not available")
@@ -109,6 +114,9 @@ func Run(parent context.Context, config Config) error {
 		config.AIQuietPeriod = QuietPeriod
 	}
 	gate := NewGate(config.AIQuietPeriod)
+	if config.AIPressure != nil {
+		gate.pressure = config.AIPressure
+	}
 	server := &http.Server{
 		Handler: authenticate(config.Sessions, config.Logger, gate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			(*api.Load()).ServeHTTP(w, r)
@@ -213,7 +221,9 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 	for {
 		err := config.CheckStore(config.Root)
 		if err == nil {
-			service, openErr := photos.Open(config.Root, config.Photos)
+			options := config.Photos
+			options.AI = config.AI
+			service, openErr := photos.Open(config.Root, options)
 			if openErr == nil {
 				return service, nil
 			}

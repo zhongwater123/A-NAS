@@ -31,6 +31,9 @@ const MaxFrame = 1 << 20
 const (
 	OpInfo       = "info"
 	OpEmbedImage = "embed_image"
+	// OpEmbedQuery encodes Text as a search query; the Worker adds the
+	// model's own query prompt.
+	OpEmbedQuery = "embed_query"
 )
 
 // Error codes the Worker answers with.
@@ -44,7 +47,8 @@ const (
 )
 
 type Request struct {
-	Op string `json:"op"`
+	Op   string `json:"op"`
+	Text string `json:"text,omitempty"`
 }
 
 type Response struct {
@@ -87,6 +91,18 @@ func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, erro
 	if err != nil {
 		return nil, err
 	}
+	return vectorOf(response)
+}
+
+func (c Client) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	response, err := c.call(ctx, Request{Op: OpEmbedQuery, Text: text}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return vectorOf(response)
+}
+
+func vectorOf(response Response) ([]float32, error) {
 	if len(response.Vector)%4 != 0 {
 		return nil, errors.New("AI worker returned a malformed vector")
 	}
