@@ -15,6 +15,8 @@ release_id=$2
 smb_interface=$3
 case "$release_id" in
   *[!A-Za-z0-9._-]*|'') echo "RELEASE_ID contains unsupported characters" >&2; exit 2 ;;
+  # Release IDs also name screen saver pools, next to the "current" pointer.
+  .*|current) echo "RELEASE_ID is reserved: $release_id" >&2; exit 2 ;;
 esac
 case "$smb_interface" in
   *[!A-Za-z0-9_.:-]*|'') echo "SMB_INTERFACE contains unsupported characters" >&2; exit 2 ;;
@@ -89,7 +91,12 @@ install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
 
-screensaver_directory=/var/lib/a-nas/screensavers
+# The screen saver pool outlives releases (issue #49). A release that brings
+# videos installs them once as a new pool named after it and moves "current"
+# to that pool; any other release keeps the pool "current" already names. The
+# Product Service always reads "current", so upgrades and product rollbacks
+# never change what plays.
+screensaver_root=/var/lib/a-nas/screensavers
 shopt -s nullglob
 screensaver_sources=("$source_release"/screensavers/*.mp4)
 shopt -u nullglob
@@ -102,9 +109,9 @@ if (( screensaver_hash_count != ${#screensaver_sources[@]} )); then
   exit 2
 fi
 if (( ${#screensaver_sources[@]} > 0 )); then
-  screensaver_directory="/var/lib/a-nas/screensavers/$release_id"
-  if [[ -e "$screensaver_directory" ]]; then
-    echo "screen saver pool already exists: $screensaver_directory" >&2
+  screensaver_pool="$screensaver_root/$release_id"
+  if [[ -e "$screensaver_pool" || -L "$screensaver_pool" ]]; then
+    echo "screen saver pool already exists: $screensaver_pool" >&2
     exit 4
   fi
   for index in "${!screensaver_sources[@]}"; do
@@ -129,11 +136,23 @@ install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/an
 mv -- "$temporary" "$target"
 trap - EXIT
 
+screensaver_pointer=
 if (( ${#screensaver_sources[@]} > 0 )); then
-  install -d -o root -g a-nas -m 0750 "$screensaver_directory"
+  install -d -o root -g a-nas -m 0750 "$screensaver_pool"
   for video in "${screensaver_sources[@]}"; do
-    install -o root -g a-nas -m 0640 "$video" "$screensaver_directory/$(basename "$video")"
+    install -o root -g a-nas -m 0640 "$video" "$screensaver_pool/$(basename "$video")"
   done
+  screensaver_pointer=$release_id
+elif [[ ! -e "$screensaver_root/current" && ! -L "$screensaver_root/current" ]]; then
+  # The first upgrade from an installer before issue #49, which played the
+  # pool installed last or, after a release without videos, none: play the
+  # pool installed last.
+  screensaver_pointer=$(find "$screensaver_root" -mindepth 1 -maxdepth 1 -type d -name '[A-Za-z0-9_-]*' -printf '%T@ %f\n' |
+    sort -n | tail -n 1 | cut -d ' ' -f 2)
+fi
+if [[ -n "$screensaver_pointer" ]]; then
+  ln -sfn -- "$screensaver_pointer" "$screensaver_root/.current.next"
+  mv -Tf -- "$screensaver_root/.current.next" "$screensaver_root/current"
 fi
 
 printf '%s\n' \
@@ -143,7 +162,7 @@ printf '%s\n' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
-  "ANAS_SCREENSAVER_DIRECTORY=$screensaver_directory" \
+  'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
 # Container management is an optional root-installed capability. Preserve it
 # across system-service upgrades only when the typed agent socket is present;

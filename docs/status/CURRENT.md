@@ -19,7 +19,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
 - Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
-- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音屏保。视频池为每次进入屏保时随机选择一条并持续循环、退出后下次闲置重新选择、单条失败补选和按 release 隔离的外部资产；`64f0e26d8349` 已带五条视频部署，安装器逐条核对了哈希，直连屏幕上的轮换行为尚未核对。2026-10-08 已在 `ed5368ba998e` 上验收 API、Host Agent、Kiosk、嵌入式桌面和旧兼容路由的 Range 请求，开机动画随 `946638851c7c` 部署。
+- Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音屏保。视频池为每次进入屏保时随机选择一条并持续循环、退出后下次闲置重新选择、单条失败补选；`64f0e26d8349` 已带五条视频部署，安装器逐条核对了哈希，直连屏幕上的轮换行为尚未核对。[issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 让视频池独立于 release：产品服务固定读取 `/var/lib/a-nas/screensavers/current`，只有带视频的 release 才建池并切换，不带视频的升级保留当前池。该修复已实现并有系统测试覆盖，尚未部署。2026-10-08 已在 `ed5368ba998e` 上验收 API、Host Agent、Kiosk、嵌入式桌面和旧兼容路由的 Range 请求，开机动画随 `946638851c7c` 部署。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
@@ -27,7 +27,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 文件闭环权限根因与修复边界已记录在[数据卷空间权限调查](../investigations/2026-10-07-data-volume-space-permissions.md)；父目录、ACL、共用回收站和启动自愈的最小 Go 回归已由红转绿。该 rc.5 方案已被 ADR 0008 取代。
 - [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 六个实现步骤均已完成；实验 NAS 的旧 `admin` 已按[手册](../runbooks/provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008)重建为统一 Linux 身份，ACL、身份镜像与 Product Service 隔离已实机验证；issue #38 的修复已随 `64f0e26d8349` 部署且 Host Agent 启动自检通过，Web 文件的用户级实机验收尚未执行。Samba 凭据需管理员与成员各自改密后重建，之后再做客户端验收。
 - 开发循环使用受影响测试，完整门禁为每个不可变 RC 制品只执行一次；部署按提交、版本和二进制哈希复用验证证明。
-- [系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)在 Debian 13 systemd 容器中用真实安装器、unit 与二进制按用户检查 Web、SMB、相册、服务身份的权限与局域网 Web 入口，共 46 项，并作为 CI 作业运行。
+- [系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)在 Debian 13 systemd 容器中用真实安装器、unit 与二进制按用户检查 Web、SMB、相册、服务身份的权限、局域网 Web 入口与跨版本保留的屏保视频池，共 63 项，并作为 CI 作业运行。
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。当时 `/opt/a-nas/current` 指向 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`（ADR 0008 之前的模型，已被取代）。
 - 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 已安装 Docker 26.1.5、独立 CLI、Compose 2.26.1 与容器代理，`ed5368ba998e` 已在代理模式下完成切换，真实代理路径和桌面 HTTP 路径均通过实机验证。
@@ -41,7 +41,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
 3. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
 4. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
-5. 在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
+5. 首次部署包含 issue #49 修复的 release 时不传 `-ScreensaverVideo`，确认 `/var/lib/a-nas/screensavers/current` 指向原五条视频的池且清单仍为五条。再在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
 6. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。
 7. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；运行期数据卷故障（离线、只读、重新挂载）、上传中途强制终止与导入中途卷满的处理已通过本地故障注入（均尚未部署）；下一步先跑通整体闭环：部署后按[验收相册 M1](../runbooks/accept-photo-library-m1.md)完成桌面上传、跨成员隔离、管理员查看、强制终止与断电；20,000 张规模与缩略图积压测试暂缓。M2 按[实施方案](../architecture/photo-ai.md)只在开发机上推进并以 PR 提交，暂不部署到 NAS：先用 Fake Provider 打通任务与存储，再经 MediaPipe Universal Embedder 实测 EmbeddingGemma 2 全模态 740M 包（2026-10-09 决定；不做 OCR），并用公开中文标注数据集设定标签初始阈值；家庭照片人工标注暂缓，其质量门禁保持未通过。M2 步骤 1 已在本地实现：缩略图完成后排入向量任务，按前台空闲与 CPU/I/O/内存压力门控，经 Worker 客户端以只读描述符传图，向量存入 Catalog，并提供 `/api/v1/photos/ai` 状态；步骤 2 的 Python Worker 经 MediaPipe 加载全模态 740M 包，已在开发机 Debian 13 容器中通过真实模型测试（4 核时图片约 0.6 s/张、峰值约 1.4 GiB，见[实测](../architecture/photo-ai.md#开发机首轮实测2026-10-09)）；下一步用公开中文数据集评估质量并校准标签阈值。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
 

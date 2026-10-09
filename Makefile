@@ -63,6 +63,8 @@ ops-check:
 	grep -Fq 'ANAS_SCREENSAVER_DIRECTORY' cmd/anas-api/main.go scripts/remote-activate-release.sh scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'screensaver_hash_list' scripts/remote-activate-release.sh
 	grep -Fq 'screensaver_hash_count' scripts/install-v1.0.1-system-services.sh
+	grep -Fq "'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current'" scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"/var/lib/a-nas/screensavers/current"' cmd/anas-api/main.go
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
 	grep -Fqx 'User=anas-container' deploy/systemd/system/anas-container-agent.service

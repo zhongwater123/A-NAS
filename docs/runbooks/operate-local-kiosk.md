@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; confinement and VT recovery pending
-更新时间：2026-10-06
+更新时间：2026-10-09
 
 ## 目的
 
@@ -23,7 +23,7 @@
 - `anas-kiosk@.service`
 - `a-nas-kiosk.pam`
 - `kiosk.env`（Experimental NAS 已实机校准的输出配置）
-- `screensavers/`（可选；由部署命令以逐文件 SHA-256 验证的匿名 MP4 构成，不进入 Git）
+- `screensavers/`（可选，只在更换视频池时携带；由部署命令以逐文件 SHA-256 验证的匿名 MP4 构成，不进入 Git）
 
 2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成。重装或新设备由管理员执行：
 
@@ -69,7 +69,9 @@ systemctl enable anas-kiosk@tty1.service
 
 本机屏幕已在 `DP-2` 的原生 `1536x2048@60.6Hz` 模式下实机校准为逆时针 `90` 度、缩放 `1.5`。这些硬件相关值位于 root 管理的 `/etc/a-nas/kiosk.env`；启动器会先校验配置，再在 Chromium 启动前原子应用 transform 和 scale。其他硬件不得直接复用 connector 名称。
 
-屏保池由系统安装脚本从版本目录可选复制到 `/var/lib/a-nas/screensavers/<release-id>/`：目录为 `root:a-nas 0750`，视频为 `root:a-nas 0640`。`/etc/a-nas/anas-api.env` 只把这个版本目录交给产品服务只读扫描，Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件名。池缺失不会阻止产品服务或 Kiosk 启动；未随本次 release 提供新池时，默认目录仍兼容已安装的单视频资产。
+屏保池的生命周期独立于产品版本。release 携带视频时，系统安装脚本逐个复核 SHA-256，把视频复制到 `/var/lib/a-nas/screensavers/<release-id>/`（目录 `root:a-nas 0750`，视频 `root:a-nas 0640`），再把同级链接 `current` 原子切到这个新池。不携带视频的 release 不建池，也不改 `current`，所以日常升级无需重新上传视频。`/etc/a-nas/anas-api.env` 固定把 `/var/lib/a-nas/screensavers/current` 交给产品服务只读扫描，Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件名。池缺失不会阻止产品服务或 Kiosk 启动。
+
+首次用包含 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 修复的安装器升级时还没有 `current`，安装器指向最近安装的池，因此原来播放的池或因该缺陷停播的池会继续播放。之后若用不含该修复的旧安装器装过带视频的 release，新池不会成为 `current`；按下面的媒体回滚步骤把 `current` 切到该池。
 
 保持 SSH 恢复会话后，首次验证可执行：
 
@@ -109,7 +111,19 @@ systemctl reset-failed
 
 这只移除本地显示会话，不停止 A-NAS API、Host Agent 或 SSH。
 
-屏保池是按 release ID 隔离的持久外部资产，产品回滚时保留所有旧池。需要回滚媒体时，先从 `/etc/a-nas/anas-api.env` 和已验证的旧 `RELEASE` 记录确认两个绝对目录都位于 `/var/lib/a-nas/screensavers/` 下，再把 `ANAS_SCREENSAVER_DIRECTORY` 切回旧目录、重启 API，并复核清单数量和 Range 请求；不要删除当前池作为回滚手段。旧池清理不属于常规回滚，必须另行确认精确 release 目录、备份需求和当前环境引用后才能执行。
+屏保池独立于产品版本：按[实机配置手册](provision-v1.0.1-experimental-storage.md#回滚)回滚产品不会改变正在播放的池，所有旧池都保留。需要回滚或切换媒体时，先从 `ls` 输出和对应 release 的 `RELEASE` 记录确认目标池，再原子切换 `current`：
+
+```bash
+pools=/var/lib/a-nas/screensavers
+ls -l --time-style=long-iso "$pools"
+target=<目标池的 release ID>
+test -f "$pools/$target/screensaver-000.mp4"
+ln -sfn -- "$target" "$pools/.current.next"
+mv -Tf -- "$pools/.current.next" "$pools/current"
+systemctl restart anas-kiosk@tty1.service
+```
+
+产品服务每次请求都重新读取 `current`，无需重启；重启 Kiosk 只是让已打开的页面重新读取清单。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段。旧池清理不属于常规回滚，必须另行确认精确的池目录、备份需求和 `current` 的指向后才能执行。
 
 ## 依据
 

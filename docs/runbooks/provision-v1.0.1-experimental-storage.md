@@ -48,6 +48,8 @@
 
 安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
 
+本地控制台的屏保视频池独立于 release。日常升级不传 `-ScreensaverVideo`，安装器保留当前池。只有更换视频时才在暂存时传入；安装器逐个复核 SHA-256，任一不符即在改动前停止，全部通过后建立新池并切换 `/var/lib/a-nas/screensavers/current`。见[本地控制台运行手册](operate-local-kiosk.md)。
+
 安装器最后核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时以退出码 5 结束，此时新版本已切换但 Web 文件与终端不可用，按[回滚](#回滚)恢复上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 
 全新实验机首次安装才使用发布目录中的交互向导；它会复核稳定磁盘身份、安装依赖、停止旧用户级预览服务、安装系统服务并逐步引导产品初始化：
@@ -160,7 +162,7 @@ systemctl daemon-reload
 systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
 ```
 
-`/etc/a-nas/*.env` 由安装器按固定内容生成，旧版本忽略新增的变量，不需要恢复。另外：
+`/etc/a-nas/*.env` 由安装器按固定内容生成，旧版本忽略新增的变量，不需要恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；需要回滚媒体时按[本地控制台运行手册](operate-local-kiosk.md#回滚)切换。另外：
 
 - 不支持回滚到 ADR 0008 之前（rc.5 及更早）：旧账号已删除重建，旧版本的启动修复还会重新授予 `a-nas` 访问空间的 ACL。
 - 回滚到 ADR 0011 之前的版本时，先 `systemctl disable --now anas-photos.service`：旧二进制没有 `photo-service` 子命令。
