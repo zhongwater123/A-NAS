@@ -27,6 +27,10 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 ## 文件、回收站与快照
 
 - Web 支持列出、新建目录、流式上传、Range 下载、重命名、同空间移动、复制和删除。
+- Web 文件管理采用可调宽的目录树、当前目录与只读详情三栏；窗口变窄时先隐藏详情栏，再以空间选择器替代目录树。路径、搜索和成熟图标组成的文件命令位于内容上方，上传入口常驻当前目录右下角。
+- 当前目录支持列表与图标视图。列表的名称、修改时间、类型和大小均可排序，文件夹在任何升降序下始终位于非文件夹项目之前；文件夹类型使用独立的暖色标签。
+- 用户自己的个人空间根目录提供图库、音乐和电影三个应用资源入口：图库是个人图库的投影并交由相册打开，不暴露受管存储路径；音乐与影视中心在功能实现前显示为不可写的“规划中”入口。应用资源不是普通目录，不参与剪切、复制、重命名或删除。
+- 详情栏只显示所选资源的元数据与说明，不承载文件操作按钮；剪切、复制、粘贴、重命名和删除统一从上方命令栏发起。
 - 路径穿越、符号链接、设备文件及跨空间隐式移动被拒绝；名称冲突返回 `409`。
 - Web 与 Samba 删除均进入隐藏的按空间、按删除者回收站，默认保留 30 天。回收站条目只有删除者能看到、恢复和清空（[统一身份与文件授权](unified-identity-and-file-acl.md)）。
 - 个人空间所有者管理自己的手动快照；共享空间快照仅管理员创建和删除。快照只读且不通过 SMB 暴露。
@@ -55,6 +59,7 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [统一身份与文件授权规格](unified-identity-and-file-acl.md)：取代本规格中的空间权限实现方式
 - [`internal/httpapi/product_test.go`](../../internal/httpapi/product_test.go)
 - [`internal/files/service_test.go`](../../internal/files/service_test.go)
-- [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：会话过期回到登录页、本机屏幕申请持久会话
+- [`web/src/App.tsx`](../../web/src/App.tsx)
+- [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：文件管理交互、会话过期回到登录页、本机屏幕申请持久会话
 - [`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut`](../../internal/httpapi/product_test.go)：本机会话只授予直接回环连接、跨越 12 小时、退出后失效
 - [本地控制台会话过期调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)
