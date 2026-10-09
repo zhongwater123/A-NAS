@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,17 @@ func (m *memoryDocker) Containers(context.Context) ([]engine.ContainerInfo, erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]engine.ContainerInfo(nil), m.containers...), nil
+}
+
+// AddressPools reports the Experimental NAS pool, so apps with their own
+// networks can be planned and installed.
+func (m *memoryDocker) AddressPools(context.Context) ([]netip.Prefix, error) {
+	return []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}, nil
+}
+
+// ProjectNetworks reports no networks: the simulated install creates none.
+func (m *memoryDocker) ProjectNetworks(context.Context, string) ([]engine.NetworkInfo, error) {
+	return nil, nil
 }
 
 // runner pretends to pull and start (or stop) the project's services.

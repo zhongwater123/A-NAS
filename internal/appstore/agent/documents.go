@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"net/netip"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
@@ -55,8 +56,11 @@ type PlanDocument struct {
 	Containers []string       `json:"containers"`
 	Ports      []PortDocument `json:"ports"`
 	Mounts     []MountJSON    `json:"mounts"`
-	Digest     string         `json:"digest"`
-	Compose    string         `json:"compose"`
+	Networks   []string       `json:"networks"`
+	// AddressPools are CIDR prefixes; set whenever Networks is not empty.
+	AddressPools []string `json:"addressPools"`
+	Digest       string   `json:"digest"`
+	Compose      string   `json:"compose"`
 }
 
 type IdentityJSON struct {
@@ -152,7 +156,11 @@ func PlanFromDomain(plan appstore.Plan) PlanDocument {
 		Identity: IdentityJSON{Username: plan.Identity.Username, UID: plan.Identity.UID, GID: plan.Identity.GID},
 		Images:   append([]string{}, plan.Images...), Containers: append([]string{}, plan.Containers...),
 		Ports: make([]PortDocument, len(plan.Ports)), Mounts: make([]MountJSON, len(plan.Mounts)),
+		Networks: append([]string{}, plan.Networks...), AddressPools: make([]string, len(plan.AddressPools)),
 		Digest: plan.Digest, Compose: string(plan.Compose),
+	}
+	for i, pool := range plan.AddressPools {
+		document.AddressPools[i] = pool.String()
 	}
 	for i, port := range plan.Ports {
 		document.Ports[i] = PortDocument{HostPort: port.HostPort, ContainerPort: port.ContainerPort, Protocol: port.Protocol, Purpose: port.Purpose}
@@ -167,7 +175,14 @@ func (document PlanDocument) ToDomain() appstore.Plan {
 	plan := appstore.Plan{
 		AppID: document.AppID, Title: document.Title, Version: document.Version, Project: document.Project,
 		Identity: appstore.Identity{Username: document.Identity.Username, UID: document.Identity.UID, GID: document.Identity.GID},
-		Images:   document.Images, Containers: document.Containers, Digest: document.Digest, Compose: []byte(document.Compose),
+		Images:   document.Images, Containers: document.Containers, Networks: document.Networks,
+		Digest: document.Digest, Compose: []byte(document.Compose),
+	}
+	// Pools are shown to the owner, never acted on, so an unparsable one is dropped.
+	for _, pool := range document.AddressPools {
+		if prefix, err := netip.ParsePrefix(pool); err == nil {
+			plan.AddressPools = append(plan.AddressPools, prefix)
+		}
 	}
 	for _, port := range document.Ports {
 		plan.Ports = append(plan.Ports, appstore.PortMapping{HostPort: port.HostPort, ContainerPort: port.ContainerPort, Protocol: port.Protocol, Purpose: port.Purpose})

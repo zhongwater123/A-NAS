@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,8 +34,19 @@ type ContainerInfo struct {
 	PublishedPorts []uint16
 }
 
+// NetworkInfo is a Docker network and the subnets Docker gave it.
+type NetworkInfo struct {
+	Name    string
+	Subnets []netip.Prefix
+}
+
 type Inspector interface {
 	Containers(ctx context.Context) ([]ContainerInfo, error)
+	// AddressPools are the daemon's default-address-pools; empty when Docker
+	// uses its built-in pools.
+	AddressPools(ctx context.Context) ([]netip.Prefix, error)
+	// ProjectNetworks lists the networks Compose created for a project.
+	ProjectNetworks(ctx context.Context, project string) ([]NetworkInfo, error)
 }
 
 // Runner executes the Compose CLI and streams its combined output.
@@ -128,7 +140,22 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 	if !ok {
 		return appstore.Plan{}, appstore.ErrNotFound
 	}
-	return appstore.Render(ctx, entry, s.policy, identity)
+	plan, err := appstore.Render(ctx, entry, s.policy, identity)
+	if err != nil || len(plan.Networks) == 0 {
+		return plan, err
+	}
+	// Docker's built-in pools (172.17-172.31, 192.168) overlap common LAN
+	// ranges; an app network there makes the host route those clients into the
+	// app (ADR 0013). Refuse until the daemon has an A-NAS pool.
+	pools, err := s.docker.AddressPools(ctx)
+	if err != nil {
+		return appstore.Plan{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	if len(pools) == 0 {
+		return appstore.Plan{}, appstore.ErrAddressPoolMissing
+	}
+	plan.AddressPools = pools
+	return plan, nil
 }
 
 func (s *Store) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
@@ -151,13 +178,57 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 
 	directory := filepath.Join(s.stateDir, "apps", id)
 	composeFile := filepath.Join(directory, "docker-compose.yml")
-	args := []string{"compose", "--progress", "plain", "-p", plan.Project, "-f", composeFile, "up", "--detach", "--remove-orphans"}
-	return s.start(id, appstore.JobInstall, installTimeout, func() error {
+	compose := []string{"compose", "--progress", "plain", "-p", plan.Project, "-f", composeFile}
+	return s.start(id, appstore.JobInstall, installTimeout, func(ctx context.Context, output io.Writer) error {
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return err
 		}
-		return os.WriteFile(composeFile, plan.Compose, 0o640)
-	}, args)
+		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
+			return err
+		}
+		if err := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans"), output); err != nil {
+			return err
+		}
+		return s.verifyNetworks(ctx, plan, compose, output)
+	})
+}
+
+// verifyNetworks rolls an install back when one of its networks is outside
+// the address pools, or cannot be inspected: the host would route those
+// addresses into the app instead of to the LAN (ADR 0013).
+func (s *Store) verifyNetworks(ctx context.Context, plan appstore.Plan, compose []string, output io.Writer) error {
+	if len(plan.Networks) == 0 {
+		return nil
+	}
+	var outside []string
+	networks, err := s.docker.ProjectNetworks(ctx, plan.Project)
+	if err != nil {
+		outside = append(outside, "cannot inspect app networks: "+err.Error())
+	}
+	for _, network := range networks {
+		for _, subnet := range network.Subnets {
+			if !withinPools(subnet, plan.AddressPools) {
+				outside = append(outside, network.Name+" "+subnet.String())
+			}
+		}
+	}
+	if len(outside) == 0 {
+		return nil
+	}
+	failure := fmt.Errorf("%w (%s); the install was rolled back", appstore.ErrNetworkOutsidePool, strings.Join(outside, ", "))
+	if err := s.runner.Run(ctx, append(compose, "down", "--remove-orphans"), output); err != nil {
+		return fmt.Errorf("%w; rollback failed: %v", failure, err)
+	}
+	return failure
+}
+
+func withinPools(subnet netip.Prefix, pools []netip.Prefix) bool {
+	for _, pool := range pools {
+		if pool.Bits() <= subnet.Bits() && pool.Contains(subnet.Masked().Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) Uninstall(ctx context.Context, id string) (appstore.Job, error) {
@@ -178,10 +249,14 @@ func (s *Store) Uninstall(ctx context.Context, id string) (appstore.Job, error) 
 	// App data under the app-data root is kept; only containers and the
 	// project network are removed.
 	args := []string{"compose", "--progress", "plain", "-p", appstore.ProjectName(id), "down", "--remove-orphans"}
-	return s.start(id, appstore.JobUninstall, uninstallTimeout, nil, args)
+	return s.start(id, appstore.JobUninstall, uninstallTimeout, func(ctx context.Context, output io.Writer) error {
+		return s.runner.Run(ctx, args, output)
+	})
 }
 
-func (s *Store) start(id string, action appstore.JobAction, timeout time.Duration, prepare func() error, args []string) (appstore.Job, error) {
+// start runs one job at a time in the background; run receives the job's
+// output, of which the job keeps the tail.
+func (s *Store) start(id string, action appstore.JobAction, timeout time.Duration, run func(context.Context, io.Writer) error) (appstore.Job, error) {
 	s.mu.Lock()
 	if s.active != "" {
 		s.mu.Unlock()
@@ -198,13 +273,7 @@ func (s *Store) start(id string, action appstore.JobAction, timeout time.Duratio
 		defer s.wait.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		err := error(nil)
-		if prepare != nil {
-			err = prepare()
-		}
-		if err == nil {
-			err = s.runner.Run(ctx, args, &jobWriter{store: s, job: job})
-		}
+		err := run(ctx, &jobWriter{store: s, job: job})
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		job.FinishedAt = s.now().UTC()
