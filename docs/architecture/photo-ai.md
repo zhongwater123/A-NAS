@@ -28,6 +28,15 @@ M2 交付后，成员可以：
 - LiteRT-LM 自己的 Python API 目前只面向生成式对话，没有公开的向量接口，因此 Worker 使用 MediaPipe 而不是直接调用 LiteRT-LM。[LiteRT-LM Python](https://developers.google.com/edge/litert-lm/python)
 - 模型卡元数据标注 Apache-2.0，但许可证链接与 MediaPipe 页面写的是 Gemma 许可。发行前必须核对权重文件实际附带的许可证；开发机试验不受影响。
 
+## 模型文件位置
+
+模型文件不进仓库，也不进发行包；位置与校验值固定在清单 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 中：
+
+- **文件**：官方仓库 `litert-community/embeddinggemma-2-740m-litert-lm`（revision `24d962e9…`）中的通用 CPU/GPU 文件 `embeddinggemma-2-740m.litertlm`，484,622,336 字节，SHA-256 `e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c`。同一仓库中带厂商后缀的文件（Qualcomm、MediaTek、Tensor、Intel PTL）是特定 NPU 的编译版本，不适用于 i3-12100。
+- **开发机**：`D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。
+- **发行（之后部署时）**：`/opt/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，`root:root 0644`，由 AI 组件的安装步骤放置。
+- Worker 加载前核对文件大小与 SHA-256，不符时拒绝加载并报告 AI 不可用。
+
 ## 整体结构
 
 ```text
@@ -46,7 +55,7 @@ M2 交付后，成员可以：
 - 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm`。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
 - 以专用身份 `a-nas-ai` 运行；systemd 约束沿用技术设计：`PrivateNetwork=yes`、`InaccessiblePaths=/srv/a-nas`、`MemoryMax`（起点 2G，按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。
 - 按需启动：`anas-ai.socket` 监听 `/run/a-nas-ai/ai.sock`（组 `a-nas-photos`、`0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
-- 模型文件随清单（来源 URL、revision、SHA-256、许可证）安装在 `/opt/a-nas/models/` 下；AI 组件可以不安装，此时套接字不存在，相册显示“智能处理不可用”。
+- 模型文件的位置与校验见“模型文件位置”；AI 组件可以不安装，此时套接字不存在，相册显示“智能处理不可用”。
 
 ### 协议
 
@@ -102,7 +111,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 |---|---|---|---|
 | 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 用 Fake Provider 跑通“上传 → 缩略图 → 向量”；AI 缺失、停止、崩溃、积压时 M1 测试全部照常通过 |
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | Worker 在 Debian 13 容器中以 Fake Provider 通过协议测试 |
-| 3 | 9 | 开发机模型实测：下载全模态 740M 包（约 485 MB），验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
+| 3 | 9 | 开发机模型实测：使用你传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 搜索接口、内存索引、Policy 过滤与桌面搜索框 | 本地 systemd 环境中用真实模型完成中文搜索，泄漏测试覆盖搜索结果 |
 | 5 | 12 | AI 标签计算、查看器标签展示、按标签筛选 | 标签只在阈值之上出现；隐藏后重算不复现 |
 | 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
@@ -111,7 +120,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 ## 待确认
 
 1. **许可**：发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并保存清单与 NOTICE。
-2. **下载**：步骤 3 需要在开发机下载模型包（约 485 MB）与公开中文数据集（体积在下载前逐个列出）。
+2. **下载**：模型包由你从其他设备传到开发机的预留位置；步骤 3 的公开中文数据集仍需下载，体积在下载前逐个列出。
 3. **标签词表**：首版约 200–300 个常用标签；如有必须识别的类别请补充。
 
 ## 风险
