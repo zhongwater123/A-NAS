@@ -106,6 +106,18 @@ type Session struct {
 	User      User      `json:"user"`
 }
 
+// sessionLifetime bounds sessions signed in from any browser but the local
+// console.
+const sessionLifetime = 12 * time.Hour
+
+// localConsoleExpiry is stored for local console sessions, which last until
+// the user signs out, an administrator resets the password or the account is
+// disabled. Every existing expiry check accepts it unchanged.
+var localConsoleExpiry = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
+
+// LocalConsole reports a session signed in on the device's own screen.
+func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpiry) }
+
 type AuditEvent struct {
 	ID           string    `json:"id"`
 	ActorUserID  string    `json:"actorUserId,omitempty"`
@@ -512,6 +524,17 @@ func (s *Service) markCredentialFailure(ctx context.Context, user User, cause er
 }
 
 func (s *Service) Authenticate(ctx context.Context, username, password string) (Session, error) {
+	return s.authenticate(ctx, username, password, false)
+}
+
+// AuthenticateLocalConsole signs in on the device's own screen; the session
+// does not expire on its own. Callers must establish that the request really
+// comes from the local console.
+func (s *Service) AuthenticateLocalConsole(ctx context.Context, username, password string) (Session, error) {
+	return s.authenticate(ctx, username, password, true)
+}
+
+func (s *Service) authenticate(ctx context.Context, username, password string, localConsole bool) (Session, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	var user User
 	var encodedHash, createdAt string
@@ -525,7 +548,10 @@ func (s *Service) Authenticate(ctx context.Context, username, password string) (
 	token := s.randomToken(32)
 	csrf := s.randomToken(24)
 	now := s.now().UTC()
-	expiresAt := now.Add(12 * time.Hour)
+	expiresAt := now.Add(sessionLifetime)
+	if localConsole {
+		expiresAt = localConsoleExpiry
+	}
 	if _, err := s.store.db.ExecContext(ctx,
 		"INSERT INTO sessions(token_hash, csrf_token, user_id, expires_at, created_at) VALUES(?,?,?,?,?)",
 		tokenHash(token), csrf, user.ID, formatTime(expiresAt), formatTime(now)); err != nil {

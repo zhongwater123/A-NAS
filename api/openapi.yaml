@@ -90,7 +90,7 @@ paths:
     post:
       security: []
       operationId: createSession
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CredentialInput" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LoginRequest" } } } }
       responses:
         "200": { description: Authenticated session, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
         "401": { $ref: "#/components/responses/ProductError" }
@@ -1098,6 +1098,19 @@ components:
       properties:
         username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
         password: { type: string, minLength: 12 }
+        localConsole:
+          type: boolean
+          description: Requests a local console session that lasts until sign-out. Honoured only for a direct loopback connection without forwarding headers; otherwise the session lasts 12 hours.
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
+        password: { type: string, minLength: 12 }
+        localConsole:
+          type: boolean
+          description: Requests a local console session that lasts until sign-out. Honoured only for a direct loopback connection without forwarding headers; otherwise the session lasts 12 hours.
     CredentialInput:
       type: object
       additionalProperties: false
@@ -1160,7 +1173,7 @@ components:
       required: [csrfToken, expiresAt, user]
       properties:
         csrfToken: { type: string }
-        expiresAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, description: "9999-12-31T23:59:59Z marks a local console session, which lasts until sign-out." }
         user: { $ref: "#/components/schemas/User" }
     Space:
       type: object

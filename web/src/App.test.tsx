@@ -114,6 +114,23 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({ username: "owner", password: "correct horse battery staple" });
   });
 
+  it("asks for a session that lasts until sign-out on the local console", async () => {
+    window.history.replaceState(null, "", "/?local-console=1");
+    try {
+      const fetchMock = installAPI({ setupRequired: true });
+      const user = userEvent.setup();
+      render(<App />);
+      await user.type(await screen.findByLabelText("账号"), "owner");
+      await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
+      await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
+      expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
+      const setupCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/setup/admin");
+      expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({ username: "owner", password: "correct horse battery staple", localConsole: true });
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
   it("shows a loading state while the first host observation is pending", async () => {
     let finishRequest: ((response: Response) => void) | undefined;
     routeFetch({ hostState: vi.fn(() => new Promise<Response>((resolve) => { finishRequest = resolve; })) });
@@ -256,6 +273,29 @@ describe("A-NAS v1.0.1 desktop", () => {
     const statusBar = await screen.findByRole("banner", { name: "设备状态" });
     expect(await within(statusBar).findByText("连接中断", { selector: ".source-badge" })).toBeTruthy();
     expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuetext")).toBe("暂无数据");
+  });
+
+  it("returns to the login screen when the session expires instead of reporting a lost connection", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let expired = false;
+    const poll = (state: unknown) => vi.fn(async () => (expired ? sessionExpiredResponse() : okResponse(state)));
+    routeFetch({ hostState: poll(healthyState), metrics: poll(metricsState) });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<App />);
+    await screen.findByRole("region", { name: "桌面应用" });
+
+    expired = true;
+    await act(async () => { vi.advanceTimersByTime(2_000); });
+    expect(await screen.findByRole("heading", { name: "登录 A-NAS" })).toBeTruthy();
+    expect(screen.getByText("登录已过期，请重新登录")).toBeTruthy();
+    expect(screen.queryByText(/连接中断/)).toBeNull();
+
+    expired = false;
+    await user.type(screen.getByLabelText("账号"), "owner");
+    await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+    expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
+    expect(screen.queryByText("登录已过期，请重新登录")).toBeNull();
   });
 
   it("reorders desktop icons by dragging without opening the app", async () => {
@@ -651,6 +691,14 @@ function okResponse(state: unknown) {
     ok: true,
     status: 200,
     json: async () => state,
+  } as Response;
+}
+
+function sessionExpiredResponse() {
+  return {
+    ok: false,
+    status: 401,
+    json: async () => ({ error: { code: "authentication_required", message: "authentication is required" } }),
   } as Response;
 }
 

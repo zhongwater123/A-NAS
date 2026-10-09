@@ -13,6 +13,9 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - 管理员可创建、重置和禁用成员；普通成员不可调用账号、格式化或共享快照管理操作。
 - 每名有效用户拥有一个个人空间，且加入唯一 `Shared` 空间。管理员的普通浏览也不能列出或推断其他成员的个人空间。
 - Web 使用 Argon2id 与服务端会话，所有变更请求验证 CSRF；Samba 使用同次输入设置独立凭据。
+- 浏览器会话自登录起固定 12 小时有效，使用中不续期。在设备本机屏幕（Kiosk 以 `?local-console=1` 打开）登录或启用设备时，会话不会自行过期，跨夜和重启后仍保持登录，直到主动退出、管理员重置该账号密码或账号被禁用；本人修改密码不影响。能接触本机屏幕的人即可使用已登录的桌面，离开时应主动退出。
+- 服务端只对没有 `Forwarded`/`X-Forwarded-For` 头的直接回环连接授予本机会话，否则按 12 小时会话处理。当前只有 Kiosk 和 SSH 隧道能到达产品服务；引入局域网反向代理时必须让代理请求携带转发头。Chromium 把 Cookie 寿命上限定为 400 天，页面每次加载读取会话时续签本机会话的 Cookie。
+- 会话过期、在别处注销或账号被禁用后，已登录页面的任一请求返回 `401` 即回到登录页并提示“登录已过期，请重新登录”，不显示为连接中断；重新登录即可继续，无需重启或刷新。
 
 ## 数据卷初始化
 
@@ -52,3 +55,6 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [统一身份与文件授权规格](unified-identity-and-file-acl.md)：取代本规格中的空间权限实现方式
 - [`internal/httpapi/product_test.go`](../../internal/httpapi/product_test.go)
 - [`internal/files/service_test.go`](../../internal/files/service_test.go)
+- [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：会话过期回到登录页、本机屏幕申请持久会话
+- [`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut`](../../internal/httpapi/product_test.go)：本机会话只授予直接回环连接、跨越 12 小时、退出后失效
+- [本地控制台会话过期调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)

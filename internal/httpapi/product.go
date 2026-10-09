@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -159,8 +161,9 @@ func (h *productHandler) handleSetupStatus(w http.ResponseWriter, r *http.Reques
 
 func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		LocalConsole bool   `json:"localConsole"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
@@ -170,7 +173,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 		h.writeAccountError(w, r, err)
 		return
 	}
-	session, err := h.accounts.Authenticate(r.Context(), request.Username, request.Password)
+	session, err := h.authenticate(r, request.Username, request.Password, request.LocalConsole)
 	if err != nil {
 		h.internalError(w, r, err)
 		return
@@ -181,14 +184,15 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 
 func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		LocalConsole bool   `json:"localConsole"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	session, err := h.accounts.Authenticate(r.Context(), request.Username, request.Password)
+	session, err := h.authenticate(r, request.Username, request.Password, request.LocalConsole)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "username or password is invalid")
 		return
@@ -197,8 +201,33 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, publicSession(session))
 }
 
-func (h *productHandler) handleCurrentSession(w http.ResponseWriter, _ *http.Request, session accounts.Session) {
+func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	// The page reads its session on every load; renewing the cookie here keeps
+	// a local console signed in past the browser's cookie lifetime cap.
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && session.LocalConsole() {
+		session.Token = cookie.Value
+		h.setSessionCookie(w, session)
+	}
 	writeJSON(w, http.StatusOK, publicSession(session))
+}
+
+// authenticate grants a local console session, which never expires on its
+// own, only to a direct loopback connection that asked for one. Today only the
+// Kiosk and SSH tunnels reach the API; a LAN proxy would add forwarding headers.
+func (h *productHandler) authenticate(r *http.Request, username, password string, localConsole bool) (accounts.Session, error) {
+	if localConsole && directLoopback(r) {
+		return h.accounts.AuthenticateLocalConsole(r.Context(), username, password)
+	}
+	return h.accounts.Authenticate(r.Context(), username, password)
+}
+
+func directLoopback(r *http.Request) bool {
+	if r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-For") != "" || !localorigin.LoopbackHost(r.Host) {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip := net.ParseIP(host)
+	return err == nil && ip != nil && ip.IsLoopback()
 }
 
 func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -839,10 +868,17 @@ func (h *productHandler) withMutation(next func(http.ResponseWriter, *http.Reque
 	})
 }
 
+// maxCookieLifetime is the longest cookie lifetime Chromium honours.
+const maxCookieLifetime = 400 * 24 * time.Hour
+
 func (h *productHandler) setSessionCookie(w http.ResponseWriter, session accounts.Session) {
+	expires := session.ExpiresAt
+	if session.LocalConsole() {
+		expires = time.Now().Add(maxCookieLifetime)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: session.Token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, Expires: session.ExpiresAt,
+		SameSite: http.SameSiteStrictMode, Expires: expires,
 	})
 }
 
