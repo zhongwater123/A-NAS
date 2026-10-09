@@ -37,7 +37,7 @@ M2 交付后，成员可以：
 | 70 | 5.3 s | 1231 / 1383 MiB | 73 ms | 613 / 756 ms | 4/4 |
 | 140（默认） | 4.0–5.7 s | 1442 / 1779 MiB | 71–98 ms | 1698–1737 / 2513 ms | 4/4 |
 
-- 包内只有 70 与 140 两种图片签名；请求 280 会报错 `exceeds maximum available signature length (140)`。Worker 默认 70，并把 token 数写入模型 ID，改动后旧向量自动重建；70 还是 140 由步骤 3 的数据集评估决定。
+- 包内只有 70 与 140 两种图片签名；请求 280 会报错 `exceeds maximum available signature length (140)`。Worker 使用 70，并把 token 数写入模型 ID，改动后旧向量自动重建；步骤 3 的评估中 140 的质量差距在 1 个百分点以内、耗时约 2.5 倍，因此保持 70。
 - 输出 768 维、已归一化；`embed_image` 直接接受编码后的图片字节，因此 Worker 不需要自己的解码器，传入缩略图 JPEG 即可。无法解码的字节以 `ValueError` 报错，Worker 记为 `invalid_input`。
 - 零样本只是冒烟：三幅纯色图形与 matplotlib 自带的一张人物照片，对 7 个中文标签取最高分全部正确，但最高分与次高分只差 0.07–0.15，不能据此设定阈值。三种提示词模板（裸标签、`task: search result | query: …`、`…一张…的照片`）结果相近。
 - 依赖：`import mediapipe` 会加载 OpenCV 的绘图工具，图形界面版 OpenCV 需要 X 库，因此换用同版本的 `opencv-contrib-python-headless`；MediaPipe 的 C 库还链接 `libEGL.so.1` 与 `libGLESv2.so.2`，安装 Debian 的 `libegl1`、`libgles2`（只是分发库，不带 GPU 驱动）即可。完整依赖的虚拟环境约 509 MB，打包时（步骤 7）再精简。
@@ -84,7 +84,7 @@ M2 交付后，成员可以：
 
 ### 输入图片
 
-AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 EXIF 方向转正、透明区域合成白底，大小有界。这样 Worker 不必解码任意尺寸的原图，也不会因超大图片耗尽内存。切片 9 用同一测试集比较 512 px 与 1024 px 输入的质量，差距明显时再增加专用的 AI 输入派生。
+AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 EXIF 方向转正、透明区域合成白底，大小有界。这样 Worker 不必解码任意尺寸的原图，也不会因超大图片耗尽内存。步骤 3 比较过 1024 px 输入：同一图片的两种向量余弦相似度平均 0.984，暂不增加专用的 AI 输入派生（[校准报告](../research/photo-ai-label-calibration.md#视觉-token-与输入尺寸)）。
 
 ### 任务与调度
 
@@ -139,7 +139,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 |---|---|---|---|
 | 1 | 8 | Go 侧：协议客户端、Fake Provider、`embedding` 任务、向量存储、空闲与资源门控、AI 状态接口 | 已实现：用 Fake Provider 跑通“上传 → 缩略图 → 向量”；没有 Worker 时冒烟与系统测试照常通过。Host Agent 活动信号移入后续步骤 |
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | 已实现：[`ai/`](../../ai/anas_ai/worker.py) 的协议测试只需标准库并纳入 `make check`；Go 客户端与 Python Worker 的互通测试通过；真实模型测试在 Debian 13 容器中通过 |
-| 3 | 9 | 70 视觉 token 的阈值已冻结（73 个可展示标签），140 token 与 1024 px 输入的对比在开发机后台运行，见[校准报告](../research/photo-ai-label-calibration.md)：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
+| 3 | 9 | 已完成：70 视觉 token、512 px 输入与 v1 阈值冻结（73 个可展示标签），见[校准报告](../research/photo-ai-label-calibration.md)：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 已实现：搜索接口、内存索引、搜索范围与桌面搜索框；Worker 增加 `embed_query` | 单元与泄漏测试覆盖范围、查看授权、回收站与分页；本地 systemd 环境中真实模型的中文搜索结果见[校准报告](../research/photo-ai-label-calibration.md#端到端搜索本地-systemd-环境) |
 | 5 | 12 | 已实现：标签向量缓存、读取时计算 AI 标签、查看器标签展示、按标签筛选 | 标签只在阈值之上、且只对校准模型出现；隐藏随步骤 6 |
 | 6 | 11 | 用户标签、AI 纠错与相册实体 | 用户元数据独立于派生数据，清除派生不影响它们 |
