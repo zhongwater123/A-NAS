@@ -107,6 +107,7 @@ install -m 0644 anas-kiosk@.service.incoming anas-kiosk@.service
 install -m 0644 a-nas-kiosk.pam.incoming a-nas-kiosk.pam
 install -m 0644 kiosk.env.incoming kiosk.env
 install -m 0644 a-nas-chromium-policy.json.incoming a-nas-chromium-policy.json
+install -m 0644 Caddyfile.incoming Caddyfile
 install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
@@ -129,6 +130,7 @@ rm -f \
   a-nas-kiosk.pam.incoming \
   kiosk.env.incoming \
   a-nas-chromium-policy.json.incoming \
+  Caddyfile.incoming \
   anas-api-system.service.incoming \
   anas-host-agent-system.service.incoming \
   anas-photos-system.service.incoming \

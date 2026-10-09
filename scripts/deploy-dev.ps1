@@ -147,6 +147,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\pam\a-nas-kiosk'); Destination = "${target}:$release/a-nas-kiosk.pam.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\config\experimental-nas-kiosk.env'); Destination = "${target}:$release/kiosk.env.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile'); Destination = "${target}:$release/Caddyfile.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
     )
     foreach ($asset in $screensaverAssets) {

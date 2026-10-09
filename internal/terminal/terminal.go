@@ -4,8 +4,10 @@
 // administrator's own Linux account (ADR 0008) and hands back only the PTY;
 // this package forwards bytes and never elevates privileges. Without a
 // Spawner, development shells run as the Product Service user. Sessions are
-// refused unless the feature is enabled, the peer is a loopback address, the
-// Host names a loopback endpoint and the browser Origin matches that Host.
+// refused unless the feature is enabled, the peer is a loopback address (the
+// local console, or the LAN entry proxying for a LAN browser, ADR 0012), the
+// Host names this device (localorigin.DeviceHost) and the browser Origin
+// matches that Host.
 package terminal
 
 import (
@@ -117,8 +119,8 @@ func (h *Handler) serveSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "terminal_disabled", "terminal is disabled")
 		return
 	}
-	if !isLoopbackPeer(r.RemoteAddr) || !localorigin.LoopbackHost(r.Host) {
-		writeError(w, http.StatusForbidden, "terminal_forbidden", "terminal is only available on loopback")
+	if !isLoopbackPeer(r.RemoteAddr) || !localorigin.DeviceHost(r.Host) {
+		writeError(w, http.StatusForbidden, "terminal_forbidden", "terminal is only available through this device's Web entry")
 		return
 	}
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
