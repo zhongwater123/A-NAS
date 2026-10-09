@@ -33,6 +33,24 @@ export interface HostState {
   }>;
 }
 
+let sessionEndedListener: (() => void) | undefined;
+
+// onSessionEnded lets the signed-in desktop return to the login screen; it
+// returns the unsubscribe function.
+export function onSessionEnded(listener: () => void): () => void {
+  sessionEndedListener = listener;
+  return () => { if (sessionEndedListener === listener) sessionEndedListener = undefined; };
+}
+
+// apiFetch is fetch for product API calls. Once signed in, every 401 means the
+// session ended (expired, signed out elsewhere or the account was disabled);
+// wrong passwords are 401 only at login, before any listener exists.
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  if (response.status === 401) sessionEndedListener?.();
+  return response;
+}
+
 export class HostStateError extends Error {
   constructor(readonly status?: number) {
     super(status ? `host state request failed with status ${status}` : "host state request failed");
@@ -42,7 +60,7 @@ export class HostStateError extends Error {
 export async function readHostState(signal?: AbortSignal): Promise<HostState> {
   let response: Response;
   try {
-    response = await fetch("/api/v1/host-state", {
+    response = await apiFetch("/api/v1/host-state", {
       method: "GET",
       headers: { Accept: "application/json" },
       signal,
@@ -117,7 +135,7 @@ export interface HostMetrics {
 }
 
 export async function readHostMetrics(signal?: AbortSignal): Promise<HostMetrics> {
-  const response = await fetch("/api/v1/metrics", { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin", signal });
+  const response = await apiFetch("/api/v1/metrics", { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin", signal });
   if (!response.ok) throw new HostStateError(response.status);
   const value: unknown = await response.json();
   if (!isHostMetrics(value)) throw new HostStateError();
@@ -165,7 +183,7 @@ export async function request<T>(path: string, init: RequestInit = {}, mutation 
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (mutation && csrfToken) headers.set("X-CSRF-Token", csrfToken);
-  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  const response = await apiFetch(path, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: { code: "request_failed", message: `请求失败 (${response.status})` } }));
     throw new APIError(response.status, body?.error?.code ?? "request_failed", body?.error?.message ?? "请求失败");
@@ -177,8 +195,10 @@ export async function request<T>(path: string, init: RequestInit = {}, mutation 
 const json = (value: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
 
 export const getSetupStatus = () => request<{setupRequired: boolean}>("/api/v1/setup/status");
-export async function setupAdministrator(username: string, password: string) { const value = await request<Session>("/api/v1/setup/admin", json({ username, password })); setSession(value); return value; }
-export async function login(username: string, password: string) { const value = await request<Session>("/api/v1/session", json({ username, password })); setSession(value); return value; }
+// localConsole asks for a session that lasts until sign-out; the server grants it only to the device's own screen.
+const credentials = (username: string, password: string, localConsole: boolean) => json({ username, password, ...(localConsole ? { localConsole } : {}) });
+export async function setupAdministrator(username: string, password: string, localConsole = false) { const value = await request<Session>("/api/v1/setup/admin", credentials(username, password, localConsole)); setSession(value); return value; }
+export async function login(username: string, password: string, localConsole = false) { const value = await request<Session>("/api/v1/session", credentials(username, password, localConsole)); setSession(value); return value; }
 export async function currentSession() { const value = await request<Session>("/api/v1/session"); setSession(value); return value; }
 export const changePassword = (currentPassword: string, newPassword: string) => request<void>("/api/v1/session/password", json({ currentPassword, newPassword }), true);
 export const listNotifications = async () => (await request<{items: Notification[]}>("/api/v1/notifications")).items;

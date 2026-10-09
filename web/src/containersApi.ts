@@ -1,4 +1,4 @@
-import { DataSource, csrfHeaders } from "./api";
+import { DataSource, apiFetch, csrfHeaders } from "./api";
 
 export type ContainerState = "created" | "running" | "paused" | "restarting" | "removing" | "exited" | "dead";
 export type ContainerAction = "start" | "stop" | "restart";
@@ -68,7 +68,7 @@ export async function readContainerLogs(id: string, tail = 200, signal?: AbortSi
 async function request(path: string, init: RequestInit): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
+    response = await apiFetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ContainerAPIError("network_error");

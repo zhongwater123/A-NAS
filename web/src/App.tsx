@@ -39,8 +39,8 @@ import {
   APIError, DiskRole, FileEntry, Health, HostState, Notification, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User, ViewingScope,
   acknowledgeNotification, changePassword, confirmStoragePlan, createDirectory, createMember, createSnapshot, createStoragePlan, currentSession, deleteFile,
   deleteSnapshot, disableMember, endViewing, executeStoragePlan, fileDownloadURL, getSetupStatus, listEntries, listNotifications, listSnapshots,
-  listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, purgeTrash, resetMember,
-  restoreSnapshotEntry, restoreTrash, setupAdministrator, startViewing, uploadFile,
+  listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, onSessionEnded, purgeTrash, resetMember,
+  restoreSnapshotEntry, restoreTrash, setSession, setupAdministrator, startViewing, uploadFile,
 } from "./api";
 import { AppCenterPanel } from "./AppCenterPanel";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
@@ -138,7 +138,19 @@ export default function App() {
 		}).catch(() => { if (active) { setError("无法连接 A-NAS 产品服务"); setMode("login"); } });
 		return () => { active = false; };
 	}, []);
-	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={setSessionState} />;
+	// Browser sessions last 12 hours and any session can be revoked; once
+	// polls are rejected, sign in again rather than report a lost connection.
+	useEffect(() => {
+		if (!session) return;
+		return onSessionEnded(() => {
+			setSession();
+			setSessionState(undefined);
+			setError("登录已过期，请重新登录");
+			setMode("login");
+		});
+	}, [session]);
+	const authenticated = (value: Session) => { setError(""); setSessionState(value); };
+	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={authenticated} />;
 	const signOut = () => { void logout().finally(() => { setSessionState(undefined); setMode("login"); }); };
 	if (session.user.mustChangePassword) {
 		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
@@ -209,8 +221,8 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 		const data = new FormData(event.currentTarget);
 		try {
 			const session = mode === "setup"
-				? await setupAdministrator(String(data.get("username")), String(data.get("password")))
-				: await login(String(data.get("username")), String(data.get("password")));
+				? await setupAdministrator(String(data.get("username")), String(data.get("password")), isLocalConsole())
+				: await login(String(data.get("username")), String(data.get("password")), isLocalConsole());
 			onAuthenticated(session);
 		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
 		finally { setSubmitting(false); }
