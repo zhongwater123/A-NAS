@@ -115,8 +115,8 @@ bash scripts/system-test.sh
 
 - SSH 别名 `a-nas` 写在 `%USERPROFILE%\.ssh\config`，以 Debian 安装时创建的普通账号 `guoyi` 登录，密钥为 `%USERPROFILE%\.ssh\a-nas-guoyi_ed25519`（无口令，只授权给本机）。该账号不属于 `sudo`，只用于只读检查与联调；任何 root 操作仍由管理员按运行手册执行。
 - SSH 别名 `a-nas-dev` 以 `anas-dev` 登录，密钥为 `%USERPROFILE%\.ssh\a-nas-dev_ed25519`（无口令，只授权给本机），用于暂存 release。
-- `deploy-dev.ps1` 只有在 `build/.validated-build` 与提交、产品版本和两个二进制哈希都一致时才跳过 WSL 中的 `make check`。本机缺 gcc，不能原生运行 `make check`：2026-10-09 暂存 `64f0e26d8349` 时，按[运行检查](#运行检查)逐项运行 `check-steps` 的全部目标（cgo 部分在容器中，`go build` 加 `-trimpath -ldflags "-X main.version=<12 位提交>"`），全部通过后按 Makefile `check` 目标的格式写入该文件，再运行 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户> -ScreensaverVideo <视频>`。在 WSL 中补齐 gcc 后即可改用原生 `make check`。
-- 屏保视频池独立于 release：不传 `-ScreensaverVideo` 时，root 安装会保留 NAS 上当前的视频池，只有更换视频时才需要原始文件，见[本地控制台运行手册](../runbooks/operate-local-kiosk.md)。安装器随 release 一起暂存，所以这一点只对包含 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 修复的提交成立。基于更早主干的分支仍会在不带视频的升级后停播屏保，应先合入主干再部署。
+- `deploy-dev.ps1` 只有在 `build/.validated-build` 与提交、产品版本和两个二进制哈希都一致时才跳过 WSL 中的 `make check`。2026-10-09 暂存 `64f0e26d8349` 时本机还缺 gcc，所以按[运行检查](#运行检查)逐项运行 `check-steps` 的全部目标（cgo 部分在容器中，`go build` 加 `-trimpath -ldflags "-X main.version=<12 位提交>"`），全部通过后按 Makefile `check` 目标的格式写入该文件，再运行 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>`。同日 WSL 已有 gcc，但在 `/mnt/d` 上 vitest worker 启动超时：把工作树复制到 WSL 自身的 ext4 目录（排除 `.git`、`web/node_modules` 与 `build`），在那里 `npm ci` 后运行 `make check-steps VERSION=<版本>` 与 `bash scripts/system-test.sh`。
+- 屏保视频不随 release 暂存。只有更换视频时，才用 `deploy-screensavers.ps1` 上传 NAS 还没有的文件，见[本地控制台运行手册](../runbooks/operate-local-kiosk.md#更换屏保视频)。系统安装器随 release 一起暂存，所以基于 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md) 之前主干的分支仍使用旧安装器，会在不带视频的升级后停播屏保；这类分支应先合入主干再部署。
 - 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。
 - 撤销本机访问：删除 NAS 上 `/home/guoyi/.ssh/authorized_keys` 中注释为 `claude-code@SKZ00011303->guoyi@a-nas` 的一行。
 
@@ -168,7 +168,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
 - 安装器配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
 - 重启 Host Agent 后以上行为保持；
-- 屏保视频池跨版本保留：带视频的 release 建池并成为当前池，不带视频的升级保留当前池，视频哈希不符时升级在改动前停止，新视频替换当前池并保留旧池，从旧安装器首次升级时选用最近安装的池（[issue #49](https://github.com/zhongwater123/A-NAS/issues/49)）；
+- 屏保视频的独立通道（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：暂存只上传缺少的视频并复用旧 release 暂存过的视频；安装后的池成为当前池，release 升级保留它；共有的视频只存一份；重复安装同一个池不产生变化；切回已安装的池不需要暂存区；视频哈希不符或池 ID 与清单不符时拒绝且不留改动；从旧安装器首次升级时以硬链接导入它留下的池；
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 ```bash

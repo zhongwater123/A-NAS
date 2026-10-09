@@ -42,8 +42,14 @@
 ### 升级产品不改变视频池
 
 - Given：宿主机已有一个视频池在播放。
-- When：安装一个不携带视频的新 release，或回滚到旧 release。
-- Then：仍播放原视频池，清单数量不变，不需要重新上传视频；只有安装携带视频的 release 才换成新池。
+- When：安装新 release，或回滚到旧 release。
+- Then：仍播放原视频池，清单数量不变，不需要重新上传视频。release 不携带视频，只有管理员显式安装另一个池才会更换。
+
+### 只上传 NAS 还没有的视频
+
+- Given：NAS 上已有部分视频，包括早先随 release 暂存过的。
+- When：从开发机暂存一个包含新旧视频的池并安装。
+- Then：只传输和存储新视频；同一视频出现在多个池中也只保存一份。
 
 ### 视频池不可用时保留壁纸
 
@@ -56,21 +62,21 @@
 - `local-console=1` 只是显示模式标记，不是权限凭据；产品 API 和 Host Agent 权限边界不变。
 - 产品服务只读扫描 `ANAS_SCREENSAVER_DIRECTORY` 指向的绝对目录，只接纳该目录第一层的普通 `.mp4` 文件；默认值与系统安装器写入的值都是 `/var/lib/a-nas/screensavers/current`。该路径可以是指向目录的符号链接，每次请求重新读取，因此切换链接后无需重启产品服务。
 - `/local-console/screensavers` 返回不含宿主机文件名的同源视频 URL 清单；各视频 URL 支持标准字节 Range。原 `/local-console/screensaver.mp4` 保留为读取排序后首个视频的兼容路由。
-- 部署脚本将每个外部视频分别计算并验证 SHA-256，以匿名编号文件构成完整池；外部媒体缺失不阻止产品服务、登录或桌面启动。
-- 视频池的生命周期独立于产品版本。系统安装器把携带视频的 release 逐个复核 SHA-256 后安装为 `/var/lib/a-nas/screensavers/<release-id>/`，再把同级的 `current` 链接原子切到该池；任一视频不符时在改动任何文件前停止。不携带视频的 release 不建池，也不改 `current`。旧池保留，供媒体回滚。
-- 首次以本规则安装时还没有 `current`，安装器指向最近安装的池。旧安装器总让最近安装的池生效，或因 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 在不带视频的升级后不播放任何池，因此迁移后无需重新上传视频。
+- 屏保视频是系统盘上的长期媒体，不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）。每个视频以 SHA-256 命名存放在 `/var/lib/a-nas/screensavers/objects/`；池是 `pools/<池 ID>/` 下匿名编号的硬链接和 `SHA256SUMS`，池 ID 是清单 SHA-256 的前 16 位十六进制；`current` 链接指向当前池。外部媒体缺失不阻止产品服务、登录或桌面启动。
+- 只有 root 执行的 `install-screensavers.sh` 会改变当前池。它逐个复核 SHA-256、核对池 ID 与清单一致，任一不符即在改动前停止，然后原子切换 `current`。指定一个已安装的池时直接切换，作为媒体回滚；旧池和对象都保留。
+- 升级和产品回滚都不改变 `current`。首次升级时还没有 `current`，系统安装器以硬链接导入旧安装器留下的最近一个池并设为当前池。旧安装器总让这个池生效，或因 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 在不带视频的升级后什么都不播，因此迁移后无需重新上传视频。
 
 ## 验收证据
 
 - React 定时、输入消费、每次进入只随机选择一条并循环、失败补选与远程模式测试见 [`LocalConsoleScreenSaver.test.tsx`](../../web/src/LocalConsoleScreenSaver.test.tsx)。
 - 清单筛选、匿名 URL、兼容路由与视频 Range 测试见 [`handler_test.go`](../../internal/webui/handler_test.go)。
-- 真实安装器的视频池生命周期见[系统测试](../../scripts/system-test.sh)：带视频安装、不带视频升级保留当前池、哈希不符停止升级、新视频替换当前池并保留旧池，以及从旧安装器首次升级。链接切换即时生效见 [`handler_test.go`](../../internal/webui/handler_test.go)。
-- 多文件哈希、安装和直连屏幕验收见[本地控制台运行手册](../runbooks/operate-local-kiosk.md)与[部署手册](../runbooks/deploy-web-preview-to-experimental-nas.md)。
+- 视频通道见[系统测试](../../scripts/system-test.sh)，全程使用真实的暂存脚本、媒体安装脚本和系统安装器：只上传缺少的视频、复用旧 release 暂存过的视频、升级保留当前池、共有视频只存一份、重复安装不产生变化、不需要暂存区的媒体回滚、拒绝哈希不符或 ID 不符的池且不留改动，以及从旧安装器首次升级时导入旧池。链接切换即时生效见 [`handler_test.go`](../../internal/webui/handler_test.go)。
+- 更换视频、媒体回滚和直连屏幕验收见[本地控制台运行手册](../runbooks/operate-local-kiosk.md)。
 
 ## 关联
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)
-- ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
-- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/LocalConsoleScreenSaver.tsx)、[`handler.go`](../../internal/webui/handler.go)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)、[屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
+- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/LocalConsoleScreenSaver.tsx)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
 - 测试：[`App.test.tsx`](../../web/src/App.test.tsx)、[`LocalConsoleScreenSaver.test.tsx`](../../web/src/LocalConsoleScreenSaver.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)
 - Issue：[#49 不带屏保视频的升级会让本地控制台屏保失效](https://github.com/zhongwater123/A-NAS/issues/49)

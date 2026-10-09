@@ -71,23 +71,7 @@ Host Agent IPC 在实机通过后切换实时状态：
 .\scripts\deploy-dev.ps1 -NasHost <NAS_HOST> -Mode agent
 ```
 
-只有更换本地控制台的屏保视频池时才显式传入仓库外的 MP4 数组；不传时 release 不携带视频，root 系统安装保留 NAS 上的当前池。传入时，脚本为每个文件计算并验证 SHA-256，再以 `screensaver-000.mp4` 开始的匿名编号放入版本目录。后续 root 系统安装复核哈希后，把视频复制到 `/var/lib/a-nas/screensavers/<release-id>/` 并让它成为当前池（见[本地控制台运行手册](operate-local-kiosk.md)）；不会移动源文件，也不会把视频写入 Git 或二进制。单次最多 32 条，重复路径、非 MP4 或缺失文件会在建立网络连接前拒绝：
-
-```powershell
-.\scripts\deploy-dev.ps1 `
-  -NasHost <NAS_HOST> `
-  -Mode agent `
-  -StageOnly `
-  -ScreensaverVideo @(
-    "E:\SteamLibrary\steamapps\workshop\content\431960\3667411885\BMW M5.mp4",
-    "E:\SteamLibrary\steamapps\workshop\content\431960\3556095996\Penguins.mp4",
-    "E:\SteamLibrary\steamapps\workshop\content\431960\3666233105\1771036359365.mp4",
-    "E:\SteamLibrary\steamapps\workshop\content\431960\3679705103\妄想天使直播.mp4",
-    "E:\SteamLibrary\steamapps\workshop\content\431960\3743343692\ЭКСПОНАТ - MIA BOYKA (TikTok Homelander Edit) HARDSTYLE REMIX by MilWo - MilWo (1080p, h264) (1).mp4"
-  )
-```
-
-`-WhatIf` 会执行 Git 状态、路径、扩展名和哈希前置检查，但不会构建、联网或修改远端。正式上传后核对输出的五个文件名与 SHA-256，再由 root 安装脚本建立新池并切换当前池；不得把 Steam Workshop 目录直接授予产品服务读取权限。
+屏保视频不再随 release 暂存，`deploy-dev.ps1` 已没有 `-ScreensaverVideo` 参数。更换视频见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
 
 2026-10-06 实机已验证 Fake 部署、失败自动回滚、修复后的 Live 部署、制品哈希、`0600` UDS、`503` 映射和恢复路径。限定 SSH 配置也已验证：普通公钥命令保持可用，`127.0.0.1:18080 → 127.0.0.1:8080` 返回健康响应，而转发到远端 22 端口被 `administratively prohibited` 拒绝。首次 Live 失败的证据链见[调查记录](../investigations/2026-10-06-host-agent-runtime-directory.md)。
 
