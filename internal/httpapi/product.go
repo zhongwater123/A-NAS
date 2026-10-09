@@ -349,8 +349,22 @@ func (h *productHandler) handleDownload(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	defer content.Reader.Close()
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": content.Name}))
+	disposition := "attachment"
+	if r.URL.Query().Get("disposition") == "inline" && browserPreviewableImage(content.Name) {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": content.Name}))
 	http.ServeContent(w, r, content.Name, content.ModifiedAt, content.Reader)
+}
+
+func browserPreviewableImage(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, suffix := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {

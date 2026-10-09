@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -146,8 +147,53 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	}
 }
 
+func TestListVolumesRefreshesFilesystemUsageFromHostState(t *testing.T) {
+	ctx := context.Background()
+	state, err := fake.NewHealthy().Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &stateReader{state: state}
+	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-usage" }})
+	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	total, available := uint64(500_107_862_016), uint64(482_000_000_000)
+	for index := range reader.state.Disks {
+		if reader.state.Disks[index].ID.String() == "disk:fake-data-01" {
+			reader.state.Disks[index].Role = hoststate.DiskRoleData
+			reader.state.Disks[index].FilesystemCapacityBytes = &total
+			reader.state.Disks[index].FilesystemAvailableBytes = &available
+		}
+	}
+
+	volumes, err := service.ListVolumes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(volumes) != 1 || volumes[0].CapacityBytes != total || volumes[0].AvailableBytes == nil || *volumes[0].AvailableBytes != available {
+		t.Fatalf("volumes = %#v, want live filesystem usage", volumes)
+	}
+}
+
 type recordingExecutor struct {
 	executedDiskID string
+}
+
+type stateReader struct{ state hoststate.State }
+
+func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
+	if err := ctx.Err(); err != nil {
+		return hoststate.State{}, err
+	}
+	return r.state, nil
 }
 
 func (e *recordingExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {

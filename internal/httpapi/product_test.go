@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,11 +143,12 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	var uploadBody bytes.Buffer
 	uploadWriter := multipart.NewWriter(&uploadBody)
 	_ = uploadWriter.WriteField("parentId", directory.ID)
-	part, err := uploadWriter.CreateFormFile("file", "hello.txt")
+	part, err := uploadWriter.CreateFormFile("file", "preview.png")
 	if err != nil {
 		t.Fatalf("create multipart file: %v", err)
 	}
-	_, _ = part.Write([]byte("hello through API"))
+	uploadedContents := []byte("\x89PNG\r\n\x1a\npreview")
+	_, _ = part.Write(uploadedContents)
 	_ = uploadWriter.Close()
 	uploadRequest := httptest.NewRequest(http.MethodPost, "/api/v1/spaces/"+privateSpace.ID+"/uploads", &uploadBody)
 	uploadRequest.Header.Set("Content-Type", uploadWriter.FormDataContentType())
@@ -165,8 +167,24 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	downloadRequest.AddCookie(responseCookies[0])
 	download := httptest.NewRecorder()
 	handler.ServeHTTP(download, downloadRequest)
-	if got, want := download.Code, http.StatusOK; got != want || download.Body.String() != "hello through API" {
+	if got, want := download.Code, http.StatusOK; got != want || !bytes.Equal(download.Body.Bytes(), uploadedContents) {
 		t.Fatalf("download status/body = %d/%q, want 200/content", got, download.Body.String())
+	}
+	if disposition := download.Header().Get("Content-Disposition"); !strings.HasPrefix(disposition, "attachment") {
+		t.Fatalf("download disposition = %q, want attachment", disposition)
+	}
+	previewRequest := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+uploaded.ID+"/content?disposition=inline", nil)
+	previewRequest.AddCookie(responseCookies[0])
+	preview := httptest.NewRecorder()
+	handler.ServeHTTP(preview, previewRequest)
+	if got, want := preview.Code, http.StatusOK; got != want || !bytes.Equal(preview.Body.Bytes(), uploadedContents) {
+		t.Fatalf("preview status/body = %d/%q, want 200/content", got, preview.Body.String())
+	}
+	if disposition := preview.Header().Get("Content-Disposition"); !strings.HasPrefix(disposition, "inline") {
+		t.Fatalf("preview disposition = %q, want inline", disposition)
+	}
+	if contentType := preview.Header().Get("Content-Type"); contentType != "image/png" {
+		t.Fatalf("preview content type = %q, want image/png", contentType)
 	}
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/files/"+uploaded.ID, nil)
 	deleteRequest.Header.Set("X-CSRF-Token", session.CSRFToken)

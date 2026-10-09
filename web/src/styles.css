@@ -325,6 +325,7 @@ button { font: inherit; }
 .file-volume-state.available { color: #38846f; }
 .file-volume-track { height: 5px; margin: 8px 0 7px; overflow: hidden; border-radius: 999px; background: #e3e8ee; }
 .file-volume-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #3d86d1, #23a395); }
+.file-volume-track.unknown { background: repeating-linear-gradient(135deg, #e1e7ed 0 5px, #edf1f5 5px 10px); }
 .file-volume-values { display: grid; grid-template-columns: 1fr auto; gap: 3px 7px; color: #7f8c99; font-size: 7px; }
 .file-volume-values strong { color: #40556b; font-size: 8px; }
 .file-volume-values :nth-child(even) { text-align: right; }
@@ -351,7 +352,7 @@ button { font: inherit; }
 
 .file-action-bar { min-height: 43px; flex: none; display: flex; align-items: center; gap: 2px; padding: 5px 10px; border-bottom: 1px solid #dfe5eb; background: #f7f9fb; }
 .file-action-bar > i { width: 1px; height: 23px; flex: none; margin: 0 4px; background: #dce2e8; }
-.file-command-button { min-width: 30px; height: 31px; border: 0; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 7px; color: #42586e; background: transparent; font-size: 9px; white-space: nowrap; }
+.file-command-button { min-width: 30px; height: 31px; border: 0; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; color: #42586e; background: transparent; font-size: 8px; white-space: nowrap; }
 .file-command-button:hover:not(:disabled) { color: #205f9e; background: #e8f1fa; }
 .file-command-button.danger:hover:not(:disabled) { color: #a83a49; background: #fbecef; }
 .file-command-button svg { width: 15px; height: 15px; flex: none; }
@@ -381,7 +382,7 @@ button { font: inherit; }
 .file-list-header button:hover { color: #315f8c; background: #eaf1f7; }
 .file-list-header svg { width: 11px; transition: transform .15s; }
 .file-list-header svg.ascending { transform: rotate(180deg); }
-.file-list-row { min-height: 47px; border-bottom: 1px solid #edf0f4; color: #536477; transition: background .12s; }
+.file-list-row { min-height: 49px; border-bottom: 1px solid #edf0f4; color: #536477; transition: background .12s; }
 .file-list-row:last-child { border-bottom: 0; }
 .file-list-row:hover { background: #f2f7fc; }
 .file-list-row.selected { background: #eaf4ff; box-shadow: inset 3px 0 #3987d5; }
@@ -396,13 +397,13 @@ button { font: inherit; }
 .file-type-icon svg { width: 17px; }
 .file-name-cell button, .file-name-cell a { min-width: 0; width: 100%; display: grid; gap: 2px; border: 0; padding: 0; color: #26384b; background: transparent; text-align: left; text-decoration: none; }
 .file-name-cell button:disabled { opacity: .75; }
-.file-name-cell strong { min-width: 0; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.file-name-cell strong { min-width: 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .file-name-cell strong em { display: inline-flex; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #75558f; background: #eee5f7; font-size: 7px; font-style: normal; }
-.file-name-cell small { overflow: hidden; color: #97a1ad; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.file-name-cell small { overflow: hidden; color: #8b97a4; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .file-name-cell button:hover:not(:disabled) strong, .file-name-cell a:hover strong { color: #236bb4; text-decoration: underline; }
-.file-date-cell { display: flex; align-items: center; gap: 5px; color: #718093; font-size: 8px; white-space: nowrap; }
+.file-date-cell { display: flex; align-items: center; gap: 5px; color: #718093; font-size: 9px; white-space: nowrap; }
 .file-date-cell svg { width: 11px; color: #9aa5b1; }
-.file-type-cell, .file-size-cell { color: #718093; font-size: 8px; }
+.file-type-cell, .file-size-cell { color: #718093; font-size: 9px; }
 .file-type-cell > span { display: inline-flex; min-height: 20px; align-items: center; padding: 0 6px; border-radius: 6px; }
 .file-type-cell > span.directory { color: #875a16; border: 1px solid #efddb7; background: #fff2d7; font-weight: 700; }
 .file-type-cell > span.resource { color: #705187; border: 1px solid #e2d5ed; background: #f2ebf7; font-weight: 700; }
@@ -411,8 +412,8 @@ button { font: inherit; }
 .file-icon-card:hover, .file-icon-card.selected { border-color: #9cc2e9; background: #edf6ff; box-shadow: 0 4px 13px rgba(41,83,124,.07); }
 .file-icon-card .file-type-icon { width: 37px; height: 37px; margin-bottom: auto; }
 .file-icon-card strong, .file-icon-card small { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-icon-card strong { margin-top: 8px; color: #304255; font-size: 9px; }
-.file-icon-card small { margin-top: 2px; color: #8e99a5; font-size: 7px; }
+.file-icon-card strong { margin-top: 8px; color: #304255; font-size: 10px; }
+.file-icon-card small { margin-top: 2px; color: #85919e; font-size: 8px; }
 .file-empty-state { position: absolute; inset: 35px 0 0; min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 24px; color: #8794a2; text-align: center; }
 .file-empty-state > svg { width: 31px; height: 31px; margin-bottom: 5px; color: #93a4b7; }
 .file-empty-state > .loader { width: 26px; height: 26px; margin-bottom: 7px; }
@@ -435,6 +436,8 @@ button { font: inherit; }
 .file-inspector-preview.resource { color: #78509d; background: linear-gradient(145deg,#efe6f8,#e4f2f7); }
 .file-inspector-preview.music, .file-inspector-preview.movies { color: #7e6a47; background: linear-gradient(145deg,#f6efdf,#edf1f4); }
 .file-inspector-preview svg { width: 40px; height: 40px; }
+.file-inspector-preview.image { overflow: hidden; background: #e8eef3; }
+.file-inspector-preview.image img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .file-inspector-copy { min-height: 0; padding: 0 14px 14px; overflow: auto; }
 .file-inspector-copy h3 { margin: 0 0 4px; overflow-wrap: anywhere; color: #253646; font-size: 12px; }
 .file-inspector-copy > p { margin: 0 0 13px; color: #83909e; font-size: 8px; }

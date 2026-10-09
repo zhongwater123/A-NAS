@@ -194,6 +194,38 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
+  it("previews an image file in the details pane", async () => {
+    installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [{ id: "file:photo", spaceId: "space:owner", name: "family-photo.jpg", kind: "file", sizeBytes: 2048, modifiedAt: "2026-10-08T10:00:00Z" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("family-photo.jpg"));
+    await user.click(row!);
+
+    const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
+    const preview = within(inspector).getByRole("img", { name: "family-photo.jpg 的预览" });
+    expect(preview.getAttribute("src")).toBe("/api/v1/files/file%3Aphoto/content?disposition=inline");
+  });
+
+  it("does not report the whole data volume as used when usage is unavailable", async () => {
+    installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 500_107_862_016, state: "available" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const values = dialog.querySelectorAll(".file-volume-values strong");
+
+    expect(values[0]?.textContent).toBe("—");
+    expect(values[1]?.textContent).toBe("466 GB");
+  });
+
   it("enables photos, trash, snapshots, accounts, and storage", async () => {
     installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });

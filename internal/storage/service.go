@@ -77,7 +77,7 @@ type Volume struct {
 	DiskID         string      `json:"diskId"`
 	FilesystemUUID string      `json:"filesystemUuid,omitempty"`
 	CapacityBytes  uint64      `json:"capacityBytes,omitempty"`
-	AvailableBytes uint64      `json:"availableBytes,omitempty"`
+	AvailableBytes *uint64     `json:"availableBytes,omitempty"`
 	State          VolumeState `json:"state"`
 }
 
@@ -354,6 +354,7 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 	state, readErr := s.reader.Read(ctx)
 	for index := range volumes {
 		volumes[index].State = VolumeStateUnavailable
+		volumes[index].AvailableBytes = nil
 		if readErr != nil {
 			continue
 		}
@@ -362,6 +363,11 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 				volumes[index].CapacityBytes = disk.CapacityBytes
 				if disk.Role == hoststate.DiskRoleData {
 					volumes[index].State = VolumeStateAvailable
+					if disk.FilesystemCapacityBytes != nil && disk.FilesystemAvailableBytes != nil {
+						volumes[index].CapacityBytes = *disk.FilesystemCapacityBytes
+						available := *disk.FilesystemAvailableBytes
+						volumes[index].AvailableBytes = &available
+					}
 				}
 				break
 			}

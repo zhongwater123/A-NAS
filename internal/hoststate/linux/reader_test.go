@@ -101,6 +101,23 @@ func TestReaderReturnsOneDebianObservation(t *testing.T) {
 	}
 }
 
+func TestObserveDataVolumeUsageReportsFilesystemCapacity(t *testing.T) {
+	disks := []hoststate.Disk{{Role: hoststate.DiskRoleData}}
+	observeDataVolumeUsage(disks, func(path string) (uint64, uint64, error) {
+		if path != "/srv/a-nas/data" {
+			t.Fatalf("usage path = %q", path)
+		}
+		return 500_107_862_016, 482_000_000_000, nil
+	})
+
+	if disks[0].FilesystemCapacityBytes == nil || *disks[0].FilesystemCapacityBytes != 500_107_862_016 {
+		t.Fatalf("filesystem capacity = %v", disks[0].FilesystemCapacityBytes)
+	}
+	if disks[0].FilesystemAvailableBytes == nil || *disks[0].FilesystemAvailableBytes != 482_000_000_000 {
+		t.Fatalf("filesystem available = %v", disks[0].FilesystemAvailableBytes)
+	}
+}
+
 func TestReaderRejectsObservationWithoutSystemDisk(t *testing.T) {
 	reader := newReader(dependencies{
 		root: fstest.MapFS{

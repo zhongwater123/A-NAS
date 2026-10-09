@@ -699,36 +699,40 @@ type operatingSystemDocument struct {
 }
 
 type diskDocument struct {
-	ID                 string              `json:"id"`
-	Model              string              `json:"model"`
-	Transport          hoststate.Transport `json:"transport"`
-	CapacityBytes      uint64              `json:"capacityBytes"`
-	Rotational         bool                `json:"rotational"`
-	Removable          bool                `json:"removable"`
-	InUse              bool                `json:"inUse"`
-	Filesystems        []string            `json:"filesystems"`
-	Role               hoststate.DiskRole  `json:"role"`
-	Health             hoststate.Health    `json:"health"`
-	SMARTStatus        hoststate.Health    `json:"smartStatus"`
-	TemperatureCelsius *int                `json:"temperatureCelsius,omitempty"`
+	ID                       string              `json:"id"`
+	Model                    string              `json:"model"`
+	Transport                hoststate.Transport `json:"transport"`
+	CapacityBytes            uint64              `json:"capacityBytes"`
+	FilesystemCapacityBytes  *uint64             `json:"filesystemCapacityBytes,omitempty"`
+	FilesystemAvailableBytes *uint64             `json:"filesystemAvailableBytes,omitempty"`
+	Rotational               bool                `json:"rotational"`
+	Removable                bool                `json:"removable"`
+	InUse                    bool                `json:"inUse"`
+	Filesystems              []string            `json:"filesystems"`
+	Role                     hoststate.DiskRole  `json:"role"`
+	Health                   hoststate.Health    `json:"health"`
+	SMARTStatus              hoststate.Health    `json:"smartStatus"`
+	TemperatureCelsius       *int                `json:"temperatureCelsius,omitempty"`
 }
 
 func documentFromDomain(state hoststate.State) stateDocument {
 	disks := make([]diskDocument, len(state.Disks))
 	for i, disk := range state.Disks {
 		disks[i] = diskDocument{
-			ID:                 disk.ID.String(),
-			Model:              disk.Model,
-			Transport:          disk.Transport,
-			CapacityBytes:      disk.CapacityBytes,
-			Rotational:         disk.Rotational,
-			Removable:          disk.Removable,
-			InUse:              disk.InUse,
-			Filesystems:        append([]string(nil), disk.Filesystems...),
-			Role:               disk.Role,
-			Health:             disk.Health,
-			SMARTStatus:        disk.SMARTStatus,
-			TemperatureCelsius: disk.TemperatureCelsius,
+			ID:                       disk.ID.String(),
+			Model:                    disk.Model,
+			Transport:                disk.Transport,
+			CapacityBytes:            disk.CapacityBytes,
+			FilesystemCapacityBytes:  disk.FilesystemCapacityBytes,
+			FilesystemAvailableBytes: disk.FilesystemAvailableBytes,
+			Rotational:               disk.Rotational,
+			Removable:                disk.Removable,
+			InUse:                    disk.InUse,
+			Filesystems:              append([]string(nil), disk.Filesystems...),
+			Role:                     disk.Role,
+			Health:                   disk.Health,
+			SMARTStatus:              disk.SMARTStatus,
+			TemperatureCelsius:       disk.TemperatureCelsius,
 		}
 	}
 	return stateDocument{
@@ -781,24 +785,32 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 		if strings.TrimSpace(disk.Model) == "" || disk.CapacityBytes == 0 || !validTransport(disk.Transport) || !validRole(disk.Role) || !validHealth(disk.Health) || !validHealth(disk.SMARTStatus) {
 			return hoststate.State{}, errors.New("invalid disk state")
 		}
+		if (disk.FilesystemCapacityBytes == nil) != (disk.FilesystemAvailableBytes == nil) {
+			return hoststate.State{}, errors.New("incomplete filesystem usage")
+		}
+		if disk.FilesystemCapacityBytes != nil && (disk.Role != hoststate.DiskRoleData || *disk.FilesystemCapacityBytes == 0 || *disk.FilesystemAvailableBytes > *disk.FilesystemCapacityBytes) {
+			return hoststate.State{}, errors.New("invalid filesystem usage")
+		}
 		for _, filesystem := range disk.Filesystems {
 			if strings.TrimSpace(filesystem) == "" {
 				return hoststate.State{}, errors.New("invalid disk filesystem evidence")
 			}
 		}
 		disks[i] = hoststate.Disk{
-			ID:                 id,
-			Model:              disk.Model,
-			Transport:          disk.Transport,
-			CapacityBytes:      disk.CapacityBytes,
-			Rotational:         disk.Rotational,
-			Removable:          disk.Removable,
-			InUse:              disk.InUse,
-			Filesystems:        append([]string(nil), disk.Filesystems...),
-			Role:               disk.Role,
-			Health:             disk.Health,
-			SMARTStatus:        disk.SMARTStatus,
-			TemperatureCelsius: disk.TemperatureCelsius,
+			ID:                       id,
+			Model:                    disk.Model,
+			Transport:                disk.Transport,
+			CapacityBytes:            disk.CapacityBytes,
+			FilesystemCapacityBytes:  disk.FilesystemCapacityBytes,
+			FilesystemAvailableBytes: disk.FilesystemAvailableBytes,
+			Rotational:               disk.Rotational,
+			Removable:                disk.Removable,
+			InUse:                    disk.InUse,
+			Filesystems:              append([]string(nil), disk.Filesystems...),
+			Role:                     disk.Role,
+			Health:                   disk.Health,
+			SMARTStatus:              disk.SMARTStatus,
+			TemperatureCelsius:       disk.TemperatureCelsius,
 		}
 	}
 	return hoststate.State{

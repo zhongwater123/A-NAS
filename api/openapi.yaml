@@ -246,7 +246,7 @@ paths:
   /api/v1/files/{fileId}/content:
     get:
       operationId: downloadFile
-      parameters: [{ $ref: "#/components/parameters/FileID" }, { name: Range, in: header, schema: { type: string } }]
+      parameters: [{ $ref: "#/components/parameters/FileID" }, { name: Range, in: header, schema: { type: string } }, { name: disposition, in: query, description: Use inline for browser-previewable raster images; other files remain attachments., schema: { type: string, enum: [inline] } }]
       responses:
         "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }

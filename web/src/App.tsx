@@ -57,7 +57,7 @@ import { Component, CSSProperties, ErrorInfo, FormEvent, KeyboardEvent as ReactK
 import {
   APIError, DiskRole, FileEntry, Health, HostState, Notification, Session, Snapshot, SnapshotEntry, Space, StoragePlan, TrashItem, User, ViewingScope, Volume,
   acknowledgeNotification, changePassword, confirmStoragePlan, copyFile, createDirectory, createMember, createSnapshot, createStoragePlan, currentSession, deleteFile,
-  deleteSnapshot, disableMember, endViewing, executeStoragePlan, fileDownloadURL, getSetupStatus, listEntries, listNotifications, listSnapshots,
+  deleteSnapshot, disableMember, endViewing, executeStoragePlan, fileDownloadURL, filePreviewURL, getSetupStatus, listEntries, listNotifications, listSnapshots,
   listSnapshotEntries, listSpaces, listTrash, listUsers, listVolumes, login, logout, moveFile, onSessionEnded, purgeTrash, resetMember,
   restoreSnapshotEntry, restoreTrash, setSession, setupAdministrator, startViewing, uploadFile,
 } from "./api";
@@ -536,6 +536,7 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 	const [creatingDirectory, setCreatingDirectory] = useState(false);
 	const [renaming, setRenaming] = useState<FileEntry>();
 	const [pendingDelete, setPendingDelete] = useState<FileEntry>();
+	const [failedPreviewID, setFailedPreviewID] = useState("");
 	const [error, setError] = useState("");
 	const managerRef = useRef<HTMLDivElement>(null);
 	const parentID = trail.at(-1)?.id ?? "";
@@ -562,6 +563,7 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 	}, []);
 	useEffect(() => { void loadSpaces(); void refreshVolume(); }, [loadSpaces, refreshVolume]);
 	useEffect(() => { if (spaceID) void refresh(spaceID, parentID); }, [spaceID, parentID, refresh]);
+	useEffect(() => { setFailedPreviewID(""); }, [selectedItemID]);
 	useEffect(() => {
 		if (!pendingDelete && !renaming && !viewMenuOpen) return;
 		const closeOnEscape = (event: KeyboardEvent) => {
@@ -594,9 +596,10 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 	const totalSize = visibleItems.reduce((total, item) => total + (item.kind === "file" ? item.sizeBytes : 0), 0);
 	const selectedSpaceLabel = selectedSpace?.kind === "shared" ? "共享空间" : selectedSpace?.viewing ? `只读查看 · ${selectedSpace.name}` : "个人空间";
 	const capacityBytes = volume?.capacityBytes ?? 0;
-	const availableBytes = volume?.availableBytes ?? 0;
-	const usedBytes = Math.max(0, capacityBytes - availableBytes);
-	const usedPercent = capacityBytes ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
+	const usageKnown = capacityBytes > 0 && volume?.availableBytes !== undefined;
+	const availableBytes = usageKnown ? Math.min(capacityBytes, Math.max(0, volume.availableBytes!)) : 0;
+	const usedBytes = usageKnown ? capacityBytes - availableBytes : 0;
+	const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
 	const canMutateSelection = Boolean(selectedEntry && !viewing && !activity);
 	const canPaste = Boolean(clipboard && !viewing && !activity && !(clipboard.mode === "move" && (clipboard.entry.parentId ?? "") === parentID));
 
@@ -718,8 +721,8 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 			})}</nav>
 			<div className="file-volume-card">
 				<header><strong>数据卷</strong><span className={`file-volume-state ${volume?.state ?? "unavailable"}`}>{volume?.state === "available" ? "在线" : "不可用"}</span></header>
-				<div className="file-volume-track" role="progressbar" aria-label={`数据卷已使用 ${usedPercent}%`} aria-valuenow={usedPercent} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${usedPercent}%` }} /></div>
-				<div className="file-volume-values"><span>已用空间</span><span>总空间</span><strong>{capacityBytes ? formatFileSize(usedBytes) : "—"}</strong><strong>{capacityBytes ? formatFileSize(capacityBytes) : "—"}</strong></div>
+				<div className={`file-volume-track ${usageKnown ? "" : "unknown"}`} role="progressbar" aria-label={usageKnown ? `数据卷已使用 ${usedPercent}%` : "数据卷使用情况暂不可用"} aria-valuenow={usageKnown ? usedPercent : undefined} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${usedPercent}%` }} /></div>
+				<div className="file-volume-values"><span>已用空间</span><span>总空间</span><strong>{usageKnown ? formatFileSize(usedBytes) : "—"}</strong><strong>{capacityBytes ? formatFileSize(capacityBytes) : "—"}</strong></div>
 			</div>
 		</aside>
 
@@ -790,7 +793,7 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 
 		<aside className="file-inspector" aria-label="详细信息">
 			<header>详细信息</header>
-			{selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""}`}>{itemIcon(selectedItem)}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatFileSize(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
+			{selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isBrowserPreviewableImage(selectedItem.name) ? "image" : ""}`}>{selectedItem.entry?.kind === "file" && isBrowserPreviewableImage(selectedItem.name) && failedPreviewID !== selectedItem.id ? <img src={filePreviewURL(selectedItem.entry.id)} alt={`${selectedItem.name} 的预览`} onError={() => setFailedPreviewID(selectedItem.id)} /> : itemIcon(selectedItem)}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatFileSize(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
 		</aside>
 
 		{pendingDelete && <div className="file-dialog-backdrop"><section className="file-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="file-delete-title"><span className="file-confirm-icon"><Trash2 /></span><div><h3 id="file-delete-title">移到回收站？</h3><p>“{pendingDelete.name}”将移到回收站，可在 30 天内恢复。</p></div><div className="file-confirm-actions"><button disabled={Boolean(activity)} onClick={() => setPendingDelete(undefined)}>取消</button><button className="danger-button" disabled={Boolean(activity)} onClick={() => void removeEntry()}>{activity ? "正在移动…" : "移到回收站"}</button></div></section></div>}
@@ -992,6 +995,11 @@ function fileTypeLabel(name: string): string {
 	if (["xls", "xlsx", "csv"].includes(extension ?? "")) return "电子表格";
 	if (["doc", "docx", "txt", "md"].includes(extension ?? "")) return "文档";
 	return extension ? `${extension.toLocaleUpperCase("en-US")} 文件` : "文件";
+}
+
+function isBrowserPreviewableImage(name: string): boolean {
+	const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
+	return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(extension ?? "");
 }
 
 function fileSortLabel(sort: FileSort): string {
