@@ -46,6 +46,9 @@ export interface InstallPlan {
   containers: string[];
   ports: Array<{ hostPort: number; containerPort: number; protocol: string; purpose?: string }>;
   mounts: Array<{ hostPath: string; containerPath: string; kind: "appdata" | "shared" | "system"; readOnly: boolean; purpose?: string }>;
+  // Docker networks the install creates and the address pools they come from.
+  networks: string[];
+  addressPools: string[];
   digest: string;
   compose: string;
 }

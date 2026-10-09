@@ -24,6 +24,13 @@ var (
 	ErrPortInUse        = errors.New("a published port is already in use")
 	ErrNameInUse        = errors.New("a container name is already in use")
 	ErrUnavailable      = errors.New("app store engine is unavailable")
+	// ErrAddressPoolMissing refuses apps that create Docker networks while
+	// Docker allocates from its built-in pools, which overlap common LAN
+	// ranges (ADR 0013).
+	ErrAddressPoolMissing = errors.New("Docker has no address pool for app networks")
+	// ErrNetworkOutsidePool fails an install whose network Docker placed
+	// outside the address pools; the install is rolled back.
+	ErrNetworkOutsidePool = errors.New("an app network is outside the Docker address pools")
 )
 
 // ValidID reports whether id can name a catalog app and its Compose project.

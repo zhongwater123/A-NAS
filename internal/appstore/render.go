@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"path"
 	"sort"
 	"strconv"
@@ -67,8 +68,8 @@ type PortMapping struct {
 }
 
 // Plan is what the owner confirms before an install: the identity the app
-// runs as, images that will be pulled, host ports that will open and host
-// folders containers can write.
+// runs as, images that will be pulled, host ports that will open, host
+// folders containers can write and Docker networks the app creates.
 type Plan struct {
 	AppID      string
 	Title      string
@@ -79,8 +80,15 @@ type Plan struct {
 	Containers []string
 	Ports      []PortMapping
 	Mounts     []Mount
-	Digest     string
-	Compose    []byte
+	// Networks are the Compose networks the install creates, including the
+	// implicit default network; empty when every service uses Docker's
+	// default bridge.
+	Networks []string
+	// AddressPools are the Docker address pools those networks come from. The
+	// engine fills them in; Render does not know the daemon.
+	AddressPools []netip.Prefix
+	Digest       string
+	Compose      []byte
 }
 
 // PolicyError lists every reason a manifest cannot be installed.
@@ -134,6 +142,10 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 		if bool(network.External) || (network.Driver != "" && network.Driver != "bridge") {
 			reject("network %s is external or not a bridge", name)
 		}
+		// Addresses come only from the A-NAS address pool (ADR 0013).
+		if network.Ipam.Driver != "" || len(network.Ipam.Config) > 0 {
+			reject("network %s sets its own address range", name)
+		}
 	}
 	for name, config := range project.Configs {
 		if config.File != "" {
@@ -147,6 +159,10 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 	}
 
 	plan := Plan{AppID: entry.App.ID, Title: entry.App.Title, Version: entry.App.Version, Project: project.Name, Identity: identity}
+	for name := range project.Networks {
+		plan.Networks = append(plan.Networks, name)
+	}
+	sort.Strings(plan.Networks)
 	// Volume name to the folder it is rooted at.
 	bases := map[string]string{}
 	serviceNames := make([]string, 0, len(project.Services))

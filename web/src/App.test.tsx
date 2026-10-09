@@ -73,6 +73,8 @@ const memosPlan = {
   containers: ["memos"],
   ports: [{ hostPort: 5230, containerPort: 5230, protocol: "tcp", purpose: "WebUI 端口" }],
   mounts: [{ hostPath: "/srv/a-nas/data/apps/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false }],
+  networks: [] as string[],
+  addressPools: [] as string[],
   digest: "d".repeat(64),
   compose: "name: a-nas-memos\n",
 };
@@ -483,6 +485,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(plan).getByText("/srv/a-nas/data/apps/memos/memos")).toBeTruthy();
     expect(within(plan).getByText("app-memos")).toBeTruthy();
     expect(within(plan).getByText(/只访问自己的应用数据/)).toBeTruthy();
+    expect(within(plan).getByText("使用 Docker 默认网桥，不新建网络")).toBeTruthy();
     expect(posts).toHaveLength(0);
 
     await user.click(within(plan).getByRole("button", { name: "确认安装" }));
@@ -523,6 +526,35 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
     expect(await screen.findByText("应用中心未启用")).toBeTruthy();
+  });
+
+  it("shows the Docker networks an app creates and refuses them without an address pool", async () => {
+    let poolConfigured = true;
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      apps: async (url) => {
+        if (url.endsWith("/plan")) {
+          return poolConfigured
+            ? okResponse({ ...memosPlan, networks: ["default"], addressPools: ["10.96.64.0/19"] })
+            : { ok: false, status: 409, json: async () => ({ error: { code: "address_pool_missing", message: "Docker has no address pool for app networks" } }) } as Response;
+        }
+        return okResponse(appList({}));
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
+    const store = screen.getByRole("dialog", { name: "应用中心" });
+    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
+    await user.click(within(store).getByRole("button", { name: "安装" }));
+    const plan = await within(store).findByRole("region", { name: "安装计划" });
+    expect(within(plan).getByText("default")).toBeTruthy();
+    expect(within(plan).getByText(/地址只从 10\.96\.64\.0\/19 分配/)).toBeTruthy();
+
+    await user.click(within(plan).getByRole("button", { name: "取消" }));
+    poolConfigured = false;
+    await user.click(within(store).getByRole("button", { name: "安装" }));
+    expect((await within(store).findByRole("alert")).textContent).toContain("Docker 尚未配置 A-NAS 网络地址池");
   });
 
   it("explains when app installation is blocked by an unavailable data volume", async () => {

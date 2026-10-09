@@ -3,6 +3,7 @@ package appstore_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -162,6 +163,34 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 				t.Fatalf("Render() error = %v, want policy error", err)
 			}
 		})
+	}
+}
+
+func TestRenderListsNetworksAndRefusesOwnAddressRanges(t *testing.T) {
+	ctx := context.Background()
+	plan, err := appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, testIdentity)
+	if err != nil || !slices.Equal(plan.Networks, []string{"default"}) {
+		t.Fatalf("implicit network = %v, %v; want the Compose default network", plan.Networks, err)
+	}
+	plan, err = appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n    network_mode: bridge\n"), testPolicy, testIdentity)
+	if err != nil || len(plan.Networks) != 0 {
+		t.Fatalf("default bridge = %v, %v; want no networks", plan.Networks, err)
+	}
+
+	_, err = appstore.Render(ctx, entry(`
+services:
+  web:
+    image: example/web:1
+    networks: [app]
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
+`), testPolicy, testIdentity)
+	var policyError *appstore.PolicyError
+	if !errors.As(err, &policyError) || !strings.Contains(err.Error(), "network app sets its own address range") {
+		t.Fatalf("own subnet error = %v", err)
 	}
 }
 
