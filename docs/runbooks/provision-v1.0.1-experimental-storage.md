@@ -50,6 +50,8 @@
 
 屏保视频不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)），安装器保留当前视频池。首次升级时，安装器会导入旧安装器留下的池。更换视频的步骤见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
 
+本地 AI 随每个 release 安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：安装器把 release 引用的模型与运行环境按内容各存一份，已有时直接复用，并启用 `anas-ai.socket`。第一次安装带 AI 的 release 时按[启用相册本地 AI](enable-photo-ai.md)核对。
+
 安装器最后核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时以退出码 5 结束，此时新版本已切换但 Web 文件与终端不可用，按[回滚](#回滚)恢复上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 
 全新实验机首次安装才使用发布目录中的交互向导；它会复核稳定磁盘身份、安装依赖、停止旧用户级预览服务、安装系统服务并逐步引导产品初始化：
@@ -70,7 +72,7 @@ EXPECTED_DISK_SERIAL=Z2AYDZPB \
 ```bash
 # 仅在仓库源可达时安装一次；若 apt 失败，停止，不进入格式化流程。
 apt-get update
-apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0
+apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2
 
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 release_id=<GIT_SHA>

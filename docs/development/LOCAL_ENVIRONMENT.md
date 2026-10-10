@@ -139,7 +139,7 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
 - 检查存储区与套接字的属主、权限和隔离。
 - 注入数据卷故障：把卷建在 device-mapper 设备上，换成 `error` 目标使 Btrfs 转为只读，再懒卸载与重新挂载，并在上传中途强制终止相册服务，确认相册暂停服务、不写系统盘并在卷恢复后自行重新打开。
 
-相册 AI Worker（`ai/`）的协议测试只需 Python 标准库：`make ai-test`。使用真实 EmbeddingGemma 2 的测试需要 MediaPipe，在 Debian 13 开发镜像中运行，模型从开发机预留位置只读挂载（见 [M2 实施方案](../architecture/photo-ai.md#模型文件位置)）：
+相册 AI Worker（`ai/`）的协议测试只需 Python 标准库：`make ai-test`。使用真实 EmbeddingGemma 2 的测试需要 MediaPipe，在 Debian 13 开发镜像中运行，模型从开发机预留位置只读挂载（见 [M2 实施方案](../architecture/photo-ai.md#模型与运行环境的交付)）：
 
 ```bash
 docker build -t anas-ai-dev:trixie -f ai/dev.Dockerfile ai      # 基于 anas-systemd:trixie
@@ -148,6 +148,8 @@ docker run --rm --cpuset-cpus=0-3 -v "$PWD:/src:ro" -w /src/ai \
   -e ANAS_AI_MODEL=/models/embeddinggemma-2-740m.litertlm -e PYTHONDONTWRITEBYTECODE=1 \
   anas-ai-dev:trixie /opt/anas-ai/bin/python -m unittest discover -s tests -t .
 ```
+
+发行用的 Worker 运行环境（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）也在开发机上构建：`scripts/build-ai-runtime.sh` 在同一开发镜像中按 [`ai/requirements.lock`](../../ai/requirements.lock) 的哈希安装 wheel，打包为 `build/ai-runtime/<ID>.tar.gz`，并写出 `deploy-dev.ps1` 读取的 `build/ai-runtime.json`。同一 ID 的包已存在时直接复用，因此 NAS 上看到的哈希不变；锁文件改了版本后先运行 `scripts/build-ai-runtime.sh --lock` 更新哈希。两者都从 PyPI 下载，NAS 不需要。2026-10-10 的包 `ccd886271b067afa` 压缩后 163 MB，解开约 460 MB。
 
 AI 标签阈值的校准（`ai/eval/`）使用放在 `D:\A-NAS-datasets`（WSL 中为 `/mnt/d/A-NAS-datasets`）的公开数据集，只在开发机使用，不进入仓库、NAS 或发行包；数据集来源、许可与结论见[标签校准报告](../research/photo-ai-label-calibration.md)。COCO 与 Open Images 元数据按报告中的地址下载并解压后，依次逐张下载其余图片、计算向量、校准阈值：
 
@@ -182,6 +184,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 安装器配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
 - 重启 Host Agent 后以上行为保持；
 - 屏保视频的独立通道（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：暂存只上传缺少的视频并复用旧 release 暂存过的视频；安装后的池成为当前池，release 升级保留它；共有的视频只存一份；重复安装同一个池不产生变化；切回已安装的池不需要暂存区；视频哈希不符或池 ID 与清单不符时拒绝且不留改动；从旧安装器首次升级时以硬链接导入它留下的池；
+- 本地 AI 随系统安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：套接字只对相册服务的组开放，搜索经套接字按需启动 Worker，Worker 以动态分配的身份运行；放在 Worker 自己单元中的探针打不开网络套接字、列不出数据卷，而同一探针在沙箱外可以；暂存的模型与清单不符时拒绝安装且不留改动；升级不重复复制模型与运行环境，并启动新 release 的 Worker。CI 使用替身模型、只含 Debian Python 的运行环境与 Worker 的假 Provider；
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 ```bash
@@ -192,6 +195,12 @@ make system-test
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
+- 部署前在开发机用真实运行环境与模型再跑一遍，同样的检查改由真实模型编码查询：
+
+  ```bash
+  scripts/build-ai-runtime.sh
+  ANAS_SYSTEM_TEST_AI=real ANAS_AI_MODEL=/mnt/d/A-NAS-models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm     bash scripts/system-test.sh anas-systemd:trixie
+  ```
 
 ## 实验 NAS 接入
 

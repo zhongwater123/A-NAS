@@ -1,0 +1,16 @@
+[Unit]
+Description=A-NAS local AI socket
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Socket]
+# The first connection starts anas-ai.service, which serves connections one at
+# a time and exits when idle (docs/architecture/photo-ai.md). Only the photo
+# service's group reaches it.
+ListenStream=/run/a-nas-ai/ai.sock
+SocketUser=root
+SocketGroup=a-nas-photos
+SocketMode=0660
+DirectoryMode=0755
+
+[Install]
+WantedBy=sockets.target

@@ -10,6 +10,11 @@
 # Usage: make build-binaries && scripts/build-system-test-image.sh &&
 #        scripts/system-test.sh [IMAGE]
 # Prints PASS/FAIL lines and exits non-zero on any failure.
+#
+# Local AI runs on a stand-in model and runtime with the Worker's fake
+# provider. With ANAS_SYSTEM_TEST_AI=real, after scripts/build-ai-runtime.sh and
+# with ANAS_AI_MODEL naming the model file, it installs the real runtime and
+# model instead.
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -18,9 +23,15 @@ if [[ "${1:-}" != --inside ]]; then
   for binary in anas-api anas-host-agent; do
     [[ -x "$repo/build/$binary" ]] || { echo "missing build/$binary: run make build-binaries" >&2; exit 2; }
   done
+  real_ai=()
+  if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
+    [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
+    [[ -f "${ANAS_AI_MODEL:-}" ]] || { echo "ANAS_AI_MODEL must name the model file" >&2; exit 2; }
+    real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro")
+  fi
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "$image" >/dev/null
+    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "$image" >/dev/null
   trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT
   for _ in $(seq 1 60); do
     state=$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)
@@ -41,6 +52,34 @@ fi
 # private mounts, which would hide that.
 mount --make-rshared /
 
+# The model and runtime the releases pin (ADR 0016), staged once as
+# deploy-dev.ps1 stages them. The stand-in runtime is a virtual environment
+# around Debian's Python alone, which the fake provider needs.
+ai=/tmp/ai-staged
+install -d "$ai"
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
+  cp /src/deploy/models/embeddinggemma-2-740m.json "$ai/model.json"
+  ln -s "/ai-model/$(jq -r .file "$ai/model.json")" "$ai/model.litertlm"
+  cp /src/build/ai-runtime.json "$ai/runtime.json"
+  ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
+else
+  head -c 65536 /dev/urandom > "$ai/model.litertlm"
+  printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
+    "$(stat -c %s "$ai/model.litertlm")" "$(sha256sum "$ai/model.litertlm" | cut -d ' ' -f 1)" > "$ai/model.json"
+  install -d "$ai/venv/bin"
+  ln -s /usr/bin/python3 "$ai/venv/bin/python"
+  printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
+    "$(python3 -c 'import platform; print(platform.python_version())')" > "$ai/venv/pyvenv.cfg"
+  tar -C "$ai/venv" -czf "$ai/runtime.tar.gz" .
+  runtime_sha=$(sha256sum "$ai/runtime.tar.gz" | cut -d ' ' -f 1)
+  printf '{"id":"%s","python":"%s","file":"runtime.tar.gz","sizeBytes":%s,"sha256":"%s"}\n' "${runtime_sha:0:16}" \
+    "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$ai/runtime.tar.gz")" \
+    "$runtime_sha" > "$ai/runtime.json"
+  install -d /etc/systemd/system/anas-ai.service.d
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake\n' \
+    > /etc/systemd/system/anas-ai.service.d/system-test.conf
+fi
+
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
@@ -48,6 +87,13 @@ stage() {
   for unit in anas-api anas-host-agent anas-photos; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
+  install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
+  install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
+  install -d "$1/ai/anas_ai"
+  install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
+  install -m 0644 "$ai/model.json" "$ai/runtime.json" "$1/ai/"
+  ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
+  ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
 }
@@ -280,6 +326,66 @@ check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
 check "Product Service account cannot list the photo store" denied as a-nas ls "$data/photos"
 
+# --- Local AI is built in (ADR 0016): started on demand, without network or
+# data volume.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+semantic_search() { curl -fsS -b /tmp/alice.jar --get --data-urlencode "q=$1" "$api/api/v1/photos/search" | jq -e '.semantic == true' >/dev/null; }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+dynamic_identity() { # UNIT: runs under a UID systemd allocates for it, not root
+  local uid
+  uid=$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value "$1")/status")
+  ((uid >= 61184 && uid <= 65519))
+}
+check "the installer enables the AI socket" systemctl is-enabled --quiet anas-ai.socket
+check "only the photo service reaches the AI socket" \
+  test "$(stat -c '%a %U %G' /run/a-nas-ai/ai.sock)" = "660 root a-nas-photos"
+check "the release links the model and runtime kept once by content" \
+  test "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/model.json")/$(jq -r .file "$ai/model.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(jq -r .id "$ai/runtime.json")"
+check "search starts the Worker through its socket" semantic_search 猫
+check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
+  check "the Worker serves the real model in its sandbox" \
+    journal_has anas-ai.service "$installed_at" "serving $(jq -r .name "$ai/model.json")@$(jq -r .sha256 "$ai/model.json" | cut -c1-12)"
+fi
+# A probe in the Worker's own unit, in place of the Worker.
+cat > /usr/local/lib/anas-ai-probe.py <<'PY'
+import os, socket, sys
+leaks = []
+for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
+    try:
+        socket.socket(family, kind).close()
+        leaks.append(f"opened a {family.name} socket")
+    except OSError:
+        pass
+try:
+    os.listdir("/srv/a-nas/data")
+    leaks.append("listed the data volume")
+except OSError:
+    pass
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/runtime/bin/python /usr/local/lib/anas-ai-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
+  /etc/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-probe.service
+systemctl daemon-reload
+check "the probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-ai-probe.py
+check "the Worker's sandbox opens no network socket and cannot read the data volume" \
+  systemctl start anas-ai-probe.service
+journalctl -u anas-ai-probe.service -o cat --no-pager | grep -E 'contained|opened|listed' | tail -n 1 || true
+staged_tampered=/tmp/tampered
+stage "$staged_tampered"
+rm "$staged_tampered/ai/model.litertlm"
+head -c 1024 /dev/urandom > "$staged_tampered/ai/model.litertlm"
+jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
+  "$ai/model.json" > "$staged_tampered/ai/model.json"
+check "a staged model that does not match its manifest is refused" \
+  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+check "the refused release changes nothing" \
+  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
+  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 1
+
 # --- One password for Web and SMB.
 new_password=$(secret)
 check "member changes her password on the Web" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
@@ -356,6 +462,11 @@ check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools
 stage /tmp/upgrade
 check "a release installs" install_release upgrade
 check "the upgrade keeps the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
+check "the upgrade copies neither the model nor the runtime again" \
+  test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = 2 \
+  -a "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "$(readlink /opt/a-nas/releases/system-test/ai/model.litertlm)"
+login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "search reaches the upgraded release's Worker" semantic_search 猫
 stage_pool "$v2" "$v3"
 pool_b=$pool
 check "a new pool uploads only its new video" test "$uploads" = 2

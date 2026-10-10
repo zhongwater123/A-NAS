@@ -90,7 +90,35 @@ install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
+install -m 0644 anas-ai-system.socket.incoming anas-ai-system.socket
+install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
+# Local AI (ADR 0016): the Worker's code and the manifests of the model and
+# runtime it pins. deploy-dev.ps1 uploads the model and runtime once per
+# content; link the staged copies the root installer copies and checks.
+rm -rf ai
+install -d -m 0750 ai
+tar -C ai --strip-components=1 -xf ai-worker.tar.incoming
+install -m 0644 ai-model.json.incoming ai/model.json
+install -m 0644 ai-runtime.json.incoming ai/runtime.json
+manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
+model_sha=$(manifest_field ai/model.json sha256)
+model_file=$(manifest_field ai/model.json file)
+runtime_sha=$(manifest_field ai/runtime.json sha256)
+runtime_file=$(manifest_field ai/runtime.json file)
+[[ "$model_sha" =~ ^[0-9a-f]{64}$ && "$model_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid model manifest" >&2; exit 2; }
+[[ "$runtime_sha" =~ ^[0-9a-f]{64}$ && "$runtime_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid AI runtime manifest" >&2; exit 2; }
+staged_model="$HOME/apps/a-nas/models/$model_sha/$model_file"
+staged_runtime="$HOME/apps/a-nas/ai-runtimes/$runtime_file"
+printf '%s  %s\n' "$model_sha" "$staged_model" | sha256sum --check --quiet -
+printf '%s  %s\n' "$runtime_sha" "$staged_runtime" | sha256sum --check --quiet -
+ln -s "$staged_model" ai/model.litertlm
+ln -s "$staged_runtime" ai/runtime.tar.gz
 rm -f \
+  anas-ai-system.socket.incoming \
+  anas-ai-system.service.incoming \
+  ai-worker.tar.incoming \
+  ai-model.json.incoming \
+  ai-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
   kiosk-launcher.incoming \
