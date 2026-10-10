@@ -127,9 +127,9 @@ func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle 
 	}
 }
 
-// ProcessAIJob fetches one missing label text vector or runs one ready
-// embedding job, and reports whether it did. It does nothing while gate is closed or the Worker is away; the error
-// returned is only for Catalog or storage faults.
+// ProcessAIJob runs one ready embedding job and reports whether it did. It
+// does nothing while gate is closed or the Worker is away; the error returned
+// is only for Catalog or storage faults.
 func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (bool, error) {
 	if open, reason := gate.Open(ctx); !open {
 		s.ai.set(AIPaused, reason, "")
@@ -140,7 +140,7 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	// work for it. A new model comes with a release, whose install restarts
 	// this service, or shows up in a search (noticeModel).
 	if model := s.knownModel(); model != "" {
-		waiting, err := s.aiWorkWaiting(ctx, model)
+		waiting, err := s.aiWorkWaiting(ctx)
 		if err != nil || !waiting {
 			if state, _, _ := s.ai.get(); err == nil && state != AIUnavailable {
 				s.ai.set(AIIdle, "", model)
@@ -158,13 +158,6 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	}
 	if err := s.requeueStale(ctx, info.Model); err != nil {
 		return false, err
-	}
-	// Label texts are few and short; they come before photos.
-	if fetched, err := s.embedLabelText(ctx, embedder, info); fetched || err != nil {
-		if fetched {
-			s.ai.set(AIWorking, "", info.Model)
-		}
-		return fetched, err
 	}
 	job, err := s.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -241,17 +234,9 @@ func (s *Service) noticeModel(model string) {
 	}
 }
 
-// aiWorkWaiting reports whether the Worker has anything to do for model: a
-// label text still without its vector, or an embedding job that is due.
-func (s *Service) aiWorkWaiting(ctx context.Context, model string) (bool, error) {
-	if model == s.labels.Model {
-		s.labelIndex.mu.Lock()
-		pending := s.labelIndex.vectors == nil && !s.now().Before(s.labelIndex.retryAt)
-		s.labelIndex.mu.Unlock()
-		if pending {
-			return true, nil
-		}
-	}
+// aiWorkWaiting reports whether the Worker has anything to do: an embedding
+// job that is due.
+func (s *Service) aiWorkWaiting(ctx context.Context) (bool, error) {
 	now := formatTime(s.now())
 	var due bool
 	err := s.db.QueryRowContext(ctx, `

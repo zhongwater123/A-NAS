@@ -7,11 +7,9 @@ import (
 	"unicode/utf8"
 )
 
-// User tags and AI corrections are user metadata of one photo asset
-// (CONTEXT.md): they are never derived, rebuilt or cleared with derived data.
-// Whoever may rename a photo may tag it or hide its AI labels. Hiding an AI
-// label keeps it hidden on that photo through model upgrades; other photos
-// still show it.
+// User tags are user metadata of one photo asset (CONTEXT.md): they are
+// never derived, rebuilt or cleared with derived data. Whoever may rename a
+// photo may tag it.
 
 // MaxTagRunes bounds a user tag.
 const MaxTagRunes = 30
@@ -49,27 +47,6 @@ func (s *Service) RemoveTag(ctx context.Context, p Principal, assetID, name stri
 	})
 }
 
-// HideAILabel records that an AI label is wrong for a photo and returns the
-// photo's details, which no longer show it.
-func (s *Service) HideAILabel(ctx context.Context, p Principal, assetID, labelID string) (Asset, error) {
-	known := false
-	for _, label := range s.labels.Labels {
-		known = known || label.ID == labelID
-	}
-	if !known {
-		return Asset{}, ErrNotFound
-	}
-	return s.changeMetadata(ctx, p, assetID, func(tx *sql.Tx, record assetRecord) error {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at) VALUES(?, ?, 'hidden', ?, ?)
-			 ON CONFLICT DO NOTHING`,
-			record.ID, labelID, p.UserID, formatTime(s.now())); err != nil {
-			return err
-		}
-		return s.audit(ctx, tx, p.UserID, "photo.ai_label_hidden", record.ID, labelID)
-	})
-}
-
 // changeMetadata runs change on a photo p may change and returns the photo's
 // details afterwards.
 func (s *Service) changeMetadata(ctx context.Context, p Principal, assetID string, change func(*sql.Tx, assetRecord) error) (Asset, error) {
@@ -90,16 +67,6 @@ func cleanTag(name string) (string, bool) {
 
 func (s *Service) tagsOf(ctx context.Context, assetID string) ([]string, error) {
 	return s.strings(ctx, "SELECT name FROM user_tags WHERE asset_id = ? ORDER BY created_at, name", assetID)
-}
-
-// hiddenLabels returns the AI labels hidden on a photo.
-func (s *Service) hiddenLabels(ctx context.Context, assetID string) (map[string]bool, error) {
-	ids, err := s.strings(ctx, "SELECT label_id FROM ai_tag_corrections WHERE asset_id = ?", assetID)
-	hidden := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		hidden[id] = true
-	}
-	return hidden, err
 }
 
 func (s *Service) strings(ctx context.Context, query string, args ...any) ([]string, error) {

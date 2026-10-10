@@ -132,7 +132,9 @@ SELECT object_id, 'embedding/v1', 'pending', created_at, created_at FROM derived
 ON CONFLICT(object_id, derivation) DO NOTHING;
 `,
 	// 5: text vectors the AI Worker made for label texts, per model, so
-	// labels survive a restart without the Worker.
+	// labels survived a restart without the Worker. AI labels are off since
+	// 2026-10 and nothing writes the table; it stays so that an older
+	// release can still open the Catalog after a rollback.
 	`
 CREATE TABLE query_vectors (
     model TEXT NOT NULL,

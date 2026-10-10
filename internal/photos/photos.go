@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
-	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 )
 
 var (
@@ -125,11 +124,10 @@ type Asset struct {
 	// nothing else about those libraries.
 	AlsoKeptBy []string    `json:"alsoKeptBy,omitempty"`
 	Trash      *TrashState `json:"trash,omitempty"`
-	// Tags, Albums and AILabels belong to a single photo's details; lists
-	// leave them out. AILabels are what local AI sees, less those hidden.
-	Tags     []string   `json:"tags,omitempty"`
-	Albums   []AlbumRef `json:"albums,omitempty"`
-	AILabels []AILabel  `json:"aiLabels,omitempty"`
+	// Tags and Albums belong to a single photo's details; lists leave them
+	// out.
+	Tags   []string   `json:"tags,omitempty"`
+	Albums []AlbumRef `json:"albums,omitempty"`
 }
 
 type TrashState struct {
@@ -165,8 +163,6 @@ type Options struct {
 	Location *time.Location
 	// AI encodes search queries; nil leaves search to photo names.
 	AI Embedder
-	// Labels defaults to the built-in vocabulary and calibration.
-	Labels *labels.Set
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -196,11 +192,9 @@ type Service struct {
 	aiModelMu sync.Mutex
 	aiModel   string
 	// embedder encodes search queries, and index holds image vectors for
-	// search and labels.
-	embedder   Embedder
-	index      vectorIndex
-	labels     labels.Set
-	labelIndex labelIndex
+	// search.
+	embedder Embedder
+	index    vectorIndex
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -251,12 +245,6 @@ func Open(root string, options Options) (*Service, error) {
 	}
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
-	}
-	if options.Labels != nil {
-		service.labels = *options.Labels
-	} else if service.labels, err = labels.V1(); err != nil {
-		_ = service.Close()
-		return nil, err
 	}
 	if service.now == nil {
 		service.now = time.Now

@@ -605,26 +605,15 @@ paths:
   /api/v1/photos/search:
     get:
       operationId: searchPhotos
-      summary: Find untrashed photos in the caller's private and the shared library by name or meaning (name matches first, then the photos that show the calibrated labels the query names, or else those nearest its best match), or the photos that show an AI label
+      summary: Find untrashed photos in the caller's private and the shared library by name or meaning, name and user tag matches first and then every photo by similarity; closest says where the closest group ends
       parameters:
-        - { name: q, in: query, description: "1 to 200 characters, such as 海边的猫; give q or label.", schema: { type: string, minLength: 1, maxLength: 200 } }
-        - { name: label, in: query, description: "The ID of an AI label photos can show, such as cat; give q or label.", schema: { type: string } }
+        - { name: q, in: query, required: true, description: "1 to 200 characters, such as 海边的猫.", schema: { type: string, minLength: 1, maxLength: 200 } }
         - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to search it as well.", schema: { type: string } }
         - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
       responses:
         "200": { description: One page of results, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoSearchResults" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
-        "404": { $ref: "#/components/responses/ProductError" }
-        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
-  /api/v1/photos/labels:
-    get:
-      operationId: listPhotoLabels
-      summary: Count the AI labels that untrashed photos in the caller's private and the shared library show, most photos first, by the rule of a search by label
-      parameters:
-        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
-      responses:
-        "200": { description: Label counts, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLabelCounts" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/libraries/{libraryId}/albums:
@@ -713,15 +702,6 @@ paths:
       operationId: removePhotoTag
       summary: Remove a user tag
       parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: name, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
-      responses:
-        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
-        "403": { $ref: "#/components/responses/ProductError" }
-        "404": { $ref: "#/components/responses/ProductError" }
-  /api/v1/photos/assets/{assetId}/ai-labels/{labelId}:
-    delete:
-      operationId: hidePhotoAILabel
-      summary: Hide a wrong AI label on this photo only; the correction outlives model upgrades
-      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: labelId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
@@ -1845,17 +1825,6 @@ components:
           description: Albums the photo is in; only a single photo's details carry them.
           type: array
           items: { type: object, additionalProperties: false, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
-        aiLabels:
-          description: What local AI sees in the photo, less labels hidden on it, clearest first, at most 5; only a single photo's details carry them.
-          type: array
-          items:
-            type: object
-            additionalProperties: false
-            required: [id, name, score]
-            properties:
-              id: { type: string }
-              name: { type: string }
-              score: { type: number, description: Similarity of the photo to the label; at least the label's calibrated threshold. }
     PhotoTimeline:
       type: object
       additionalProperties: false
@@ -1877,24 +1846,6 @@ components:
             properties:
               month: { type: string, description: "YYYY-MM in the device's time zone." }
               photos: { type: integer, minimum: 1 }
-    PhotoLabelCounts:
-      type: object
-      additionalProperties: false
-      required: [items, ready]
-      properties:
-        items:
-          type: array
-          items:
-            type: object
-            additionalProperties: false
-            required: [id, name, category, photos, coverId]
-            properties:
-              id: { type: string }
-              name: { type: string }
-              category: { type: string, description: "animal, food, object, vehicle, activity, nature, scene, people or document." }
-              photos: { type: integer, minimum: 1 }
-              coverId: { type: string, description: The photo that shows the label most clearly. }
-        ready: { type: boolean, description: "False while AI labels are not available; there are no items then." }
     PhotoAlbum:
       type: object
       additionalProperties: false
@@ -1916,24 +1867,15 @@ components:
     PhotoSearchResults:
       type: object
       additionalProperties: false
-      required: [items, semantic, match]
+      required: [items, semantic, closest]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string }
-        semantic: { type: boolean, description: "False when local AI could not encode the query and only names were matched." }
-        match:
-          type: string
-          enum: [names, labels, closest]
-          description: "What follows the name and tag matches: names (nothing; local AI could not encode the query), labels (photos showing every label in labels) or closest (photos nearest in meaning; the query names nothing local AI recognises reliably)."
-        labels:
-          type: array
-          items:
-            type: object
-            additionalProperties: false
-            required: [id, name]
-            properties:
-              id: { type: string }
-              name: { type: string }
+        semantic: { type: boolean, description: "False when local AI could not encode the query and only names and user tags were matched." }
+        closest:
+          type: integer
+          minimum: 0
+          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches and the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
     PhotoAIStatus:
       type: object
       additionalProperties: false

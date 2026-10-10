@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
-
-	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 )
 
 // Search finds photos by meaning and by name in the caller's private library
@@ -21,10 +19,9 @@ import (
 // an exact scan, so nothing outside the caller's libraries is ever scored.
 // Ranking alone shows unrelated photos after the real matches, and no single
 // similarity cut-off separates them for every query
-// (docs/research/photo-ai-label-calibration.md#搜索结果的取舍). So a query
-// that names labels calibrated for the model keeps only the photos that show
-// all of them; any other query keeps the photos close to its best match. A
-// search by AI label returns the photos that show the label.
+// (docs/research/photo-ai-label-calibration.md#搜索结果的取舍). So nothing
+// is cut off: the results come in two groups, the closest first and then
+// the less related, and the caller is told where the first group ends.
 
 var ErrInvalidQuery = errors.New("invalid photo search query")
 
@@ -36,39 +33,16 @@ const (
 	// nameMatch ranks photos whose name contains the query above every
 	// similarity, which lies within [-1, 1].
 	nameMatch = 2
-	// closestGap keeps the photos within this similarity of the best match
-	// when no calibrated label applies. On COCO about 90% of what it keeps
-	// is right when the library holds the thing; it cannot tell when the
-	// library does not, so results of this kind are presented as the closest.
+	// closestGap ends the closest group at this similarity below the best
+	// match. On COCO about 90% of the group is right when the library holds
+	// the thing; it cannot tell when the library does not, so the group is
+	// presented as the closest, not as the matches.
 	closestGap = 0.04
-	// maxClosestResults keeps such uncertain results to a few.
-	maxClosestResults = 20
 )
 
-// What semantic results are (SearchPage.Match).
-const (
-	// MatchNames: local AI could not encode the query, so only names and user
-	// tags matched.
-	MatchNames = "names"
-	// MatchLabels: the photos that show every calibrated label the query
-	// names, as far as local AI can tell.
-	MatchLabels = "labels"
-	// MatchClosest: the query names nothing local AI recognises reliably;
-	// these are the photos closest in meaning.
-	MatchClosest = "closest"
-)
-
-// LabelRef names a label a search went by.
-type LabelRef struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// SearchRequest asks for either a Query or a Label.
+// SearchRequest asks for the photos that match a query.
 type SearchRequest struct {
 	Query string
-	// Label is the ID of a label that photos show (AILabel.ID).
-	Label string
 	// Viewing names a member's private library the caller is viewing through
 	// an unexpired grant, to search it as well.
 	Viewing string
@@ -82,13 +56,12 @@ type SearchPage struct {
 	// Next continues the results; empty on the last page.
 	Next string
 	// Semantic is false when the AI Worker could not encode the query; the
-	// results then match names only. For a label it is false while label
-	// vectors are not available, and there are no results.
+	// results then match names and user tags only.
 	Semantic bool
-	// Match says what the semantic results are, and Labels which labels
-	// they show.
-	Match  string
-	Labels []LabelRef
+	// Closest counts the results, over all pages, in the closest group: the
+	// name and user tag matches and the photos within closestGap of the best
+	// match. The results after them are less related.
+	Closest int
 }
 
 type searchHit struct {
@@ -99,15 +72,11 @@ type searchHit struct {
 // A candidate's tags are its user tags joined by unit separators.
 type candidate struct{ id, objectID, name, tags string }
 
-// Search returns photos matching the query by name or meaning, or showing the
-// label. Trashed photos are never included.
+// Search returns photos matching the query by name or meaning. Trashed photos
+// are never included.
 func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest) (SearchPage, error) {
 	query := strings.TrimSpace(request.Query)
-	if request.Label != "" {
-		if _, shown := s.labels.Thresholds[request.Label]; !shown || query != "" {
-			return SearchPage{}, ErrInvalidQuery
-		}
-	} else if query == "" || utf8.RuneCountInString(query) > MaxQueryRunes {
+	if query == "" || utf8.RuneCountInString(query) > MaxQueryRunes {
 		return SearchPage{}, ErrInvalidQuery
 	}
 	after, err := decodeSearchCursor(request.Cursor)
@@ -139,21 +108,10 @@ GROUP BY a.id`, args...)
 	}
 
 	page := SearchPage{Assets: []Asset{}}
-	var hits []searchHit
-	if request.Label != "" {
-		hits, page.Semantic, err = s.labelHits(ctx, request.Label, candidates)
-		page.Match = MatchNames
-		if page.Semantic {
-			page.Match, page.Labels = MatchLabels, []LabelRef{s.labelRef(request.Label)}
-		}
-	} else {
-		hits, page.Match, page.Labels, err = s.queryHits(ctx, query, candidates)
-		page.Semantic = page.Match != MatchNames
-	}
+	hits, err := s.queryHits(ctx, query, candidates, &page)
 	if err != nil {
 		return SearchPage{}, err
 	}
-	sortHits(hits)
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
 		if start < len(hits) && hits[start] == *after {
@@ -194,50 +152,13 @@ GROUP BY a.id`, args...)
 	return page, nil
 }
 
-// queryHits scores candidates against a query: name or user tag matches
-// first, then by meaning either the photos that show every calibrated label
-// the query names or, when it names none, the photos near the best match.
-func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate) ([]searchHit, string, []LabelRef, error) {
+// queryHits ranks the candidates for a query: name or user tag matches first,
+// then every photo with a vector by similarity, at most maxSemanticResults
+// of them. It records on the page whether the query was encoded and where the
+// closest group ends.
+func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate, page *SearchPage) ([]searchHit, error) {
 	queryVector, model := s.embedQuery(ctx, query)
 	folded := strings.ToLower(query)
-	match := MatchNames
-	var required []labels.Label
-	var refs []LabelRef
-	var labelVectors map[string][]float32
-	hidden := map[string]bool{}
-	if queryVector != nil {
-		match = MatchClosest
-		if model == s.labels.Model {
-			for _, label := range s.labels.Mentioned(query) {
-				if _, calibrated := s.labels.Thresholds[label.ID]; calibrated {
-					required = append(required, label)
-				}
-			}
-		}
-		if len(required) > 0 {
-			var err error
-			if labelVectors, err = s.labelVectors(ctx); err != nil {
-				return nil, "", nil, err
-			}
-			if labelVectors != nil {
-				match = MatchLabels
-				if hidden, err = s.photosHiding(ctx, required); err != nil {
-					return nil, "", nil, err
-				}
-				for _, label := range required {
-					refs = append(refs, LabelRef{ID: label.ID, Name: label.Name})
-				}
-			}
-		}
-	}
-	shows := func(id string, vector []float32) bool {
-		for _, label := range required {
-			if hidden[id+"\x1f"+label.ID] || dot(vector, labelVectors[label.ID]) < s.labels.Thresholds[label.ID] {
-				return false
-			}
-		}
-		return true
-	}
 	var named, similar []searchHit
 	err := s.index.read(ctx, s, model, func(vectors map[string][]float32) {
 		for _, c := range candidates {
@@ -249,75 +170,27 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 			switch {
 			case strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded):
 				named = append(named, searchHit{c.id, nameMatch + score})
-			case embedded && queryVector != nil && (match != MatchLabels || shows(c.id, vector)):
+			case embedded && queryVector != nil:
 				similar = append(similar, searchHit{c.id, score})
 			}
 		}
 	})
-	sortHits(similar)
-	if match == MatchClosest && len(similar) > 0 {
-		floor := similar[0].score - closestGap
-		kept := 0
-		for kept < len(similar) && similar[kept].score >= floor {
-			kept++
-		}
-		similar = similar[:min(kept, maxClosestResults)]
-	}
-	return append(named, similar[:min(len(similar), maxSemanticResults)]...), match, refs, err
-}
-
-// photosHiding returns the photos that hid any of the labels, as asset ID
-// and label ID joined by a unit separator.
-func (s *Service) photosHiding(ctx context.Context, required []labels.Label) (map[string]bool, error) {
-	ids := make([]any, len(required))
-	for i, label := range required {
-		ids[i] = label.ID
-	}
-	pairs, err := s.strings(ctx, "SELECT asset_id || char(31) || label_id FROM ai_tag_corrections WHERE label_id IN ("+
-		strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
-	hidden := make(map[string]bool, len(pairs))
-	for _, pair := range pairs {
-		hidden[pair] = true
-	}
-	return hidden, err
-}
-
-func (s *Service) labelRef(id string) LabelRef {
-	for _, label := range s.labels.Labels {
-		if label.ID == id {
-			return LabelRef{ID: id, Name: label.Name}
-		}
-	}
-	return LabelRef{ID: id, Name: id}
-}
-
-// labelHits returns the candidates that show the label and have not hidden
-// it.
-func (s *Service) labelHits(ctx context.Context, label string, candidates []candidate) ([]searchHit, bool, error) {
-	labelVectors, err := s.labelVectors(ctx)
-	if err != nil || labelVectors == nil {
-		return nil, false, err
-	}
-	hiding, err := s.strings(ctx, "SELECT asset_id FROM ai_tag_corrections WHERE label_id = ?", label)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	hidden := make(map[string]bool, len(hiding))
-	for _, id := range hiding {
-		hidden[id] = true
-	}
-	threshold := s.labels.Thresholds[label]
-	var hits []searchHit
-	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			if vector, ok := vectors[c.objectID]; ok && !hidden[c.id] {
-				if score := dot(vector, labelVectors[label]); score >= threshold {
-					hits = append(hits, searchHit{c.id, score})
-				}
-			}
+	sortHits(named)
+	sortHits(similar)
+	similar = similar[:min(len(similar), maxSemanticResults)]
+	closest := 0
+	if len(similar) > 0 {
+		floor := similar[0].score - closestGap
+		for closest < len(similar) && similar[closest].score >= floor {
+			closest++
 		}
-	})
-	return hits, true, err
+	}
+	page.Semantic = queryVector != nil
+	page.Closest = len(named) + closest
+	return append(named, similar...), nil
 }
 
 // searchScope returns the IDs of the libraries a search covers.

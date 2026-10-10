@@ -301,7 +301,7 @@ func TestHiddenItemsAnswerExactlyLikeMissingOnes(t *testing.T) {
 	}
 }
 
-func TestTimelineByMonthAndLabelsWithoutLocalAI(t *testing.T) {
+func TestTimelineByMonth(t *testing.T) {
 	handler, _ := newAPI(t)
 	owner := client{t: t, handler: handler, as: alice}
 	private, _ := librariesOf(owner)
@@ -326,13 +326,14 @@ func TestTimelineByMonthAndLabelsWithoutLocalAI(t *testing.T) {
 		!strings.Contains(response.Body.String(), "invalid_month") {
 		t.Fatalf("bad month = %d %s", response.Code, response.Body.String())
 	}
-	var labels struct {
-		Items []photos.LabelCount `json:"items"`
-		Ready bool                `json:"ready"`
-	}
-	owner.json(http.MethodGet, "/api/v1/photos/labels", nil, http.StatusOK, &labels)
-	if labels.Ready || labels.Items == nil || len(labels.Items) != 0 {
-		t.Fatalf("labels without local AI = %+v", labels)
+	// AI labels are off: nothing lists or hides them any more.
+	for _, request := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/photos/labels"},
+		{http.MethodDelete, "/api/v1/photos/assets/" + url.PathEscape(timeline.Items[0].ID) + "/ai-labels/cat"},
+	} {
+		if response := owner.do(request.method, request.path, nil, ""); response.Code != http.StatusNotFound {
+			t.Fatalf("%s %s = %d, want 404", request.method, request.path, response.Code)
+		}
 	}
 }
 
@@ -370,9 +371,10 @@ func TestSearchMatchesNamesWithoutLocalAI(t *testing.T) {
 	var results struct {
 		Items    []photos.Asset `json:"items"`
 		Semantic bool           `json:"semantic"`
+		Closest  int            `json:"closest"`
 	}
 	owner.json(http.MethodGet, "/api/v1/photos/search?q="+url.QueryEscape("海边"), nil, http.StatusOK, &results)
-	if results.Semantic || len(results.Items) != 1 || results.Items[0].Name != "海边的猫.png" {
+	if results.Semantic || len(results.Items) != 1 || results.Items[0].Name != "海边的猫.png" || results.Closest != 1 {
 		t.Fatalf("search without an AI Worker = %+v", results)
 	}
 	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/search?q="+url.QueryEscape("海边"), nil, http.StatusOK, &results)
@@ -386,7 +388,7 @@ func TestSearchMatchesNamesWithoutLocalAI(t *testing.T) {
 	}
 }
 
-func TestAlbumsTagsAndCorrections(t *testing.T) {
+func TestAlbumsAndTags(t *testing.T) {
 	handler, _ := newAPI(t)
 	owner := client{t: t, handler: handler, as: alice}
 	private, _ := librariesOf(owner)
@@ -419,8 +421,6 @@ func TestAlbumsTagsAndCorrections(t *testing.T) {
 	if untagged.ID != photo.ID || len(untagged.Tags) != 0 {
 		t.Fatalf("details after removing the tag = %+v", untagged)
 	}
-	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/no-such-label", nil, http.StatusNotFound, nil)
-	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/cat", nil, http.StatusOK, nil)
 
 	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets", nil, http.StatusNotFound, nil)
 	owner.json(http.MethodDelete, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets/"+url.PathEscape(photo.ID), nil, http.StatusNoContent, nil)

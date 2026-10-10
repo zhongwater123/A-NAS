@@ -111,8 +111,8 @@ func (s *Service) Get(ctx context.Context, p Principal, assetID string) (Asset, 
 	return s.details(ctx, p, record)
 }
 
-// details completes an asset with its duplicate hints, user metadata and AI
-// labels, which lists leave out.
+// details completes an asset with its duplicate hints and user metadata,
+// which lists leave out.
 func (s *Service) details(ctx context.Context, p Principal, record assetRecord) (Asset, error) {
 	hinted := []assetRecord{record}
 	if err := s.addDuplicateHints(ctx, s.db, p, hinted); err != nil {
@@ -124,13 +124,6 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 		return Asset{}, err
 	}
 	if asset.Albums, err = s.albumsOf(ctx, asset.ID); err != nil {
-		return Asset{}, err
-	}
-	hidden, err := s.hiddenLabels(ctx, asset.ID)
-	if err != nil {
-		return Asset{}, err
-	}
-	if asset.AILabels, err = s.labelsOf(ctx, record.objectID, hidden); err != nil {
 		return Asset{}, err
 	}
 	return asset, nil
@@ -459,7 +452,9 @@ func checkCopySource(p Principal, source assetRecord) error {
 }
 
 // insertCopy creates the copy, which starts with the source's user tags and
-// AI corrections and keeps them apart from then on.
+// AI corrections and keeps them apart from then on. AI labels are off
+// (docs/architecture/photo-ai.md), but the corrections users made while they
+// were shown are user data and travel with the photo.
 func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, source assetRecord, target library, directoryID string) (assetRecord, error) {
 	id := s.randomID("photo")
 	if _, err := tx.ExecContext(ctx,
