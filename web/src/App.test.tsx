@@ -139,7 +139,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
     expect(screen.getByText("正在读取设备状态…")).toBeTruthy();
     await act(async () => finishRequest?.(okResponse(healthyState)));
     expect(await screen.findByText("anas-fake")).toBeTruthy();
@@ -152,7 +152,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
     expect(await screen.findByText("anas-fake")).toBeTruthy();
     const before = screen.getByText(/\d{2}:\d{2}/, { selector: ".status-time strong" }).textContent;
     act(() => vi.advanceTimersByTime(60_000));
@@ -291,13 +291,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(values[1]?.textContent).toBe("466 GB");
   });
 
-  it("enables photos, trash, snapshots, accounts, and storage", async () => {
+  it("enables photos, trash, snapshots, and one settings entry", async () => {
     installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开文件快照" }).hasAttribute("disabled")).toBe(false);
-    expect(within(desktop).getByRole("button", { name: "打开账号管理" })).toBeTruthy();
-    expect(within(desktop).getByRole("button", { name: "打开存储初始化" })).toBeTruthy();
+    expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
+    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理"]) {
+      expect(within(desktop).queryByRole("button", { name: retired })).toBeNull();
+    }
     await user.click(within(desktop).getByRole("button", { name: "打开相册" }));
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
@@ -312,10 +314,11 @@ describe("A-NAS v1.0.1 desktop", () => {
     });
     const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开存储初始化" }));
-    await user.click(await screen.findByRole("button", { name: "生成格式化计划" }));
+    await openSettingsSection(user, desktop, "存储");
+    await user.click(await screen.findByRole("button", { name: "初始化数据卷…" }));
+    await user.click(screen.getByRole("button", { name: "生成格式化计划" }));
     expect(await screen.findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
-    expect(screen.getByText("将清除的已知签名：未检测到文件系统签名")).toBeTruthy();
+    expect(screen.getByText("未检测到文件系统签名")).toBeTruthy();
     expect(screen.getByRole("region", { name: "桌面应用" })).toBeTruthy();
   });
 
@@ -324,7 +327,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开资源管理" }));
+    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }));
     expect(await screen.findByText("anas-fake")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "刷新设备状态" }));
@@ -339,7 +342,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开资源管理" }));
+    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }));
     expect(await screen.findByText("暂时无法读取设备状态")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "重新连接" }));
@@ -352,20 +355,19 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开资源管理" }));
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
 
     expect(await screen.findByText("未检测到磁盘")).toBeTruthy();
   });
 
-  it("opens, minimizes, and restores system settings", async () => {
+  it("opens, minimizes, and restores settings", async () => {
     installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开系统设置" }));
-    const settings = screen.getByRole("dialog", { name: "系统设置" });
-    await user.click(within(settings).getByRole("button", { name: "最小化系统设置" }));
-    await user.click(screen.getByRole("button", { name: "恢复系统设置" }));
-    expect(screen.getByRole("dialog", { name: "系统设置" })).toBeTruthy();
-
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
+    await user.click(screen.getByRole("button", { name: "恢复设置" }));
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
   });
 
   it("shows utilisation gauges, network rates and the clock in the status bar", async () => {
@@ -421,11 +423,11 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     layOutGrid(desktop);
-    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["文件管理", "回收站", "系统设置", "资源管理", "终端"]);
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["文件管理", "回收站", "设置", "终端", "应用中心"]);
 
     const terminal = within(desktop).getByRole("button", { name: "打开终端" }).parentElement!;
-    fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 150, clientY: 160 });
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 120, clientY: 150 });
+    fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 50, clientY: 160 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 140 });
     const dragPreview = document.querySelector(".desktop-drag-preview");
     expect(dragPreview).toBeTruthy();
     expect(desktop.contains(dragPreview)).toBe(false);
@@ -434,7 +436,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(document.querySelector(".desktop-drag-preview")).toBeNull();
     fireEvent.click(within(desktop).getByRole("button", { name: "打开终端" }));
 
-    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["终端", "文件管理", "回收站", "系统设置", "资源管理"]);
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["终端", "文件管理", "回收站", "设置", "应用中心"]);
     expect(JSON.parse(localStorage.getItem("a-nas.desktop-order.v1")!).slice(0, 2)).toEqual(["terminal", "files"]);
     expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
     expect(screen.getByText("已将终端移动到第 1 位")).toBeTruthy();
@@ -446,13 +448,13 @@ describe("A-NAS v1.0.1 desktop", () => {
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     layOutGrid(desktop);
 
-    const settings = within(desktop).getByRole("button", { name: "打开系统设置" }).parentElement!;
+    const settings = within(desktop).getByRole("button", { name: "打开设置" }).parentElement!;
     fireEvent.pointerDown(settings, { button: 0, pointerId: 2, pointerType: "mouse", clientX: 250, clientY: 50 });
     fireEvent.pointerMove(window, { pointerId: 2, clientX: 40, clientY: 50 });
-    expect(desktopOrder(desktop)[0]).toBe("系统设置");
+    expect(desktopOrder(desktop)[0]).toBe("设置");
     fireEvent.keyDown(window, { key: "Escape" });
 
-    expect(desktopOrder(desktop).slice(0, 3)).toEqual(["文件管理", "回收站", "系统设置"]);
+    expect(desktopOrder(desktop).slice(0, 3)).toEqual(["文件管理", "回收站", "设置"]);
     expect(localStorage.getItem("a-nas.desktop-order.v1")).toBeNull();
   });
 
@@ -462,14 +464,14 @@ describe("A-NAS v1.0.1 desktop", () => {
     const { unmount } = render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
 
-    within(desktop).getByRole("button", { name: "打开资源管理" }).focus();
+    within(desktop).getByRole("button", { name: "打开终端" }).focus();
     await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
-    expect(desktopOrder(desktop).slice(0, 4)).toEqual(["文件管理", "回收站", "资源管理", "系统设置"]);
-    expect(document.activeElement).toBe(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    expect(desktopOrder(desktop).slice(0, 4)).toEqual(["文件管理", "回收站", "终端", "设置"]);
+    expect(document.activeElement).toBe(within(desktop).getByRole("button", { name: "打开终端" }));
     unmount();
 
     render(<App />);
-    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "资源管理", "系统设置"]);
+    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "终端", "设置"]);
   });
 
   it("switches focus between open apps from an icon-only dock", async () => {
@@ -477,21 +479,21 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开系统设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
     await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
 
     const dock = screen.getByRole("navigation", { name: "已打开窗口" });
     expect(dock.textContent).toBe("");
     expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
 
-    await user.click(within(dock).getByRole("button", { name: "切换到系统设置" }));
-    expect(within(dock).getByRole("button", { name: "最小化系统设置" }).getAttribute("aria-current")).toBe("true");
+    await user.click(within(dock).getByRole("button", { name: "切换到设置" }));
+    expect(within(dock).getByRole("button", { name: "最小化设置" }).getAttribute("aria-current")).toBe("true");
     expect(within(dock).getByRole("button", { name: "切换到终端" })).toBeTruthy();
 
-    await user.click(within(dock).getByRole("button", { name: "最小化系统设置" }));
-    expect(screen.queryByRole("dialog", { name: "系统设置" })).toBeNull();
+    await user.click(within(dock).getByRole("button", { name: "最小化设置" }));
+    expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull();
     expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
-    expect(within(dock).getByRole("button", { name: "恢复系统设置" })).toBeTruthy();
+    expect(within(dock).getByRole("button", { name: "恢复设置" })).toBeTruthy();
   });
 
   it("lists dock icons in launch order and drops closed apps immediately from the accessibility tree", async () => {
@@ -500,12 +502,12 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
-    await user.click(within(desktop).getByRole("button", { name: "打开资源管理" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
 
     const dock = screen.getByRole("navigation", { name: "已打开窗口" });
-    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到终端", "最小化资源管理"]);
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到终端", "最小化设置"]);
 
-    await user.click(within(screen.getByRole("dialog", { name: "资源管理" })).getByRole("button", { name: "关闭资源管理" }));
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
     expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化终端"]);
   });
 
@@ -773,6 +775,12 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
 
 function ok(body: unknown, status = 200) { return { ok: true, status, json: async () => body } as Response; }
 
+async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, desktop: HTMLElement, section: string) {
+  await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+  const sections = within(screen.getByRole("dialog", { name: "设置" })).getByRole("navigation", { name: "设置分区" });
+  await user.click(within(sections).getByRole("button", { name: section }));
+}
+
 function desktopOrder(desktop: HTMLElement): string[] {
   return within(desktop).getAllByRole("button").map((button) => button.textContent!.replace("规划中", ""));
 }
@@ -864,15 +872,17 @@ describe("ADR 0008 account safeguards", () => {
     const fetchMock = installAPI({ users: [session.user] });
     const user = userEvent.setup();
     render(<App />);
-    const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
-    await user.click(await screen.findByRole("button", { name: "修改密码" }));
-    const form = screen.getByRole("form", { name: "修改自己的密码" });
+    await user.click(await screen.findByRole("button", { name: "我的账号（owner）" }));
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(within(settings).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
+    await user.click(within(settings).getByRole("button", { name: "修改密码…" }));
+    const form = within(settings).getByRole("form", { name: "修改密码" });
     await user.type(within(form).getByLabelText("当前密码"), "correct horse battery staple");
     await user.type(within(form).getByLabelText("新密码"), "administrator chosen password");
     await user.type(within(form).getByLabelText("确认新密码"), "administrator chosen password");
     await user.click(within(form).getByRole("button", { name: "保存新密码" }));
-    expect(await screen.findByText("密码已更新，SMB 凭据已同步。")).toBeTruthy();
+    expect(await within(settings).findByText("密码已更新，SMB 凭据已同步。")).toBeTruthy();
+    expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
       currentPassword: "correct horse battery staple",
@@ -915,8 +925,9 @@ describe("ADR 0008 account safeguards", () => {
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
-    await user.click(await screen.findByRole("button", { name: "查看个人空间" }));
+    await openSettingsSection(user, desktop, "用户与权限");
+    await user.click(await screen.findByRole("button", { name: "alice 的更多操作" }));
+    await user.click(within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看个人空间…" }));
     const form = screen.getByRole("form", { name: "查看 alice 的个人空间" });
     await user.type(within(form).getByLabelText("查看原因"), "Alice 请求找回文件");
     await user.type(within(form).getByLabelText("你的密码"), "correct horse battery staple");
@@ -932,8 +943,9 @@ describe("ADR 0008 account safeguards", () => {
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开账号管理" }));
-    await user.click(await screen.findByRole("button", { name: "查看私有图库" }));
+    await openSettingsSection(user, desktop, "用户与权限");
+    await user.click(await screen.findByRole("button", { name: "alice 的更多操作" }));
+    await user.click(within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看私有图库…" }));
     const form = screen.getByRole("form", { name: "查看 alice 的私有图库" });
     expect(within(form).getByText(/查看他人私有图库会写入审计/)).toBeTruthy();
     await user.type(within(form).getByLabelText("查看原因"), "找婚礼照片");
@@ -979,5 +991,137 @@ describe("ADR 0008 application access", () => {
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).queryByRole("button", { name: "打开 Docker" })).toBeNull();
     expect(within(desktop).queryByRole("button", { name: "打开应用中心" })).toBeNull();
+  });
+});
+
+describe("Settings", () => {
+  const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+
+  it("shows members their account, the overview and read-only storage", async () => {
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    const sections = within(settings).getByRole("navigation", { name: "设置分区" });
+    const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "存储"]);
+    expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
+    expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
+    expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();
+    expect(within(settings).queryByRole("button", { name: "初始化数据卷…" })).toBeNull();
+    expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/users")).toBe(false);
+  });
+
+  it("lets a member change their own password", async () => {
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    await user.click(screen.getByRole("button", { name: "修改密码…" }));
+    const form = screen.getByRole("form", { name: "修改密码" });
+    await user.type(within(form).getByLabelText("当前密码"), "alice old password");
+    await user.type(within(form).getByLabelText("新密码"), "alice new password");
+    await user.type(within(form).getByLabelText("确认新密码"), "alice another password");
+    await user.click(within(form).getByRole("button", { name: "保存新密码" }));
+    expect(within(form).getByText("两次输入的新密码不一致")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/session/password")).toBe(false);
+
+    await user.clear(within(form).getByLabelText("确认新密码"));
+    await user.type(within(form).getByLabelText("确认新密码"), "alice new password");
+    await user.click(within(form).getByRole("button", { name: "保存新密码" }));
+    expect(await screen.findByText("密码已更新，SMB 凭据已同步。")).toBeTruthy();
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ currentPassword: "alice old password", newPassword: "alice new password" });
+  });
+
+  it("keeps a pending storage plan across sections and when settings closes", async () => {
+    installAPI({
+      storagePlan: {
+        id: "plan:pending", diskId: "disk:fake-data-01", diskModel: "A-NAS Fake HDD", capacityBytes: 512000000000,
+        fingerprint: "pending-fingerprint", signatures: [], confirmationPhrase: "ERASE data-01", actions: [], state: "planned", expiresAt: "2099-01-01T00:00:00Z",
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await openSettingsSection(user, desktop, "存储");
+    await user.click(await screen.findByRole("button", { name: "初始化数据卷…" }));
+    await user.click(screen.getByRole("button", { name: "生成格式化计划" }));
+    await user.type(await screen.findByLabelText(/输入确认短语/), "ERASE");
+
+    let settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(within(settings).getByRole("button", { name: "概览" }));
+    expect(within(settings).queryByRole("heading", { name: "破坏性操作计划" })).toBeNull();
+    await user.click(within(settings).getByRole("button", { name: "关闭设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    settings = screen.getByRole("dialog", { name: "设置" });
+    expect(within(settings).getByRole("button", { name: "概览" }).getAttribute("aria-current")).toBe("page");
+
+    await user.click(within(settings).getByRole("button", { name: "存储" }));
+    expect(within(settings).getByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect((within(settings).getByLabelText(/输入确认短语/) as HTMLInputElement).value).toBe("ERASE");
+    expect(within(settings).getByRole("button", { name: "确认计划" }).hasAttribute("disabled")).toBe(true);
+    expect(within(settings).queryByRole("button", { name: "生成格式化计划" })).toBeNull();
+  });
+
+  it("reports unknown data volume usage instead of a full volume", async () => {
+    installAPI({ volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 500_107_862_016, state: "available", filesystemUuid: "09e275fe-794a" }] });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("已用空间未知 · 共 465.8 GiB")).toBeTruthy();
+    expect(within(settings).getByText("在线")).toBeTruthy();
+    expect(within(settings).queryByRole("meter", { name: "数据卷已用空间" })).toBeNull();
+    expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();
+  });
+
+  it("resets a member password from a form inside the window", async () => {
+    const prompt = vi.spyOn(window, "prompt");
+    const fetchMock = installAPI({ users: [session.user, alice] });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "用户与权限");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("成员 · 正常")).toBeTruthy();
+    expect(within(settings).getByText("管理员 · 正常")).toBeTruthy();
+    expect(within(settings).getByText("你")).toBeTruthy();
+
+    await user.click(within(settings).getByRole("button", { name: "alice 的更多操作" }));
+    await user.click(within(settings).getByRole("menuitem", { name: "重置密码…" }));
+    const form = within(settings).getByRole("form", { name: "重置 alice 的密码" });
+    await user.type(within(form).getByLabelText("新密码"), "temporary password 1");
+    await user.click(within(form).getByRole("button", { name: "确认重置" }));
+    expect(await within(settings).findByText(/已重置 alice 的密码/)).toBeTruthy();
+    expect(prompt).not.toHaveBeenCalled();
+    const call = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/users/user%3Aalice/credential" && init?.method === "PATCH");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "temporary password 1" });
+
+    await user.click(within(settings).getByRole("button", { name: "修改我的密码" }));
+    expect(within(settings).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
+    expect(within(settings).getByRole("form", { name: "修改密码" })).toBeTruthy();
+    prompt.mockRestore();
+  });
+
+  it("asks for confirmation before disabling a member", async () => {
+    const fetchMock = installAPI({ users: [session.user, alice] });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "用户与权限");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(await within(settings).findByRole("button", { name: "alice 的更多操作" }));
+    await user.click(within(settings).getByRole("menuitem", { name: "禁用账号…" }));
+    const confirm = within(settings).getByRole("form", { name: "禁用 alice" });
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+
+    await user.click(within(confirm).getByRole("button", { name: "取消" }));
+    expect(within(settings).queryByRole("form", { name: "禁用 alice" })).toBeNull();
+    await user.click(within(settings).getByRole("button", { name: "alice 的更多操作" }));
+    await user.click(within(settings).getByRole("menuitem", { name: "禁用账号…" }));
+    await user.click(within(within(settings).getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }));
+    expect(await within(settings).findByText("已禁用 alice。")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/users/user%3Aalice", expect.objectContaining({ method: "DELETE" }));
   });
 });
