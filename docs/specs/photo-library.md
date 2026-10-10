@@ -1,7 +1,7 @@
 # 相册与本地智能检索
 
-状态：M1 切片 1–6 implemented；M2 的语义检索、AI 标签、相册与用户元数据 implemented（手工位置随地点功能实现）；M3 draft
-更新时间：2026-10-08
+状态：M1 切片 1–6 implemented；M2 的语义检索、AI 标签、相册与用户元数据 implemented（手工位置随地点功能实现），AI 内置安装 in progress；M3 draft
+更新时间：2026-10-10
 
 ## 决策状态
 
@@ -14,6 +14,8 @@
 - 原图只读进入 AI Pipeline；缩略图、标签、Embedding 和模型生成结果属于可重建、可独立清除的派生数据。
 - 不做 OCR（2026-10-09 决定）：照片中的文字不参与识别、搜索或描述；如需恢复另行规划。
 - 语义向量使用 EmbeddingGemma 2 的全模态 740M 官方包（2026-10-09 决定），不使用只含文本与图像的 440M 包。
+- 本地 AI 是系统内置能力（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：随 A-NAS 安装和升级并默认开启，用户不需要下载、安装、更新或配置模型，产品也不提供这些入口。界面只呈现结果、后台整理进度、各图库开关和隐私说明，不显示模型名称、版本或组件状态。
+- AI 处理全程不联网：设备在安装、升级和运行时都不为 AI 下载任何内容，处理照片的进程无法访问网络，界面据此说明“照片只在这台设备上分析，AI 不联网”。设备低于运行 AI 的最低硬件时，基础相册照常可用，搜索只按名称与用户标签匹配，界面说明这台设备不支持智能识别。
 - AI 搜索与照片浏览共同使用相册 Policy，不因图片已被索引而绕过授权。普通文件只由文件系统 ACL 授权；照片资产由相册 Catalog 授权，这是 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 对 ADR 0008 的限定例外。
 - 第一版使用受管图库：上传后由相册持有原图身份和生命周期，不原地索引用户任意文件夹。
 - 受管图库及照片资产在文件管理中通过图库投影可见；从文件管理打开照片时跳转到相册，不把底层存储路径当作普通文件直接打开。
@@ -73,7 +75,7 @@
 - 派生数据“加速恢复包”的后续格式、兼容校验和是否值得实现。
 - RAW 首版明确覆盖的厂商格式、Live Photo 配对规则和视频兼容或转码范围。
 - HEIC、RAW 与视频的单文件大小、单次批量导入规模、视频数量及未来图库增长余量。
-- AI Worker 的 CPU、内存、I/O、温度和单任务时长上限。
+- AI Worker 的 CPU、内存、I/O、温度和单任务时长上限，以及运行 AI 的最低硬件。
 - 首次建库、增量处理和搜索响应时间的目标规模与验收阈值。
 - 必备备份的目标介质、计划、加密、保留周期和恢复验收。
 
@@ -207,6 +209,18 @@
 - Given：共享图库包含即将退出家庭的成员上传的照片资产。
 - When：管理员完成成员移除。
 - Then：共享图库继续持有这些照片资产，原上传者的修改权失效，由设备管理员继续管理；其他成员的查看和复制下载权限不变。
+
+### 在从未联网的设备上使用智能搜索
+
+- Given：新安装的 A-NAS 从未连接互联网，成员已上传照片。
+- When：设备空闲 5 分钟后完成后台整理，成员用中文搜索。
+- Then：语义搜索与 AI 标签可用；整个过程用户没有下载、安装或设置任何内容，设备也没有为 AI 发起网络连接。整理期间相册窗口显示进度。
+
+### 设备不满足 AI 最低硬件
+
+- Given：设备的内存或 CPU 低于运行 AI 的最低要求。
+- When：成员使用相册。
+- Then：上传、浏览、相册与用户标签照常可用，搜索只按名称与用户标签匹配；界面说明这台设备不支持智能识别，而不是提示安装或下载。
 
 ### 空闲时执行本地识别
 
@@ -390,6 +404,7 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 
 - 上传中断、进程崩溃和设备重启后，原图与目录状态一致。
 - AI Worker 停止时，相册基础操作继续通过测试。
+- 系统测试在没有外网的环境中完成安装与 AI 处理，并证明 AI Worker 无法建立网络连接、无法读取数据卷。
 - 同一任务重复执行不产生重复照片资产或互相冲突的当前结果。
 - 未授权照片不会通过标签、搜索计数、缩略图或错误信息泄漏。
 - 使用代表性图库记录每分钟处理量、峰值内存、CPU/I/O 占用、前台请求延迟和中文检索质量。
@@ -415,7 +430,7 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 - 技术设计：[相册技术设计](../architecture/photo-library.md)
 - 领域语言：[A-NAS](../../CONTEXT.md)
 - 项目背景：[AI 路线与家庭记忆搜索](../../PROJECT_CONTEXT.md#6-ai-路线)
-- ADR：[受管图库与不可变内容对象](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
+- ADR：[受管图库与不可变内容对象](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 研究：[本地照片 AI 模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md)
 - 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/photos/PhotosPanel.tsx)（界面行为见 [Web 相册界面](photo-gallery-ui.md)）、[相册服务进程](../../internal/photoservice/photoservice.go)；M2 的[语义搜索](../../internal/photos/search.go)、[AI 标签](../../internal/photos/ailabels.go)与[标签词表](../../internal/photos/labels/labels.go)、[相册](../../internal/photos/albums.go)、[用户标签与 AI 纠错](../../internal/photos/usertags.go)、[AI Worker 客户端](../../internal/aiworker/client.go)与 [Python Worker](../../ai/anas_ai/worker.py)；部署见[启用相册服务](../runbooks/enable-photo-service.md)
