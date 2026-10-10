@@ -58,6 +58,11 @@ type Mount struct {
 	Kind          MountKind
 	ReadOnly      bool
 	Purpose       string
+	// Volume and Subpath say how Docker must mount an app-data or Shared
+	// folder: the Docker volume rooted at the A-NAS folder and the path below
+	// it. Both are empty for read-only system files.
+	Volume  string
+	Subpath string
 }
 
 type PortMapping struct {
@@ -214,7 +219,10 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 				volume.Source = source
 				volume.Bind = nil
 				volume.Volume = &types.ServiceVolumeVolume{NoCopy: true, Subpath: subpath}
-				plan.Mounts = append(plan.Mounts, Mount{HostPath: path.Join(base, subpath), ContainerPath: volume.Target, Kind: kind, ReadOnly: volume.ReadOnly, Purpose: descriptions.volumes[volume.Target]})
+				plan.Mounts = append(plan.Mounts, Mount{
+					HostPath: path.Join(base, subpath), ContainerPath: volume.Target, Kind: kind, ReadOnly: volume.ReadOnly,
+					Purpose: descriptions.volumes[volume.Target], Volume: project.Name + "_" + source, Subpath: subpath,
+				})
 			case types.VolumeTypeVolume, types.VolumeTypeTmpfs:
 			default:
 				reject("service %s uses a %s mount", name, volume.Type)

@@ -18,6 +18,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0012：局域网经 Caddy 以明文 HTTP 开放 Web 桌面（HTTPS 前的过渡）](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)
 - [0013：Docker 网络只从 A-NAS 指定的地址池分配](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
 - [0014：屏保视频是系统盘上的长期媒体，不随 release 发布](0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
+- [0015：Docker 与 Caddy 跟随上游官方软件源，最低能力由代码检查](0015-take-docker-and-caddy-from-their-upstream-repositories.md)
 
 ## 格式
 

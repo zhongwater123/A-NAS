@@ -31,6 +31,13 @@ var (
 	// ErrNetworkOutsidePool fails an install whose network Docker placed
 	// outside the address pools; the install is rolled back.
 	ErrNetworkOutsidePool = errors.New("an app network is outside the Docker address pools")
+	// ErrRuntimeOutdated refuses installs on a Docker that drops volume
+	// subpaths, Compose before 2.30 or an engine API before 1.45: the app
+	// would get its whole app-data or Shared volume (ADR 0015).
+	ErrRuntimeOutdated = errors.New("Docker Compose or Engine is too old for A-NAS app mounts")
+	// ErrMountOutsideFolder fails an install whose container mounts an A-NAS
+	// volume beyond the folder in its plan; the install is rolled back.
+	ErrMountOutsideFolder = errors.New("an app mount is not limited to its planned folder")
 )
 
 // ValidID reports whether id can name a catalog app and its Compose project.

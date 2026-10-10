@@ -62,10 +62,25 @@ func (m *memoryDocker) ProjectNetworks(context.Context, string) ([]engine.Networ
 	return nil, nil
 }
 
+// APIVersion reports an engine that supports volume subpaths.
+func (m *memoryDocker) APIVersion(context.Context) (string, error) {
+	return "1.52", nil
+}
+
+// ProjectMounts reports no mounts: the simulated install mounts nothing.
+func (m *memoryDocker) ProjectMounts(context.Context, string) ([]engine.MountInfo, error) {
+	return nil, nil
+}
+
 // runner pretends to pull and start (or stop) the project's services.
 type runner struct {
 	docker *memoryDocker
 	step   time.Duration
+}
+
+// ComposeVersion reports a Compose that keeps volume subpaths.
+func (r *runner) ComposeVersion(context.Context) (string, error) {
+	return "2.40.3", nil
 }
 
 func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error {

@@ -58,7 +58,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
 13. Web 与 SMB 共用同一个 Linux 账号与 ACL，但密码凭据分别以不可逆格式保存，明文只存在于创建或重置调用期间。
 14. 受管图库存储只由相册服务身份访问，照片资产授权由相册 Policy 判定；个人空间与共享文件夹仍只由 ACL 授权，相册服务不获得其访问权（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
-15. 应用的 Docker 网络只从现场确认空闲的地址池分配，应用不能改变宿主机到局域网客户端的路由；地址池未配置时拒绝安装会新建网络的应用，安装后不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。
+15. 应用的 Docker 网络只从现场确认空闲的地址池分配，应用不能改变宿主机到局域网客户端的路由；地址池未配置时拒绝安装会新建网络的应用，安装后不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。应用挂载 A-NAS 卷时只得到计划中的子目录：容器代理在规划时检查 Compose 与 Engine 的最低版本，安装后核对挂载（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 
 ## 当前代码入口
 
@@ -111,6 +111,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
 - [Docker 网络地址池决策](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
+- [Docker 与 Caddy 软件源决策](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)
 - [只读宿主机状态规格](../specs/read-only-host-state.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
 - [局域网 Web 入口决策](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)

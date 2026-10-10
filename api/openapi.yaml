@@ -994,7 +994,8 @@ components:
       description: >-
         The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use,
         name_in_use, address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool),
-        policy_violation or app_engine_error.
+        docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole
+        volumes), policy_violation or app_engine_error.
       content:
         application/json:
           schema:
