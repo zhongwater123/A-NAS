@@ -236,11 +236,11 @@ wipefs --no-act "$resolved_disk" || true
 confirm "Do these values match the intended RC and disposable experimental disk?" || exit 1
 
 stage "Install host dependencies"
-warn "This installs Btrfs, partitioning, SMART, Samba, SQLite and local AI runtime packages."
+warn "This installs Btrfs, partitioning, SMART, Samba, SQLite, local AI runtime and FFmpeg packages."
 confirm "Install the required Debian packages now?" || exit 1
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends \
-  acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2
+  acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg
 
 stage "Install root-owned A-NAS system services"
 anas_uid=$(id -u anas-dev)

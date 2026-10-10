@@ -13,6 +13,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ▼                                                       ▼
 产品服务（非特权，只监听 127.0.0.1:8080）
   ├── Auth / Files / Storage / Share / Jobs / Policy
+  ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► 媒体 Worker（按连接启动，无网络、无数据卷）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              └── AI Orchestrator ──► AI Worker（M2 规划；只读 fd，无网络）
@@ -59,6 +60,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 13. Web 与 SMB 共用同一个 Linux 账号与 ACL，但密码凭据分别以不可逆格式保存，明文只存在于创建或重置调用期间。
 14. 受管图库存储只由相册服务身份访问，照片资产授权由相册 Policy 判定；个人空间与共享文件夹仍只由 ACL 授权，相册服务不获得其访问权（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
 15. 应用的 Docker 网络只从现场确认空闲的地址池分配，应用不能改变宿主机到局域网客户端的路由；地址池未配置时拒绝安装会新建网络的应用，安装后不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。应用挂载 A-NAS 卷时只得到计划中的子目录：容器代理在规划时检查 Compose 与 Engine 的最低版本，安装后核对挂载（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
+16. 影视中心不持有存储：媒体文件只经文件代理以有效会话的用户身份读取，媒体库的可见性与所在空间的读权限一致；FFmpeg 只在没有网络、看不到数据卷与产品服务状态的按连接 Worker 中运行，只接收只读描述符（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）。
 
 ## 当前代码入口
 
@@ -81,6 +83,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
+| `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
+| `internal/mediaworker` | 媒体 Worker 的类型化协议、FFmpeg 命令、按连接服务端（`anas-api media-worker`）与客户端；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
@@ -108,6 +112,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [相册与本地智能检索规格](../specs/photo-library.md)
+- [影视中心规格](../specs/media-center.md)、[影视中心技术设计](media-center.md)与 [ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)
 - [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
 - [Docker 网络地址池决策](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
