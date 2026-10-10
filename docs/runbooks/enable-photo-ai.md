@@ -1,6 +1,6 @@
 # 启用相册本地 AI
 
-状态：draft（Experimental NAS 首次部署待执行）
+状态：verified（2026-10-10 在 Experimental NAS 首次部署 `6833c7637f73`）
 更新时间：2026-10-10
 
 ## 目的
@@ -55,6 +55,18 @@
   - `systemctl show anas-ai.service -p PrivateNetwork -p RestrictAddressFamilies -p DynamicUser`：`yes`、`AF_UNIX`、`yes`。
 - **整理**：相册空闲 5 分钟后，侧栏的 AI 卡片显示“正在整理 x / y”，结束后显示“已整理全部 y 张”；照片详情出现 AI 标签。整理完成后记录 `systemctl show anas-ai.service -p MemoryPeak` 与总耗时，补充到 [M2 实施方案](../architecture/photo-ai.md)。
 - **空闲退出**：最后一次请求约 10 分钟后，`systemctl is-active anas-ai.service` 输出 `inactive`，`anas-ai.socket` 仍为 `active`。
+
+## 首次实机部署证据
+
+2026-10-10 12:27，主干 `6833c7637f73` 在 Experimental NAS 上按本手册部署：
+
+- 安装器把模型与运行环境复制到 `/opt/a-nas/models/e7a8a2204b91…/`（463 MB）与 `/opt/a-nas/ai-runtimes/ccd886271b067afa/`（460 MB），release 的 `ai/` 链接到它们；`anas-ai.socket` 已启用，套接字为 `660 root:a-nas-photos`。
+- 以 `a-nas-photos` 身份发送 `info`，返回 `embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2`、768 维，与标签校准的模型一致。
+- Worker 以动态身份 `a-nas-ai`（UID 64936）运行，`/proc/<pid>/net/dev` 只有 `lo`；`PrivateNetwork=yes`、`RestrictAddressFamilies=AF_UNIX`、`DynamicUser=yes`、`MemoryMax=2G`。
+- 首次整理 185 张测试照片，至 14:12 共用 CPU 约 1,000 秒，内存峰值 815 MB，没有重启。
+- 两处问题：
+  - 部署块在重启容器代理后立即运行探针，代理尚未创建套接字，探针失败，重跑通过；探针现在会等待套接字。
+  - 整理完成后 Worker 没有在空闲 10 分钟后退出：相册服务每分钟询问一次 Worker 的模型，每次连接都让它重新计时，于是常驻约 800 MB。修复后相册服务只在有任务时联系 Worker，随下一次部署生效；验证方法见“空闲退出”。
 
 ## 回滚或恢复
 

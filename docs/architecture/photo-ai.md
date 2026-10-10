@@ -44,6 +44,7 @@ M2 交付后，成员可以：
 - 零样本只是冒烟：三幅纯色图形与 matplotlib 自带的一张人物照片，对 7 个中文标签取最高分全部正确，但最高分与次高分只差 0.07–0.15，不能据此设定阈值。三种提示词模板（裸标签、`task: search result | query: …`、`…一张…的照片`）结果相近。
 - 依赖：`import mediapipe` 会加载 OpenCV 的绘图工具，图形界面版 OpenCV 需要 X 库，因此换用同版本的 `opencv-contrib-python-headless`；MediaPipe 的 C 库还链接 `libEGL.so.1` 与 `libGLESv2.so.2`，安装 Debian 的 `libegl1`、`libgles2`（只是分发库，不带 GPU 驱动）即可。完整依赖的虚拟环境约 509 MB，步骤 7 的发行运行环境去掉音频与评估依赖后约 460 MB（见“模型与运行环境的交付”）。
 - 按 70 token 估算，2 万张照片约需 3.4 小时的空闲 CPU 时间；实机与温度影响待部署后验证。
+- 实机（i3-12100，`CPUQuota=200%`，2026-10-10）：首次整理 185 张测试照片，连同 73 个标签文本与几次搜索共用 CPU 约 1,000 秒，约 5 CPU 秒/张，是开发机单张墙钟时间的数倍（XNNPack 多线程计入 CPU 时间）；Worker 内存峰值 815 MB，低于开发机测得的 1.2–1.4 GiB。按此估计 2 万张约需 28 CPU 小时。
 
 ## 模型与运行环境的交付
 
@@ -73,7 +74,7 @@ M2 交付后，成员可以：
 
 - 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm`。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
 - 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷；`MemoryMax=2G`（按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
-- 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
+- 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。任何一次连接都会拉起 Worker 并重新计时，所以相册服务在得知模型 ID 之后，只在有到期的向量任务或缺少标签文本向量时才联系它；模型 ID 在服务启动后的第一轮得知，更换模型随 release 而来（安装器重启相册服务），搜索遇到新模型时也会让后台重新核对。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
 - 模型与运行环境的来源、位置与校验见“模型与运行环境的交付”。安装器随系统启用套接字，没有“未安装”状态；Worker 启动中、崩溃或模型校验失败时相册照常可用，搜索退回按名称与用户标签匹配。设备低于最低硬件（待实机测量）时不启动 Worker。这些情况下界面都不说 AI 不可用（[相册界面规格](../specs/photo-gallery-ui.md)）。
 
 ### 协议
