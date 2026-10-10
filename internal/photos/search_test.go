@@ -158,16 +158,17 @@ func TestSearchRanksTheCallersPhotosByMeaning(t *testing.T) {
 	index(t, service, embedder)
 
 	page := search(t, service, namedAlice, "红色的花")
-	if !page.Semantic || page.Match != photos.MatchClosest {
-		t.Fatalf("Semantic = %v, Match = %q with the Worker available and no calibrated label", page.Semantic, page.Match)
+	if !page.Semantic {
+		t.Fatal("Semantic = false with the Worker available")
 	}
-	// Bob's private photo and the trashed one never appear, however close;
-	// the blue photo is too far from the best match to show at all.
-	if got := names(page.Assets); !slices.Equal(got, []string{"a.png", "c.png"}) {
-		t.Fatalf("results = %v, want Alice's red photo first and only what she can see", got)
+	// Bob's private photo and the trashed one never appear, however close.
+	// Nothing visible is cut off: the blue photo follows the two red ones as
+	// less related.
+	if got := names(page.Assets); !slices.Equal(got, []string{"a.png", "c.png", "b.png"}) || page.Closest != 2 {
+		t.Fatalf("results = %v, closest %d; want Alice's red photo first, the blue one after the closest two, and only what she can see", got, page.Closest)
 	}
-	if got := names(search(t, service, namedAlice, "蓝天").Assets); got[0] != "b.png" {
-		t.Fatalf("blue query ranks %v", got)
+	if page := search(t, service, namedAlice, "蓝天"); names(page.Assets)[0] != "b.png" || page.Closest != 1 {
+		t.Fatalf("blue query ranks %v, closest %d", names(page.Assets), page.Closest)
 	}
 	if got := names(search(t, service, namedBob, "红色").Assets); !slices.Equal(got, []string{"bobs red.png", "c.png"}) {
 		t.Fatalf("Bob's results = %v, want his own and the shared photo only", got)
@@ -182,13 +183,15 @@ func TestSearchPutsNameMatchesFirstAndFallsBackToNames(t *testing.T) {
 	importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
 	index(t, service, embedder)
 
-	if got := names(search(t, service, namedAlice, "蓝色").Assets); !slices.Equal(got, []string{"蓝色的车.png", "sea.png"}) {
-		t.Fatalf("results = %v, want the name match before the closest colour", got)
+	// The name match belongs to the closest group; the red photo is less
+	// related.
+	if page := search(t, service, namedAlice, "蓝色"); !slices.Equal(names(page.Assets), []string{"蓝色的车.png", "sea.png", "red.png"}) || page.Closest != 2 {
+		t.Fatalf("results = %v, closest %d; want the name match before the closest colour", names(page.Assets), page.Closest)
 	}
 	embedder.setUnavailable(true)
 	page := search(t, service, namedAlice, "蓝色")
-	if page.Semantic || page.Match != photos.MatchNames || !slices.Equal(names(page.Assets), []string{"蓝色的车.png"}) {
-		t.Fatalf("without the Worker: semantic=%v results=%v, want names only", page.Semantic, names(page.Assets))
+	if page.Semantic || page.Closest != 1 || !slices.Equal(names(page.Assets), []string{"蓝色的车.png"}) {
+		t.Fatalf("without the Worker: semantic=%v results=%v closest %d, want names only", page.Semantic, names(page.Assets), page.Closest)
 	}
 	if page := search(t, service, namedAlice, "RED"); !slices.Equal(names(page.Assets), []string{"red.png"}) {
 		t.Fatalf("name matching ignores case: %v", names(page.Assets))
@@ -198,14 +201,15 @@ func TestSearchPutsNameMatchesFirstAndFallsBackToNames(t *testing.T) {
 func TestSearchPagesWithoutRepeatsAndRejectsBadInput(t *testing.T) {
 	service, embedder, _ := searchService(t)
 	private, _ := libraries(t, service, namedAlice)
-	// Five shades of green, all close enough to the best match to be kept.
-	for i, content := range [][]byte{green, solidPNG(35, 205, 30), solidPNG(30, 190, 40), solidPNG(40, 200, 35), solidPNG(30, 210, 30)} {
+	// Four shades of green close to the best match, then two that are not.
+	for i, content := range [][]byte{green, solidPNG(35, 205, 30), solidPNG(30, 190, 40), solidPNG(40, 200, 35),
+		solidPNG(120, 160, 120), red} {
 		importPhoto(t, service, namedAlice, private.ID, "", string(rune('a'+i))+".png", content)
 	}
 	index(t, service, embedder)
 	ctx := context.Background()
 
-	all := names(search(t, service, namedAlice, "绿").Assets)
+	all := search(t, service, namedAlice, "绿")
 	var paged []string
 	cursor := ""
 	for range 10 {
@@ -213,13 +217,17 @@ func TestSearchPagesWithoutRepeatsAndRejectsBadInput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Search() page error = %v", err)
 		}
+		// Every page tells where the closest group ends among all results.
+		if page.Closest != 4 {
+			t.Fatalf("a page says the closest group has %d photos, want 4", page.Closest)
+		}
 		paged = append(paged, names(page.Assets)...)
 		if cursor = page.Next; cursor == "" {
 			break
 		}
 	}
-	if !slices.Equal(paged, all) || len(all) != 5 {
-		t.Fatalf("pages = %v, want %v", paged, all)
+	if got := names(all.Assets); !slices.Equal(paged, got) || len(got) != 6 || got[5] != "f.png" || all.Closest != 4 {
+		t.Fatalf("pages = %v, want %v with the red photo last and 4 closest (got %d)", paged, got, all.Closest)
 	}
 	for _, query := range []string{"", "   ", strings.Repeat("猫", photos.MaxQueryRunes+1)} {
 		if _, err := service.Search(ctx, namedAlice, photos.SearchRequest{Query: query}); !errors.Is(err, photos.ErrInvalidQuery) {

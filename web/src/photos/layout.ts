@@ -11,7 +11,7 @@ export const defaultRowHeight = 180;
 export const tileGap = 4;
 export const clampRowHeight = (value: number) => Math.round(Math.min(maxRowHeight, Math.max(minRowHeight, value)));
 
-export const sizes = { month: 64, day: 44, heading: 52, more: 72, end: 64 };
+export const sizes = { month: 64, day: 44, heading: 52, divider: 92, more: 72, end: 64 };
 
 export interface Box<T> { item: T; left: number; width: number; height: number }
 
@@ -22,6 +22,7 @@ export type Entry =
   | { kind: "month"; key: string; size: number; label: string; month: string; photos: number }
   | { kind: "day"; key: string; size: number; label: string; ids: string[] }
   | { kind: "heading"; key: string; size: number; label: string; detail?: string }
+  | { kind: "divider"; key: string; size: number; label: string; title: string; text: string }
   | { kind: "row"; key: string; size: number; label: string; boxes: Box<PhotoAsset>[] }
   | { kind: "pending"; key: string; size: number; label: string; boxes: Box<PendingPhoto>[] }
   | { kind: "placeholder"; key: string; size: number; label: string; month: string; photos: number; failed: boolean }
@@ -109,10 +110,21 @@ export function timelineEntries(months: PhotoMonth[], loaded: Map<string, MonthS
   return entries;
 }
 
+// A split ends a list's first group after at photos, such as search results
+// closest to the query.
+export interface Split { at: number; title: string; text: string }
+
 // flatEntries lays out a list without dates, such as an album or search
-// results; "more" asks for the next page when it scrolls into view.
-export function flatEntries(assets: PhotoAsset[], width: number, rowHeight: number, more: boolean, end = ""): Entry[] {
-  const entries = rowEntries(assets, width, rowHeight, "", "row");
+// results; "more" asks for the next page when it scrolls into view. Photos
+// after a split follow a divider in rows of their own, labelled with its
+// title.
+export function flatEntries(assets: PhotoAsset[], width: number, rowHeight: number, more: boolean, end = "", split?: Split): Entry[] {
+  const at = split ? Math.min(split.at, assets.length) : assets.length;
+  const entries = rowEntries(assets.slice(0, at), width, rowHeight, "", "row");
+  if (split && at < assets.length) {
+    entries.push({ kind: "divider", key: "divider", size: sizes.divider, label: "", title: split.title, text: split.text });
+    entries.push(...rowEntries(assets.slice(at), width, rowHeight, split.title, "row"));
+  }
   if (more) entries.push({ kind: "more", key: "more", size: sizes.more, label: "" });
   else if (end && assets.length) entries.push({ kind: "end", key: "end", size: sizes.end, label: "", text: end });
   return entries;

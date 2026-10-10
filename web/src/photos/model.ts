@@ -41,11 +41,7 @@ export function libraryName(caller: Caller, library?: PhotoLibrary) {
 
 export const placeLibrary = (place: Place) => "libraryId" in place ? place.libraryId : "";
 
-// Label categories of the vocabulary, in the order AI search shows them.
-export const categoryNames: Record<string, string> = {
-  animal: "动物", food: "食物", object: "物品", vehicle: "交通工具", activity: "活动", nature: "自然", scene: "场景", people: "人物", document: "文档",
-};
-// The member library a search or the things page started from covers.
+// The member library a search started from covers.
 export const placeViewing = (caller: Caller, place: Place) => {
   if ("viewing" in place) return place.viewing;
   return libraryOf(caller, placeLibrary(place))?.viewing ? placeLibrary(place) : "";

@@ -23,7 +23,7 @@ import os
 ROOT = os.environ.get("ANAS_DATASETS", "/datasets")
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-VOCABULARY = os.path.join(REPO, "internal", "photos", "labels", "v1.json")
+VOCABULARY = os.path.join(HERE, "labels", "v1.json")
 GROUND_TRUTH = os.path.join(HERE, "ground_truth.json")
 
 COCO_ANNOTATIONS = os.path.join("coco", "annotations", "instances_val2017.json")

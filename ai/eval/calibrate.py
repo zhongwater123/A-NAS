@@ -31,7 +31,7 @@ MIN_POSITIVES = 20  # in the calibration half
 MIN_RECALL = 0.2  # a label that rarely fires is not worth showing
 SHOWN = 5  # most labels shown per photo
 REFERENCE_PREVALENCE = 0.05  # precision is also quoted as if 5% of photos held the label
-CALIBRATION = os.path.join(datasets.REPO, "internal", "photos", "labels", "v1.calibration.json")
+CALIBRATION = os.path.join(datasets.HERE, "labels", "v1.calibration.json")
 
 
 def label_matrix(vocabulary, texts, template, synonyms):

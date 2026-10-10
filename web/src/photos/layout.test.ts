@@ -60,4 +60,18 @@ describe("flatEntries", () => {
     expect(flatEntries(photos, 900, 180, false, "以上是相关度较高的照片").at(-1)?.kind).toBe("end");
     expect(flatEntries([], 900, 180, false, "以上是相关度较高的照片")).toEqual([]);
   });
+
+  it("starts the photos after a split on new rows behind a divider", () => {
+    const photos = ["a", "b", "c", "d", "e"].map((id) => photo(id, "2026-05-02T08:00:00Z"));
+    const split = { at: 2, title: "相关度较低", text: "差距较大" };
+    const entries = flatEntries(photos, 2000, 180, true, "", split);
+    expect(entries.map((entry) => entry.kind)).toEqual(["row", "divider", "row", "more"]);
+    const ids = (entry: (typeof entries)[number]) => entry.kind === "row" ? entry.boxes.map((box) => box.item.id) : [];
+    expect(ids(entries[0])).toEqual(["a", "b"]);
+    expect(ids(entries[2])).toEqual(["c", "d", "e"]);
+    // Rows after the divider float its title while they scroll by.
+    expect([entries[0].label, entries[2].label]).toEqual(["", "相关度较低"]);
+    // A split at or past the loaded photos waits for them.
+    expect(flatEntries(photos, 2000, 180, true, "", { ...split, at: 5 }).map((entry) => entry.kind)).toEqual(["row", "more"]);
+  });
 });

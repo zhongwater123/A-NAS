@@ -151,7 +151,7 @@ docker run --rm --cpuset-cpus=0-3 -v "$PWD:/src:ro" -w /src/ai \
 
 发行用的 Worker 运行环境（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）也在开发机上构建：`scripts/build-ai-runtime.sh` 在同一开发镜像中按 [`ai/requirements.lock`](../../ai/requirements.lock) 的哈希安装 wheel，打包为 `build/ai-runtime/<ID>.tar.gz`，并写出 `deploy-dev.ps1` 读取的 `build/ai-runtime.json`。同一 ID 的包已存在时直接复用，因此 NAS 上看到的哈希不变；锁文件改了版本后先运行 `scripts/build-ai-runtime.sh --lock` 更新哈希。两者都从 PyPI 下载，NAS 不需要。2026-10-10 的包 `ccd886271b067afa` 压缩后 163 MB，解开约 460 MB。
 
-AI 标签阈值的校准（`ai/eval/`）使用放在 `D:\A-NAS-datasets`（WSL 中为 `/mnt/d/A-NAS-datasets`）的公开数据集，只在开发机使用，不进入仓库、NAS 或发行包；数据集来源、许可与结论见[标签校准报告](../research/photo-ai-label-calibration.md)。COCO 与 Open Images 元数据按报告中的地址下载并解压后，依次逐张下载其余图片、计算向量、校准阈值：
+AI 的评估（`ai/eval/`：标签阈值校准、搜索取舍与分块向量）使用放在 `D:\A-NAS-datasets`（WSL 中为 `/mnt/d/A-NAS-datasets`）的公开数据集，只在开发机使用，不进入仓库、NAS 或发行包；数据集来源、许可与结论见[标签校准报告](../research/photo-ai-label-calibration.md)。COCO 与 Open Images 元数据按报告中的地址下载并解压后，依次逐张下载其余图片、计算向量、校准阈值：
 
 ```bash
 AI="docker run --rm -v $PWD:/src -w /src/ai -v /mnt/d/A-NAS-datasets:/datasets \
@@ -162,7 +162,14 @@ $AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache 
 $AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --report /datasets/report.json --write
 ```
 
-`eval.embed` 可中断，重跑时只补算缺少的向量；权重缓存放在 WSL 自己的磁盘上，加载比放在 `/mnt/d` 快。`--write` 不带路径时更新 `internal/photos/labels/v1.calibration.json`；`--compare-with` 在两份缓存共有的图片上比较视觉 token 或输入尺寸。
+`eval.embed` 可中断，重跑时只补算缺少的向量；权重缓存放在 WSL 自己的磁盘上，加载比放在 `/mnt/d` 快。`--write` 不带路径时更新 `ai/eval/labels/v1.calibration.json`；`--compare-with` 在两份缓存共有的图片上比较视觉 token 或输入尺寸。
+
+分块向量（[M2 实施方案“AI 标签”](../architecture/photo-ai.md#ai-标签2026-10-10-起暂停)）先为 COCO 测试半与 COCO-CN 测试集算每块的向量，再与整图向量比较；中途也可以运行 `eval.tile_search` 查看已算部分的结果：
+
+```bash
+$AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack --tokens 70 --tiles 2 --split test --sets coco,coco-cn
+$AI -m eval.tile_search --cache "/datasets/cache/<模型 ID>-e512" --tiles "/datasets/cache/<模型 ID>-e512-tiles2"
+```
 
 相册的规模基线（4 名成员、20,000 张，约 5 分钟）与 12 MP 缩略图计时默认跳过，在同一 cgo 容器中加 `-e ANAS_PHOTO_SCALE=1` 运行 `go test -count=1 -timeout 60m -run 'TestScale' -v ./internal/photos/`；结果的解读见[相册技术设计](../architecture/photo-library.md)切片 7。
 
