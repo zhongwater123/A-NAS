@@ -99,7 +99,8 @@ func (s *Service) ScanInBackground(ctx context.Context, actor accounts.User, lib
 	}()
 }
 
-// Rescan scans a library the actor manages.
+// Rescan scans a library the actor manages and reads the videos FFmpeg
+// could not read before once more.
 func (s *Service) Rescan(ctx context.Context, actor accounts.User, libraryID string) error {
 	library, err := s.library(ctx, actor, libraryID)
 	if err != nil {
@@ -107,6 +108,12 @@ func (s *Service) Rescan(ctx context.Context, actor accounts.User, libraryID str
 	}
 	if !library.manageable(actor) {
 		return ErrForbidden
+	}
+	if _, err := s.store.db.ExecContext(ctx, `
+UPDATE videos SET probe_state = CASE WHEN probe_state = 'failed' THEN 'pending' ELSE probe_state END,
+frame_state = CASE WHEN frame_state = 'failed' THEN 'pending' ELSE frame_state END
+WHERE library_id = ? AND (probe_state = 'failed' OR frame_state = 'failed')`, libraryID); err != nil {
+		return err
 	}
 	s.ScanInBackground(ctx, actor, libraryID)
 	return nil

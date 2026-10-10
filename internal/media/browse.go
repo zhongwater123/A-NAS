@@ -248,24 +248,28 @@ func (s *Service) Home(ctx context.Context, actor accounts.User) (Home, error) {
 	sort.SliceStable(favorites, func(i, j int) bool { return c.favorites[favorites[i].ID].After(c.favorites[favorites[j].ID]) })
 	home.Favorites = limit(favorites, homeRow)
 	// The banner shows what the user is watching, then new films and shows,
-	// each once and only with a wide image.
+	// each once and only with a wide image; other videos only when there is
+	// nothing else.
 	seen := map[string]bool{}
 	home.Featured = []Title{}
-	for _, candidates := range [][]Title{home.Continue, recent} {
+	feature := func(candidates []Title, others bool) {
 		for _, title := range candidates {
 			key := title.ID
 			if title.ShowID != "" {
 				key = title.ShowID
 			}
-			if seen[key] || !title.Artwork.Backdrop || title.Type == TypeOther && len(home.Featured) > 0 {
+			if len(home.Featured) == homeFeature || seen[key] || !title.Artwork.Backdrop || (title.Type == TypeOther) != others {
 				continue
 			}
 			seen[key] = true
 			home.Featured = append(home.Featured, title)
-			if len(home.Featured) == homeFeature {
-				return home, nil
-			}
 		}
+	}
+	feature(home.Continue, false)
+	feature(recent, false)
+	if len(home.Featured) == 0 {
+		feature(home.Continue, true)
+		feature(recent, true)
 	}
 	return home, nil
 }

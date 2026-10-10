@@ -57,6 +57,7 @@ import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { MediaCenter } from "./media/MediaCenter";
 import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
 import { StatusBar } from "./StatusBar";
@@ -65,7 +66,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "photos" | "trash" | "snapshots" | "settings" | "terminal" | "docker" | "store";
+type WindowID = "files" | "photos" | "media" | "trash" | "snapshots" | "settings" | "terminal" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -96,6 +97,7 @@ type WindowAction =
 const initialWindows: WindowModel[] = [
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
+	{ id: "media", title: "影视中心", open: false, minimized: false, maximized: false, x: 210, y: 46, width: 1120, height: 720, z: 2, opened: 0 },
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
 	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
@@ -107,6 +109,7 @@ const initialWindows: WindowModel[] = [
 const windowIcons: Record<WindowID, LucideIcon> = {
   files: FolderClosed,
   photos: Image,
+  media: PlaySquare,
   trash: Trash2,
   snapshots: Camera,
   settings: Settings,
@@ -118,6 +121,7 @@ const windowIcons: Record<WindowID, LucideIcon> = {
 const windowTones: Record<WindowID, string> = {
   files: "files",
   photos: "photos",
+  media: "video",
   trash: "trash",
   snapshots: "snapshot",
   settings: "settings",
@@ -258,7 +262,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", keywords: "shell 命令行 bash", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
     ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
-    { id: "video", label: "影视", ariaLabel: "影视，规划中", tone: "video", icon: <PlaySquare />, disabled: true },
+    { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <PlaySquare />, active: isOpen("media"), onClick: () => openWindow("media") },
     { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
     { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", keywords: "快照 恢复 历史版本 snapshot", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
@@ -313,8 +317,9 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
-			  {window.id === "files" && <FilePanel onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} />}
+			  {window.id === "files" && <FilePanel onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} />}
 			  {window.id === "photos" && <PhotosPanel userId={session.user.id} isAdmin={session.user.role === "admin"} />}
+			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "trash" && <TrashPanel />}
 			  {window.id === "snapshots" && <SnapshotPanel />}
 			  {window.id === "terminal" && <TerminalPanel />}
@@ -382,7 +387,7 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
     : { left: model.x, top: model.y, width: model.width, height: model.height, zIndex: model.z };
 
   return (
-    <section className={`app-window ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
+    <section className={`app-window app-window-${model.id} ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
       <div className="window-titlebar" onPointerDown={beginDrag}>
         <div className="window-title"><span className="window-app-icon"><Icon size={17} /></span>{model.title}</div>
         <div className="window-actions">
@@ -433,10 +438,10 @@ type FileBrowserItem = {
 const personalFileResources: FileBrowserItem[] = [
 	{ id: "resource:photos", name: "图库", kind: "resource", type: "图库投影", detail: "个人图库", modifiedAt: "", sizeBytes: 0, resource: "photos" },
 	{ id: "resource:music", name: "音乐", kind: "resource", type: "功能入口", detail: "音乐资源 · 规划中", modifiedAt: "", sizeBytes: 0, resource: "music", planned: true },
-	{ id: "resource:movies", name: "电影", kind: "resource", type: "功能入口", detail: "影视中心 · 规划中", modifiedAt: "", sizeBytes: 0, resource: "movies", planned: true },
+	{ id: "resource:movies", name: "影视", kind: "resource", type: "功能入口", detail: "影视中心", modifiedAt: "", sizeBytes: 0, resource: "movies" },
 ];
 
-function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
+function FilePanel({ onOpenPhotos, onOpenMedia }: { onOpenPhotos: () => void; onOpenMedia: () => void }) {
 	const [spaces, setSpaces] = useState<Space[]>([]);
 	const [spaceID, setSpaceID] = useState("");
 	const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -575,6 +580,7 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 		if (item.entry?.kind === "directory") openDirectory(item.entry);
 		else if (item.entry?.kind === "file") downloadEntry(item.entry);
 		else if (item.resource === "photos") onOpenPhotos();
+		else if (item.resource === "movies") onOpenMedia();
 	};
 	const changeSort = (nextSort: FileSort) => {
 		if (sortBy === nextSort) setSortDirection((value) => value === "ascending" ? "descending" : "ascending");
@@ -727,7 +733,7 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 						<ChevronDown className={!active || collapsed ? "collapsed" : ""} /><span className={`file-tree-icon ${space.kind}`}>{space.kind === "shared" ? <UsersRound /> : space.viewing ? <ShieldCheck /> : <FolderOpen />}</span><strong>{label}</strong><small>{space.kind === "shared" ? "共享" : space.name}</small>
 					</button>
 					{active && !collapsed && <div className="file-tree-branch">
-						{space.kind === "private" && !space.viewing && personalFileResources.map((resource) => <button key={resource.id} className="file-tree-child resource" disabled={resource.planned} onClick={() => resource.resource === "photos" && onOpenPhotos()}><span>{itemIcon(resource)}</span><strong>{resource.name}</strong><small>{resource.planned ? "规划中" : "打开"}</small></button>)}
+						{space.kind === "private" && !space.viewing && personalFileResources.map((resource) => <button key={resource.id} className="file-tree-child resource" disabled={resource.planned} onClick={() => resource.resource === "photos" ? onOpenPhotos() : resource.resource === "movies" && onOpenMedia()}><span>{itemIcon(resource)}</span><strong>{resource.name}</strong><small>{resource.planned ? "规划中" : "打开"}</small></button>)}
 						<button className={`file-tree-child ${trail.length === 0 ? "current" : ""}`} onClick={() => navigateTo(0)}><span><FolderClosed /></span><strong>根目录</strong></button>
 						{trail.map((item, index) => <button key={item.id} className={`file-tree-child path ${index === trail.length - 1 ? "current" : ""}`} onClick={() => navigateTo(index + 1)}><span><FolderClosed /></span><strong>{item.name}</strong></button>)}
 					</div>}
@@ -808,7 +814,7 @@ function FilePanel({ onOpenPhotos }: { onOpenPhotos: () => void }) {
 
 		<aside className="file-inspector" aria-label="详细信息">
 			<header>详细信息</header>
-			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isBrowserPreviewableImage(selectedItem.name) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatFileSize(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
+			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isBrowserPreviewableImage(selectedItem.name) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatFileSize(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.resource === "movies" && <p className="file-inspector-hint">打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
 		</aside>
 
 		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>

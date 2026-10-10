@@ -260,7 +260,7 @@ func (s *showRow) artwork() Artwork {
 
 func (c *catalog) progressOf(id string) *Progress {
 	row, ok := c.progress[id]
-	if !ok || (row.Position <= 0 && !row.Watched) {
+	if !ok || (row.Position <= 0 && !row.Watched && row.PlayedAt.IsZero()) {
 		return nil
 	}
 	progress := &Progress{Position: row.Position, Duration: row.Duration, Watched: row.Watched}
