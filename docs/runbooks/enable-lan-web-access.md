@@ -38,6 +38,7 @@
 
    - 预期：`caddy.service` 运行；`apt-cache policy caddy` 显示已安装的版本来自 `dl.cloudsmith.io`。全新安装时 80 端口提供 Caddy 的默认欢迎页，已有 A-NAS 配置时保持局域网入口。
    - 完成标准：`systemctl is-active caddy` 为 `active`，`caddy version` 为官方源当前的 2.x 版本。
+   - 官方源不可用：2026-10-09 起 Cloudsmith 对软件包索引返回 `402 Payment Required`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），`apt-get update` 因此失败。此时执行 `rm -f /etc/apt/sources.list.d/caddy-stable.list /etc/apt/preferences.d/caddy && apt-get update`，保留已安装的 Caddy（全新安装时先装 Debian 的 `caddy` 过渡），源恢复后重新执行本步骤。A-NAS 的 Caddyfile 只做反向代理，Debian 的 2.6.2 可以提供局域网入口。
 3. 按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装包含本功能的发布，发布目录中应有 `Caddyfile`。安装器检测到 Caddy 后先校验配置，再把原 `/etc/caddy/Caddyfile` 备份为 `/etc/caddy/Caddyfile.before-a-nas`，写入 A-NAS 配置并重新加载 Caddy。
    - 预期：安装器正常结束，`head -n 1 /etc/caddy/Caddyfile` 输出 `# Managed by A-NAS.`。
    - 完成标准：`systemctl is-active caddy anas-api` 均为 `active`。

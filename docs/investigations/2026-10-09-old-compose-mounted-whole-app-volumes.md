@@ -1,6 +1,6 @@
 # Debian 的 Compose 2.26.1 把应用的整个卷挂进容器
 
-状态：fixed locally；Experimental NAS 已换用 Compose 2.40.3，Docker 与 Caddy 切换到官方源待完成
+状态：fixed locally；Experimental NAS 已换用 Docker 官方源，包含检查的容器代理待部署
 更新时间：2026-10-10
 
 ## 症状与影响
@@ -37,13 +37,14 @@ Compose 2.29 及以前在卷挂载没有其他高级选项时，用旧式绑定�
 ## 修复与回归证据
 
 - 实机（2026-10-09）：从 docker/compose 官方发布获取 2.40.3 独立程序，SHA-256 `dba9d98e1ba5bfe11d88c99b9bd32fc4a0624a30fafe68eea34d61a3e42fd372` 与发布记录一致，安装到 `/usr/local/lib/docker/cli-plugins/docker-compose`；root 与容器代理身份下都报告 2.40.3。在 NAS 上用临时目录实测子目录挂载，容器只看到子目录中的文件。OpenList 停止后把文件移入 `data`，重建后挂载为 `"Subpath":"data"`，HTTP 返回 200 且使用原有数据库。卸载后重装的 Immich 中 postgres 正常运行，网页 `:2283` 返回 200，网络为 `10.96.65.0/24`。
+- 实机（2026-10-10）：按[迁移步骤](../runbooks/install-container-agent.md#从-debian-dockerio-迁移到官方软件源)换用 Docker 官方源，得到 Docker 29.9.0（API 1.56）与 Compose v5.6.0，手动安装的 Compose 已删除，现有应用的挂载不变。
 - 决定：[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)，Docker 与 Caddy 改用官方软件源。
 - 代码：[`Store.Plan`](../../internal/appstore/engine/engine.go) 在 Compose 低于 2.30 或 Engine API 低于 1.45 时返回 `docker_runtime_outdated`；安装后核对每个 A-NAS 卷的挂载都是计划中的子目录（[`ProjectMounts`](../../internal/appstore/engine/docker.go) 从挂载规格读取子目录，旧式绑定没有规格即视为整个卷），否则回滚；[`Render`](../../internal/appstore/render.go) 在计划中记录每个文件夹对应的卷与子目录；产品服务读取代理响应时忽略新增字段。
 - 测试：`TestPlanRefusesADockerThatDropsVolumeSubpaths`、`TestInstallRollsBackAMountBeyondItsFolder`、`TestInstallKeepsMountsOnTheirFolders`、`TestRenderRecordsTheVolumeAndSubpathOfEachFolder`、`TestClientIgnoresFieldsANewerAgentAdds`。
 
 ## 后续工作
 
-- 按 ADR 0015 把 NAS 的 Docker 与 Caddy 换成官方源，删除手动安装的 Compose 程序。
+- 在 Experimental NAS 部署包含版本与挂载检查的容器代理。
 - 首次失败安装期间 Immich 服务一直连不上数据库，未见它初始化上传目录；如需确认，检查共享空间根部是否出现 Immich 的 `library`、`upload`、`thumbs` 等目录。
 
 ## 关联

@@ -1,6 +1,6 @@
 # 安装 Docker 与容器代理
 
-状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证）
+状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证，2026-10-10 在该机完成到官方源的迁移）
 更新时间：2026-10-10
 
 ## 目的
@@ -96,6 +96,8 @@ docker ps --format '{{.Names}}\t{{.Status}}'
 ```
 
 完成标准：Server 为官方源当前的主版本，Compose 不低于 2.30；存储驱动与地址池和迁移前一致；迁移前运行的容器重新运行；`runuser -u anas-container -- env DOCKER_CONFIG=/var/lib/a-nas-container/docker-config docker compose version` 报告同一个 Compose。任一不符时停止，按[回滚](#回滚或恢复)恢复 Debian 包。
+
+2026-10-10 Experimental NAS 迁移后为 Docker 29.9.0（API 1.56）与 Compose v5.6.0；存储驱动仍为 `overlay2`，地址池不变，Immich 与 OpenList 随 Docker 启动恢复。
 
 ### 2. 配置 Docker 网络地址池
 
