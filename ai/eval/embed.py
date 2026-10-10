@@ -10,6 +10,12 @@ stopped.
 
 MediaPipe uses four threads; on a larger machine run several shards at once
 (--shard 0/3, 1/3, 2/3), each writing its own file.
+
+--tiles N cuts each image into an N x N grid instead and embeds every tile
+through the same thumbnail, keyed <image>#<row><column> in a cache of its
+own; eval.tile_search measures whether such tile vectors find small things
+the whole-photo vector misses. --split test keeps to the COCO test half and
+the COCO-CN test split, the photos search is measured on.
 """
 
 import argparse
@@ -39,23 +45,37 @@ CAPTION_TEMPLATES = {"plain": "{}", "query": QUERY_PROMPT}
 def thumbnail(path, edge):
     """Renders the photo service's thumbnail of the image at path."""
     with Image.open(path) as opened:
+        return render(ImageOps.exif_transpose(opened), edge)
+
+
+def tiles(path, grid, edge):
+    """Renders the thumbnail of each tile of a grid x grid cut, row by row."""
+    with Image.open(path) as opened:
         image = ImageOps.exif_transpose(opened)
         width, height = image.size
-        if width > edge or height > edge:
-            # imaging.Fit: keep the aspect ratio, truncate the short side.
-            if width / height > 1:
-                size = (edge, max(1, int(edge / (width / height))))
-            else:
-                size = (max(1, int(edge * (width / height))), edge)
-            image = image.resize(size, Image.Resampling.LANCZOS)
-        if image.mode in ("RGBA", "LA", "P"):
-            image = image.convert("RGBA")
-            flat = Image.new("RGB", image.size, "white")
-            flat.paste(image, mask=image.getchannel("A"))
-            image = flat
-        out = io.BytesIO()
-        image.convert("RGB").save(out, format="JPEG", quality=82)
-        return out.getvalue()
+        xs = [round(width * i / grid) for i in range(grid + 1)]
+        ys = [round(height * i / grid) for i in range(grid + 1)]
+        return [(f"{row}{column}", render(image.crop((xs[column], ys[row], xs[column + 1], ys[row + 1])), edge))
+                for row in range(grid) for column in range(grid)]
+
+
+def render(image, edge):
+    width, height = image.size
+    if width > edge or height > edge:
+        # imaging.Fit: keep the aspect ratio, truncate the short side.
+        if width / height > 1:
+            size = (edge, max(1, int(edge / (width / height))))
+        else:
+            size = (max(1, int(edge * (width / height))), edge)
+        image = image.resize(size, Image.Resampling.LANCZOS)
+    if image.mode in ("RGBA", "LA", "P"):
+        image = image.convert("RGBA")
+        flat = Image.new("RGB", image.size, "white")
+        flat.paste(image, mask=image.getchannel("A"))
+        image = flat
+    out = io.BytesIO()
+    image.convert("RGB").save(out, format="JPEG", quality=82)
+    return out.getvalue()
 
 
 class Cache:
@@ -89,17 +109,19 @@ def in_shard(key, shard):
     return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % count == index
 
 
-def image_jobs(sets):
+def image_jobs(sets, test_only=False):
     ground_truth = datasets.load_ground_truth()
     jobs = []
     if "coco" in sets:
-        jobs += [(sample.key, sample.path) for sample in datasets.coco_samples(ground_truth)]
+        jobs += [(sample.key, sample.path) for sample in datasets.coco_samples(ground_truth)
+                 if not test_only or sample.split == "test"]
     if "openimages" in sets:
         ids = datasets.select_openimages(ground_truth)
-        jobs += [(sample.key, sample.path) for sample in datasets.openimages_samples(ground_truth, ids)]
+        jobs += [(sample.key, sample.path) for sample in datasets.openimages_samples(ground_truth, ids)
+                 if not test_only or sample.split == "test"]
     if "coco-cn" in sets:
         # Test first, so that --limit keeps the split search is measured on.
-        for split in ("test", "val"):
+        for split in ("test",) if test_only else ("test", "val"):
             images, _captions = datasets.coco_cn(split)
             jobs += [(f"coco-cn:{name}", path) for name, path in images]
     return jobs
@@ -131,6 +153,8 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="embed at most this many images per set (0: all)")
     parser.add_argument("--no-texts", action="store_true")
     parser.add_argument("--shard", default="0/1", help="I/N: embed only the I-th of N stable parts")
+    parser.add_argument("--tiles", type=int, default=1, help="embed the tiles of an N x N grid instead of whole images")
+    parser.add_argument("--split", choices=("all", "test"), default="all", help="test: only the images search is measured on")
     parser.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"),
                         help="writable directory for the runtime's repacked weights; a local disk loads faster")
     args = parser.parse_args()
@@ -141,10 +165,11 @@ def main():
     os.makedirs(args.weight_cache, exist_ok=True)
     provider = providers.MediaPipeProvider(args.model, MANIFEST, vision_tokens=args.tokens, cache_dir=args.weight_cache)
     print(f"model {provider.model} loaded in {time.monotonic() - started:.1f} s, peak RSS {peak_rss_mib():.0f} MiB", flush=True)
-    directory = os.path.join(datasets.ROOT, "cache", f"{provider.model}-e{args.edge}")
+    directory = os.path.join(datasets.ROOT, "cache", f"{provider.model}-e{args.edge}"
+                             + (f"-tiles{args.tiles}" if args.tiles > 1 else ""))
     os.makedirs(directory, exist_ok=True)
 
-    if not args.no_texts:
+    if not args.no_texts and args.tiles == 1:
         done = load_vectors(directory, "texts")
         texts = Cache(os.path.join(directory, f"texts{suffix}.npz"))
         todo = [text for text in text_jobs() if text not in done and in_shard(text, shard)]
@@ -158,21 +183,27 @@ def main():
     known = load_vectors(directory, "images")
     images = Cache(os.path.join(directory, f"images{suffix}.npz"))
     for name in args.sets.split(","):
-        jobs = image_jobs({name})
+        jobs = image_jobs({name}, test_only=args.split == "test")
         if args.limit:
             jobs = jobs[: args.limit]
-        todo = [(key, path) for key, path in jobs if key not in known and in_shard(key, shard)]
+        # A tiled image counts as done once its last tile is.
+        last = "" if args.tiles == 1 else f"#{args.tiles - 1}{args.tiles - 1}"
+        todo = [(key, path) for key, path in jobs if key + last not in known and in_shard(key, shard)]
         print(f"{name}: {len(jobs)} images, {len(todo)} to embed", flush=True)
         started, done, failed = time.monotonic(), 0, []
         for key, path in todo:
             try:
-                vector = provider.embed_image(thumbnail(path, args.edge))
+                if args.tiles == 1:
+                    vectors = {key: provider.embed_image(thumbnail(path, args.edge))}
+                else:
+                    vectors = {f"{key}#{tile}": provider.embed_image(data) for tile, data in tiles(path, args.tiles, args.edge)}
             except (OSError, providers.InvalidInput) as error:
                 failed.append((key, str(error)))
                 continue
-            images.vectors[key] = np.asarray(vector, dtype=np.float32)
+            for tile_key, vector in vectors.items():
+                images.vectors[tile_key] = np.asarray(vector, dtype=np.float32)
             done += 1
-            if done % 500 == 0:
+            if done % (500 if args.tiles == 1 else 100) == 0:
                 images.save()
                 elapsed = time.monotonic() - started
                 print(f"  {done}/{len(todo)}  {elapsed / done:.3f} s/image  peak RSS {peak_rss_mib():.0f} MiB", flush=True)
