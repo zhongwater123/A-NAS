@@ -125,9 +125,11 @@ type Asset struct {
 	// nothing else about those libraries.
 	AlsoKeptBy []string    `json:"alsoKeptBy,omitempty"`
 	Trash      *TrashState `json:"trash,omitempty"`
-	// AILabels are what local AI sees in the photo; only a single photo's
-	// details carry them.
-	AILabels []AILabel `json:"aiLabels,omitempty"`
+	// Tags, Albums and AILabels belong to a single photo's details; lists
+	// leave them out. AILabels are what local AI sees, less those hidden.
+	Tags     []string   `json:"tags,omitempty"`
+	Albums   []AlbumRef `json:"albums,omitempty"`
+	AILabels []AILabel  `json:"aiLabels,omitempty"`
 }
 
 type TrashState struct {

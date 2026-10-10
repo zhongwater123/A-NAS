@@ -1,23 +1,28 @@
-import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Copy, Download, ImagePlus, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError, endViewing } from "./api";
+import { PhotoMetadata } from "./PhotoMetadata";
 import {
-  PhotoAsset, PhotoLibrary, PhotoSearch, copyPhoto, emptyPhotoTrash, getPhoto, listPhotoLibraries, listPhotoTrash, listTimeline, originalURL,
-  previewURL, purgePhoto, renamePhoto, restorePhoto, searchPhotos, trashPhoto, uploadPhoto,
+  PhotoAlbum, PhotoAsset, PhotoLibrary, PhotoSearch, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getPhoto, listAlbumPhotos, listAlbums,
+  listPhotoLibraries, listPhotoTrash, listTimeline, originalURL, previewURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto,
+  searchPhotos, thumbnailURL, trashPhoto, uploadPhoto,
 } from "./photosApi";
 
 interface Props { userId: string; isAdmin: boolean }
 
-// PhotosPanel is the managed photo library: a timeline per library, search
-// over the caller's and the shared library (plus a member library while
-// viewing it), a viewer and the library's trash.
+// PhotosPanel is the managed photo library: a timeline and albums per
+// library, search over the caller's and the shared library (plus a member
+// library while viewing it), a viewer and the library's trash.
 // All rules live in the photo service; the panel only hides actions the
 // caller could not perform anyway.
 export function PhotosPanel({ userId, isAdmin }: Props) {
   const [libraries, setLibraries] = useState<PhotoLibrary[]>([]);
   const [libraryId, setLibraryId] = useState("");
-  const [view, setView] = useState<"timeline" | "trash" | "search">("timeline");
+  const [view, setView] = useState<"timeline" | "albums" | "album" | "trash" | "search">("timeline");
+  const [albums, setAlbums] = useState<PhotoAlbum[]>([]);
+  const [album, setAlbum] = useState<PhotoAlbum>();
+  const [viewerAlbums, setViewerAlbums] = useState<PhotoAlbum[]>([]);
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<PhotoSearch>();
   const [details, setDetails] = useState<PhotoAsset>();
@@ -42,6 +47,10 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const canChange = (asset: PhotoAsset) => {
     const owner = libraryOf(asset);
     return Boolean(owner && !owner.viewing && (owner.kind === "private" || asset.uploadedBy === userId || isAdmin));
+  };
+  const canEditAlbum = (item: PhotoAlbum) => {
+    const owner = libraries.find((candidate) => candidate.id === item.libraryId);
+    return Boolean(owner && !owner.viewing && (owner.kind === "private" || item.createdBy === userId || isAdmin));
   };
 
   const loadLibraries = useCallback(async () => {
@@ -84,6 +93,24 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     finally { setLoading(false); }
   }, [searched, readOnly, libraryId]);
 
+  const loadAlbums = useCallback(async () => {
+    if (!libraryId) return;
+    try { setAlbums(await listAlbums(libraryId)); setError(""); }
+    catch (caught) { setError(messageOf(caught)); }
+    finally { setLoading(false); }
+  }, [libraryId]);
+
+  const loadAlbum = useCallback(async (cursor = "") => {
+    if (!album) return;
+    try {
+      const page = await listAlbumPhotos(album.id, cursor);
+      setAssets((current) => cursor ? [...current, ...page.items] : page.items);
+      setNext(page.next);
+      setError("");
+    } catch (caught) { setError(messageOf(caught)); }
+    finally { setLoading(false); }
+  }, [album]);
+
   const loadTrash = useCallback(async () => {
     if (!libraryId) return;
     try { setTrash(await listPhotoTrash(libraryId)); setError(""); }
@@ -94,12 +121,15 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     setSelected(undefined);
     if (view === "timeline") void loadTimeline();
     else if (view === "search") void loadSearch();
+    else if (view === "albums") void loadAlbums();
+    else if (view === "album") void loadAlbum();
     else void loadTrash();
-  }, [view, loadTimeline, loadSearch, loadTrash]);
-  const reload = () => view === "search" ? loadSearch() : loadTimeline();
+  }, [view, loadTimeline, loadSearch, loadAlbums, loadAlbum, loadTrash]);
+  const reload = () => view === "search" ? loadSearch() : view === "album" ? loadAlbum() : loadTimeline();
   // Until the libraries have loaded, as while the photo service is
   // unavailable, refreshing loads them; selecting one then loads its view.
-  const refresh = () => !libraryId ? loadLibraries() : view === "trash" ? loadTrash() : reload();
+  const refresh = () => !libraryId ? loadLibraries() : view === "trash" ? loadTrash() : view === "albums" ? loadAlbums() : reload();
+  const openAlbum = (item: PhotoAlbum) => { setLoading(true); setAlbum(item); setView("album"); };
   const clearSearch = () => { setQuery(""); setSearched(undefined); setView("timeline"); };
   const startSearch = (search: PhotoSearch) => {
     setSelected(undefined);
@@ -115,7 +145,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     startSearch({ query: text });
   };
   // Administrative viewing never includes the member's trash.
-  useEffect(() => { if (readOnly) setView("timeline"); }, [readOnly]);
+  useEffect(() => { if (readOnly) setView((current) => current === "trash" ? "timeline" : current); }, [readOnly]);
 
   // Thumbnails render in the background after an upload, and the grid shows
   // the original meanwhile; recheck the pending ones for about a minute so
@@ -166,7 +196,24 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     getPhoto(currentID).then((asset) => { if (live) setDetails(asset); }).catch(() => undefined);
     return () => { live = false; };
   }, [currentID]);
-  const aiLabels = details?.id === currentID ? details?.aiLabels ?? [] : [];
+  const currentDetails = details?.id === currentID ? details : undefined;
+  // The albums the viewer offers: those of the photo's library the caller
+  // may edit and, for a shared photo, the caller's own, which take a copy.
+  const currentLibraryID = currentLibrary?.id;
+  const copyIntoMine = currentLibrary?.kind === "shared" && mine ? mine : undefined;
+  useEffect(() => {
+    setViewerAlbums([]);
+    if (!currentLibraryID) return;
+    let live = true;
+    const sources = copyIntoMine ? [currentLibraryID, copyIntoMine.id] : [currentLibraryID];
+    void Promise.all(sources.map((source) => listAlbums(source))).then((lists) => {
+      if (!live) return;
+      const [own, other = []] = lists;
+      setViewerAlbums([...own.filter(canEditAlbum), ...other.map((item) => ({ ...item, name: `我的图库 · ${item.name}` }))]);
+    }, () => undefined);
+    return () => { live = false; };
+    // canEditAlbum only reads the libraries, which change with currentLibraryID.
+  }, [currentLibraryID, copyIntoMine?.id]);
   // Copying again would only add another independent copy, so say it worked.
   const copyTo = (target: PhotoLibrary, label: string) => {
     if (current) void act(() => copyPhoto(current.id, target.id), async () => { setError(""); setNotice(`已复制到${label}`); });
@@ -191,11 +238,17 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
             <input type="search" aria-label="搜索照片" placeholder="搜索，如：海边的猫" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
             <button type="submit" aria-label="搜索"><Search size={14} /></button>
           </form>
-          <select aria-label="图库" value={libraryId} onChange={(event) => { setLoading(true); setLibraryId(event.target.value); if (view === "search") clearSearch(); }}>
+          <select aria-label="图库" value={libraryId} onChange={(event) => {
+            setLoading(true);
+            setLibraryId(event.target.value);
+            if (view === "search") clearSearch();
+            if (view === "album") setView("albums");
+          }}>
             {libraries.map((item) => <option key={item.id} value={item.id}>{libraryLabel(item, userId)}</option>)}
           </select>
           <div className="segmented" role="tablist" aria-label="相册视图">
             <button role="tab" aria-selected={view === "timeline"} className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}>照片</button>
+            <button role="tab" aria-selected={view === "albums" || view === "album"} className={view === "albums" || view === "album" ? "active" : ""} onClick={() => { setLoading(true); setView("albums"); }}>相册</button>
             {!readOnly && <button role="tab" aria-selected={view === "trash"} className={view === "trash" ? "active" : ""} onClick={() => setView("trash")}>回收站</button>}
           </div>
           {view === "timeline" && !readOnly && <label className="upload-button"><ImagePlus size={14} />上传照片<input type="file" aria-label="上传照片" accept="image/jpeg,image/png" multiple onChange={(event: ChangeEvent<HTMLInputElement>) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} /></label>}
@@ -225,6 +278,50 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
             ))}
           </div>
           {next && <button className="photos-more" onClick={() => void loadSearch(next)}>加载更多</button>}
+        </>
+      ) : view === "albums" ? (
+        <>
+          <div className="inline-form">
+            <span className="photos-note">相册是图库里的分组：一张照片可以放进多个相册，删除相册不会删除照片。</span>
+            {!readOnly && <button onClick={() => {
+              const name = window.prompt("新相册的名称");
+              if (name?.trim()) void act(() => createAlbum(libraryId, name.trim()), loadAlbums);
+            }}><FolderPlus size={13} />新建相册</button>}
+          </div>
+          {loading ? <div className="empty-compact">正在载入相册…</div> : !albums.length && !error && <div className="empty-compact">还没有相册。</div>}
+          <div className="album-grid">
+            {albums.map((item) => (
+              <button key={item.id} className="album-card" aria-label={`打开相册 ${item.name}`} onClick={() => openAlbum(item)}>
+                {item.coverId ? <img src={thumbnailURL(item.coverId)} alt="" loading="lazy" onError={(event) => showOriginal(event.currentTarget, item.coverId ?? "")} /> : <span className="album-empty"><Images /></span>}
+                <strong>{item.name}</strong>
+                <small>{item.photos} 张</small>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : view === "album" && album ? (
+        <>
+          <div className="inline-form">
+            <button onClick={() => setView("albums")}><ArrowLeft size={13} />全部相册</button>
+            <strong className="album-title">{album.name}</strong>
+            <span className="photos-note" />
+            {canEditAlbum(album) && <button onClick={() => {
+              const name = window.prompt("新的相册名称", album.name);
+              if (name && name !== album.name) void act(async () => setAlbum(await renameAlbum(album.id, name)), async () => undefined);
+            }}><Pencil size={13} />重命名</button>}
+            {canEditAlbum(album) && <button className="danger-link" onClick={() => {
+              if (window.confirm(`删除相册“${album.name}”？其中的照片会留在图库里。`)) void act(() => deleteAlbum(album.id), async () => { setAlbum(undefined); setView("albums"); });
+            }}>删除相册</button>}
+          </div>
+          {loading ? <div className="empty-compact">正在载入照片…</div> : !assets.length && !error && <div className="empty-compact">相册里还没有照片。在照片的查看页选择“加入相册”。</div>}
+          <div className="photo-grid">
+            {assets.map((asset, index) => (
+              <button key={asset.id} className="photo-tile" aria-label={`查看 ${asset.name}`} onClick={() => setSelected(index)}>
+                <img src={previewURL(asset)} alt={asset.name} loading="lazy" onError={(event) => showOriginal(event.currentTarget, asset.id)} />
+              </button>
+            ))}
+          </div>
+          {next && <button className="photos-more" onClick={() => void loadAlbum(next)}>加载更多</button>}
         </>
       ) : view === "timeline" ? (
         <>
@@ -286,14 +383,20 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
               {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}
             </dl>
             {current.alsoKeptBy?.length ? <p className="photo-hint">{current.alsoKeptBy.join("、")} 也保存了相同的照片。</p> : null}
-            {aiLabels.length > 0 && (
-              <div className="photo-labels" aria-label="AI 标签">
-                <span>本地 AI 识别</span>
-                {aiLabels.map((label) => (
-                  <button key={label.id} title={`相似度 ${label.score.toFixed(2)}，点击查看同类照片`} onClick={() => startSearch({ label: label.id, name: label.name })}>{label.name}</button>
-                ))}
-              </div>
-            )}
+            <PhotoMetadata
+              asset={currentDetails}
+              canEdit={canChange(current)}
+              albums={viewerAlbums}
+              onChange={(asset) => { setNotice(""); setError(""); setDetails(asset); }}
+              onTag={(tag) => { setQuery(tag); startSearch({ query: tag }); }}
+              onLabel={(label) => startSearch({ label: label.id, name: label.name })}
+              onAdded={(item, added) => {
+                setError("");
+                setNotice(added.id === current.id ? `已加入相册“${item.name}”` : `已复制到我的图库并加入相册“${item.name}”`);
+                void getPhoto(current.id).then(setDetails, () => undefined);
+              }}
+              onError={(caught) => setError(messageOf(caught))}
+            />
             <div className="photo-viewer-actions">
               <a className="upload-button" href={originalURL(current.id, true)}><Download size={14} />下载原图</a>
               {canChange(current) && <button onClick={() => {
@@ -302,6 +405,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
               }}><Pencil size={13} />重命名</button>}
               {currentLibrary?.kind === "private" && !currentLibrary.viewing && shared && <button onClick={() => copyTo(shared, "共享图库")}><Copy size={13} />复制到共享图库</button>}
               {currentLibrary?.kind === "shared" && mine && <button onClick={() => copyTo(mine, "我的图库")}><Copy size={13} />复制到我的图库</button>}
+              {view === "album" && album && canEditAlbum(album) && <button onClick={() => void act(() => removeFromAlbum(album.id, current.id), async () => { setSelected(undefined); await loadAlbum(); })}><FolderMinus size={13} />从相册移除</button>}
               {canChange(current) && <button className="danger-link" onClick={() => void act(() => trashPhoto(current.id), async () => { setSelected(undefined); await reload(); })}><Trash2 size={13} />移到回收站</button>}
             </div>
             {/* The viewer covers the panel's banners, so its outcome shows here. */}

@@ -107,12 +107,29 @@ func (s *Service) Get(ctx context.Context, p Principal, assetID string) (Asset, 
 	if err != nil {
 		return Asset{}, err
 	}
+	return s.details(ctx, p, record)
+}
+
+// details completes an asset with its duplicate hints, user metadata and AI
+// labels, which lists leave out.
+func (s *Service) details(ctx context.Context, p Principal, record assetRecord) (Asset, error) {
 	hinted := []assetRecord{record}
 	if err := s.addDuplicateHints(ctx, s.db, p, hinted); err != nil {
 		return Asset{}, err
 	}
 	asset := hinted[0].Asset
-	if asset.AILabels, err = s.labelsOf(ctx, record.objectID); err != nil {
+	var err error
+	if asset.Tags, err = s.tagsOf(ctx, asset.ID); err != nil {
+		return Asset{}, err
+	}
+	if asset.Albums, err = s.albumsOf(ctx, asset.ID); err != nil {
+		return Asset{}, err
+	}
+	hidden, err := s.hiddenLabels(ctx, asset.ID)
+	if err != nil {
+		return Asset{}, err
+	}
+	if asset.AILabels, err = s.labelsOf(ctx, record.objectID, hidden); err != nil {
 		return Asset{}, err
 	}
 	return asset, nil
@@ -172,10 +189,14 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	if err != nil {
 		return Page{}, err
 	}
+	return s.newestFirst(ctx, p, "WHERE a.library_id = ? AND a.trashed_at IS NULL", []any{lib.id}, cursor, limit)
+}
+
+// newestFirst pages through the assets that where selects, newest capture
+// time first, or import time for originals without one.
+func (s *Service) newestFirst(ctx context.Context, p Principal, where string, args []any, cursor string, limit int) (Page, error) {
 	limit = pageSize(limit)
 	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
-	where := "WHERE a.library_id = ? AND a.trashed_at IS NULL"
-	args := []any{lib.id}
 	if cursor != "" {
 		at, id, err := decodeCursor(cursor)
 		if err != nil {
@@ -343,13 +364,8 @@ func (s *Service) Copy(ctx context.Context, p Principal, assetID, targetLibraryI
 		if err != nil {
 			return err
 		}
-		// Administrative Viewing Mode is read-only: copying would keep a
-		// member's private photo after the grant ends.
-		if viewingOnly(p, source.library) {
-			return ErrForbidden
-		}
-		if source.Trash != nil {
-			return ErrConflict
+		if err := checkCopySource(p, source); err != nil {
+			return err
 		}
 		target, err := s.visibleLibrary(ctx, tx, p, targetLibraryID)
 		if err != nil {
@@ -361,21 +377,53 @@ func (s *Service) Copy(ctx context.Context, p Principal, assetID, targetLibraryI
 		if err := s.checkDirectory(ctx, tx, target, targetDirectoryID); err != nil {
 			return err
 		}
-		id := s.randomID("photo")
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at, taken_at)
-			 SELECT ?, ?, NULLIF(?, ''), object_id, name, ?, ?, taken_at FROM assets WHERE id = ?`,
-			id, target.id, targetDirectoryID, p.UserID, formatTime(s.now()), source.ID); err != nil {
-			return err
-		}
-		record, err := s.assetByID(ctx, tx, id)
-		if err != nil {
-			return err
-		}
+		record, err := s.insertCopy(ctx, tx, p, source, target, targetDirectoryID)
 		copied = record.Asset
-		return s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)
+		return err
 	})
 	return copied, err
+}
+
+// checkCopySource refuses copies that would outlive the caller's access or
+// revive a trashed photo.
+func checkCopySource(p Principal, source assetRecord) error {
+	// Administrative Viewing Mode is read-only: copying would keep a
+	// member's private photo after the grant ends.
+	if viewingOnly(p, source.library) {
+		return ErrForbidden
+	}
+	if source.Trash != nil {
+		return ErrConflict
+	}
+	return nil
+}
+
+// insertCopy creates the copy, which starts with the source's user tags and
+// AI corrections and keeps them apart from then on.
+func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, source assetRecord, target library, directoryID string) (assetRecord, error) {
+	id := s.randomID("photo")
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at, taken_at)
+		 SELECT ?, ?, NULLIF(?, ''), object_id, name, ?, ?, taken_at FROM assets WHERE id = ?`,
+		id, target.id, directoryID, p.UserID, formatTime(s.now()), source.ID); err != nil {
+		return assetRecord{}, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO user_tags(asset_id, name, created_by, created_at) SELECT ?, name, created_by, created_at FROM user_tags WHERE asset_id = ?",
+		id, source.ID); err != nil {
+		return assetRecord{}, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at)
+		 SELECT ?, label_id, verdict, created_by, created_at FROM ai_tag_corrections WHERE asset_id = ?`,
+		id, source.ID); err != nil {
+		return assetRecord{}, err
+	}
+	record, err := s.assetByID(ctx, tx, id)
+	if err != nil {
+		return assetRecord{}, err
+	}
+	return record, s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)
 }
 
 // ListTrash returns the trashed assets of a library that p may restore or

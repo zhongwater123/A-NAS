@@ -19,9 +19,13 @@ export interface PhotoAsset {
   // Other members whose private libraries hold the same original.
   alsoKeptBy?: string[];
   trash?: PhotoTrash;
-  // What local AI sees in the photo; only a single photo's details carry it.
+  // User tags, albums and what local AI sees, less hidden labels; only a
+  // single photo's details carry them.
+  tags?: string[];
+  albums?: { id: string; name: string }[];
   aiLabels?: PhotoAILabel[];
 }
+export interface PhotoAlbum { id: string; libraryId: string; name: string; createdBy: string; createdAt: string; photos: number; coverId?: string }
 export interface PhotoAILabel { id: string; name: string; score: number }
 export interface PhotoPage { items: PhotoAsset[]; next?: string }
 // semantic is false when local AI could not encode the query and only names
@@ -53,6 +57,21 @@ export const restorePhoto = (assetId: string) => request<PhotoAsset>(`${base}/as
 export const purgePhoto = (assetId: string) => request<void>(`${base}/trash/${id(assetId)}`, { method: "DELETE" }, true);
 export const listPhotoTrash = async (libraryId: string) => (await request<{ items: PhotoAsset[] }>(`${base}/libraries/${id(libraryId)}/trash`)).items;
 export const emptyPhotoTrash = async (libraryId: string) => (await request<{ purged: number }>(`${base}/libraries/${id(libraryId)}/trash`, { method: "DELETE" }, true)).purged;
+
+export const listAlbums = async (libraryId: string) => (await request<{ items: PhotoAlbum[] }>(`${base}/libraries/${id(libraryId)}/albums`)).items;
+export const createAlbum = (libraryId: string, name: string) => request<PhotoAlbum>(`${base}/libraries/${id(libraryId)}/albums`, json("POST", { name }), true);
+export const renameAlbum = (albumId: string, name: string) => request<PhotoAlbum>(`${base}/albums/${id(albumId)}`, json("PATCH", { name }), true);
+export const deleteAlbum = (albumId: string) => request<void>(`${base}/albums/${id(albumId)}`, { method: "DELETE" }, true);
+export const listAlbumPhotos = (albumId: string, cursor = "", limit = 120) =>
+  request<PhotoPage>(`${base}/albums/${id(albumId)}/assets?limit=${limit}${cursor ? `&cursor=${id(cursor)}` : ""}`);
+// Adding a photo of another library copies it into the album's library; the
+// result is the photo the album holds.
+export const addToAlbum = (albumId: string, assetId: string) => request<PhotoAsset>(`${base}/albums/${id(albumId)}/assets`, json("POST", { assetId }), true);
+export const removeFromAlbum = (albumId: string, assetId: string) => request<void>(`${base}/albums/${id(albumId)}/assets/${id(assetId)}`, { method: "DELETE" }, true);
+export const addPhotoTag = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/tags`, json("POST", { name }), true);
+export const removePhotoTag = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/tags/${id(name)}`, { method: "DELETE" }, true);
+export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
+export const thumbnailURL = (assetId: string) => `${base}/assets/${id(assetId)}/thumbnail`;
 
 export const originalURL = (assetId: string, download = false) => `${base}/assets/${id(assetId)}/original${download ? "?download=1" : ""}`;
 // The grid shows the original until its thumbnail is ready; JPEG and PNG

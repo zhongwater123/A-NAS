@@ -350,3 +350,45 @@ func TestSearchMatchesNamesWithoutLocalAI(t *testing.T) {
 		}
 	}
 }
+
+func TestAlbumsTagsAndCorrections(t *testing.T) {
+	handler, _ := newAPI(t)
+	owner := client{t: t, handler: handler, as: alice}
+	private, _ := librariesOf(owner)
+	var photo photos.Asset
+	if response := owner.upload(private.ID, "", "cat.png", pngBytes(t, 50)); response.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d", response.Code)
+	} else if err := json.Unmarshal(response.Body.Bytes(), &photo); err != nil {
+		t.Fatal(err)
+	}
+
+	var album photos.Album
+	owner.json(http.MethodPost, "/api/v1/photos/libraries/"+url.PathEscape(private.ID)+"/albums", map[string]string{"name": "旅行"}, http.StatusCreated, &album)
+	owner.json(http.MethodPost, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets", map[string]string{"assetId": photo.ID}, http.StatusOK, nil)
+	var listed struct {
+		Items []photos.Asset `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets", nil, http.StatusOK, &listed)
+	if len(listed.Items) != 1 || listed.Items[0].ID != photo.ID {
+		t.Fatalf("album photos = %+v", listed.Items)
+	}
+
+	var tagged photos.Asset
+	owner.json(http.MethodPost, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/tags", map[string]string{"name": "猫咪/小黑"}, http.StatusUnprocessableEntity, nil)
+	owner.json(http.MethodPost, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/tags", map[string]string{"name": "小黑"}, http.StatusOK, &tagged)
+	if len(tagged.Tags) != 1 || len(tagged.Albums) != 1 || tagged.Albums[0].Name != "旅行" {
+		t.Fatalf("details after tagging = %+v", tagged)
+	}
+	var untagged photos.Asset
+	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/tags/"+url.PathEscape("小黑"), nil, http.StatusOK, &untagged)
+	if untagged.ID != photo.ID || len(untagged.Tags) != 0 {
+		t.Fatalf("details after removing the tag = %+v", untagged)
+	}
+	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/no-such-label", nil, http.StatusNotFound, nil)
+	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/cat", nil, http.StatusOK, nil)
+
+	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets", nil, http.StatusNotFound, nil)
+	owner.json(http.MethodDelete, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets/"+url.PathEscape(photo.ID), nil, http.StatusNoContent, nil)
+	owner.json(http.MethodDelete, "/api/v1/photos/albums/"+url.PathEscape(album.ID), nil, http.StatusNoContent, nil)
+	owner.json(http.MethodGet, "/api/v1/photos/assets/"+url.PathEscape(photo.ID), nil, http.StatusOK, nil)
+}

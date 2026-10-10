@@ -864,8 +864,21 @@ button { font: inherit; }
 .photos-actions { display: flex; align-items: center; gap: 8px; }
 .photos-search { display: flex; align-items: center; }
 .photo-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; }
-.photo-labels span { width: 100%; color: rgba(238, 242, 247, .6); font-size: 11px; }
-.photo-viewer .photo-labels button { min-height: 24px; padding: 0 9px; border-radius: 12px; }
+.photo-labels > span:first-child { width: 100%; color: rgba(238, 242, 247, .6); font-size: 11px; }
+.photo-chip { display: inline-flex; align-items: center; border: 1px solid rgba(255,255,255,.18); border-radius: 12px; overflow: hidden; }
+.photo-chip.ai { border-style: dashed; }
+.photo-chip > span { padding: 0 9px; font-size: 12px; line-height: 24px; }
+.photo-viewer .photo-chip button { min-height: 24px; padding: 0 8px; border: 0; border-radius: 0; }
+.photo-tag-form { display: inline-flex; align-items: center; }
+.photo-tag-form input { width: 96px; min-height: 24px; padding: 0 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 12px 0 0 12px; color: #eef2f7; background: rgba(255,255,255,.06); font: inherit; font-size: 12px; }
+.photo-viewer .photo-tag-form button { min-height: 26px; border-radius: 0 12px 12px 0; }
+.photo-labels select { min-height: 26px; border-radius: 12px; font-size: 12px; }
+.album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.product-page .album-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 0 8px; overflow: hidden; border: 1px solid #dbe3ec; border-radius: 10px; background: #fff; text-align: left; }
+.album-card img, .album-empty { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: grid; place-items: center; color: #94a3b8; background: #e3e8ef; }
+.album-card strong { padding: 6px 10px 0; font-size: 13px; }
+.album-card small { padding: 0 10px; color: var(--muted); font-size: 11px; }
+.album-title { font-size: 14px; }
 .photos-search input { width: 180px; min-height: 30px; padding: 0 8px; border: 1px solid #cbd7e3; border-right: 0; border-radius: 8px 0 0 8px; font: inherit; font-size: 12px; }
 .product-page .photos-search button { border-radius: 0 8px 8px 0; }
 .photos-actions .upload-button { gap: 5px; }
