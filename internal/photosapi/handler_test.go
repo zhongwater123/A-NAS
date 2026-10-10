@@ -292,12 +292,47 @@ func TestHiddenItemsAnswerExactlyLikeMissingOnes(t *testing.T) {
 			t.Errorf("%s: hidden %d %q, missing %d %q", path, hidden.Code, hidden.Body.String(), missing.Code, missing.Body.String())
 		}
 	}
-	for _, path := range []string{"/api/v1/photos/libraries/%s/timeline", "/api/v1/photos/libraries/%s/entries", "/api/v1/photos/libraries/%s/trash"} {
+	for _, path := range []string{"/api/v1/photos/libraries/%s/timeline", "/api/v1/photos/libraries/%s/timeline/months", "/api/v1/photos/libraries/%s/entries", "/api/v1/photos/libraries/%s/trash"} {
 		hidden := stranger.do(http.MethodGet, strings.Replace(path, "%s", private.ID, 1), nil, "")
 		missing := stranger.do(http.MethodGet, strings.Replace(path, "%s", "library:missing", 1), nil, "")
 		if hidden.Code != http.StatusNotFound || hidden.Body.String() != missing.Body.String() {
 			t.Errorf("%s: hidden %d %q, missing %d %q", path, hidden.Code, hidden.Body.String(), missing.Code, missing.Body.String())
 		}
+	}
+}
+
+func TestTimelineByMonthAndLabelsWithoutLocalAI(t *testing.T) {
+	handler, _ := newAPI(t)
+	owner := client{t: t, handler: handler, as: alice}
+	private, _ := librariesOf(owner)
+	if response := owner.upload(private.ID, "", "cat.png", pngBytes(t, 40)); response.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d", response.Code)
+	}
+	var months struct {
+		Items []photos.TimelineMonth `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/libraries/"+private.ID+"/timeline/months", nil, http.StatusOK, &months)
+	if len(months.Items) != 1 || months.Items[0].Photos != 1 {
+		t.Fatalf("months = %+v", months)
+	}
+	var timeline struct {
+		Items []photos.Asset `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/libraries/"+private.ID+"/timeline?month="+months.Items[0].Month, nil, http.StatusOK, &timeline)
+	if len(timeline.Items) != 1 || timeline.Items[0].Name != "cat.png" {
+		t.Fatalf("timeline of %s = %+v", months.Items[0].Month, timeline)
+	}
+	if response := owner.do(http.MethodGet, "/api/v1/photos/libraries/"+private.ID+"/timeline?month=2026-13", nil, ""); response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "invalid_month") {
+		t.Fatalf("bad month = %d %s", response.Code, response.Body.String())
+	}
+	var labels struct {
+		Items []photos.LabelCount `json:"items"`
+		Ready bool                `json:"ready"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/labels", nil, http.StatusOK, &labels)
+	if labels.Ready || labels.Items == nil || len(labels.Items) != 0 {
+		t.Fatalf("labels without local AI = %+v", labels)
 	}
 }
 

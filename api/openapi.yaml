@@ -605,7 +605,7 @@ paths:
   /api/v1/photos/search:
     get:
       operationId: searchPhotos
-      summary: Find untrashed photos in the caller's private and the shared library by name or meaning (name matches first, then by similarity), or the photos that show an AI label
+      summary: Find untrashed photos in the caller's private and the shared library by name or meaning (name matches first, then the photos that show the calibrated labels the query names, or else those nearest its best match), or the photos that show an AI label
       parameters:
         - { name: q, in: query, description: "1 to 200 characters, such as 海边的猫; give q or label.", schema: { type: string, minLength: 1, maxLength: 200 } }
         - { name: label, in: query, description: "The ID of an AI label photos can show, such as cat; give q or label.", schema: { type: string } }
@@ -615,6 +615,16 @@ paths:
       responses:
         "200": { description: One page of results, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoSearchResults" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/labels:
+    get:
+      operationId: listPhotoLabels
+      summary: Count the AI labels that untrashed photos in the caller's private and the shared library show, most photos first, by the rule of a search by label
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+      responses:
+        "200": { description: Label counts, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLabelCounts" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/libraries/{libraryId}/albums:
@@ -722,11 +732,21 @@ paths:
       summary: List available photo assets, newest capture time first
       parameters:
         - { $ref: "#/components/parameters/PhotoLibraryID" }
+        - { name: month, in: query, description: "Only this month (YYYY-MM) of the device's time zone.", schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" } }
         - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
       responses:
         "200": { description: One timeline page, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/timeline/months:
+    get:
+      operationId: listPhotoTimelineMonths
+      summary: Count available photo assets by month of the device's time zone, newest month first
+      parameters:
+        - { $ref: "#/components/parameters/PhotoLibraryID" }
+      responses:
+        "200": { description: Months with photos, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimelineMonths" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/entries:
     get:
@@ -1843,6 +1863,38 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string, description: Cursor for the next page; absent on the last page. }
+    PhotoTimelineMonths:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [month, photos]
+            properties:
+              month: { type: string, description: "YYYY-MM in the device's time zone." }
+              photos: { type: integer, minimum: 1 }
+    PhotoLabelCounts:
+      type: object
+      additionalProperties: false
+      required: [items, ready]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, category, photos, coverId]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              category: { type: string, description: "animal, food, object, vehicle, activity, nature, scene, people or document." }
+              photos: { type: integer, minimum: 1 }
+              coverId: { type: string, description: The photo that shows the label most clearly. }
+        ready: { type: boolean, description: "False while AI labels are not available; there are no items then." }
     PhotoAlbum:
       type: object
       additionalProperties: false
@@ -1864,11 +1916,24 @@ components:
     PhotoSearchResults:
       type: object
       additionalProperties: false
-      required: [items, semantic]
+      required: [items, semantic, match]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string }
         semantic: { type: boolean, description: "False when local AI could not encode the query and only names were matched." }
+        match:
+          type: string
+          enum: [names, labels, closest]
+          description: "What follows the name and tag matches: names (nothing; local AI could not encode the query), labels (photos showing every label in labels) or closest (photos nearest in meaning; the query names nothing local AI recognises reliably)."
+        labels:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
     PhotoAIStatus:
       type: object
       additionalProperties: false

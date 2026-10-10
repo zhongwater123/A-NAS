@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 //go:embed v1.json
@@ -99,6 +100,47 @@ func (s Set) Texts(label Label) []string {
 		texts[i] = strings.Replace(s.Phrase, "{}", word, 1)
 	}
 	return texts
+}
+
+// Mentioned returns the labels a text names by their name or a synonym, in
+// order and each once. Where words overlap the longest wins, so 热狗 names the
+// hot dog and not the dog; case is ignored.
+func (s Set) Mentioned(text string) []Label {
+	type term struct {
+		word  string
+		label int
+	}
+	var terms []term
+	for i, label := range s.Labels {
+		for _, word := range append([]string{label.Name}, label.Synonyms...) {
+			if word = strings.ToLower(word); word != "" {
+				terms = append(terms, term{word, i})
+			}
+		}
+	}
+	text = strings.ToLower(text)
+	var found []Label
+	seen := make(map[string]bool)
+	for position := 0; position < len(text); {
+		longest := -1
+		for i, candidate := range terms {
+			if strings.HasPrefix(text[position:], candidate.word) && (longest < 0 || len(candidate.word) > len(terms[longest].word)) {
+				longest = i
+			}
+		}
+		if longest < 0 {
+			_, size := utf8.DecodeRuneInString(text[position:])
+			position += size
+			continue
+		}
+		label := s.Labels[terms[longest].label]
+		if !seen[label.ID] {
+			seen[label.ID] = true
+			found = append(found, label)
+		}
+		position += len(terms[longest].word)
+	}
+	return found
 }
 
 // Shown returns the labels that have a threshold, in vocabulary order.

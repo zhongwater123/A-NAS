@@ -54,6 +54,10 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	}{
 		{name: "photo libraries", path: "/api/v1/photos/libraries", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo timeline", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo timeline month", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?month=2026-10", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo timeline bad month", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?month=2026-13", handler: photoHandler, wantStatus: http.StatusBadRequest},
+		{name: "photo timeline months", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline/months", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo labels", path: "/api/v1/photos/labels", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo entries", path: "/api/v1/photos/libraries/" + photoLibraryID + "/entries", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo directory", method: http.MethodPost, body: `{"name":"Trips"}`, path: "/api/v1/photos/libraries/" + photoLibraryID + "/directories", handler: photoHandler, csrf: true, wantStatus: http.StatusCreated},
 		{name: "photo asset", path: "/api/v1/photos/assets/" + photoAssetID, handler: photoHandler, wantStatus: http.StatusOK},

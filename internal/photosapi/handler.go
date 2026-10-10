@@ -85,7 +85,9 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
+	h.mux.HandleFunc("GET "+p+"/labels", h.labels)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline", h.timeline)
+	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline/months", h.timelineMonths)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/entries", h.entries)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/uploads", h.upload)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/directories", h.createDirectory)
@@ -122,6 +124,10 @@ type searchResponse struct {
 	// Semantic is false when only names were matched because local AI could
 	// not encode the query.
 	Semantic bool `json:"semantic"`
+	// Match says what the results after the name matches are: names, labels
+	// (photos showing every label in Labels) or closest (nearest in meaning).
+	Match  string            `json:"match"`
+	Labels []photos.LabelRef `json:"labels,omitempty"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -164,12 +170,45 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page, err := h.service.Timeline(r.Context(), principal, r.PathValue("libraryID"), r.URL.Query().Get("cursor"), limit)
+	query := r.URL.Query()
+	var page photos.Page
+	var err error
+	if month := query.Get("month"); month != "" {
+		page, err = h.service.TimelineInMonth(r.Context(), principal, r.PathValue("libraryID"), month, query.Get("cursor"), limit)
+	} else {
+		page, err = h.service.Timeline(r.Context(), principal, r.PathValue("libraryID"), query.Get("cursor"), limit)
+	}
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+}
+
+func (h *handler) timelineMonths(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	months, err := h.service.TimelineMonths(r.Context(), principal, r.PathValue("libraryID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, itemsResponse[photos.TimelineMonth]{Items: months})
+}
+
+type labelsResponse struct {
+	Items []photos.LabelCount `json:"items"`
+	// Ready is false while AI labels are not available yet.
+	Ready bool `json:"ready"`
+}
+
+func (h *handler) labels(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	counts, ready, err := h.service.LabelCounts(r.Context(), principal, r.URL.Query().Get("viewing"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, labelsResponse{Items: counts, Ready: ready})
 }
 
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +225,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic})
+	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Match: page.Match, Labels: page.Labels})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
@@ -458,6 +497,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, photos.ErrInvalidCursor):
 		WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+	case errors.Is(err, photos.ErrInvalidMonth):
+		WriteError(w, http.StatusBadRequest, "invalid_month", "month must be YYYY-MM")
 	case errors.Is(err, photos.ErrInvalidQuery):
 		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters or a label photos can show, not both")
 	case errors.Is(err, photos.ErrUnsupportedType):

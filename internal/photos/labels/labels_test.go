@@ -44,3 +44,30 @@ func TestParseRejectsCalibrationsThatDoNotFit(t *testing.T) {
 		}
 	}
 }
+
+func TestMentionedFindsLabelsByTheirLongestWord(t *testing.T) {
+	set, err := labels.V1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := func(text string) []string {
+		var found []string
+		for _, label := range set.Mentioned(text) {
+			found = append(found, label.ID)
+		}
+		return found
+	}
+	for text, want := range map[string][]string{
+		"笔记本电脑":         {"laptop"},
+		"海边的小猫":         {"sea", "cat"},
+		"热狗":            {"hot_dog"},
+		"猫头鹰和大熊猫":       {"owl", "panda"},
+		"猫和猫咪":          {"cat"},
+		"停在楼下的电动车":      {"electric_bike"},
+		"Model 3D 1024": nil,
+	} {
+		if got := ids(text); !slices.Equal(got, want) {
+			t.Errorf("Mentioned(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

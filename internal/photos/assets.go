@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"strings"
+	"time"
 )
 
 var ErrInvalidCursor = errors.New("invalid photo timeline cursor")
@@ -190,6 +191,65 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 		return Page{}, err
 	}
 	return s.newestFirst(ctx, p, "WHERE a.library_id = ? AND a.trashed_at IS NULL", []any{lib.id}, cursor, limit)
+}
+
+var ErrInvalidMonth = errors.New("invalid photo timeline month")
+
+// monthLayout names a calendar month of the device's time zone, the zone
+// capture times without an offset are read in.
+const monthLayout = "2006-01"
+
+// TimelineMonth counts a library's available assets in one month, by capture
+// time or by import time for originals without one.
+type TimelineMonth struct {
+	// Month is YYYY-MM in the device's time zone.
+	Month  string `json:"month"`
+	Photos int    `json:"photos"`
+}
+
+// TimelineMonths counts a library's available assets by month, newest first,
+// so a timeline can lay out and jump to months it has not loaded yet.
+func (s *Service) TimelineMonths(ctx context.Context, p Principal, libraryID string) ([]TimelineMonth, error) {
+	lib, err := s.visibleLibrary(ctx, s.db, p, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := s.strings(ctx, `SELECT IFNULL(taken_at, imported_at) FROM assets
+WHERE library_id = ? AND trashed_at IS NULL ORDER BY IFNULL(taken_at, imported_at) DESC`, lib.id)
+	if err != nil {
+		return nil, err
+	}
+	months := []TimelineMonth{}
+	for _, key := range keys {
+		at, err := parseTime(key)
+		if err != nil {
+			return nil, err
+		}
+		// Local months follow the UTC order, so equal months are adjacent.
+		month := at.In(s.location).Format(monthLayout)
+		if last := len(months) - 1; last >= 0 && months[last].Month == month {
+			months[last].Photos++
+		} else {
+			months = append(months, TimelineMonth{Month: month, Photos: 1})
+		}
+	}
+	return months, nil
+}
+
+// TimelineInMonth pages through one month (YYYY-MM) of a library's timeline
+// the way Timeline does.
+func (s *Service) TimelineInMonth(ctx context.Context, p Principal, libraryID, month, cursor string, limit int) (Page, error) {
+	start, err := time.ParseInLocation(monthLayout, month, s.location)
+	if err != nil {
+		return Page{}, ErrInvalidMonth
+	}
+	lib, err := s.visibleLibrary(ctx, s.db, p, libraryID)
+	if err != nil {
+		return Page{}, err
+	}
+	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
+	return s.newestFirst(ctx, p, "WHERE a.library_id = ? AND a.trashed_at IS NULL AND "+sortKey+" >= ? AND "+sortKey+" < ?",
+		[]any{lib.id, formatTime(start), formatTime(start.AddDate(0, 1, 0))}, cursor, limit)
 }
 
 // newestFirst pages through the assets that where selects, newest capture
