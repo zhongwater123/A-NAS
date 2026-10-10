@@ -15,8 +15,10 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.1
+	github.com/prometheus/procfs v0.22.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	golang.org/x/crypto v0.57.0
+	golang.org/x/mod v0.41.0
 	golang.org/x/sys v0.48.0
 )
 
@@ -40,7 +42,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sirupsen/logrus v1.10.1 // indirect
 	github.com/tinylib/msgp v1.6.3 // indirect

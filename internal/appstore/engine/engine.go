@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 )
 
@@ -24,6 +26,11 @@ const (
 	installTimeout   = 30 * time.Minute
 	uninstallTimeout = 5 * time.Minute
 	outputTailLines  = 40
+
+	// Compose before 2.30 sends volume subpaths through the legacy bind API,
+	// which drops them; the engine API gained subpaths in 1.45 (ADR 0015).
+	minComposeVersion = "v2.30.0"
+	minEngineAPI      = "v1.45"
 )
 
 // ContainerInfo is what conflict checks and install state need from Docker.
@@ -40,6 +47,15 @@ type NetworkInfo struct {
 	Subnets []netip.Prefix
 }
 
+// MountInfo is a volume a container mounts and the path below the volume
+// root it was given; Subpath is empty when the whole volume is mounted.
+type MountInfo struct {
+	Container string
+	Volume    string
+	Target    string
+	Subpath   string
+}
+
 type Inspector interface {
 	Containers(ctx context.Context) ([]ContainerInfo, error)
 	// AddressPools are the daemon's default-address-pools; empty when Docker
@@ -47,11 +63,17 @@ type Inspector interface {
 	AddressPools(ctx context.Context) ([]netip.Prefix, error)
 	// ProjectNetworks lists the networks Compose created for a project.
 	ProjectNetworks(ctx context.Context, project string) ([]NetworkInfo, error)
+	// APIVersion is the highest engine API version the daemon supports.
+	APIVersion(ctx context.Context) (string, error)
+	// ProjectMounts lists the volumes the project's containers mount.
+	ProjectMounts(ctx context.Context, project string) ([]MountInfo, error)
 }
 
 // Runner executes the Compose CLI and streams its combined output.
 type Runner interface {
 	Run(ctx context.Context, args []string, output io.Writer) error
+	// ComposeVersion is the version of the Compose CLI that Run uses.
+	ComposeVersion(ctx context.Context) (string, error)
 }
 
 type Store struct {
@@ -141,8 +163,14 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 		return appstore.Plan{}, appstore.ErrNotFound
 	}
 	plan, err := appstore.Render(ctx, entry, s.policy, identity)
-	if err != nil || len(plan.Networks) == 0 {
+	if err != nil {
 		return plan, err
+	}
+	if err := s.checkRuntime(ctx); err != nil {
+		return appstore.Plan{}, err
+	}
+	if len(plan.Networks) == 0 {
+		return plan, nil
 	}
 	// Docker's built-in pools (172.17-172.31, 192.168) overlap common LAN
 	// ranges; an app network there makes the host route those clients into the
@@ -189,14 +217,90 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		if err := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans"), output); err != nil {
 			return err
 		}
-		return s.verifyNetworks(ctx, plan, compose, output)
+		failure := s.mountProblems(ctx, plan)
+		if failure == nil {
+			failure = s.networkProblems(ctx, plan)
+		}
+		if failure == nil {
+			return nil
+		}
+		// Docker did not keep the app inside its plan: roll it back.
+		if err := s.runner.Run(ctx, append(compose, "down", "--remove-orphans"), output); err != nil {
+			return fmt.Errorf("%w; the install could not be rolled back: %v", failure, err)
+		}
+		return fmt.Errorf("%w; the install was rolled back", failure)
 	})
 }
 
-// verifyNetworks rolls an install back when one of its networks is outside
-// the address pools, or cannot be inspected: the host would route those
-// addresses into the app instead of to the LAN (ADR 0013).
-func (s *Store) verifyNetworks(ctx context.Context, plan appstore.Plan, compose []string, output io.Writer) error {
+// checkRuntime refuses to plan on a Docker that would mount whole volumes,
+// giving an app all of its app data or the whole Shared folder (ADR 0015).
+func (s *Store) checkRuntime(ctx context.Context) error {
+	compose, err := s.runner.ComposeVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	api, err := s.docker.APIVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	if !atLeast(compose, minComposeVersion) {
+		return fmt.Errorf("%w: Docker Compose %s, need %s or later", appstore.ErrRuntimeOutdated, compose, strings.TrimPrefix(minComposeVersion, "v"))
+	}
+	if !atLeast(api, minEngineAPI) {
+		return fmt.Errorf("%w: Docker Engine API %s, need %s or later", appstore.ErrRuntimeOutdated, api, strings.TrimPrefix(minEngineAPI, "v"))
+	}
+	return nil
+}
+
+// atLeast compares versions as Docker and distributions print them, with or
+// without the leading v; a distribution revision such as 2.26.1-4 sorts below
+// 2.26.1, which is safe for a minimum.
+func atLeast(version, minimum string) bool {
+	version = "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
+	return semver.IsValid(version) && semver.Compare(version, minimum) >= 0
+}
+
+// mountProblems reports an A-NAS volume that a container mounts beyond the
+// folder in the plan, or mounts that cannot be inspected.
+func (s *Store) mountProblems(ctx context.Context, plan appstore.Plan) error {
+	planned := map[string]appstore.Mount{}
+	volumes := map[string]bool{}
+	for _, mount := range plan.Mounts {
+		if mount.Volume != "" {
+			planned[mount.ContainerPath] = mount
+			volumes[mount.Volume] = true
+		}
+	}
+	if len(volumes) == 0 {
+		return nil
+	}
+	var problems []string
+	mounts, err := s.docker.ProjectMounts(ctx, plan.Project)
+	if err != nil {
+		problems = append(problems, "cannot inspect app mounts: "+err.Error())
+	}
+	for _, mount := range mounts {
+		if !volumes[mount.Volume] {
+			continue
+		}
+		if want, ok := planned[mount.Target]; !ok || want.Volume != mount.Volume || want.Subpath != mount.Subpath {
+			got := "the whole " + mount.Volume
+			if mount.Subpath != "" {
+				got = mount.Volume + "/" + mount.Subpath
+			}
+			problems = append(problems, fmt.Sprintf("%s mounts %s at %s", mount.Container, got, mount.Target))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w (%s)", appstore.ErrMountOutsideFolder, strings.Join(problems, ", "))
+}
+
+// networkProblems reports a network outside the address pools, or networks
+// that cannot be inspected: the host would route those addresses into the
+// app instead of to the LAN (ADR 0013).
+func (s *Store) networkProblems(ctx context.Context, plan appstore.Plan) error {
 	if len(plan.Networks) == 0 {
 		return nil
 	}
@@ -215,11 +319,7 @@ func (s *Store) verifyNetworks(ctx context.Context, plan appstore.Plan, compose 
 	if len(outside) == 0 {
 		return nil
 	}
-	failure := fmt.Errorf("%w (%s); the install was rolled back", appstore.ErrNetworkOutsidePool, strings.Join(outside, ", "))
-	if err := s.runner.Run(ctx, append(compose, "down", "--remove-orphans"), output); err != nil {
-		return fmt.Errorf("%w; rollback failed: %v", failure, err)
-	}
-	return failure
+	return fmt.Errorf("%w (%s)", appstore.ErrNetworkOutsidePool, strings.Join(outside, ", "))
 }
 
 func withinPools(subnet netip.Prefix, pools []netip.Prefix) bool {
@@ -375,6 +475,21 @@ func (r CLIRunner) Run(ctx context.Context, args []string, output io.Writer) err
 		return fmt.Errorf("compose command failed: %w", err)
 	}
 	return nil
+}
+
+// ComposeVersion reads the version of the Compose CLI that Run picks.
+func (r CLIRunner) ComposeVersion(ctx context.Context) (string, error) {
+	name, arguments := "docker", []string{"compose", "version", "--short"}
+	if _, err := exec.LookPath("docker"); err != nil || !composePluginAvailable(ctx) {
+		name, arguments = "docker-compose", arguments[1:]
+	}
+	command := exec.CommandContext(ctx, name, arguments...)
+	command.Env = append(os.Environ(), r.Environment...)
+	output, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("read the Compose version: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func composePluginAvailable(ctx context.Context) bool {

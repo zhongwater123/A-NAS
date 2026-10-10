@@ -6,7 +6,7 @@
 
 ## 决定
 
-1. **入口**：Debian 官方包 Caddy 监听所有地址的 TCP 80，以 `reverse_proxy` 转发到 `127.0.0.1:8080`，不启用自动 HTTPS。绑定全部地址而不是局域网 IP，因此开机时不依赖 DHCP 先完成，不会出现 Samba `bind interfaces only` 那样只绑定回环的问题。
+1. **入口**：Caddy（软件源见 [ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)）监听所有地址的 TCP 80，以 `reverse_proxy` 转发到 `127.0.0.1:8080`，不启用自动 HTTPS。绑定全部地址而不是局域网 IP，因此开机时不依赖 DHCP 先完成，不会出现 Samba `bind interfaces only` 那样只绑定回环的问题。
 2. **产品服务仍只监听回环**：局域网请求全部经 Caddy 进入，并带有 Caddy 设置的 `X-Forwarded-For`。应用中心安装的第三方容器经 Docker 网桥访问不到产品服务。
 3. **开放全部功能**：局域网浏览器与本地控制台使用同一 Web UI、同一产品 API 和同一组账号权限，包括管理员的账号、存储、Docker、应用中心和启用后的终端。
 4. **Host 校验**：应用中心、Docker 的写请求与终端原先只接受回环 Host，现在接受 `localhost`、回环地址和任意 IP 字面量。DHCP 换址不需要改配置；DNS 重绑定页面的 Host 是攻击者的域名，仍被拒绝。按域名访问需要以后扩展允许列表。

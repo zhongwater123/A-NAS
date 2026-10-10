@@ -1,10 +1,10 @@
 # 当前状态
 
-更新时间：2026-10-09
+更新时间：2026-10-10
 
 ## 当前阶段
 
-v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 于 2026-10-09 部署已合并 PR #50 的提交 `9923c5987c0b`，包含文件管理三栏布局、可调栏宽、列表/图标视图、文件夹优先排序、成熟图标工具栏、当前目录上传入口、真实图片缩略图与自适应预览，以及双击下载、框选多选和右键编辑菜单：系统服务与 Kiosk 指向同一 release，Host Agent 启动自检记录 `file broker identity switch verified`，相册服务就绪，Caddy 在 80 端口提供局域网入口，产品服务仍只监听 `127.0.0.1:8080`。Docker 与应用中心的实时代理模式自 2026-10-08 起启用。OpenList 已按 `app-openlist` 的 UID/GID 30002 重建，状态 running、重启计数 0、HTTP 返回 200。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝，遗留的 `a-nas-members` 组已不存在。新文件管理界面的用户级实机验收（布局交互、上传、删除、恢复）尚未执行。
+v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental NAS 于 2026-10-09 部署主干提交 `d66d3da22ea6`，在 PR #50 的 `9923c5987c0b` 之上加入相册 M2 步骤 1–5 的代码（不安装 AI Worker，不运行模型），不含之后合并的 #53 屏保与 #54 相册步骤 6。PR #50 包含文件管理三栏布局、可调栏宽、列表/图标视图、文件夹优先排序、成熟图标工具栏、当前目录上传入口、真实图片缩略图与自适应预览，以及双击下载、框选多选和右键编辑菜单：系统服务与 Kiosk 指向同一 release，Host Agent 启动自检记录 `file broker identity switch verified`，相册服务就绪，Caddy 在 80 端口提供局域网入口，产品服务仍只监听 `127.0.0.1:8080`。Docker 与应用中心的实时代理模式自 2026-10-08 起启用。OpenList 已按 `app-openlist` 的 UID/GID 30002 重建，状态 running、重启计数 0、HTTP 返回 200。ADR 0008 旧账号已按手册删除并重建为 UID/GID 20100，固定组为 GID 20000/20001，身份注册表已镜像到数据卷；`admin` 可以穿过但不能列出数据卷根并访问自己的个人空间，Product Service 账号 `a-nas` 被内核拒绝，遗留的 `a-nas-members` 组已不存在。新文件管理界面的用户级实机验收（布局交互、上传、删除、恢复）尚未执行。
 
 升级中发现并修复了三个连续阻塞：身份同步前把不存在账号写入 ACL 导致 Host Agent 启动死锁、`build-binaries` 未先生成嵌入式 Web UI、数据卷挂载点缺少 `a-nas-users:--x`。证据与最小回归见 [ADR 0008 首次升级调查](../investigations/2026-10-08-adr0008-bootstrap-private-acl.md)。容器部署又暴露出 Debian 13 将 CLI 拆为独立推荐包，以及部署脚本误用 `/screensaver.mp4`、`/v1/containers` 两个路由；集中式只读探针修正为 `/local-console/screensaver.mp4`、`/v1/snapshot` 后已完成实机切换，详见[容器部署调查](../investigations/2026-10-08-experimental-nas-containers-disabled.md)。旧 Samba 凭据已按手册删除，需要管理员通过已部署的自助改密入口重建后才能开始 Windows SMB 双向验收。
 
@@ -26,21 +26,21 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - rc.4 已创建 `/dev/sda1` Btrfs 数据卷（UUID `09e275fe-794a-458d-8200-b6e67c55cc22`）并挂载到 `/srv/a-nas/data`；卷 marker 与 UUID 一致，API、Host Agent、Kiosk 和 Samba 服务均 active。
 - 文件闭环权限根因与修复边界已记录在[数据卷空间权限调查](../investigations/2026-10-07-data-volume-space-permissions.md)；父目录、ACL、共用回收站和启动自愈的最小 Go 回归已由红转绿。该 rc.5 方案已被 ADR 0008 取代。
 - [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 六个实现步骤均已完成；实验 NAS 的旧 `admin` 已按[手册](../runbooks/provision-v1.0.1-experimental-storage.md#升级到统一身份adr-0008)重建为统一 Linux 身份，ACL、身份镜像与 Product Service 隔离已实机验证；issue #38 的修复已随 `9923c5987c0b` 部署且 Host Agent 启动自检通过，Web 文件的用户级实机验收尚未执行。Samba 凭据需管理员与成员各自改密后重建，之后再做客户端验收。
-- PR #50 已合并，应用提交 `9923c5987c0b` 已通过 `make check VERSION=9923c5987c0b` 和 Debian 13 systemd 容器系统测试；StageOnly 复用验证清单，API SHA-256 为 `37d296bd20eeb09d6d7818bcaeda55800bbc61100198bb0104e9ba2c17c10c18`，Host Agent SHA-256 为 `bd27c6134c88067c85ebe8e21920adefd7e8c5501fd188b927125f0f8e683041`。实验 NAS 切换后两个 current 链接一致，六个相关服务 active，回环与局域网健康检查均返回 `ok`，特权套接字、身份切换日志和五条屏保资源哈希均已核对。
+- `d66d3da22ea6` 在 WSL ext4 副本中通过全部门禁（前端 79 项），发布二进制在 Debian 12 容器中构建（WSL 的 glibc 2.43 新于 Debian 13 的 2.41），Debian 13 systemd 系统测试 48 项通过；API SHA-256 为 `9a0521f9…c7588`，Host Agent 为 `6847b3ef…f2913`，容器代理为 `051ba0ad…0ac0e4`。实验 NAS 切换后两个 current 链接一致，八个相关服务 active，身份切换日志、相册服务就绪与五条屏保哈希均已核对，局域网健康检查返回 `ok`。
 - 开发循环使用受影响测试，完整门禁为每个不可变 RC 制品只执行一次；部署按提交、版本和二进制哈希复用验证证明。
 - [系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)在 Debian 13 systemd 容器中用真实安装器、unit 与二进制按用户检查 Web、SMB、相册、服务身份的权限、局域网 Web 入口与屏保视频的独立通道，共 69 项，并作为 CI 作业运行。
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。当时 `/opt/a-nas/current` 指向 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`（ADR 0008 之前的模型，已被取代）。
-- 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 已安装 Docker 26.1.5、独立 CLI、Compose 2.26.1 与容器代理，`ed5368ba998e` 已在代理模式下完成切换，真实代理路径和桌面 HTTP 路径均通过实机验证。
-- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。会新建 Docker 网络的应用要求 Docker 配置专用地址池，安装后核对网络地址，不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。
-- 局域网 Web 入口已实现：安装 Caddy 后，内网浏览器经 `http://<NAS 地址>` 使用全部功能，明文 HTTP 作为 HTTPS 前的过渡（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。2026-10-09 已在实验 NAS 启用（Caddy 2.6.2），从公司 WiFi 上的开发机访问 `http://172.18.45.48` 的健康检查、首页与未登录 `401` 均正常。
+- 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 目前是 Debian 的 Docker 26.1.5，加上 2026-10-09 从官方发布手动安装的 Compose 2.40.3（Debian 的 2.26.1 会让应用拿到整个卷），容器代理为 `d66d3da22ea6`；按 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 改用 Docker 官方软件源尚待执行。
+- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。会新建 Docker 网络的应用要求 Docker 配置专用地址池，安装后核对网络地址，不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）；实验 NAS 的地址池为 `10.96.64.0/18`，重装的 Immich 网络为 `10.96.65.0/24`。容器代理还在规划时检查 Compose 与 Engine API 的最低版本，安装后核对每个挂载只到计划中的子目录（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
+- 局域网 Web 入口已实现：安装 Caddy 后，内网浏览器经 `http://<NAS 地址>` 使用全部功能，明文 HTTP 作为 HTTPS 前的过渡（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。2026-10-09 已在实验 NAS 启用（Debian 的 Caddy 2.6.2，待按 ADR 0015 换成官方源），从公司 WiFi 上的开发机访问 `http://172.18.45.48` 的健康检查、首页与未登录 `401` 均正常。
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 
 ## 下一步
 
 1. 在 Web 中验收 PR #50 的文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口和资源文件夹跳转，再打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `9923c5987c0b` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
-3. 恢复应用中心：按[安装手册第 2 步](../runbooks/install-container-agent.md#2-配置-docker-网络地址池)在 Experimental NAS 配置 Docker 地址池 `10.96.64.0/18`，按第 4 步把容器代理更新到包含 ADR 0013 检查的版本，再从应用中心重新安装 Immich（数据保留），见[调查](../investigations/2026-10-09-app-network-cut-off-wifi-clients.md)。
+3. 把 Docker 与 Caddy 换成官方软件源（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）：按[容器代理手册](../runbooks/install-container-agent.md#从-debian-dockerio-迁移到官方软件源)卸载 Debian 的 docker.io 等包、安装 `docker-ce` 与 Compose 插件并删除手动安装的 Compose，按[局域网入口手册](../runbooks/enable-lan-web-access.md)把 Caddy 升级到官方源；随后部署包含 ADR 0015 检查的版本并更新容器代理，确认 OpenList 与 Immich 运行、挂载仍为子目录。
 4. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
 5. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
 6. 首次部署包含 ADR 0014 的 release 后，确认安装器已把原五条视频的池导入为 `/var/lib/a-nas/screensavers/pools/<池 ID>` 且 `current` 指向它、清单仍为五条；再按[运行手册](../runbooks/operate-local-kiosk.md#首次升级)确认并清理按 release 存放的旧池副本（需管理员确认）。之后在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
@@ -54,7 +54,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
 - 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB。当天部署后已重启 smbd 并确认监听 `172.18.45.48:445`，但下次重启仍会复现；根治前每次重启后需 root 执行 `systemctl restart smbd`。
-- 2026-10-09 经应用中心安装的 Immich 新建的 Docker 网络推断占用了 `172.19.0.0/16`，所有 172.19.x 的 WiFi 客户端都无法访问 NAS；已在本机屏幕卸载，数据保留。Experimental NAS 配置地址池并更新容器代理之前，不要安装会新建网络的应用（audiobookshelf、excalidraw、filedrop、immich、linkwarden、psitransfer）。
+- 实验 NAS 的 Compose 2.40.3 是手动放在 `/usr/local/lib/docker/cli-plugins/docker-compose` 的二进制，不随 apt 更新；已部署的容器代理 `d66d3da22ea6` 尚不检查 Compose 版本与挂载。Debian 的 Compose 2.26.1 会把应用的整个卷挂进容器（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)），迁移到官方源之前不要删除或替换该文件。
 - 2026-10-09 从公司 WiFi 上的开发机（`172.19.172.225`）到 NAS 与网关的 TCP 445 均不通，而 80 端口正常；连接期间 NAS 上没有任何来自该网段的 445 连接状态，说明拦截发生在公司网络或该电脑的安全策略，不在 NAS。跨网段访问目前使用局域网 Web；SMB 需从 `172.18.45.x` 有线网段复测，或请 IT 放行到 NAS 的 TCP 445。
 
 ## 验证基线

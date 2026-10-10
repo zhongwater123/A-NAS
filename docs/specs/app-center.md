@@ -1,7 +1,7 @@
 # 应用中心
 
 状态：implemented
-更新时间：2026-10-09
+更新时间：2026-10-10
 
 ## 目标
 
@@ -50,7 +50,7 @@
 
 - 清单与安装策略见 [ADR 0010](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)；`catalog_test.go` 渲染每个内置应用，确保列出的应用都能通过策略。当前内置 26 个应用，来源提交为 CasaOS-AppStore `0909364`。
 - 路径：`/DATA/AppData/<app>/…` → `ANAS_APP_DATA_ROOT/<app>/…`（默认数据卷上的 `/srv/a-nas/data/apps`，不经 SMB 发布，成员不可列出）；其余 `/DATA/…`（含整个 `/DATA`）→ `ANAS_SHARED_DATA_ROOT/…`（默认 Shared 共享文件夹 `/srv/a-nas/data/spaces/shared`，绝不映射到数据卷根目录）；`/etc/localtime` 强制只读，`/etc/timezone` 被移除并以 `TZ` 代替。其他应用的数据目录、相对路径、`..` 逃逸和其余宿主机路径一律拒绝。
-- **挂载方式**：数据卷上的文件夹不以绑定挂载交给 Docker（Docker 每次启动都会跟随绑定源路径中的符号链接，而能写共享空间或应用自身数据的人可以把其中的文件夹换成指向宿主机的链接）。渲染结果改为两个 A-NAS 卷：`a-nas-appdata` 以 `apps/<app>`、`a-nas-shared` 以共享空间为根（`local` 驱动、`o=bind`，根目录的名称只有 root 能改），具体文件夹作为 `volume.subpath`，并设 `nocopy`。Docker 每次启动在卷内解析子路径，链接指向卷外时拒绝启动；它既不创建卷根也不创建子路径。清单不能声明 `a-nas-` 前缀的卷。需要 Docker Engine 26 及以上（Debian 13 的 `docker.io` 为 26.1）。
+- **挂载方式**：数据卷上的文件夹不以绑定挂载交给 Docker（Docker 每次启动都会跟随绑定源路径中的符号链接，而能写共享空间或应用自身数据的人可以把其中的文件夹换成指向宿主机的链接）。渲染结果改为两个 A-NAS 卷：`a-nas-appdata` 以 `apps/<app>`、`a-nas-shared` 以共享空间为根（`local` 驱动、`o=bind`，根目录的名称只有 root 能改），具体文件夹作为 `volume.subpath`，并设 `nocopy`。Docker 每次启动在卷内解析子路径，链接指向卷外时拒绝启动；它既不创建卷根也不创建子路径。清单不能声明 `a-nas-` 前缀的卷。子目录挂载需要 Docker Compose 2.30 及以上与 Engine API 1.45 及以上：容器代理在规划时检查，不满足时返回 `409 docker_runtime_outdated`。Compose 2.29 及以前把子目录交给旧的绑定接口，引擎会挂载整个卷（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)）。安装后，容器代理核对每个容器对 A-NAS 卷的挂载都是计划中的子目录；有任一不符或无法检查时立即 `compose down` 回滚，任务失败并写明容器、卷与挂载点。Docker 来自官方软件源（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 - **运行身份**（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）：每个应用对应 Host Agent 分配的 Linux 账号 `app-<id>`（UID/GID 30000–30999，永不复用）。查看计划只在 Host Agent 登记表中预留 UID，账号在安装前预建文件夹时才创建。计划按该身份渲染：清单显式声明 `user` 时把它改为该 UID/GID，声明 `PUID`/`PGID` 时无论原值是变量还是字面量都改为该 UID/GID，并在安装计划中显示。环境变量插值只提供 `AppID`、`TZ`、`PUID`、`PGID`，不读取容器代理自身环境。既不声明 `user` 也不支持 `PUID`/`PGID` 的镜像保留其镜像默认用户，必须在入库评审中确认它能使用所挂载目录；固定 UID 或 root 初始化等第三种身份策略进入内置目录前需要扩展安装策略并增加兼容性证据。
 - **共享空间授权**：计划挂载共享空间内的文件夹时，计划明示“该应用将获得共享空间的读写权限（与成员相同）”；确认安装后 `app-<id>` 加入 `a-nas-users`，从而经共享空间的 ACL 获得访问，新文件继承该 ACL，成员可读写。卸载时立即撤销该成员资格，应用身份与其数据保留。应用身份永远无法访问任何个人空间。
 - **文件夹由 Host Agent 预建**：安装前 Host Agent 校验计划中的每个宿主机文件夹只在 `apps/<app>` 或（已同意时）共享空间内，创建 `apps` 子卷（仅 root）、应用数据文件夹（属主 `app-<id>`）与共享空间文件夹（继承 ACL）；每一级都经不跟随符号链接的描述符创建并改属主，路径中出现链接时拒绝。Docker 不会创建任何宿主机文件夹，数据卷离线时应用无法启动，也绝不会把数据写到系统盘。
@@ -68,7 +68,7 @@
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：以渲染结果运行一次性 Compose 项目，共享空间中被换成指向卷外目录的链接的文件夹使容器拒绝启动（`path concatenation escapes the base directory`），换回真实文件夹后正常挂载，写入文件属主为应用 UID；卷根不存在时挂载失败且 Docker 不创建它。
 - 2026-10-08 Experimental NAS（Debian 13 自带 Docker 26.1.5、Compose 2.26.1）：真实拉取并安装 OpenList 4.2.2，以 `app-openlist` 运行，见 [OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
 - 产品接口：[应用中心 API 测试](../../internal/appstoreapi/handler_test.go) 覆盖安装前预建文件夹、卸载撤销与数据卷离线拒绝；[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go)。
-- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。
+- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。`TestPlanRefusesADockerThatDropsVolumeSubpaths`、`TestInstallRollsBackAMountBeyondItsFolder` 与 `TestInstallKeepsMountsOnTheirFolders` 覆盖过旧的 Compose 或 Engine API 被拒绝、挂载超出计划文件夹时回滚与正确挂载时正常安装。
 - 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
 - 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖搜索、计划确认、按摘要安装、已安装状态、卸载确认、端口冲突提示、未启用状态、Docker 网络与地址池显示，以及地址池缺失提示。
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：通过产品 API 与容器代理安装 Memos——本机 Docker 无法访问 Docker Hub，首次安装如实失败并显示拉取错误；以本地镜像临时标记为 `neosmemo/memos:0.28.0` 后，安装成功（容器带 `a-nas-memos` 项目与 `io.a-nas.app` 标签，绑定目录重写到应用数据根，Docker 窗口可见），重复安装返回 `already_installed`，卸载后容器与网络删除且数据保留；过期摘要返回 `plan_changed`，跨站请求返回 `forbidden`。Chromium 中模拟模式完成浏览、计划、安装、卸载全流程，26 个图标全部加载。临时镜像标签与测试数据已清理。

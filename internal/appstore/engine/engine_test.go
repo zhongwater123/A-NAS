@@ -22,6 +22,9 @@ type fakeDocker struct {
 	containers []engine.ContainerInfo
 	pools      []netip.Prefix
 	networks   []engine.NetworkInfo
+	mounts     []engine.MountInfo
+	// apiVersion defaults to an engine that supports volume subpaths.
+	apiVersion string
 }
 
 func (f *fakeDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {
@@ -38,12 +41,32 @@ func (f *fakeDocker) ProjectNetworks(context.Context, string) ([]engine.NetworkI
 	return f.networks, nil
 }
 
+func (f *fakeDocker) APIVersion(context.Context) (string, error) {
+	if f.apiVersion == "" {
+		return "1.52", nil
+	}
+	return f.apiVersion, nil
+}
+
+func (f *fakeDocker) ProjectMounts(context.Context, string) ([]engine.MountInfo, error) {
+	return f.mounts, nil
+}
+
 type fakeRunner struct {
 	mu    sync.Mutex
 	calls [][]string
 	err   error
 	gate  chan struct{}
 	after func(args []string)
+	// compose defaults to a Compose that keeps volume subpaths.
+	compose string
+}
+
+func (f *fakeRunner) ComposeVersion(context.Context) (string, error) {
+	if f.compose == "" {
+		return "2.40.3", nil
+	}
+	return f.compose, nil
 }
 
 func (f *fakeRunner) Run(_ context.Context, args []string, output io.Writer) error {
@@ -237,6 +260,76 @@ func TestInstallKeepsANetworkInsideThePool(t *testing.T) {
 
 	apps, _ := store.Apps(ctx)
 	if job := find(apps, "audiobookshelf").Job; len(runner.calls) != 1 || job.State != appstore.JobSucceeded {
+		t.Fatalf("calls = %v job = %+v, want one up and success", runner.calls, job)
+	}
+}
+
+// On 2026-10-09 the Debian Compose 2.26.1 mounted Immich's whole app folder
+// as its database directory and the whole Shared folder as its uploads.
+func TestPlanRefusesADockerThatDropsVolumeSubpaths(t *testing.T) {
+	for _, test := range []struct{ compose, api string }{
+		{compose: "2.26.1-4", api: "1.45"},
+		{compose: "v2.29.7", api: "1.52"},
+		{compose: "2.40.3", api: "1.44"},
+	} {
+		store, _ := newStore(t, &fakeDocker{apiVersion: test.api}, &fakeRunner{compose: test.compose})
+		if _, err := store.Plan(context.Background(), "memos", identity); !errors.Is(err, appstore.ErrRuntimeOutdated) {
+			t.Errorf("Compose %s, API %s: plan error = %v, want ErrRuntimeOutdated", test.compose, test.api, err)
+		}
+	}
+	store, _ := newStore(t, &fakeDocker{apiVersion: "1.45"}, &fakeRunner{compose: "v2.30.0"})
+	if _, err := store.Plan(context.Background(), "memos", identity); err != nil {
+		t.Fatalf("Compose 2.30.0 with API 1.45: plan error = %v", err)
+	}
+}
+
+func TestInstallRollsBackAMountBeyondItsFolder(t *testing.T) {
+	docker := &fakeDocker{}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+	plan, err := store.Plan(ctx, "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := plan.Mounts[0]
+	if folder.Volume != "a-nas-memos_a-nas-appdata" || folder.Subpath == "" {
+		t.Fatalf("planned mount = %+v, want a subpath of the app-data volume", folder)
+	}
+	docker.mounts = []engine.MountInfo{{Container: "memos", Volume: folder.Volume, Target: folder.ContainerPath}}
+	if _, err := store.Install(ctx, "memos", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+
+	if len(runner.calls) != 2 || !strings.HasSuffix(strings.Join(runner.calls[1], " "), "down --remove-orphans") {
+		t.Fatalf("runner calls = %v, want up then a rollback down", runner.calls)
+	}
+	apps, _ := store.Apps(ctx)
+	job := find(apps, "memos").Job
+	if job.State != appstore.JobFailed || !strings.Contains(job.Error, "the whole a-nas-memos_a-nas-appdata") || !strings.Contains(job.Error, "rolled back") {
+		t.Fatalf("job = %+v, want a failed install naming the whole volume", job)
+	}
+}
+
+func TestInstallKeepsMountsOnTheirFolders(t *testing.T) {
+	docker := &fakeDocker{}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+	plan, _ := store.Plan(ctx, "memos", identity)
+	folder := plan.Mounts[0]
+	docker.mounts = []engine.MountInfo{
+		{Container: "memos", Volume: folder.Volume, Target: folder.ContainerPath, Subpath: folder.Subpath},
+		{Container: "memos", Volume: "someone-elses-volume", Target: "/elsewhere"},
+	}
+	if _, err := store.Install(ctx, "memos", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+
+	apps, _ := store.Apps(ctx)
+	if job := find(apps, "memos").Job; len(runner.calls) != 1 || job.State != appstore.JobSucceeded {
 		t.Fatalf("calls = %v job = %+v, want one up and success", runner.calls, job)
 	}
 }

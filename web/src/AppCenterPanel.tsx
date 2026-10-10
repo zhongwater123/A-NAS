@@ -325,6 +325,7 @@ function describeError(error: unknown): string {
     name_in_use: `容器名已被占用${taken ? `（${taken}）` : ""}`,
     policy_violation: "该应用不符合安装安全策略",
     address_pool_missing: "Docker 尚未配置 A-NAS 网络地址池，暂不能安装会新建网络的应用",
+    docker_runtime_outdated: "Docker 或 Docker Compose 版本过旧，无法把应用限制在它的文件夹内，请先升级",
     volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
     apps_unavailable: "无法连接容器代理",
     network_error: "无法连接 A-NAS",

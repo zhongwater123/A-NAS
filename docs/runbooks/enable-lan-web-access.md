@@ -1,7 +1,7 @@
 # 启用局域网 Web 访问
 
 状态：verified（2026-10-09 已在 Experimental NAS 执行）
-更新时间：2026-10-09
+更新时间：2026-10-10
 
 ## 目的
 
@@ -20,10 +20,24 @@
    - 命令：`ss -ltnp 'sport = :80'`
    - 预期：只有表头。
    - 完成标准：没有其他程序监听 80；否则停止。
-2. 安装 Caddy。
-   - 命令：`apt-get update && apt-get install -y caddy`
-   - 预期：Debian 包启动 `caddy.service`，80 端口提供 Caddy 的默认欢迎页。
-   - 完成标准：`systemctl is-active caddy` 为 `active`，`caddy version` 为 2.6 或更高。
+2. 从 Caddy 官方软件源安装 Caddy（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。Debian 13 自带的 `caddy` 停留在 2022 年的 2.6.2，不再使用；官方源与 Debian 的包同名，用 apt 优先级固定来源。已装了 Debian 包的主机执行同一段命令即可原地升级，`--force-confold` 保留安装器写入的 A-NAS 配置。
+   - 命令：
+
+     ```bash
+     apt-get update
+     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list
+     chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
+     printf 'Package: caddy\nPin: origin dl.cloudsmith.io\nPin-Priority: 700\n' > /etc/apt/preferences.d/caddy
+     apt-get update
+     apt-get install -y -o Dpkg::Options::=--force-confold caddy
+     apt-cache policy caddy
+     caddy version
+     ```
+
+   - 预期：`caddy.service` 运行；`apt-cache policy caddy` 显示已安装的版本来自 `dl.cloudsmith.io`。全新安装时 80 端口提供 Caddy 的默认欢迎页，已有 A-NAS 配置时保持局域网入口。
+   - 完成标准：`systemctl is-active caddy` 为 `active`，`caddy version` 为官方源当前的 2.x 版本。
 3. 按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装包含本功能的发布，发布目录中应有 `Caddyfile`。安装器检测到 Caddy 后先校验配置，再把原 `/etc/caddy/Caddyfile` 备份为 `/etc/caddy/Caddyfile.before-a-nas`，写入 A-NAS 配置并重新加载 Caddy。
    - 预期：安装器正常结束，`head -n 1 /etc/caddy/Caddyfile` 输出 `# Managed by A-NAS.`。
    - 完成标准：`systemctl is-active caddy anas-api` 均为 `active`。
@@ -41,6 +55,7 @@
 - 关闭局域网入口：`systemctl disable --now caddy`。产品服务、本地控制台与 SMB 不受影响。
 - 恢复 Caddy 原配置：`install -m 0644 /etc/caddy/Caddyfile.before-a-nas /etc/caddy/Caddyfile && systemctl reload caddy`。
 - 彻底移除：`apt-get remove caddy`，之后的安装器会跳过局域网入口。
+- 退回 Debian 的 Caddy：删除 `/etc/apt/preferences.d/caddy` 与 `/etc/apt/sources.list.d/caddy-stable.list`，`apt-get update` 后执行 `apt-get install -y --allow-downgrades -o Dpkg::Options::=--force-confold caddy=2.6.2-12+deb13u1`。仅用于排障。
 
 ## 关联
 

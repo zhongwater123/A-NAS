@@ -166,6 +166,31 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 	}
 }
 
+func TestRenderRecordsTheVolumeAndSubpathOfEachFolder(t *testing.T) {
+	plan, err := appstore.Render(context.Background(), entry(`
+services:
+  web:
+    image: example/web:1
+    volumes:
+      - /DATA/AppData/$AppID/config:/config
+      - /DATA/Media/Music:/music:ro
+      - /etc/localtime:/etc/localtime
+`), testPolicy, testIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		"/config":        {"a-nas-demo_a-nas-appdata", "config"},
+		"/music":         {"a-nas-demo_a-nas-shared", "Media/Music"},
+		"/etc/localtime": {"", ""},
+	}
+	for _, mount := range plan.Mounts {
+		if got := [2]string{mount.Volume, mount.Subpath}; got != want[mount.ContainerPath] {
+			t.Errorf("mount %s = volume %q subpath %q, want %q", mount.ContainerPath, got[0], got[1], want[mount.ContainerPath])
+		}
+	}
+}
+
 func TestRenderListsNetworksAndRefusesOwnAddressRanges(t *testing.T) {
 	ctx := context.Background()
 	plan, err := appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, testIdentity)
