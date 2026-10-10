@@ -301,7 +301,7 @@ export function PhotoScroller({ entries, scrollRef, topInset, inset, insetRight 
     <div className="ph-scroll-frame">
       <div
         ref={scrollRef}
-        className="ph-scroll"
+        className={`ph-scroll${scrubber ? " with-scrubber" : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -323,71 +323,100 @@ export function PhotoScroller({ entries, scrollRef, topInset, inset, insetRight 
         {children}
       </div>
       {labelEntry?.label && <div className="ph-floating-date" style={{ top: topInset + 10 }} aria-hidden="true">{labelEntry.label}</div>}
-      {scrubber && <Scrubber entries={entries} starts={index.starts} total={virtualizer.getTotalSize()} offset={offset} viewport={viewport} topInset={topInset} onJump={(key) => { const position = index.byKey.get(key); if (position !== undefined) virtualizer.scrollToIndex(position, { align: "start" }); }} />}
+      {scrubber && <Scrubber entries={entries} starts={index.starts} total={virtualizer.getTotalSize()} offset={offset} viewport={viewport} topInset={topInset} onScroll={(value) => { if (scrollRef.current) scrollRef.current.scrollTop = value; }} />}
     </div>
   );
 }
 
-interface ScrubberProps { entries: Entry[]; starts: number[]; total: number; offset: number; viewport: number; topInset: number; onJump: (key: string) => void }
+interface ScrubberProps { entries: Entry[]; starts: number[]; total: number; offset: number; viewport: number; topInset: number; onScroll: (offset: number) => void }
 
-// Scrubber maps the timeline's height onto the window's: years are marked
-// where their months begin; pointing shows the month, pressing or dragging
-// jumps to it.
-function Scrubber({ entries, starts: positions, total, offset, viewport, topInset, onJump }: ScrubberProps) {
+// Scrubber is the timeline's scrollbar: its thumb drags through the photos,
+// years and months are marked where they begin, and a bubble names the month
+// being pointed at, dragged to or scrolled through.
+function Scrubber({ entries, starts: positions, total, offset, viewport, topInset, onScroll }: ScrubberProps) {
   const rail = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{ y: number; month: string }>();
+  const grab = useRef<number>(undefined);
+  const [pointer, setPointer] = useState<number>();
   const [dragging, setDragging] = useState(false);
-  const months = useMemo(() => entries.flatMap((entry, position) => entry.kind === "month" ? [{ month: entry.month, key: entry.key, start: positions[position] }] : []), [entries, positions]);
+  const [scrolling, setScrolling] = useState(false);
+  const months = useMemo(() => entries.flatMap((entry, position) => entry.kind === "month" ? [{ month: entry.month, start: positions[position] - topInset }] : []), [entries, positions, topInset]);
   // The rail runs from below the toolbar to the bottom, 8px in from each.
   const height = Math.max(0, viewport - topInset - 16);
-  const scale = total > 0 ? height / total : 0;
+  const range = Math.max(1, total - viewport);
+  const thumb = Math.min(height, Math.max(32, (viewport / Math.max(total, 1)) * height));
+  const travel = Math.max(1, height - thumb);
+  const toY = (value: number) => Math.min(1, Math.max(0, value / range)) * travel;
+  const toOffset = (thumbTop: number) => Math.min(1, Math.max(0, thumbTop / travel)) * range;
+  // The bubble shows briefly while the photos scroll.
+  const last = useRef(offset);
+  useEffect(() => {
+    if (Math.abs(offset - last.current) < 2) return;
+    last.current = offset;
+    setScrolling(true);
+    const timer = window.setTimeout(() => setScrolling(false), 900);
+    return () => window.clearTimeout(timer);
+  }, [offset]);
   const years = useMemo(() => {
     const marks: Array<{ year: string; y: number }> = [];
     for (const month of months) {
       const year = month.month.slice(0, 4);
-      const y = month.start * scale;
-      if (marks.at(-1)?.year === year) continue;
-      if (marks.length && y - (marks.at(-1)?.y ?? 0) < 18) continue;
+      const y = toY(month.start) + thumb / 2;
+      if (marks.at(-1)?.year === year || (marks.length && y - (marks.at(-1)?.y ?? 0) < 18)) continue;
       marks.push({ year, y });
     }
     return marks;
-  }, [months, scale]);
-  if (months.length < 2 || total <= viewport) return null;
-  const monthAt = (clientY: number) => {
-    const rect = rail.current?.getBoundingClientRect();
-    if (!rect) return undefined;
-    const y = Math.min(Math.max(0, clientY - rect.top), rect.height);
-    const target = y / (scale || 1);
+  }, [months, range, travel, thumb]);
+  if (months.length < 1 || total <= viewport + 1) return null;
+  const monthAt = (value: number) => {
     let found = months[0];
-    for (const month of months) { if (month.start - topInset <= target) found = month; else break; }
-    return { y, month: found };
+    for (const month of months) { if (month.start <= value + 1) found = month; else break; }
+    return found.month;
   };
-  const follow = (clientY: number, jump: boolean) => {
-    const at = monthAt(clientY);
-    if (!at) return;
-    setHover({ y: at.y, month: at.month.month });
-    if (jump) onJump(at.month.key);
-  };
+  const railY = (clientY: number) => clientY - (rail.current?.getBoundingClientRect().top ?? 0);
+  const thumbTop = toY(offset);
+  const bubbleTop = pointer !== undefined && !dragging ? pointer : thumbTop + thumb / 2;
+  const bubbleMonth = pointer !== undefined && !dragging ? monthAt(toOffset(pointer - thumb / 2)) : monthAt(offset);
+  const step = (delta: number) => onScroll(Math.min(range, Math.max(0, offset + delta)));
   return (
     <div
       ref={rail}
       className={`ph-scrubber${dragging ? " dragging" : ""}`}
-      style={{ top: topInset + 8 }}
-      role="slider"
-      aria-label="按月份跳转"
+      style={{ top: topInset + 8, height }}
+      role="scrollbar"
+      aria-label="时间轴"
+      aria-orientation="vertical"
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={Math.round((offset / Math.max(1, total - viewport)) * 100)}
-      aria-valuetext={hover ? fullMonthLabel(hover.month) : undefined}
-      onPointerMove={(event) => follow(event.clientY, dragging)}
-      onPointerLeave={() => { if (!dragging) setHover(undefined); }}
-      onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); setDragging(true); follow(event.clientY, true); }}
-      onPointerUp={() => { setDragging(false); setHover(undefined); }}
+      aria-valuenow={Math.round((offset / range) * 100)}
+      aria-valuetext={fullMonthLabel(monthAt(offset))}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        const moves: Record<string, number> = { ArrowDown: 120, ArrowUp: -120, PageDown: viewport * 0.9, PageUp: -viewport * 0.9, End: range, Home: -range };
+        if (event.key in moves) { event.preventDefault(); step(moves[event.key]); }
+      }}
+      onPointerMove={(event) => {
+        const y = railY(event.clientY);
+        if (dragging && grab.current !== undefined) onScroll(toOffset(y - grab.current));
+        else setPointer(y);
+      }}
+      onPointerLeave={() => setPointer(undefined)}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        const y = railY(event.clientY);
+        // Grabbing the thumb keeps its hold; pressing the rail brings it there.
+        grab.current = y >= thumbTop && y <= thumbTop + thumb ? y - thumbTop : thumb / 2;
+        if (grab.current === thumb / 2) onScroll(toOffset(y - thumb / 2));
+        setDragging(true);
+      }}
+      onPointerUp={() => { grab.current = undefined; setDragging(false); }}
+      onPointerCancel={() => { grab.current = undefined; setDragging(false); }}
     >
       {years.map((mark) => <span key={mark.year} className="ph-scrubber-year" style={{ top: mark.y }}>{mark.year}</span>)}
-      {months.map((month) => <i key={month.key} className="ph-scrubber-tick" style={{ top: month.start * scale }} />)}
-      <span className="ph-scrubber-thumb" style={{ top: Math.min(height - 2, offset * scale) }} />
-      {hover && <span className="ph-scrubber-bubble" style={{ top: hover.y }}>{fullMonthLabel(hover.month)}</span>}
+      {months.map((month) => <i key={month.month} className="ph-scrubber-tick" style={{ top: toY(month.start) + thumb / 2 }} />)}
+      <span className="ph-scrubber-thumb" style={{ top: thumbTop, height: thumb }} />
+      {(dragging || scrolling || pointer !== undefined) && <span className="ph-scrubber-bubble" style={{ top: bubbleTop }}>{fullMonthLabel(bubbleMonth)}</span>}
     </div>
   );
 }

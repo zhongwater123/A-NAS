@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, CircleAlert, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, ScanEye, Search, ShieldCheck,
+  ArrowLeft, CircleAlert, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck,
   Sparkles, Trash2, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -7,7 +7,8 @@ import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect,
 import { endViewing } from "../api";
 import { AlbumPicker } from "./AlbumPicker";
 import { AssetGrid } from "./AssetGrid";
-import { AlbumsView, Empty, ThingsView } from "./Collections";
+import { AISearchHome } from "./AISearch";
+import { AlbumsView, Empty } from "./Collections";
 import { useDialogs, useToasts } from "./feedback";
 import type { GridProps } from "./grid";
 import { clampRowHeight, defaultRowHeight, maxRowHeight, minRowHeight } from "./layout";
@@ -17,9 +18,9 @@ import {
 } from "./model";
 import { PhotoPicker } from "./PhotoPicker";
 import {
-  addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, listAlbumPhotos, listAlbums, listPhotoLabels, listPhotoLibraries,
+  addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, listAlbumPhotos, listAlbums, listPhotoLibraries,
   listPhotoTrash, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
-  type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLabelCount, type PhotoLibrary,
+  type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoSearchPage,
 } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { useSelection } from "./selection";
@@ -51,9 +52,7 @@ const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve
 const placeKey = (place: Place) => {
   switch (place.kind) {
     case "album": return `album:${place.album.id}`;
-    case "label": return `label:${place.viewing}:${place.label.id}`;
     case "search": return `search:${place.viewing}:${place.query}`;
-    case "things": return `things:${place.viewing}`;
     default: return `${place.kind}:${place.libraryId}`;
   }
 };
@@ -78,8 +77,9 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const [albumsKey, setAlbumsKey] = useState(0);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [ai, setAI] = useState<PhotoAIStatus>();
-  const [labels, setLabels] = useState<{ viewing: string; items: PhotoLabelCount[] }>();
-  const [semantic, setSemantic] = useState(true);
+  // What the current search's results are, as the photo service says.
+  const [searchInfo, setSearchInfo] = useState<Pick<PhotoSearchPage, "match" | "labels">>();
+  const [recent, setRecent] = useStored<string[]>("a-nas.photos.recentSearches", []);
   const [query, setQuery] = useState("");
   const [picker, setPicker] = useState<PhotoAsset[]>();
   const [photoPicker, setPhotoPicker] = useState<PhotoAlbum>();
@@ -156,25 +156,17 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     selection.clear();
     setHidden(new Set());
     setCount(undefined);
-    setSemantic(true);
+    setSearchInfo(undefined);
     if (next.kind !== "search") setQuery("");
   }, [selection.clear]);
 
   const libraryId = place ? placeLibrary(place) : "";
-  // Searches and the things page keep the sidebar on the library they came from.
+  // AI search keeps the sidebar on the library it came from.
   const lastLibrary = useRef("");
   if (libraryId) lastLibrary.current = libraryId;
   const sideLibrary = libraryOf(caller, libraryId) ?? (place && "viewing" in place && place.viewing ? libraryOf(caller, place.viewing) : libraryOf(caller, lastLibrary.current)) ?? mine;
   const viewingLibrary = sideLibrary?.viewing ? sideLibrary : undefined;
   const readOnlyPlace = Boolean(viewingLibrary);
-
-  // Search labels match the query by name, as shortcuts to the label view.
-  useEffect(() => {
-    if (place?.kind !== "search" || labels?.viewing === place.viewing) return;
-    let live = true;
-    listPhotoLabels(place.viewing).then((value) => { if (live) setLabels({ viewing: place.viewing, items: value.items }); }, () => undefined);
-    return () => { live = false; };
-  }, [place]);
 
   // Uploads go to the album or library shown, else to the caller's library.
   const uploadTarget = useMemo((): UploadTarget | undefined => {
@@ -375,7 +367,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     rename: renameOne,
     copy: (asset, library) => void copyTo(library, [asset]),
     openAlbum: (album) => void openAlbumById(album),
-    openLabel: (label) => { setViewer(undefined); setPlace({ kind: "label", viewing: place ? placeViewing(caller, place) : "", label }); },
+    openLabel: (label) => { setViewer(undefined); startSearch(label.name); },
     searchTag: (tag) => { setViewer(undefined); startSearch(tag); },
     error: reportError,
   };
@@ -385,17 +377,19 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     root.current?.focus();
   }, []);
 
+  // Every search opens AI search; a search from a member library being
+  // viewed covers that library too.
   const startSearch = (text: string) => {
     if (!place) return;
-    const back = place.kind === "search" ? place.back : place;
-    setPlace({ kind: "search", viewing: placeViewing(caller, place), query: text, back });
+    setPlace({ kind: "search", viewing: placeViewing(caller, place), query: text });
     setQuery(text);
+    if (text) setRecent((current) => [text, ...current.filter((item) => item !== text)].slice(0, 8));
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
     const text = query.trim();
     if (text) startSearch(text);
-    else if (place?.kind === "search") setPlace(place.back);
+    else if (place?.kind === "search") setPlace({ ...place, query: "" });
   };
 
   // ---- Keyboard and dropped files ----
@@ -403,7 +397,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     if (viewer || dialogs.open || picker || photoPicker) return;
     const typing = (event.target as HTMLElement).closest("input, textarea");
     if (event.key === "Escape" && selection.selected.size && !typing) { event.preventDefault(); selection.clear(); }
-    else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !typing && place?.kind !== "albums" && place?.kind !== "things") {
+    else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !typing && place?.kind !== "albums" && !(place?.kind === "search" && !place.query)) {
       event.preventDefault();
       selection.replace(viewAssets.map((asset) => asset.id));
     } else if (event.key === "/" && !typing) { event.preventDefault(); searchInput.current?.focus(); }
@@ -438,19 +432,26 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       case "albums": return { text: "相册", detail: libraryName(caller, sideLibrary) };
       case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
       case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
-      case "things": return { text: "识别的事物", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
-      case "label": return { text: place.label.name, detail: count === undefined ? "本地 AI 识别" : `本地 AI 识别出 ${count} 张，可能有误`, back: { kind: "things", viewing: place.viewing } as Place };
-      case "search": return { text: `“${place.query}”`, detail: count === undefined ? "搜索结果" : `找到 ${count} 张`, back: place.back };
+      case "search": return place.query
+        ? { text: "AI 搜图", detail: count === undefined ? "" : `找到 ${count} 张`, back: { ...place, query: "" } as Place }
+        : { text: "AI 搜图", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
     }
   })();
-  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "label" || place.kind === "search";
-  const suggestions = place.kind === "search" && labels?.viewing === place.viewing
-    ? labels.items.filter((label) => label.name.includes(place.query) || place.query.includes(label.name)).slice(0, 6) : [];
-  const subbar: ReactNode = place.kind === "search" && (suggestions.length || !semantic) ? (
-    <div className="ph-subbar">
-      {!semantic && <span className="ph-subbar-note"><CircleAlert />本地 AI 暂不可用，只按名称和标签匹配</span>}
-      {suggestions.length > 0 && <span className="ph-subbar-label"><Sparkles />识别为</span>}
-      {suggestions.map((label) => <button type="button" key={label.id} className="ph-chip-button" onClick={() => setPlace({ kind: "label", viewing: place.viewing, label })}>{label.name}<small>{label.photos}</small></button>)}
+  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || (place.kind === "search" && Boolean(place.query));
+  const quoted = (searchInfo?.labels ?? []).map((label) => `“${label.name}”`).join("和");
+  // On AI search the search box sits under the toolbar, with what the
+  // results are.
+  const subbar: ReactNode = place.kind === "search" && place.query ? (
+    <div className="ph-subbar ph-search-bar">
+      <form className="ph-search wide" role="search" onSubmit={submitSearch}>
+        <Search />
+        <input ref={searchInput} type="search" aria-label="搜索照片" placeholder="例如：海边的猫" maxLength={200} value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setPlace({ ...place, query: "" }); } }} />
+      </form>
+      {searchInfo?.match === "labels" && <span className="ph-subbar-label"><Sparkles />只显示本地 AI 识别为{quoted}的照片，识别可能有误</span>}
+      {searchInfo?.match === "closest" && <span className="ph-subbar-note"><CircleAlert />没有能确定的结果，以下是最接近的照片</span>}
+      {searchInfo?.match === "names" && <span className="ph-subbar-note"><CircleAlert />本地 AI 暂不可用，只按名称和标签匹配</span>}
     </div>
   ) : null;
 
@@ -500,17 +501,15 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           load={async () => ({ items: await listPhotoTrash(place.libraryId) })} onCount={setCount} onError={reportError}
           badge={(asset) => asset.trash && <span className="ph-tile-days">{daysLeft(asset.trash.purgeAfter)} 天后删除</span>}
           empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />} />;
-      case "label":
-        return <AssetGrid key={`label:${place.label.id}`} {...grid} listKey={`label:${place.viewing}:${place.label.id}`} load={(cursor) => searchPhotos({ label: place.label.id, name: place.label.name }, place.viewing, cursor)}
-          onCount={setCount} onError={reportError} empty={<Empty icon={<ScanEye />} title={`没有${place.label.name}`} text="AI 标签暂不可用，或这些照片已被隐藏此标签。" />} />;
       case "search":
+        if (!place.query) {
+          return <AISearchHome viewing={place.viewing} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent} onSearch={startSearch} onForget={() => setRecent([])} onError={reportError} />;
+        }
         return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos({ query: place.query }, place.viewing, cursor)}
-          onPage={(page, first) => { if (first && "semantic" in page) setSemantic(Boolean(page.semantic)); }} onCount={setCount} onError={reportError}
-          end="以上是相关度较高的照片" empty={<Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+          onPage={(page, first) => { if (first && "match" in page) { const found = page as PhotoSearchPage; setSearchInfo({ match: found.match, labels: found.labels }); } }} onCount={setCount} onError={reportError}
+          empty={<Empty icon={<Search />} title="没有找到相关照片" text={searchInfo?.match === "labels" ? `本地 AI 没有在照片里认出${quoted}。` : "换个说法试试，比如“海边的日落”“桌上的蛋糕”。"} />} />;
       case "albums":
         return <AlbumsView libraryId={place.libraryId} readOnly={readOnlyPlace} refreshKey={albumsKey} topInset={topInset} onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })} onCreate={() => void newAlbum()} onError={reportError} />;
-      case "things":
-        return <ThingsView viewing={place.viewing} refreshKey={refreshKey} topInset={topInset} ai={ai} onOpen={(label) => setPlace({ kind: "label", viewing: place.viewing, label })} onError={reportError} />;
     }
   })();
 
@@ -555,12 +554,12 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
                 <button type="button" className="ph-icon-button" aria-label="删除相册" title="删除相册" onClick={() => void deleteCurrentAlbum()}><Trash2 /></button>
               </div>
             )}
-            <form className="ph-search" role="search" onSubmit={submitSearch}>
-              <Search />
-              <input ref={searchInput} type="search" aria-label="搜索照片" placeholder="搜索照片，如：海边的猫" maxLength={200} value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => { if (event.key === "Escape" && place.kind === "search") { event.preventDefault(); setPlace(place.back); } }} />
-            </form>
+            {place.kind !== "search" && (
+              <form className="ph-search" role="search" onSubmit={submitSearch}>
+                <Search />
+                <input ref={searchInput} type="search" aria-label="搜索照片" placeholder="用一句话找照片，如：海边的猫" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
+              </form>
+            )}
             {photoGrid && (
               <div className="ph-zoom" role="group" aria-label="照片大小">
                 <button type="button" aria-label="缩小照片" title="缩小 (Ctrl+滚轮)" disabled={rowHeight <= minRowHeight} onClick={() => zoomBy(1 / 1.2)}><ZoomOut /></button>

@@ -605,7 +605,7 @@ paths:
   /api/v1/photos/search:
     get:
       operationId: searchPhotos
-      summary: Find untrashed photos in the caller's private and the shared library by name or meaning (name matches first, then by similarity), or the photos that show an AI label
+      summary: Find untrashed photos in the caller's private and the shared library by name or meaning (name matches first, then the photos that show the calibrated labels the query names, or else those nearest its best match), or the photos that show an AI label
       parameters:
         - { name: q, in: query, description: "1 to 200 characters, such as 海边的猫; give q or label.", schema: { type: string, minLength: 1, maxLength: 200 } }
         - { name: label, in: query, description: "The ID of an AI label photos can show, such as cat; give q or label.", schema: { type: string } }
@@ -1886,10 +1886,11 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [id, name, photos, coverId]
+            required: [id, name, category, photos, coverId]
             properties:
               id: { type: string }
               name: { type: string }
+              category: { type: string, description: "animal, food, object, vehicle, activity, nature, scene, people or document." }
               photos: { type: integer, minimum: 1 }
               coverId: { type: string, description: The photo that shows the label most clearly. }
         ready: { type: boolean, description: "False while AI labels are not available; there are no items then." }
@@ -1914,11 +1915,24 @@ components:
     PhotoSearchResults:
       type: object
       additionalProperties: false
-      required: [items, semantic]
+      required: [items, semantic, match]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string }
         semantic: { type: boolean, description: "False when local AI could not encode the query and only names were matched." }
+        match:
+          type: string
+          enum: [names, labels, closest]
+          description: "What follows the name and tag matches: names (nothing; local AI could not encode the query), labels (photos showing every label in labels) or closest (photos nearest in meaning; the query names nothing local AI recognises reliably)."
+        labels:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
     PhotoAIStatus:
       type: object
       additionalProperties: false

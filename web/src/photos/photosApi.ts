@@ -29,11 +29,13 @@ export interface PhotoAlbum { id: string; libraryId: string; name: string; creat
 export interface PhotoAILabel { id: string; name: string; score: number }
 export interface PhotoPage { items: PhotoAsset[]; next?: string }
 // semantic is false when local AI could not encode the query and only names
-// were matched.
-export interface PhotoSearchPage extends PhotoPage { semantic: boolean }
+// were matched. match says what follows the name matches: the photos that show
+// every label in labels, or the photos closest in meaning when the query names
+// nothing local AI recognises reliably.
+export interface PhotoSearchPage extends PhotoPage { semantic: boolean; match: "names" | "labels" | "closest"; labels?: { id: string; name: string }[] }
 // A month of a library's timeline in the device's time zone (YYYY-MM).
 export interface PhotoMonth { month: string; photos: number }
-export interface PhotoLabelCount { id: string; name: string; photos: number; coverId: string }
+export interface PhotoLabelCount { id: string; name: string; category: string; photos: number; coverId: string }
 export interface PhotoAIStatus {
   state: "unavailable" | "paused" | "working" | "idle";
   // Why work is paused: foreground, or a resource under pressure.

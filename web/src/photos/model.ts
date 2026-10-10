@@ -1,17 +1,15 @@
 import { APIError } from "../api";
 import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./photosApi";
 
-// A place is what the main area shows. Searches and labels cover the
-// caller's and the shared library; viewing adds the member library they were
-// started from, so ordinary searches never mix it in.
+// A place is what the main area shows. AI search (an empty query is its start
+// page) covers the caller's and the shared library; viewing adds the member
+// library it was started from, so ordinary searches never mix it in.
 export type Place =
   | { kind: "timeline"; libraryId: string }
   | { kind: "albums"; libraryId: string }
   | { kind: "album"; libraryId: string; album: PhotoAlbum }
   | { kind: "trash"; libraryId: string }
-  | { kind: "things"; viewing: string }
-  | { kind: "label"; viewing: string; label: { id: string; name: string } }
-  | { kind: "search"; viewing: string; query: string; back: Place };
+  | { kind: "search"; viewing: string; query: string };
 
 export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
 
@@ -42,6 +40,11 @@ export function libraryName(caller: Caller, library?: PhotoLibrary) {
 }
 
 export const placeLibrary = (place: Place) => "libraryId" in place ? place.libraryId : "";
+
+// Label categories of the vocabulary, in the order AI search shows them.
+export const categoryNames: Record<string, string> = {
+  animal: "动物", food: "食物", object: "物品", vehicle: "交通工具", activity: "活动", nature: "自然", scene: "场景", people: "人物", document: "文档",
+};
 // The member library a search or the things page started from covers.
 export const placeViewing = (caller: Caller, place: Place) => {
   if ("viewing" in place) return place.viewing;

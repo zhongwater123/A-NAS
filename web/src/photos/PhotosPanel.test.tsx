@@ -256,7 +256,7 @@ describe("PhotosPanel viewer", () => {
         if (url === "/api/v1/photos/assets/photo%3Acat" && !init?.method) return json(details);
         if (url === "/api/v1/photos/assets/photo%3Acat/tags" && init?.method === "POST") { details = { ...details, tags: ["小橘"] }; return json(details); }
         if (url === "/api/v1/photos/assets/photo%3Acat/ai-labels/dog" && init?.method === "DELETE") { details = { ...details, aiLabels: details.aiLabels?.slice(0, 1) }; return json(details); }
-        if (url.startsWith("/api/v1/photos/search?label=cat")) return json({ items: [asset("photo:cat"), asset("photo:kitten")], semantic: true });
+        if (url.startsWith("/api/v1/photos/search?q=%E7%8C%AB")) return json({ items: [asset("photo:cat"), asset("photo:kitten")], semantic: true, match: "labels", labels: [{ id: "cat", name: "猫" }] });
         return undefined;
       },
       timeline(privateLibrary.id, () => [asset("photo:cat")]),
@@ -271,10 +271,11 @@ describe("PhotosPanel viewer", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "狗" })).toBeNull());
 
     await user.click(within(screen.getByLabelText("AI 标签")).getByRole("button", { name: "猫" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?label=cat&limit=120", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120", expect.anything());
     expect(await screen.findByRole("button", { name: "查看 photo:kitten.jpg" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "猫" })).toBeTruthy();
-    expect(screen.getByText("本地 AI 识别出 2 张，可能有误")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "AI 搜图" })).toBeTruthy();
+    expect(screen.getByText("只显示本地 AI 识别为“猫”的照片，识别可能有误")).toBeTruthy();
+    expect(screen.getByText("找到 2 张")).toBeTruthy();
   });
 });
 
@@ -416,37 +417,55 @@ describe("PhotosPanel albums, trash and labels", () => {
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
   });
 
-  it("lists recognised things and explains when local AI is off", async () => {
+  it("starts AI search with recent searches and the things local AI recognises, and explains when it is off", async () => {
     let ready = true;
-    serve((url) => {
-      if (url === "/api/v1/photos/labels") return json(ready ? { items: [{ id: "cat", name: "猫", photos: 8, coverId: "photo:cat" }], ready: true } : { items: [], ready: false });
+    const fetchMock = serve((url) => {
+      if (url === "/api/v1/photos/labels") return json(ready
+        ? { items: [{ id: "cat", name: "猫", category: "animal", photos: 8, coverId: "photo:cat" }, { id: "pizza", name: "披萨", category: "food", photos: 3, coverId: "photo:pizza" }], ready: true }
+        : { items: [], ready: false });
       if (url === "/api/v1/photos/ai") return json(ready ? { state: "working", ready: 3, pending: 2, failed: 1 } : { state: "unavailable", ready: 0, pending: 5, failed: 0 });
+      if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:cat")], semantic: true, match: "labels", labels: [{ id: "cat", name: "猫" }] });
       return undefined;
     });
+    window.localStorage.setItem("a-nas.photos.recentSearches", JSON.stringify(["海边的日落"]));
     const user = userEvent.setup();
     const { unmount } = render(<PhotosPanel userId="user:alice" isAdmin={false} />);
     expect(await screen.findByText("正在整理 3 / 6")).toBeTruthy();
     expect(screen.getByText(/1 张无法识别/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "识别的事物" }));
-    const card = await screen.findByRole("button", { name: "查看 猫" });
-    expect(within(card).getByText("8 张")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "AI 搜图" }));
+    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /^动物/ })).toBeTruthy();
+    expect(within(await screen.findByRole("button", { name: "搜索 猫" })).getByText("8 张")).toBeTruthy();
+    expect(within(screen.getByLabelText("最近搜索")).getByRole("button", { name: "海边的日落" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "搜索 猫" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120", expect.anything());
+    expect(await screen.findByRole("button", { name: "查看 photo:cat.jpg" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(within(await screen.findByLabelText("最近搜索")).getByRole("button", { name: "猫" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "清除最近搜索" }));
+    expect(screen.queryByLabelText("最近搜索")).toBeNull();
     unmount();
 
     ready = false;
     render(<PhotosPanel userId="user:alice" isAdmin={false} />);
     expect(await screen.findByText("本地 AI 未启用")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "识别的事物" }));
+    await user.click(screen.getByRole("button", { name: "AI 搜图" }));
     expect(await screen.findByText(/此设备还没有启用本地 AI/)).toBeTruthy();
   });
 });
 
 describe("PhotosPanel search and viewing", () => {
-  it("searches by meaning, offers matching labels and goes back", async () => {
+  it("searches from any page into AI search and says what the results are", async () => {
+    const results: Record<string, object> = {
+      "%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB": { items: [asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" })], semantic: true, match: "labels", labels: [{ id: "cat", name: "猫" }] },
+      "%E7%94%B5%E5%8A%A8%E8%BD%A6": { items: [asset("photo:bike")], semantic: true, match: "closest" },
+      "%E9%BB%84%E6%98%8F": { items: [], semantic: false, match: "names" },
+    };
     const fetchMock = serve(
       (url) => {
-        if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" })], semantic: false });
-        if (url === "/api/v1/photos/labels") return json({ items: [{ id: "cat", name: "猫", photos: 4, coverId: "photo:cat" }], ready: true });
-        return undefined;
+        const query = url.match(/^\/api\/v1\/photos\/search\?q=([^&]+)/)?.[1];
+        return query ? json(results[query]) : undefined;
       },
       timeline(privateLibrary.id, () => [asset("photo:home")]),
     );
@@ -457,13 +476,23 @@ describe("PhotosPanel search and viewing", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB&limit=120", expect.anything());
     expect(await screen.findByRole("button", { name: "查看 photo:sea.jpg" })).toBeTruthy();
-    expect(await screen.findByText("本地 AI 暂不可用，只按名称和标签匹配")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: /^猫\s*4$/ })).toBeTruthy();
+    expect(screen.getByText("只显示本地 AI 识别为“猫”的照片，识别可能有误")).toBeTruthy();
     await openPhoto(user, "photo:sea.jpg");
     expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
     await user.keyboard("{Escape}");
 
+    const box = screen.getByRole("searchbox", { name: "搜索照片" });
+    await user.clear(box);
+    await user.type(box, "电动车{Enter}");
+    expect(await screen.findByText("没有能确定的结果，以下是最接近的照片")).toBeTruthy();
+    await user.clear(screen.getByRole("searchbox", { name: "搜索照片" }));
+    await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "黄昏{Enter}");
+    expect(await screen.findByText("本地 AI 暂不可用，只按名称和标签匹配")).toBeTruthy();
+    expect(screen.getByText("没有找到相关照片")).toBeTruthy();
+
     await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /^照片/ }));
     expect(await screen.findByRole("button", { name: "查看 photo:home.jpg" })).toBeTruthy();
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
   });
@@ -476,7 +505,7 @@ describe("PhotosPanel search and viewing", () => {
       (url, init) => {
         if (url === "/api/v1/photos/libraries") return json({ items: ended ? [own, sharedLibrary] : [own, sharedLibrary, viewed] });
         if (url === "/api/v1/viewing/viewing%3A7" && init?.method === "DELETE") { ended = true; return new Response(null, { status: 204 }); }
-        if (url.startsWith("/api/v1/photos/search")) return json({ items: [], semantic: true });
+        if (url.startsWith("/api/v1/photos/search")) return json({ items: [], semantic: true, match: "closest" });
         return undefined;
       },
       timeline(viewed.id, () => [asset("photo:w", { libraryId: viewed.id })]),

@@ -124,6 +124,10 @@ type searchResponse struct {
 	// Semantic is false when only names were matched because local AI could
 	// not encode the query.
 	Semantic bool `json:"semantic"`
+	// Match says what the results after the name matches are: names, labels
+	// (photos showing every label in Labels) or closest (nearest in meaning).
+	Match  string            `json:"match"`
+	Labels []photos.LabelRef `json:"labels,omitempty"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +225,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic})
+	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Match: page.Match, Labels: page.Labels})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {

@@ -149,7 +149,7 @@ func TestSearchRanksTheCallersPhotosByMeaning(t *testing.T) {
 	bobPrivate, _ := libraries(t, service, namedBob)
 	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "a.png", red)
 	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "b.png", blue)
-	importPhoto(t, service, namedBob, shared.ID, "", "c.png", green)
+	importPhoto(t, service, namedBob, shared.ID, "", "c.png", solidPNG(210, 40, 40))
 	importPhoto(t, service, namedBob, bobPrivate.ID, "", "bobs red.png", solidPNG(230, 20, 20))
 	trashed := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "d.png", solidPNG(200, 40, 40))
 	if _, err := service.Trash(context.Background(), namedAlice, trashed.ID); err != nil {
@@ -158,11 +158,12 @@ func TestSearchRanksTheCallersPhotosByMeaning(t *testing.T) {
 	index(t, service, embedder)
 
 	page := search(t, service, namedAlice, "红色的花")
-	if !page.Semantic {
-		t.Fatal("Semantic = false with the Worker available")
+	if !page.Semantic || page.Match != photos.MatchClosest {
+		t.Fatalf("Semantic = %v, Match = %q with the Worker available and no calibrated label", page.Semantic, page.Match)
 	}
-	// Bob's private photo and the trashed one never appear, however close.
-	if got := names(page.Assets); !slices.Equal(got, []string{"a.png", "c.png", "b.png"}) {
+	// Bob's private photo and the trashed one never appear, however close;
+	// the blue photo is too far from the best match to show at all.
+	if got := names(page.Assets); !slices.Equal(got, []string{"a.png", "c.png"}) {
 		t.Fatalf("results = %v, want Alice's red photo first and only what she can see", got)
 	}
 	if got := names(search(t, service, namedAlice, "蓝天").Assets); got[0] != "b.png" {
@@ -181,12 +182,12 @@ func TestSearchPutsNameMatchesFirstAndFallsBackToNames(t *testing.T) {
 	importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
 	index(t, service, embedder)
 
-	if got := names(search(t, service, namedAlice, "蓝色").Assets); !slices.Equal(got, []string{"蓝色的车.png", "sea.png", "red.png"}) {
+	if got := names(search(t, service, namedAlice, "蓝色").Assets); !slices.Equal(got, []string{"蓝色的车.png", "sea.png"}) {
 		t.Fatalf("results = %v, want the name match before the closest colour", got)
 	}
 	embedder.setUnavailable(true)
 	page := search(t, service, namedAlice, "蓝色")
-	if page.Semantic || !slices.Equal(names(page.Assets), []string{"蓝色的车.png"}) {
+	if page.Semantic || page.Match != photos.MatchNames || !slices.Equal(names(page.Assets), []string{"蓝色的车.png"}) {
 		t.Fatalf("without the Worker: semantic=%v results=%v, want names only", page.Semantic, names(page.Assets))
 	}
 	if page := search(t, service, namedAlice, "RED"); !slices.Equal(names(page.Assets), []string{"red.png"}) {
@@ -197,7 +198,8 @@ func TestSearchPutsNameMatchesFirstAndFallsBackToNames(t *testing.T) {
 func TestSearchPagesWithoutRepeatsAndRejectsBadInput(t *testing.T) {
 	service, embedder, _ := searchService(t)
 	private, _ := libraries(t, service, namedAlice)
-	for i, content := range [][]byte{red, green, blue, solidPNG(10, 120, 240), solidPNG(240, 120, 10)} {
+	// Five shades of green, all close enough to the best match to be kept.
+	for i, content := range [][]byte{green, solidPNG(35, 205, 30), solidPNG(30, 190, 40), solidPNG(40, 200, 35), solidPNG(30, 210, 30)} {
 		importPhoto(t, service, namedAlice, private.ID, "", string(rune('a'+i))+".png", content)
 	}
 	index(t, service, embedder)

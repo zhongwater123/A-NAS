@@ -145,9 +145,11 @@ func (s *Service) labelsOf(ctx context.Context, objectID string, hidden map[stri
 
 // LabelCount is a label and how many photos within a search's scope show it.
 type LabelCount struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Photos int    `json:"photos"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Category groups labels, such as animal, food or vehicle.
+	Category string `json:"category"`
+	Photos   int    `json:"photos"`
 	// CoverID is the photo that shows the label most clearly.
 	CoverID string `json:"coverId"`
 }
@@ -227,7 +229,7 @@ JOIN assets a ON a.id = c.asset_id WHERE a.library_id IN `+in, scope...)
 	}
 	for _, label := range s.labels.Shown() {
 		if t := tallies[label.ID]; t != nil {
-			counts = append(counts, LabelCount{ID: label.ID, Name: label.Name, Photos: t.photos, CoverID: t.cover})
+			counts = append(counts, LabelCount{ID: label.ID, Name: label.Name, Category: label.Category, Photos: t.photos, CoverID: t.cover})
 		}
 	}
 	slices.SortStableFunc(counts, func(a, b LabelCount) int { return cmp.Compare(b.Photos, a.Photos) })
