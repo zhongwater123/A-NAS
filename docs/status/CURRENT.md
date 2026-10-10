@@ -41,7 +41,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 1. 在 Web 中验收 PR #50 的文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口和资源文件夹跳转，再打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `9923c5987c0b` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
 3. 在应用中心安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查在实机上放行正常安装；Caddy 官方源恢复后按[局域网入口手册](../runbooks/enable-lan-web-access.md)第 2 步升级（见外部条件）。
-4. 管理员在账号管理中修改自己的密码以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
+4. 管理员修改自己的密码（已部署的 `173cbb5499ce` 在“账号管理”，主干在“设置 → 我的账号”）以同时重建 Web 与 Samba 凭据，确认 `pdbedit -L -u admin` 出现凭据，再从能到达 NAS TCP 445 的 Windows 电脑（见外部条件）用新密码连接 SMB；成员的 SMB 凭据需本人登录改密后重建。
 5. 完成个人与 Shared 的 Web/Windows SMB 双向读写、大文件哈希、Web 先删后 SMB 删除、恢复、快照、正常重启、SMART、容量、服务和审计证据。全部通过后才创建 `v1.0.1` 标签。
 6. 2026-10-10 首次部署包含 ADR 0014 的 release 时，安装器已把原五条视频导入为池 `53e12079d8d50c4c`，`current` 指向它且五条哈希核对通过；按[运行手册](../runbooks/operate-local-kiosk.md#首次升级)确认并清理按 release 存放的旧池副本（需管理员确认）。之后在直连屏幕核对五条清单与 Range 请求，再验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒。
 7. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。

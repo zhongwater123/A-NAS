@@ -93,7 +93,7 @@ rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）�
 2. 列出旧账号：只处理 `/var/lib/a-nas/space-registry.json` 中个人空间目录名对应、且 `getent passwd <name>` 显示 UID 小于 20000、shell 为 `/usr/sbin/nologin` 的账号。不得删除 `root`、`a-nas`、`anas-dev` 或其他系统账号。
 3. 对每个旧账号执行 `smbpasswd -x <name>`、`userdel <name>`，若存在同名私有组再执行 `groupdel <name>`。
 4. 激活新版本并启动服务后确认：`getent passwd <name>` 的 UID 与 GID 均在 20100–29999；`getent group a-nas-users a-nas-admins` 为 GID 20000/20001；日志不再出现身份冲突。
-5. 管理员在“账号管理”中修改自己的密码，以重建自己的 Samba 凭据。成员的 Samba 凭据只能由本人重建：管理员为成员重置密码后，该成员下次登录必须自己改密，在此之前 SMB 保持停用。
+5. 管理员在“设置 → 我的账号”（`173cbb5499ce` 及更早版本为“账号管理”）中修改自己的密码，以重建自己的 Samba 凭据。成员的 Samba 凭据只能由本人重建：管理员为成员重置密码后，该成员下次登录必须自己改密，在此之前 SMB 保持停用。
 6. 确认没有引用后，移除 rc.5 及更早版本遗留的 `a-nas-members` 组：
 
    ```bash
@@ -108,7 +108,7 @@ rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）�
 
 ## 生成和执行计划
 
-1. 在本地 Kiosk 的“存储初始化”打开候选盘。
+1. 在本地 Kiosk 的“设置 → 存储 → 初始化数据卷”（`173cbb5499ce` 及更早版本为“存储初始化”）打开候选盘。
 2. 保存页面显示的稳定 ID、型号、容量、指纹、动作、确认短语和过期时间。
 3. 再次对照机箱盘位或购买记录；只有完全一致时输入确认短语。
 4. 执行后等待状态 `succeeded`。任何服务重启、超时或 `needs_attention` 都停止操作，不生成第二个计划，先导出日志和 `lsblk --json --output NAME,PATH,SERIAL,WWN,MODEL,SIZE,TRAN,RM,TYPE,FSTYPE,MOUNTPOINTS`。
