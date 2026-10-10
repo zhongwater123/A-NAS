@@ -135,6 +135,19 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 		s.ai.set(AIPaused, reason, "")
 		return false, nil
 	}
+	// Any call starts the Worker through its socket and keeps it from
+	// exiting when idle, so once its model is known ask only when there is
+	// work for it. A new model comes with a release, whose install restarts
+	// this service, or shows up in a search (noticeModel).
+	if model := s.knownModel(); model != "" {
+		waiting, err := s.aiWorkWaiting(ctx, model)
+		if err != nil || !waiting {
+			if state, _, _ := s.ai.get(); err == nil && state != AIUnavailable {
+				s.ai.set(AIIdle, "", model)
+			}
+			return false, err
+		}
+	}
 	info, err := embedder.Info(ctx)
 	if errors.Is(err, ErrAIUnavailable) {
 		s.ai.set(AIUnavailable, "", "")
@@ -204,6 +217,48 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, m
 	}
 	s.aiModel = model
 	return nil
+}
+
+// knownModel is the Worker's model this service last worked for, or "" before
+// the first round and after noticeModel saw another one.
+func (s *Service) knownModel() string {
+	s.aiModelMu.Lock()
+	defer s.aiModelMu.Unlock()
+	return s.aiModel
+}
+
+// noticeModel lets the AI runner look again when the Worker reports a model
+// other than the one it last worked for.
+func (s *Service) noticeModel(model string) {
+	s.aiModelMu.Lock()
+	changed := s.aiModel != "" && s.aiModel != model
+	if changed {
+		s.aiModel = ""
+	}
+	s.aiModelMu.Unlock()
+	if changed {
+		s.wakeAI()
+	}
+}
+
+// aiWorkWaiting reports whether the Worker has anything to do for model: a
+// label text still without its vector, or an embedding job that is due.
+func (s *Service) aiWorkWaiting(ctx context.Context, model string) (bool, error) {
+	if model == s.labels.Model {
+		s.labelIndex.mu.Lock()
+		pending := s.labelIndex.vectors == nil && !s.now().Before(s.labelIndex.retryAt)
+		s.labelIndex.mu.Unlock()
+		if pending {
+			return true, nil
+		}
+	}
+	now := formatTime(s.now())
+	var due bool
+	err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation = ?
+  AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
+		embeddingDerivation, now, now).Scan(&due)
+	return due, err
 }
 
 // releaseJob gives a claimed job back without spending its attempt, for work

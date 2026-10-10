@@ -10,6 +10,7 @@ import http.client
 import json
 import socket
 import sys
+import time
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -18,9 +19,20 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.path = path
 
     def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(self.timeout)
-        self.sock.connect(self.path)
+        # systemd reports the agent active before it has created its socket,
+        # so a probe right after a restart waits for the socket to appear.
+        deadline = time.monotonic() + self.timeout
+        while True:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(self.timeout)
+            try:
+                self.sock.connect(self.path)
+                return
+            except (FileNotFoundError, ConnectionRefusedError):
+                self.sock.close()
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
 
 
 def request(connection, path, expected=200, headers=None, limit=4 * 1024 * 1024):

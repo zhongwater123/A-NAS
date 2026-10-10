@@ -24,6 +24,8 @@ type fakeEmbedder struct {
 	failure     error
 	dimensions  int
 	embedded    int
+	// infos counts Info calls: each one would start the real Worker.
+	infos int
 }
 
 func newFakeEmbedder() *fakeEmbedder { return &fakeEmbedder{model: "fake-1", dimensions: 4} }
@@ -31,6 +33,7 @@ func newFakeEmbedder() *fakeEmbedder { return &fakeEmbedder{model: "fake-1", dim
 func (f *fakeEmbedder) Info(context.Context) (photos.EmbedderInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.infos++
 	if f.unavailable {
 		return photos.EmbedderInfo{}, photos.ErrAIUnavailable
 	}
@@ -224,8 +227,64 @@ func TestBadOrFailingInputsEndAsFailures(t *testing.T) {
 	}
 }
 
+func TestAnIdleRunnerLeavesTheWorkerAlone(t *testing.T) {
+	service, _, _ := newService(t)
+	private, _ := libraries(t, service, alice)
+	embedder, gate := newFakeEmbedder(), &fakeGate{open: true}
+	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, service)
+	processAI(t, service, embedder, gate)
+
+	// Socket activation starts the Worker for any call and keeps it from
+	// exiting when idle, so rounds without work must not make one.
+	asked := embedder.infos
+	for range 3 {
+		if processed := processAI(t, service, embedder, gate); processed != 0 {
+			t.Fatalf("processed %d AI jobs without work", processed)
+		}
+	}
+	if embedder.infos != asked {
+		t.Fatalf("idle rounds asked the Worker %d more times", embedder.infos-asked)
+	}
+	if status := aiStatus(t, service, alice); status.State != photos.AIIdle || status.Model != "fake-1" {
+		t.Fatalf("idle status = %+v", status)
+	}
+
+	// New work brings the Worker back.
+	importPhoto(t, service, alice, private.ID, "", "b.png", encodePNG(2))
+	processAll(t, service)
+	if processed := processAI(t, service, embedder, gate); processed != 1 {
+		t.Fatalf("processed %d AI jobs after a new photo, want 1", processed)
+	}
+}
+
+func TestASearchThatMeetsANewModelRequeuesVectors(t *testing.T) {
+	c := newClock()
+	embedder, gate := newFakeEmbedder(), &fakeGate{open: true}
+	service, err := photos.Open(filepath.Join(t.TempDir(), "photos"), photos.Options{Now: c.Now, DisableCapacityReserve: true, AI: embedder})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	private, _ := libraries(t, service, alice)
+	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, service)
+	processAI(t, service, embedder, gate)
+
+	embedder.model = "fake-2"
+	if processed := processAI(t, service, embedder, gate); processed != 0 {
+		t.Fatalf("an idle round asked the Worker and processed %d jobs", processed)
+	}
+	if _, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "cat"}); err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if processed := processAI(t, service, embedder, gate); processed != 1 {
+		t.Fatalf("processed %d AI jobs after a search met the new model, want 1", processed)
+	}
+}
+
 func TestANewModelReplacesEveryVector(t *testing.T) {
-	service, _, root := newService(t)
+	service, c, root := newService(t)
 	private, _ := libraries(t, service, alice)
 	embedder, gate := newFakeEmbedder(), &fakeGate{open: true}
 	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
@@ -233,7 +292,10 @@ func TestANewModelReplacesEveryVector(t *testing.T) {
 	processAll(t, service)
 	processAI(t, service, embedder, gate)
 
+	// A new model comes with a release, whose install restarts the service.
 	embedder.model = "fake-2"
+	_ = service.Close()
+	service = openService(t, root, c.Now)
 	if processed := processAI(t, service, embedder, gate); processed != 2 {
 		t.Fatalf("processed %d AI jobs after a model change, want 2", processed)
 	}
