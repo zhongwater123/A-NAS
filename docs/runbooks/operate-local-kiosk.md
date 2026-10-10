@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; confinement and VT recovery pending
-更新时间：2026-10-09
+更新时间：2026-10-10
 
 ## 目的
 
@@ -134,7 +134,9 @@ readlink "$pools/current"                              # 必须是 pools/<池 ID
 find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 ```
 
-确认列表中只有旧 release 目录、且清单与 Range 请求都正常后，才逐个 `rm -r -- "$pools/<release>"`。被导入的池与对象共享数据，删除它的目录不影响播放；其他目录是独立副本，删除后释放空间。不要删除 `objects`、`pools` 或 `current`。
+确认列表中只有旧 release 目录、且清单与 Range 请求都正常后，才逐个 `rm -r -- "$pools/<release>"`。被导入的池与对象共享数据，删除它的目录不影响播放；其他目录是独立副本，删除后释放空间。删除前逐个核对目录中每个视频的 SHA-256 都在 `current/SHA256SUMS` 中。不要删除 `objects`、`pools` 或 `current`。
+
+单视频时期的安装可能在 `$pools` 根部留下独立的 `.mp4`（Experimental NAS 为 `computer-chip.mp4`），导入不会处理它。其 SHA-256 在 `current/SHA256SUMS` 中时是副本，可以删除；不在时是独有视频。要保留它，以 root 把它复制到暂存账号目录，下载到开发机后用 `scripts/deploy-screensavers.ps1` 与当前池的视频一起暂存为新池，安装新池并用 `cmp` 确认新池中的对应文件与原文件相同后再删除原文件。2026-10-10 Experimental NAS 按此加入后，当前池为六条。
 
 ## 验收
 
@@ -144,7 +146,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 6. `F1`、浏览器导航、开发工具、不受控缩放和右键菜单不可逃离产品界面；当前 Experimental NAS 未通过 `F1` 和缩放项，不能把本地 Kiosk 视为面向非受信任用户的安全边界。
-7. 登录后请求 `/local-console/screensavers`，应返回五个匿名 URL；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。
+7. 登录后请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。
 8. 登录后保持三分钟无输入，屏保应从池中选择一条，静音、居中铺满且无黑边；让视频自然结束，确认仍循环同一条而不切换。第一次移动鼠标或按键只退出屏保，不打开或操作下层应用；再次等待三分钟后应重新随机选择池内一条，允许与上次相同。
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
 
