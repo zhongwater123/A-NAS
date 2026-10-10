@@ -50,7 +50,6 @@ function serve(...routes: Route[]) {
     }
     if (url === "/api/v1/photos/libraries") return json({ items: [sharedLibrary, privateLibrary] });
     if (url === "/api/v1/photos/ai") return json({ state: "idle", ready: 3, pending: 0, failed: 0 });
-    if (url.startsWith("/api/v1/photos/labels")) return json({ items: [], ready: false });
     if (url.endsWith("/timeline/months")) return json({ items: [] });
     if (/\/assets\/[^/]+$/.test(url) && !init?.method) return json(asset(decodeURIComponent(url.split("/").at(-1) ?? "")));
     return json({ items: [] });
@@ -249,14 +248,13 @@ describe("PhotosPanel viewer", () => {
     expect(screen.getByRole("button", { name: "移到回收站" })).toBeTruthy();
   });
 
-  it("tags a photo, hides a wrong AI label and opens the photos with a label", async () => {
-    let details = asset("photo:cat", { aiLabels: [{ id: "cat", name: "猫", score: 0.76 }, { id: "dog", name: "狗", score: 0.7 }] });
+  it("tags a photo and finds the photos with its tag", async () => {
+    let details = asset("photo:cat");
     const fetchMock = serve(
       (url, init) => {
         if (url === "/api/v1/photos/assets/photo%3Acat" && !init?.method) return json(details);
         if (url === "/api/v1/photos/assets/photo%3Acat/tags" && init?.method === "POST") { details = { ...details, tags: ["小橘"] }; return json(details); }
-        if (url === "/api/v1/photos/assets/photo%3Acat/ai-labels/dog" && init?.method === "DELETE") { details = { ...details, aiLabels: details.aiLabels?.slice(0, 1) }; return json(details); }
-        if (url.startsWith("/api/v1/photos/search?q=%E7%8C%AB")) return json({ items: [asset("photo:cat"), asset("photo:kitten")], semantic: true, match: "labels", labels: [{ id: "cat", name: "猫" }] });
+        if (url.startsWith("/api/v1/photos/search?q=%E5%B0%8F%E6%A9%98")) return json({ items: [asset("photo:cat"), asset("photo:kitten")], semantic: true, closest: 2 });
         return undefined;
       },
       timeline(privateLibrary.id, () => [asset("photo:cat")]),
@@ -267,15 +265,15 @@ describe("PhotosPanel viewer", () => {
 
     await user.type(await screen.findByRole("textbox", { name: "添加标签" }), "小橘{Enter}");
     expect(await within(screen.getByLabelText("标签")).findByRole("button", { name: "小橘" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "隐藏 AI 标签 狗" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "狗" })).toBeNull());
+    // AI labels are off: the details show only the user's tags.
+    expect(screen.queryByLabelText("AI 标签")).toBeNull();
 
-    await user.click(within(screen.getByLabelText("AI 标签")).getByRole("button", { name: "猫" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120", expect.anything());
+    await user.click(within(screen.getByLabelText("标签")).getByRole("button", { name: "小橘" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E5%B0%8F%E6%A9%98&limit=120", expect.anything());
     expect(await screen.findByRole("button", { name: "查看 photo:kitten.jpg" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "AI 搜图" })).toBeTruthy();
-    expect(screen.getByText("只显示本地 AI 识别为“猫”的照片，识别可能有误")).toBeTruthy();
     expect(screen.getByText("找到 2 张")).toBeTruthy();
+    expect(screen.queryByRole("separator", { name: "相关度较低" })).toBeNull();
   });
 });
 
@@ -357,7 +355,7 @@ describe("PhotosPanel selection", () => {
   });
 });
 
-describe("PhotosPanel albums, trash and labels", () => {
+describe("PhotosPanel albums, trash and AI search", () => {
   it("lists albums, opens one, renames it and takes a photo out of it", async () => {
     let removed = false;
     const fetchMock = serve((url, init) => {
@@ -417,14 +415,11 @@ describe("PhotosPanel albums, trash and labels", () => {
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
   });
 
-  it("starts AI search with recent searches and the things local AI recognises, and explains when it is off", async () => {
+  it("starts AI search with recent searches and kinds of sentence to try, and never says AI is off", async () => {
     let ready = true;
     const fetchMock = serve((url) => {
-      if (url === "/api/v1/photos/labels") return json(ready
-        ? { items: [{ id: "cat", name: "猫", category: "animal", photos: 8, coverId: "photo:cat" }, { id: "pizza", name: "披萨", category: "food", photos: 3, coverId: "photo:pizza" }], ready: true }
-        : { items: [], ready: false });
       if (url === "/api/v1/photos/ai") return json(ready ? { state: "working", ready: 3, pending: 2, failed: 1 } : { state: "unavailable", ready: 0, pending: 5, failed: 0 });
-      if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:cat")], semantic: true, match: "labels", labels: [{ id: "cat", name: "猫" }] });
+      if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:sea")], semantic: true, closest: 1 });
       return undefined;
     });
     window.localStorage.setItem("a-nas.photos.recentSearches", JSON.stringify(["海边的日落"]));
@@ -434,15 +429,14 @@ describe("PhotosPanel albums, trash and labels", () => {
     expect(screen.getByText(/1 张无法识别/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "AI 搜图" }));
     expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /^动物/ })).toBeTruthy();
-    expect(within(await screen.findByRole("button", { name: "搜索 猫" })).getByText("8 张")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "场景与氛围" })).toBeTruthy();
     expect(within(screen.getByLabelText("最近搜索")).getByRole("button", { name: "海边的日落" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "搜索 猫" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120", expect.anything());
-    expect(await screen.findByRole("button", { name: "查看 photo:cat.jpg" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "搜索 傍晚的海边" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E5%82%8D%E6%99%9A%E7%9A%84%E6%B5%B7%E8%BE%B9&limit=120", expect.anything());
+    expect(await screen.findByRole("button", { name: "查看 photo:sea.jpg" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "返回" }));
-    expect(within(await screen.findByLabelText("最近搜索")).getByRole("button", { name: "猫" })).toBeTruthy();
+    expect(within(await screen.findByLabelText("最近搜索")).getByRole("button", { name: "傍晚的海边" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "清除最近搜索" }));
     expect(screen.queryByLabelText("最近搜索")).toBeNull();
     unmount();
@@ -451,18 +445,18 @@ describe("PhotosPanel albums, trash and labels", () => {
     ready = false;
     render(<PhotosPanel userId="user:alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "AI 搜图" }));
-    expect(await screen.findByText(/照片整理好后，这里会按动物、食物、物品等列出/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "可以这样搜" })).toBeTruthy();
     expect(screen.queryByRole("status", { name: "本地 AI 状态" })).toBeNull();
     expect(screen.queryByText(/未启用|不可用/)).toBeNull();
   });
 });
 
 describe("PhotosPanel search and viewing", () => {
-  it("searches from any page into AI search and says what the results are", async () => {
+  it("searches from any page into AI search and divides the closest results from the less related", async () => {
     const results: Record<string, object> = {
-      "%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB": { items: [asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" })], semantic: true, match: "labels", labels: [{ id: "cat", name: "猫" }] },
-      "%E7%94%B5%E5%8A%A8%E8%BD%A6": { items: [asset("photo:bike")], semantic: true, match: "closest" },
-      "%E9%BB%84%E6%98%8F": { items: [], semantic: false, match: "names" },
+      "%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB": { items: [asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" })], semantic: true, closest: 1 },
+      "%E7%94%B5%E5%8A%A8%E8%BD%A6": { items: [asset("photo:bike"), asset("photo:scooter"), asset("photo:garden")], semantic: true, closest: 2 },
+      "%E9%BB%84%E6%98%8F": { items: [], semantic: false, closest: 0 },
     };
     const fetchMock = serve(
       (url) => {
@@ -478,7 +472,7 @@ describe("PhotosPanel search and viewing", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB&limit=120", expect.anything());
     expect(await screen.findByRole("button", { name: "查看 photo:sea.jpg" })).toBeTruthy();
-    expect(screen.getByText("只显示本地 AI 识别为“猫”的照片，识别可能有误")).toBeTruthy();
+    expect(screen.queryByRole("separator", { name: "相关度较低" })).toBeNull();
     await openPhoto(user, "photo:sea.jpg");
     expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
     await user.keyboard("{Escape}");
@@ -486,7 +480,13 @@ describe("PhotosPanel search and viewing", () => {
     const box = screen.getByRole("searchbox", { name: "搜索照片" });
     await user.clear(box);
     await user.type(box, "电动车{Enter}");
-    expect(await screen.findByText("没有能确定的结果，以下是最接近的照片")).toBeTruthy();
+    expect(await screen.findByRole("separator", { name: "相关度较低" })).toBeTruthy();
+    expect(screen.getByText("以下照片与搜索的内容差距较大，可能并不相关")).toBeTruthy();
+    expect(screen.getByText("最接近 2 张 · 共 3 张")).toBeTruthy();
+    // The less related photos come after the divider, in the order given.
+    const order = [...document.querySelectorAll(".ph-entry")].flatMap((entry) => entry.querySelector("[role=separator]")
+      ? ["divider"] : [...entry.querySelectorAll("button[aria-label^='查看 ']")].map((button) => button.getAttribute("aria-label")));
+    expect(order).toEqual(["查看 photo:bike.jpg", "查看 photo:scooter.jpg", "divider", "查看 photo:garden.jpg"]);
     await user.clear(screen.getByRole("searchbox", { name: "搜索照片" }));
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "黄昏{Enter}");
     expect(await screen.findByText("没有找到相关照片")).toBeTruthy();
@@ -507,7 +507,7 @@ describe("PhotosPanel search and viewing", () => {
       (url, init) => {
         if (url === "/api/v1/photos/libraries") return json({ items: ended ? [own, sharedLibrary] : [own, sharedLibrary, viewed] });
         if (url === "/api/v1/viewing/viewing%3A7" && init?.method === "DELETE") { ended = true; return new Response(null, { status: 204 }); }
-        if (url.startsWith("/api/v1/photos/search")) return json({ items: [], semantic: true, match: "closest" });
+        if (url.startsWith("/api/v1/photos/search")) return json({ items: [], semantic: true, closest: 0 });
         return undefined;
       },
       timeline(viewed.id, () => [asset("photo:w", { libraryId: viewed.id })]),

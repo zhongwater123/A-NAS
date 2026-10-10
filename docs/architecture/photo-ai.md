@@ -1,16 +1,16 @@
 # 相册本地 AI（M2）实施方案
 
-状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字在部署后补充
+状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）；2026-10-10 起 AI 标签暂停，搜索改为纯向量排序与两段式结果（[#66](https://github.com/zhongwater123/A-NAS/issues/66)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字在部署后补充
 更新时间：2026-10-10
 
-本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供 AI 标签与中文语义搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
+本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供中文自然语言搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
 ## 目标与范围
 
 M2 交付后，成员可以：
 
 - 在相册里用中文搜索“海边的猫”“车库里的电动车”，结果只含自己有权查看的照片；
-- 在查看器里看到少量高置信 AI 标签，并能隐藏错误标签、添加自己的标签；
+- 给照片添加自己的标签，并按标签找回照片（AI 标签已暂停，见“AI 标签”）；
 - 不下载、不安装、不配置任何 AI 组件：AI 随系统安装并默认开启；
 - 在 AI Worker 启动中、崩溃、积压或硬件不足时照常使用 M1 的全部功能。
 
@@ -74,7 +74,7 @@ M2 交付后，成员可以：
 
 - 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm`。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
 - 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷；`MemoryMax=2G`（按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
-- 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。任何一次连接都会拉起 Worker 并重新计时，所以相册服务在得知模型 ID 之后，只在有到期的向量任务或缺少标签文本向量时才联系它；模型 ID 在服务启动后的第一轮得知，更换模型随 release 而来（安装器重启相册服务），搜索遇到新模型时也会让后台重新核对。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
+- 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。任何一次连接都会拉起 Worker 并重新计时，所以相册服务在得知模型 ID 之后，只在有到期的向量任务时才联系它；模型 ID 在服务启动后的第一轮得知，更换模型随 release 而来（安装器重启相册服务），搜索遇到新模型时也会让后台重新核对。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
 - 模型与运行环境的来源、位置与校验见“模型与运行环境的交付”。安装器随系统启用套接字，没有“未安装”状态；Worker 启动中、崩溃或模型校验失败时相册照常可用，搜索退回按名称与用户标签匹配。设备低于最低硬件（待实机测量）时不启动 Worker。这些情况下界面都不说 AI 不可用（[相册界面规格](../specs/photo-gallery-ui.md)）。
 
 ### 协议
@@ -105,34 +105,35 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 ### 存储（Catalog migration 4–6）
 
 - `embeddings(object_id, derivation, model, vector, created_at)`：每个对象一行，记录产生它的模型，768 维 float32 约 3 KB；20,000 张约 60 MB。
-- `query_vectors(model, text, vector, created_at)`：Worker 为标签文本编码的向量，按模型与文本缓存，重启后无需 Worker 即可显示标签。
-- 不保存 AI 标签：标签分数在读取时由图片向量与标签向量算出，阈值或词表随新版本更新后立即生效，无需重算任务。
+- `query_vectors(model, text, vector, created_at)`：AI 标签暂停前缓存标签文本的向量；暂停后不再写入。表保留，以便回滚到旧 release 时 Catalog 仍能打开。
 - 用户元数据（migration 6，[`albums.go`](../../internal/photos/albums.go)、[`usertags.go`](../../internal/photos/usertags.go)）：`albums(id, library_id, name, created_by, created_at)` 与 `album_assets(album_id, asset_id, added_by, added_at)` 记录相册分组；`user_tags(asset_id, name, …)` 与 `ai_tag_corrections(asset_id, label_id, verdict, …)` 以照片资产为键。照片永久删除时随之删除；AI 标签的计算与派生数据的清除永远不改动它们，复制照片时一并复制标签与纠错。
 
-### AI 标签
+### AI 标签（2026-10-10 起暂停）
 
-已实现于 [`photos/ailabels.go`](../../internal/photos/ailabels.go)，词表与校准随程序发布（[`photos/labels`](../../internal/photos/labels/labels.go)）。
+步骤 3 与 5 曾用同一个向量做零样本标签：照片向量与标签文本向量的相似度超过逐标签校准的阈值（[校准报告](../research/photo-ai-label-calibration.md)）就显示标签，查询提到已校准的标签时还按阈值过滤搜索结果。部署到 Experimental NAS 后用户决定关闭全部 AI 标签（[#66](https://github.com/zhongwater123/A-NAS/issues/66)）：
 
-- 词表 v1（[`v1.json`](../../internal/photos/labels/v1.json)）共 330 个中文标签，每项有稳定 ID、显示名、同义词与分类，覆盖规格点名的“猫”“电动车”“3D 打印机”等物体、动物、场景、食物、文档与活动。
-- 校准（[`v1.calibration.json`](../../internal/photos/labels/v1.calibration.json)）记录模型 ID、标签短语（v1 为标签名本身）与每个可展示标签的阈值；方法与结果见[标签校准报告](../research/photo-ai-label-calibration.md)。v1 有 73 个标签可展示，其余只参与搜索，宁可少标不错标。
-- 标签向量：AI 后台任务在处理照片之前，逐条请 Worker 用 `embed_query` 编码可展示标签的文本，存入 `query_vectors`；全部就绪后才显示标签。
-- 标签分数是照片向量与标签向量的余弦相似度。照片详情只显示达到阈值的标签，按超出阈值的幅度排序，最多 5 个，标明“本地 AI 识别”并附相似度。阈值只对校准时的模型成立：Worker 的模型 ID 与校准不符时不显示任何标签，也不编码标签文本。
-- 按标签筛选：`GET /api/v1/photos/search?label=` 在搜索范围内返回显示该标签的照片，按相似度排序；查看器中点击标签即进入。
-- 用户可以在查看器中隐藏错误的 AI 标签：纠错只作用于该张照片资产，按标签 ID 保存，模型升级后仍然有效，按标签筛选也不再返回它（2026-10-09 决定）。用户标签由用户添加和删除（至多 30 字），显示在 AI 标签之前；能重命名照片的人才能修改标签与纠错。
-- 相册是图库内的分组（2026-10-09 决定，见[规格](../specs/photo-library.md)）：同一图库的照片加入相册不产生副本，一张照片可在多个相册中；来自另一图库的照片先复制到相册所在图库。删除相册或移出照片不删除照片，回收站中的照片暂不列出、恢复后回到相册。创建与修改权限沿用虚拟目录：能向图库添加的人可以创建相册，创建者、私有图库所有者或共享图库的管理员可以修改。
+- **误导**：航拍城市被标成“飞盘”。能校准的只有 COCO 标注过的物体（73 个可展示标签全是动物、物品、食物、交通工具这类），场景、文档和人物都没有可用的负例，类别太少，帮不了家庭照片的检索。
+- **伤害搜索**：查询里出现这 73 个词之一，搜索就从排序变成硬过滤；按标签过滤时 COCO 上约一半真实照片不显示（召回 53%），用户却看不出来。
+- **小物体本来就找不到**：整张照片只有一个向量。在 COCO val2017 上，搜“手机”时手机不到画面 1% 的照片只有 39% 排进前 R 名（R 为真实照片数），大手机为 100%；杯子 20%、瓶子 21%、笔记本电脑 16%；140 个视觉 token 也没有改善。这是整图向量的性质，标签无法弥补。
+
+现状：
+
+- 照片详情不再返回 AI 标签，`GET /api/v1/photos/labels`、`search?label=` 与隐藏 AI 标签的接口已删除，后台不再为标签文本计算向量。由向量计算标签的代码与 Go 词表包随之删除；词表 v1 与阈值移到 [`ai/eval/labels`](../../ai/eval/labels/v1.json)，作为评估用的中文查询集。
+- 用户已有的 AI 纠错（`ai_tag_corrections`）是用户元数据：不显示、不删除，复制照片时一并复制。
+- 固定类别的目标检测暂不做（用户 2026-10-10 决定）。小物体先在开发机评估“分块向量”：每张照片除整图外再按网格切块，各算一个向量，搜索取整图与各块的较高分（[`eval.tile_search`](../../ai/eval/tile_search.py)）。它不引入新模型、新许可或新运行时，代价是每张照片的向量计算与内存随块数成倍增加；结论与数字写入本节后再决定是否进入产品。
+- 是否恢复标签、由什么模型产生，另行决定。
 
 ### 语义搜索
 
 已实现于 [`photos/search.go`](../../internal/photos/search.go)，桌面相册窗口提供搜索框。
 
 - `GET /api/v1/photos/search?q=&viewing=&cursor=&limit=`：查询 1–200 字符。相册服务请 Worker 编码查询，再对范围内未进回收站的照片做精确余弦扫描。图片向量按内容对象常驻内存（20,000 张约 60 MB）：第一次搜索时按当前模型载入，之后随新向量写入与对象清除同步更新，换模型时整体重载。
-- 取舍（2026-10-10 决定，取代“只排序、不设分数下限”）：名称或用户标签包含查询（不区分大小写）的照片排在最前。之后的语义结果：
-  - 查询提到已校准的标签（按名称或同义词，最长词优先，“热狗”不算“狗”）时，只保留同时显示所有这些标签的照片（达到阈值且未被隐藏），再按整句相似度排序；响应 `match` 为 `labels`，`labels` 列出所依据的标签。
-  - 否则只保留相似度在最佳匹配 0.04 以内的照片，最多 20 张，`match` 为 `closest`，窗口说明这是“最接近的照片”。
-  - 依据见[校准报告](../research/photo-ai-label-calibration.md#搜索结果的取舍)：只排序时 COCO 上显示的照片只有 15% 相关；按标签阈值 88% 相关、召回 53%；按最佳匹配 0.04 以内 90% 相关、召回 33%。任何不依赖逐标签校准的规则，在图库里根本没有该事物时仍会返回照片，所以后者只作“最接近”展示。
-  - 语义结果最多 500 张；分页游标记录上一页最后一项的分数与 ID。
+- 排序（2026-10-10 决定，[#66](https://github.com/zhongwater123/A-NAS/issues/66)，取代按标签阈值过滤与“至多 20 张最接近”）：名称或用户标签包含查询（不区分大小写）的照片排在最前；其余有向量的照片全部按与查询的相似度排列，至多 500 张，不按任何标签过滤。
+- 两段（方案 C）：名称与用户标签的匹配，加上相似度在最佳匹配 0.04 以内的照片，组成“最接近”的一组；其后的照片相关度较低。响应的 `closest` 给出这一组在所有页中的数量，每页相同，界面在其后画分隔线。依据见[校准报告](../research/photo-ai-label-calibration.md#搜索结果的取舍)：只排序时前 500 张中只有 15% 相关；0.04 以内约 90% 相关、召回约 33%。相似度没有能区分相关与否的分数线，图库里根本没有要找的东西时也会划出一组，所以界面只称“最接近”。
+- 分页游标记录上一页最后一项的分数与 ID；每页重新扫描一次，规模的实测与向量存储的评估见 #66，暂未进行。
 - 范围按[规格](../specs/photo-library.md)：普通搜索覆盖自己的私有图库与共享图库，不混入任何查看中的成员图库；管理员在查看模式下用 `viewing` 指定所查看的成员私有图库，经有效授权校验后加入，授权过期或无权时与不存在的图库一样返回 404。候选只从范围内的图库查询，结果来自 Catalog 当前记录。
-- AI 不可用（Worker 未运行、模型不符或编码失败）时只按名称与用户标签匹配，响应的 `semantic` 为 `false`、`match` 为 `names`，窗口不另作提示（2026-10-10 决定）。模型与校准不符时查询照常编码，但不按标签阈值过滤，按 `closest` 处理。
+- AI 不可用（Worker 未运行、模型不符或编码失败）时只按名称与用户标签匹配，响应的 `semantic` 为 `false`，`closest` 等于结果数，窗口不另作提示（2026-10-10 决定）。
+- 时间、地点与人物不是向量能回答的条件（“去年夏天”“妈妈”）：对应能力实现后，从查询中解析出这些条件再过滤，其余部分仍按向量排序。
 
 ### 界面上的整理进度与隐私说明
 
@@ -156,7 +157,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 | 2 | 8 | Python Worker：UDS 服务、fd 接收、MediaPipe Provider 与 Fake Provider、单元测试 | 已实现：[`ai/`](../../ai/anas_ai/worker.py) 的协议测试只需标准库并纳入 `make check`；Go 客户端与 Python Worker 的互通测试通过；真实模型测试在 Debian 13 容器中通过 |
 | 3 | 9 | 已完成：70 视觉 token、512 px 输入与 v1 阈值冻结（73 个可展示标签），见[校准报告](../research/photo-ai-label-calibration.md)：使用传到开发机预留位置的全模态 740M 包，验证 Debian 13 x86 上的加载、文本与图片编码、内存与延迟、30 分钟连续运行；比较提示词模板与 512/1024 px 输入；建立标签词表 v1 与阈值校准脚本 | 形成实测报告并冻结模型 revision、维度、提示词与初始阈值；未通过则按研究文档改选候选 |
 | 4 | 12 | 已实现：搜索接口、内存索引、搜索范围与桌面搜索框；Worker 增加 `embed_query` | 单元与泄漏测试覆盖范围、查看授权、回收站与分页；本地 systemd 环境中真实模型的中文搜索结果见[校准报告](../research/photo-ai-label-calibration.md#端到端搜索本地-systemd-环境) |
-| 5 | 12 | 已实现：标签向量缓存、读取时计算 AI 标签、查看器标签展示、按标签筛选 | 标签只在阈值之上、且只对校准模型出现；隐藏随步骤 6 |
+| 5 | 12 | 已实现，2026-10-10 起暂停（#66）：标签向量缓存、读取时计算 AI 标签、查看器标签展示、按标签筛选 | 标签只在阈值之上、且只对校准模型出现；隐藏随步骤 6 |
 | 6 | 11 | 已实现：相册分组、加入与移出、用户标签、AI 纠错（手工位置随地点功能实现） | 用户元数据独立于派生数据，清除派生不影响它们；纠错与标签经重启和复制保留 |
 | 7 | 10 | 已实现：内置打包（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：锁定哈希的离线 wheel、按内容存放的模型与运行环境、`a-nas-ai` 身份与按需启动的套接字单元、安装器、经 SSH 暂存（整理进度与隐私说明已随 [#61](https://github.com/zhongwater123/A-NAS/pull/61) 的相册界面实现） | 系统测试在没有外网的环境中完成安装，Worker 经套接字按需启动并编码图片；测试证明 Worker 无法联网、无法读取数据卷；升级与回滚不重复复制模型；部署到 Experimental NAS 另行确认 |
 
@@ -164,7 +165,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 1. **许可**：模型随系统再分发，对外发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并随系统提供许可证与 NOTICE。
 2. **最低硬件**：运行 Worker 的内存与 CPU 下限，在 Experimental NAS 上实测后确定。
-3. **标签词表**：v1 共 330 个标签，其中 73 个可展示；如有必须识别的类别请补充。
+3. **小物体**：分块向量是否值得进入产品，以开发机评估的召回、排序质量与成本决定（见“AI 标签”）。
 
 ## 风险
 

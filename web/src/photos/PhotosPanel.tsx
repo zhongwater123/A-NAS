@@ -1,6 +1,6 @@
 import {
   ArrowLeft, CircleAlert, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck,
-  Sparkles, Trash2, X, ZoomIn, ZoomOut,
+  Trash2, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -77,8 +77,9 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   const [albumsKey, setAlbumsKey] = useState(0);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [ai, setAI] = useState<PhotoAIStatus>();
-  // What the current search's results are, as the photo service says.
-  const [searchInfo, setSearchInfo] = useState<Pick<PhotoSearchPage, "match" | "labels">>();
+  // How many of the current search's results are the closest, as the photo
+  // service says; the less related follow.
+  const [closest, setClosest] = useState<number>();
   const [recent, setRecent] = useStored<string[]>("a-nas.photos.recentSearches", []);
   const [query, setQuery] = useState("");
   const [picker, setPicker] = useState<PhotoAsset[]>();
@@ -156,7 +157,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     selection.clear();
     setHidden(new Set());
     setCount(undefined);
-    setSearchInfo(undefined);
+    setClosest(undefined);
     if (next.kind !== "search") setQuery("");
   }, [selection.clear]);
 
@@ -367,7 +368,6 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     rename: renameOne,
     copy: (asset, library) => void copyTo(library, [asset]),
     openAlbum: (album) => void openAlbumById(album),
-    openLabel: (label) => { setViewer(undefined); startSearch(label.name); },
     searchTag: (tag) => { setViewer(undefined); startSearch(tag); },
     error: reportError,
   };
@@ -426,6 +426,10 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   }
 
   // ---- Toolbar ----
+  // Search results name their closest group while less related ones follow.
+  const searchDetail = closest === undefined ? ""
+    : count !== undefined && closest >= count ? `找到 ${count} 张`
+      : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`;
   const title = (() => {
     switch (place.kind) {
       case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : `${count} 张照片` };
@@ -433,14 +437,12 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
       case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
       case "search": return place.query
-        ? { text: "AI 搜图", detail: count === undefined ? "" : `找到 ${count} 张`, back: { ...place, query: "" } as Place }
+        ? { text: "AI 搜图", detail: searchDetail, back: { ...place, query: "" } as Place }
         : { text: "AI 搜图", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
     }
   })();
   const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || (place.kind === "search" && Boolean(place.query));
-  const quoted = (searchInfo?.labels ?? []).map((label) => `“${label.name}”`).join("和");
-  // On AI search the search box sits under the toolbar, with what the
-  // results are.
+  // On AI search the search box sits under the toolbar.
   const subbar: ReactNode = place.kind === "search" && place.query ? (
     <div className="ph-subbar ph-search-bar">
       <form className="ph-search wide" role="search" onSubmit={submitSearch}>
@@ -449,8 +451,6 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setPlace({ ...place, query: "" }); } }} />
       </form>
-      {searchInfo?.match === "labels" && <span className="ph-subbar-label"><Sparkles />只显示本地 AI 识别为{quoted}的照片，识别可能有误</span>}
-      {searchInfo?.match === "closest" && <span className="ph-subbar-note"><CircleAlert />没有能确定的结果，以下是最接近的照片</span>}
     </div>
   ) : null;
 
@@ -502,11 +502,12 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />} />;
       case "search":
         if (!place.query) {
-          return <AISearchHome viewing={place.viewing} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent} onSearch={startSearch} onForget={() => setRecent([])} onError={reportError} />;
+          return <AISearchHome topInset={topInset} ai={ai} recent={recent} onSearch={startSearch} onForget={() => setRecent([])} />;
         }
-        return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos({ query: place.query }, place.viewing, cursor)}
-          onPage={(page, first) => { if (first && "match" in page) { const found = page as PhotoSearchPage; setSearchInfo({ match: found.match, labels: found.labels }); } }} onCount={setCount} onError={reportError}
-          empty={<Empty icon={<Search />} title="没有找到相关照片" text={searchInfo?.match === "labels" ? `本地 AI 没有在照片里认出${quoted}。` : "换个说法试试，比如“海边的日落”“桌上的蛋糕”。"} />} />;
+        return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor)}
+          onPage={(page, first) => { if (first && "closest" in page) setClosest((page as PhotoSearchPage).closest); }} onCount={setCount} onError={reportError}
+          split={closest === undefined ? undefined : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
+          empty={<Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
       case "albums":
         return <AlbumsView libraryId={place.libraryId} readOnly={readOnlyPlace} refreshKey={albumsKey} topInset={topInset} onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })} onCreate={() => void newAlbum()} onError={reportError} />;
     }

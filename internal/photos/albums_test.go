@@ -249,45 +249,31 @@ func TestUserTagsAreTheCallersAndFindPhotos(t *testing.T) {
 	}
 }
 
-func TestHiddenAILabelsStayHiddenOnThatPhotoOnly(t *testing.T) {
-	embedder := &colorEmbedder{}
+// AI labels are off, but the corrections users made while they were shown are
+// user data: they stay with the photo and travel with its copies.
+func TestAICorrectionsStayWithThePhoto(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "photos")
-	service := labelService(t, root, embedder, colourLabels(t, "colour-1"))
+	service, err := photos.Open(root, photos.Options{Now: newClock().Now, DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
 	ctx := context.Background()
 	private, shared := libraries(t, service, namedAlice)
-	first := importPhoto(t, service, namedAlice, private.ID, "", "a.png", red)
-	second := importPhoto(t, service, namedAlice, private.ID, "", "b.png", solidPNG(240, 20, 20))
-	index(t, service, embedder)
-
-	hidden, err := service.HideAILabel(ctx, namedAlice, first.ID, "red")
-	if err != nil || len(hidden.AILabels) != 0 {
-		t.Fatalf("HideAILabel() = %+v, %v", hidden.AILabels, err)
+	photo := importPhoto(t, service, namedAlice, private.ID, "", "a.png", red)
+	db := catalogDB(t, root)
+	if _, err := db.Exec(`INSERT INTO ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at)
+VALUES(?, 'frisbee', 'hidden', ?, '2026-10-09T00:00:00Z')`, photo.ID, namedAlice.UserID); err != nil {
+		t.Fatal(err)
 	}
-	if got := labelIDs(t, service, namedAlice, second.ID); !slices.Equal(got, []string{"red"}) {
-		t.Fatalf("the other red photo shows %v", got)
-	}
-	page, err := service.Search(ctx, namedAlice, photos.SearchRequest{Label: "red"})
-	if err != nil || !slices.Equal(names(page.Assets), []string{"b.png"}) {
-		t.Fatalf("Search(label red) = %v, %v; want the hidden photo left out", names(page.Assets), err)
-	}
-	if _, err := service.HideAILabel(ctx, namedAlice, first.ID, "no-such-label"); !errors.Is(err, photos.ErrNotFound) {
-		t.Fatalf("HideAILabel(unknown) error = %v", err)
-	}
-	if _, err := service.HideAILabel(ctx, namedBob, first.ID, "red"); !errors.Is(err, photos.ErrNotFound) {
-		t.Fatalf("hiding a label on another member's photo error = %v", err)
-	}
-	// A copy keeps the correction.
-	copied, err := service.Copy(ctx, namedAlice, first.ID, shared.ID, "")
+	copied, err := service.Copy(ctx, namedAlice, photo.ID, shared.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := labelIDs(t, service, namedAlice, copied.ID); len(got) != 0 {
-		t.Fatalf("the copy shows %v", got)
-	}
-	// Corrections are user data: a restart keeps them.
-	_ = service.Close()
-	restarted := labelService(t, root, embedder, colourLabels(t, "colour-1"))
-	if got := labelIDs(t, restarted, namedAlice, first.ID); len(got) != 0 {
-		t.Fatalf("after a restart the photo shows %v", got)
+	for _, id := range []string{photo.ID, copied.ID} {
+		var label string
+		if err := db.QueryRow("SELECT label_id FROM ai_tag_corrections WHERE asset_id = ?", id).Scan(&label); err != nil || label != "frisbee" {
+			t.Fatalf("correction of %s = %q, %v", id, label, err)
+		}
 	}
 }

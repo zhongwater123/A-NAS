@@ -71,7 +71,7 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
-  // Details carry tags, labels and albums; lists leave them out.
+  // Details carry tags and albums; lists leave them out.
   useEffect(() => {
     setDetails(undefined);
     setOriginalReady(false);

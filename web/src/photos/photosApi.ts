@@ -19,23 +19,18 @@ export interface PhotoAsset {
   // Other members whose private libraries hold the same original.
   alsoKeptBy?: string[];
   trash?: PhotoTrash;
-  // User tags, albums and what local AI sees, less hidden labels; only a
-  // single photo's details carry them.
+  // User tags and albums; only a single photo's details carry them.
   tags?: string[];
   albums?: { id: string; name: string }[];
-  aiLabels?: PhotoAILabel[];
 }
 export interface PhotoAlbum { id: string; libraryId: string; name: string; createdBy: string; createdAt: string; photos: number; coverId?: string }
-export interface PhotoAILabel { id: string; name: string; score: number }
 export interface PhotoPage { items: PhotoAsset[]; next?: string }
 // semantic is false when local AI could not encode the query and only names
-// were matched. match says what follows the name matches: the photos that show
-// every label in labels, or the photos closest in meaning when the query names
-// nothing local AI recognises reliably.
-export interface PhotoSearchPage extends PhotoPage { semantic: boolean; match: "names" | "labels" | "closest"; labels?: { id: string; name: string }[] }
+// and user tags were matched. closest counts the results, over all pages, in
+// the closest group; the results after them are less related.
+export interface PhotoSearchPage extends PhotoPage { semantic: boolean; closest: number }
 // A month of a library's timeline in the device's time zone (YYYY-MM).
 export interface PhotoMonth { month: string; photos: number }
-export interface PhotoLabelCount { id: string; name: string; category: string; photos: number; coverId: string }
 export interface PhotoAIStatus {
   state: "unavailable" | "paused" | "working" | "idle";
   // Why work is paused: foreground, or a resource under pressure.
@@ -58,13 +53,9 @@ export const listTimelineMonths = async (libraryId: string) =>
   (await request<{ items: PhotoMonth[] }>(`${base}/libraries/${id(libraryId)}/timeline/months`)).items;
 export const listTimelineMonth = (libraryId: string, month: string, cursor = "", limit = 500) =>
   request<PhotoPage>(`${base}/libraries/${id(libraryId)}/timeline?month=${id(month)}&${page(cursor, limit)}`);
-// A search is by query or by AI label; viewing adds a member library the
-// caller is viewing read-only.
-export type PhotoSearch = { query: string } | { label: string; name: string };
-export const searchPhotos = (search: PhotoSearch, viewing = "", cursor = "", limit = 120) =>
-  request<PhotoSearchPage>(`${base}/search?${"label" in search ? `label=${id(search.label)}` : `q=${id(search.query)}`}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
-export const listPhotoLabels = (viewing = "") =>
-  request<{ items: PhotoLabelCount[]; ready: boolean }>(`${base}/labels${viewing ? `?viewing=${id(viewing)}` : ""}`);
+// viewing adds a member library the caller is viewing read-only.
+export const searchPhotos = (query: string, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoSearchPage>(`${base}/search?q=${id(query)}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
 export const getAIStatus = () => request<PhotoAIStatus>(`${base}/ai`);
 export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal) {
   const body = new FormData();
@@ -92,7 +83,6 @@ export const addToAlbum = (albumId: string, assetId: string) => request<PhotoAss
 export const removeFromAlbum = (albumId: string, assetId: string) => request<void>(`${base}/albums/${id(albumId)}/assets/${id(assetId)}`, { method: "DELETE" }, true);
 export const addPhotoTag = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/tags`, json("POST", { name }), true);
 export const removePhotoTag = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/tags/${id(name)}`, { method: "DELETE" }, true);
-export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
 export const thumbnailURL = (assetId: string) => `${base}/assets/${id(assetId)}/thumbnail`;
 
 export const originalURL = (assetId: string, download = false) => `${base}/assets/${id(assetId)}/original${download ? "?download=1" : ""}`;

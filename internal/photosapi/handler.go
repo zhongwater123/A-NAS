@@ -85,7 +85,6 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
-	h.mux.HandleFunc("GET "+p+"/labels", h.labels)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline", h.timeline)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline/months", h.timelineMonths)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/entries", h.entries)
@@ -124,10 +123,9 @@ type searchResponse struct {
 	// Semantic is false when only names were matched because local AI could
 	// not encode the query.
 	Semantic bool `json:"semantic"`
-	// Match says what the results after the name matches are: names, labels
-	// (photos showing every label in Labels) or closest (nearest in meaning).
-	Match  string            `json:"match"`
-	Labels []photos.LabelRef `json:"labels,omitempty"`
+	// Closest counts the results, over all pages, in the closest group; the
+	// results after them are less related.
+	Closest int `json:"closest"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -195,22 +193,6 @@ func (h *handler) timelineMonths(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, itemsResponse[photos.TimelineMonth]{Items: months})
 }
 
-type labelsResponse struct {
-	Items []photos.LabelCount `json:"items"`
-	// Ready is false while AI labels are not available yet.
-	Ready bool `json:"ready"`
-}
-
-func (h *handler) labels(w http.ResponseWriter, r *http.Request) {
-	principal, _ := principalFrom(r)
-	counts, ready, err := h.service.LabelCounts(r.Context(), principal, r.URL.Query().Get("viewing"))
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, labelsResponse{Items: counts, Ready: ready})
-}
-
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	limit, ok := pageLimit(w, r)
@@ -219,13 +201,13 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	page, err := h.service.Search(r.Context(), principal, photos.SearchRequest{
-		Query: query.Get("q"), Label: query.Get("label"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+		Query: query.Get("q"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
 	})
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Match: page.Match, Labels: page.Labels})
+	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
@@ -500,7 +482,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, photos.ErrInvalidMonth):
 		WriteError(w, http.StatusBadRequest, "invalid_month", "month must be YYYY-MM")
 	case errors.Is(err, photos.ErrInvalidQuery):
-		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters or a label photos can show, not both")
+		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters")
 	case errors.Is(err, photos.ErrUnsupportedType):
 		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "only JPEG and PNG photos are supported")
 	case errors.Is(err, photos.ErrTooLarge):

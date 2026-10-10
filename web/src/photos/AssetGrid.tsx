@@ -1,7 +1,8 @@
+import { ChevronsDown } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { gridInset, type GridProps, usePendingThumbnails, useTileRenderer } from "./grid";
-import { type Entry, flatEntries } from "./layout";
+import { type Entry, flatEntries, type Split } from "./layout";
 import { messageOf } from "./model";
 import type { PhotoAsset, PhotoPage } from "./photosApi";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
@@ -16,6 +17,8 @@ interface Props extends GridProps {
   badge?: (asset: PhotoAsset) => ReactNode;
   empty: ReactNode;
   end?: string;
+  // split ends the first group after that many of the loaded photos.
+  split?: Split;
 }
 
 // AssetGrid shows a list without dates, such as an album, search results or
@@ -60,14 +63,25 @@ export function AssetGrid(props: Props) {
 
   const shown = useMemo(() => assets?.filter((asset) => !hidden.has(asset.id)), [assets, hidden]);
   usePendingThumbnails(shown, (ready) => setAssets((value) => value?.map((asset) => ready.get(asset.id) ?? asset)));
-  const entries = useMemo(() => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end), [shown, width, rowHeight, next, props.end]);
+  const { split } = props;
+  // Hidden photos leave the first group smaller.
+  const shownSplit = useMemo(() => split && assets && { ...split, at: assets.slice(0, split.at).filter((asset) => !hidden.has(asset.id)).length },
+    [split?.at, split?.title, split?.text, assets, hidden]);
+  const entries = useMemo(() => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end, shownSplit),
+    [shown, width, rowHeight, next, props.end, shownSplit]);
   useEffect(() => onAssets(shown ?? []), [shown]);
   useEffect(() => onCount?.(shown && !next ? shown.length : undefined), [shown, next]);
 
   const renderTile = useTileRenderer(props, props.badge);
   const renderEntry = (entry: Entry): ReactNode => entry.kind === "more"
     ? <div className="ph-more"><span className="ph-spinner" />正在载入更多</div>
-    : entry.kind === "end" ? <div className="ph-end">{entry.text}</div> : null;
+    : entry.kind === "end" ? <div className="ph-end">{entry.text}</div>
+      : entry.kind === "divider" ? (
+        <div className="ph-divider" role="separator" aria-label={entry.title}>
+          <span className="ph-divider-title"><ChevronsDown />{entry.title}</span>
+          <small>{entry.text}</small>
+        </div>
+      ) : null;
 
   return (
     <PhotoScroller
@@ -82,6 +96,7 @@ export function AssetGrid(props: Props) {
       onMarquee={props.onMarquee}
       onMarqueeEnd={props.onGestureEnd}
       onBackgroundClick={props.onBackgroundClick}
+      floatingLabel={Boolean(split)}
       handle={props.scroller}
     >
       {assets === undefined ? <div className="ph-loading" style={{ paddingTop: props.topInset }}><span className="ph-spinner" /></div> : !shown?.length && props.empty}
