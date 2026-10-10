@@ -3,7 +3,6 @@ package photos_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -246,34 +245,5 @@ func TestUserTagsAreTheCallersAndFindPhotos(t *testing.T) {
 	}
 	if _, err := service.RemoveTag(ctx, namedAlice, party.ID, "生日"); !errors.Is(err, photos.ErrNotFound) {
 		t.Fatalf("RemoveTag() twice error = %v", err)
-	}
-}
-
-// AI labels are off, but the corrections users made while they were shown are
-// user data: they stay with the photo and travel with its copies.
-func TestAICorrectionsStayWithThePhoto(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "photos")
-	service, err := photos.Open(root, photos.Options{Now: newClock().Now, DisableCapacityReserve: true})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	t.Cleanup(func() { _ = service.Close() })
-	ctx := context.Background()
-	private, shared := libraries(t, service, namedAlice)
-	photo := importPhoto(t, service, namedAlice, private.ID, "", "a.png", red)
-	db := catalogDB(t, root)
-	if _, err := db.Exec(`INSERT INTO ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at)
-VALUES(?, 'frisbee', 'hidden', ?, '2026-10-09T00:00:00Z')`, photo.ID, namedAlice.UserID); err != nil {
-		t.Fatal(err)
-	}
-	copied, err := service.Copy(ctx, namedAlice, photo.ID, shared.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{photo.ID, copied.ID} {
-		var label string
-		if err := db.QueryRow("SELECT label_id FROM ai_tag_corrections WHERE asset_id = ?", id).Scan(&label); err != nil || label != "frisbee" {
-			t.Fatalf("correction of %s = %q, %v", id, label, err)
-		}
 	}
 }

@@ -6,7 +6,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
-// Albums and user tags (docs/architecture/photo-ai.md).
+// Albums, user tags and AI corrections, which take a photo out of an AI
+// cluster (docs/architecture/photo-ai.md).
 
 type nameRequest struct {
 	Name string `json:"name"`
@@ -27,6 +28,7 @@ func (h *handler) metadataRoutes() {
 	h.mux.HandleFunc("DELETE "+p+"/albums/{albumID}/assets/{assetID}", h.removeFromAlbum)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/tags", h.addTag)
 	h.mux.HandleFunc("DELETE "+p+"/assets/{assetID}/tags/{name}", h.removeTag)
+	h.mux.HandleFunc("DELETE "+p+"/assets/{assetID}/ai-labels/{labelID}", h.hideAILabel)
 }
 
 func (h *handler) listAlbums(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +132,16 @@ func (h *handler) addTag(w http.ResponseWriter, r *http.Request) {
 func (h *handler) removeTag(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	asset, err := h.service.RemoveTag(r.Context(), principal, r.PathValue("assetID"), r.PathValue("name"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, asset)
+}
+
+func (h *handler) hideAILabel(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	asset, err := h.service.HideAILabel(r.Context(), principal, r.PathValue("assetID"), r.PathValue("labelID"))
 	if err != nil {
 		h.fail(w, r, err)
 		return

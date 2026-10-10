@@ -452,9 +452,7 @@ func checkCopySource(p Principal, source assetRecord) error {
 }
 
 // insertCopy creates the copy, which starts with the source's user tags and
-// AI corrections and keeps them apart from then on. AI labels are off
-// (docs/architecture/photo-ai.md), but the corrections users made while they
-// were shown are user data and travel with the photo.
+// AI corrections and keeps them apart from then on.
 func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, source assetRecord, target library, directoryID string) (assetRecord, error) {
 	id := s.randomID("photo")
 	if _, err := tx.ExecContext(ctx,
