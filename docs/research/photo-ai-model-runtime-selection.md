@@ -94,6 +94,14 @@ SigLIP 2 Base 仍保留为 0.4B/F32 回归基线；若 EmbeddingGemma 2 的 Linu
 
 聚类只在同一可见图库边界内进行，不跨私有图库自动关联身份。系统保存的是无姓名的人脸向量和簇；命名、合并、拆分由有权限的用户确认。模型升级后重算派生数据，不静默沿用旧阈值。[scikit-learn 的 HDBSCAN 官方 API](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.HDBSCAN.html)可作为首个实现候选，但最终还要与层次聚类比较，且不得为 2 万张全量照片无界地物化 N×N 距离矩阵。
 
+2026-10-10 复核：M2 的 Worker 运行环境已包含 OpenCV 5.0（`opencv-contrib-python-headless` 5.0.0.93），其中的 `FaceDetectorYN` 与 `FaceRecognizerSF` 可以直接运行 OpenCV Zoo 的两个模型，不必再引入 OpenVINO：
+
+- [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)：轻量人脸检测器，同时输出 5 个关键点；官方报告 WIDER Face 验证集 AP 0.834（easy）、0.824（medium）、0.708（hard）。目录内文件以 MIT 许可发布。`face_detection_yunet_2026may.onnx` 是为 OpenCV 5.x 重新导出的动态输入尺寸版本，`2023mar` 为固定尺寸，另有 INT8 版本。
+- [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)：以 SFace 损失训练的 MobileFaceNet，用 YuNet 的 5 个关键点对齐人脸后输出 128 维向量；官方评估准确率 0.9940（INT8 0.9932）。目录内文件以 Apache-2.0 许可发布；训练数据来源需在对外发行前核对。
+- [InsightFace](https://github.com/deepinsight/insightface) 的预训练模型只许非商业研究使用，不作为候选。
+
+人物识别的实施方案据此把 YuNet + SFace 列为首选、上述 Open Model Zoo 组合列为回退，见[相册人物识别](../architecture/photo-faces.md)。
+
 ### 结构化中文摘要
 
 首版默认描述不是自由生成，而是使用经过阈值筛选的标签、场景、OCR 是否存在、人物数量和可信元数据拼装短句，例如：“室内，可能包含 3D 打印机和桌子；画面中有文字”。它不增加一个常驻大模型，结果可解释、可重建、可按字段纠错，也能直接参加中文检索。
