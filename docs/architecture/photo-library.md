@@ -99,7 +99,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 | 能力 | 首选基线 | 选择理由 | 冻结条件 |
 |---|---|---|---|
 | 中文语义向量与开放标签 | 已选定 Google EmbeddingGemma 2 全模态 740M 官方 LiteRT 包（2026-10-09 决定） | Google DeepMind 于 2026-10-06 发布、支持 100+ 语言，许可待核对（见 [M2 实施方案](photo-ai.md)）；全模态包约 485 MB，440M 文本+视觉包约 388 MB，官方列出图片检索与图片分类用途；零样本标签依赖图文同一向量空间的相似度，官方未给出中文图文指标 | 作为首个集成目标；中文家庭照片质量、Debian x86 Runtime、RSS、查询延迟与吞吐达标后冻结为发行默认；发布过新必须保留回退 |
-| 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
+| 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO；[实施方案](photo-faces.md)建议改用运行环境中 OpenCV 自带的 YuNet + SFace，本组合降为回退（待确认） | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
 | 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
 
 图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
@@ -169,7 +169,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 
 **M3 人物、格式、导入与发布**
 
-13. 人脸 occurrence 与分图库人物库。
+13. 人脸 occurrence 与分图库人物库；实施方案见[相册人物识别](photo-faces.md)（draft）。
 14. HEIC、GIF、RAW、Live Photo 与视频；视频播放兼容与是否转码需先决定。
 15. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
 16. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。
