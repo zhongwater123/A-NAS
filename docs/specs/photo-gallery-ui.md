@@ -1,6 +1,6 @@
 # Web 相册界面
 
-状态：draft
+状态：implemented
 更新时间：2026-10-10
 
 ## 目标
@@ -93,11 +93,19 @@
 - 相册服务不可用时显示原因与重试按钮。
 - 管理员只读查看时隐藏所有写操作、上传和回收站，横幅显示到期时间和“结束查看”。
 
+## 实现说明
+
+- 等高行布局使用 [justified-layout](https://github.com/flickr/justified-layout)，虚拟滚动使用 [@tanstack/react-virtual](https://tanstack.com/virtual)，查看器缩放使用 [react-zoom-pan-pinch](https://github.com/BetterTyped/react-zoom-pan-pinch)。
+- 时间线只渲染视口附近的行；月份载入或网格缩放改变上方高度时，以视口顶部（缩放时为指针下）的照片为锚点保持位置。
+- 选择、框选和拖动勾选都按布局计算命中，不依赖已渲染的 DOM，因此能选中滚出视口的照片。
+- 上传用 XMLHttpRequest 报告字节进度；浏览器端先拒绝非 JPEG/PNG 和超过 256 MB 的文件，它们只出现在上传队列中。
+- 网格大小、信息栏和侧栏开合保存在本机浏览器的 localStorage 中。
+
 ## 验收证据
 
-- 前端：`web/src/photos/*.test.tsx`。
-- 后端：`internal/photos` 与 `internal/photosapi` 的按月时间线和标签汇总测试、OpenAPI 契约测试。
-- 本地 systemd 环境中用真实 AI Worker 和测试图库人工核对。
+- 前端：[`PhotosPanel.test.tsx`](../../web/src/photos/PhotosPanel.test.tsx)（时间线、上传、查看器、选择与批量操作、相册、回收站、识别的事物、搜索、只读查看、服务不可用）与 [`layout.test.ts`](../../web/src/photos/layout.test.ts)（等高行与时间线条目）。
+- 后端：[按月时间线](../../internal/photos/timeline_test.go)、[标签汇总](../../internal/photos/ailabels_test.go)、[API](../../internal/photosapi/handler_test.go) 与 [OpenAPI 契约](../../internal/httpapi/openapi_test.go)。
+- 2026-10-10 在本地 systemd 环境（真实安装器、相册服务与 AI Worker，178 张测试照片）中用 Edge 无头浏览器以真实鼠标事件核对：Ctrl+滚轮缩放后指针下照片保持原位、框选与拖动勾选、拖到侧栏相册、拖入上传、查看器展开与收回动画、窄窗口布局。
 
 ## 关联
 

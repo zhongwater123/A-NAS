@@ -30,7 +30,7 @@ export interface GridProps {
 
 export const gridInset = 22;
 // The timeline's right side leaves room for its month scrubber.
-export const scrubberInset = 40;
+export const scrubberInset = 46;
 
 // useTileRenderer renders a grid's tiles with stable callbacks, so tiles
 // that did not change are not rendered again.

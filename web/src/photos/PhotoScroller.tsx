@@ -175,7 +175,7 @@ export function PhotoScroller({ entries, scrollRef, topInset, inset, insetRight 
           viewportY: point.y - element.scrollTop,
         };
       }
-      onZoom(Math.exp(-event.deltaY * 0.0025));
+      onZoom(Math.exp(-event.deltaY * 0.0018));
     };
     element.addEventListener("wheel", wheel, { passive: false });
     return () => element.removeEventListener("wheel", wheel);
@@ -261,7 +261,8 @@ export function PhotoScroller({ entries, scrollRef, topInset, inset, insetRight 
       const up = () => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
-        if (swiping) swallowClick.current = true;
+        // The click that ends a swipe, if any, follows at once.
+        if (swiping) { swallowClick.current = true; window.setTimeout(() => { swallowClick.current = false; }); }
       };
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);

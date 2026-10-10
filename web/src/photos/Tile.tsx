@@ -1,5 +1,5 @@
 import { Check, CircleAlert, Copy, RotateCcw } from "lucide-react";
-import { DragEvent, MouseEvent, PointerEvent, ReactNode, memo } from "react";
+import { DragEvent, MouseEvent, PointerEvent, ReactNode, memo, useRef } from "react";
 
 import type { Box, PendingPhoto } from "./layout";
 import { originalURL, previewURL, type PhotoAsset } from "./photosApi";
@@ -23,7 +23,10 @@ interface Props {
 // photos are being selected; the check in its corner always toggles.
 export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onToggle, onCheckDown, onDragIds, badge }: Props) {
   const asset = box.item;
+  // A press on the check swipes over other photos; it must not drag the tile.
+  const fromCheck = useRef(false);
   const dragStart = (event: DragEvent<HTMLDivElement>) => {
+    if (fromCheck.current) { event.preventDefault(); return; }
     const ids = onDragIds?.(asset) ?? [asset.id];
     event.dataTransfer.setData(dragType, JSON.stringify(ids));
     event.dataTransfer.effectAllowed = "copy";
@@ -72,7 +75,11 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
         aria-checked={selected}
         aria-label={`选择 ${asset.name}`}
         className="ph-check"
-        onPointerDown={(event) => onCheckDown?.(asset, event)}
+        onPointerDown={(event) => {
+          fromCheck.current = true;
+          window.addEventListener("pointerup", () => { fromCheck.current = false; }, { once: true });
+          onCheckDown?.(asset, event);
+        }}
         onClick={(event) => onToggle(asset, event)}
       >
         <Check strokeWidth={3} />

@@ -43,6 +43,8 @@ export function Timeline(props: Props) {
   const generation = useRef(0);
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
+  // The unloaded months last seen in view.
+  const inView = useRef<string[]>([]);
 
   // A new library starts over; a refresh reloads the months already shown
   // and swaps them in at once, so nothing flickers.
@@ -62,6 +64,8 @@ export function Timeline(props: Props) {
         setMonths(nextMonths);
         setLoaded(new Map(reloaded));
         onReloaded();
+        // Months in view that were loading when the refresh began load again.
+        for (const month of inView.current) if (!keep.includes(month) && nextMonths.some((item) => item.month === month)) ensureRef.current(month);
       } catch (caught) {
         if (current !== generation.current) return;
         setMonths((value) => value ?? []);
@@ -79,6 +83,8 @@ export function Timeline(props: Props) {
       () => { if (current === generation.current) setLoaded((value) => new Map(value).set(month, { failed: true })); },
     ).finally(() => loading.current.delete(month));
   }, [libraryId]);
+  const ensureRef = useRef(ensure);
+  ensureRef.current = ensure;
 
   const visible = useMemo(() => {
     if (!hidden.size) return loaded;
@@ -121,7 +127,10 @@ export function Timeline(props: Props) {
       renderTile={renderTile}
       renderPending={(box) => <PendingTile key={box.item.key} box={box} onRetry={props.onRetryUpload} />}
       renderEntry={renderEntry}
-      onRange={(inView) => { for (const entry of inView) if (entry.kind === "placeholder" && !entry.failed) ensure(entry.month); }}
+      onRange={(range) => {
+        inView.current = range.flatMap((entry) => entry.kind === "placeholder" ? [entry.month] : []);
+        for (const entry of range) if (entry.kind === "placeholder" && !entry.failed) ensure(entry.month);
+      }}
       onZoom={props.onZoom}
       onMarquee={props.onMarquee}
       onMarqueeEnd={props.onGestureEnd}

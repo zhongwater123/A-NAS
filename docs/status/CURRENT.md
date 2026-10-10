@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-09
+更新时间：2026-10-10
 
 ## 当前阶段
 
@@ -20,6 +20,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。
 - Web 桌面终端已本地实现：仅管理员可通过回环同源 WebSocket 打开 PTY Shell，生产中由文件代理以该管理员本人的 Linux 账号运行，默认关闭，见[终端规格](../specs/web-terminal.md)；Experimental NAS 尚未启用。
 - Web 桌面已整合 CPU/内存/网速状态栏、动态图标程序坞、可持久化图标排序、4:3 深蓝抽象壁纸和 [CRT 风格开机动画](../specs/boot-ident.md)；拖拽预览已移出滚动网格以避免右侧裁剪。本地控制台还会在登录后闲置三分钟播放外部静音屏保。视频池为每次进入屏保时随机选择一条并持续循环、退出后下次闲置重新选择、单条失败补选；`9923c5987c0b` 已带五条视频部署，安装器逐条核对了哈希，直连屏幕上的轮换行为尚未核对。按 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)（[issue #49](https://github.com/zhongwater123/A-NAS/issues/49)），屏保视频已改为系统盘上的长期媒体，不再随 release 发布：每个视频按 SHA-256 只存一份，产品服务固定读取 `/var/lib/a-nas/screensavers/current`，更换视频走独立的暂存与安装命令，只上传缺少的视频。该机制已实现并有系统测试覆盖，尚未部署。2026-10-08 已在 `ed5368ba998e` 上验收 API、Host Agent、Kiosk、嵌入式桌面和旧兼容路由的 Range 请求，开机动画随 `946638851c7c` 部署。
+- Web 相册窗口已按[相册界面规格](../specs/photo-gallery-ui.md)重做：以照片为中心的等高行时间线、年月时间轴与按月载入、连续缩放、框选与拖动勾选的批量操作、拖到相册、即时显示的上传、可缩放与幻灯片的沉浸式查看器、识别的事物页和本地 AI 进度；新增按月时间线与 AI 标签汇总两个只读接口。已在本地 systemd 环境验证，尚未部署到实验 NAS。
 - root Host Agent 与非特权产品服务通过 `root:a-nas 0660` UDS 通信；系统单元使用 root 所有的 `/opt/a-nas/current` 发布目录。
 - rc.4 让空盘计划稳定输出数组、兼容旧 `null`、显示存储操作进度并为桌面窗口增加错误边界，见[蓝屏调查](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)。
 - rc.4 使用 root 管理的 Chromium policy 禁止保存密码、通行密钥和同步；更广的 Kiosk 约束仍见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
