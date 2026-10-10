@@ -1,0 +1,46 @@
+[Unit]
+Description=A-NAS media worker (FFmpeg)
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Service]
+Type=simple
+# Runs FFmpeg on the one video the Product Service opened as the signed-in
+# user and passed as a descriptor. It has no network and sees neither the
+# data volume nor the Product Service's state (ADR 0017); the system test
+# proves both. The connection is standard input; logs go to the journal so
+# they never mix with the protocol.
+ExecStart=/opt/a-nas/current/anas-api media-worker
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+DynamicUser=true
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas -/etc/a-nas -/run/a-nas -/run/a-nas-photos -/run/a-nas-sessions -/run/a-nas-ai
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# A 4K HEVC transcode is the heaviest job; playback still yields to the rest
+# of the device.
+MemoryMax=2G
+CPUWeight=50
+IOWeight=50
+RuntimeMaxSec=8h

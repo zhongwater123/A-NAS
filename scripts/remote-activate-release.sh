@@ -92,6 +92,8 @@ install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
 install -m 0644 anas-ai-system.socket.incoming anas-ai-system.socket
 install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
+install -m 0644 anas-media-system.socket.incoming anas-media-system.socket
+install -m 0644 anas-media-system@.service.incoming anas-media-system@.service
 # Local AI (ADR 0016): the Worker's code and the manifests of the model and
 # runtime it pins. deploy-dev.ps1 uploads the model and runtime once per
 # content; link the staged copies the root installer copies and checks.
@@ -116,6 +118,8 @@ ln -s "$staged_runtime" ai/runtime.tar.gz
 rm -f \
   anas-ai-system.socket.incoming \
   anas-ai-system.service.incoming \
+  anas-media-system.socket.incoming \
+  anas-media-system@.service.incoming \
   ai-worker.tar.incoming \
   ai-model.json.incoming \
   ai-runtime.json.incoming \
