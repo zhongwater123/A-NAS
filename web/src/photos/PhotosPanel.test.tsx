@@ -50,6 +50,7 @@ function serve(...routes: Route[]) {
     }
     if (url === "/api/v1/photos/libraries") return json({ items: [sharedLibrary, privateLibrary] });
     if (url === "/api/v1/photos/ai") return json({ state: "idle", ready: 3, pending: 0, failed: 0 });
+    if (url.startsWith("/api/v1/photos/labels?") || url === "/api/v1/photos/labels") return json({ items: [], ready: false });
     if (url.endsWith("/timeline/months")) return json({ items: [] });
     if (/\/assets\/[^/]+$/.test(url) && !init?.method) return json(asset(decodeURIComponent(url.split("/").at(-1) ?? "")));
     return json({ items: [] });
@@ -265,13 +266,13 @@ describe("PhotosPanel viewer", () => {
 
     await user.type(await screen.findByRole("textbox", { name: "添加标签" }), "小橘{Enter}");
     expect(await within(screen.getByLabelText("标签")).findByRole("button", { name: "小橘" })).toBeTruthy();
-    // AI labels are off: the details show only the user's tags.
+    // Photo details never list AI labels, only the user's tags.
     expect(screen.queryByLabelText("AI 标签")).toBeNull();
 
     await user.click(within(screen.getByLabelText("标签")).getByRole("button", { name: "小橘" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E5%B0%8F%E6%A9%98&limit=120", expect.anything());
     expect(await screen.findByRole("button", { name: "查看 photo:kitten.jpg" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "AI 搜图" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "AI 聚合" })).toBeTruthy();
     expect(screen.getByText("找到 2 张")).toBeTruthy();
     expect(screen.queryByRole("separator", { name: "相关度较低" })).toBeNull();
   });
@@ -355,7 +356,7 @@ describe("PhotosPanel selection", () => {
   });
 });
 
-describe("PhotosPanel albums, trash and AI search", () => {
+describe("PhotosPanel albums, trash and AI 聚合", () => {
   it("lists albums, opens one, renames it and takes a photo out of it", async () => {
     let removed = false;
     const fetchMock = serve((url, init) => {
@@ -415,37 +416,58 @@ describe("PhotosPanel albums, trash and AI search", () => {
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
   });
 
-  it("starts AI search with recent searches and kinds of sentence to try, and never says AI is off", async () => {
-    let ready = true;
-    const fetchMock = serve((url) => {
-      if (url === "/api/v1/photos/ai") return json(ready ? { state: "working", ready: 3, pending: 2, failed: 1 } : { state: "unavailable", ready: 0, pending: 5, failed: 0 });
+  it("opens AI 聚合 with searches and clusters, and takes a wrong photo out of a cluster", async () => {
+    const cat = { id: "cat", name: "猫", category: "animal", photos: 2, coverId: "photo:cat" };
+    let hidden = false;
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/ai") return json({ state: "working", ready: 3, pending: 2, failed: 1 });
+      if (url === "/api/v1/photos/labels") return json({ items: [cat, { id: "sea", name: "海", category: "nature", photos: 1, coverId: "photo:sea" }], ready: true });
+      if (url.startsWith("/api/v1/photos/labels/cat/assets")) return json({ items: hidden ? [asset("photo:cat")] : [asset("photo:cat"), asset("photo:fox")] });
+      if (url === "/api/v1/photos/assets/photo%3Afox/ai-labels/cat" && init?.method === "DELETE") { hidden = true; return json(asset("photo:fox")); }
       if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:sea")], semantic: true, closest: 1 });
       return undefined;
     });
     window.localStorage.setItem("a-nas.photos.recentSearches", JSON.stringify(["海边的日落"]));
     const user = userEvent.setup();
-    const { unmount } = render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
     expect(await screen.findByText("正在整理 3 / 6")).toBeTruthy();
     expect(screen.getByText(/1 张无法识别/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "AI 搜图" }));
+    await user.click(screen.getByRole("button", { name: "AI 聚合" }));
     expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "场景与氛围" })).toBeTruthy();
     expect(within(screen.getByLabelText("最近搜索")).getByRole("button", { name: "海边的日落" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /^动物/ })).toBeTruthy();
+    expect(within(await screen.findByRole("button", { name: "打开 猫" })).getByText("2 张")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开 海" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "搜索 傍晚的海边" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E5%82%8D%E6%99%9A%E7%9A%84%E6%B5%B7%E8%BE%B9&limit=120", expect.anything());
-    expect(await screen.findByRole("button", { name: "查看 photo:sea.jpg" })).toBeTruthy();
+    // A search stays a search: it never goes through the clusters.
+    await user.type(screen.getByRole("searchbox", { name: "用一句话搜索照片" }), "猫{Enter}");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E7%8C%AB&limit=120", expect.anything());
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/v1/photos/labels/"))).toBe(false);
+    await user.click(await screen.findByRole("button", { name: "返回" }));
+
+    // A cluster opens on its own; a wrong photo can be taken out of it.
+    await user.click(await screen.findByRole("button", { name: "打开 猫" }));
+    expect(await screen.findByRole("heading", { name: "猫" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/labels/cat/assets?limit=120", expect.anything());
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:fox.jpg" }));
+    await user.click(screen.getByRole("button", { name: "不是猫" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/assets/photo%3Afox/ai-labels/cat", expect.objectContaining({ method: "DELETE" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "查看 photo:fox.jpg" })).toBeNull());
+    expect(await screen.findByText("已从“猫”移出 1 张，照片仍在图库中")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "返回" }));
-    expect(within(await screen.findByLabelText("最近搜索")).getByRole("button", { name: "傍晚的海边" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "清除最近搜索" }));
-    expect(screen.queryByLabelText("最近搜索")).toBeNull();
-    unmount();
+    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+  });
 
-    // AI is built in: while it cannot run, nothing says it is off.
-    ready = false;
+  it("suggests sentences until local AI has clusters, and never says AI is off", async () => {
+    serve((url) => {
+      if (url === "/api/v1/photos/ai") return json({ state: "unavailable", ready: 0, pending: 5, failed: 0 });
+      return undefined;
+    });
+    const user = userEvent.setup();
     render(<PhotosPanel userId="user:alice" isAdmin={false} />);
-    await user.click(await screen.findByRole("button", { name: "AI 搜图" }));
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
     expect(await screen.findByRole("heading", { name: "可以这样搜" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "场景与氛围" })).toBeTruthy();
     expect(screen.queryByRole("status", { name: "本地 AI 状态" })).toBeNull();
     expect(screen.queryByText(/未启用|不可用/)).toBeNull();
   });

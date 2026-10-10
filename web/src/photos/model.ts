@@ -1,15 +1,17 @@
 import { APIError } from "../api";
-import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./photosApi";
+import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary } from "./photosApi";
 
-// A place is what the main area shows. AI search (an empty query is its start
-// page) covers the caller's and the shared library; viewing adds the member
-// library it was started from, so ordinary searches never mix it in.
+// A place is what the main area shows. AI 聚合 (a search with an empty query
+// is its start page) and its clusters cover the caller's and the shared
+// library; viewing adds the member library it was started from, so ordinary
+// searches never mix it in.
 export type Place =
   | { kind: "timeline"; libraryId: string }
   | { kind: "albums"; libraryId: string }
   | { kind: "album"; libraryId: string; album: PhotoAlbum }
   | { kind: "trash"; libraryId: string }
-  | { kind: "search"; viewing: string; query: string };
+  | { kind: "search"; viewing: string; query: string }
+  | { kind: "cluster"; viewing: string; label: PhotoLabelCount };
 
 export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
 
@@ -41,7 +43,11 @@ export function libraryName(caller: Caller, library?: PhotoLibrary) {
 
 export const placeLibrary = (place: Place) => "libraryId" in place ? place.libraryId : "";
 
-// The member library a search started from covers.
+// Label categories of the vocabulary, in the order AI 聚合 shows them.
+export const categoryNames: Record<string, string> = {
+  animal: "动物", nature: "自然", food: "食物", vehicle: "交通工具", activity: "运动", object: "物品", scene: "场景", people: "人物", document: "文档",
+};
+// The member library a search or a cluster started from covers.
 export const placeViewing = (caller: Caller, place: Place) => {
   if ("viewing" in place) return place.viewing;
   return libraryOf(caller, placeLibrary(place))?.viewing ? placeLibrary(place) : "";

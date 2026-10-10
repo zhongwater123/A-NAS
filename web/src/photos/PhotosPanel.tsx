@@ -1,13 +1,13 @@
 import {
-  ArrowLeft, CircleAlert, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck,
-  Trash2, X, ZoomIn, ZoomOut,
+  ArrowLeft, CircleAlert, CircleMinus, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck,
+  Shapes, Trash2, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { endViewing } from "../api";
 import { AlbumPicker } from "./AlbumPicker";
 import { AssetGrid } from "./AssetGrid";
-import { AISearchHome } from "./AISearch";
+import { AIHome } from "./AIHome";
 import { AlbumsView, Empty } from "./Collections";
 import { useDialogs, useToasts } from "./feedback";
 import type { GridProps } from "./grid";
@@ -18,7 +18,7 @@ import {
 } from "./model";
 import { PhotoPicker } from "./PhotoPicker";
 import {
-  addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, listAlbumPhotos, listAlbums, listPhotoLibraries,
+  addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries,
   listPhotoTrash, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
   type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoSearchPage,
 } from "./photosApi";
@@ -53,6 +53,7 @@ const placeKey = (place: Place) => {
   switch (place.kind) {
     case "album": return `album:${place.album.id}`;
     case "search": return `search:${place.viewing}:${place.query}`;
+    case "cluster": return `cluster:${place.viewing}:${place.label.id}`;
     default: return `${place.kind}:${place.libraryId}`;
   }
 };
@@ -262,6 +263,15 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       action: { label: "撤销", run: () => void runEach(removed, (asset) => addToAlbum(album.id, asset.id)).then(() => { unhide(removed.map((asset) => asset.id)); setAlbumsKey((value) => value + 1); }) },
     });
   };
+  // A wrong photo leaves the AI cluster for good; it stays in the library.
+  const takeOutOfCluster = async (assets: PhotoAsset[]) => {
+    if (place?.kind !== "cluster") return;
+    const label = place.label;
+    const result = await batch("正在移出", assets, (asset) => hideAILabel(asset.id, label.id));
+    hide(result.succeeded.map((entry) => entry.item.id));
+    selection.clear();
+    report(`已从“${label.name}”移出 ${result.succeeded.length} 张，照片仍在图库中`, result.details);
+  };
   const purge = async (assets: PhotoAsset[]) => {
     if (!await dialogs.confirm({ title: `永久删除 ${assets.length} 张照片？`, message: "永久删除后无法恢复，照片会从所有相册中移除。", confirm: "永久删除", danger: true })) return;
     const result = await batch("正在永久删除", assets, (asset) => purgePhoto(asset.id));
@@ -437,11 +447,12 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
       case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
       case "search": return place.query
-        ? { text: "AI 搜图", detail: searchDetail, back: { ...place, query: "" } as Place }
-        : { text: "AI 搜图", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
+        ? { text: "AI 聚合", detail: searchDetail, back: { ...place, query: "" } as Place }
+        : { text: "AI 聚合", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
+      case "cluster": return { text: place.label.name, detail: `${count ?? place.label.photos} 张 · 本地 AI 聚合`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
     }
   })();
-  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || (place.kind === "search" && Boolean(place.query));
+  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "cluster" || (place.kind === "search" && Boolean(place.query));
   // On AI search the search box sits under the toolbar.
   const subbar: ReactNode = place.kind === "search" && place.query ? (
     <div className="ph-subbar ph-search-bar">
@@ -478,6 +489,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           {copyTarget && <button type="button" onClick={() => void copyTo(copyTarget, chosen)}><Copy /><span>复制到{copyTarget.kind === "shared" ? "共享" : "我的图库"}</span></button>}
           <button type="button" onClick={() => void download(chosen)}><Download /><span>下载</span></button>
           {place.kind === "album" && canEditAlbum(caller, place.album) && <button type="button" onClick={() => void removeFromCurrentAlbum(chosen)}><FolderMinus /><span>移出相册</span></button>}
+          {place.kind === "cluster" && allChangeable && <button type="button" title="AI 归错了？只把这些照片移出这一类" onClick={() => void takeOutOfCluster(chosen)}><CircleMinus /><span>不是{place.label.name}</span></button>}
           {allChangeable && <button type="button" className="danger" onClick={() => void trash(chosen)}><Trash2 /><span>删除</span></button>}
         </>
       )}
@@ -502,12 +514,17 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />} />;
       case "search":
         if (!place.query) {
-          return <AISearchHome topInset={topInset} ai={ai} recent={recent} onSearch={startSearch} onForget={() => setRecent([])} />;
+          return <AIHome viewing={place.viewing} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent} onSearch={startSearch} onForget={() => setRecent([])}
+            onOpenCluster={(label) => setPlace({ kind: "cluster", viewing: place.viewing, label })} onError={reportError} />;
         }
         return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor)}
           onPage={(page, first) => { if (first && "closest" in page) setClosest((page as PhotoSearchPage).closest); }} onCount={setCount} onError={reportError}
           split={closest === undefined ? undefined : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
           empty={<Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+      case "cluster":
+        return <AssetGrid key={`cluster:${place.label.id}`} {...grid} listKey={`cluster:${place.viewing}:${place.label.id}`} load={(cursor) => listLabelPhotos(place.label.id, place.viewing, cursor)}
+          onCount={setCount} onError={reportError}
+          empty={<Empty icon={<Shapes />} title="这一类里没有照片了" text="被移出的照片仍在图库中，只是不再归在这一类。" />} />;
       case "albums":
         return <AlbumsView libraryId={place.libraryId} readOnly={readOnlyPlace} refreshKey={albumsKey} topInset={topInset} onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })} onCreate={() => void newAlbum()} onError={reportError} />;
     }
