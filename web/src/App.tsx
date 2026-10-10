@@ -66,7 +66,7 @@ import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
-import { PhotosPanel } from "./PhotosPanel";
+import { PhotosPanel } from "./photos/PhotosPanel";
 import { SourceBadge, StatusBar } from "./StatusBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";

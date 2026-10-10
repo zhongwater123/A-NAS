@@ -192,6 +192,29 @@ export async function request<T>(path: string, init: RequestInit = {}, mutation 
   return response.json() as Promise<T>;
 }
 
+// uploadForm posts a multipart form like request does, reporting upload
+// progress as a fraction; fetch cannot report it.
+export function uploadForm<T>(path: string, body: FormData, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    xhr.setRequestHeader("Accept", "application/json");
+    if (csrfToken) xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total); };
+    xhr.onload = () => {
+      if (xhr.status === 401) sessionEndedListener?.();
+      let body: { error?: { code?: string; message?: string } } | undefined;
+      try { body = xhr.responseText ? JSON.parse(xhr.responseText) : undefined; } catch { body = undefined; }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
+      else reject(new APIError(xhr.status, body?.error?.code ?? "request_failed", body?.error?.message ?? `请求失败 (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new APIError(0, "network_error", "网络连接中断"));
+    xhr.onabort = () => reject(new DOMException("upload aborted", "AbortError"));
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(body);
+  });
+}
+
 const json = (value: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
 
 export const getSetupStatus = () => request<{setupRequired: boolean}>("/api/v1/setup/status");
