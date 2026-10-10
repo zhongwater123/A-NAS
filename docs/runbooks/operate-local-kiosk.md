@@ -141,7 +141,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 ## 验收
 
 1. 开机后直连屏幕显示 A-NAS 桌面，中文字体正常，键盘和鼠标可用。
-2. 桌面右上角状态栏显示“模拟数据”或“实时主机”，CPU/内存仪表盘与网速有读数；打开资源管理可读取对应状态。
+2. 桌面右上角状态栏显示“模拟数据”或“实时主机”，CPU/内存仪表盘与网速有读数；打开“设置 → 概览”可读取对应状态（`173cbb5499ce` 及更早版本为“资源管理”）。
 3. `ps` 显示 Cage 与 Chromium 均属于 `anas-dev`，Chromium 参数中不存在 `--no-sandbox`。
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。

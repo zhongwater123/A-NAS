@@ -18,6 +18,7 @@
 - [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented）
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
+- [设置](settings.md)（implemented）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 
