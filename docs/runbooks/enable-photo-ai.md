@@ -8,7 +8,7 @@
 第一次在 Experimental NAS 上安装带本地 AI 的 release（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。本地 AI 随每个 release 安装，之后的升级按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)进行即可，不再需要单独操作。成功后：
 
 - `anas-ai.socket` 已启用；第一次搜索或后台整理时，systemd 按需启动 Worker。
-- 相册可以用中文按意思搜索，照片详情显示 AI 标签。
+- 相册可以用中文按意思搜索，结果分为“最接近”与“相关度较低”两段（AI 标签自 2026-10-10 暂停，照片详情不显示）。
 - 侧栏的 AI 卡片显示整理进度。
 
 ## 前提与风险
@@ -53,7 +53,7 @@
   - `ps -o user=,rss= -p "$pid"`：用户为 `a-nas-ai`（动态分配，UID 在 61184–65519），RSS 约 1.2–1.4 GB。
   - `cat /proc/$pid/net/dev`：只列出 `lo`。
   - `systemctl show anas-ai.service -p PrivateNetwork -p RestrictAddressFamilies -p DynamicUser`：`yes`、`AF_UNIX`、`yes`。
-- **整理**：相册空闲 5 分钟后，侧栏的 AI 卡片显示“正在整理 x / y”，结束后显示“已整理全部 y 张”；照片详情出现 AI 标签。整理完成后记录 `systemctl show anas-ai.service -p MemoryPeak` 与总耗时，补充到 [M2 实施方案](../architecture/photo-ai.md)。
+- **整理**：相册空闲 5 分钟后，侧栏的 AI 卡片显示“正在整理 x / y”，结束后显示“已整理全部 y 张”；搜索一句话时结果分两段，中间有“相关度较低”分隔线。整理完成后记录 `systemctl show anas-ai.service -p MemoryPeak` 与总耗时，补充到 [M2 实施方案](../architecture/photo-ai.md)。
 - **空闲退出**：最后一次请求约 10 分钟后，`systemctl is-active anas-ai.service` 输出 `inactive`，`anas-ai.socket` 仍为 `active`。
 
 ## 首次实机部署证据

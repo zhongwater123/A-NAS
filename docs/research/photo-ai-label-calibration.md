@@ -1,6 +1,6 @@
 # 相册 AI 标签校准与中文检索评估
 
-> 状态：完成（70 视觉 token、512 px 输入与 v1 阈值已冻结）  
+> 状态：完成，作为历史证据保留。70 视觉 token 与 512 px 输入仍在使用；v1 标签阈值只用于评估：AI 标签已于 2026-10-10 暂停，搜索不再按标签过滤（[M2 实施方案“AI 标签”](../architecture/photo-ai.md#ai-标签2026-10-10-起暂停)，[#66](https://github.com/zhongwater123/A-NAS/issues/66)）。词表与阈值移到 `ai/eval/labels/`  
 > 更新日期：2026-10-10  
 > 适用范围：EmbeddingGemma 2 全模态 740M（`embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2`），标签词表 v1  
 > 关联：[M2 实施方案](../architecture/photo-ai.md) 步骤 3、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
@@ -22,7 +22,7 @@
 代码在 [`ai/eval/`](../../ai/eval/)，本机运行方法见[本地环境](../development/LOCAL_ENVIRONMENT.md)。
 
 - **输入**：评估图片先按相册服务的缩略图规则处理（[`thumbnail.go`](../../internal/photos/thumbnail.go)：长边 512 px、Lanczos、白底、JPEG 质量 82），再经 [`MediaPipeProvider`](../../ai/anas_ai/providers.py) 编码，与 Worker 使用同一路径。
-- **词表**：[`internal/photos/labels/v1.json`](../../internal/photos/labels/v1.json) 共 330 个标签，每项有稳定 ID、中文名、同义词与分类；[`ground_truth.json`](../../ai/eval/ground_truth.json) 把其中 248 个映射到公开数据集的类别，其余没有可用真值。
+- **词表**：[`ai/eval/labels/v1.json`](../../ai/eval/labels/v1.json) 共 330 个标签，每项有稳定 ID、中文名、同义词与分类；[`ground_truth.json`](../../ai/eval/ground_truth.json) 把其中 248 个映射到公开数据集的类别，其余没有可用真值。
 - **真值**：每个（图片，标签）为正、负或未知。COCO 80 类完整标注，映射到 COCO 类别的标签在没有该类标注的图片上为负。COCO 不标注的标签可声明“除非出现某些 COCO 类别，否则不存在”（没有鸟就没有鸭子；没有食物与餐具就没有咖啡），这类推断偶有错误时只会让阈值更严。Open Images 的正例来自任一映射类别被核验为有，负例来自首个映射类别被核验为无，其余为未知。
 - **划分**：按图片键的哈希把图片固定分成校准与测试两半；阈值与模板只看校准半，结果只在测试半报告。
 - **阈值**：每个标签取校准半上误报率不超过上限的最低分数。误报率只在 COCO 负例上计算：COCO 按照片的自然分布收集，Open Images 的负例则是先被模型误认、再经人工否定的困难样本，混入后误报率被困难样本主导，猫、狗等常见标签的阈值会高到几乎不出现（首轮按此计算时猫的召回率只有 16%）；困难负例上的误报率单独报告。召回率统计两个数据集的全部正例。
@@ -126,6 +126,6 @@ COCO-CN 测试集的句子查询（每句只有一张正确照片）在“最佳
 
 ## 关联
 
-- 词表与真值：[`internal/photos/labels/v1.json`](../../internal/photos/labels/v1.json)、[`ai/eval/ground_truth.json`](../../ai/eval/ground_truth.json)
+- 词表与真值：[`ai/eval/labels/v1.json`](../../ai/eval/labels/v1.json)、[`ai/eval/ground_truth.json`](../../ai/eval/ground_truth.json)
 - 校准脚本：[`ai/eval/`](../../ai/eval/)（搜索取舍：[`search_cutoff.py`](../../ai/eval/search_cutoff.py)）；一致性测试 [`ai/tests/test_labels.py`](../../ai/tests/test_labels.py)
 - 方案：[M2 实施方案](../architecture/photo-ai.md)
