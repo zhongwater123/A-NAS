@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -140,6 +141,97 @@ func (s *Service) labelsOf(ctx context.Context, objectID string, hidden map[stri
 		return cmp.Compare(b.Score-s.labels.Thresholds[b.ID], a.Score-s.labels.Thresholds[a.ID])
 	})
 	return found[:min(len(found), maxShownLabels)], err
+}
+
+// LabelCount is a label and how many photos within a search's scope show it.
+type LabelCount struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Photos int    `json:"photos"`
+	// CoverID is the photo that shows the label most clearly.
+	CoverID string `json:"coverId"`
+}
+
+// LabelCounts lists the labels that photos within a search's scope show, most
+// photos first, by the rule of a search by label: a photo that hid a label
+// does not count for it. ready is false while the label vectors are not in the
+// Catalog; there are no counts then.
+func (s *Service) LabelCounts(ctx context.Context, p Principal, viewing string) (counts []LabelCount, ready bool, err error) {
+	scope, err := s.searchScope(ctx, p, viewing)
+	if err != nil {
+		return nil, false, err
+	}
+	counts = []LabelCount{}
+	labelVectors, err := s.labelVectors(ctx)
+	if err != nil || labelVectors == nil {
+		return counts, false, err
+	}
+	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") + ")"
+	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE trashed_at IS NULL AND library_id IN "+in+" ORDER BY id", scope...)
+	if err != nil {
+		return nil, false, err
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.objectID); err != nil {
+			_ = rows.Close()
+			return nil, false, err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, false, err
+	}
+	hiding, err := s.strings(ctx, `SELECT c.asset_id || char(31) || c.label_id FROM ai_tag_corrections c
+JOIN assets a ON a.id = c.asset_id WHERE a.library_id IN `+in, scope...)
+	if err != nil {
+		return nil, false, err
+	}
+	hidden := make(map[string]bool, len(hiding))
+	for _, pair := range hiding {
+		hidden[pair] = true
+	}
+
+	type tally struct {
+		photos int
+		cover  string
+		margin float64
+	}
+	tallies := make(map[string]*tally)
+	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
+		for _, c := range candidates {
+			vector, ok := vectors[c.objectID]
+			if !ok {
+				continue
+			}
+			for _, label := range s.labels.Shown() {
+				margin := dot(vector, labelVectors[label.ID]) - s.labels.Thresholds[label.ID]
+				if margin < 0 || hidden[c.id+"\x1f"+label.ID] {
+					continue
+				}
+				t := tallies[label.ID]
+				if t == nil {
+					t = &tally{}
+					tallies[label.ID] = t
+				}
+				t.photos++
+				if t.cover == "" || margin > t.margin {
+					t.cover, t.margin = c.id, margin
+				}
+			}
+		}
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, label := range s.labels.Shown() {
+		if t := tallies[label.ID]; t != nil {
+			counts = append(counts, LabelCount{ID: label.ID, Name: label.Name, Photos: t.photos, CoverID: t.cover})
+		}
+	}
+	slices.SortStableFunc(counts, func(a, b LabelCount) int { return cmp.Compare(b.Photos, a.Photos) })
+	return counts, true, nil
 }
 
 func (s *Service) queryVectors(ctx context.Context, model string) (map[string][]float32, error) {

@@ -95,6 +95,41 @@ func TestPhotosShowOnlyLabelsAboveTheirThresholds(t *testing.T) {
 	}
 }
 
+// Label counts follow a search by label: the caller's and the shared
+// library, without photos that hid the label.
+func TestLabelCountsCoverTheSearchScope(t *testing.T) {
+	embedder := &colorEmbedder{}
+	service := labelService(t, filepath.Join(t.TempDir(), "photos"), embedder, colourLabels(t, "colour-1"))
+	ctx := context.Background()
+	alicePrivate, shared := libraries(t, service, namedAlice)
+	bobPrivate, _ := libraries(t, service, namedBob)
+	if counts, ready, err := service.LabelCounts(ctx, namedAlice, ""); err != nil || ready || len(counts) != 0 {
+		t.Fatalf("LabelCounts() before label vectors = %v ready=%v, %v", counts, ready, err)
+	}
+	clearest := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "clearest.png", solidPNG(250, 5, 5))
+	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "red.png", red)
+	hiding := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "hiding.png", red)
+	bluePhoto := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "blue.png", blue)
+	importPhoto(t, service, namedBob, shared.ID, "", "shared.png", red)
+	importPhoto(t, service, namedBob, bobPrivate.ID, "", "bob.png", red)
+	index(t, service, embedder)
+	if _, err := service.HideAILabel(ctx, namedAlice, hiding.ID, "red"); err != nil {
+		t.Fatalf("HideAILabel() error = %v", err)
+	}
+
+	counts, ready, err := service.LabelCounts(ctx, namedAlice, "")
+	want := []photos.LabelCount{
+		{ID: "red", Name: "红色", Photos: 3, CoverID: clearest.ID},
+		{ID: "blue", Name: "蓝色", Photos: 1, CoverID: bluePhoto.ID},
+	}
+	if err != nil || !ready || !slices.Equal(counts, want) {
+		t.Fatalf("LabelCounts() = %+v ready=%v, %v; want %+v", counts, ready, err, want)
+	}
+	if _, _, err := service.LabelCounts(ctx, namedBob, alicePrivate.ID); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("LabelCounts() naming another member's library error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestLabelsHoldOnlyForTheCalibratedModel(t *testing.T) {
 	embedder := &colorEmbedder{}
 	service := labelService(t, filepath.Join(t.TempDir(), "photos"), embedder, colourLabels(t, "another model"))

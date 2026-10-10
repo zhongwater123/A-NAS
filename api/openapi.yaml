@@ -617,6 +617,16 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/labels:
+    get:
+      operationId: listPhotoLabels
+      summary: Count the AI labels that untrashed photos in the caller's private and the shared library show, most photos first, by the rule of a search by label
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+      responses:
+        "200": { description: Label counts, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLabelCounts" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/libraries/{libraryId}/albums:
     get:
       operationId: listPhotoAlbums
@@ -722,11 +732,21 @@ paths:
       summary: List available photo assets, newest capture time first
       parameters:
         - { $ref: "#/components/parameters/PhotoLibraryID" }
+        - { name: month, in: query, description: "Only this month (YYYY-MM) of the device's time zone.", schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" } }
         - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
       responses:
         "200": { description: One timeline page, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/timeline/months:
+    get:
+      operationId: listPhotoTimelineMonths
+      summary: Count available photo assets by month of the device's time zone, newest month first
+      parameters:
+        - { $ref: "#/components/parameters/PhotoLibraryID" }
+      responses:
+        "200": { description: Months with photos, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimelineMonths" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/entries:
     get:
@@ -1842,6 +1862,37 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string, description: Cursor for the next page; absent on the last page. }
+    PhotoTimelineMonths:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [month, photos]
+            properties:
+              month: { type: string, description: "YYYY-MM in the device's time zone." }
+              photos: { type: integer, minimum: 1 }
+    PhotoLabelCounts:
+      type: object
+      additionalProperties: false
+      required: [items, ready]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, photos, coverId]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              photos: { type: integer, minimum: 1 }
+              coverId: { type: string, description: The photo that shows the label most clearly. }
+        ready: { type: boolean, description: "False while AI labels are not available; there are no items then." }
     PhotoAlbum:
       type: object
       additionalProperties: false
