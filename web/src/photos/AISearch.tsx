@@ -53,8 +53,7 @@ export function AISearchHome({ viewing, refreshKey, topInset, ai, recent, onSear
     event.preventDefault();
     if (query.trim()) onSearch(query.trim());
   };
-  const unavailable = ai?.state === "unavailable";
-  const status = !ai ? "" : unavailable ? "本地 AI 未启用，只能按名称和标签搜索" : ai.pending ? `已整理 ${ai.ready} / ${ai.ready + ai.pending + ai.failed} 张` : `已整理全部 ${ai.ready} 张`;
+  const status = !ai || ai.state === "unavailable" ? "" : ai.pending ? `已整理 ${ai.ready} / ${ai.ready + ai.pending + ai.failed} 张` : `已整理全部 ${ai.ready} 张`;
 
   return (
     <div className="ph-cards-scroll ph-discover" style={{ paddingTop: topInset }}>
@@ -84,9 +83,7 @@ export function AISearchHome({ viewing, refreshKey, topInset, ai, recent, onSear
         <header><h3>按内容浏览</h3><small>这些是本地 AI 能可靠认出的事物，点一下即可搜索</small></header>
         {labels === undefined ? <div className="ph-loading"><span className="ph-spinner" /></div>
           : !groups.length ? (
-            <Empty icon={<ScanSearch />} title="还没有可以浏览的事物" text={unavailable || !labels.ready
-              ? "此设备还没有启用本地 AI，或识别用的词表尚未准备好。启用后，本地 AI 会在空闲时认出照片里的猫、海滩、蛋糕等事物。"
-              : "本地 AI 还没在照片里认出熟悉的事物。整理完更多照片后会出现在这里。"} />
+            <Empty icon={<ScanSearch />} title="还没有可以浏览的事物" text="照片整理好后，这里会按动物、食物、物品等列出照片里认出的事物。现在可以先按名称和标签搜索。" />
           ) : groups.map(([category, items]) => {
             const expanded = open.has(category);
             return (

@@ -447,11 +447,13 @@ describe("PhotosPanel albums, trash and labels", () => {
     expect(screen.queryByLabelText("最近搜索")).toBeNull();
     unmount();
 
+    // AI is built in: while it cannot run, nothing says it is off.
     ready = false;
     render(<PhotosPanel userId="user:alice" isAdmin={false} />);
-    expect(await screen.findByText("本地 AI 未启用")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "AI 搜图" }));
-    expect(await screen.findByText(/此设备还没有启用本地 AI/)).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "AI 搜图" }));
+    expect(await screen.findByText(/照片整理好后，这里会按动物、食物、物品等列出/)).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "本地 AI 状态" })).toBeNull();
+    expect(screen.queryByText(/未启用|不可用/)).toBeNull();
   });
 });
 
@@ -487,8 +489,8 @@ describe("PhotosPanel search and viewing", () => {
     expect(await screen.findByText("没有能确定的结果，以下是最接近的照片")).toBeTruthy();
     await user.clear(screen.getByRole("searchbox", { name: "搜索照片" }));
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "黄昏{Enter}");
-    expect(await screen.findByText("本地 AI 暂不可用，只按名称和标签匹配")).toBeTruthy();
-    expect(screen.getByText("没有找到相关照片")).toBeTruthy();
+    expect(await screen.findByText("没有找到相关照片")).toBeTruthy();
+    expect(screen.queryByText(/不可用/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
