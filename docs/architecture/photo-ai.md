@@ -1,6 +1,6 @@
 # 相册本地 AI（M2）实施方案
 
-状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）；2026-10-10 起 AI 标签暂停，搜索改为纯向量排序与两段式结果（[#66](https://github.com/zhongwater123/A-NAS/issues/66)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字在部署后补充
+状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）；2026-10-10 起搜索改为纯向量排序与两段式结果（[#66](https://github.com/zhongwater123/A-NAS/issues/66)），AI 标签只在 AI 聚合中展示、不参与搜索。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字在部署后补充
 更新时间：2026-10-10
 
 本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供中文自然语言搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
@@ -10,7 +10,7 @@
 M2 交付后，成员可以：
 
 - 在相册里用中文搜索“海边的猫”“车库里的电动车”，结果只含自己有权查看的照片；
-- 给照片添加自己的标签，并按标签找回照片（AI 标签已暂停，见“AI 标签”）；
+- 给照片添加自己的标签，并按标签找回照片；在 AI 聚合中浏览本地 AI 有把握的照片组；
 - 不下载、不安装、不配置任何 AI 组件：AI 随系统安装并默认开启；
 - 在 AI Worker 启动中、崩溃、积压或硬件不足时照常使用 M1 的全部功能。
 
@@ -105,23 +105,40 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 ### 存储（Catalog migration 4–6）
 
 - `embeddings(object_id, derivation, model, vector, created_at)`：每个对象一行，记录产生它的模型，768 维 float32 约 3 KB；20,000 张约 60 MB。
-- `query_vectors(model, text, vector, created_at)`：AI 标签暂停前缓存标签文本的向量；暂停后不再写入。表保留，以便回滚到旧 release 时 Catalog 仍能打开。
+- `query_vectors(model, text, vector, created_at)`：Worker 为标签文本编码的向量，按模型与文本缓存，重启后无需 Worker 即可列出 AI 聚合。
 - 用户元数据（migration 6，[`albums.go`](../../internal/photos/albums.go)、[`usertags.go`](../../internal/photos/usertags.go)）：`albums(id, library_id, name, created_by, created_at)` 与 `album_assets(album_id, asset_id, added_by, added_at)` 记录相册分组；`user_tags(asset_id, name, …)` 与 `ai_tag_corrections(asset_id, label_id, verdict, …)` 以照片资产为键。照片永久删除时随之删除；AI 标签的计算与派生数据的清除永远不改动它们，复制照片时一并复制标签与纠错。
 
-### AI 标签（2026-10-10 起暂停）
+### AI 聚合
 
-步骤 3 与 5 曾用同一个向量做零样本标签：照片向量与标签文本向量的相似度超过逐标签校准的阈值（[校准报告](../research/photo-ai-label-calibration.md)）就显示标签，查询提到已校准的标签时还按阈值过滤搜索结果。部署到 Experimental NAS 后用户决定关闭全部 AI 标签（[#66](https://github.com/zhongwater123/A-NAS/issues/66)）：
+已实现于 [`photos/ailabels.go`](../../internal/photos/ailabels.go)，词表与阈值随程序发布（[`photos/labels`](../../internal/photos/labels/labels.go)）。
 
-- **误导**：航拍城市被标成“飞盘”。能校准的只有 COCO 标注过的物体（73 个可展示标签全是动物、物品、食物、交通工具这类），场景、文档和人物都没有可用的负例，类别太少，帮不了家庭照片的检索。
-- **伤害搜索**：查询里出现这 73 个词之一，搜索就从排序变成硬过滤；按标签过滤时 COCO 上约一半真实照片不显示（召回 53%），用户却看不出来。
-- **小物体本来就找不到**：整张照片只有一个向量。在 COCO val2017 上，搜“手机”时手机不到画面 1% 的照片只有 39% 排进前 R 名（R 为真实照片数），大手机为 100%；杯子 20%、瓶子 21%、笔记本电脑 16%；140 个视觉 token 也没有改善。这是整图向量的性质，标签无法弥补。
+**由来**：步骤 3 与 5 曾用同一个向量做零样本标签，显示在照片详情上，查询提到已校准的标签时还按阈值过滤搜索结果。部署后发现：
+- 标签误导：航拍城市被标成“飞盘”。
+- 标签过滤让 COCO 上约一半真实照片从搜索结果中消失（召回 53%）。
+- 整图向量本来就找不到小物体：搜“手机”时，手机不到画面 1% 的照片只有 39% 排进前 R 名（R 为真实照片数），大手机为 100%。
 
-现状：
+#66 因此关闭了全部标签。之后用户希望把按内容分组的呈现找回来，并定下两条规则（2026-10-10）：
+- **红线**：由向量模型产生的标签不参与搜索。
+- **宁缺毋滥**：宁可少标，不能错标。
 
-- 照片详情不再返回 AI 标签，`GET /api/v1/photos/labels`、`search?label=` 与隐藏 AI 标签的接口已删除，后台不再为标签文本计算向量。由向量计算标签的代码与 Go 词表包随之删除；词表 v1 与阈值移到 [`ai/eval/labels`](../../ai/eval/labels/v1.json)，作为评估用的中文查询集。
-- 用户已有的 AI 纠错（`ai_tag_corrections`）是用户元数据：不显示、不删除，复制照片时一并复制。
-- 固定类别的目标检测暂不做（用户 2026-10-10 决定）。小物体先在开发机评估“分块向量”：每张照片除整图外再按网格切块，各算一个向量，搜索取整图与各块的较高分（[`eval.tile_search`](../../ai/eval/tile_search.py)）。它不引入新模型、新许可或新运行时，代价是每张照片的向量计算与内存随块数成倍增加；结论与数字写入本节后再决定是否进入产品。
-- 是否恢复标签、由什么模型产生，另行决定。
+**行为**：
+- 标签只以 AI 聚合呈现：照片向量与某个标签文本向量的相似度达到阈值、且这张照片没有被移出，就归入该标签的一组。
+- 接口：
+  - `GET /api/v1/photos/labels` 按组列出调用者可见范围内的张数与最有把握的封面；
+  - `GET /api/v1/photos/labels/{id}/assets` 按把握从高到低分页列出一组；
+  - `DELETE /api/v1/photos/assets/{id}/ai-labels/{label}` 把一张照片移出一组，记为该照片资产的 AI 纠错，复制与模型升级后仍然有效。
+- 照片详情不列 AI 标签；搜索只用名称、用户标签和向量排序（[`TestSearchNeverUsesClusters`](../../internal/photos/ailabels_test.go) 守住这一点）。
+- 标签分数在读取时算出，阈值随新版本立即生效。标签文本的向量由 AI 后台任务逐条请 Worker 编码，存入 `query_vectors`；全部就绪前不列出任何组。阈值只对校准时的模型成立：模型不符时不编码标签文本，也不列出任何组。
+
+**校准**：按聚合的用法从严，方法与数字见[校准报告](../research/photo-ai-label-calibration.md#ai-聚合的严格校准)。
+- 每个标签在校准半上归入的照片至少 95% 正确，且至少归入 10 张才启用。
+- 场景标签的真值来自 COCO-Stuff。
+- v1 阈值启用 25 个标签：动物 6、自然 2（雪、大海）、食物 2、交通工具 5、运动 2、物品 8。在不参与选择的测试半上，各组收入的照片 95.2% 正确（1,589 张）。
+- 天空、树、草地、道路在这一标准下只能收入不到一成的真实照片；山、沙子、河、建筑只有 75%–93% 正确。按“宁缺毋滥”，它们都不启用。
+
+**之后**：
+- 固定类别的目标检测另行评估，不在本版。
+- 小物体先在开发机评估“分块向量”：每张照片除整图外再按网格切块，各算一个向量，搜索取整图与各块的较高分（[`eval.tile_search`](../../ai/eval/tile_search.py)）。它不引入新模型、新许可或新运行时，代价是向量计算与内存随块数成倍增加；有结论后再决定是否进入产品。
 
 ### 语义搜索
 
@@ -137,7 +154,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 ### 界面上的整理进度与隐私说明
 
-- 相册侧栏的 AI 卡片（[`Sidebar.tsx`](../../web/src/photos/Sidebar.tsx)）读取 AI 状态接口（`GET /api/v1/photos/ai`，读取不计入前台活动），显示整理进度、暂停原因与无法识别的数量，AI 无法运行时隐藏；AI 搜索页（[`AISearch.tsx`](../../web/src/photos/AISearch.tsx)）说明照片只在这台设备上由本地 AI 识别。界面不显示模型名称、版本或组件状态，接口返回的模型 ID 只用于诊断。
+- 相册侧栏的 AI 卡片（[`Sidebar.tsx`](../../web/src/photos/Sidebar.tsx)）读取 AI 状态接口（`GET /api/v1/photos/ai`，读取不计入前台活动），显示整理进度、暂停原因与无法识别的数量，AI 无法运行时隐藏；AI 聚合页（[`AIHome.tsx`](../../web/src/photos/AIHome.tsx)）说明照片只在这台设备上由本地 AI 识别。界面不显示模型名称、版本或组件状态，接口返回的模型 ID 只用于诊断。
 - 隐私说明以 Worker 沙箱的系统测试为前提，测试未通过的版本不得发布。
 - 各图库的 AI 开关见[规格](../specs/photo-library.md)，不在步骤 7 内实现。
 
