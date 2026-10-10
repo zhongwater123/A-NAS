@@ -451,7 +451,6 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
       </form>
       {searchInfo?.match === "labels" && <span className="ph-subbar-label"><Sparkles />只显示本地 AI 识别为{quoted}的照片，识别可能有误</span>}
       {searchInfo?.match === "closest" && <span className="ph-subbar-note"><CircleAlert />没有能确定的结果，以下是最接近的照片</span>}
-      {searchInfo?.match === "names" && <span className="ph-subbar-note"><CircleAlert />本地 AI 暂不可用，只按名称和标签匹配</span>}
     </div>
   ) : null;
 

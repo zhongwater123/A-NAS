@@ -117,17 +117,16 @@ function AlbumLink({ album, active, droppable, onOpen, onDrop }: { album: PhotoA
   );
 }
 
-// AICard says what local AI is doing with the caller's photos.
+// AICard shows how far the built-in AI has organised the caller's photos.
+// AI is part of the product, not something users manage, so while it cannot
+// run the card is simply absent.
 function AICard({ ai }: { ai?: PhotoAIStatus }) {
-  if (!ai) return null;
+  if (!ai || ai.state === "unavailable") return null;
   const total = ai.ready + ai.pending + ai.failed;
   const share = total ? ai.ready / total : 1;
-  let title = "本地 AI";
-  let detail = "";
-  if (ai.state === "unavailable") {
-    title = "本地 AI 未启用";
-    detail = "搜索只按照片名称和标签匹配";
-  } else if (!ai.pending) {
+  let title: string;
+  let detail: string;
+  if (!ai.pending) {
     title = `已整理全部 ${ai.ready} 张`;
     detail = "可以用自然语言搜索照片";
   } else if (ai.state === "working") {
@@ -143,7 +142,7 @@ function AICard({ ai }: { ai?: PhotoAIStatus }) {
       <div>
         <strong>{title}</strong>
         <small>{detail}{ai.failed ? `；${ai.failed} 张无法识别` : ""}</small>
-        {ai.state !== "unavailable" && total > 0 && <span className="ph-ai-bar"><span style={{ width: `${Math.round(share * 100)}%` }} /></span>}
+        {total > 0 && <span className="ph-ai-bar"><span style={{ width: `${Math.round(share * 100)}%` }} /></span>}
       </div>
     </div>
   );
