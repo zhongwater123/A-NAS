@@ -1,6 +1,6 @@
 # Debian 的 Compose 2.26.1 把应用的整个卷挂进容器
 
-状态：fixed locally；Experimental NAS 已换用 Docker 官方源，包含检查的容器代理待部署
+状态：resolved
 更新时间：2026-10-10
 
 ## 症状与影响
@@ -44,7 +44,7 @@ Compose 2.29 及以前在卷挂载没有其他高级选项时，用旧式绑定�
 
 ## 后续工作
 
-- 在 Experimental NAS 部署包含版本与挂载检查的容器代理。
+- 2026-10-10 已在 Experimental NAS 部署容器代理 `173cbb5499ce`，探针通过；`docker inspect` 显示 Immich 与 OpenList 的每个挂载都是计划中的子目录（如 `a-nas-immich_a-nas-appdata/pgdata`、`a-nas-openlist_a-nas-appdata/data`）。
 - 首次失败安装期间 Immich 服务一直连不上数据库，未见它初始化上传目录；如需确认，检查共享空间根部是否出现 Immich 的 `library`、`upload`、`thumbs` 等目录。
 
 ## 关联
