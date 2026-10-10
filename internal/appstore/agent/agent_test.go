@@ -62,6 +62,19 @@ func TestClientRoundTripsTheAppCenter(t *testing.T) {
 	}
 }
 
+// The agent is installed apart from the product service; on 2026-10-09 an
+// agent that added plan fields broke every plan in an older product service.
+func TestClientIgnoresFieldsANewerAgentAdds(t *testing.T) {
+	client := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"apps":[{"id":"memos","title":"Memos","state":"available","running":0,"total":0,"addedLater":true}],"addedLater":1}`)
+	})))
+	apps, err := client.Apps(context.Background())
+	if err != nil || len(apps) != 1 || apps[0].ID != "memos" {
+		t.Fatalf("Apps() = %+v, %v; want the known fields and no error", apps, err)
+	}
+}
+
 func serve(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	socket := filepath.Join(t.TempDir(), "agent.sock")

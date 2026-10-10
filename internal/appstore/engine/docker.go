@@ -6,13 +6,15 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 )
 
 // DockerInspector reads container names, app labels and published ports, the
-// daemon's address pools and the subnets of app networks.
+// daemon's address pools and API version, and the networks and volume
+// mounts of app projects.
 type DockerInspector struct {
 	Client *client.Client
 }
@@ -70,5 +72,48 @@ func (d DockerInspector) ProjectNetworks(ctx context.Context, project string) ([
 	return networks, nil
 }
 
-// composeProjectLabel is the label Compose puts on every network it creates.
+func (d DockerInspector) APIVersion(ctx context.Context) (string, error) {
+	version, err := d.Client.ServerVersion(ctx, client.ServerVersionOptions{})
+	if err != nil {
+		return "", err
+	}
+	return version.APIVersion, nil
+}
+
+// ProjectMounts reads each project container's volumes. The subpath comes
+// from the mount spec: a Compose that falls back to the legacy bind API
+// leaves no spec, so the container gets the whole volume and Subpath is empty.
+func (d DockerInspector) ProjectMounts(ctx context.Context, project string) ([]MountInfo, error) {
+	list, err := d.Client.ContainerList(ctx, client.ContainerListOptions{
+		All: true, Filters: make(client.Filters).Add("label", composeProjectLabel+"="+project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var mounts []MountInfo
+	for _, item := range list.Items {
+		inspected, err := d.Client.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return nil, err
+		}
+		subpaths := map[string]string{}
+		if inspected.Container.HostConfig != nil {
+			for _, spec := range inspected.Container.HostConfig.Mounts {
+				if spec.VolumeOptions != nil {
+					subpaths[spec.Target] = spec.VolumeOptions.Subpath
+				}
+			}
+		}
+		name := strings.TrimPrefix(inspected.Container.Name, "/")
+		for _, point := range inspected.Container.Mounts {
+			if point.Type == mount.TypeVolume {
+				mounts = append(mounts, MountInfo{Container: name, Volume: point.Name, Target: point.Destination, Subpath: subpaths[point.Destination]})
+			}
+		}
+	}
+	return mounts, nil
+}
+
+// composeProjectLabel is the label Compose puts on every container and
+// network it creates.
 const composeProjectLabel = "com.docker.compose.project"

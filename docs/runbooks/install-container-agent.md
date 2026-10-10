@@ -1,18 +1,18 @@
 # 安装 Docker 与容器代理
 
-状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证）
-更新时间：2026-10-09
+状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证，2026-10-10 在该机完成到官方源的迁移）
+更新时间：2026-10-10
 
 ## 目的
 
-在 Experimental NAS 上安装 Debian 打包的 Docker Engine、Compose 与 A-NAS 容器代理，使桌面“Docker”和“应用中心”以实时模式运行。产品服务只能访问容器代理的类型化 Unix socket，不能直接访问等同 root 权限的 `docker.sock`。
+在 Experimental NAS 上从 Docker 官方 apt 源安装 Docker Engine 与 Compose 插件（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)），再安装 A-NAS 容器代理，使桌面“Docker”和“应用中心”以实时模式运行。产品服务只能访问容器代理的类型化 Unix socket，不能直接访问等同 root 权限的 `docker.sock`。
 
 ## 前提与停止条件
 
 - 必须在主机名为 `a-nas-dev` 的 Debian 13 amd64 Experimental NAS 上以 root 执行；先按 [SSH 手册](bootstrap-experimental-nas-ssh.md)核对主机指纹。
 - `/opt/a-nas/current` 与 `/home/anas-dev/apps/a-nas/current` 必须指向同一个已验证 release；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。
 - 当前架构的产品服务身份是系统账号 `a-nas`。不得沿用 ADR 0008 以前的用户级预览步骤给 `anas-dev` 授权，也不得把 `a-nas`、`anas-dev` 或 Kiosk 账号加入 `docker` 组。
-- Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态；它新建的网络会改变宿主机路由，所以必须先配置地址池。安装失败、Docker Server 低于 26、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
+- Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态；它新建的网络会改变宿主机路由，所以必须先配置地址池。安装失败、Compose 低于 2.30 或 Engine API 低于 1.45（应用中心会拒绝安装，见[应用中心规格](../specs/app-center.md)）、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
 - 升级前备份 `/etc/a-nas/anas-api.env`；回滚只停用能力，不自动删除 `/var/lib/docker`、应用数据、镜像或容器。
 
 ## 安装
@@ -37,16 +37,67 @@ install -o root -g root -m 0600 \
   /root/a-nas-container-agent-backup/anas-api.env
 
 apt-get update
-apt-get install --no-install-recommends docker.io docker-cli docker-compose
+apt-get install -y ca-certificates curl
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+cat > /etc/apt/sources.list.d/docker.sources <<'SOURCES'
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: trixie
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+SOURCES
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin
 systemctl enable --now docker.service
 
 systemctl is-active --quiet docker.service
-docker version
-docker info --format 'server={{.ServerVersion}} cgroup={{.CgroupVersion}}'
-docker-compose version
+docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
+docker info --format 'cgroup={{.CgroupVersion}} driver={{.Driver}}'
+docker compose version
 ```
 
-完成标准：Docker Client 与 Server 都可用，Server 版本不低于 26.0，cgroup 为 2，Compose 命令可用。Debian 13 把 `/usr/bin/docker` 拆到 `docker-cli` 推荐包；使用 `--no-install-recommends` 时必须显式安装它。应用中心优先使用 `docker compose`，不可用时会使用 Debian 的 `docker-compose`。
+完成标准：Docker Client 与 Server 都可用，Server 为官方源当前的主版本，Compose 不低于 2.30，cgroup 为 2。Debian 自带的 `docker.io` 与 `docker-compose` 不再使用：它们停留在 26.1 与 2.26.1，后者会让应用拿到整个卷（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)）。已经装了 Debian 包的主机按[迁移步骤](#从-debian-dockerio-迁移到官方软件源)处理。
+
+### 从 Debian docker.io 迁移到官方软件源
+
+2026-10-10 之前按本手册安装的主机使用 Debian 的 `docker.io`、`docker-cli`、`docker-compose`、`containerd` 与 `runc`。按 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 换成官方包：卸载 Debian 包不会删除 `/var/lib/docker`、`/etc/docker/daemon.json` 或应用数据，镜像、容器、卷与地址池都会保留；设置了重启策略的应用容器在 Docker 重新启动后自动恢复。迁移期间 Docker 与全部容器中断几分钟。
+
+```bash
+test "$(hostname)" = a-nas-dev
+docker info --format 'driver={{.Driver}} pools={{json .DefaultAddressPools}}'   # 记下存储驱动与地址池
+docker ps --format '{{.Names}}'                                                 # 记下运行中的容器
+
+systemctl stop anas-container-agent.service
+apt-get remove -y docker.io docker-cli docker-compose containerd runc
+apt-get update
+apt-get install -y ca-certificates curl
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+cat > /etc/apt/sources.list.d/docker.sources <<'SOURCES'
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: trixie
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+SOURCES
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin
+rm -f /usr/local/lib/docker/cli-plugins/docker-compose   # 临时手动安装的 Compose，改由 apt 管理
+
+docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
+docker compose version
+docker info --format 'driver={{.Driver}} pools={{json .DefaultAddressPools}}'
+systemctl start anas-container-agent.service
+systemctl is-active docker.service anas-container-agent.service
+docker ps --format '{{.Names}}\t{{.Status}}'
+```
+
+完成标准：Server 为官方源当前的主版本，Compose 不低于 2.30；存储驱动与地址池和迁移前一致；迁移前运行的容器重新运行；`runuser -u anas-container -- env DOCKER_CONFIG=/var/lib/a-nas-container/docker-config docker compose version` 报告同一个 Compose。任一不符时停止，按[回滚](#回滚或恢复)恢复 Debian 包。
+
+2026-10-10 Experimental NAS 迁移后为 Docker 29.9.0（API 1.56）与 Compose v5.6.0；存储驱动仍为 `overlay2`，地址池不变，Immich 与 OpenList 随 Docker 启动恢复。
 
 ### 2. 配置 Docker 网络地址池
 
@@ -203,6 +254,8 @@ systemctl restart anas-api.service
 ```
 
 如需撤销授权，执行 `gpasswd -d a-nas anas-container` 后重启 `anas-api.service`。移除 Docker 会影响全部容器与镜像，必须另行确认；不要把 `apt-get purge` 或 `/var/lib/docker` 删除放进常规回滚。
+
+迁移到官方软件源后需要退回 Debian 包时，先停止容器代理，再执行 `apt-get remove -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin`、删除 `/etc/apt/sources.list.d/docker.sources`，然后 `apt-get update && apt-get install -y docker.io docker-cli docker-compose containerd runc`。Debian 的 Compose 2.26.1 会让应用拿到整个卷，应用中心会拒绝安装，因此退回只用于排障。
 
 ## 关联
 

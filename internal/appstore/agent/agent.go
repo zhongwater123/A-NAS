@@ -121,9 +121,10 @@ func (c *Client) do(ctx context.Context, method, path string, body any, into any
 		*raw, err = io.ReadAll(limited)
 		return response.Header.Get("Content-Type"), err
 	}
-	decoder := json.NewDecoder(limited)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
+	// The agent is installed apart from the product service, so a newer agent
+	// may add fields; an older client ignores them rather than failing every
+	// request (the 2026-10-09 App Center outage).
+	if err := json.NewDecoder(limited).Decode(into); err != nil {
 		return "", fmt.Errorf("decode container agent response: %w", err)
 	}
 	return response.Header.Get("Content-Type"), nil
@@ -260,6 +261,7 @@ var errorCodes = []struct {
 	{appstore.ErrPortInUse, http.StatusConflict, "port_in_use"},
 	{appstore.ErrNameInUse, http.StatusConflict, "name_in_use"},
 	{appstore.ErrAddressPoolMissing, http.StatusConflict, "address_pool_missing"},
+	{appstore.ErrRuntimeOutdated, http.StatusConflict, "docker_runtime_outdated"},
 	{appstore.ErrUnavailable, http.StatusServiceUnavailable, "apps_unavailable"},
 }
 
