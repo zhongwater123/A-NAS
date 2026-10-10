@@ -13,6 +13,10 @@ param(
 
     [string]$WslUser = 'anas-dev',
 
+    # Where the model that deploy\models\embeddinggemma-2-740m.json pins lives
+    # on this machine (docs/architecture/photo-ai.md).
+    [string]$ModelDirectory = 'D:\A-NAS-models\embeddinggemma-2-740m',
+
     [switch]$StageOnly
 )
 
@@ -55,7 +59,7 @@ try {
     }
 
     $action = if ($StageOnly) { 'stage for a root-managed system upgrade without touching running services' } else { "activate in $Mode mode, verify, and rollback on failure" }
-    $summary = "build commit $version as product $productVersion, deploy both binaries and local-console artifacts, then $action"
+    $summary = "build commit $version as product $productVersion, deploy both binaries, local AI and local-console artifacts, then $action"
     if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
         Write-Host "Release: $version"
         Write-Host "Product: $productVersion"
@@ -92,6 +96,29 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
     }
 
+    # Local AI is part of every release (ADR 0016). The model and the Python
+    # runtime travel once per content; the release carries their manifests.
+    $modelManifestPath = Join-Path $repoRoot 'deploy\models\embeddinggemma-2-740m.json'
+    $modelManifest = Get-Content -LiteralPath $modelManifestPath -Raw | ConvertFrom-Json
+    $modelPath = Join-Path $ModelDirectory $modelManifest.file
+    $runtimeManifestPath = Join-Path $repoRoot 'build\ai-runtime.json'
+    if (-not (Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf)) {
+        throw 'Missing build\ai-runtime.json: run scripts/build-ai-runtime.sh in WSL first.'
+    }
+    $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
+    $runtimePath = Join-Path $repoRoot "build\ai-runtime\$($runtimeManifest.file)"
+    foreach ($content in @(@{ Path = $modelPath; Sha = $modelManifest.sha256 }, @{ Path = $runtimePath; Sha = $runtimeManifest.sha256 })) {
+        if (-not (Test-Path -LiteralPath $content.Path -PathType Leaf)) {
+            throw "Missing local AI file: $($content.Path)"
+        }
+        if ((Get-FileHash -LiteralPath $content.Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $content.Sha) {
+            throw "Local AI file does not match its manifest: $($content.Path)"
+        }
+    }
+    $workerArchive = Join-Path $repoRoot 'build\ai-worker.tar'
+    & git -c $gitSafeDirectory archive --format=tar -o $workerArchive HEAD ai/anas_ai
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot archive the AI Worker.' }
+
     $apiHash = (Get-FileHash -LiteralPath $apiBinary -Algorithm SHA256).Hash.ToLowerInvariant()
     $agentHash = (Get-FileHash -LiteralPath $agentBinary -Algorithm SHA256).Hash.ToLowerInvariant()
     $release = "apps/a-nas/releases/$version"
@@ -105,6 +132,24 @@ try {
     & ssh.exe @sshOptions $target "install -d -m 0750 ~/$release"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot create the remote release directory.' }
 
+    # Uploads a file the NAS staging area does not hold yet and checks it there.
+    function Send-StagedContent([string]$Source, [string]$Directory, [string]$Name, [string]$Sha) {
+        $remote = "$Directory/$Name"
+        & ssh.exe @sshOptions $target "printf '%s  %s\n' $Sha ~/$remote | sha256sum --check --quiet - >/dev/null 2>&1"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "The NAS already holds $Name."
+            return
+        }
+        & ssh.exe @sshOptions $target "install -d -m 0750 ~/$Directory"
+        if ($LASTEXITCODE -ne 0) { throw "Cannot create ~/$Directory on the NAS." }
+        & scp.exe @sshOptions $Source "${target}:$remote.incoming"
+        if ($LASTEXITCODE -ne 0) { throw "Upload failed: $Source" }
+        & ssh.exe @sshOptions $target "printf '%s  %s\n' $Sha ~/$remote.incoming | sha256sum --check --quiet - && mv -f ~/$remote.incoming ~/$remote"
+        if ($LASTEXITCODE -ne 0) { throw "The uploaded file does not match its manifest: $Name" }
+    }
+    Send-StagedContent $modelPath "apps/a-nas/models/$($modelManifest.sha256)" $modelManifest.file $modelManifest.sha256
+    Send-StagedContent $runtimePath 'apps/a-nas/ai-runtimes' $runtimeManifest.file $runtimeManifest.sha256
+
     $uploads = @(
         @{ Source = $apiBinary; Destination = "${target}:$release/anas-api.incoming" },
         @{ Source = $agentBinary; Destination = "${target}:$release/anas-host-agent.incoming" },
@@ -113,6 +158,11 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-api.service'); Destination = "${target}:$release/anas-api-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-photos.service'); Destination = "${target}:$release/anas-photos-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.socket'); Destination = "${target}:$release/anas-ai-system.socket.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.service'); Destination = "${target}:$release/anas-ai-system.service.incoming" },
+        @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
+        @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
+        @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Destination = "${target}:$release/install-screensavers.sh.incoming" },

@@ -56,12 +56,18 @@ class MediaPipeProvider:
         if vision_tokens not in VISION_TOKENS:
             raise ValueError(f"vision tokens must be one of {VISION_TOKENS}")
         manifest = verify_model(model_path, manifest_path)
-        import mediapipe
-        from mediapipe.tasks.python.core.base_options import BaseOptions
-        from mediapipe.tasks.python.retrieval.universal_embedder import (
-            UniversalEmbedder,
-            UniversalEmbedderOptions,
-        )
+        try:
+            import mediapipe
+            from mediapipe.tasks.python.core.base_options import BaseOptions
+            from mediapipe.tasks.python.retrieval.universal_embedder import (
+                UniversalEmbedder,
+                UniversalEmbedderOptions,
+            )
+        except ImportError as error:
+            # A runtime that cannot load MediaPipe is a broken installation,
+            # not a reason to crash: under socket activation every connection
+            # would restart the Worker until systemd gives up on the socket.
+            raise Unavailable(f"the AI runtime cannot load MediaPipe: {error}") from error
 
         self._embedder = UniversalEmbedder.create_from_options(
             UniversalEmbedderOptions(

@@ -1,6 +1,6 @@
 # 相册技术设计
 
-状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 Worker 打包待做；M3 未开始。模型 revision、视觉 token 与 v1 标签阈值已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量。部署与验收进度见[当前状态](../status/CURRENT.md)。
+状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 已按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 实现为随系统内置安装；M3 未开始。模型 revision、视觉 token 与 v1 标签阈值已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量。部署与验收进度见[当前状态](../status/CURRENT.md)。
 
 本设计落实[相册规格](../specs/photo-library.md)。受管图库的长期边界由 [ADR 0006](../adr/0006-use-a-managed-photo-library.md) 决定，相册服务的身份、存储位置与授权方式由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定；模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -116,7 +116,7 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
 - Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级。
-- Worker 的 Python 依赖以锁定哈希的离线 wheel 随发行制品分发，模型文件附带来源、许可证、SHA-256 与预处理版本清单；AI 组件可以未安装，此时相册显示“智能处理不可用”，基础相册不受影响。
+- AI 随系统内置安装、默认开启，设备不联网获取模型（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：Worker 的 Python 依赖以锁定哈希的离线 wheel、模型文件连同来源、许可证、SHA-256 与预处理版本清单随发行制品交付，按内容各存一份并由 release 引用。Worker 不可用时基础相册不受影响。
 - EmbeddingGemma 2 的全模态 740M 官方 LiteRT 包经 MediaPipe Universal Embedder 运行（LiteRT-LM 自身的 Python API 没有向量接口，见 [M2 实施方案](photo-ai.md)），并用 Transformers/Sentence Transformers 结果抽样核对量化正确性；人脸模型优先使用 OpenVINO CPU Provider。不做 OCR（2026-10-09 决定）。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
 - Debian 13 不在当前 OpenVINO 官方支持发行版列表中，因此必须在目标系统完成离线安装、模型加载、连续运行和服务重启测试；失败时回退 ONNX Runtime CPU，不能让 Runtime 兼容性阻塞基础相册。
 - 模型文件必须随清单记录来源、许可证、SHA-256、预处理版本与输出 schema；安装后离线运行，不在推理时访问互联网。
@@ -159,11 +159,11 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 
 **M2 本地 AI 检索**
 
-实施方案见[相册本地 AI（M2）](photo-ai.md)；开发期只在开发机验证，以 PR 提交，不部署到 Experimental NAS。
+实施方案见[相册本地 AI（M2）](photo-ai.md)；开发期只在开发机验证，以 PR 提交，部署包含 AI 的版本到 Experimental NAS 另行确认。
 
-8. **AI contract**：Worker 协议与描述符传递、Fake AI Provider、空闲与资源门控，以及“AI 未安装、停止、崩溃或积压”时的基础相册测试；可与切片 3 并行。
+8. **AI contract**：Worker 协议与描述符传递、Fake AI Provider、空闲与资源门控，以及“AI 停止、崩溃或积压”时的基础相册测试；可与切片 3 并行。
 9. **Model benchmark**：先在开发机的 Debian 13 环境中经 MediaPipe Universal Embedder 完成模型离线加载、编码、RSS 与延迟冒烟测试，再用公开中文标注数据集设定标签初始阈值并冻结模型清单；实机数字在部署后补充。家庭照片的人工标注暂缓，见“模型基准与发布门槛”。
-10. **Worker 打包**：离线依赖、模型清单与 systemd 沙箱。
+10. **Worker 内置打包**：离线依赖、按内容存放的模型与运行环境、安装器与 systemd 沙箱，以及证明 Worker 无法联网的系统测试（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 11. **相册与用户元数据**：相册实体与加入相册（同一图库内引用照片资产，跨图库时先复制；2026-10-09 决定），以及用户标签、AI 纠错和手工位置的 migration、Policy、API 与 Web；人工人物名称随切片 13 的人物库实现。2026-10-08 从 M1 移出：基础相册不依赖它们，而用户标签与 AI 纠错首先服务于检索。
 12. **Search**：精确向量检索、受控中文标签、用户标签与 AI 纠错、文本检索、Policy 前后过滤。
 
@@ -204,6 +204,7 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - [相册规格](../specs/photo-library.md)
 - [受管图库 ADR](../adr/0006-use-a-managed-photo-library.md)
 - [相册服务身份与 Catalog 授权 ADR](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
+- [AI 随系统内置安装 ADR](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - [统一身份与文件授权规格](../specs/unified-identity-and-file-acl.md)
 - [本地照片 AI 模型与 Runtime 研究](../research/photo-ai-model-runtime-selection.md)
 - [领域语言](../../CONTEXT.md)

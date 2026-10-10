@@ -43,12 +43,61 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
   exit 2
 fi
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl; do
+# Local AI is part of every release (ADR 0016): the Worker's code, its units,
+# and manifests that pin the model and Python runtime by content.
+for file in anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/model.json ai/runtime.json; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing local AI file: $source_release/$file" >&2
+    exit 2
+  fi
+done
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3
   fi
 done
+# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2).
+for library in libEGL.so.1 libGLESv2.so.2; do
+  if ! ldconfig -p | grep -Fq "$library ("; then
+    echo "missing required host library: $library" >&2
+    exit 3
+  fi
+done
+
+# manifest_field FILE KEY: one field of a JSON manifest.
+manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
+model_sha=$(manifest_field "$source_release/ai/model.json" sha256)
+model_size=$(manifest_field "$source_release/ai/model.json" sizeBytes)
+model_file=$(manifest_field "$source_release/ai/model.json" file)
+runtime_id=$(manifest_field "$source_release/ai/runtime.json" id)
+runtime_sha=$(manifest_field "$source_release/ai/runtime.json" sha256)
+runtime_python=$(manifest_field "$source_release/ai/runtime.json" python)
+if [[ ! "$model_sha" =~ ^[0-9a-f]{64}$ || ! "$model_size" =~ ^[0-9]+$ || ! "$model_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "invalid model manifest: $source_release/ai/model.json" >&2
+  exit 2
+fi
+if [[ ! "$runtime_id" =~ ^[0-9a-f]{16}$ || ! "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "invalid AI runtime manifest: $source_release/ai/runtime.json" >&2
+  exit 2
+fi
+system_python=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+if [[ "$system_python" != "$runtime_python" ]]; then
+  echo "the AI runtime needs Python $runtime_python; this system has $system_python" >&2
+  exit 3
+fi
+# Each model and runtime is kept once by content and linked from every release
+# that pins it, so an upgrade or rollback copies neither again.
+model_path=/opt/a-nas/models/$model_sha/$model_file
+runtime_path=/opt/a-nas/ai-runtimes/$runtime_id
+if [[ ! -f "$model_path" && ! -f "$source_release/ai/model.litertlm" ]]; then
+  echo "missing model: neither $model_path nor $source_release/ai/model.litertlm" >&2
+  exit 2
+fi
+if [[ ! -d "$runtime_path" && ! -f "$source_release/ai/runtime.tar.gz" ]]; then
+  echo "missing AI runtime: neither $runtime_path nor $source_release/ai/runtime.tar.gz" >&2
+  exit 2
+fi
 # The LAN Web entry is optional: installing Caddy enables it (ADR 0012).
 # Validate before changing anything, so a bad configuration stops the upgrade.
 lan_entry=false
@@ -88,6 +137,39 @@ install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
+install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes
+
+# Staged content is copied before it is checked, so the staging account cannot
+# change it after the check.
+incoming=
+trap '[[ -z "$incoming" ]] || rm -rf -- "$incoming" "$incoming.tar.gz"' EXIT
+if [[ ! -f "$model_path" ]]; then
+  incoming=$(mktemp -d /opt/a-nas/models/.incoming-XXXXXX)
+  cp -- "$source_release/ai/model.litertlm" "$incoming/$model_file"
+  if [[ "$(stat -c %s "$incoming/$model_file")" != "$model_size" ]] ||
+    ! printf '%s  %s\n' "$model_sha" "$incoming/$model_file" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged model does not match its manifest: $source_release/ai/model.litertlm" >&2
+    exit 4
+  fi
+  chmod 0644 "$incoming/$model_file"
+  chmod 0755 "$incoming"
+  mv -T -- "$incoming" "/opt/a-nas/models/$model_sha"
+  incoming=
+fi
+if [[ ! -d "$runtime_path" ]]; then
+  incoming=$(mktemp -d /opt/a-nas/ai-runtimes/.incoming-XXXXXX)
+  cp -- "$source_release/ai/runtime.tar.gz" "$incoming.tar.gz"
+  if ! printf '%s  %s\n' "$runtime_sha" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged AI runtime does not match its manifest: $source_release/ai/runtime.tar.gz" >&2
+    exit 4
+  fi
+  tar -C "$incoming" --no-same-owner -xzf "$incoming.tar.gz"
+  rm -f -- "$incoming.tar.gz"
+  chmod 0755 "$incoming"
+  mv -T -- "$incoming" "$runtime_path"
+  incoming=
+fi
+trap - EXIT
 
 target="/opt/a-nas/releases/$release_id"
 if [[ -e "$target" ]]; then
@@ -100,6 +182,11 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
+install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
+install -o root -g root -m 0644 "$source_release/ai/model.json" "$source_release/ai/runtime.json" "$temporary/ai/"
+ln -s -- "$model_path" "$temporary/ai/model.litertlm"
+ln -s -- "$runtime_path" "$temporary/ai/runtime"
 mv -- "$temporary" "$target"
 trap - EXIT
 
@@ -154,6 +241,8 @@ chmod 0600 /etc/a-nas/host-agent.env
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
+install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
+install -o root -g root -m 0644 "$source_release/anas-ai-system.service" /etc/systemd/system/anas-ai.service
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
 if [[ "$lan_entry" == true ]]; then
   # Keep the administrator's own configuration the first time A-NAS replaces it.
@@ -167,6 +256,11 @@ fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
+# A running Worker belongs to the previous release; the next connection starts
+# this release's.
+systemctl stop anas-ai.service
+systemctl enable anas-ai.socket
+systemctl restart anas-ai.socket
 systemctl enable anas-host-agent.service anas-photos.service anas-api.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service
@@ -178,7 +272,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-ai.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

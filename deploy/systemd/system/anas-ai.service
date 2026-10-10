@@ -1,0 +1,48 @@
+[Unit]
+Description=A-NAS local AI Worker
+Documentation=https://github.com/zhongwater123/A-NAS
+Requires=anas-ai.socket
+After=anas-ai.socket
+
+[Service]
+Type=simple
+# Turns thumbnails the photo service passes as descriptors, and search text,
+# into vectors. It has no network and no data volume, so photos cannot leave
+# the device through it (ADR 0011, ADR 0016); the system test proves both.
+User=a-nas-ai
+DynamicUser=true
+# The installer links the release's runtime and model to the copies it keeps
+# once per content under /opt/a-nas.
+Environment=PYTHONPATH=/opt/a-nas/current/ai
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai
+# XNNPack keeps repacked weights here so later starts load faster.
+CacheDirectory=a-nas-ai
+CacheDirectoryMode=0700
+UMask=0077
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+# About 1.4 GiB at peak with 70 vision tokens (docs/architecture/photo-ai.md).
+MemoryMax=2G
+CPUQuota=200%
+# AI runs only while the photo library is idle and still yields to anything
+# else on the machine.
+CPUWeight=10
+IOWeight=10

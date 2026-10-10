@@ -19,6 +19,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0013：Docker 网络只从 A-NAS 指定的地址池分配](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
 - [0014：屏保视频是系统盘上的长期媒体，不随 release 发布](0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
 - [0015：Docker 与 Caddy 跟随上游官方软件源，最低能力由代码检查](0015-take-docker-and-caddy-from-their-upstream-repositories.md)
+- [0016：相册 AI 随系统内置安装，设备不联网获取模型](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 
 ## 格式
 

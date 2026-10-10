@@ -1,7 +1,7 @@
 # 相册本地 AI（M2）实施方案
 
-状态：进行中（步骤 1–6 已实现并合并，步骤 7 待做；代码随主干部署，但不安装 AI Worker、不在 Experimental NAS 上运行模型，部署 AI 组件需另行确认）
-更新时间：2026-10-09
+状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字在部署后补充
+更新时间：2026-10-10
 
 本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供 AI 标签与中文语义搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -11,7 +11,8 @@ M2 交付后，成员可以：
 
 - 在相册里用中文搜索“海边的猫”“车库里的电动车”，结果只含自己有权查看的照片；
 - 在查看器里看到少量高置信 AI 标签，并能隐藏错误标签、添加自己的标签；
-- 在 AI 组件未安装、停止、崩溃或积压时照常使用 M1 的全部功能。
+- 不下载、不安装、不配置任何 AI 组件：AI 随系统安装并默认开启；
+- 在 AI Worker 启动中、崩溃、积压或硬件不足时照常使用 M1 的全部功能。
 
 不在 M2 内：人脸与人物库（M3 切片 13）、按需中文描述与视频内容分析。不做 OCR（2026-10-09 决定）。
 
@@ -19,6 +20,7 @@ M2 交付后，成员可以：
 
 - **模型包**：使用全模态 740M 官方包（约 485 MB，2026-10-09 决定）。相册只调用文本与图片编码；包内的音频编码器保留，不为相册单独裁剪。
 - **OCR**：不做（2026-10-09 决定）。
+- **内置**：AI 随系统安装和升级、默认开启，模型与运行环境由开发机经 SSH 传到设备，设备不联网获取（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
 ## 已核实的 Runtime 事实（2026-10-08）
 
@@ -40,18 +42,19 @@ M2 交付后，成员可以：
 - 包内只有 70 与 140 两种图片签名；请求 280 会报错 `exceeds maximum available signature length (140)`。Worker 使用 70，并把 token 数写入模型 ID，改动后旧向量自动重建；步骤 3 的评估中 140 的质量差距在 1 个百分点以内、耗时约 2.5 倍，因此保持 70。
 - 输出 768 维、已归一化；`embed_image` 直接接受编码后的图片字节，因此 Worker 不需要自己的解码器，传入缩略图 JPEG 即可。无法解码的字节以 `ValueError` 报错，Worker 记为 `invalid_input`。
 - 零样本只是冒烟：三幅纯色图形与 matplotlib 自带的一张人物照片，对 7 个中文标签取最高分全部正确，但最高分与次高分只差 0.07–0.15，不能据此设定阈值。三种提示词模板（裸标签、`task: search result | query: …`、`…一张…的照片`）结果相近。
-- 依赖：`import mediapipe` 会加载 OpenCV 的绘图工具，图形界面版 OpenCV 需要 X 库，因此换用同版本的 `opencv-contrib-python-headless`；MediaPipe 的 C 库还链接 `libEGL.so.1` 与 `libGLESv2.so.2`，安装 Debian 的 `libegl1`、`libgles2`（只是分发库，不带 GPU 驱动）即可。完整依赖的虚拟环境约 509 MB，打包时（步骤 7）再精简。
+- 依赖：`import mediapipe` 会加载 OpenCV 的绘图工具，图形界面版 OpenCV 需要 X 库，因此换用同版本的 `opencv-contrib-python-headless`；MediaPipe 的 C 库还链接 `libEGL.so.1` 与 `libGLESv2.so.2`，安装 Debian 的 `libegl1`、`libgles2`（只是分发库，不带 GPU 驱动）即可。完整依赖的虚拟环境约 509 MB，步骤 7 的发行运行环境去掉音频与评估依赖后约 460 MB（见“模型与运行环境的交付”）。
 - 按 70 token 估算，2 万张照片约需 3.4 小时的空闲 CPU 时间；实机与温度影响待部署后验证。
 
-## 模型文件位置
+## 模型与运行环境的交付
 
-模型文件不进仓库，也不进发行包；位置与校验值固定在清单 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 中：
+按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)，模型与 Python 运行环境随发行制品送达设备，按内容各存一份并由 release 引用；设备在安装、升级和运行时都不联网获取。模型文件不进仓库，来源与校验值固定在清单 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 中。
 
-- **文件**：官方仓库 `litert-community/embeddinggemma-2-740m-litert-lm`（revision `24d962e9…`）中的通用 CPU/GPU 文件 `embeddinggemma-2-740m.litertlm`，484,622,336 字节，SHA-256 `e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c`。同一仓库中带厂商后缀的文件（Qualcomm、MediaTek、Tensor、Intel PTL）是特定 NPU 的编译版本，不适用于 i3-12100。
-- **Experimental NAS 暂存**：`/home/anas-dev/apps/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，与发行制品一样由开发机以 `anas-dev` 经 SSH 传入（目录已于 2026-10-09 创建）：`scp embeddinggemma-2-740m.litertlm anas-dev@<NAS>:apps/a-nas/models/embeddinggemma-2-740m/`，传完在 NAS 上用 `sha256sum` 核对。暂存只放文件，不启用任何 AI 组件。
-- **Experimental NAS 安装（之后部署 AI 时）**：`/opt/a-nas/models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，`root:root 0644`。root 执行的安装步骤先按清单核对暂存文件的大小与 SHA-256，再复制到这里；`anas-dev` 无权写入该目录。
-- **开发机**：`D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。开发期的实测副本从 NAS 暂存目录复制过来。
-- Worker 加载前核对文件大小与 SHA-256，不符时拒绝加载并报告 AI 不可用。
+- **模型文件**：官方仓库 `litert-community/embeddinggemma-2-740m-litert-lm`（revision `24d962e9…`）中的通用 CPU/GPU 文件 `embeddinggemma-2-740m.litertlm`，484,622,336 字节，SHA-256 `e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c`。同一仓库中带厂商后缀的文件（Qualcomm、MediaTek、Tensor、Intel PTL）是特定 NPU 的编译版本，不适用于 i3-12100。
+- **运行环境**：[`ai/requirements.lock`](../../ai/requirements.lock) 以版本与哈希固定 MediaPipe 及其运行所需的依赖：导入 MediaPipe 会加载其绘图工具，所以 OpenCV（headless 版）与 Matplotlib 保留；只服务音频任务的 `sounddevice` 与开发期的评估依赖不装。[`scripts/build-ai-runtime.sh`](../../scripts/build-ai-runtime.sh) 在开发机的 Debian 13 容器中按锁文件安装成虚拟环境并打包，运行环境 ID 取锁文件与 Python 版本的 SHA-256 前 16 位十六进制。2026-10-10 的运行环境解开约 460 MB（原开发环境 664 MB），压缩包 163 MB。NAS 不运行 pip、不访问 PyPI，也不需要 `python3-venv`（Experimental NAS 没有安装）：虚拟环境只引用系统的 `/usr/bin/python3`，安装器核对系统 Python 与构建时的版本一致。
+- **开发机**：模型位于 `D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。
+- **暂存**：[`deploy-dev.ps1`](../../scripts/deploy-dev.ps1) 以 `anas-dev` 经 SSH 暂存 release 时，先核对 NAS 暂存区的 `apps/a-nas/models/<SHA-256>/<文件名>` 与 `apps/a-nas/ai-runtimes/<ID>.tar.gz`，缺少或哈希不符时才上传；release 只携带 Worker 代码、两份清单与单元，暂存脚本把模型与运行环境链接进 release 的 `ai/` 目录。Experimental NAS 上 2026-10-09 按名称暂存的模型已于 2026-10-10 核对哈希后移到按哈希的位置。
+- **安装**：root 执行的安装器先把暂存的模型与运行环境复制到自己的临时目录再核对大小与 SHA-256，暂存账号因此无法改动已校验的内容；通过后放入 `/opt/a-nas/models/<SHA-256>/<文件名>`（`root:root 0644`）与 `/opt/a-nas/ai-runtimes/<ID>/`，已经安装的直接复用。release 的 `ai/` 目录包含 Worker 代码、两份清单，以及指向这两处的链接；单元经 `/opt/a-nas/current/ai/` 引用它们。安装器还要求 `python3`、`libEGL.so.1` 与 `libGLESv2.so.2`（Debian 包 `libegl1`、`libgles2`），缺少时以退出码 3 停止。
+- **校验**：Worker 加载前核对文件大小与 SHA-256，不符时拒绝加载并报告 AI 不可用。
 
 ## 整体结构
 
@@ -69,9 +72,9 @@ M2 交付后，成员可以：
 ### AI Worker（`anas-ai`）
 
 - 一个小型 Python 进程，内部只有一个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm`。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量。
-- 以专用身份 `a-nas-ai` 运行；systemd 约束沿用技术设计：`PrivateNetwork=yes`、`InaccessiblePaths=/srv/a-nas`、`MemoryMax`（起点 2G，按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。
-- 按需启动：`anas-ai.socket` 监听 `/run/a-nas-ai/ai.sock`（组 `a-nas-photos`、`0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
-- 模型文件的位置与校验见“模型文件位置”；AI 组件可以不安装，此时套接字不存在，相册显示“智能处理不可用”。
+- 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷；`MemoryMax=2G`（按实测收紧）、`CPUQuota=200%`、低 `CPUWeight`/`IOWeight`。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
+- 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
+- 模型与运行环境的来源、位置与校验见“模型与运行环境的交付”。安装器随系统启用套接字，没有“未安装”状态；Worker 启动中、崩溃或模型校验失败时相册照常可用，搜索退回按名称与用户标签匹配。设备低于最低硬件（待实机测量）时不启动 Worker。这些情况下界面都不说 AI 不可用（[相册界面规格](../specs/photo-gallery-ui.md)）。
 
 ### 协议
 
@@ -128,7 +131,13 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 依据见[校准报告](../research/photo-ai-label-calibration.md#搜索结果的取舍)：只排序时 COCO 上显示的照片只有 15% 相关；按标签阈值 88% 相关、召回 53%；按最佳匹配 0.04 以内 90% 相关、召回 33%。任何不依赖逐标签校准的规则，在图库里根本没有该事物时仍会返回照片，所以后者只作“最接近”展示。
   - 语义结果最多 500 张；分页游标记录上一页最后一项的分数与 ID。
 - 范围按[规格](../specs/photo-library.md)：普通搜索覆盖自己的私有图库与共享图库，不混入任何查看中的成员图库；管理员在查看模式下用 `viewing` 指定所查看的成员私有图库，经有效授权校验后加入，授权过期或无权时与不存在的图库一样返回 404。候选只从范围内的图库查询，结果来自 Catalog 当前记录。
-- AI 不可用（未安装、未运行、模型不符或编码失败）时只按名称匹配，响应的 `semantic` 为 `false`、`match` 为 `names`，窗口提示本地 AI 暂不可用。模型与校准不符时查询照常编码，但不按标签阈值过滤，按 `closest` 处理。
+- AI 不可用（Worker 未运行、模型不符或编码失败）时只按名称与用户标签匹配，响应的 `semantic` 为 `false`、`match` 为 `names`，窗口不另作提示（2026-10-10 决定）。模型与校准不符时查询照常编码，但不按标签阈值过滤，按 `closest` 处理。
+
+### 界面上的整理进度与隐私说明
+
+- 相册侧栏的 AI 卡片（[`Sidebar.tsx`](../../web/src/photos/Sidebar.tsx)）读取 AI 状态接口（`GET /api/v1/photos/ai`，读取不计入前台活动），显示整理进度、暂停原因与无法识别的数量，AI 无法运行时隐藏；AI 搜索页（[`AISearch.tsx`](../../web/src/photos/AISearch.tsx)）说明照片只在这台设备上由本地 AI 识别。界面不显示模型名称、版本或组件状态，接口返回的模型 ID 只用于诊断。
+- 隐私说明以 Worker 沙箱的系统测试为前提，测试未通过的版本不得发布。
+- 各图库的 AI 开关见[规格](../specs/photo-library.md)，不在步骤 7 内实现。
 
 ### 失败、版本与重建
 
@@ -138,7 +147,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 ## 切片与顺序
 
-每步一个 PR，按顺序合并；全部只在开发机验证。
+按顺序实现，每个步骤一个提交；开发期只在开发机验证，部署到 Experimental NAS 另行确认。
 
 | 步骤 | 对应切片 | 内容 | 完成标准 |
 |---|---|---|---|
@@ -148,12 +157,12 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 | 4 | 12 | 已实现：搜索接口、内存索引、搜索范围与桌面搜索框；Worker 增加 `embed_query` | 单元与泄漏测试覆盖范围、查看授权、回收站与分页；本地 systemd 环境中真实模型的中文搜索结果见[校准报告](../research/photo-ai-label-calibration.md#端到端搜索本地-systemd-环境) |
 | 5 | 12 | 已实现：标签向量缓存、读取时计算 AI 标签、查看器标签展示、按标签筛选 | 标签只在阈值之上、且只对校准模型出现；隐藏随步骤 6 |
 | 6 | 11 | 已实现：相册分组、加入与移出、用户标签、AI 纠错（手工位置随地点功能实现） | 用户元数据独立于派生数据，清除派生不影响它们；纠错与标签经重启和复制保留 |
-| 7 | 10 | 打包：离线 wheel 与哈希、模型清单、`anas-ai` 单元与安装器、系统测试 | 系统测试在无网络下安装并运行 Worker；不部署到 NAS，等你决定 |
+| 7 | 10 | 已实现：内置打包（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：锁定哈希的离线 wheel、按内容存放的模型与运行环境、`a-nas-ai` 身份与按需启动的套接字单元、安装器、经 SSH 暂存（整理进度与隐私说明已随 [#61](https://github.com/zhongwater123/A-NAS/pull/61) 的相册界面实现） | 系统测试在没有外网的环境中完成安装，Worker 经套接字按需启动并编码图片；测试证明 Worker 无法联网、无法读取数据卷；升级与回滚不重复复制模型；部署到 Experimental NAS 另行确认 |
 
 ## 待确认
 
-1. **许可**：发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并保存清单与 NOTICE。
-2. **下载**：模型包由你从其他设备传到开发机的预留位置；步骤 3 的公开中文数据集仍需下载，体积在下载前逐个列出。
+1. **许可**：模型随系统再分发，对外发行前核对权重许可证（Apache-2.0 还是 Gemma 许可），并随系统提供许可证与 NOTICE。
+2. **最低硬件**：运行 Worker 的内存与 CPU 下限，在 Experimental NAS 上实测后确定。
 3. **标签词表**：v1 共 330 个标签，其中 73 个可展示；如有必须识别的类别请补充。
 
 ## 风险
@@ -169,5 +178,5 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 技术设计：[相册技术设计](photo-library.md)（切片 8–12）
 - 规格：[相册](../specs/photo-library.md)
 - 研究：[本地照片 AI 模型与 Runtime](../research/photo-ai-model-runtime-selection.md)
-- ADR：[0006 受管图库](../adr/0006-use-a-managed-photo-library.md)、[0011 相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
+- ADR：[0006 受管图库](../adr/0006-use-a-managed-photo-library.md)、[0011 相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0016 AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - 代码：[`internal/photos/jobs.go`](../../internal/photos/jobs.go)（复用的持久任务表）

@@ -36,8 +36,8 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh
-	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh
+	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh
+	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
@@ -82,6 +82,17 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
+	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/main.go
+	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
+	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket
+	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-ai.service
+	grep -Fq 'anas-ai-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-worker.tar.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	! grep -E '^[A-Za-z0-9_.-]+==' ai/requirements.lock | grep -v -- ' --hash=sha256:[0-9a-f]\{64\}$$'
 
 vet:
 	$(GO) vet ./...

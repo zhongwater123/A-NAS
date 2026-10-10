@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -138,6 +139,19 @@ class ManifestTest(unittest.TestCase):
             providers.verify_model(model, manifest)
         with self.assertRaises(providers.Unavailable):
             providers.verify_model(os.path.join(directory, "absent.litertlm"), manifest)
+
+    @unittest.skipIf(importlib.util.find_spec("mediapipe"), "MediaPipe is installed")
+    def test_a_runtime_without_mediapipe_is_unavailable(self):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        model = os.path.join(directory, "model.litertlm")
+        with open(model, "wb") as file:
+            file.write(b"weights")
+        manifest = os.path.join(directory, "manifest.json")
+        with open(manifest, "w", encoding="utf-8") as file:
+            json.dump({"name": "test", "sizeBytes": 7, "sha256": hashlib.sha256(b"weights").hexdigest()}, file)
+        with self.assertRaises(providers.Unavailable):
+            providers.MediaPipeProvider(model, manifest)
 
 
 if __name__ == "__main__":
