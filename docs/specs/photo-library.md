@@ -406,7 +406,7 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 
 ## 验收证据
 
-- M1 已实现部分的测试见下方“关联”；M2、M3 实现时补充 AI Worker 与图库投影的测试链接，“待确认”项在对应切片开始前得出结论。
+- M1 与 M2 已实现部分的测试见下方“关联”；M3 实现时补充图库投影的测试链接，“待确认”项在对应切片开始前得出结论。
 - 实机阶段：使用实验 NAS 和代表性测试图库记录资源及性能基线。
 
 ## 关联
@@ -418,5 +418,5 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 - ADR：[受管图库与不可变内容对象](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 研究：[本地照片 AI 模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md)
-- 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/PhotosPanel.tsx)、[相册服务进程](../../internal/photoservice/photoservice.go)；部署见[启用相册服务](../runbooks/enable-photo-service.md)
-- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[私有图库查看授权](../../internal/accounts/library_viewing_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/PhotosPanel.test.tsx)、[端到端冒烟](../../scripts/smoke-photo-service.sh)
+- 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/PhotosPanel.tsx)、[相册服务进程](../../internal/photoservice/photoservice.go)；M2 的[语义搜索](../../internal/photos/search.go)、[AI 标签](../../internal/photos/ailabels.go)与[标签词表](../../internal/photos/labels/labels.go)、[相册](../../internal/photos/albums.go)、[用户标签与 AI 纠错](../../internal/photos/usertags.go)、[AI Worker 客户端](../../internal/aiworker/client.go)与 [Python Worker](../../ai/anas_ai/worker.py)；部署见[启用相册服务](../runbooks/enable-photo-service.md)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[私有图库查看授权](../../internal/accounts/library_viewing_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/PhotosPanel.test.tsx)、[端到端冒烟](../../scripts/smoke-photo-service.sh)；M2 的[向量任务](../../internal/photos/ai_test.go)、[搜索范围与分页](../../internal/photos/search_test.go)、[AI 标签](../../internal/photos/ailabels_test.go)、[相册、用户标签与 AI 纠错](../../internal/photos/albums_test.go)、[Worker 协议](../../internal/aiworker/python_test.go)、[词表一致性](../../ai/tests/test_labels.py)

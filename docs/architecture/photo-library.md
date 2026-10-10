@@ -1,6 +1,6 @@
 # 相册技术设计
 
-状态：M1 切片 1–6 已实现；切片 7 实机闸门、M2 与 M3 未开始；模型质量与资源参数待基准冻结。部署与验收进度见[当前状态](../status/CURRENT.md)。
+状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 Worker 打包待做；M3 未开始。模型 revision、视觉 token 与 v1 标签阈值已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量。部署与验收进度见[当前状态](../status/CURRENT.md)。
 
 本设计落实[相册规格](../specs/photo-library.md)。受管图库的长期边界由 [ADR 0006](../adr/0006-use-a-managed-photo-library.md) 决定，相册服务的身份、存储位置与授权方式由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定；模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
