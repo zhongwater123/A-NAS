@@ -511,6 +511,93 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化终端"]);
   });
 
+  it("keeps the system rail to working shortcuts", async () => {
+    stubDesktopFetch(healthyState, true);
+    render(<App />);
+    const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
+    const buttons = within(rail).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["显示桌面", "全部应用", "打开设置", "账号（owner）"]);
+    expect(buttons.some((button) => button.hasAttribute("disabled"))).toBe(false);
+    expect(within(rail).getByRole("button", { name: "显示桌面" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("hides the open windows from the rail and brings back only those", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+    await user.click(within(dock).getByRole("button", { name: "切换到文件管理" }));
+    await user.click(within(dock).getByRole("button", { name: "最小化文件管理" }));
+
+    const showDesktop = within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "显示桌面" });
+    expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
+    await user.click(showDesktop);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(showDesktop.getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(showDesktop);
+    expect(screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"))).toEqual(["设置", "终端"]);
+    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "恢复文件管理" })).toBeTruthy();
+    expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("finds an app in the launcher by what it does and opens it with Enter", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
+    await user.click(within(rail).getByRole("button", { name: "全部应用" }));
+    const launcher = screen.getByRole("dialog", { name: "全部应用" });
+    const search = within(launcher).getByRole("searchbox", { name: "搜索应用" });
+    expect(document.activeElement).toBe(search);
+    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toContain("打开相册");
+    expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("AI 助手");
+
+    await user.type(search, "命令行");
+    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开终端"]);
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("dialog", { name: "全部应用" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "终端" })).toBeTruthy();
+  });
+
+  it("closes the launcher with Escape and returns focus to the rail", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const trigger = within(await screen.findByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "全部应用" });
+    await user.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const launcher = screen.getByRole("dialog", { name: "全部应用" });
+    await user.type(within(launcher).getByRole("searchbox", { name: "搜索应用" }), "传真");
+    expect(within(launcher).getByRole("status").textContent).toBe("没有名为“传真”的应用");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "全部应用" })).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("signs out only from the account menu", async () => {
+    const fetchMock = installAPI();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "账号（owner）" }));
+    const account = screen.getByRole("region", { name: "账号" });
+    expect(account.textContent).toContain("管理员");
+    expect(account.textContent).toContain("浏览器登录 · 有效至");
+    expect(document.activeElement).toBe(within(account).getByRole("menuitem", { name: /^我的账号/ }));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(within(account).getByRole("menuitem", { name: "退出登录" }));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "登录" })).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session" && init?.method === "DELETE")).toBe(true);
+  });
+
   it("manages containers from the Docker app", async () => {
     const scrollIntoView = vi.fn(() => Promise.resolve());
     Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
@@ -872,7 +959,8 @@ describe("ADR 0008 account safeguards", () => {
     const fetchMock = installAPI({ users: [session.user] });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "我的账号（owner）" }));
+    await user.click(await screen.findByRole("button", { name: "账号（owner）" }));
+    await user.click(screen.getByRole("menuitem", { name: /^我的账号/ }));
     const settings = screen.getByRole("dialog", { name: "设置" });
     expect(within(settings).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
     await user.click(within(settings).getByRole("button", { name: "修改密码…" }));

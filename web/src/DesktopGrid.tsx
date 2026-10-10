@@ -7,6 +7,8 @@ export interface DesktopApp {
   id: string;
   label: string;
   ariaLabel: string;
+  // Extra search terms for the launcher.
+  keywords?: string;
   tone: string;
   icon: ReactNode;
   onClick?: () => void;
