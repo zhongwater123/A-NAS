@@ -31,6 +31,9 @@ export interface PhotoPage { items: PhotoAsset[]; next?: string }
 export interface PhotoSearchPage extends PhotoPage { semantic: boolean; closest: number }
 // A month of a library's timeline in the device's time zone (YYYY-MM).
 export interface PhotoMonth { month: string; photos: number }
+// An AI cluster: the photos local AI is sure show a label. Clusters are shown
+// on their own and never take part in search.
+export interface PhotoLabelCount { id: string; name: string; category: string; photos: number; coverId: string }
 export interface PhotoAIStatus {
   state: "unavailable" | "paused" | "working" | "idle";
   // Why work is paused: foreground, or a resource under pressure.
@@ -56,6 +59,12 @@ export const listTimelineMonth = (libraryId: string, month: string, cursor = "",
 // viewing adds a member library the caller is viewing read-only.
 export const searchPhotos = (query: string, viewing = "", cursor = "", limit = 120) =>
   request<PhotoSearchPage>(`${base}/search?q=${id(query)}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+export const listPhotoLabels = (viewing = "") =>
+  request<{ items: PhotoLabelCount[]; ready: boolean }>(`${base}/labels${viewing ? `?viewing=${id(viewing)}` : ""}`);
+export const listLabelPhotos = (labelId: string, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoPage>(`${base}/labels/${id(labelId)}/assets?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+// Takes a photo out of an AI cluster, for that photo only.
+export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
 export const getAIStatus = () => request<PhotoAIStatus>(`${base}/ai`);
 export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal) {
   const body = new FormData();

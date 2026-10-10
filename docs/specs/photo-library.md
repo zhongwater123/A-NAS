@@ -1,6 +1,6 @@
 # 相册与本地智能检索
 
-状态：M1 切片 1–6 implemented；M2 的自然语言搜索、相册与用户元数据 implemented（手工位置随地点功能实现），AI 内置安装 implemented，AI 标签已暂停（2026-10-10）；M3 draft
+状态：M1 切片 1–6 implemented；M2 的自然语言搜索、相册与用户元数据 implemented（手工位置随地点功能实现），AI 内置安装 implemented，AI 标签改为只在 AI 聚合中展示（2026-10-10）；M3 draft
 更新时间：2026-10-10
 
 ## 决策状态
@@ -15,7 +15,9 @@
 - 不做 OCR（2026-10-09 决定）：照片中的文字不参与识别、搜索或描述；如需恢复另行规划。
 - 语义向量使用 EmbeddingGemma 2 的全模态 740M 官方包（2026-10-09 决定），不使用只含文本与图像的 440M 包。
 - 搜索就是“自然语言 → 向量 → 排序”（2026-10-10 决定，[#66](https://github.com/zhongwater123/A-NAS/issues/66)）：查询编码为向量，对可见照片按相似度排序，不按任何标签过滤，也不截断成固定张数。名称或用户标签包含查询的照片排在最前。结果分为两段：与最佳结果足够接近的一组在前，其余照片作为“相关度较低”排在分隔线之后，可以继续往下翻。相似度没有能区分相关与不相关的分数线，图库里根本没有要找的东西时也会排出一组“最接近”的照片，因此界面只说“最接近”，不说“找到”。
-- AI 标签暂停（2026-10-10 决定，#66）：整张照片的一个向量只能可靠地校准少数物体类别，部署后的标签误导性强（航拍城市被标成“飞盘”），按标签过滤还会让一半真实照片从搜索结果中消失。照片上不再显示 AI 标签，也不能按标签浏览或过滤；用户已有的 AI 纠错作为用户元数据保留，不显示、不删除。固定类别的目标检测暂不做；整图向量找不到小物体的问题先在开发机评估分块向量。是否恢复标签、由什么模型产生，另行决定。
+- **红线：由向量模型产生的标签不参与搜索**（2026-10-10 决定）。部署后的标签误导性强（航拍城市被标成“飞盘”），按标签过滤还会让一半真实照片从搜索结果中消失（#66）。
+- AI 标签只以“AI 聚合”呈现（2026-10-10 决定）：侧栏的“AI 搜图”改名“AI 聚合”，页面上方是一句话搜索，下方按动物、自然、交通工具等列出本地 AI 有把握的照片组，每组有封面与张数，点开单独查看。照片详情不显示 AI 标签，搜索也不使用它们。标签宁缺毋滥：每个标签在公开数据集上至少 95% 正确才启用，宁可少收也不收错（[实施方案](../architecture/photo-ai.md#ai-聚合)）。用户可以把归错的照片移出某一组，记为该照片的 AI 纠错。
+- 固定类别的目标检测另行评估，不在本版；整图向量找不到小物体的问题先在开发机评估分块向量。
 - 本地 AI 是系统内置能力（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：随 A-NAS 安装和升级并默认开启，用户不需要下载、安装、更新或配置模型，产品也不提供这些入口。界面只呈现结果、后台整理进度、各图库开关和隐私说明，不显示模型名称、版本或组件状态。
 - AI 处理全程不联网：设备在安装、升级和运行时都不为 AI 下载任何内容，处理照片的进程无法访问网络，界面据此说明“照片只在这台设备上分析，AI 不联网”。AI 无法运行时（Worker 启动中、出错或设备低于最低硬件），基础相册照常可用，搜索只按名称与用户标签匹配；界面从不说 AI 已关闭或不可用，只是不显示整理进度（2026-10-10 决定，见[相册界面规格](photo-gallery-ui.md)）。
 - AI 搜索与照片浏览共同使用相册 Policy，不因图片已被索引而绕过授权。普通文件只由文件系统 ACL 授权；照片资产由相册 Catalog 授权，这是 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 对 ADR 0008 的限定例外。
@@ -42,7 +44,7 @@
 - 一张照片资产可以属于本图库的多个相册；从相册移出或删除相册不删除照片，照片进入回收站时暂时从相册中隐藏，恢复后回到原相册，永久删除时离开所有相册。跨图库复制的照片资产可以复用同一份不可变原图字节，最后一个引用永久删除后才回收物理对象。
 - 首个容量、性能与压力测试基线按 4 名家庭成员、20,000 张照片和 2,000 个视频执行；未来增长余量仍需确认。
 - 普通搜索默认覆盖当前用户私有图库和共享图库；管理员只有进入管理员查看模式并选择一名成员后才能搜索该成员私有图库，不提供跨所有成员私有图库的全局搜索。
-- 用户标签与 AI 标签分别保存；用户标签优先展示，AI 重建不得覆盖用户标签。AI 标签暂停期间不产生 AI 标签。
+- 用户标签与 AI 标签分别保存；用户标签优先展示，AI 重建不得覆盖用户标签。
 - 人脸识别与人物聚类、照片地点地图和按需详细描述能力首版默认启用；视频内容 AI 分析仍不在首版范围。
 - 删除家庭成员账号前，管理员必须选择将其图库转移、导出，或连同账号进入待删除状态，不允许直接丢弃图库。
 - 私有图库只能转移给设备管理员；账号待删除保留 30 天并可撤销，到期后图库进入 15 天回收站流程。
@@ -51,7 +53,7 @@
 - 各成员可以分别关闭自己私有图库的人脸、位置、AI 标签和详细描述，并清除相应派生数据；共享图库的开关只由管理员控制。
 - 每个私有图库有独立人物库，共享图库有独立家庭人物库，人物名称和人脸聚类不在图库之间自动复用。
 - 地点地图只使用原文件 EXIF 坐标和用户手工位置，不由 AI 推断精确位置；用户可以修正或移除位置。
-- 用户对错误 AI 标签的否定或修正形成持久 AI 纠错，模型升级和重新索引后仍然生效。AI 标签暂停期间没有新的纠错入口，已有记录随照片保留和复制。
+- 用户对错误 AI 标签的否定或修正形成持久 AI 纠错，模型升级和重新索引后仍然生效；在 AI 聚合中表现为把照片移出某一组。
 - 后台 AI 在连续 5 分钟没有上传、下载、播放或交互后开始；检测到前台活动立即停止领取新任务，已经开始的单张原子任务允许完成。
 - 第一版所有图库共同使用数据盘可用容量，不设置成员配额或共享图库独立配额。
 - 首版备份必须包含原图、照片资产目录、用户元数据、相册、虚拟目录和权限；派生数据不进入首版必备备份，恢复后按版本重建。
@@ -250,10 +252,8 @@
 
 ### 用户纠正 AI 标签
 
-AI 标签暂停期间（2026-10-10 起）不适用；恢复 AI 标签时沿用。
-
-- Given：照片资产同时具有 AI 标签和用户标签。
-- When：用户添加、修改或删除用户标签，或者隐藏错误的 AI 标签。
+- Given：照片资产同时具有用户标签，并被本地 AI 归入 AI 聚合中的某一组。
+- When：用户添加、修改或删除用户标签，或者在该组中把这张照片移出（“不是 X”）。
 - Then：用户标签独立保存并优先展示，对错误 AI 标签的否定或修正作为 AI 纠错持久保存，后续模型升级和索引重建仍须遵守。AI 纠错只作用于该张照片资产，不影响同一图库中的其他照片（2026-10-09 决定）。
 
 ### 关闭私有图库 AI 能力
@@ -332,7 +332,7 @@ AI 处理：                pending → running → ready
 - 同一照片、原图版本、Pipeline 版本和能力组合必须幂等。
 - AI Provider 位于模型运行时的 seam；本地模型与将来经明确授权的云端模型可以作为不同 Adapter。
 - 如果向量索引只有一种实现，首版不为假想替换创建公共 seam；相册 Module 仍不得向调用者暴露特定扩展或表结构。
-- 首版默认调度人脸检测与聚类、EXIF 地点索引和图片 Embedding（AI 标签暂停）；详细描述的能力默认可用，但只有用户请求单张照片时才创建任务，且自由生成 VLM 不进入默认后台队列。
+- 首版默认调度人脸检测与聚类、EXIF 地点索引和图片 Embedding（AI 聚合由 Embedding 在读取时算出）；详细描述的能力默认可用，但只有用户请求单张照片时才创建任务，且自由生成 VLM 不进入默认后台队列。
 
 ### 资源隔离
 
@@ -437,5 +437,5 @@ RAW 厂商格式、Live Photo 配对和视频兼容范围仍需建立测试样�
 - ADR：[受管图库与不可变内容对象](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 研究：[本地照片 AI 模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md)
-- 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/photos/PhotosPanel.tsx)（界面行为见 [Web 相册界面](photo-gallery-ui.md)）、[相册服务进程](../../internal/photoservice/photoservice.go)；M2 的[自然语言搜索](../../internal/photos/search.go)、[相册](../../internal/photos/albums.go)、[用户标签](../../internal/photos/usertags.go)、[AI Worker 客户端](../../internal/aiworker/client.go)与 [Python Worker](../../ai/anas_ai/worker.py)；部署见[启用相册服务](../runbooks/enable-photo-service.md)
-- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[私有图库查看授权](../../internal/accounts/library_viewing_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/photos/PhotosPanel.test.tsx)、[时间线按月](../../internal/photos/timeline_test.go)、[端到端冒烟](../../scripts/smoke-photo-service.sh)；M2 的[向量任务](../../internal/photos/ai_test.go)、[搜索范围、两段结果与分页](../../internal/photos/search_test.go)、[相册、用户标签与保留的 AI 纠错](../../internal/photos/albums_test.go)、[Worker 协议](../../internal/aiworker/python_test.go)
+- 代码：[`internal/photos`](../../internal/photos/photos.go)（Catalog、受管存储、Policy、缩略图任务与崩溃对账）、[`internal/photosapi`](../../internal/photosapi/handler.go)、[Web 相册窗口](../../web/src/photos/PhotosPanel.tsx)（界面行为见 [Web 相册界面](photo-gallery-ui.md)）、[相册服务进程](../../internal/photoservice/photoservice.go)；M2 的[自然语言搜索](../../internal/photos/search.go)、[AI 聚合](../../internal/photos/ailabels.go)与[标签词表](../../internal/photos/labels/labels.go)、[相册](../../internal/photos/albums.go)、[用户标签与 AI 纠错](../../internal/photos/usertags.go)、[AI Worker 客户端](../../internal/aiworker/client.go)与 [Python Worker](../../ai/anas_ai/worker.py)；部署见[启用相册服务](../runbooks/enable-photo-service.md)
+- 测试：[权限矩阵](../../internal/photos/policy_test.go)、[生命周期](../../internal/photos/service_test.go)、[缩略图与 EXIF](../../internal/photos/media_test.go)、[崩溃对账](../../internal/photos/reconcile_test.go)、[跨成员泄漏与重复提示](../../internal/photos/leak_test.go)、[私有图库查看授权](../../internal/accounts/library_viewing_test.go)、[API](../../internal/photosapi/handler_test.go)、[Web](../../web/src/photos/PhotosPanel.test.tsx)、[时间线按月](../../internal/photos/timeline_test.go)、[端到端冒烟](../../scripts/smoke-photo-service.sh)；M2 的[向量任务](../../internal/photos/ai_test.go)、[搜索范围、两段结果与分页](../../internal/photos/search_test.go)、[AI 聚合、纠错与“不参与搜索”](../../internal/photos/ailabels_test.go)、[相册与用户标签](../../internal/photos/albums_test.go)、[Worker 协议](../../internal/aiworker/python_test.go)

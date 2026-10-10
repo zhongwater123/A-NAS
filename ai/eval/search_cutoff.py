@@ -114,7 +114,7 @@ def main():
     parser.add_argument("--report")
     args = parser.parse_args()
     texts = load_vectors(args.cache, "texts")
-    with open(datasets.os.path.join(datasets.HERE, "labels", "v1.calibration.json"), encoding="utf-8") as file:
+    with open(datasets.os.path.join(datasets.REPO, "internal", "photos", "labels", "v1.calibration.json"), encoding="utf-8") as file:
         calibration = json.load(file)
     vectors, queries = label_queries(args.cache, texts)
     print(f"{len(queries)} label queries over {len(vectors)} COCO test photos")

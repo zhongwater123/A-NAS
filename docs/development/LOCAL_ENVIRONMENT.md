@@ -162,9 +162,15 @@ $AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache 
 $AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --report /datasets/report.json --write
 ```
 
-`eval.embed` 可中断，重跑时只补算缺少的向量；权重缓存放在 WSL 自己的磁盘上，加载比放在 `/mnt/d` 快。`--write` 不带路径时更新 `ai/eval/labels/v1.calibration.json`；`--compare-with` 在两份缓存共有的图片上比较视觉 token 或输入尺寸。
+`eval.embed` 可中断，重跑时只补算缺少的向量；权重缓存放在 WSL 自己的磁盘上，加载比放在 `/mnt/d` 快。`--write` 不带路径时更新 `internal/photos/labels/v1.calibration.json`；`--compare-with` 在两份缓存共有的图片上比较视觉 token 或输入尺寸。
 
-分块向量（[M2 实施方案“AI 标签”](../architecture/photo-ai.md#ai-标签2026-10-10-起暂停)）先为 COCO 测试半与 COCO-CN 测试集算每块的向量，再与整图向量比较；中途也可以运行 `eval.tile_search` 查看已算部分的结果：
+AI 聚合的阈值按“宁缺毋滥”校准，场景标签的真值来自 COCO-Stuff：只取 `stuff_annotations_trainval2017.zip` 里的 `stuff_val2017.json`（22 MB），用 [remotezip](https://pypi.org/project/remotezip/) 按 HTTP Range 读出，不下载 1.1 GB 的整个压缩包，放在 `/mnt/d/A-NAS-datasets/coco-stuff/`：
+
+```bash
+$AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --min-precision 0.95 --min-label-precision 0.95 --min-recall 0.1 --write
+```
+
+分块向量（[M2 实施方案“AI 聚合”](../architecture/photo-ai.md#ai-聚合)）先为 COCO 测试半与 COCO-CN 测试集算每块的向量，再与整图向量比较；中途也可以运行 `eval.tile_search` 查看已算部分的结果：
 
 ```bash
 $AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack --tokens 70 --tiles 2 --split test --sets coco,coco-cn

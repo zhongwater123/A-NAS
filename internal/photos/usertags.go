@@ -7,9 +7,11 @@ import (
 	"unicode/utf8"
 )
 
-// User tags are user metadata of one photo asset (CONTEXT.md): they are
-// never derived, rebuilt or cleared with derived data. Whoever may rename a
-// photo may tag it.
+// User tags and AI corrections are user metadata of one photo asset
+// (CONTEXT.md): they are never derived, rebuilt or cleared with derived data.
+// Whoever may rename a photo may tag it or take it out of an AI cluster. A
+// photo taken out of a cluster stays out through model upgrades; other photos
+// stay in.
 
 // MaxTagRunes bounds a user tag.
 const MaxTagRunes = 30
@@ -44,6 +46,27 @@ func (s *Service) RemoveTag(ctx context.Context, p Principal, assetID, name stri
 			return err
 		}
 		return s.audit(ctx, tx, p.UserID, "photo.tag_removed", record.ID, name)
+	})
+}
+
+// HideAILabel records that an AI label is wrong for a photo, which leaves the
+// label's cluster, and returns the photo's details.
+func (s *Service) HideAILabel(ctx context.Context, p Principal, assetID, labelID string) (Asset, error) {
+	known := false
+	for _, label := range s.labels.Labels {
+		known = known || label.ID == labelID
+	}
+	if !known {
+		return Asset{}, ErrNotFound
+	}
+	return s.changeMetadata(ctx, p, assetID, func(tx *sql.Tx, record assetRecord) error {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO ai_tag_corrections(asset_id, label_id, verdict, created_by, created_at) VALUES(?, ?, 'hidden', ?, ?)
+			 ON CONFLICT DO NOTHING`,
+			record.ID, labelID, p.UserID, formatTime(s.now())); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, p.UserID, "photo.ai_label_hidden", record.ID, labelID)
 	})
 }
 
