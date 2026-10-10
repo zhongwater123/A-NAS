@@ -3,7 +3,6 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowUpDown,
-  Bell,
   Bot,
   Box,
   Camera,
@@ -21,10 +20,8 @@ import {
   FolderOpen,
   FolderPlus,
   Grid2X2,
-  Home,
   Image,
   List,
-  LogOut,
   Maximize2,
   Minus,
   Monitor,
@@ -33,14 +30,12 @@ import {
   Pencil,
   PlaySquare,
   RefreshCw,
-  RotateCcw,
   Scissors,
   Search,
   Settings,
   Share2,
   ShieldCheck,
   ShoppingBag,
-  Sparkles,
   SquareTerminal,
   Trash2,
   Upload,
@@ -63,8 +58,9 @@ import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { PhotosPanel } from "./photos/PhotosPanel";
-import { avatarTone, SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
+import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
 import { StatusBar } from "./StatusBar";
+import { DesktopView, SystemRail } from "./SystemRail";
 import { TerminalPanel } from "./TerminalPanel";
 import { useHostState } from "./useHostState";
 import "./styles.css";
@@ -94,7 +90,8 @@ type WindowAction =
   | { type: "maximize"; id: WindowID }
   | { type: "move"; id: WindowID; x: number; y: number }
   | { type: "resize"; id: WindowID; width: number; height: number }
-  | { type: "show-desktop" };
+  | { type: "show-desktop" }
+  | { type: "restore"; ids: WindowID[] };
 
 const initialWindows: WindowModel[] = [
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
@@ -253,18 +250,19 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
   const openSettings = (section?: SettingsSection) => { if (section) setSettingsSection(section); openWindow("settings"); };
+  // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
-    { id: "files", label: "文件管理", ariaLabel: "打开文件管理", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
-    { id: "trash", label: "回收站", ariaLabel: "打开回收站", tone: "trash", icon: <Trash2 />, active: isOpen("trash"), onClick: () => openWindow("trash") },
-    { id: "settings", label: "设置", ariaLabel: "打开设置", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openSettings() },
-    ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
+    { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
+    { id: "trash", label: "回收站", ariaLabel: "打开回收站", keywords: "删除 恢复", tone: "trash", icon: <Trash2 />, active: isOpen("trash"), onClick: () => openWindow("trash") },
+    { id: "settings", label: "设置", ariaLabel: "打开设置", keywords: "账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openSettings() },
+    ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", keywords: "shell 命令行 bash", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
-    ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
+    ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
     { id: "video", label: "影视", ariaLabel: "影视，规划中", tone: "video", icon: <PlaySquare />, disabled: true },
     { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
-    { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
-    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
-    { id: "photos", label: "相册", ariaLabel: "打开相册", tone: "photos", icon: <Image />, active: isOpen("photos"), onClick: () => openWindow("photos") },
+    { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", keywords: "快照 恢复 历史版本 snapshot", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
+    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
+    { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <Image />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "backup", label: "备份", ariaLabel: "备份，规划中", tone: "backup", icon: <ShieldCheck />, disabled: true },
@@ -273,27 +271,34 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   ];
   const visible = windows.filter((window) => window.open && !window.minimized);
   const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
+  // Windows hidden by "show desktop" come back on the next press, as long as
+  // nothing was reopened in between; windows minimized by hand stay down.
+  const [revealed, setRevealed] = useState<WindowID[]>([]);
+  const hidden = revealed.filter((id) => windows.some((window) => window.id === id && window.open && window.minimized));
+  const desktopView: DesktopView = visible.length ? "windows" : hidden.length ? "revealed" : "clear";
+  const toggleDesktop = () => {
+    if (visible.length) {
+      setRevealed(visible.map((window) => window.id));
+      dispatch({ type: "show-desktop" });
+    } else if (hidden.length) {
+      setRevealed([]);
+      dispatch({ type: "restore", ids: hidden });
+    }
+  };
 
   return (
     <main className="desktop-shell">
       <div className="wallpaper-glow" />
 
-      <aside className="system-rail" aria-label="系统快捷栏">
-        <div className="rail-group">
-          <button className="rail-button active" aria-label="显示桌面" onClick={() => dispatch({ type: "show-desktop" })}><Home /></button>
-          <button className="rail-button" aria-label="全部应用"><Grid2X2 /></button>
-        </div>
-        <div className="rail-rule" />
-        <div className="rail-group"><button className="rail-button" aria-label="AI 助手，规划中" disabled><Sparkles /></button></div>
-        <div className="rail-spacer" />
-        <div className="rail-group rail-secondary">
-          <button className="rail-button" aria-label="任务历史，规划中" disabled><RotateCcw /></button>
-          <button className="rail-button" aria-label="通知，规划中" disabled><Bell /></button>
-		  <button className={`rail-avatar ${avatarTone(session.user.username)}`} aria-label={`我的账号（${session.user.username}）`} onClick={() => openSettings("account")}>{session.user.username.slice(0, 1).toUpperCase()}</button>
-		  <button className="rail-button" aria-label="退出登录" onClick={onLogout}><LogOut /></button>
-          <button className="rail-button" aria-label="打开设置" onClick={() => openSettings()}><Settings /></button>
-        </div>
-      </aside>
+      <SystemRail
+        apps={desktopApps}
+        session={session}
+        desktopView={desktopView}
+        settingsFocused={focusedID === "settings"}
+        onToggleDesktop={toggleDesktop}
+        onOpenSettings={openSettings}
+        onLogout={onLogout}
+      />
 
       <DesktopGrid apps={desktopApps} />
 
@@ -849,6 +854,12 @@ function messageOf(error: unknown) { return error instanceof Error ? error.messa
 
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);
+  if (action.type === "restore") {
+    // Bring the windows back above the rest, keeping their stacking order.
+    const base = Math.max(...windows.map((window) => window.z)) + 1;
+    const order = windows.filter((window) => window.open && action.ids.includes(window.id)).sort((a, b) => a.z - b.z).map((window) => window.id);
+    return windows.map((window) => order.includes(window.id) ? { ...window, minimized: false, z: base + order.indexOf(window.id) } : window);
+  }
   const top = Math.max(...windows.map((window) => window.z)) + 1;
   const nextOpened = Math.max(...windows.map((window) => window.opened)) + 1;
   return windows.map((window) => {

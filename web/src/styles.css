@@ -47,6 +47,7 @@ button { font: inherit; }
   mix-blend-mode: screen;
 }
 
+/* System rail: the same dark glass as the status bar and dock. */
 .system-rail {
   position: absolute;
   z-index: 80;
@@ -54,37 +55,219 @@ button { font: inherit; }
   top: 18px;
   bottom: 18px;
   width: 60px;
-  border: 1px solid rgba(255,255,255,.18);
-  border-radius: 18px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 9px 0;
-  background: rgba(255,255,255,.12);
-  box-shadow: 0 18px 50px rgba(33,24,72,.18);
-  backdrop-filter: blur(28px) saturate(130%);
+  padding: 8px 0;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(34,24,72,.5), rgba(20,14,46,.34));
+  box-shadow: 0 18px 46px rgba(22,14,52,.3), inset 0 1px 0 rgba(255,255,255,.2);
+  backdrop-filter: blur(24px) saturate(150%);
 }
-.rail-group { display: grid; gap: 7px; }
+.rail-group { display: grid; gap: 6px; }
 .rail-spacer { flex: 1; }
-.rail-rule { width: 36px; height: 1px; margin: 7px 0; background: rgba(255,255,255,.18); }
 .rail-button {
+  --rail-ease: cubic-bezier(.22,1,.36,1);
   position: relative;
-  width: 43px;
-  height: 43px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
   border: 0;
   border-radius: 13px;
   display: grid;
   place-items: center;
-  color: rgba(255,255,255,.84);
+  color: rgba(255,255,255,.76);
   background: transparent;
   cursor: pointer;
-  transition: .18s ease;
+  transition: color .16s ease, background .16s ease, box-shadow .16s ease;
 }
-.rail-button svg { width: 20px; height: 20px; }
-.rail-button:hover:not(:disabled), .rail-button.active { color: #fff; background: rgba(255,255,255,.18); transform: translateY(-1px); }
-.rail-button:disabled { cursor: not-allowed; opacity: .72; }
-.rail-avatar { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(145deg, #ffd0a8, #e69d78); color: #67422d; font-size: 12px; font-weight: 850; cursor: pointer; }
-.rail-avatar:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.rail-button > svg { width: 20px; height: 20px; transition: transform .22s var(--rail-ease); }
+.rail-button:hover { color: #fff; background: rgba(255,255,255,.12); }
+.rail-button:hover > svg { transform: scale(1.08); }
+.rail-button:active > svg { transform: scale(.92); }
+.rail-button.on { color: #fff; }
+.rail-button[aria-expanded="true"] { color: #fff; background: rgba(255,255,255,.17); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), inset 0 0 0 1px rgba(255,255,255,.08); }
+/* Edge marker for where the user is: the desktop itself or the focused settings window. */
+.rail-button::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255,255,255,.8);
+  opacity: 0;
+  transform: translateY(-50%) scaleY(.2);
+  transition: transform .24s var(--rail-ease), opacity .16s ease;
+}
+.rail-button.on::before { opacity: 1; transform: translateY(-50%) scaleY(1); }
+.rail-button:focus-visible { outline: 2px solid rgba(255,255,255,.92); outline-offset: 2px; }
+.rail-face {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  text-shadow: 0 1px 1px rgba(0,0,0,.18);
+  box-shadow: 0 0 0 2px rgba(255,255,255,.26), 0 4px 10px rgba(10,8,30,.3);
+  transition: transform .22s var(--rail-ease), box-shadow .16s ease;
+}
+.rail-account:hover > .rail-face { transform: scale(1.06); }
+.rail-account[aria-expanded="true"] { background: transparent; box-shadow: none; }
+.rail-account[aria-expanded="true"] > .rail-face { box-shadow: 0 0 0 2px rgba(255,255,255,.75), 0 4px 10px rgba(10,8,30,.3); }
+.rail-tip {
+  position: absolute;
+  z-index: 1;
+  left: calc(100% + 16px);
+  top: 50%;
+  padding: 6px 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 9px;
+  color: #fff;
+  background: rgba(18,15,44,.94);
+  box-shadow: 0 10px 28px rgba(10,8,30,.38);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-4px, -50%);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.rail-tip::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-left: 1px solid rgba(255,255,255,.14);
+  border-bottom: 1px solid rgba(255,255,255,.14);
+  background: rgb(18,15,44);
+  transform: translateY(-50%) rotate(45deg);
+}
+@media (hover: hover) {
+  .rail-button:hover > .rail-tip { opacity: 1; transform: translate(0, -50%); transition-delay: .3s; }
+}
+.rail-button:focus-visible > .rail-tip { opacity: 1; transform: translate(0, -50%); }
+.rail-button[aria-expanded="true"] > .rail-tip { display: none; }
+
+/* Launcher and account popovers sit beside the rail, above the windows. */
+.launcher, .account-popover {
+  position: absolute;
+  z-index: 90;
+  left: 88px;
+  border: 1px solid rgba(255,255,255,.2);
+  color: #fff;
+  background: linear-gradient(160deg, rgba(38,28,82,.9), rgba(17,13,42,.88));
+  box-shadow: 0 30px 80px rgba(8,6,28,.5), inset 0 1px 0 rgba(255,255,255,.16);
+  backdrop-filter: blur(30px) saturate(160%);
+  animation: rail-popover-in .22s cubic-bezier(.22,1,.36,1);
+}
+@keyframes rail-popover-in { from { opacity: 0; transform: translateX(-8px) scale(.98); } }
+@keyframes rail-sheet-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.launcher {
+  top: 18px;
+  width: 448px;
+  max-height: calc(100% - 36px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 22px;
+  transform-origin: 0 0;
+}
+.launcher-search {
+  flex: none;
+  height: 44px;
+  margin: 14px 14px 2px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 13px;
+  background: rgba(255,255,255,.09);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+  cursor: text;
+  transition: background .16s ease, box-shadow .16s ease;
+}
+.launcher-search:focus-within { background: rgba(255,255,255,.13); box-shadow: inset 0 0 0 1px rgba(255,255,255,.34), 0 0 0 3px rgba(129,140,248,.28); }
+.launcher-search svg { flex: none; width: 17px; height: 17px; opacity: .72; }
+.launcher-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; color: #fff; background: none; font: inherit; font-size: 14px; }
+.launcher-search input::placeholder { color: rgba(255,255,255,.48); }
+.launcher-search input::-webkit-search-cancel-button { display: none; }
+.launcher-body { min-height: 0; overflow-y: auto; padding: 4px 12px 14px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+.launcher-heading { margin: 12px 6px 6px; display: flex; align-items: baseline; justify-content: space-between; color: rgba(255,255,255,.58); font-size: 11px; font-weight: 750; letter-spacing: .6px; }
+.launcher-heading small { font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; opacity: .8; }
+.launcher-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; }
+.launcher-tile {
+  position: relative;
+  padding: 12px 4px 10px;
+  border: 0;
+  border-radius: 15px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: #fff;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: background .14s ease;
+}
+.launcher-tile:hover, .launcher-tile.suggested { background: rgba(255,255,255,.1); }
+.launcher-tile:focus-visible { outline: none; background: rgba(255,255,255,.14); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.75); }
+.launcher-tile:active .launcher-icon { transform: scale(.94); }
+.launcher-label { max-width: 100%; overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-icon {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: white;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.42), 0 8px 18px rgba(10,8,30,.32);
+  transition: transform .18s cubic-bezier(.22,1,.36,1);
+}
+.launcher-icon::before { content: ""; position: absolute; inset: 1px 1px 50%; border-radius: 13px 13px 48% 48%; background: linear-gradient(rgba(255,255,255,.35), transparent); pointer-events: none; }
+.launcher-icon svg { position: relative; width: 26px; height: 26px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.14)); }
+.launcher-tile:hover .launcher-icon { transform: translateY(-2px); }
+.launcher-tile.running .launcher-icon::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 4px; height: 4px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px rgba(255,255,255,.9); transform: translateX(-50%); }
+.launcher-planned { margin: 0; padding: 0 4px; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.launcher-planned li { padding: 4px 11px 4px 4px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; color: rgba(255,255,255,.66); background: rgba(255,255,255,.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); font-size: 11.5px; font-weight: 600; }
+.launcher-planned .launcher-icon { width: 22px; height: 22px; border-radius: 7px; box-shadow: none; opacity: .72; filter: saturate(.6); }
+.launcher-planned .launcher-icon::before { border-radius: 6px 6px 48% 48%; }
+.launcher-planned .launcher-icon svg { width: 13px; height: 13px; }
+.launcher-empty { margin: 0; padding: 38px 0 30px; color: rgba(255,255,255,.6); font-size: 13px; text-align: center; }
+.launcher-footer { flex: none; padding: 10px 18px 11px; display: flex; gap: 16px; border-top: 1px solid rgba(255,255,255,.09); color: rgba(255,255,255,.5); font-size: 11px; }
+.launcher-footer span { display: inline-flex; align-items: center; gap: 3px; }
+.launcher-footer kbd { min-width: 18px; padding: 1px 5px; border-radius: 5px; color: rgba(255,255,255,.82); background: rgba(255,255,255,.1); box-shadow: inset 0 -1px 0 rgba(255,255,255,.12); font: 600 10px/16px Inter, system-ui, sans-serif; text-align: center; }
+.launcher-footer kbd:last-of-type { margin-right: 3px; }
+.account-popover { bottom: 18px; width: 272px; padding: 8px; border-radius: 20px; transform-origin: 0 100%; }
+.account-card { padding: 10px 10px 8px; display: flex; align-items: center; gap: 12px; }
+.account-face { width: 46px; height: 46px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 19px; font-weight: 800; text-shadow: 0 1px 1px rgba(0,0,0,.18); box-shadow: 0 0 0 2px rgba(255,255,255,.24); }
+.account-who { min-width: 0; display: grid; justify-items: start; gap: 4px; }
+.account-who strong { max-width: 100%; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.account-role { padding: 1px 8px; border-radius: 999px; color: rgba(255,255,255,.85); background: rgba(255,255,255,.13); font-size: 10.5px; font-weight: 700; }
+.account-session { margin: 0 4px 6px; padding: 7px 8px; display: flex; align-items: center; gap: 7px; border-radius: 10px; color: rgba(255,255,255,.66); background: rgba(255,255,255,.05); font-size: 11px; }
+.account-session svg { flex: none; width: 14px; height: 14px; opacity: .8; }
+.account-menu { padding-top: 4px; display: grid; gap: 2px; border-top: 1px solid rgba(255,255,255,.09); }
+.account-item { width: 100%; padding: 9px 10px; border: 0; border-radius: 11px; display: flex; align-items: center; gap: 11px; color: #fff; background: transparent; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; transition: background .14s ease, color .14s ease; }
+.account-item svg { flex: none; width: 17px; height: 17px; opacity: .85; }
+.account-item small { margin-left: auto; color: rgba(255,255,255,.46); font-size: 11px; font-weight: 500; }
+.account-item:hover, .account-item:focus-visible { outline: none; background: rgba(255,255,255,.11); }
+.account-item.danger { color: #fecdd3; }
+.account-item.danger:hover, .account-item.danger:focus-visible { color: #fff; background: rgba(244,63,94,.3); }
+.account-separator { height: 1px; margin: 3px 8px; background: rgba(255,255,255,.09); }
+@media (prefers-reduced-motion: reduce) {
+  .rail-button, .rail-button > svg, .rail-button::before, .rail-face, .rail-tip, .launcher-tile, .launcher-icon { transition: none; }
+  .launcher, .account-popover { animation: none; }
+}
 
 .desktop-grid {
   position: absolute;
@@ -1066,9 +1249,15 @@ button.ov-stat:hover { border-color: rgba(47, 111, 228, .35); box-shadow: 0 6px 
 }
 @media (max-width: 620px) {
   .desktop-shell { min-width: 0; min-height: 0; }
-  .system-rail { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 58px; flex-direction: row; justify-content: center; }
-  .rail-rule, .rail-spacer, .rail-secondary .rail-button:first-child, .rail-secondary .notification, .rail-avatar { display: none; }
-  .rail-group, .rail-secondary { display: flex; }
+  .system-rail { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 58px; flex-direction: row; padding: 0 8px; border-radius: 20px; }
+  .rail-group { display: flex; }
+  .rail-button::before { left: 50%; top: auto; bottom: -7px; width: 18px; height: 3px; border-radius: 3px 3px 0 0; transform: translateX(-50%) scaleX(.2); }
+  .rail-button.on::before { transform: translateX(-50%) scaleX(1); }
+  .rail-tip { display: none; }
+  .launcher, .account-popover { left: 8px; right: 8px; top: auto; bottom: 74px; width: auto; transform-origin: 50% 100%; animation-name: rail-sheet-in; }
+  .launcher { max-height: calc(100% - 150px); }
+  .account-popover { left: auto; width: min(272px, calc(100% - 16px)); transform-origin: 100% 100%; }
+  .launcher-footer { display: none; }
   .desktop-grid { left: 18px; right: 18px; top: 96px; bottom: 78px; width: auto; grid-template-columns: repeat(3, 1fr); justify-items: center; }
   .status-bar { top: 10px; left: 10px; right: 10px; gap: 8px; padding: 6px 12px 6px 6px; justify-content: space-between; }
   .status-meta .source-badge { display: none; }
