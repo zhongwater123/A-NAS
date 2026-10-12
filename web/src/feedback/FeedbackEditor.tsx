@@ -60,10 +60,14 @@ export function FeedbackEditor({
   const attachedCount = useRef(attached.length);
   attachedCount.current = attached.length;
 
-  // An edit continues where the text ends.
+  // Focus without scrolling: a window wider than the screen makes the
+  // desktop scrollable, and the panel slides in from past its edge. An edit
+  // continues where the text ends.
   useEffect(() => {
     const field = textArea.current;
-    if (autoFocus && field) field.setSelectionRange(field.value.length, field.value.length);
+    if (!autoFocus || !field) return;
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(field.value.length, field.value.length);
   }, [autoFocus]);
 
   const count = attached.length + draft.added.length;
@@ -153,7 +157,6 @@ export function FeedbackEditor({
         className="fb-text"
         value={draft.text}
         placeholder={placeholder}
-        autoFocus={autoFocus}
         rows={3}
         onChange={(event) => onChange({ ...draft, text: event.target.value })}
         onKeyDown={keyDown}

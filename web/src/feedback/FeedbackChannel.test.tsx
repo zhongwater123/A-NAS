@@ -66,9 +66,15 @@ async function openPanel(user: ReturnType<typeof userEvent.setup>) {
 describe("问题反馈", () => {
   it("shows the open count on the edge button and lists open items first", async () => {
     serve([upload, heic, subtitles]);
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
     const user = userEvent.setup();
     render(<FeedbackChannel />);
     const panel = await openPanel(user);
+    // A window wider than the screen makes the desktop scrollable; focusing
+    // the composer must not scroll it.
+    expect(document.activeElement).toBe(within(panel).getByLabelText("新反馈内容"));
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    focus.mockRestore();
     expect(within(panel).getByRole("tab", { name: "待处理2" }).getAttribute("aria-selected")).toBe("true");
     const list = await within(panel).findByRole("list", { name: "反馈清单" });
     expect(within(list).getAllByRole("checkbox").map((box) => box.getAttribute("aria-checked"))).toEqual(["false", "false"]);

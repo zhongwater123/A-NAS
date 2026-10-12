@@ -8,8 +8,8 @@ export function Lightbox({ urls, index, onIndex, onClose }: { urls: string[]; in
   const layer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    layer.current?.focus();
-    return () => returnTo?.focus();
+    layer.current?.focus({ preventScroll: true });
+    return () => returnTo?.focus({ preventScroll: true });
   }, []);
   const many = urls.length > 1;
   const step = (delta: number) => onIndex((index + delta + urls.length) % urls.length);

@@ -56,7 +56,7 @@ export function FeedbackChannel() {
     return () => window.clearInterval(timer);
   }, [open, refresh]);
   useEffect(() => {
-    if (wasOpen.current && !open) button.current?.focus();
+    if (wasOpen.current && !open) button.current?.focus({ preventScroll: true });
     wasOpen.current = open;
   }, [open]);
   // A draft outlives closing the panel, but not leaving the desktop.
