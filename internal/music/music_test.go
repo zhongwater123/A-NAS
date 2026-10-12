@@ -1,0 +1,428 @@
+package music_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/mewkiz/flac"
+	"github.com/mewkiz/flac/meta"
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/music"
+	"golang.org/x/text/encoding/simplifiedchinese"
+)
+
+type acceptingCredentials struct{}
+
+func (acceptingCredentials) SetCredential(context.Context, accounts.CredentialRequest) error {
+	return nil
+}
+func (acceptingCredentials) DisableCredential(context.Context, string) error { return nil }
+
+type fixture struct {
+	ctx      context.Context
+	library  *music.Service
+	files    *files.Service
+	admin    accounts.User
+	member   accounts.User
+	private  string // the admin's personal space directory
+	shared   string
+	spaceIDs map[string]string
+}
+
+func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+	accountStore, err := accounts.OpenSQLite(filepath.Join(dir, "control.db"))
+	if err != nil {
+		t.Fatalf("open accounts: %v", err)
+	}
+	t.Cleanup(func() { _ = accountStore.Close() })
+	accountService := accounts.NewService(accountStore, acceptingCredentials{}, accounts.Options{})
+	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("setup administrator: %v", err)
+	}
+	member, err := accountService.CreateMember(ctx, admin, "kid", "another long passphrase")
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	fileStore, err := files.OpenSQLite(filepath.Join(dir, "files.db"))
+	if err != nil {
+		t.Fatalf("open files: %v", err)
+	}
+	t.Cleanup(func() { _ = fileStore.Close() })
+	volume := filepath.Join(dir, "volume")
+	fileService := files.NewService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	musicStore, err := music.OpenSQLite(filepath.Join(dir, "music.db"))
+	if err != nil {
+		t.Fatalf("open music: %v", err)
+	}
+	t.Cleanup(func() { _ = musicStore.Close() })
+	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{})
+	t.Cleanup(library.Close)
+	spaces, err := accountService.ListSpaces(ctx, admin)
+	if err != nil {
+		t.Fatalf("list spaces: %v", err)
+	}
+	ids := map[string]string{}
+	for _, space := range spaces {
+		ids[string(space.Kind)] = space.ID
+	}
+	return &fixture{
+		ctx: ctx, library: library, files: fileService, admin: admin, member: member,
+		private: filepath.Join(volume, "spaces", "private", "owner"), shared: filepath.Join(volume, "spaces", "shared"),
+		spaceIDs: ids,
+	}
+}
+
+// scan runs a scan for actor and waits for it to finish.
+func (f *fixture) scan(t *testing.T, actor accounts.User) music.Status {
+	t.Helper()
+	if _, err := f.library.StartScan(f.ctx, actor); err != nil {
+		t.Fatalf("start scan: %v", err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err := f.library.Status(f.ctx, actor)
+		if err != nil {
+			t.Fatalf("status: %v", err)
+		}
+		if status.Scan.State == "idle" {
+			if status.Scan.Error != "" {
+				t.Fatalf("scan failed: %s", status.Scan.Error)
+			}
+			return status
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("scan did not finish")
+	return music.Status{}
+}
+
+func (f *fixture) tracks(t *testing.T, actor accounts.User) map[string]music.Track {
+	t.Helper()
+	library, err := f.library.Tracks(f.ctx, actor)
+	if err != nil {
+		t.Fatalf("tracks: %v", err)
+	}
+	byTitle := map[string]music.Track{}
+	for _, track := range library.Items {
+		byTitle[track.Title] = track
+	}
+	return byTitle
+}
+
+func write(t *testing.T, file string, contents []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pngImage(t *testing.T, shade uint8) []byte {
+	t.Helper()
+	picture := image.NewRGBA(image.Rect(0, 0, 64, 48))
+	for y := range 48 {
+		for x := range 64 {
+			picture.Set(x, y, color.RGBA{R: shade, G: uint8(x * 4), B: uint8(y * 5), A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, picture); err != nil {
+		t.Fatal(err)
+	}
+	return encoded.Bytes()
+}
+
+// id3Frame encodes an ID3v2.3 frame.
+func id3Frame(id string, body []byte) []byte {
+	frame := []byte(id)
+	frame = binary.BigEndian.AppendUint32(frame, uint32(len(body)))
+	frame = append(frame, 0, 0)
+	return append(frame, body...)
+}
+
+// mp3File is an ID3v2.3 tag followed by silent 128 kbit/s MPEG-1 Layer III
+// frames of 1152 samples at 44.1 kHz.
+func mp3File(frames int, tagFrames ...[]byte) []byte {
+	var body []byte
+	for _, frame := range tagFrames {
+		body = append(body, frame...)
+	}
+	size := len(body)
+	file := []byte{'I', 'D', '3', 3, 0, 0, byte(size >> 21 & 0x7f), byte(size >> 14 & 0x7f), byte(size >> 7 & 0x7f), byte(size & 0x7f)}
+	file = append(file, body...)
+	for range frames {
+		frame := make([]byte, 417)
+		copy(frame, []byte{0xff, 0xfb, 0x90, 0x00})
+		file = append(file, frame...)
+	}
+	return file
+}
+
+func text(value string) []byte { return append([]byte{3}, value...) } // UTF-8
+
+func flacFile(t *testing.T, samples uint64, picture []byte, tags ...[2]string) []byte {
+	t.Helper()
+	info := &meta.StreamInfo{BlockSizeMin: 4096, BlockSizeMax: 4096, SampleRate: 44100, NChannels: 2, BitsPerSample: 16, NSamples: samples}
+	blocks := []*meta.Block{{Header: meta.Header{Type: meta.TypeVorbisComment, Length: 1}, Body: &meta.VorbisComment{Vendor: "test", Tags: tags}}}
+	if picture != nil {
+		blocks = append(blocks, &meta.Block{Header: meta.Header{Type: meta.TypePicture, Length: 1}, Body: &meta.Picture{Type: 3, MIME: "image/png", Width: 64, Height: 48, Data: picture}})
+	}
+	var encoded bytes.Buffer
+	encoder, err := flac.NewEncoder(&encoded, info, blocks...)
+	if err != nil {
+		t.Fatalf("encode flac: %v", err)
+	}
+	if err := encoder.Close(); err != nil {
+		t.Fatalf("close flac: %v", err)
+	}
+	return encoded.Bytes()
+}
+
+func TestScanIndexesTagsCoversLyricsAndDurations(t *testing.T) {
+	f := newFixture(t)
+	gbkTitle, _ := simplifiedchinese.GBK.NewEncoder().Bytes([]byte("晴天"))
+	gbkArtist, _ := simplifiedchinese.GBK.NewEncoder().Bytes([]byte("周杰伦"))
+	cover := pngImage(t, 200)
+	// An old tagger's GBK bytes in ISO-8859-1 frames, an embedded cover and lyrics.
+	write(t, filepath.Join(f.private, "音乐", "叶惠美", "01 晴天.mp3"), mp3File(100,
+		id3Frame("TIT2", append([]byte{0}, gbkTitle...)),
+		id3Frame("TPE1", append([]byte{0}, gbkArtist...)),
+		id3Frame("TALB", text("叶惠美")),
+		id3Frame("TCON", text("流行")),
+		id3Frame("TRCK", text("1/11")),
+		id3Frame("APIC", append(append([]byte{0}, "image/png\x00"...), append([]byte{3, 0}, cover...)...)),
+		id3Frame("USLT", append([]byte{3}, "chi\x00[00:01.00]故事的小黄花"...)),
+	))
+	// FLAC tags; the cover comes from the folder and the lyrics from an .lrc.
+	write(t, filepath.Join(f.shared, "Classical", "Bach", "aria.flac"), flacFile(t, 44100*3, nil,
+		[2]string{"TITLE", "Aria"}, [2]string{"ARTIST", "Glenn Gould"}, [2]string{"ALBUM", "Goldberg Variations"},
+		[2]string{"DATE", "1981"}, [2]string{"GENRE", "Classical"}, [2]string{"DISCNUMBER", "1"}))
+	write(t, filepath.Join(f.shared, "Classical", "Bach", "cover.jpg"), cover)
+	write(t, filepath.Join(f.shared, "Classical", "Bach", "aria.lrc"), []byte("[00:00.50]Aria"))
+	// Untagged: the file name names artist and title.
+	write(t, filepath.Join(f.shared, "陈奕迅 - 十年.mp3"), mp3File(10))
+	// Not music, and hidden folders.
+	write(t, filepath.Join(f.shared, "notes.txt"), []byte("hello"))
+	write(t, filepath.Join(f.shared, ".cache", "hidden.mp3"), mp3File(10))
+
+	status := f.scan(t, f.admin)
+	if status.Tracks != 3 {
+		t.Fatalf("library holds %d tracks, want 3", status.Tracks)
+	}
+	tracks := f.tracks(t, f.admin)
+	sunny, ok := tracks["晴天"]
+	if !ok {
+		t.Fatalf("GBK title was not repaired: %v", tracks)
+	}
+	if sunny.Artist != "周杰伦" || sunny.Album != "叶惠美" || sunny.TrackNo != 1 || sunny.Format != "mp3" || sunny.Folder != "音乐/叶惠美" {
+		t.Errorf("mp3 track = %+v", sunny)
+	}
+	if want := int64(100 * 1152 * 1000 / 44100); sunny.DurationMs < want-1 || sunny.DurationMs > want+1 {
+		t.Errorf("mp3 duration = %d ms, want %d", sunny.DurationMs, want)
+	}
+	if sunny.CoverID == "" || !sunny.Lyrics {
+		t.Errorf("mp3 cover %q, lyrics %v", sunny.CoverID, sunny.Lyrics)
+	}
+	aria := tracks["Aria"]
+	if aria.Artist != "Glenn Gould" || aria.Year != 1981 || aria.DurationMs != 3000 || aria.DiscNo != 1 || len(aria.Genres) != 1 {
+		t.Errorf("flac track = %+v", aria)
+	}
+	if aria.CoverID == "" || aria.CoverID != sunny.CoverID {
+		t.Errorf("folder cover %q should match the identical embedded picture %q", aria.CoverID, sunny.CoverID)
+	}
+	ten := tracks["十年"]
+	if ten.Artist != "陈奕迅" || ten.Album != "" || ten.AlbumID != "album:unknown" {
+		t.Errorf("untagged track = %+v", ten)
+	}
+
+	for _, size := range []string{music.CoverSmall, music.CoverLarge} {
+		file, err := f.library.CoverPath(f.ctx, f.admin, sunny.CoverID, size)
+		if err != nil {
+			t.Fatalf("cover %s: %v", size, err)
+		}
+		rendition, err := os.Open(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config, format, err := image.DecodeConfig(rendition)
+		_ = rendition.Close()
+		if err != nil || format != "jpeg" || config.Width != 48 || config.Height != 48 {
+			t.Errorf("%s cover is %s %dx%d (%v), want a 48 px JPEG square", size, format, config.Width, config.Height, err)
+		}
+	}
+	lyrics, err := f.library.Lyrics(f.ctx, f.admin, aria.ID)
+	if err != nil || lyrics != "[00:00.50]Aria" {
+		t.Errorf("sidecar lyrics = %q, %v", lyrics, err)
+	}
+	if lyrics, err := f.library.Lyrics(f.ctx, f.admin, sunny.ID); err != nil || lyrics != "[00:01.00]故事的小黄花" {
+		t.Errorf("embedded lyrics = %q, %v", lyrics, err)
+	}
+	stream, err := f.library.OpenTrack(f.ctx, f.admin, aria.ID)
+	if err != nil {
+		t.Fatalf("open track: %v", err)
+	}
+	header := make([]byte, 4)
+	_, err = io.ReadFull(stream.Reader, header)
+	_ = stream.Reader.Close()
+	if err != nil || string(header) != "fLaC" || stream.Track.ContentType() != "audio/flac" {
+		t.Errorf("stream starts %q with %q (%v)", header, stream.Track.ContentType(), err)
+	}
+}
+
+func TestMembersOnlySeeTheirOwnSpaceAndTheSharedSpace(t *testing.T) {
+	f := newFixture(t)
+	write(t, filepath.Join(f.private, "mine.mp3"), mp3File(5, id3Frame("TIT2", text("Mine"))))
+	write(t, filepath.Join(f.shared, "ours.mp3"), mp3File(5, id3Frame("TIT2", text("Ours"))))
+	f.scan(t, f.admin)
+	f.scan(t, f.member)
+	if tracks := f.tracks(t, f.admin); len(tracks) != 2 {
+		t.Errorf("administrator sees %d tracks, want 2", len(tracks))
+	}
+	memberTracks := f.tracks(t, f.member)
+	if _, ok := memberTracks["Mine"]; ok || len(memberTracks) != 1 {
+		t.Fatalf("member sees %v, want only the shared track", memberTracks)
+	}
+	mine := f.tracks(t, f.admin)["Mine"]
+	if _, err := f.library.OpenTrack(f.ctx, f.member, mine.ID); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("member opened another member's track: %v", err)
+	}
+	if err := f.library.SetFavorite(f.ctx, f.member, mine.ID, true); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("member favorited another member's track: %v", err)
+	}
+	if _, err := f.library.CoverPath(f.ctx, f.member, "00000000000000000000000000000000", music.CoverSmall); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("unknown cover: %v", err)
+	}
+}
+
+func TestRescanFollowsRenamesAndRemovalsAndKeepsUserData(t *testing.T) {
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "Inbox", "song.mp3"), mp3File(5, id3Frame("TIT2", text("Song"))))
+	write(t, filepath.Join(f.shared, "gone.mp3"), mp3File(5, id3Frame("TIT2", text("Gone"))))
+	f.scan(t, f.admin)
+	song := f.tracks(t, f.admin)["Song"]
+	if err := f.library.SetFavorite(f.ctx, f.admin, song.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	playlist, err := f.library.CreatePlaylist(f.ctx, f.admin, "  Road trip ", []string{song.ID})
+	if err != nil || playlist.Name != "Road trip" {
+		t.Fatalf("create playlist = %+v, %v", playlist, err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(f.shared, "Albums"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(f.shared, "Inbox", "song.mp3"), filepath.Join(f.shared, "Albums", "renamed.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(f.shared, "gone.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	status := f.scan(t, f.admin)
+	tracks := f.tracks(t, f.admin)
+	moved := tracks["Song"]
+	if status.Tracks != 1 || moved.ID != song.ID || moved.Folder != "Albums" || moved.Name != "renamed.mp3" {
+		t.Fatalf("after rename: %d tracks, %+v", status.Tracks, moved)
+	}
+	favorites, err := f.library.Favorites(f.ctx, f.admin)
+	if err != nil || len(favorites) != 1 || favorites[0].TrackID != song.ID {
+		t.Errorf("favorites = %+v, %v", favorites, err)
+	}
+	if err := f.library.RecordPlay(f.ctx, f.admin, song.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.library.RecordPlay(f.ctx, f.admin, song.ID); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := f.library.Recent(f.ctx, f.admin)
+	if err != nil || len(recent) != 1 || recent[0].Plays != 2 {
+		t.Errorf("recent = %+v, %v", recent, err)
+	}
+}
+
+func TestMusicFoldersNarrowTheLibrary(t *testing.T) {
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "Music", "a.mp3"), mp3File(5, id3Frame("TIT2", text("In music"))))
+	write(t, filepath.Join(f.shared, "Music Videos", "b.mp3"), mp3File(5, id3Frame("TIT2", text("Beside music"))))
+	write(t, filepath.Join(f.shared, "Audiobooks", "c.mp3"), mp3File(5, id3Frame("TIT2", text("Audiobook"))))
+	f.scan(t, f.admin)
+	if tracks := f.tracks(t, f.admin); len(tracks) != 3 {
+		t.Fatalf("default folders hold %d tracks, want 3", len(tracks))
+	}
+	entries, err := f.files.Tree(f.ctx, f.admin, f.spaceIDs["shared"], "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var musicFolder string
+	for _, entry := range entries {
+		if entry.Path == "Music" {
+			musicFolder = entry.ID
+		}
+	}
+	sources, err := f.library.SetSources(f.ctx, f.admin, []music.SourceInput{{SpaceID: f.spaceIDs["shared"], FolderID: musicFolder}}, false)
+	if err != nil || !sources.Custom || len(sources.Items) != 1 || sources.Items[0].Path != "Music" {
+		t.Fatalf("set sources = %+v, %v", sources, err)
+	}
+	tracks := f.tracks(t, f.admin)
+	if _, ok := tracks["In music"]; !ok || len(tracks) != 1 {
+		t.Errorf("custom folder shows %v, want only the Music folder", tracks)
+	}
+	if _, err := f.library.SetSources(f.ctx, f.admin, []music.SourceInput{{SpaceID: "space:unknown"}}, false); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("unknown space accepted: %v", err)
+	}
+	if sources, err := f.library.SetSources(f.ctx, f.admin, nil, true); err != nil || sources.Custom || len(sources.Items) != 2 {
+		t.Errorf("default sources = %+v, %v", sources, err)
+	}
+}
+
+func TestPlaylistsBelongToTheirMember(t *testing.T) {
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "a.mp3"), mp3File(5, id3Frame("TIT2", text("A"))))
+	write(t, filepath.Join(f.shared, "b.mp3"), mp3File(5, id3Frame("TIT2", text("B"))))
+	f.scan(t, f.admin)
+	tracks := f.tracks(t, f.admin)
+	a, b := tracks["A"].ID, tracks["B"].ID
+	playlist, err := f.library.CreatePlaylist(f.ctx, f.admin, "Mix", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if playlist, err = f.library.AddToPlaylist(f.ctx, f.admin, playlist.ID, []string{a, b, a}); err != nil || len(playlist.TrackIDs) != 3 {
+		t.Fatalf("add = %+v, %v", playlist, err)
+	}
+	name, order := "Evening", []string{b, a}
+	if playlist, err = f.library.UpdatePlaylist(f.ctx, f.admin, playlist.ID, music.PlaylistChange{Name: &name, TrackIDs: &order}); err != nil || playlist.Name != "Evening" || playlist.TrackIDs[0] != b {
+		t.Fatalf("update = %+v, %v", playlist, err)
+	}
+	if _, err := f.library.UpdatePlaylist(f.ctx, f.member, playlist.ID, music.PlaylistChange{Name: &name}); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("member changed another member's playlist: %v", err)
+	}
+	if lists, _ := f.library.Playlists(f.ctx, f.member); len(lists) != 0 {
+		t.Errorf("member sees %d playlists", len(lists))
+	}
+	blank := " "
+	if _, err := f.library.UpdatePlaylist(f.ctx, f.admin, playlist.ID, music.PlaylistChange{Name: &blank}); !errors.Is(err, music.ErrInvalid) {
+		t.Errorf("blank name accepted: %v", err)
+	}
+	if err := f.library.DeletePlaylist(f.ctx, f.admin, playlist.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.library.DeletePlaylist(f.ctx, f.admin, playlist.ID); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("second delete: %v", err)
+	}
+}

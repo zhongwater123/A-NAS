@@ -33,6 +33,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
@@ -164,6 +165,14 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
+	musicStore, err := music.OpenSQLite(filepath.Join(stateDirectory, "music.db"))
+	if err != nil {
+		return err
+	}
+	defer musicStore.Close()
+	// Runs before the deferred musicStore.Close, after the server stopped.
+	musicService := music.New(musicStore, filepath.Join(stateDirectory, "music-covers"), fileService, accountService, music.Options{Logger: logger})
+	defer musicService.Close()
 	// The Product Service cannot reach the data volume in production; there
 	// the photo service owns the photos subvolume under its own identity and
 	// the Product Service only forwards the photo API to it (ADR 0011).
@@ -228,6 +237,7 @@ func run(logger *slog.Logger) error {
 		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
 		Photos:     photoAPI,
 		Media:      mediaapi.New(mediaService, logger),
+		Music:      musicService,
 		Logger:     logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
