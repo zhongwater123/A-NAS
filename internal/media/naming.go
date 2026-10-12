@@ -123,7 +123,7 @@ func parseName(base string, mode nameMode) parsedName {
 		titlePart = chineseSeason.ReplaceAllString(titlePart, "")
 	}
 	if titlePart = strings.TrimSpace(titlePart); titlePart != "" {
-		info, _ := ptn.Parse(titlePart)
+		info := parseRelease(titlePart)
 		result.Title = cleanTitle(info.Title)
 		result.Year = info.Year
 		if result.Title == "" && info.Year != 0 {
@@ -137,12 +137,53 @@ func parseName(base string, mode nameMode) parsedName {
 	return result
 }
 
+// hyphenated finds words joined by hyphens, as in Spider-Man or WEB-DL.
+var hyphenated = regexp.MustCompile(`\p{L}+(?:-\p{L}+)+`)
+
+// keptHyphen stands in for a hyphen inside a title while go-ptn reads it.
+const keptHyphen = "\u2011"
+
+// parseRelease is go-ptn's Parse with hyphens inside words kept, so that
+// "Spider-Man" or "X-Men" is not taken for a release group suffix. A hyphen
+// next to an all-capital part (WEB-DL, -SPARKS) still splits.
+func parseRelease(name string) *ptn.TorrentInfo {
+	protected := hyphenated.ReplaceAllStringFunc(name, func(word string) string {
+		parts := strings.Split(word, "-")
+		var joined strings.Builder
+		joined.WriteString(parts[0])
+		for i := 1; i < len(parts); i++ {
+			if allCapitals(parts[i-1]) || allCapitals(parts[i]) {
+				joined.WriteString("-")
+			} else {
+				joined.WriteString(keptHyphen)
+			}
+			joined.WriteString(parts[i])
+		}
+		return joined.String()
+	})
+	info, _ := ptn.Parse(protected)
+	info.Title = strings.ReplaceAll(info.Title, keptHyphen, "-")
+	return info
+}
+
+// allCapitals reports a part of at least two letters, all upper case.
+func allCapitals(part string) bool {
+	count := 0
+	for _, r := range part {
+		if !unicode.IsUpper(r) {
+			return false
+		}
+		count++
+	}
+	return count >= 2
+}
+
 func episodeTitleAfter(rest string) string {
 	rest = strings.TrimLeft(rest, " ._-")
 	if rest == "" {
 		return ""
 	}
-	info, _ := ptn.Parse(rest)
+	info := parseRelease(rest)
 	title := cleanTitle(info.Title)
 	if genericTitle.MatchString(title) {
 		return ""
@@ -164,7 +205,7 @@ func folderTitle(name string) (string, int) {
 			return title, year
 		}
 	}
-	info, _ := ptn.Parse(name)
+	info := parseRelease(name)
 	if title := cleanTitle(info.Title); title != "" {
 		return title, info.Year
 	}
