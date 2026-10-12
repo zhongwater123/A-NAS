@@ -14,7 +14,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
 产品服务（非特权，只监听 127.0.0.1:8080）
   ├── Auth / Files / Storage / Share / Jobs / Policy
   ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► 媒体 Worker（按连接启动，无网络、无数据卷）
-  ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；ADR 0018）
+  ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一媒体 Worker 探测与解码；ADR 0018）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              └── AI Orchestrator ──► AI Worker（M2 规划；只读 fd，无网络）
@@ -86,7 +86,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，由 `internal/httpapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md)；尚未部署 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
-| `internal/mediaworker` | 媒体 Worker 的类型化协议、FFmpeg 命令、按连接服务端（`anas-api media-worker`）与客户端；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
+| `internal/mediaworker` | 媒体 Worker：与应用无关的类型化协议（探测、截图、字幕、视频流、音频解码）、FFmpeg 命令、按连接服务端（`anas-api media-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
