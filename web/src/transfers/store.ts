@@ -52,16 +52,16 @@ export interface UploadBatch {
   choice?: ConflictChoice;
 }
 
-// ExternalUpload is an upload another app runs and reports here, such as
-// photos sent to the photo library.
+// ExternalUpload is an upload another app runs and reports here: photos sent
+// to the photo library, or videos the media center sends into a library.
 export interface ExternalUpload {
   key: string;
-  app: "photos";
+  app: "photos" | "media";
   name: string;
   size: number;
   label: string;
   progress: number;
-  phase: "running" | "completed" | "failed";
+  phase: "running" | "completed" | "failed" | "canceled";
   error?: string;
   createdAt: number;
   finishedAt?: number;
@@ -346,6 +346,7 @@ export class TransferStore {
       progress: (fraction: number) => change({ progress: fraction }, false),
       done: () => change({ phase: "completed", progress: 1, finishedAt: Date.now() }),
       fail: (error: string) => change({ phase: "failed", error, finishedAt: Date.now() }),
+      cancel: () => change({ phase: "canceled", finishedAt: Date.now() }),
     };
   }
 

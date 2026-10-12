@@ -86,7 +86,7 @@ const (
 	unstartedAfter = 15 * time.Minute
 	// partialAfter ends a download that a range request stopping before the
 	// end left part-way.
-	partialAfter = time.Hour
+	partialAfter   = time.Hour
 	keepFinished   = 30 * 24 * time.Hour
 	maxFinished    = 500
 	maxLiveUploads = 64
@@ -154,7 +154,10 @@ type Options struct {
 	// Sessions lists the signed-in sessions. Ending an abandoned upload
 	// removes its temporary as its owner through one of them.
 	Sessions func(context.Context) []accounts.Session
-	Logger   *slog.Logger
+	// FilesChanged, when set, is told after an upload was saved in a space,
+	// so indexes over ordinary files (the media center) catch up.
+	FilesChanged func(ctx context.Context, user accounts.User, spaceID string)
+	Logger       *slog.Logger
 }
 
 type Service struct {
@@ -162,6 +165,7 @@ type Service struct {
 	files    *files.Service
 	spaces   Spaces
 	sessions func(context.Context) []accounts.Session
+	changed  func(context.Context, accounts.User, string)
 	now      func() time.Time
 	random   io.Reader
 	logger   *slog.Logger
@@ -198,7 +202,7 @@ func Open(path string, fileService *files.Service, spaces Spaces, options Option
 		return nil, err
 	}
 	service := &Service{
-		store: db, files: fileService, spaces: spaces, sessions: options.Sessions,
+		store: db, files: fileService, spaces: spaces, sessions: options.Sessions, changed: options.FilesChanged,
 		now: options.Now, random: options.Random, logger: options.Logger, live: make(map[string]*liveTransfer),
 	}
 	if service.now == nil {

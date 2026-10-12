@@ -33,6 +33,7 @@ type fixture struct {
 	root     string
 	mu       sync.Mutex
 	now      time.Time
+	changed  []string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -81,7 +82,11 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) open(t *testing.T) {
 	t.Helper()
-	service, err := Open(f.path, f.files, f.accounts, Options{Now: f.clock})
+	service, err := Open(f.path, f.files, f.accounts, Options{Now: f.clock, FilesChanged: func(_ context.Context, user accounts.User, spaceID string) {
+		f.mu.Lock()
+		f.changed = append(f.changed, user.Username+" "+spaceID)
+		f.mu.Unlock()
+	}})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -163,6 +168,9 @@ func TestUploadIsFollowedUntilSavedAndOnlyItsOwnerSeesIt(t *testing.T) {
 	}
 	if content, _ := os.ReadFile(filepath.Join(f.root, "家庭视频.mp4")); string(content) != "0123456789" {
 		t.Fatalf("saved content = %q", content)
+	}
+	if want := []string{"alice " + f.shared.ID}; !slices.Equal(f.changed, want) {
+		t.Fatalf("FilesChanged calls = %v, want %v", f.changed, want)
 	}
 	// A browser that missed the final response finds the upload complete.
 	status, err := f.service.UploadStatus(f.ctx, f.alice, upload.ID)

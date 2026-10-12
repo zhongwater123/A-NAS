@@ -154,6 +154,9 @@ func (s *Service) FinishUpload(ctx context.Context, owner accounts.User, id stri
 	}
 	s.mu.Unlock()
 	t := s.settle(ctx, live, StateCompleted, nil)
+	if s.changed != nil {
+		s.changed(ctx, owner, committed.Entry.SpaceID)
+	}
 	t.decorate()
 	return t, nil
 }

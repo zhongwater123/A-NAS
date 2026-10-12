@@ -222,7 +222,7 @@ func run(logger *slog.Logger) error {
 	}
 	defer feedbackStore.Close()
 	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
-		Sessions: accountService.RememberedSessions, Logger: logger,
+		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
 	})
 	if err != nil {
 		return err
