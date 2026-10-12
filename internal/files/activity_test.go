@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
@@ -38,8 +39,11 @@ func TestFileEventsCarryTheirSpaceAndMembersSeeOnlyTheirOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
+	// Events a millisecond apart would be ordered by their random IDs.
+	now := time.Date(2026, time.October, 12, 8, 0, 0, 0, time.UTC)
 	service := files.NewService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true,
+		Now: func() time.Time { now = now.Add(time.Second); return now },
 	})
 	uploaded, err := service.Upload(ctx, alice, private.ID, "", "体检报告.pdf", bytes.NewReader([]byte("x")))
 	if err != nil {

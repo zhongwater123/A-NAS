@@ -1,6 +1,6 @@
 import {
-  ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, Images, KeyRound,
-  LayoutDashboard, LogOut, Monitor, Network, RefreshCw, ShieldCheck, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
+  ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
+  LayoutDashboard, LogOut, Monitor, Network, ScrollText, ShieldCheck, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 
@@ -9,12 +9,13 @@ import {
   changePassword, confirmStoragePlan, createMember, createStoragePlan, disableMember, executeStoragePlan, listUsers, listVolumes, resetMember, startViewing,
 } from "./api";
 import { isLocalConsole } from "./LocalConsoleScreenSaver";
+import { LogsSection, type LogsPreset } from "./logs/LogsSection";
+import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
 import type { HostStateView } from "./useHostState";
 
-export type SettingsSection = "account" | "overview" | "storage" | "users";
+export type SettingsSection = "account" | "overview" | "storage" | "users" | "logs";
 
 type PlanStep = "plan" | "confirm" | "execute";
-type Tone = "neutral" | "accent" | "success" | "warning" | "danger";
 
 export interface StoragePlanFlow {
   plan?: StoragePlan;
@@ -32,11 +33,12 @@ const systemSections: Array<{ id: SettingsSection; label: string; icon: LucideIc
   { id: "overview", label: "概览", icon: LayoutDashboard, tone: "overview" },
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
+  { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
 ];
 
 const plannedSections: Array<{ label: string; icon: LucideIcon; tone: string }> = [
   { label: "网络与访问", icon: Network, tone: "network" },
-  { label: "安全与审计", icon: ShieldCheck, tone: "security" },
+  { label: "安全", icon: ShieldCheck, tone: "security" },
   { label: "系统更新", icon: CircleArrowUp, tone: "update" },
 ];
 
@@ -75,6 +77,8 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
   const isAdmin = user.role === "admin";
   const current = section === "users" && !isAdmin ? "overview" : section;
   const [editingPassword, setEditingPassword] = useState(false);
+  // "登录记录" in My account opens the logs on sign-ins.
+  const [logsPreset, setLogsPreset] = useState<LogsPreset>();
   const volumes = useVolumes(storagePlan.plan?.state);
   const navigate = (next: SettingsSection) => { setEditingPassword(false); onSectionChange(next); };
   return (
@@ -93,11 +97,13 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
         {plannedSections.map(({ label, icon, tone }) => <button key={label} aria-label={`${label}，规划中`} disabled><IconTile tone={tone} icon={icon} />{label}</button>)}
       </nav>
       <div className="set-main">
-        <div className="set-page">
-          {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onLogout={onLogout} />}
+        <div className={`set-page ${current === "logs" ? "wide" : ""}`}>
+          {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onLogout={onLogout}
+            onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
           {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
           {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
           {current === "users" && <UsersSection currentUser={user} onChangeOwnPassword={() => { onSectionChange("account"); setEditingPassword(true); }} />}
+          {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
         </div>
       </div>
     </div>
@@ -120,11 +126,12 @@ function useVolumes(planState?: string): VolumesView {
 
 // ---------------------------------------------------------------- My account
 
-function AccountSection({ session, editing, onEditingChange, onLogout }: {
+function AccountSection({ session, editing, onEditingChange, onLogout, onShowSignIns }: {
   session: Session;
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
   onLogout: () => void;
+  onShowSignIns: () => void;
 }) {
   const { user } = session;
   const [error, setError] = useState("");
@@ -178,6 +185,9 @@ function AccountSection({ session, editing, onEditingChange, onLogout }: {
           label="本次登录"
           detail={localConsole ? "设备本机屏幕 · 退出登录前一直保持登录" : `浏览器 · ${formatDateTime(session.expiresAt)} 前有效，之后需要重新登录`}
         />
+        <Row icon={<IconTile tone="logs" icon={History} />} label="登录记录" detail="这个账号在哪里登录过、是否有人输错过密码">
+          <button className="set-btn" onClick={onShowSignIns}>查看<ChevronRight /></button>
+        </Row>
       </Group>
     </>
   );
@@ -606,20 +616,6 @@ function Dialog({ title, onClose, children }: { title: string; onClose?: () => v
 
 // -------------------------------------------------------------- Shared parts
 
-function PageHeader({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {
-  return <header className="set-header"><div><h2>{title}</h2><p>{subtitle}</p></div>{action}</header>;
-}
-
-function Group({ title, aside, footnote, overflowVisible, children }: { title: string; aside?: string; footnote?: string; overflowVisible?: boolean; children: ReactNode }) {
-  return (
-    <div className="set-group">
-      <div className="set-group-head"><h3>{title}</h3>{aside && <span>{aside}</span>}</div>
-      <div className={`set-card ${overflowVisible ? "overflow-visible" : ""}`}>{children}</div>
-      {footnote && <p className="set-footnote">{footnote}</p>}
-    </div>
-  );
-}
-
 function Row({ icon, label, detail, children }: { icon?: ReactNode; label: string; detail?: string; children?: ReactNode }) {
   return (
     <div className="set-row">
@@ -638,44 +634,13 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <div className="set-field"><label><span>{label}</span>{children}</label>{hint && <small>{hint}</small>}</div>;
 }
 
-function Pill({ tone = "neutral", outline, children }: { tone?: Tone; outline?: boolean; children: ReactNode }) {
-  return <span className={`set-pill ${tone} ${outline ? "outline" : ""}`}>{children}</span>;
-}
-
-function Banner({ tone, onClose, children }: { tone: "error" | "warning" | "success"; onClose?: () => void; children: ReactNode }) {
-  const Icon = tone === "success" ? CircleCheck : CircleAlert;
-  return (
-    <div className={`set-banner ${tone}`} role={tone === "error" ? "alert" : "status"}>
-      <Icon /><span>{children}</span>
-      {onClose && <button className="set-icon-btn" aria-label="关闭提示" onClick={onClose}><X /></button>}
-    </div>
-  );
-}
-
 function Callout({ tone, title, children }: { tone: "danger" | "success" | "warning"; title: string; children: ReactNode }) {
   const Icon = tone === "success" ? CircleCheck : TriangleAlert;
   return <div className={`wiz-callout ${tone}`}><Icon /><div><strong>{title}</strong><p>{children}</p></div></div>;
 }
 
-function IconTile({ tone, icon: Icon, size }: { tone: string; icon: LucideIcon; size?: "lg" }) {
-  return <span className={`set-tile ${tone} ${size ?? ""}`}><Icon /></span>;
-}
-
-function Avatar({ name, size }: { name: string; size?: "lg" }) {
-  return <span className={`set-avatar ${avatarTone(name)} ${size ?? ""}`} aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>;
-}
-
-// avatarTone gives a person the same colour wherever their initial appears.
-export function avatarTone(name: string): string {
-  return `avatar-c${[...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 6}`;
-}
-
 function StatusText({ status }: { status: User["status"] }) {
   return <span className="set-status"><span className={`set-dot status-${status}`} />{statusLabel(status)}</span>;
-}
-
-function RefreshButton({ label, busy, onClick }: { label: string; busy: boolean; onClick: () => void }) {
-  return <button className="set-icon-btn bordered" aria-label={label} disabled={busy} onClick={onClick}><RefreshCw className={busy ? "spinning" : ""} /></button>;
 }
 
 function HostStatePending({ host, inline }: { host: HostStateView; inline?: boolean }) {
@@ -691,8 +656,6 @@ function HostStateBanner({ host, snapshot }: { host: HostStateView; snapshot: Ho
 }
 
 // ------------------------------------------------------------------ Helpers
-
-function messageOf(error: unknown) { return error instanceof Error ? error.message : "请求失败"; }
 
 function volumeUsage(volume: Volume) {
   const capacity = volume.capacityBytes ?? 0;
