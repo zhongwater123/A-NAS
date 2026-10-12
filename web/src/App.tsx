@@ -387,8 +387,10 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
   };
 
   const Icon = windowIcons[model.id];
+  // The dock floats over the bottom of the desktop whenever a window is open,
+  // so a maximized window ends above it and keeps its bottom controls reachable.
   const style = model.maximized
-    ? { left: 88, top: 12, right: 12, bottom: 12, zIndex: model.z }
+    ? { left: 88, top: 12, right: 12, bottom: 90, zIndex: model.z }
     : { left: model.x, top: model.y, width: model.width, height: model.height, zIndex: model.z };
 
   return (
