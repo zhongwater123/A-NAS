@@ -3,8 +3,10 @@ package appstore_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 )
@@ -42,5 +44,48 @@ func TestEmbeddedCatalogPassesPolicy(t *testing.T) {
 		if entry.Icon == nil || entry.App.Title == "" || len(plan.Images) == 0 {
 			t.Errorf("%s: incomplete entry title=%q icon=%v images=%v", entry.App.ID, entry.App.Title, entry.Icon != nil, plan.Images)
 		}
+	}
+}
+
+// Every vendored app is listed under an A-NAS category, so none is only
+// reachable through search.
+func TestEveryCatalogAppHasACategory(t *testing.T) {
+	entries, err := appstore.Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !slices.Contains(appstore.Categories, entry.App.Category) {
+			t.Errorf("%s: category %q is not an A-NAS category", entry.App.ID, entry.App.Category)
+		}
+	}
+}
+
+func TestCatalogReadsFirstUseNotesAndLinks(t *testing.T) {
+	manifest := `
+x-casaos:
+  title: {en_US: Demo}
+  developer: Demo Team
+  website: "javascript:alert(1)"
+  repo: https://github.com/demo/demo
+  docs: /docs
+  update_at: 2026-05-17
+  tips:
+    before_install:
+      en_US: Default password is admin.
+      zh_CN: 默认密码是 admin。
+services: {}
+`
+	entries, err := appstore.LoadCatalog(fstest.MapFS{"memos/docker-compose.yml": {Data: []byte(manifest)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := entries[0].App
+	want := appstore.App{
+		ID: "memos", Title: "Demo", Category: appstore.CategoryNotes, Developer: "Demo Team",
+		Repo: "https://github.com/demo/demo", Updated: "2026-05-17", Notes: "默认密码是 admin。", Scheme: "http", Path: "/",
+	}
+	if app != want {
+		t.Fatalf("app = %+v, want %+v", app, want)
 	}
 }

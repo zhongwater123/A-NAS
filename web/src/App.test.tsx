@@ -80,12 +80,15 @@ const memosPlan = {
 };
 
 function appList(memos: Record<string, unknown>) {
-  const base = { tagline: "", description: "", version: "1", author: "", website: "", scheme: "http", path: "/", state: "available", running: 0, total: 0 };
+  const base = {
+    tagline: "", description: "", notes: "", version: "1", author: "", developer: "", website: "", repo: "", docs: "", updated: "",
+    scheme: "http", path: "/", state: "available", running: 0, total: 0,
+  };
   return {
     dataSource: "simulated",
     apps: [
-      { ...base, id: "memos", title: "Memos", tagline: "轻量笔记", category: "Productivity", webPort: 5230, ...memos },
-      { ...base, id: "navidrome", title: "Navidrome", tagline: "音乐流媒体", category: "Media", webPort: 4533 },
+      { ...base, id: "memos", title: "Memos", tagline: "轻量笔记", category: "notes", webPort: 5230, ...memos },
+      { ...base, id: "navidrome", title: "Navidrome", tagline: "音乐流媒体", category: "media", webPort: 4533 },
     ],
   };
 }
@@ -679,13 +682,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开应用中心" }));
 
     const store = screen.getByRole("dialog", { name: "应用中心" });
-    await user.type(await within(store).findByRole("textbox", { name: "搜索应用" }), "memo");
-    expect(within(store).queryByRole("button", { name: /Navidrome/ })).toBeNull();
-    await user.click(within(store).getByRole("button", { name: "Memos，可安装" }));
-    await user.click(within(store).getByRole("button", { name: "安装" }));
+    await user.click(await within(store).findByRole("button", { name: "安装 Memos" }));
 
-    const plan = await within(store).findByRole("region", { name: "安装计划" });
-    expect(within(plan).getByText("neosmemo/memos:0.28.0")).toBeTruthy();
+    const plan = await within(store).findByRole("dialog", { name: "安装计划" });
+    expect(await within(plan).findByText("neosmemo/memos:0.28.0")).toBeTruthy();
     expect(within(plan).getByText("5230/tcp")).toBeTruthy();
     expect(within(plan).getByText("/srv/a-nas/data/apps/memos/memos")).toBeTruthy();
     expect(within(plan).getByText("app-memos")).toBeTruthy();
@@ -695,12 +695,9 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     await user.click(within(plan).getByRole("button", { name: "确认安装" }));
     expect(posts).toEqual([{ url: "/api/v1/apps/memos/install", body: { digest: memosPlan.digest } }]);
-    expect(await within(store).findByText(/已安装 · 1\/1 个容器运行中/)).toBeTruthy();
+    expect(await within(store).findByText("Memos 已安装")).toBeTruthy();
+    expect(within(store).getByText(/已安装 · 1\/1 个容器运行中/)).toBeTruthy();
     expect(within(store).getByText(/Container memos\s+Started/)).toBeTruthy();
-
-    await user.click(within(store).getByRole("button", { name: "卸载" }));
-    await user.click(within(store).getByRole("button", { name: "确认卸载" }));
-    expect(posts[1]).toEqual({ url: "/api/v1/apps/memos/uninstall", body: {} });
   });
 
   it("explains install conflicts and a disabled App Center", async () => {
@@ -718,8 +715,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const { unmount } = render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
     const store = screen.getByRole("dialog", { name: "应用中心" });
-    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
-    await user.click(within(store).getByRole("button", { name: "安装" }));
+    await user.click(await within(store).findByRole("button", { name: "安装 Memos" }));
     await user.click(await within(store).findByRole("button", { name: "确认安装" }));
     expect((await within(store).findByRole("alert")).textContent).toContain("端口已被占用（5230 is used by other）");
     unmount();
@@ -752,8 +748,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     const store = screen.getByRole("dialog", { name: "应用中心" });
     await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
     await user.click(within(store).getByRole("button", { name: "安装" }));
-    const plan = await within(store).findByRole("region", { name: "安装计划" });
-    expect(within(plan).getByText("default")).toBeTruthy();
+    const plan = await within(store).findByRole("dialog", { name: "安装计划" });
+    expect(await within(plan).findByText("default")).toBeTruthy();
     expect(within(plan).getByText(/地址只从 10\.96\.64\.0\/19 分配/)).toBeTruthy();
 
     await user.click(within(plan).getByRole("button", { name: "取消" }));

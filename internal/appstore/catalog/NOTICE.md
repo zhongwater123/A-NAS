@@ -4,4 +4,4 @@ The `docker-compose.yml` and `icon.*` files in this directory are copied without
 
 A-NAS does not run these files as-is: `internal/appstore` validates each manifest against its install policy and renders a rewritten Compose file with A-NAS host paths and labels. App names, logos and container images belong to their respective projects and are subject to their own licenses and trademarks.
 
-Apps from the pinned commit that the policy rejects (host devices, host networking, ports below 1024 or host paths outside `/DATA`) are not included: Emby, Gitea, Jellyfin, Node-RED, Snapdrop and WebDav.
+The catalog is a reviewed selection of the apps at the pinned commit. Apps the policy rejects (host devices, host networking, ports below 1024 or host paths outside `/DATA`, among others) are never included; which of the remaining apps are included, and why others are not, is recorded in the [app catalog review](../../../docs/research/app-catalog-review-2026-10.md). A-NAS lists each app under its own category, assigned in [`categories.go`](../categories.go), so these files stay unmodified.

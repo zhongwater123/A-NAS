@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -90,12 +92,19 @@ func parseMetadata(id string, compose []byte) (App, error) {
 		Title:       localized(meta["title"]),
 		Tagline:     localized(meta["tagline"]),
 		Description: localized(meta["description"]),
-		Category:    text(meta["category"]),
+		Category:    appCategories[id],
 		Version:     text(meta["version"]),
 		Author:      text(meta["author"]),
-		Website:     text(meta["website"]),
+		Developer:   text(meta["developer"]),
+		Website:     webLink(meta["website"]),
+		Repo:        webLink(meta["repo"]),
+		Docs:        webLink(meta["docs"]),
+		Updated:     date(meta["update_at"]),
 		Scheme:      text(meta["scheme"]),
 		Path:        text(meta["index"]),
+	}
+	if tips, ok := meta["tips"].(map[string]any); ok {
+		app.Notes = localized(tips["before_install"])
 	}
 	if app.Title == "" {
 		app.Title = id
@@ -142,4 +151,24 @@ func text(value any) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+// date reads a YYYY-MM-DD value, which YAML decodes as a timestamp when unquoted.
+func date(value any) string {
+	if day, ok := value.(time.Time); ok {
+		return day.Format(time.DateOnly)
+	}
+	if day, err := time.Parse(time.DateOnly, text(value)); err == nil {
+		return day.Format(time.DateOnly)
+	}
+	return ""
+}
+
+// webLink keeps only absolute http(s) links, since the UI renders them as links.
+func webLink(value any) string {
+	link, err := url.Parse(text(value))
+	if err != nil || (link.Scheme != "http" && link.Scheme != "https") || link.Host == "" {
+		return ""
+	}
+	return link.String()
 }

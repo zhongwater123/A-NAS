@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -47,6 +48,8 @@ type ProductDependencies struct {
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
 	Media http.Handler
+	// Music is the music library; nil answers music_unavailable.
+	Music *music.Service
 	// Feedback serves /api/v1/feedback, the list every signed-in user reads
 	// and edits, and receives the user through feedbackapi.WithUser.
 	Feedback http.Handler
@@ -63,6 +66,7 @@ type productHandler struct {
 	apps       http.Handler
 	photos     http.Handler
 	media      http.Handler
+	music      *music.Service
 	feedback   http.Handler
 	logger     *slog.Logger
 	mux        *http.ServeMux
@@ -77,7 +81,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
-		photos: dependencies.Photos, media: dependencies.Media, feedback: dependencies.Feedback,
+		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
 		logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -145,6 +149,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
+	h.musicRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})

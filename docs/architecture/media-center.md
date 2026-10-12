@@ -17,7 +17,7 @@ anas-api（a-nas）
    │     └── 播放、探测、截图、字幕：files.Service.OpenContent 得到只读 fd
    │                 │ SCM_RIGHTS + 类型化请求
    │                 ▼
-   └── internal/mediaworker.Client ──► /run/a-nas-media/media.sock（root:a-nas 0660）
+   └── media.WorkerProcessor ──► internal/mediaworker.Client ──► /run/a-nas-media/media.sock（root:a-nas 0660）
                                           │ Accept=yes，每个连接一个实例
                                           ▼
                                 anas-media@.service（DynamicUser，无网络，
@@ -26,6 +26,8 @@ anas-api（a-nas）
 ```
 
 开发模式（`ANAS_HOSTSTATE_MODE=fake`）用 `mediaworker.Local` 在进程内的 socketpair 上运行同一个服务端，协议与命令完全相同；找不到 FFmpeg 时影视中心只按文件名与 NFO 工作，所有视频都尝试直接播放。
+
+`internal/mediaworker` 是 A-NAS 共用的 FFmpeg 边界，不引用任何应用的类型：探测返回 ffprobe 的中性结果，错误是它自己的 `ErrUnavailable`、`ErrUnreadable`、`ErrInvalid`。影视中心的 [`media.WorkerProcessor`](../../internal/media/worker.go) 把它适配为 `media.Processor`：挑选视频、音轨与字幕流，判断 HDR，并把错误换成影视中心的错误。音乐用同一个 Worker 探测与解码浏览器不能播放的音频（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)）。
 
 ## 身份与可见性
 
@@ -64,8 +66,8 @@ anas-api（a-nas）
 ## Worker 协议
 
 - 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/mediaworker/protocol.go)）。
-- 请求只有四种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/mediaworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
-- 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
+- 请求只有五种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位，把第一条音轨解码为 FLAC，供音乐使用）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/mediaworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
+- 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
 
 ## 关联
 
