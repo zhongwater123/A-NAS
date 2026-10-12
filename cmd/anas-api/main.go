@@ -30,6 +30,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/media"
+	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
@@ -45,6 +48,15 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	// The photo service runs from the same binary as its own process and
 	// identity (ADR 0011), so releases keep two hashed binaries.
+	// systemd starts a media worker per connection, with the connection as
+	// standard input (ADR 0017).
+	if len(os.Args) == 2 && os.Args[1] == mediaWorkerCommand {
+		if err := runMediaWorker(); err != nil {
+			logger.Error("A-NAS media worker failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == photoServiceCommand {
 		if err := runPhotoService(logger); err != nil {
 			logger.Error("A-NAS photo service stopped", "error", err)
@@ -58,7 +70,19 @@ func main() {
 	}
 }
 
-const photoServiceCommand = "photo-service"
+const (
+	photoServiceCommand = "photo-service"
+	mediaWorkerCommand  = "media-worker"
+)
+
+func runMediaWorker() error {
+	if os.Geteuid() == 0 {
+		return errors.New("the media worker must run under its own dynamic identity, never root")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"})
+}
 
 func runPhotoService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {
@@ -156,6 +180,23 @@ func run(logger *slog.Logger) error {
 		defer photoService.Close()
 		photoAPI = photosapi.New(photoService, logger)
 	}
+	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
+	if err != nil {
+		return err
+	}
+	defer mediaStore.Close()
+	processor, err := configuredMediaProcessor(live)
+	if err != nil {
+		return err
+	}
+	mediaService, err := media.NewService(mediaStore, media.Options{
+		Files: fileService, Spaces: accountService, Sessions: accountService.RememberedSessions,
+		Processor: processor, CacheDir: filepath.Join(stateDirectory, "media-cache"), Logger: logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer mediaService.Close()
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -186,6 +227,7 @@ func run(logger *slog.Logger) error {
 		Containers: containersapi.New(containerManager, containerSource, logger),
 		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
 		Photos:     photoAPI,
+		Media:      mediaapi.New(mediaService, logger),
 		Logger:     logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
@@ -202,6 +244,7 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
+	go mediaService.Run(ctx)
 	if photoService != nil {
 		background := make(chan struct{})
 		go func() {
@@ -252,6 +295,31 @@ type sandboxedVolumeGuard struct{ files.VolumeGuard }
 
 func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bool) error {
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
+}
+
+// configuredMediaProcessor picks where FFmpeg runs. Production uses the
+// sandboxed worker socket; development runs FFmpeg in this process when it
+// is installed, and otherwise the media center works without it.
+func configuredMediaProcessor(live bool) (media.Processor, error) {
+	mode := os.Getenv("ANAS_MEDIA_WORKER")
+	if mode == "" {
+		mode = "local"
+		if live {
+			mode = "socket"
+		}
+	}
+	switch mode {
+	case "socket":
+		return mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}, nil
+	case "local":
+		if tools, ok := mediaworker.LocalTools(); ok {
+			return mediaworker.Local{Tools: tools}, nil
+		}
+		return nil, nil
+	case "disabled":
+		return nil, nil
+	}
+	return nil, errors.New("ANAS_MEDIA_WORKER must be socket, local or disabled")
 }
 
 // developmentAI reaches an AI Worker only when ANAS_AI_SOCKET names one, so

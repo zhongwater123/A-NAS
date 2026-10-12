@@ -29,7 +29,7 @@ for binary in anas-api anas-host-agent install-screensavers.sh; do
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-media-system.socket anas-media-system@.service; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -51,7 +51,8 @@ for file in anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai
     exit 2
   fi
 done
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3; do
+# The media center runs Debian's FFmpeg in its worker sandbox (ADR 0017).
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3
@@ -214,6 +215,7 @@ printf '%s\n' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
+  'ANAS_MEDIA_SOCKET=/run/a-nas-media/media.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
@@ -243,6 +245,8 @@ install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/s
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
 install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
 install -o root -g root -m 0644 "$source_release/anas-ai-system.service" /etc/systemd/system/anas-ai.service
+install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
+install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
 if [[ "$lan_entry" == true ]]; then
   # Keep the administrator's own configuration the first time A-NAS replaces it.
@@ -261,6 +265,10 @@ systemctl enable --now smbd.service
 systemctl stop anas-ai.service
 systemctl enable anas-ai.socket
 systemctl restart anas-ai.socket
+# Each connection runs its own media worker; streams already playing finish
+# with the previous release.
+systemctl enable anas-media.socket
+systemctl restart anas-media.socket
 systemctl enable anas-host-agent.service anas-photos.service anas-api.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service
@@ -272,7 +280,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-ai.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-ai.socket anas-media.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup
