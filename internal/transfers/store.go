@@ -147,8 +147,8 @@ func (s *store) clearFinished(ctx context.Context, ownerID string) error {
 }
 
 // recover settles what a restart interrupted. Uploads lost the temporary
-// file they wrote to and must start again; a browser may still resume an
-// interrupted download, whose content address keeps working.
+// file they wrote to and must start again; a download being sent failed,
+// and a browser that resumes it starts it again.
 func (s *store) recover(ctx context.Context, now time.Time) error {
 	at := formatTime(now)
 	if _, err := s.db.ExecContext(ctx, `
@@ -156,17 +156,25 @@ UPDATE transfers SET state = 'failed', error_code = 'service_restarted', error_m
 updated_at = ?1, finished_at = ?1 WHERE direction = 'upload' AND finished_at = ''`, at); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, "UPDATE transfers SET state = 'interrupted', updated_at = ? WHERE direction = 'download' AND state = 'running'", at)
+	_, err := s.db.ExecContext(ctx, `
+UPDATE transfers SET state = 'failed', error_code = 'interrupted', error_message = 'the connection dropped during the transfer',
+updated_at = ?1, finished_at = ?1 WHERE direction = 'download' AND state IN ('running', 'interrupted')`, at)
 	return err
 }
 
-// failUnstarted ends downloads that no browser requested in time, for
-// example because a pop-up blocker stopped the link.
-func (s *store) failUnstarted(ctx context.Context, cutoff, now time.Time) error {
+// failStaleDownloads ends downloads that no browser requested in time, for
+// example because a pop-up blocker stopped the link, and downloads that a
+// range request left part-way for too long.
+func (s *store) failStaleDownloads(ctx context.Context, unstarted, partial, now time.Time) error {
 	at := formatTime(now)
-	_, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(ctx, `
 UPDATE transfers SET state = 'failed', error_code = 'not_started', error_message = 'the browser did not start the download',
-updated_at = ?1, finished_at = ?1 WHERE direction = 'download' AND state = 'pending' AND created_at < ?2`, at, formatTime(cutoff))
+updated_at = ?1, finished_at = ?1 WHERE direction = 'download' AND state = 'pending' AND created_at < ?2`, at, formatTime(unstarted)); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE transfers SET state = 'failed', error_code = 'interrupted', error_message = 'the connection dropped during the transfer',
+updated_at = ?1, finished_at = ?1 WHERE direction = 'download' AND state = 'interrupted' AND updated_at < ?2`, at, formatTime(partial))
 	return err
 }
 

@@ -274,6 +274,41 @@ curl -fsS -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" \
   -F "file=@/tmp/lan.txt;filename=lan.txt" "$lan/api/v1/spaces/$alice_private/uploads" || true
 check "LAN upload is owned by the member's UID" test "$(owner_uid "$data/spaces/private/alice/lan.txt" 2>/dev/null)" = "$alice_id"
 
+# --- Resumable uploads (ADR 0019): tus parts land in the member's own temporary.
+tus_meta() { # KEY VALUE ... -> Upload-Metadata
+  local pairs=()
+  while [ $# -gt 1 ]; do pairs+=("$1 $(printf '%s' "$2" | base64 -w0)"); shift 2; done
+  local IFS=,
+  printf '%s' "${pairs[*]}"
+}
+header_of() { tr -d '\r' | sed -n "s/^$1: //Ip"; }
+head -c 3000000 /dev/urandom > /tmp/resumable.bin
+tus_location=$(curl -fsS -D - -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" -H 'Tus-Resumable: 1.0.0' \
+  -H 'Upload-Length: 3000000' -H "Upload-Metadata: $(tus_meta filename resumable.bin spaceId "$alice_private" relativePath 续传/2026)" \
+  -X POST "$lan/api/v1/uploads" | header_of Location || true)
+check "LAN upload address points back at the LAN entry" grep -q "^$lan/api/v1/uploads/" <<<"$tus_location"
+tus_part() { # OFFSET COUNT
+  head -c "$(($1 + $2))" /tmp/resumable.bin | tail -c "$2" | curl -fsS -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" \
+    -H 'Tus-Resumable: 1.0.0' -H "Upload-Offset: $1" -H 'Content-Type: application/offset+octet-stream' --data-binary @- -X PATCH "$tus_location"
+}
+tus_part 0 1000000 || true
+resumed_dir="$data/spaces/private/alice/续传/2026"
+temporary=$(find "$resumed_dir" -maxdepth 1 -name '.a-nas-upload-*' 2>/dev/null | head -n 1)
+check "an unfinished upload is a hidden temporary owned by the member" \
+  test -n "$temporary" -a "$(owner_uid "$temporary" 2>/dev/null)" = "$alice_id"
+check "the NAS reports where the upload stopped" \
+  test "$(curl -fsS -I -b /tmp/lan.jar -H 'Tus-Resumable: 1.0.0' "$tus_location" | header_of Upload-Offset)" = 1000000
+tus_part 1000000 2000000 || true
+check "the resumed upload saves the whole file" cmp -s /tmp/resumable.bin "$resumed_dir/resumable.bin"
+check "the saved upload is owned by the member's UID" test "$(owner_uid "$resumed_dir/resumable.bin" 2>/dev/null)" = "$alice_id"
+check "a saved upload leaves no temporary" test -z "$(find "$resumed_dir" -name '.a-nas-upload-*' 2>/dev/null)"
+check "member cannot start an upload into the administrator's private space" \
+  test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Tus-Resumable: 1.0.0' -H 'Upload-Length: 1' \
+    -H "Upload-Metadata: $(tus_meta filename x.bin spaceId "$owner_private")" -X POST "$api/api/v1/uploads")" = 403
+download_url=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d "{\"entryIds\":[\"$alice_file\"]}" "$api/api/v1/transfers/downloads" | jq -r .contentUrl || true)
+check "a followed download returns the uploaded bytes" cmp -s /tmp/alice.txt <(curl -fsS -b /tmp/alice.jar "$api$download_url")
+
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"
 check "Product Service account cannot list Shared" denied as a-nas ls "$data/spaces/shared"

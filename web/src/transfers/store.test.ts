@@ -115,12 +115,17 @@ describe("the upload queue", () => {
 
   it("holds the queue while the volume is full until the user continues", () => {
     store.enqueue([{ file: file("a.jpg") }, { file: file("b.jpg") }, { file: file("c.jpg") }, { file: file("d.jpg") }], target);
-    tus.uploads[0].fail("PATCH", 507, "insufficient_storage");
+    // A file too large to fit fails alone before sending anything.
+    tus.uploads[0].fail("POST", 507, "insufficient_storage");
+    expect(phases()).toEqual(["failed", "running", "running", "running"]);
+    expect(store.getSnapshot().uploads[0].error?.code).toBe("file_too_large");
+    // The volume filling up mid-way holds every upload.
+    tus.uploads[1].fail("PATCH", 507, "insufficient_storage");
     expect(store.getSnapshot().holds).toEqual(["space"]);
-    expect(phases()).toEqual(["waiting", "waiting", "waiting", "queued"]);
-    expect(tus.uploads).toHaveLength(3);
+    expect(phases()).toEqual(["failed", "waiting", "waiting", "waiting"]);
+    expect(tus.uploads).toHaveLength(4);
     store.release("space");
-    expect(phases()).toEqual(["running", "running", "running", "queued"]);
+    expect(phases()).toEqual(["failed", "running", "running", "running"]);
   });
 
   it("pauses on an expired session and continues after the same account signs in", () => {
@@ -139,7 +144,7 @@ describe("the upload queue", () => {
   it("starts a lost upload again once, and fails the folder's uploads when it is gone", async () => {
     store.enqueue([{ file: file("a.jpg") }], target);
     tus.uploads[0].created("upload-a");
-    tus.uploads[0].fail("PATCH", 404);
+    tus.uploads[0].fail("PATCH", 404, "ERR_UPLOAD_NOT_FOUND");
     expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", restarted: true, transferred: 0, superseded: ["upload-a"] });
     expect(tus.uploads[1].options.endpoint).toBe("/api/v1/uploads");
     await vi.advanceTimersByTimeAsync(0);
@@ -150,7 +155,8 @@ describe("the upload queue", () => {
     expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "failed", error: { code: "upload_lost" } });
 
     store.enqueue(["b", "c", "d", "e"].map((name) => ({ file: file(name) })), target);
-    tus.uploads[2].fail("POST", 404, "not_found");
+    // The folder went away while b was being sent.
+    tus.uploads[2].fail("PATCH", 404, "not_found");
     expect(phases().slice(1)).toEqual(["failed", "running", "running", "failed"]);
   });
 

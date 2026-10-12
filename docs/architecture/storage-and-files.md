@@ -66,11 +66,33 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - Product Service 的每个文件操作都携带请求的会话令牌。File Broker 以只读方式打开 `control.db` 自行校验令牌、账号状态与过期时间，不信任 Product Service 声明的身份；令牌无效、账号被禁用或数据卷不可用时拒绝，不会派生进程。
 - 通过校验后，Broker 为该用户（按 UID 与角色）派生 `anas-host-agent file-worker`：UID/GID 为账号 UID，附加组为 `a-nas-users`（管理员另加 `a-nas-admins`），只接受 20100–29999 内且与 `/etc/passwd` 一致的身份。工作进程拒绝以 root 运行，空闲 5 分钟后退出，同一用户的操作串行执行。
 - 工作进程用 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` 解析数据卷内路径：`..` 与符号链接无法越界，经过仅可穿过的容器与回收站目录只需执行权限。改名使用 `RENAME_NOREPLACE`，不会覆盖已有条目。需要 Linux 5.6 及以上内核。
-- 下载与上传的文件内容不经过 root：工作进程打开或新建文件后经 `SCM_RIGHTS` 把描述符交回 Product Service。容量检查在 Product Service 中对数据卷根目录执行；复制目录按其中文件总大小检查，上传只检查下一块数据。
+- 下载与上传的文件内容不经过 root：工作进程打开或新建文件后经 `SCM_RIGHTS` 把描述符交回 Product Service。容量检查在 Product Service 中对数据卷根目录执行；复制目录按其中文件总大小检查，分片上传开始时检查整个文件、之后每片再检查一次，旧的 multipart 上传只检查下一块数据。
 - 回收站条目只对删除者可见并只能由其恢复或清除，因为每个用户的回收目录只授予本人。
 - 例外：只读快照仍由 root Host Agent 创建、列出并读出对象内容；恢复时由工作进程以用户身份写入目标空间。
 - 派生工作进程要求 Host Agent 保留 `CAP_SETUID`/`CAP_SETGID`。systemd 257 在单元同时写 `User=` 与 seccomp 过滤（`RestrictAddressFamilies`）时会拿走 `CAP_SETUID`，所以 `anas-host-agent.service` 不写 `User=`/`Group=`，由 `make ops-check` 保证。Broker 启动时以 `nobody` 身份按工作进程相同的参数运行探针，记录 `file broker identity switch verified` 或失败原因；安装器在探针未通过或能力缺失时以退出码 5 结束。
 - Product Service 以 `ProtectSystem=strict` 运行，它看到的数据卷挂载始终是只读的。它在文件操作前只确认挂载的是预期的数据卷（Btrfs、卷标记与已初始化卷的 UUID 一致），不判断可写性；真正只读的数据卷由执行写入的工作进程以 `EROFS` 报告为卷不可用。
+
+## 上传与下载
+
+传输中心（[规格](../specs/transfer-center.md)）的数据流：
+
+```text
+浏览器 tus-js-client ──POST/HEAD/PATCH /api/v1/uploads──► transfersapi（tusd pkg/handler，会话与 CSRF 由产品 API 先行校验）
+                                                            │ 数据存储
+                                                            ▼
+                                                   transfers.Service ── transfers.db（状态、进度、30 天记录）
+                                                            │
+                                                            ▼
+                                                   files.Service：BeginUpload / WriteUpload / CommitUpload / AbortUpload
+                                                            │ 创建临时文件、建子文件夹、重命名、移入回收站
+                                                            ▼
+                                                   File Broker（登录者 UID）──► 目标文件夹中的 .a-nas-upload-*
+```
+
+- 创建上传时以用户身份检查写权限、建好文件夹上传的子文件夹、检查整个文件的保留空间并创建临时文件；产品服务持有其描述符（`files.PendingUpload`）直到完成或放弃，分片直接写描述符，不再经过文件代理（[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）。
+- 完成时同步到磁盘，按同名策略以 `RENAME_NOREPLACE` 重命名；`replace` 先把原文件移到上传者的回收站。目录对账跳过 `.a-nas-upload-*`，并以当前用户身份删除内存中无人持有、10 分钟未修改的临时文件。
+- 下载先经 `POST /api/v1/transfers/downloads` 校验条目并建立记录，浏览器再以普通下载获取 `/api/v1/transfers/{id}/content`。单个文件经 `http.ServeContent` 支持 Range；文件夹与多选以 `archive/zip` 存储方式流式打包，打包前以用户身份重新列出内容，打不开的文件跳过并在压缩包内列出。进度按发送的字节计数；取消或打包中途失败时中断连接，浏览器不会把截断的文件当作完成。
+- 进行中的传输只在产品服务进程内；状态变化与每 5 秒的进度写入 `transfers.db`。重启时未完成的上传记为 `service_restarted`；连接断开或重启时正在发送的下载记为失败（`interrupted`），浏览器续传或重新下载同一地址时这条记录重新开始。
 
 ## 管理员查看模式
 
@@ -92,7 +114,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)：本页描述的身份与授权模型
 - [Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md) 与[系统测试](../../scripts/system-test.sh)
-- [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
+- [基础存储与共享规格](../specs/basic-storage-and-sharing.md)、[传输中心规格](../specs/transfer-center.md)
+- [ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)：分片上传与持有的临时文件
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)

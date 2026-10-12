@@ -293,6 +293,39 @@ func TestDownloadOfAFileIsFollowedAndResumes(t *testing.T) {
 	if started, err := f.service.ServeDownload(httptest.NewRecorder(), request, f.bob, download.ID); started || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another user's download = %v, %v", started, err)
 	}
+
+	// The browser goes away mid-file: the download fails until it comes back.
+	dropped := &droppingWriter{ResponseRecorder: httptest.NewRecorder(), after: 3}
+	if started, err := f.service.ServeDownload(dropped, httptest.NewRequest(http.MethodGet, download.ContentURL, nil), f.alice, download.ID); !started || err == nil {
+		t.Fatalf("dropped download = %v, %v", started, err)
+	}
+	if got := f.state(t, f.alice, download.ID); got.State != StateFailed || got.Error == nil || got.Error.Code != "interrupted" {
+		t.Fatalf("after a dropped connection: %#v", got)
+	}
+	if again := f.serve(t, f.alice, download.ID, "bytes=3-"); again.Code != http.StatusPartialContent || again.Body.String() != "3456789" {
+		t.Fatalf("resumed after the drop = %d %q", again.Code, again.Body.String())
+	}
+	if got := f.state(t, f.alice, download.ID); got.State != StateCompleted {
+		t.Fatalf("resumed download = %#v", got)
+	}
+}
+
+// droppingWriter fails once after some bytes, like a connection the browser closed.
+type droppingWriter struct {
+	*httptest.ResponseRecorder
+	after   int
+	written int
+}
+
+func (w *droppingWriter) Write(data []byte) (int, error) {
+	if w.written+len(data) > w.after {
+		count := w.after - w.written
+		w.written = w.after
+		_, _ = w.ResponseRecorder.Write(data[:count])
+		return count, errors.New("broken pipe")
+	}
+	w.written += len(data)
+	return w.ResponseRecorder.Write(data)
 }
 
 func TestDownloadOfAFolderIsAZIPArchive(t *testing.T) {
@@ -398,7 +431,7 @@ func TestCanceledDownloadStopsAndUnstartedOnesFail(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.advance(unstartedAfter + time.Minute)
-	if err := f.service.store.failUnstarted(f.ctx, f.clock().Add(-unstartedAfter), f.clock()); err != nil {
+	if err := f.service.store.failStaleDownloads(f.ctx, f.clock().Add(-unstartedAfter), f.clock().Add(-partialAfter), f.clock()); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.state(t, f.alice, unstarted.ID); got.State != StateFailed || got.Error.Code != "not_started" {

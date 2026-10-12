@@ -84,6 +84,9 @@ const (
 	// removes its temporary.
 	abandonedAfter = 24 * time.Hour
 	unstartedAfter = 15 * time.Minute
+	// partialAfter ends a download that a range request stopping before the
+	// end left part-way.
+	partialAfter = time.Hour
 	keepFinished   = 30 * 24 * time.Hour
 	maxFinished    = 500
 	maxLiveUploads = 64
@@ -253,8 +256,8 @@ func (s *Service) Run(ctx context.Context) {
 		s.flush(ctx)
 		s.endAbandoned(ctx)
 		now := s.now()
-		if err := s.store.failUnstarted(ctx, now.Add(-unstartedAfter), now); err != nil {
-			s.logger.ErrorContext(ctx, "fail unstarted downloads", "error", err)
+		if err := s.store.failStaleDownloads(ctx, now.Add(-unstartedAfter), now.Add(-partialAfter), now); err != nil {
+			s.logger.ErrorContext(ctx, "fail stale downloads", "error", err)
 		}
 		if now.Sub(lastPrune) > time.Hour {
 			lastPrune = now
@@ -392,7 +395,7 @@ func (s *Service) ClearFinished(ctx context.Context, owner accounts.User) error 
 	return s.store.clearFinished(ctx, owner.ID)
 }
 
-// track starts following a transfer's bytes in this process.
+// track starts following an upload's bytes in this process.
 func (s *Service) track(owner accounts.User, t Transfer, upload *files.PendingUpload) *liveTransfer {
 	live := &liveTransfer{owner: owner, transfer: t, upload: upload, lastActivity: s.now()}
 	live.meter.reset(s.now(), t.TransferredBytes)
@@ -400,6 +403,20 @@ func (s *Service) track(owner accounts.User, t Transfer, upload *files.PendingUp
 	s.live[t.ID] = live
 	s.mu.Unlock()
 	return live
+}
+
+// trackIdle follows a download unless another request already sends it; one
+// download goes over one connection at a time.
+func (s *Service) trackIdle(owner accounts.User, t Transfer, cancel context.CancelFunc) (*liveTransfer, bool) {
+	live := &liveTransfer{owner: owner, transfer: t, lastActivity: s.now(), cancel: cancel}
+	live.meter.reset(s.now(), t.TransferredBytes)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, busy := s.live[t.ID]; busy {
+		return nil, false
+	}
+	s.live[t.ID] = live
+	return live, true
 }
 
 // progress records bytes moved by a live transfer.

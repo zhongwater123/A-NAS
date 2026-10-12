@@ -81,7 +81,7 @@ const chunkSize = 8 * 1024 * 1024;
 const retryDelays = [0, 1000, 3000, 6000, 10000];
 const unfinishedPhases: UploadPhase[] = ["queued", "running", "paused", "waiting", "conflict"];
 
-export type FailureKind = "network" | "file" | "session" | "denied" | "conflict" | "missing" | "lost" | "invalid" | "volume" | "space" | "busy" | "canceled" | "server";
+export type FailureKind = "network" | "file" | "session" | "denied" | "conflict" | "missing" | "lost" | "invalid" | "volume" | "space" | "toolarge" | "busy" | "canceled" | "server";
 export interface ClassifiedFailure { kind: FailureKind; code: string; message: string }
 
 // classifyUploadError says what an upload failure means for the queue. The
@@ -105,12 +105,15 @@ export function classifyUploadError(error: Error): ClassifiedFailure {
   switch (status) {
     case 401: return failure("session", "authentication_required");
     case 403: return code === "csrf_failed" ? failure("session", code) : failure("denied", "forbidden");
-    case 404: return detailed.originalRequest.getMethod() === "POST" ? failure("missing", "not_found") : failure("lost", "upload_lost");
+    // The product API's not_found is the target folder; tusd's own 404 is
+    // an upload the NAS no longer knows.
+    case 404: return code === "not_found" ? failure("missing", code) : failure("lost", "upload_lost");
     case 409: return code === "name_conflict" ? failure("conflict", code) : code === "folder_blocked" ? failure("invalid", code) : failure("server", "upload_offset");
     case 410: return failure("canceled", "canceled");
     case 423: return code === "volume_unavailable" ? failure("volume", code) : failure("busy", "upload_locked");
     case 429: return failure("busy", "too_many_uploads");
-    case 507: return failure("space", "insufficient_storage");
+    // Refused before any byte: this file alone does not fit.
+    case 507: return detailed.originalRequest.getMethod() === "POST" ? { kind: "toolarge", code: "file_too_large", message } : failure("space", "insufficient_storage");
   }
   if (status >= 400 && status < 500) return failure("invalid", "validation_failed");
   return failure("server", "internal_error");

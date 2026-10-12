@@ -69,6 +69,9 @@ func New(service *transfers.Service, logger *slog.Logger) (http.Handler, error) 
 			// The desktop is same-origin; cross-origin requests never reach here.
 			Cors:           &tusd.CorsConfig{Disable: true},
 			NetworkTimeout: networkTimeout,
+			// Upload addresses follow the scheme and host the browser used,
+			// which Caddy forwards (ADR 0012); they only go back to that browser.
+			RespectForwardedHeaders: true,
 			// tusd reports every request; uploadStore logs what fails.
 			Logger: xslog.New(xslog.NewTextHandler(io.Discard, nil)),
 		})

@@ -76,17 +76,13 @@ func (s *Service) ServeDownload(w http.ResponseWriter, r *http.Request, owner ac
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	s.mu.Lock()
-	if _, busy := s.live[id]; busy {
-		s.mu.Unlock()
+	// A failed or finished download starts again when its browser resumes
+	// it or fetches it anew.
+	t.State, t.Error, t.FinishedAt = StateRunning, nil, nil
+	live, ok := s.trackIdle(owner, t, cancel)
+	if !ok {
 		return false, ErrState
 	}
-	s.mu.Unlock()
-	t.State, t.Error, t.FinishedAt = StateRunning, nil, nil
-	live := s.track(owner, t, nil)
-	s.mu.Lock()
-	live.cancel = cancel
-	s.mu.Unlock()
 	s.begin(live)
 	writer := &countingWriter{ResponseWriter: w, report: func(bytes int64) { s.progress(live, bytes) }}
 	var failure error
@@ -111,8 +107,9 @@ func (s *Service) ServeDownload(w http.ResponseWriter, r *http.Request, owner ac
 		s.settle(ctx, live, StateInterrupted, nil)
 		return true, nil
 	case writer.failed != nil || ctx.Err() != nil:
-		// The browser went away; it may resume the download.
-		s.settle(ctx, live, StateInterrupted, nil)
+		// The browser went away. The download is over unless the browser
+		// resumes it, which starts it again.
+		s.settle(ctx, live, StateFailed, FailureOf(ErrInterrupted))
 		return writer.started, failure
 	default:
 		s.settle(ctx, live, StateFailed, FailureOf(failure))

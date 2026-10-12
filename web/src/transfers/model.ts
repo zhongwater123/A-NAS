@@ -216,6 +216,7 @@ const failures: Record<string, string> = {
   validation_failed: "文件名无效，或 NAS 不接受这个请求",
   volume_unavailable: "数据卷离线或只读",
   insufficient_storage: "数据卷空间不足",
+  file_too_large: "文件大于数据卷可用空间",
   too_many_uploads: "未完成的上传过多",
   upload_lost: "NAS 上的上传进度已丢失",
   service_restarted: "NAS 服务重启，上传需要重新开始",
