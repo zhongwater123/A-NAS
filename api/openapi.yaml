@@ -254,7 +254,7 @@ paths:
     patch:
       operationId: moveFile
       parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileTransfer" } } } }
       responses:
         "200": { description: File moved, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
     delete:
@@ -266,7 +266,7 @@ paths:
     post:
       operationId: copyFile
       parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileTransfer" } } } }
       responses:
         "201": { description: File copied, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
   /api/v1/trash:
@@ -1111,10 +1111,10 @@ paths:
   /api/v1/media/libraries/{libraryId}/scan:
     post:
       operationId: scanMediaLibrary
-      summary: Scan a library the caller manages again, in the background
+      summary: Scan a library the caller manages again, in the background, and retry the videos FFmpeg could not read
       parameters: [{ $ref: "#/components/parameters/MediaLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
-        "202": { description: Scanning }
+        "202": { description: The library while it is being scanned, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibrary" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/media/home:
@@ -1856,6 +1856,14 @@ components:
       required: [name]
       properties:
         parentId: { type: string }
+        name: { type: string, minLength: 1 }
+    FileTransfer:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        spaceId: { type: string, description: Target space; defaults to the entry's own space. A move to another space copies the entry with new IDs and then removes the original. }
+        parentId: { type: string, description: Target folder in the target space; empty for its root. }
         name: { type: string, minLength: 1 }
     TrashItem:
       type: object

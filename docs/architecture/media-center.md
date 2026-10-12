@@ -34,7 +34,7 @@ anas-api（a-nas）
 - 媒体库记录空间 ID、空间类型和所有者。共享空间的库对全体有效账号可见，个人空间的库只对所有者可见（[`library.go`](../../internal/media/library.go)）；不可见的资源一律按不存在处理。共享空间的库由管理员管理，个人空间的库由所有者管理。
 - 同一空间内的媒体库文件夹不得互相包含，以免同一视频在首页出现两次。
 - 读取视频、NFO、图片和字幕都调用 `files.Service`，在生产中由文件代理以请求者身份打开，内核 ACL 是最终裁决。后台扫描与整理通过 `accounts.Service.RememberedSessions` 借用能读取该空间的会话：个人空间用所有者的，共享空间优先用创建者的、否则任一有效会话（[`service.go`](../../internal/media/service.go)）。
-- 打开影视中心（`GET /libraries`、`GET /home`）时，距上次扫描超过 10 分钟的库以当前用户身份在后台重扫；后台循环每 15 分钟扫描全部库，之后逐个探测、截图（[`process.go`](../../internal/media/process.go)）。
+- Web 上传、移动、复制、删除与恢复成功后，产品 API 调用 `ProductDependencies.FilesChanged`，影视中心以操作者身份在约 3 秒后重扫该空间的媒体库（`SpaceChanged`，同一库的连续变更合并为一次）。打开影视中心（`GET /libraries` 每 20 秒轮询一次、`GET /home`）时，距上次扫描超过 2 分钟的库以当前用户身份在后台重扫，SMB 放入的视频靠这一途径和每 15 分钟的后台循环出现；之后逐个探测、截图（[`process.go`](../../internal/media/process.go)）。扫描进行中又收到扫描请求时，当前扫描结束后再扫描一次。`POST /libraries/{id}/scan` 返回扫描中的媒体库。
 
 ## 扫描与识别
 

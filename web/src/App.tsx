@@ -551,7 +551,7 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 	const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
 	const canMutateSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
 	const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
-	const canPaste = Boolean(clipboard?.entries.length && !viewing && !activity && !(clipboard.mode === "move" && clipboard.entries.every((entry) => (entry.parentId ?? "") === parentID)));
+	const canPaste = Boolean(clipboard?.entries.length && !viewing && !activity && !(clipboard.mode === "move" && clipboard.entries.every((entry) => entry.spaceId === spaceID && (entry.parentId ?? "") === parentID)));
 
 	useEffect(() => {
 		if (!selectedItem?.entry || !isTextPreviewable(selectedItem.name) || selectedItems.length !== 1) { setTextPreview(undefined); return; }
@@ -691,12 +691,13 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 		setActivity(`${clipboard.mode === "copy" ? "正在复制" : "正在移动"} ${clipboard.entries.length} 个项目…`);
 		try {
 			for (const source of clipboard.entries) {
-				const name = clipboard.mode === "copy" && (source.parentId ?? "") === parentID ? duplicateFileName(source.name) : source.name;
-				if (clipboard.mode === "copy") await copyFile(source.id, parentID, name);
-				else await moveFile(source.id, parentID, name);
+				const here = source.spaceId === spaceID && (source.parentId ?? "") === parentID;
+				const name = clipboard.mode === "copy" && here ? duplicateFileName(source.name) : source.name;
+				if (clipboard.mode === "copy") await copyFile(source.id, parentID, name, spaceID);
+				else if (!here) await moveFile(source.id, parentID, name, spaceID);
 			}
 			if (clipboard.mode === "move") setClipboard(undefined);
-			setSelectedItemID(""); setSelectedItemIDs([]); await refresh(spaceID, parentID); setError("");
+			setSelectedItemID(""); setSelectedItemIDs([]); await Promise.all([refresh(spaceID, parentID), refreshVolume()]); setError("");
 		} catch (caught) { setError(messageOf(caught)); }
 		finally { setActivity(""); }
 	};

@@ -101,7 +101,7 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 	clock := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Now: func() time.Time { clock = clock.Add(time.Second); return clock },
+		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -594,5 +594,42 @@ func TestStreamsSubtitlesAndArtworkGoThroughTheProcessor(t *testing.T) {
 	}
 	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("poster without one: %v", err)
+	}
+}
+
+func TestWebChangesRescanTheLibrariesOfTheirSpace(t *testing.T) {
+	env := newTestEnv(t, nil)
+	alicePrivate := env.private[env.alice.ID]
+	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
+	env.write(t, alicePrivate, "我的视频/旅行.mp4", "video")
+	shared := env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	env.library(t, env.alice, alicePrivate, LibraryOther, "我的视频")
+	env.write(t, env.shared, "电影/Up (2009).mkv", "video")
+	env.write(t, alicePrivate, "我的视频/生日.mp4", "video")
+
+	// A member uploaded to the shared space through the Web.
+	env.media.SpaceChanged(env.ctx, env.alice, env.shared.ID)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		movies, _ := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+		if movies.Total == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the shared library was not rescanned: %+v", movies.Items)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if others, _ := env.media.Titles(env.ctx, env.alice, TitleQuery{Category: "other"}); others.Total != 1 {
+		t.Fatalf("a library in another space was rescanned: %+v", others.Items)
+	}
+
+	library, err := env.media.Rescan(env.ctx, env.admin, shared.ID)
+	if err != nil || library.ID != shared.ID || library.Name != shared.Name {
+		t.Fatalf("Rescan() = %+v, %v", library, err)
+	}
+	if _, err := env.media.Rescan(env.ctx, env.bob, shared.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member rescanned a shared library: %v", err)
 	}
 }

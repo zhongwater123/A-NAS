@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestRootFileSystemStaysBeneathItsBase(t *testing.T) {
@@ -102,5 +104,43 @@ func TestRootFileSystemRenameAndCopyNeverReplace(t *testing.T) {
 	}
 	if contents, _ := os.ReadFile(filepath.Join(base, "b.txt")); string(contents) != "b" {
 		t.Fatalf("b.txt was overwritten with %q", contents)
+	}
+}
+
+// Copies get the modes of files created through the Web, so they inherit the
+// target's default ACL rather than having it masked by the original's modes.
+func TestRootFileSystemCopiesAreCreatedLikeNewFiles(t *testing.T) {
+	// On the data volume a default ACL replaces the umask.
+	umask := unix.Umask(0)
+	t.Cleanup(func() { unix.Umask(umask) })
+	ctx := context.Background()
+	base := t.TempDir()
+	r := NewRootFileSystem(base, false)
+	source := filepath.Join(base, "private", "album")
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "a.jpg"), []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(source, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(source, 0o700) })
+	if err := os.MkdirAll(filepath.Join(base, "shared"), 0o770); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "shared", "album")
+	if err := r.Copy(ctx, source, target); err != nil {
+		t.Fatalf("Copy() of a read-only folder error = %v", err)
+	}
+	for path, want := range map[string]os.FileMode{target: 0o770, filepath.Join(target, "a.jpg"): 0o660} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("%s mode = %v, want %v", path, got, want)
+		}
 	}
 }

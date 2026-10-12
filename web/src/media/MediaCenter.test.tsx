@@ -179,6 +179,30 @@ describe("MediaCenter", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "播放 沙丘" })).toBeNull());
   });
 
+  it("rescans a library and shows that it is scanning", async () => {
+    const scanning = { ...library, scan: { state: "scanning" as const, pending: 0 } };
+    let scanned = false;
+    const fetchMock = serve([library],
+      (url, init) => {
+        if (url !== "/api/v1/media/libraries/library%3Afilms/scan" || init?.method !== "POST") return undefined;
+        scanned = true;
+        return json(scanning, 202);
+      },
+      // The server keeps reporting the scan while it runs.
+      (url, init) => (scanned && url === "/api/v1/media/libraries" && !init?.method ? json({ items: [scanning], processing: true }) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /媒体库/ }));
+    await user.click(await screen.findByRole("button", { name: "家庭影院的操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "重新扫描" }));
+    expect(await screen.findByText("正在重新扫描“家庭影院”")).toBeTruthy();
+    expect(screen.getByText("正在扫描文件夹…")).toBeTruthy();
+    expect(screen.queryByText("请求失败，请稍后再试")).toBeNull();
+    expect(calls(fetchMock, "POST", "/api/v1/media/libraries/library%3Afilms/scan")).toHaveLength(1);
+  });
+
   it("creates a collection and adds a title to it from a card", async () => {
     const fetchMock = serve([library],
       (url, init) => (url === "/api/v1/media/collections" && !init?.method ? json({ items: [{ id: "collection:weekend", name: "周末片单", automatic: false, count: 0, updatedAt: "", covers: [] }] }) : undefined),
