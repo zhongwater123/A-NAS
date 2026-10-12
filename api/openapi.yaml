@@ -5,7 +5,7 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
-    the managed photo library, an opt-in administrator terminal, and container lifecycle actions that go through the separate
+    the managed photo library, the media center, an opt-in administrator terminal, and container lifecycle actions that go through the separate
     container agent.
 servers:
   - url: http://127.0.0.1:8080
@@ -911,6 +911,297 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/media/libraries:
+    get:
+      operationId: listMediaLibraries
+      summary: List the media libraries the caller can see; libraries not scanned for ten minutes are scanned in the background
+      responses:
+        "200":
+          description: Visible libraries and whether FFmpeg is available to read durations and convert videos
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [items, processing], properties: { items: { type: array, items: { $ref: "#/components/schemas/MediaLibrary" } }, processing: { type: boolean } } } } }
+        "503": { $ref: "#/components/responses/ProductError" }
+    post:
+      operationId: createMediaLibrary
+      summary: Create a library over folders of one space and start scanning it; shared-space libraries are for administrators
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibraryInput" } } } }
+      responses:
+        "201": { description: The new library, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibrary" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { description: A folder is already part of another library (folders_overlap), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/media/libraries/{libraryId}:
+    parameters: [{ $ref: "#/components/parameters/MediaLibraryID" }]
+    get:
+      operationId: getMediaLibrary
+      summary: Describe one library
+      responses:
+        "200": { description: The library, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibrary" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: updateMediaLibrary
+      summary: Rename a library or change its kind or folders, then rescan it
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibraryInput" } } } }
+      responses:
+        "200": { description: The library, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibrary" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteMediaLibrary
+      summary: Forget a library with its progress and favorites; no file is touched
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/libraries/{libraryId}/scan:
+    post:
+      operationId: scanMediaLibrary
+      summary: Scan a library the caller manages again, in the background
+      parameters: [{ $ref: "#/components/parameters/MediaLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "202": { description: Scanning }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/home:
+    get:
+      operationId: getMediaHome
+      summary: The start page; stale libraries are scanned in the background
+      responses:
+        "200": { description: Rows of the start page, content: { application/json: { schema: { $ref: "#/components/schemas/MediaHome" } } } }
+  /api/v1/media/titles:
+    get:
+      operationId: listMediaTitles
+      summary: List films, shows (one card per show) and other videos
+      parameters:
+        - { name: category, in: query, schema: { type: string, enum: [all, movie, show, other] } }
+        - { name: library, in: query, schema: { type: string } }
+        - { name: genre, in: query, schema: { type: string } }
+        - { name: sort, in: query, description: Newest added first by default; names sort in pinyin order., schema: { type: string, enum: [added, name, year, rating] } }
+        - { name: q, in: query, description: "Matches titles, original titles, file names and episode titles.", schema: { type: string } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of titles and the genres of all matches, content: { application/json: { schema: { $ref: "#/components/schemas/MediaTitleResults" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/shows/{showId}:
+    get:
+      operationId: getMediaShow
+      summary: A show with its seasons, episodes and the episode to play next
+      parameters: [{ name: showId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: The show, content: { application/json: { schema: { $ref: "#/components/schemas/MediaShowDetail" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/videos/{videoId}:
+    get:
+      operationId: getMediaVideo
+      summary: A film, episode or other video with its file, streams and tracks
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }]
+      responses:
+        "200": { description: The video, content: { application/json: { schema: { $ref: "#/components/schemas/MediaVideoDetail" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/videos/{videoId}/playback:
+    get:
+      operationId: getMediaPlayback
+      summary: Decide whether the browser plays the original file or a stream converted by FFmpeg
+      parameters:
+        - { $ref: "#/components/parameters/MediaVideoID" }
+        - { name: caps, in: query, description: "What the browser decodes beyond H.264, AAC, MP3, Opus and FLAC in MP4 and WebM: a comma-separated list of hevc, av1, vp9, ac3, eac3, mkv and webm.", schema: { type: string } }
+        - { name: audio, in: query, description: Position among the audio tracks; -1 or absent for the default., schema: { type: integer, minimum: -1 } }
+        - { name: quality, in: query, schema: { type: string, enum: [original, 1080p, 720p, 480p] } }
+      responses:
+        "200": { description: How to play, content: { application/json: { schema: { $ref: "#/components/schemas/MediaPlayback" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/videos/{videoId}/file:
+    get:
+      operationId: getMediaVideoFile
+      summary: The original file, opened as the caller, with range requests for seeking
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }]
+      responses:
+        "200": { description: The file, content: { video/*: { schema: { type: string, format: binary } } } }
+        "206": { description: Part of the file, content: { video/*: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/videos/{videoId}/stream:
+    get:
+      operationId: getMediaVideoStream
+      summary: Fragmented MP4 converted by FFmpeg from start seconds on; it cannot seek, so players request a new start
+      parameters:
+        - { $ref: "#/components/parameters/MediaVideoID" }
+        - { name: mode, in: query, schema: { type: string, enum: [remux, transcode] } }
+        - { name: start, in: query, schema: { type: number, minimum: 0 } }
+        - { name: audio, in: query, schema: { type: integer, minimum: -1 } }
+        - { name: quality, in: query, schema: { type: string, enum: [original, 1080p, 720p, 480p] } }
+        - { name: caps, in: query, schema: { type: string } }
+      responses:
+        "200": { description: The stream, content: { video/mp4: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { description: FFmpeg cannot read the file (media_unreadable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { description: "Every conversion slot is in use (media_busy), or FFmpeg is unavailable (media_worker_unavailable)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/media/videos/{videoId}/subtitles/{trackId}:
+    get:
+      operationId: getMediaSubtitle
+      summary: A subtitle track converted to WebVTT
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }, { name: trackId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: WebVTT, content: { text/vtt: { schema: { type: string } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/videos/{videoId}/progress:
+    put:
+      operationId: saveMediaProgress
+      summary: Record the caller's position; reaching 90% marks the video watched
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [position], properties: { position: { type: number, minimum: 0 }, duration: { type: number, minimum: 0 } } } } }
+      responses:
+        "200": { description: The saved progress, content: { application/json: { schema: { $ref: "#/components/schemas/MediaProgress" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/titles/{titleId}/watched:
+    put:
+      operationId: setMediaWatched
+      summary: Mark a video, or every episode of a show, watched or unwatched
+      parameters: [{ $ref: "#/components/parameters/MediaTitleID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [watched], properties: { watched: { type: boolean } } } } } }
+      responses:
+        "204": { description: Saved }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/favorites:
+    get:
+      operationId: listMediaFavorites
+      summary: The caller's favorite titles, latest first
+      responses:
+        "200": { description: Favorites, content: { application/json: { schema: { $ref: "#/components/schemas/MediaTitlePage" } } } }
+  /api/v1/media/favorites/{titleId}:
+    parameters: [{ $ref: "#/components/parameters/MediaTitleID" }, { $ref: "#/components/parameters/CSRFToken" }]
+    put:
+      operationId: addMediaFavorite
+      summary: Add a film, show or video to the caller's favorites
+      responses:
+        "204": { description: Saved }
+        "404": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: removeMediaFavorite
+      summary: Remove a title from the caller's favorites
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/history:
+    get:
+      operationId: listMediaHistory
+      summary: What the caller played, latest first
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: History, content: { application/json: { schema: { $ref: "#/components/schemas/MediaTitlePage" } } } }
+    delete:
+      operationId: clearMediaHistory
+      summary: Clear the caller's history; progress and watched marks stay
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Cleared }
+  /api/v1/media/history/{videoId}:
+    delete:
+      operationId: removeMediaHistory
+      summary: Remove one video from the caller's history
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/collections:
+    get:
+      operationId: listMediaCollections
+      summary: The caller's own collections, then the automatic ones NFO files declare
+      responses:
+        "200": { description: Collections, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/MediaCollection" } } } } } } }
+    post:
+      operationId: createMediaCollection
+      summary: Create a collection of the caller's, optionally with titles
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 40 }, items: { type: array, items: { type: string } } } } } } }
+      responses:
+        "201": { description: The collection, content: { application/json: { schema: { $ref: "#/components/schemas/MediaCollection" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/collections/{collectionId}:
+    parameters: [{ name: collectionId, in: path, required: true, schema: { type: string } }]
+    get:
+      operationId: getMediaCollection
+      summary: A collection with its titles
+      responses:
+        "200": { description: The collection, content: { application/json: { schema: { $ref: "#/components/schemas/MediaCollectionDetail" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: renameMediaCollection
+      summary: Rename one of the caller's collections
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 40 } } } } } }
+      responses:
+        "204": { description: Renamed }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteMediaCollection
+      summary: Delete one of the caller's collections; its titles stay
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/collections/{collectionId}/items:
+    post:
+      operationId: addToMediaCollection
+      summary: Add titles to one of the caller's collections
+      parameters: [{ name: collectionId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, minItems: 1, items: { type: string } } } } } } }
+      responses:
+        "204": { description: Added }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/collections/{collectionId}/items/{titleId}:
+    delete:
+      operationId: removeFromMediaCollection
+      summary: Remove a title from one of the caller's collections
+      parameters: [{ name: collectionId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/MediaTitleID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/folders:
+    get:
+      operationId: listMediaFolderRoots
+      summary: The folders of every visible library
+      responses:
+        "200": { description: Library folders, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/MediaFolderRoot" } } } } } } }
+  /api/v1/media/folders/{entryId}:
+    get:
+      operationId: getMediaFolder
+      summary: One folder of a library, with the subfolders that hold videos and the videos directly in it
+      parameters:
+        - { name: entryId, in: path, required: true, description: The library folder's file ID., schema: { type: string } }
+        - { name: path, in: query, description: Slash-separated path below the library folder., schema: { type: string } }
+      responses:
+        "200": { description: The folder, content: { application/json: { schema: { $ref: "#/components/schemas/MediaFolderListing" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/media/artwork/{titleId}/{kind}:
+    get:
+      operationId: getMediaArtwork
+      summary: A title's poster, backdrop or thumbnail as JPEG; the client adds the artwork version to the URL so the response may be cached
+      parameters:
+        - { $ref: "#/components/parameters/MediaTitleID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [poster, backdrop, thumb] } }
+      responses:
+        "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
 components:
   securitySchemes:
     cookieAuth:
@@ -929,6 +1220,9 @@ components:
     PhotoAssetID: { name: assetId, in: path, required: true, schema: { type: string } }
     PhotoAlbumID: { name: albumId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
+    MediaLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
+    MediaVideoID: { name: videoId, in: path, required: true, schema: { type: string } }
+    MediaTitleID: { name: titleId, in: path, required: true, description: A video or show ID., schema: { type: string } }
     AppId:
       name: appId
       in: path
@@ -1920,3 +2214,296 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/ErrorDetail"
+    MediaLibraryInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        kind: { type: string, enum: [movies, shows, mixed, other], description: Required when creating. }
+        spaceId: { type: string, description: Required when creating; ignored when updating. }
+        folderIds: { type: array, minItems: 1, maxItems: 16, items: { type: string }, description: Folder file IDs of the space; required when creating. }
+    MediaLibrary:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, spaceId, spaceKind, createdBy, createdAt, folders, counts, scan, canManage, covers]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [movies, shows, mixed, other] }
+        spaceId: { type: string }
+        spaceKind: { type: string, enum: [private, shared] }
+        ownerUserId: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        folders:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [entryId, name, path]
+            properties:
+              entryId: { type: string }
+              name: { type: string }
+              path: { type: string }
+              missing: { type: boolean }
+        counts:
+          type: object
+          additionalProperties: false
+          required: [movies, shows, episodes, others, sizeBytes]
+          properties:
+            movies: { type: integer }
+            shows: { type: integer }
+            episodes: { type: integer }
+            others: { type: integer }
+            sizeBytes: { type: integer }
+        scan:
+          type: object
+          additionalProperties: false
+          required: [state, pending]
+          properties:
+            state: { type: string, enum: [idle, scanning, processing] }
+            pending: { type: integer, description: Videos whose durations or frames FFmpeg has yet to read. }
+            scannedAt: { type: string, format: date-time }
+            error: { type: string }
+        canManage: { type: boolean }
+        covers: { type: array, maxItems: 4, items: { type: string }, description: "Title IDs with artwork, for the library card." }
+    MediaArtwork:
+      type: object
+      additionalProperties: false
+      required: [poster, backdrop, thumb]
+      properties:
+        poster: { type: boolean }
+        backdrop: { type: boolean }
+        thumb: { type: boolean }
+        version: { type: string }
+    MediaProgress:
+      type: object
+      additionalProperties: false
+      required: [position, duration, watched]
+      properties:
+        position: { type: number }
+        duration: { type: number }
+        watched: { type: boolean }
+        playedAt: { type: string, format: date-time }
+    MediaTitle:
+      type: object
+      description: A card for a film, a show, an episode or another video.
+      required: [id, type, libraryId, title, addedAt, artwork, favorite]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [movie, show, episode, other] }
+        libraryId: { type: string }
+        title: { type: string }
+        originalTitle: { type: string }
+        year: { type: integer }
+        genres: { type: array, items: { type: string } }
+        rating: { type: number }
+        addedAt: { type: string, format: date-time }
+        duration: { type: number }
+        resolution: { type: string, enum: [4K, 1080p, 720p, SD] }
+        hdr: { type: string }
+        artwork: { $ref: "#/components/schemas/MediaArtwork" }
+        favorite: { type: boolean }
+        progress: { $ref: "#/components/schemas/MediaProgress" }
+        seasons: { type: integer }
+        episodes: { type: integer }
+        watchedEpisodes: { type: integer }
+        showId: { type: string }
+        showTitle: { type: string }
+        season: { type: integer }
+        episode: { type: integer }
+    MediaTitlePage:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        total: { type: integer }
+    MediaTitleResults:
+      type: object
+      additionalProperties: false
+      required: [items, total, genres]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        total: { type: integer }
+        genres: { type: array, items: { type: string } }
+    MediaHome:
+      type: object
+      additionalProperties: false
+      required: [featured, continue, recent, movies, shows, others, favorites, libraries, scanning]
+      properties:
+        featured: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        continue: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        recent: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        movies: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        shows: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        others: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        favorites: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+        libraries: { type: integer }
+        scanning: { type: boolean }
+    MediaCollectionRef:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    MediaEpisode:
+      type: object
+      additionalProperties: false
+      required: [id, season, episode, title, addedAt, artwork]
+      properties:
+        id: { type: string }
+        season: { type: integer }
+        episode: { type: integer }
+        title: { type: string }
+        plot: { type: string }
+        duration: { type: number }
+        addedAt: { type: string, format: date-time }
+        artwork: { $ref: "#/components/schemas/MediaArtwork" }
+        progress: { $ref: "#/components/schemas/MediaProgress" }
+    MediaShowDetail:
+      allOf:
+        - { $ref: "#/components/schemas/MediaTitle" }
+        - type: object
+          required: [seasonList, collections]
+          properties:
+            plot: { type: string }
+            next: { $ref: "#/components/schemas/MediaEpisode" }
+            seasonList:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [number, episodes]
+                properties:
+                  number: { type: integer }
+                  episodes: { type: array, items: { $ref: "#/components/schemas/MediaEpisode" } }
+            collections: { type: array, items: { $ref: "#/components/schemas/MediaCollectionRef" } }
+    MediaVideoDetail:
+      allOf:
+        - { $ref: "#/components/schemas/MediaTitle" }
+        - type: object
+          required: [file, probeState, audio, subtitles, collections]
+          properties:
+            plot: { type: string }
+            episodeTitle: { type: string }
+            file:
+              type: object
+              additionalProperties: false
+              required: [name, folder, sizeBytes, modifiedAt]
+              properties:
+                name: { type: string }
+                folder: { type: string }
+                sizeBytes: { type: integer }
+                modifiedAt: { type: string, format: date-time }
+            media:
+              type: object
+              additionalProperties: false
+              required: [container]
+              properties:
+                container: { type: string }
+                videoCodec: { type: string }
+                audioCodec: { type: string }
+                width: { type: integer }
+                height: { type: integer }
+                frameRate: { type: number }
+                bitrate: { type: integer }
+            probeState: { type: string, enum: [pending, ready, failed] }
+            audio:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [index, label, codec]
+                properties:
+                  index: { type: integer }
+                  label: { type: string }
+                  language: { type: string }
+                  codec: { type: string }
+                  channels: { type: integer }
+                  default: { type: boolean }
+            subtitles:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, label, external]
+                properties:
+                  id: { type: string }
+                  label: { type: string }
+                  language: { type: string }
+                  external: { type: boolean }
+                  default: { type: boolean }
+            previousId: { type: string }
+            nextId: { type: string }
+            collections: { type: array, items: { $ref: "#/components/schemas/MediaCollectionRef" } }
+            collection: { type: string, description: The automatic collection an NFO file names. }
+    MediaPlayback:
+      type: object
+      additionalProperties: false
+      required: [mode, url, audio, quality, qualities]
+      properties:
+        mode: { type: string, enum: [direct, remux, transcode] }
+        url: { type: string }
+        duration: { type: number }
+        reason: { type: string }
+        audio: { type: integer }
+        quality: { type: string, enum: [original, 1080p, 720p, 480p] }
+        qualities: { type: array, items: { type: string, enum: [original, 1080p, 720p, 480p] } }
+    MediaCollection:
+      type: object
+      additionalProperties: false
+      required: [id, name, automatic, count, updatedAt, covers]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        automatic: { type: boolean }
+        count: { type: integer }
+        updatedAt: { type: string, format: date-time }
+        covers: { type: array, items: { type: string } }
+    MediaCollectionDetail:
+      type: object
+      additionalProperties: false
+      required: [id, name, automatic, count, updatedAt, covers, items]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        automatic: { type: boolean }
+        count: { type: integer }
+        updatedAt: { type: string, format: date-time }
+        covers: { type: array, items: { type: string } }
+        items: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+    MediaFolderRoot:
+      type: object
+      additionalProperties: false
+      required: [libraryId, libraryName, entryId, name, path, videos]
+      properties:
+        libraryId: { type: string }
+        libraryName: { type: string }
+        entryId: { type: string }
+        name: { type: string }
+        path: { type: string }
+        videos: { type: integer }
+        cover: { type: string }
+        missing: { type: boolean }
+    MediaFolderListing:
+      type: object
+      additionalProperties: false
+      required: [root, path, folders, videos]
+      properties:
+        root: { $ref: "#/components/schemas/MediaFolderRoot" }
+        path: { type: string }
+        folders:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, path, videos]
+            properties:
+              name: { type: string }
+              path: { type: string }
+              videos: { type: integer }
+              cover: { type: string }
+        videos: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }

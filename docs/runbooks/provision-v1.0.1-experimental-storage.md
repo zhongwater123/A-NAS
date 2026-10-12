@@ -72,7 +72,7 @@ EXPECTED_DISK_SERIAL=Z2AYDZPB \
 ```bash
 # 仅在仓库源可达时安装一次；若 apt 失败，停止，不进入格式化流程。
 apt-get update
-apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2
+apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg
 
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 release_id=<GIT_SHA>
@@ -85,7 +85,9 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
+影视中心的媒体 Worker 使用 Debian 的 FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)），安装器在缺少 `ffmpeg` 或 `ffprobe` 时以退出码 3 结束而不改变系统；已部署过的设备升级前以 root 执行一次 `apt-get install --no-install-recommends ffmpeg`。
+
+完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-media.socket` 已启用且 `/run/a-nas-media/media.sock` 为 `root:a-nas 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
 ## 升级到统一身份（ADR 0008）
 

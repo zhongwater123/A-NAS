@@ -21,6 +21,7 @@ import (
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
+	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
@@ -42,6 +43,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	}
 
 	photoHandler, photoLibraryID, photoAssetID := photoAPI(t)
+	movies := newMediaFixture(t)
+	mediaHandler := mediaAPIFor(movies.media, movies.admin)
+	mediaVideo := "/api/v1/media/videos/" + movies.film
 	tests := []struct {
 		name       string
 		method     string
@@ -68,6 +72,36 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photos unavailable", path: "/api/v1/photos/libraries", handler: withPhotoPrincipal(photosapi.New(nil, nil)), wantStatus: http.StatusServiceUnavailable},
+		{name: "media libraries", path: "/api/v1/media/libraries", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media library", path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media library missing", path: "/api/v1/media/libraries/library:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
+		{name: "media library overlap", method: http.MethodPost, body: `{"name":"重复","kind":"movies","spaceId":"` + movies.shared.ID + `","folderIds":["` + movies.folder + `"]}`, path: "/api/v1/media/libraries", handler: mediaHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "media library rename", method: http.MethodPatch, body: `{"name":"家庭影院"}`, path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "media home", path: "/api/v1/media/home", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media titles", path: "/api/v1/media/titles?category=movie&sort=name&limit=10", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media search", path: "/api/v1/media/titles?q=" + url.QueryEscape("繁花"), handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media show", path: "/api/v1/media/shows/" + movies.show, handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media show missing", path: "/api/v1/media/shows/show:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
+		{name: "media video", path: mediaVideo, handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media playback", path: mediaVideo + "/playback?caps=mkv,hevc&quality=original", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media stream without FFmpeg", path: mediaVideo + "/stream?mode=remux&start=0", handler: mediaHandler, wantStatus: http.StatusServiceUnavailable},
+		{name: "media subtitle missing", path: mediaVideo + "/subtitles/x9", handler: mediaHandler, wantStatus: http.StatusNotFound},
+		{name: "media progress", method: http.MethodPut, body: `{"position":42,"duration":100}`, path: "/api/v1/media/videos/" + movies.episode + "/progress", handler: mediaHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "media watched", method: http.MethodPut, body: `{"watched":true}`, path: "/api/v1/media/titles/" + movies.show + "/watched", handler: mediaHandler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "media favorite", method: http.MethodPut, path: "/api/v1/media/favorites/" + movies.film, handler: mediaHandler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "media favorite missing", method: http.MethodPut, path: "/api/v1/media/favorites/video:missing", handler: mediaHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "media favorites", path: "/api/v1/media/favorites", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media history", path: "/api/v1/media/history?limit=20", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media history missing", method: http.MethodDelete, path: "/api/v1/media/history/video:missing", handler: mediaHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "media collection create", method: http.MethodPost, body: `{"name":"周末片单","items":["` + movies.film + `"]}`, path: "/api/v1/media/collections", handler: mediaHandler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "media collection bad name", method: http.MethodPost, body: `{"name":"   "}`, path: "/api/v1/media/collections", handler: mediaHandler, csrf: true, wantStatus: http.StatusBadRequest},
+		{name: "media collections", path: "/api/v1/media/collections", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media collection missing", path: "/api/v1/media/collections/collection:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
+		{name: "media folders", path: "/api/v1/media/folders", handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media folder", path: "/api/v1/media/folders/" + movies.folder + "?path=" + url.QueryEscape("Heat (1995)"), handler: mediaHandler, wantStatus: http.StatusOK},
+		{name: "media folder missing", path: "/api/v1/media/folders/file:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
+		{name: "media artwork missing", path: "/api/v1/media/artwork/" + movies.film + "/backdrop", handler: mediaHandler, wantStatus: http.StatusNotFound},
+		{name: "media unavailable", path: "/api/v1/media/home", handler: mediaapi.New(nil, nil), wantStatus: http.StatusServiceUnavailable},
 		{name: "health", path: "/healthz", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "system", path: "/api/v1/system", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "disks", path: "/api/v1/disks", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
