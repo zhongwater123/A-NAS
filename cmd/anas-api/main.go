@@ -165,6 +165,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
+	// The media center and the music library share one FFmpeg boundary and
+	// adapt its operations to their own needs (ADR 0017, ADR 0018).
+	mediaWorker, err := configuredMediaWorker(live)
+	if err != nil {
+		return err
+	}
 	musicStore, err := music.OpenSQLite(filepath.Join(stateDirectory, "music.db"))
 	if err != nil {
 		return err
@@ -194,9 +200,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer mediaStore.Close()
-	processor, err := configuredMediaProcessor(live)
-	if err != nil {
-		return err
+	var processor media.Processor
+	if mediaWorker != nil {
+		processor = media.WorkerProcessor{Worker: mediaWorker}
 	}
 	mediaService, err := media.NewService(mediaStore, media.Options{
 		Files: fileService, Spaces: accountService, Sessions: accountService.RememberedSessions,
@@ -307,10 +313,10 @@ func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bo
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
 }
 
-// configuredMediaProcessor picks where FFmpeg runs. Production uses the
+// configuredMediaWorker picks where FFmpeg runs. Production uses the
 // sandboxed worker socket; development runs FFmpeg in this process when it
-// is installed, and otherwise the media center works without it.
-func configuredMediaProcessor(live bool) (media.Processor, error) {
+// is installed, and otherwise the media center and music work without it.
+func configuredMediaWorker(live bool) (mediaworker.Worker, error) {
 	mode := os.Getenv("ANAS_MEDIA_WORKER")
 	if mode == "" {
 		mode = "local"

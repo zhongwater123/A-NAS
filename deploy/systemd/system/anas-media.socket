@@ -4,8 +4,8 @@ Documentation=https://github.com/zhongwater123/A-NAS
 
 [Socket]
 # Every connection starts its own anas-media@.service with the connection as
-# standard input, so each video is handled by a fresh, isolated FFmpeg
-# (ADR 0017). Only the Product Service's group reaches it.
+# standard input, so each video or song is handled by a fresh, isolated
+# FFmpeg (ADR 0017, ADR 0018). Only the Product Service's group reaches it.
 ListenStream=/run/a-nas-media/media.sock
 Accept=yes
 MaxConnections=8
