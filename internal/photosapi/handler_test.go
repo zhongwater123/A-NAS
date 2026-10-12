@@ -427,3 +427,45 @@ func TestAlbumsAndTags(t *testing.T) {
 	owner.json(http.MethodDelete, "/api/v1/photos/albums/"+url.PathEscape(album.ID), nil, http.StatusNoContent, nil)
 	owner.json(http.MethodGet, "/api/v1/photos/assets/"+url.PathEscape(photo.ID), nil, http.StatusOK, nil)
 }
+
+func TestActivityListsOnlyTheCallersOwnPhotoEvents(t *testing.T) {
+	handler, _ := newAPI(t)
+	asAlice := client{t: t, handler: handler, as: alice}
+	asBob := client{t: t, handler: handler, as: bob}
+	alicePrivate, _ := librariesOf(asAlice)
+	bobPrivate, _ := librariesOf(asBob)
+	for index, name := range []string{"a.png", "b.png", "c.png"} {
+		if response := asAlice.upload(alicePrivate.ID, "", name, pngBytes(t, uint8(10+index))); response.Code != http.StatusCreated {
+			t.Fatalf("upload %s status = %d; body=%s", name, response.Code, response.Body.String())
+		}
+	}
+	if response := asBob.upload(bobPrivate.ID, "", "secret.png", pngBytes(t, 99)); response.Code != http.StatusCreated {
+		t.Fatalf("bob upload status = %d", response.Code)
+	}
+
+	response := asAlice.do(http.MethodGet, photosapi.ActivityPath+"?limit=2", nil, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("activity status = %d; body=%s", response.Code, response.Body.String())
+	}
+	events, err := photosapi.DecodeActivity(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// limit+1 events tell the caller that more follow.
+	if len(events) != 3 {
+		t.Fatalf("events = %+v, want 3", events)
+	}
+	for _, event := range events {
+		if event.ActorUserID != alice.UserID || event.Action != "photo.imported" || strings.Contains(event.Detail, "secret") {
+			t.Fatalf("alice sees %+v", event)
+		}
+	}
+	admin := client{t: t, handler: handler, as: photos.Principal{UserID: "user:admin", Admin: true}}
+	response = admin.do(http.MethodGet, photosapi.ActivityPath+"?q=secret", nil, "")
+	if events, _ := photosapi.DecodeActivity(response.Body); len(events) != 0 {
+		t.Fatalf("an administrator finds another member's photo: %+v", events)
+	}
+	if response := asAlice.do(http.MethodGet, photosapi.ActivityPath+"?limit=0", nil, ""); response.Code != http.StatusBadRequest {
+		t.Fatalf("bad limit status = %d", response.Code)
+	}
+}

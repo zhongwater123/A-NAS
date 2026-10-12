@@ -101,7 +101,7 @@ VALUES(?,?,?,?,?,?,?)`, entryID, snapshot.ID, parentID, object.Name, object.Kind
 		_ = s.snapshots.Delete(ctx, spaceID, snapshot.ID)
 		return Snapshot{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "snapshot.created", snapshot.ID, snapshot.Name)
+	_ = s.audit(ctx, actor.ID, "snapshot.created", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 	return snapshot, nil
 }
 
@@ -185,7 +185,7 @@ FROM snapshot_entries WHERE id = ? AND snapshot_id = ?`, snapshotEntryID, snapsh
 	}
 	restored, err := s.Upload(ctx, actor, snapshot.SpaceID, targetParentID, targetName, reader)
 	if err == nil {
-		_ = s.audit(ctx, actor.ID, "snapshot.file_restored", restored.ID, snapshot.ID)
+		_ = s.audit(ctx, actor.ID, "snapshot.file_restored", snapshot.SpaceID, restored.ID, snapshot.ID)
 	}
 	return restored, err
 }
@@ -204,7 +204,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, actor accounts.User, snaps
 	if _, err := s.store.db.ExecContext(ctx, "DELETE FROM snapshots WHERE id = ?", snapshotID); err != nil {
 		return err
 	}
-	return s.audit(ctx, actor.ID, "snapshot.deleted", snapshot.ID, snapshot.Name)
+	return s.audit(ctx, actor.ID, "snapshot.deleted", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 }
 
 func (s *Service) authorizeSnapshot(ctx context.Context, actor accounts.User, snapshotID string) (Snapshot, accounts.Space, error) {

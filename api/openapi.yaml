@@ -214,6 +214,49 @@ paths:
       responses:
         "200": { description: Administrator audit export, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } } } } } } }
         "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/activity:
+    get:
+      operationId: listActivity
+      summary: Page through the activity log, newest first
+      description: >-
+        Merges the account, sign-in, file, storage and photo audit trails. Administrators see every account's events,
+        members only their own and what was done to their account or private space. File names in another member's
+        private space are left out (redacted), and photo events are only shown to the account that made them.
+      parameters:
+        - { name: before, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: category, in: query, schema: { $ref: "#/components/schemas/ActivityCategory" } }
+        - { name: actor, in: query, description: "Administrators only: an account ID, or system for what the device did on its own; members always get their own events.", schema: { type: string } }
+        - { name: q, in: query, description: "Matches file and photo names, action codes, client addresses and account names.", schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200": { description: One page of events, content: { application/json: { schema: { $ref: "#/components/schemas/ActivityPage" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+  /api/v1/system-logs:
+    get:
+      operationId: listSystemLogs
+      summary: Read A-NAS service logs from the systemd journal through the Host Agent, newest first
+      description: >-
+        Administrators only. The Host Agent reads only the allowlisted A-NAS services (ADR 0019); levels, messages
+        and fields of JSON log lines come from the line itself. A page stops after 20,000 scanned lines; next then
+        continues from the last line scanned.
+      parameters:
+        - { name: service, in: query, schema: { $ref: "#/components/schemas/SystemLogService" } }
+        - { name: level, in: query, description: The least severe level to include., schema: { type: string, enum: [error, warning, info, debug] } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: q, in: query, description: "Plain text matched against messages and fields, case-insensitively.", schema: { type: string, maxLength: 200 } }
+        - { name: before, in: query, description: Continue with lines older than this cursor (the next value of the previous page)., schema: { type: string } }
+        - { name: after, in: query, description: "Only lines newer than this cursor, for following the log.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+      responses:
+        "200": { description: One page of log lines, content: { application/json: { schema: { $ref: "#/components/schemas/SystemLogPage" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/spaces:
     get:
       operationId: listSpaces
@@ -1945,6 +1988,81 @@ components:
         resourceId: { type: string }
         occurredAt: { type: string, format: date-time }
         detail: { type: string }
+    ActivityCategory:
+      type: string
+      enum: [session, account, file, storage, photo]
+    ActivityAccount:
+      type: object
+      additionalProperties: false
+      required: [id, username]
+      properties:
+        id: { type: string }
+        username: { type: string }
+    ActivityEvent:
+      type: object
+      additionalProperties: false
+      required: [id, occurredAt, category, action, resourceType]
+      properties:
+        id: { type: string }
+        occurredAt: { type: string, format: date-time }
+        category: { type: string, enum: [session, account, file, storage, photo, other] }
+        action: { type: string, description: "Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded." }
+        actor: { $ref: "#/components/schemas/ActivityAccount" }
+        system: { type: boolean, description: The device did this on its own. }
+        subject: { $ref: "#/components/schemas/ActivityAccount" }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        detail:
+          type: string
+          description: >-
+            A file or photo name, a snapshot name, a storage failure, or JSON for session events
+            ({via: local-console|lan|loopback, address, username, reason: invalid_password|unknown_user|disabled|unavailable})
+            and viewing events ({reason, expiresAt}).
+        space:
+          type: object
+          additionalProperties: false
+          required: [id, kind]
+          properties:
+            id: { type: string }
+            kind: { type: string, enum: [private, shared] }
+            owner: { $ref: "#/components/schemas/ActivityAccount" }
+        redacted: { type: boolean, description: Names in another member's private space were left out. }
+    ActivityPage:
+      type: object
+      additionalProperties: false
+      required: [items, scope]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ActivityEvent" } }
+        next: { type: string, description: Pass as before to read older events; absent when there are none. }
+        scope: { type: string, enum: [all, self] }
+        unavailable: { type: array, items: { $ref: "#/components/schemas/ActivityCategory" }, description: Categories whose records could not be read this time. }
+    SystemLogService:
+      type: string
+      enum: [api, host-agent, photos, containers, ai, media, kiosk, samba, caddy]
+    SystemLogEntry:
+      type: object
+      additionalProperties: false
+      required: [cursor, time, service, level, message]
+      properties:
+        cursor: { type: string }
+        time: { type: string, format: date-time }
+        service: { $ref: "#/components/schemas/SystemLogService" }
+        unit: { type: string }
+        level: { type: string, enum: [error, warning, info, debug] }
+        message: { type: string }
+        fields: { type: object, additionalProperties: { type: string } }
+        pid: { type: integer }
+        truncated: { type: boolean, description: The message was cut at 16 KiB. }
+    SystemLogPage:
+      type: object
+      additionalProperties: false
+      required: [items, dataSource]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/SystemLogEntry" } }
+        next: { type: string, description: Pass as before to continue with older lines; absent at the start of the journal. }
+        scannedThrough: { type: string, format: date-time, description: The page stopped at its scan limit before filling; older lines were not checked yet. }
+        overflow: { type: boolean, description: An after query found more new lines than one page holds. }
+        dataSource: { $ref: "#/components/schemas/DataSource" }
     MetricsResponse:
       type: object
       additionalProperties: false

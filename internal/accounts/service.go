@@ -541,7 +541,20 @@ func (s *Service) authenticate(ctx context.Context, username, password string, l
 	err := s.store.db.QueryRowContext(ctx,
 		"SELECT id, username, role, status, password_hash, created_at, must_change_password FROM users WHERE username = ?", username,
 	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt, &user.MustChangePassword)
-	if err != nil || user.Status != UserStatusActive || !verifyPassword(password, encodedHash) {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		s.recordSignInFailure(ctx, "", username, SignInUnknownUser)
+		return Session{}, ErrInvalidCredentials
+	case err != nil:
+		return Session{}, ErrInvalidCredentials
+	case user.Status == UserStatusDisabled:
+		s.recordSignInFailure(ctx, user.ID, username, SignInDisabled)
+		return Session{}, ErrInvalidCredentials
+	case user.Status != UserStatusActive:
+		s.recordSignInFailure(ctx, user.ID, username, SignInUnavailable)
+		return Session{}, ErrInvalidCredentials
+	case !verifyPassword(password, encodedHash):
+		s.recordSignInFailure(ctx, user.ID, username, SignInInvalidPassword)
 		return Session{}, ErrInvalidCredentials
 	}
 	user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
@@ -558,6 +571,7 @@ func (s *Service) authenticate(ctx context.Context, username, password string, l
 		return Session{}, err
 	}
 	s.sessions.remember(user.ID, token, expiresAt)
+	s.recordSignIn(ctx, user, localConsole)
 	return Session{Token: token, CSRFToken: csrf, ExpiresAt: expiresAt, User: user}, nil
 }
 
@@ -585,10 +599,24 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(
 	return session, nil
 }
 
+// EndSession signs the session's user out; only the user's own sign-out
+// calls it, so it is recorded as one.
 func (s *Service) EndSession(ctx context.Context, token string) error {
 	s.sessions.forgetToken(token)
-	_, err := s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash = ?", tokenHash(token))
-	return err
+	var userID, expiresAt string
+	err := s.store.db.QueryRowContext(ctx, "SELECT user_id, expires_at FROM sessions WHERE token_hash = ?", tokenHash(token)).Scan(&userID, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash = ?", tokenHash(token)); err != nil {
+		return err
+	}
+	expiry, _ := time.Parse(time.RFC3339Nano, expiresAt)
+	s.recordSignOut(ctx, userID, expiry.Equal(localConsoleExpiry))
+	return nil
 }
 
 func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {

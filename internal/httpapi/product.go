@@ -155,6 +155,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
+	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
 	h.musicRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -247,10 +248,11 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 // SSH tunnels connect directly; the LAN entry (Caddy, ADR 0012) always adds
 // X-Forwarded-For, so LAN browsers get ordinary sessions.
 func (h *productHandler) authenticate(r *http.Request, username, password string, localConsole bool) (accounts.Session, error) {
+	ctx := withClientOrigin(r)
 	if localConsole && directLoopback(r) {
-		return h.accounts.AuthenticateLocalConsole(r.Context(), username, password)
+		return h.accounts.AuthenticateLocalConsole(ctx, username, password)
 	}
-	return h.accounts.Authenticate(r.Context(), username, password)
+	return h.accounts.Authenticate(ctx, username, password)
 }
 
 func directLoopback(r *http.Request) bool {
@@ -265,7 +267,7 @@ func directLoopback(r *http.Request) bool {
 func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	cookie, _ := r.Cookie(sessionCookieName)
 	if cookie != nil {
-		_ = h.accounts.EndSession(r.Context(), cookie.Value)
+		_ = h.accounts.EndSession(withClientOrigin(r), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)
