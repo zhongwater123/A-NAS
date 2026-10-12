@@ -26,6 +26,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                 Host Agent（root 系统服务、受限 UDS）
                     ├── Linux 状态 Adapter
                     ├── 类型化身份、ACL、卷、Samba 与 Btrfs 快照操作
+                    ├── 白名单服务日志查询（固定参数的 journalctl，只读；ADR 0019）
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
                     └── 会话查询（供相册服务确认身份）
 
@@ -69,7 +70,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 |---|---|---|
 | `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、快照、可选终端与容器管理已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
-| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、快照、[设置](../specs/settings.md)（我的账号、概览、存储、用户与权限）、终端、Docker 窗口与随机单视频循环屏保已实现 |
+| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、快照、[设置](../specs/settings.md)（我的账号、概览、存储、用户与权限、[日志](../specs/logs.md)）、终端、Docker 窗口与随机单视频循环屏保已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
@@ -88,6 +89,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
 | `internal/mediaworker` | 媒体 Worker：与应用无关的类型化协议（探测、截图、字幕、视频流、音频解码）、FFmpeg 命令、按连接服务端（`anas-api media-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
+| `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，由 `internal/httpapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
+| `internal/systemlog` / `internal/systemlog/journal` | A-NAS 服务日志：服务白名单、查询与 JSON 日志行解析、开发用 Fake，以及 Host Agent 中以固定参数运行 `journalctl` 的读取器（[ADR 0019](../adr/0019-read-service-logs-through-the-host-agent.md)） | 已实现，Host Agent `/v1/system-logs` 与产品 API `/api/v1/system-logs` 仅管理员可用；系统测试覆盖真实单元 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
@@ -117,6 +120,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册与本地智能检索规格](../specs/photo-library.md)
 - [影视中心规格](../specs/media-center.md)、[影视中心技术设计](media-center.md)与 [ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)
 - [问题反馈规格](../specs/feedback.md)
+- [日志规格](../specs/logs.md)与[服务日志读取决策](../adr/0019-read-service-logs-through-the-host-agent.md)
 - [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
 - [Docker 网络地址池决策](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
