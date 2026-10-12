@@ -1,5 +1,5 @@
 // Package journal reads the allowlisted A-NAS service logs from the systemd
-// journal for the Host Agent (ADR 0019). It runs journalctl with fixed
+// journal for the Host Agent (ADR 0020). It runs journalctl with fixed
 // arguments built from a validated systemlog.Query, never through a shell,
 // and filters levels and text itself instead of passing expressions on.
 package journal

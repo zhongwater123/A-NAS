@@ -26,7 +26,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                 Host Agent（root 系统服务、受限 UDS）
                     ├── Linux 状态 Adapter
                     ├── 类型化身份、ACL、卷、Samba 与 Btrfs 快照操作
-                    ├── 白名单服务日志查询（固定参数的 journalctl，只读；ADR 0019）
+                    ├── 白名单服务日志查询（固定参数的 journalctl，只读；ADR 0020）
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
                     └── 会话查询（供相册服务确认身份）
 
@@ -90,7 +90,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/mediaworker` | 媒体 Worker：与应用无关的类型化协议（探测、截图、字幕、视频流、音频解码）、FFmpeg 命令、按连接服务端（`anas-api media-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
 | `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，由 `internal/httpapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
-| `internal/systemlog` / `internal/systemlog/journal` | A-NAS 服务日志：服务白名单、查询与 JSON 日志行解析、开发用 Fake，以及 Host Agent 中以固定参数运行 `journalctl` 的读取器（[ADR 0019](../adr/0019-read-service-logs-through-the-host-agent.md)） | 已实现，Host Agent `/v1/system-logs` 与产品 API `/api/v1/system-logs` 仅管理员可用；系统测试覆盖真实单元 |
+| `internal/systemlog` / `internal/systemlog/journal` | A-NAS 服务日志：服务白名单、查询与 JSON 日志行解析、开发用 Fake，以及 Host Agent 中以固定参数运行 `journalctl` 的读取器（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)） | 已实现，Host Agent `/v1/system-logs` 与产品 API `/api/v1/system-logs` 仅管理员可用；系统测试覆盖真实单元 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
 | `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
@@ -120,7 +120,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册与本地智能检索规格](../specs/photo-library.md)
 - [影视中心规格](../specs/media-center.md)、[影视中心技术设计](media-center.md)与 [ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)
 - [问题反馈规格](../specs/feedback.md)
-- [日志规格](../specs/logs.md)与[服务日志读取决策](../adr/0019-read-service-logs-through-the-host-agent.md)
+- [日志规格](../specs/logs.md)与[服务日志读取决策](../adr/0020-read-service-logs-through-the-host-agent.md)
 - [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
 - [Docker 网络地址池决策](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)

@@ -1,5 +1,5 @@
 // Package systemlog describes the A-NAS service logs an administrator may
-// read in the Web desktop: the allowlist of services (ADR 0019), the query a
+// read in the Web desktop: the allowlist of services (ADR 0020), the query a
 // client sends and the lines it gets back. The Host Agent reads them from the
 // systemd journal (package journal); development uses Fake.
 package systemlog

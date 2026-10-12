@@ -274,7 +274,7 @@ curl -fsS -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" \
   -F "file=@/tmp/lan.txt;filename=lan.txt" "$lan/api/v1/spaces/$alice_private/uploads" || true
 check "LAN upload is owned by the member's UID" test "$(owner_uid "$data/spaces/private/alice/lan.txt" 2>/dev/null)" = "$alice_id"
 
-# --- Logs (ADR 0019): sign-ins are recorded with how the client connected,
+# --- Logs (ADR 0020): sign-ins are recorded with how the client connected,
 # and the Host Agent reads A-NAS service logs from the journal under its
 # production unit.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)

@@ -101,7 +101,7 @@
 
 - 活动记录由产品服务读取各模块的审计表并合并：账号与登录（`control.db`）、文件与快照（`files.db`）、存储计划（`storage.db`），以及相册服务数据卷上的 Catalog。各来源按同一游标（毫秒时间与记录 ID）分页，合并结果严格按时间倒序且不重复、不遗漏。
 - 相册服务不可用或数据卷离线时，其余来源照常返回，列表上方提示“相册的活动暂时无法读取”；某个来源失败不影响其他来源。
-- 系统日志只经 Host Agent 读取（[ADR 0019](../adr/0019-read-service-logs-through-the-host-agent.md)）：产品服务只能按服务键名请求，Host Agent 以固定参数运行 `journalctl`，只匹配白名单中的单元；关键词在 Host Agent 中按纯文本匹配，不传给 `journalctl` 当作表达式。每行消息超过 16 KiB 时截断并标记。单次读取在 10 秒内结束，超时返回已读到的部分。
+- 系统日志只经 Host Agent 读取（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)）：产品服务只能按服务键名请求，Host Agent 以固定参数运行 `journalctl`，只匹配白名单中的单元；关键词在 Host Agent 中按纯文本匹配，不传给 `journalctl` 当作表达式。每行消息超过 16 KiB 时截断并标记。单次读取在 10 秒内结束，超时返回已读到的部分。
 - Host Agent 不可用时，系统日志显示“无法读取系统日志”和“重试”，活动记录不受影响。
 - 新文件审计记录写入所在空间；部署前已有的记录在启动时按文件目录、回收站和快照补写空间。仍无法确定空间的旧记录对管理员一律按他人私有内容处理（不显示名称），除非操作者就是管理员本人。
 - 登录失败的记录没有频率限制；局域网中持续猜测密码会让 `control.db` 随之增长。
@@ -118,6 +118,6 @@
 
 - 规格：[设置](settings.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[局域网 Web 访问](lan-web-access.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
-- ADR：[0019：系统日志经 Host Agent 的白名单 journal 查询读取](../adr/0019-read-service-logs-through-the-host-agent.md)
+- ADR：[0020：系统日志经 Host Agent 的白名单 journal 查询读取](../adr/0020-read-service-logs-through-the-host-agent.md)
 - 代码：[日志分区](../../web/src/logs/LogsSection.tsx)、[活动记录](../../internal/activity/activity.go)、[系统日志](../../internal/systemlog/systemlog.go)、[journal 读取](../../internal/systemlog/journal/journal.go)
 - 测试：见“验收证据”

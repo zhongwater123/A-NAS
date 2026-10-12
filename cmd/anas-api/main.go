@@ -118,7 +118,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	// Development shows invented service logs; the Host Agent reads the
-	// journal (ADR 0019).
+	// journal (ADR 0020).
 	var systemLogs systemlog.Reader = systemlog.NewFake(nil)
 	if logs, ok := operations.(systemlog.Reader); ok && live {
 		systemLogs = logs

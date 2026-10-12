@@ -1,4 +1,4 @@
-# 0019：系统日志经 Host Agent 的白名单 journal 查询读取
+# 0020：系统日志经 Host Agent 的白名单 journal 查询读取
 
 状态：proposed（2026-10-12，随“设置 → 日志”PR 提交评审）；行为见[日志规格](../specs/logs.md)。
 

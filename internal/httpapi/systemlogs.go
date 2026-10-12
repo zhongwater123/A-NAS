@@ -13,7 +13,7 @@ type systemLogResponse struct {
 }
 
 // handleSystemLogs serves the allowlisted service logs to administrators. The
-// filters are validated here and again by the Host Agent (ADR 0019).
+// filters are validated here and again by the Host Agent (ADR 0020).
 func (h *productHandler) handleSystemLogs(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if !h.requireAdministrator(w, session) {
 		return

@@ -239,7 +239,7 @@ paths:
       operationId: listSystemLogs
       summary: Read A-NAS service logs from the systemd journal through the Host Agent, newest first
       description: >-
-        Administrators only. The Host Agent reads only the allowlisted A-NAS services (ADR 0019); levels, messages
+        Administrators only. The Host Agent reads only the allowlisted A-NAS services (ADR 0020); levels, messages
         and fields of JSON log lines come from the line itself. A page stops after 20,000 scanned lines; next then
         continues from the last line scanned.
       parameters:

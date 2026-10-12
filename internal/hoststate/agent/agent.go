@@ -133,7 +133,7 @@ type Services struct {
 	Viewing     accounts.ViewingProvisioner
 	Apps        appid.Host
 	Snapshots   files.SnapshotBackend
-	// SystemLogs reads the allowlisted service logs (ADR 0019).
+	// SystemLogs reads the allowlisted service logs (ADR 0020).
 	SystemLogs systemlog.Reader
 }
 

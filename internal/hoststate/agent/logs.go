@@ -17,7 +17,7 @@ const systemLogsPath = "/v1/system-logs"
 const systemLogsTimeout = 20 * time.Second
 
 // handleSystemLogs serves GET /v1/system-logs: allowlisted service logs only,
-// with the same filters the product API validated (ADR 0019).
+// with the same filters the product API validated (ADR 0020).
 func (h *handler) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
