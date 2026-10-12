@@ -229,7 +229,7 @@ def label_quality(scores, truth, rows, natural, thresholds, ids):
 
 def labelled(images, vocabulary, ground_truth):
     """The evaluation images present in images: samples, vectors, truth."""
-    samples = datasets.coco_samples(ground_truth) + datasets.openimages_samples(
+    samples = datasets.coco_samples(ground_truth) + datasets.coco_train_samples(ground_truth) + datasets.openimages_samples(
         ground_truth, datasets.select_openimages(ground_truth))
     samples = [sample for sample in samples if sample.key in images]
     vectors = np.stack([images[sample.key] for sample in samples])
@@ -306,9 +306,11 @@ def main():
     calibration = np.array([sample.split == "calibration" for sample in samples])
     subclasses = frozenset(i for i, label in enumerate(ids) if ground_truth.get(label, {}).get("cocoAbsentUnless"))
     test = ~calibration
-    coco = np.array([sample.key.startswith("coco:") for sample in samples])
-    report = {"model": model, "images": {"coco": int(coco.sum()), "openimages": int((~coco).sum())}}
-    print(f"{model}: {coco.sum()} COCO and {(~coco).sum()} Open Images images")
+    coco = np.array([sample.natural for sample in samples])
+    train = np.array([sample.key.startswith("coco-train:") for sample in samples])
+    report = {"model": model, "images": {"coco": int((coco & ~train).sum()), "cocoTrain": int(train.sum()),
+                                         "openimages": int((~coco).sum())}}
+    print(f"{model}: {(coco & ~train).sum()} COCO val, {train.sum()} COCO train and {(~coco).sum()} Open Images images")
 
     # Prompt: mean AP on the calibration half picks the template.
     report["templates"] = {}

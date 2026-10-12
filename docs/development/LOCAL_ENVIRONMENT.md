@@ -170,6 +170,15 @@ AI 聚合的阈值按“宁缺毋滥”校准，场景标签的真值来自 COCO
 $AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --min-precision 0.9 --min-label-precision 0.8 --min-recall 0.1 --write
 ```
 
+校准集还可以加入 COCO 2017 train 的固定子集（2026-10-12 起）。验证集的 5,000 张让稀有标签和多数场景的照片太少，无法判断某组对不对；子集只用于校准，测试仍只用验证集的测试半。
+
+[`eval.coco_train`](../../ai/eval/coco_train.py) 在开发机宿主上运行，需要 ijson 与 remotezip，不在评估镜像里。它按图片 ID 的哈希取 2 万张，把本机 `annotations_trainval2017.zip` 中的实例标注和远端 stuff 压缩包中的 `stuff_train2017.json` 以流式读取、压缩成每张图的类别与面积（约 11 MB），再逐张下载图片（约 3.1 GB）：
+
+```bash
+cd ai && ANAS_DATASETS=D:/A-NAS-datasets python -m eval.coco_train --count 20000
+$AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack --tokens 70 --sets coco-train --no-texts
+```
+
 分块向量（[M2 实施方案“AI 聚合”](../architecture/photo-ai.md#ai-聚合)）先为 COCO 测试半与 COCO-CN 测试集算每块的向量，再与整图向量比较；中途也可以运行 `eval.tile_search` 查看已算部分的结果：
 
 ```bash
