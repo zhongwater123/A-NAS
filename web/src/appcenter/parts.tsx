@@ -1,13 +1,18 @@
 import { Check, Loader } from "lucide-react";
-import { CSSProperties, KeyboardEvent, ReactNode, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CSSProperties, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { AppJob, CatalogApp, iconURL } from "../appsApi";
 import { appURL, openApp } from "./model";
 
-const loadMarkdown = () => import("./AppMarkdown");
-const AppMarkdown = lazy(loadMarkdown);
-// Loading the renderer with the App Center keeps raw Markdown from flashing on an app's page.
-export const preloadMarkdown = () => void loadMarkdown();
+// The Markdown renderer is its own chunk. Once loaded it renders synchronously
+// (React.lazy would still suspend once), so loading it with the App Center
+// keeps raw Markdown from flashing on an app's page.
+let markdown: typeof import("./AppMarkdown") | undefined;
+let loadingMarkdown: Promise<unknown> | undefined;
+export function preloadMarkdown(): Promise<unknown> {
+  loadingMarkdown ??= import("./AppMarkdown").then((module) => { markdown = module; });
+  return loadingMarkdown;
+}
 
 export function AppIcon({ app, size = "md" }: { app: CatalogApp; size?: "sm" | "md" | "lg" | "xl" }) {
   const [failed, setFailed] = useState(false);
@@ -31,15 +36,14 @@ export function AppAction({ app, onInstall }: { app: CatalogApp; onInstall: (app
   return <button className="ac-get" aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>安装</button>;
 }
 
-// Manifest Markdown; plain text shows while the renderer loads.
+// Manifest Markdown; plain text shows until the renderer has loaded.
 export function RichText({ text }: { text: string }) {
-  return (
-    <div className="ac-prose">
-      <Suspense fallback={<p className="ac-prose-plain">{text}</p>}>
-        <AppMarkdown>{text}</AppMarkdown>
-      </Suspense>
-    </div>
-  );
+  const [, setLoaded] = useState(Boolean(markdown));
+  useEffect(() => {
+    if (!markdown) void preloadMarkdown().then(() => setLoaded(true));
+  }, []);
+  const Markdown = markdown?.default;
+  return <div className="ac-prose">{Markdown ? <Markdown>{text}</Markdown> : <p className="ac-prose-plain">{text}</p>}</div>;
 }
 
 // Long text folds to a few lines with a control to show the rest.

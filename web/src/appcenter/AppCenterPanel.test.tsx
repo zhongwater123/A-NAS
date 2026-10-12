@@ -173,6 +173,27 @@ describe("AppCenterPanel", () => {
     expect(await screen.findByRole("dialog", { name: "安装计划" })).toBeTruthy();
   });
 
+  it("does not show an earlier failure as the result of a new install", async () => {
+    const earlier = job({ state: "failed", error: "pull access denied", startedAt: "2026-10-12T08:00:00Z" });
+    const retried = job({ startedAt: "2026-10-12T09:00:00Z" });
+    let memos = app("memos", { job: earlier });
+    serve(() => [memos], () => json(retried, 202));
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "安装 Memos" }));
+    const plan = await screen.findByRole("dialog", { name: "安装计划" });
+    await within(plan).findByText("app-memos");
+    await user.click(within(plan).getByRole("button", { name: "确认安装" }));
+    // The list still reports the earlier failed job until the agent's next answer.
+    expect(await screen.findByRole("dialog", { name: "安装进度" })).toBeTruthy();
+
+    memos = { ...memos, job: { ...retried, state: "failed", error: "port is already allocated" } };
+    await refresh();
+    const failed = await screen.findByRole("dialog", { name: "安装失败" });
+    expect(within(failed).getByText("port is already allocated")).toBeTruthy();
+  });
+
   it("holds an install while another app's job runs", async () => {
     serve(() => [app("memos"), app("navidrome", { category: "media", state: "installing", job: job({ appId: "navidrome" }) })]);
     const user = userEvent.setup();

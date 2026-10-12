@@ -3,7 +3,7 @@ import {
 } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useState } from "react";
 
-import { AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
+import { AppJob, AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
 import { AppIcon, JobOutput, Layer, Progress, RichText } from "./parts";
 import { appURL, describeError, installFailed, mountLabels, openApp, useElapsed } from "./model";
 
@@ -18,6 +18,8 @@ interface SheetProps {
 // the sheet never stops the install.
 export function InstallSheet({ app, busyApp, onChanged, onClose }: SheetProps & { busyApp?: CatalogApp }) {
   const [submitted, setSubmitted] = useState(app.state === "installing");
+  // The job this sheet started; until the list catches up, an earlier failed job is not ours.
+  const [started, setStarted] = useState<AppJob>();
   const [plan, setPlan] = useState<InstallPlan>();
   const [planning, setPlanning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -44,7 +46,7 @@ export function InstallSheet({ app, busyApp, onChanged, onClose }: SheetProps & 
     setSubmitting(true);
     setFailure(undefined);
     try {
-      await installApp(app.id, plan.digest);
+      setStarted(await installApp(app.id, plan.digest));
       setSubmitted(true);
       await onChanged();
     } catch (error) {
@@ -56,12 +58,14 @@ export function InstallSheet({ app, busyApp, onChanged, onClose }: SheetProps & 
   };
   const retry = () => {
     setSubmitted(false);
+    setStarted(undefined);
     setFailure(undefined);
     void loadPlan();
   };
 
   // One layer for every stage, so focus and the open animation carry over.
-  const stage = !submitted ? "plan" : app.state === "installed" ? "done" : installFailed(app) ? "failed" : "running";
+  const failed = installFailed(app) && (!started || app.job?.startedAt === started.startedAt);
+  const stage = !submitted ? "plan" : app.state === "installed" ? "done" : failed ? "failed" : "running";
   const labels = { plan: "安装计划", running: "安装进度", done: "安装完成", failed: "安装失败" };
   return (
     <Layer label={labels[stage]} onDismiss={submitting ? undefined : onClose}>

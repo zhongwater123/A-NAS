@@ -33,7 +33,7 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: () => void }) 
   const busyApp = apps.find(isBusy);
   const installed = apps.filter(listedAsInstalled);
 
-  useEffect(preloadMarkdown, []);
+  useEffect(() => void preloadMarkdown(), []);
   useLayoutEffect(() => {
     if (main.current) main.current.scrollTop = current ? 0 : listScroll.current;
   }, [current?.id]);
