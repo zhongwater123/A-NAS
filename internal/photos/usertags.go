@@ -1,8 +1,10 @@
 package photos
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -68,6 +70,62 @@ func (s *Service) HideAILabel(ctx context.Context, p Principal, assetID, labelID
 		}
 		return s.audit(ctx, tx, p.UserID, "photo.ai_label_hidden", record.ID, labelID)
 	})
+}
+
+// TagCount is a user tag and how many photos within a search's scope carry
+// it: one of "你的标签" on AI 聚合.
+type TagCount struct {
+	Name   string `json:"name"`
+	Photos int    `json:"photos"`
+	// CoverID is the photo most recently given the tag.
+	CoverID string `json:"coverId"`
+}
+
+// TagCounts lists the user tags on untrashed photos within a search's scope,
+// most photos first. The tags are the users' own; nothing is inferred.
+func (s *Service) TagCounts(ctx context.Context, p Principal, viewing string) ([]TagCount, error) {
+	scope, err := s.searchScope(ctx, p, viewing)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT t.name, t.asset_id FROM user_tags t JOIN assets a ON a.id = t.asset_id
+WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+ORDER BY t.created_at DESC, t.asset_id DESC`, scope...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := []TagCount{}
+	index := make(map[string]int)
+	for rows.Next() {
+		var name, assetID string
+		if err := rows.Scan(&name, &assetID); err != nil {
+			return nil, err
+		}
+		if i, seen := index[name]; seen {
+			counts[i].Photos++
+			continue
+		}
+		index[name] = len(counts)
+		counts = append(counts, TagCount{Name: name, Photos: 1, CoverID: assetID})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.SortStableFunc(counts, func(a, b TagCount) int { return cmp.Compare(b.Photos, a.Photos) })
+	return counts, nil
+}
+
+// TagPhotos lists by page the untrashed photos within a search's scope that
+// carry a user tag, newest first.
+func (s *Service) TagPhotos(ctx context.Context, p Principal, name, viewing, cursor string, limit int) (Page, error) {
+	scope, err := s.searchScope(ctx, p, viewing)
+	if err != nil {
+		return Page{}, err
+	}
+	where := "WHERE a.library_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") +
+		") AND a.trashed_at IS NULL AND a.id IN (SELECT asset_id FROM user_tags WHERE name = ?)"
+	return s.newestFirst(ctx, p, where, append(slices.Clone(scope), name), cursor, limit)
 }
 
 // changeMetadata runs change on a photo p may change and returns the photo's

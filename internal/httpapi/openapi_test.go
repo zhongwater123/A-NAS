@@ -64,6 +64,8 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo labels", path: "/api/v1/photos/labels", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo label cluster", path: "/api/v1/photos/labels/cat/assets?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo label cluster missing", path: "/api/v1/photos/labels/no-such-label/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo tags", path: "/api/v1/photos/tags", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo tag group", path: "/api/v1/photos/tags/" + url.PathEscape("小橘") + "/assets?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo entries", path: "/api/v1/photos/libraries/" + photoLibraryID + "/entries", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo directory", method: http.MethodPost, body: `{"name":"Trips"}`, path: "/api/v1/photos/libraries/" + photoLibraryID + "/directories", handler: photoHandler, csrf: true, wantStatus: http.StatusCreated},
 		{name: "photo asset", path: "/api/v1/photos/assets/" + photoAssetID, handler: photoHandler, wantStatus: http.StatusOK},

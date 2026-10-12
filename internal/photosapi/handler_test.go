@@ -430,6 +430,25 @@ func TestAlbumsTagsAndCorrections(t *testing.T) {
 	if untagged.ID != photo.ID || len(untagged.Tags) != 0 {
 		t.Fatalf("details after removing the tag = %+v", untagged)
 	}
+	owner.json(http.MethodPost, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/tags", map[string]string{"name": "小黑"}, http.StatusOK, nil)
+	var tags struct {
+		Items []photos.TagCount `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/tags", nil, http.StatusOK, &tags)
+	if len(tags.Items) != 1 || tags.Items[0].Name != "小黑" || tags.Items[0].Photos != 1 || tags.Items[0].CoverID != photo.ID {
+		t.Fatalf("tag groups = %+v", tags.Items)
+	}
+	var group struct {
+		Items []photos.Asset `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/tags/"+url.PathEscape("小黑")+"/assets", nil, http.StatusOK, &group)
+	if len(group.Items) != 1 || group.Items[0].ID != photo.ID {
+		t.Fatalf("photos tagged 小黑 = %+v", group.Items)
+	}
+	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/tags", nil, http.StatusOK, &tags)
+	if len(tags.Items) != 0 {
+		t.Fatalf("another member sees tag groups %+v", tags.Items)
+	}
 	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/no-such-label", nil, http.StatusNotFound, nil)
 	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/cat", nil, http.StatusOK, nil)
 

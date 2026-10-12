@@ -34,6 +34,9 @@ export interface PhotoMonth { month: string; photos: number }
 // An AI cluster: the photos local AI is sure show a label. Clusters are shown
 // on their own and never take part in search.
 export interface PhotoLabelCount { id: string; name: string; category: string; photos: number; coverId: string }
+// A user tag as a group: the photos people tagged by hand. photos is 0 when
+// a group is opened without its count, such as from a photo's details.
+export interface PhotoTagCount { name: string; photos: number; coverId: string }
 export interface PhotoAIStatus {
   state: "unavailable" | "paused" | "working" | "idle";
   // Why work is paused: foreground, or a resource under pressure.
@@ -63,6 +66,10 @@ export const listPhotoLabels = (viewing = "") =>
   request<{ items: PhotoLabelCount[]; ready: boolean }>(`${base}/labels${viewing ? `?viewing=${id(viewing)}` : ""}`);
 export const listLabelPhotos = (labelId: string, viewing = "", cursor = "", limit = 120) =>
   request<PhotoPage>(`${base}/labels/${id(labelId)}/assets?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+export const listTagGroups = async (viewing = "") =>
+  (await request<{ items: PhotoTagCount[] }>(`${base}/tags${viewing ? `?viewing=${id(viewing)}` : ""}`)).items;
+export const listTagPhotos = (name: string, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoPage>(`${base}/tags/${id(name)}/assets?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
 // Takes a photo out of an AI cluster, for that photo only.
 export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
 export const getAIStatus = () => request<PhotoAIStatus>(`${base}/ai`);

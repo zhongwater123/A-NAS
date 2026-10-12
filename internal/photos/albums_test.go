@@ -247,3 +247,55 @@ func TestUserTagsAreTheCallersAndFindPhotos(t *testing.T) {
 		t.Fatalf("RemoveTag() twice error = %v", err)
 	}
 }
+
+// The users' own tags form groups on AI 聚合 over the caller's search scope:
+// another member's private photos never count, trashed photos drop out, and
+// the cover is the photo most recently given the tag.
+func TestTagGroupsCoverTheSearchScope(t *testing.T) {
+	service, c, _ := newService(t)
+	ctx := context.Background()
+	alicePrivate, shared := libraries(t, service, namedAlice)
+	bobPrivate, _ := libraries(t, service, namedBob)
+	first := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "first.png", pngBytes(t, 1))
+	second := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "second.png", pngBytes(t, 2))
+	sharedPhoto := importPhoto(t, service, namedAlice, shared.ID, "", "shared.png", pngBytes(t, 3))
+	trashed := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "trashed.png", pngBytes(t, 4))
+	bobs := importPhoto(t, service, namedBob, bobPrivate.ID, "", "bob.png", pngBytes(t, 5))
+	for _, tagging := range []struct {
+		p     photos.Principal
+		asset photos.Asset
+		tag   string
+	}{
+		{namedAlice, first, "小橘"}, {namedAlice, sharedPhoto, "小橘"}, {namedAlice, second, "小橘"},
+		{namedAlice, trashed, "小橘"}, {namedAlice, first, "海边"}, {namedBob, bobs, "小橘"},
+	} {
+		c.Advance(time.Minute)
+		if _, err := service.AddTag(ctx, tagging.p, tagging.asset.ID, tagging.tag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.Trash(ctx, namedAlice, trashed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err := service.TagCounts(ctx, namedAlice, "")
+	want := []photos.TagCount{{Name: "小橘", Photos: 3, CoverID: second.ID}, {Name: "海边", Photos: 1, CoverID: first.ID}}
+	if err != nil || !slices.Equal(counts, want) {
+		t.Fatalf("TagCounts(alice) = %+v, %v; want %+v", counts, err, want)
+	}
+	page, err := service.TagPhotos(ctx, namedAlice, "小橘", "", "", 2)
+	if err != nil || len(page.Assets) != 2 || page.Next == "" {
+		t.Fatalf("TagPhotos(alice) first page = %v next=%q, %v", names(page.Assets), page.Next, err)
+	}
+	rest, err := service.TagPhotos(ctx, namedAlice, "小橘", "", page.Next, 2)
+	if err != nil || len(rest.Assets) != 1 || rest.Next != "" {
+		t.Fatalf("TagPhotos(alice) second page = %v, %v", names(rest.Assets), err)
+	}
+	// Bob sees his own tag and the shared photo, never Alice's private ones.
+	if counts, err := service.TagCounts(ctx, namedBob, ""); err != nil || !slices.Equal(counts, []photos.TagCount{{Name: "小橘", Photos: 2, CoverID: bobs.ID}}) {
+		t.Fatalf("TagCounts(bob) = %+v, %v", counts, err)
+	}
+	if page, err := service.TagPhotos(ctx, namedBob, "海边", "", "", 0); err != nil || len(page.Assets) != 0 {
+		t.Fatalf("TagPhotos(bob, 海边) = %v, %v", names(page.Assets), err)
+	}
+}

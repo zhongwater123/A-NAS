@@ -53,6 +53,8 @@ export function Sidebar({ caller, library, place, albumsKey, count, ai, onPlace,
   const readOnly = Boolean(library?.viewing);
   const at = (kind: Place["kind"]) => place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
   const viewing = readOnly ? libraryId : "";
+  // Searches, AI clusters and tag groups all belong to AI 聚合.
+  const onAIPage = place.kind === "search" || place.kind === "cluster" || place.kind === "tag";
 
   return (
     <nav className="ph-sidebar" aria-label="相册导航">
@@ -64,7 +66,7 @@ export function Sidebar({ caller, library, place, albumsKey, count, ai, onPlace,
         <button type="button" className={at("timeline") ? "active" : ""} aria-current={at("timeline") ? "page" : undefined} onClick={() => onPlace({ kind: "timeline", libraryId })}>
           <Images /><span>照片</span>{count !== undefined && at("timeline") && <small>{count}</small>}
         </button>
-        <button type="button" className={place.kind === "search" || place.kind === "cluster" ? "active" : ""} aria-current={place.kind === "search" || place.kind === "cluster" ? "page" : undefined} onClick={() => onPlace({ kind: "search", viewing, query: "" })}>
+        <button type="button" className={onAIPage ? "active" : ""} aria-current={onAIPage ? "page" : undefined} onClick={() => onPlace({ kind: "search", viewing, query: "" })}>
           <Shapes /><span>AI 聚合</span>
         </button>
         {!readOnly && (

@@ -249,13 +249,13 @@ describe("PhotosPanel viewer", () => {
     expect(screen.getByRole("button", { name: "移到回收站" })).toBeTruthy();
   });
 
-  it("tags a photo and finds the photos with its tag", async () => {
+  it("tags a photo and opens the group of its tag", async () => {
     let details = asset("photo:cat");
     const fetchMock = serve(
       (url, init) => {
         if (url === "/api/v1/photos/assets/photo%3Acat" && !init?.method) return json(details);
         if (url === "/api/v1/photos/assets/photo%3Acat/tags" && init?.method === "POST") { details = { ...details, tags: ["小橘"] }; return json(details); }
-        if (url.startsWith("/api/v1/photos/search?q=%E5%B0%8F%E6%A9%98")) return json({ items: [asset("photo:cat"), asset("photo:kitten")], semantic: true, closest: 2 });
+        if (url.startsWith("/api/v1/photos/tags/%E5%B0%8F%E6%A9%98/assets")) return json({ items: [asset("photo:cat"), asset("photo:kitten")] });
         return undefined;
       },
       timeline(privateLibrary.id, () => [asset("photo:cat")]),
@@ -270,11 +270,10 @@ describe("PhotosPanel viewer", () => {
     expect(screen.queryByLabelText("AI 标签")).toBeNull();
 
     await user.click(within(screen.getByLabelText("标签")).getByRole("button", { name: "小橘" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E5%B0%8F%E6%A9%98&limit=120", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/tags/%E5%B0%8F%E6%A9%98/assets?limit=120", expect.anything());
     expect(await screen.findByRole("button", { name: "查看 photo:kitten.jpg" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "AI 聚合" })).toBeTruthy();
-    expect(screen.getByText("找到 2 张")).toBeTruthy();
-    expect(screen.queryByRole("separator", { name: "相关度较低" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "小橘" })).toBeTruthy();
+    expect(screen.getByText("2 张 · 你的标签")).toBeTruthy();
   });
 });
 
@@ -419,9 +418,13 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
   it("opens AI 聚合 with searches and clusters, and takes a wrong photo out of a cluster", async () => {
     const cat = { id: "cat", name: "猫", category: "animal", photos: 2, coverId: "photo:cat" };
     let hidden = false;
+    let untagged = false;
     const fetchMock = serve((url, init) => {
       if (url === "/api/v1/photos/ai") return json({ state: "working", ready: 3, pending: 2, failed: 1 });
       if (url === "/api/v1/photos/labels") return json({ items: [cat, { id: "sea", name: "海", category: "nature", photos: 1, coverId: "photo:sea" }], ready: true });
+      if (url === "/api/v1/photos/tags") return json({ items: [{ name: "小橘", photos: 2, coverId: "photo:orange" }] });
+      if (url.startsWith("/api/v1/photos/tags/%E5%B0%8F%E6%A9%98/assets")) return json({ items: untagged ? [asset("photo:orange")] : [asset("photo:orange"), asset("photo:ginger")] });
+      if (url === "/api/v1/photos/assets/photo%3Aginger/tags/%E5%B0%8F%E6%A9%98" && init?.method === "DELETE") { untagged = true; return json(asset("photo:ginger")); }
       if (url.startsWith("/api/v1/photos/labels/cat/assets")) return json({ items: hidden ? [asset("photo:cat")] : [asset("photo:cat"), asset("photo:fox")] });
       if (url === "/api/v1/photos/assets/photo%3Afox/ai-labels/cat" && init?.method === "DELETE") { hidden = true; return json(asset("photo:fox")); }
       if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:sea")], semantic: true, closest: 1 });
@@ -456,6 +459,16 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     expect(await screen.findByText("已从“猫”移出 1 张，照片仍在图库中")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+
+    // The users' own tags are groups too; a tag can be taken off from there.
+    expect(within(screen.getByLabelText("你的标签")).getByText("2 张")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "打开标签 小橘" }));
+    expect(await screen.findByRole("heading", { name: "小橘" })).toBeTruthy();
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:ginger.jpg" }));
+    await user.click(screen.getByRole("button", { name: "去掉标签" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/assets/photo%3Aginger/tags/%E5%B0%8F%E6%A9%98", expect.objectContaining({ method: "DELETE" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "查看 photo:ginger.jpg" })).toBeNull());
+    expect(await screen.findByText("已从 1 张照片上去掉“小橘”")).toBeTruthy();
   });
 
   it("suggests sentences until local AI has clusters, and never says AI is off", async () => {

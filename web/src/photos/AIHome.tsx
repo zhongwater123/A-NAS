@@ -1,8 +1,8 @@
-import { ChevronDown, ChevronUp, FileText, History, ScanSearch, Search, ShieldCheck, Sunset, X } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Hash, History, ScanSearch, Search, ShieldCheck, Sunset, X } from "lucide-react";
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { categoryNames, messageOf } from "./model";
-import { listPhotoLabels, thumbnailURL, type PhotoAIStatus, type PhotoLabelCount } from "./photosApi";
+import { listPhotoLabels, listTagGroups, thumbnailURL, type PhotoAIStatus, type PhotoLabelCount, type PhotoTagCount } from "./photosApi";
 
 interface Props {
   viewing: string;
@@ -13,6 +13,7 @@ interface Props {
   onSearch: (query: string) => void;
   onForget: () => void;
   onOpenCluster: (label: PhotoLabelCount) => void;
+  onOpenTag: (tag: PhotoTagCount) => void;
   onError: (message: string) => void;
 }
 
@@ -28,12 +29,15 @@ const ways = [
   { icon: FileText, title: "截图与文档", text: "拍下的纸张和屏幕", examples: ["手机截图", "手写的笔记", "餐厅菜单"] },
 ];
 
-// AIHome is AI 聚合: a sentence finds photos by meaning, and below, the photos
-// local AI has grouped by what they show. A group holds only the photos the
-// model is sure of; it opens on its own and never filters a search.
-export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, onForget, onOpenCluster, onError }: Props) {
+// AIHome is AI 聚合: a sentence finds photos by meaning; below, the groups
+// people made with their own tags, then the photos local AI has grouped by
+// what they show. An AI group holds only the photos the model is sure of; it
+// opens on its own and never filters a search.
+export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, onForget, onOpenCluster, onOpenTag, onError }: Props) {
   const [query, setQuery] = useState("");
   const [clusters, setClusters] = useState<{ items: PhotoLabelCount[]; ready: boolean }>();
+  const [tags, setTags] = useState<PhotoTagCount[]>([]);
+  const [allTags, setAllTags] = useState(false);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const groups = useMemo(() => {
     const byCategory = new Map<string, PhotoLabelCount[]>();
@@ -56,6 +60,7 @@ export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, on
   useEffect(() => {
     let live = true;
     listPhotoLabels(viewing).then((value) => { if (live) setClusters(value); }, (caught) => { if (live) { setClusters({ items: [], ready: false }); onError(messageOf(caught)); } });
+    listTagGroups(viewing).then((value) => { if (live) setTags(value); }, (caught) => { if (live) onError(messageOf(caught)); });
     return () => { live = false; };
   }, [viewing, refreshKey]);
   const submit = (event: FormEvent) => {
@@ -82,6 +87,26 @@ export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, on
         )}
         <p className="ph-hero-note"><ShieldCheck />照片在这台 NAS 上由本地 AI 识别，不会离开设备{status ? ` · ${status}` : ""}</p>
       </section>
+
+      {tags.length > 0 && (
+        <section className="ph-browse ph-tag-groups" aria-label="你的标签">
+          <header><h3>你的标签</h3><small>你亲手打的标签，每个标签就是一组</small></header>
+          <div className="ph-cards things">
+            {(allTags ? tags : tags.slice(0, perRow * 2)).map((tag) => (
+              <button type="button" key={tag.name} className="ph-card ph-thing" aria-label={`打开标签 ${tag.name}`} onClick={() => onOpenTag(tag)}>
+                <span className="ph-card-cover"><img src={thumbnailURL(tag.coverId)} alt="" loading="lazy" /><span className="ph-tag-mark"><Hash /></span></span>
+                <strong>{tag.name}</strong>
+                <small>{tag.photos} 张</small>
+              </button>
+            ))}
+          </div>
+          {tags.length > perRow * 2 && (
+            <button type="button" className="ph-browse-more" onClick={() => setAllTags(!allTags)}>
+              {allTags ? <><ChevronUp />收起</> : <><ChevronDown />展开全部 {tags.length} 个标签</>}
+            </button>
+          )}
+        </section>
+      )}
 
       {clusters === undefined ? <div className="ph-loading"><span className="ph-spinner" /></div> : groups.length ? (
         <section ref={browse} className="ph-browse" aria-label="按内容聚合">

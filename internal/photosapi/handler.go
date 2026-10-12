@@ -87,6 +87,8 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
 	h.mux.HandleFunc("GET "+p+"/labels", h.labels)
 	h.mux.HandleFunc("GET "+p+"/labels/{labelID}/assets", h.labelPhotos)
+	h.mux.HandleFunc("GET "+p+"/tags", h.tags)
+	h.mux.HandleFunc("GET "+p+"/tags/{name}/assets", h.tagPhotos)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline", h.timeline)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/timeline/months", h.timelineMonths)
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/entries", h.entries)
@@ -221,6 +223,32 @@ func (h *handler) labelPhotos(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	page, err := h.service.LabelPhotos(r.Context(), principal, r.PathValue("labelID"), query.Get("viewing"), query.Get("cursor"), limit)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+}
+
+// tags lists the users' own tags as groups, beside the AI clusters.
+func (h *handler) tags(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	counts, err := h.service.TagCounts(r.Context(), principal, r.URL.Query().Get("viewing"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, itemsResponse[photos.TagCount]{Items: counts})
+}
+
+func (h *handler) tagPhotos(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	page, err := h.service.TagPhotos(r.Context(), principal, r.PathValue("name"), query.Get("viewing"), query.Get("cursor"), limit)
 	if err != nil {
 		h.fail(w, r, err)
 		return

@@ -1,8 +1,8 @@
 import { APIError } from "../api";
-import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary } from "./photosApi";
+import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoTagCount } from "./photosApi";
 
 // A place is what the main area shows. AI 聚合 (a search with an empty query
-// is its start page) and its clusters cover the caller's and the shared
+// is its start page), its clusters and the user tag groups cover the caller's and the shared
 // library; viewing adds the member library it was started from, so ordinary
 // searches never mix it in.
 export type Place =
@@ -11,7 +11,8 @@ export type Place =
   | { kind: "album"; libraryId: string; album: PhotoAlbum }
   | { kind: "trash"; libraryId: string }
   | { kind: "search"; viewing: string; query: string }
-  | { kind: "cluster"; viewing: string; label: PhotoLabelCount };
+  | { kind: "cluster"; viewing: string; label: PhotoLabelCount }
+  | { kind: "tag"; viewing: string; tag: PhotoTagCount };
 
 export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
 

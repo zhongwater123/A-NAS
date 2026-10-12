@@ -640,6 +640,30 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/tags:
+    get:
+      operationId: listPhotoTagGroups
+      summary: List the users' own tags on untrashed photos in the caller's private and the shared library as groups, most photos first
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+      responses:
+        "200": { description: Tag groups, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTagCounts" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/tags/{name}/assets:
+    get:
+      operationId: listPhotoTagGroup
+      summary: List the untrashed photos in the caller's private and the shared library that carry a user tag, newest first
+      parameters:
+        - { name: name, in: path, required: true, description: "A user tag, such as 小橘.", schema: { type: string } }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of the group, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/libraries/{libraryId}/albums:
     get:
       operationId: listPhotoAlbums
@@ -2191,6 +2215,21 @@ components:
               photos: { type: integer, minimum: 1 }
               coverId: { type: string, description: The photo that matches the label most clearly. }
         ready: { type: boolean, description: "False while AI clusters are not available; there are no items then." }
+    PhotoTagCounts:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, photos, coverId]
+            properties:
+              name: { type: string }
+              photos: { type: integer, minimum: 1 }
+              coverId: { type: string, description: The photo most recently given the tag. }
     PhotoAlbum:
       type: object
       additionalProperties: false
