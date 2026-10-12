@@ -5,7 +5,7 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
-    the managed photo library, the media center, an opt-in administrator terminal, and container lifecycle actions that go through the separate
+    the managed photo library, the media center, the shared feedback list, an opt-in administrator terminal, and container lifecycle actions that go through the separate
     container agent.
 servers:
   - url: http://127.0.0.1:8080
@@ -1202,6 +1202,85 @@ paths:
         "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback:
+    get:
+      operationId: listFeedback
+      summary: "Every feedback item, newest first; all signed-in accounts read the same list"
+      responses:
+        "200": { description: Feedback items, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/FeedbackItem" } } } } } } }
+    post:
+      operationId: createFeedback
+      summary: File a problem or suggestion with text, images or both
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 5000 }
+                image: { type: array, maxItems: 6, description: "PNG, JPEG, GIF or WebP; at most 10 MiB each. The server sniffs the type.", items: { type: string, format: binary } }
+      responses:
+        "201": { description: The new item, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback/{feedbackId}:
+    parameters: [{ $ref: "#/components/parameters/FeedbackID" }]
+    put:
+      operationId: editFeedback
+      summary: "Replace an item's text and images; refused with feedback_changed when someone edited it after the given version"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The version the edit was made from. }
+                text: { type: string, maxLength: 5000 }
+                keep: { type: array, description: "IDs of the attached images that stay; the others are removed.", items: { type: string } }
+                image: { type: array, description: Images to add., items: { type: string, format: binary } }
+      responses:
+        "200": { description: The edited item, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: resolveFeedback
+      summary: "Mark an item handled, which strikes it through, or open again; this is not an edit and keeps the version"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [resolved], properties: { resolved: { type: boolean } } } } } }
+      responses:
+        "200": { description: The item, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteFeedback
+      summary: Delete an item and its images
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback/{feedbackId}/images/{imageId}:
+    get:
+      operationId: getFeedbackImage
+      summary: "One attached image; its content never changes, so it may be cached"
+      parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { name: imageId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: The image
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "404": { $ref: "#/components/responses/ProductError" }
 components:
   securitySchemes:
     cookieAuth:
@@ -1223,6 +1302,7 @@ components:
     MediaLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
     MediaVideoID: { name: videoId, in: path, required: true, schema: { type: string } }
     MediaTitleID: { name: titleId, in: path, required: true, description: A video or show ID., schema: { type: string } }
+    FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     AppId:
       name: appId
       in: path
@@ -2452,6 +2532,30 @@ components:
         audio: { type: integer }
         quality: { type: string, enum: [original, 1080p, 720p, 480p] }
         qualities: { type: array, items: { type: string, enum: [original, 1080p, 720p, 480p] } }
+    FeedbackItem:
+      type: object
+      additionalProperties: false
+      required: [id, text, images, version, createdBy, createdAt, resolved]
+      properties:
+        id: { type: string }
+        text: { type: string, maxLength: 5000 }
+        images: { type: array, maxItems: 6, items: { $ref: "#/components/schemas/FeedbackImage" } }
+        version: { type: integer, minimum: 1, description: "Counts edits to the text and images; resolving does not change it." }
+        createdBy: { type: string, description: Username of the account that filed the item. }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, description: Username of the latest editor of the text or images. }
+        updatedAt: { type: string, format: date-time }
+        resolved: { type: boolean }
+        resolvedBy: { type: string }
+        resolvedAt: { type: string, format: date-time }
+    FeedbackImage:
+      type: object
+      additionalProperties: false
+      required: [id, contentType, sizeBytes]
+      properties:
+        id: { type: string }
+        contentType: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp] }
+        sizeBytes: { type: integer, minimum: 1, maximum: 10485760 }
     MediaCollection:
       type: object
       additionalProperties: false

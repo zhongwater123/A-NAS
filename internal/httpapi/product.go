@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
@@ -44,8 +46,11 @@ type ProductDependencies struct {
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
-	Media  http.Handler
-	Logger *slog.Logger
+	Media http.Handler
+	// Feedback serves /api/v1/feedback, the list every signed-in user reads
+	// and edits, and receives the user through feedbackapi.WithUser.
+	Feedback http.Handler
+	Logger   *slog.Logger
 }
 
 type productHandler struct {
@@ -58,6 +63,7 @@ type productHandler struct {
 	apps       http.Handler
 	photos     http.Handler
 	media      http.Handler
+	feedback   http.Handler
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -71,7 +77,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
-		photos: dependencies.Photos, media: dependencies.Media, logger: logger, mux: http.NewServeMux(),
+		photos: dependencies.Photos, media: dependencies.Media, feedback: dependencies.Feedback,
+		logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -89,7 +96,11 @@ func (h *productHandler) routes() {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
 	}
 	if h.media != nil {
-		h.mux.Handle(mediaapi.PathPrefix+"/", h.withMediaUser(h.media))
+		h.mux.Handle(mediaapi.PathPrefix+"/", h.withUser(h.media, mediaapi.WithUser))
+	}
+	if h.feedback != nil {
+		h.mux.Handle(feedbackapi.PathPrefix, h.withUser(h.feedback, feedbackapi.WithUser))
+		h.mux.Handle(feedbackapi.PathPrefix+"/", h.withUser(h.feedback, feedbackapi.WithUser))
 	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)
@@ -881,11 +892,11 @@ func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc 
 	}
 }
 
-// withMediaUser hands the media API the signed-in user; writes need the
+// withUser hands an API the signed-in user through attach; writes need the
 // CSRF token.
-func (h *productHandler) withMediaUser(next http.Handler) http.HandlerFunc {
+func (h *productHandler) withUser(next http.Handler, attach func(context.Context, accounts.User) context.Context) http.HandlerFunc {
 	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		next.ServeHTTP(w, r.WithContext(mediaapi.WithUser(r.Context(), session.User)))
+		next.ServeHTTP(w, r.WithContext(attach(r.Context(), session.User)))
 	}
 	read, write := h.withSession(serve), h.withMutation(serve)
 	return func(w http.ResponseWriter, r *http.Request) {

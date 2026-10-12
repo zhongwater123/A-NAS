@@ -24,6 +24,8 @@ import (
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/feedback"
+	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -197,6 +199,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer mediaService.Close()
+	feedbackStore, err := feedback.Open(filepath.Join(stateDirectory, "feedback.db"), feedback.Options{})
+	if err != nil {
+		return err
+	}
+	defer feedbackStore.Close()
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -228,6 +235,7 @@ func run(logger *slog.Logger) error {
 		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
 		Photos:     photoAPI,
 		Media:      mediaapi.New(mediaService, logger),
+		Feedback:   feedbackapi.New(feedbackStore, logger),
 		Logger:     logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
