@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
 const requestTimeout = 3 * time.Second
@@ -120,6 +121,7 @@ type handler struct {
 	viewing     accounts.ViewingProvisioner
 	apps        appid.Host
 	snapshots   files.SnapshotBackend
+	systemLogs  systemlog.Reader
 	logger      *slog.Logger
 }
 
@@ -131,6 +133,8 @@ type Services struct {
 	Viewing     accounts.ViewingProvisioner
 	Apps        appid.Host
 	Snapshots   files.SnapshotBackend
+	// SystemLogs reads the allowlisted service logs (ADR 0019).
+	SystemLogs systemlog.Reader
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -143,7 +147,8 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	}
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
-		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots, logger: logger,
+		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
+		systemLogs: services.SystemLogs, logger: logger,
 	}
 }
 
@@ -170,6 +175,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/accounts/credential/") {
 		h.handleDisableCredential(w, r)
+		return
+	}
+	if r.URL.Path == systemLogsPath {
+		h.handleSystemLogs(w, r)
 		return
 	}
 	if r.URL.Path == "/v1/snapshots" {

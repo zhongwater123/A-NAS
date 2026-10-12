@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
 const sessionCookieName = "anas_session"
@@ -53,6 +54,9 @@ type ProductDependencies struct {
 	// Feedback serves /api/v1/feedback, the list every signed-in user reads
 	// and edits, and receives the user through feedbackapi.WithUser.
 	Feedback http.Handler
+	// SystemLogs reads the allowlisted service logs for administrators; nil
+	// answers logs_unavailable.
+	SystemLogs systemlog.Reader
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
 	// center) catch up without waiting for their periodic scan. The context
@@ -73,6 +77,8 @@ type productHandler struct {
 	media      http.Handler
 	music      *music.Service
 	feedback   http.Handler
+	systemLogs systemlog.Reader
+	dataSource DataSource
 	changed    func(context.Context, accounts.User, string)
 	logger     *slog.Logger
 	mux        *http.ServeMux
@@ -88,6 +94,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
+		systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -156,6 +163,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
 	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
+	h.mux.HandleFunc("GET /api/v1/system-logs", h.withSession(h.handleSystemLogs))
 	h.musicRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
