@@ -28,7 +28,6 @@ import {
   Music2,
   PanelLeftClose,
   Pencil,
-  PlaySquare,
   RefreshCw,
   Scissors,
   Search,
@@ -41,7 +40,6 @@ import {
   Upload,
   UsersRound,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { Component, CSSProperties, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
@@ -59,6 +57,7 @@ import { DockerPanel } from "./DockerPanel";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
+import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
 import { MusicPanel } from "./music/MusicPanel";
 import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
@@ -109,10 +108,10 @@ const initialWindows: WindowModel[] = [
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
 ];
 
-const windowIcons: Record<WindowID, LucideIcon> = {
+const windowIcons: Record<WindowID, AppGlyph> = {
   files: FolderClosed,
   photos: Image,
-  media: PlaySquare,
+  media: MediaCenterGlyph,
   music: Music2,
   trash: Trash2,
   snapshots: Camera,
@@ -267,7 +266,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", keywords: "shell 命令行 bash", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
     ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
-    { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <PlaySquare />, active: isOpen("media"), onClick: () => openWindow("media") },
+    { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <MediaCenterGlyph />, active: isOpen("media"), onClick: () => openWindow("media") },
     { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
     { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", keywords: "快照 恢复 历史版本 snapshot", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
