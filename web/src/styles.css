@@ -337,7 +337,9 @@ button { font: inherit; }
 .icon-trash, .icon-settings { background: linear-gradient(155deg, #c9cdd3, #777e89); }
 .icon-resources { background: linear-gradient(155deg, #253346, #05090f); }
 .icon-store { background: linear-gradient(155deg, #798dff, #4f52dd); }
-.icon-video { background: linear-gradient(155deg, #43c9ff, #3568ed); }
+/* 影视中心 is the one black tile; its own sunset mark carries the colour. */
+.icon-video { background: linear-gradient(155deg, #34363d 0%, #131418 46%, #000 100%); }
+.icon-video::before { opacity: .55; }
 .icon-download { background: linear-gradient(155deg, #66eb83, #11b944); }
 .icon-snapshot { background: linear-gradient(155deg, #4bd1ff, #2981df); }
 .icon-docker { background: linear-gradient(155deg, #5ba2ff, #3152d4); }

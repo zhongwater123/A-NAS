@@ -1,11 +1,12 @@
-import type { LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
+import type { AppGlyph } from "./MediaCenterGlyph";
 
 export interface DockEntry {
   id: string;
   title: string;
   minimized: boolean;
-  icon: LucideIcon;
+  icon: AppGlyph;
   tone: string;
 }
 

@@ -234,6 +234,8 @@ export const listSpaces = async () => (await request<{items: Space[]}>("/api/v1/
 export const listEntries = async (spaceId: string, parentId = "") => (await request<{items: FileEntry[]}>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/entries?parentId=${encodeURIComponent(parentId)}`)).items;
 export const createDirectory = (spaceId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/directories`, json({ parentId, name }), true);
 export function uploadFile(spaceId: string, parentId: string, file: File) { const body = new FormData(); body.set("parentId", parentId); body.set("file", file); return request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/uploads`, { method: "POST", body }, true); }
+// sendFile uploads like uploadFile and reports progress as a fraction; parentId must precede the file in the form.
+export function sendFile(spaceId: string, parentId: string, file: File, onProgress: (fraction: number) => void, signal?: AbortSignal) { const body = new FormData(); body.set("parentId", parentId); body.set("file", file); return uploadForm<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/uploads`, body, onProgress, signal); }
 // Without spaceId the target folder is in the entry's own space.
 export const moveFile = (fileId: string, parentId: string, name: string, spaceId?: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}`, { ...json({ spaceId, parentId, name }), method: "PATCH" }, true);
 export const copyFile = (fileId: string, parentId: string, name: string, spaceId?: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}/copies`, json({ spaceId, parentId, name }), true);
