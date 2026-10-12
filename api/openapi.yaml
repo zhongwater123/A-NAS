@@ -1909,7 +1909,7 @@ components:
         category:
           type: string
           description: A-NAS category; empty when the container agent predates A-NAS categories.
-          enum: ["", media, reading, photos, downloads, files, notes, workflow, system]
+          enum: ["", media, reading, photos, downloads, files, notes, workflow, tools, network, system]
         version:
           type: string
         author:

@@ -72,6 +72,8 @@
 .ac-tile.files { background: linear-gradient(160deg, #5cc8f5, #1a8fd0); }
 .ac-tile.notes { background: linear-gradient(160deg, #b59cff, #7350e0); }
 .ac-tile.workflow { background: linear-gradient(160deg, #ff9a6b, #e8603a); }
+.ac-tile.tools { background: linear-gradient(160deg, #c7d36a, #8a9a1e); }
+.ac-tile.network { background: linear-gradient(160deg, #6fb7ff, #2f8fb8); }
 .ac-tile.system { background: linear-gradient(160deg, #8f9bb0, #586274); }
 
 /* App icons */
@@ -198,6 +200,8 @@ button.ac-get.open:hover { background: #2862cd; }
 .ac-app-head.files { --ac-tint: #1a8fd0; }
 .ac-app-head.notes { --ac-tint: #7350e0; }
 .ac-app-head.workflow { --ac-tint: #e8603a; }
+.ac-app-head.tools { --ac-tint: #8a9a1e; }
+.ac-app-head.network { --ac-tint: #2f8fb8; }
 .ac-app-head.system { --ac-tint: #586274; }
 .ac-app-title { min-width: 0; }
 .ac-app-title h2 { font-size: 25px; font-weight: 700; letter-spacing: -.015em; overflow-wrap: anywhere; }

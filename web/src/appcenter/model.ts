@@ -1,4 +1,4 @@
-import { Activity, BookOpen, Download, FolderSync, Images, type LucideIcon, Music, NotebookPen, Shapes, Workflow } from "lucide-react";
+import { Activity, BookOpen, Download, FolderSync, Images, type LucideIcon, Music, NotebookPen, Router, Shapes, Workflow, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AppsAPIError, CatalogApp, InstallPlan } from "../appsApi";
@@ -15,10 +15,12 @@ export const categories: Category[] = [
   { id: "media", label: "影音", blurb: "音乐、有声书与播客", icon: Music },
   { id: "reading", label: "阅读", blurb: "电子书、漫画与新闻订阅", icon: BookOpen },
   { id: "photos", label: "照片", blurb: "照片与视频图库", icon: Images },
-  { id: "downloads", label: "下载", blurb: "BT 下载工具", icon: Download },
+  { id: "downloads", label: "下载", blurb: "BT 与网盘文件下载", icon: Download },
   { id: "files", label: "文件与同步", blurb: "网盘、同步、文件分享与备份", icon: FolderSync },
   { id: "notes", label: "笔记与知识", blurb: "笔记、知识库与书签", icon: NotebookPen },
-  { id: "workflow", label: "协作与自动化", blurb: "协作文档、白板与工作流", icon: Workflow },
+  { id: "workflow", label: "协作与自动化", blurb: "协作文档、白板、聊天与工作流", icon: Workflow },
+  { id: "tools", label: "实用工具", blurb: "PDF、格式转换与记账", icon: Wrench },
+  { id: "network", label: "网络工具", blurb: "动态域名与网速测试", icon: Router },
   { id: "system", label: "监控与安全", blurb: "监控面板与密码管理", icon: Activity },
 ];
 

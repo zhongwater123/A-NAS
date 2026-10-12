@@ -25,7 +25,7 @@ export function Discover({ apps, onShow, onInstall, onCategory }: BrowseProps & 
         <div className="ac-banner-text">
           <p className="ac-eyebrow">发现</p>
           <h2>给 NAS 装上好用的应用</h2>
-          <p>{apps.length} 个开源应用均经过 A-NAS 安全审查。安装前列出它会用到的文件夹和端口，确认后才执行；每个应用以独立账号运行，卸载时保留数据。</p>
+          <p>{apps.length} 个应用均经过 A-NAS 安全审查。安装前列出它会用到的文件夹和端口，确认后才执行；每个应用以独立账号运行，卸载时保留数据。</p>
           <ul className="ac-banner-points">
             <li><ShieldCheck />安装前可审查</li>
             <li><LockKeyhole />独立账号运行</li>
