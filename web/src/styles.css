@@ -341,12 +341,12 @@ button { font: inherit; }
 .icon-video { background: linear-gradient(155deg, #34363d 0%, #131418 46%, #000 100%); }
 .icon-video::before { opacity: .55; }
 .icon-download { background: linear-gradient(155deg, #66eb83, #11b944); }
-.icon-snapshot { background: linear-gradient(155deg, #4bd1ff, #2981df); }
 .icon-docker { background: linear-gradient(155deg, #5ba2ff, #3152d4); }
 .icon-photos { color: #7f5ed8; background: linear-gradient(155deg, #ffffff, #e4e8f1); }
 .icon-logs { background: linear-gradient(155deg, #657282, #252c36); }
 .icon-vm { background: linear-gradient(155deg, #7e9cff, #4e69de); }
-.icon-backup { background: linear-gradient(155deg, #56d7ff, #3189d9); }
+/* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
+.icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
 .icon-music { background: linear-gradient(155deg, #ff506d, #d92471); }
 .icon-ai { background: linear-gradient(155deg, #8c7cff, #5544c4); }
 .icon-terminal { color: #5df2a0; background: linear-gradient(155deg, #33404f, #0b1017); }
