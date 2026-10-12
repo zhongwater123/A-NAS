@@ -56,6 +56,7 @@ import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
+import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
 import { MusicPanel } from "./music/MusicPanel";
@@ -343,6 +344,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
         focusedID={focusedID}
         onSelect={(id, state) => dispatch({ type: state === "focused" ? "minimize" : "open", id: id as WindowID })}
       />
+      <FeedbackChannel />
       <LocalConsoleScreenSaver enabled={isLocalConsole()} />
     </main>
   );

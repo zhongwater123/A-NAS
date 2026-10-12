@@ -16,10 +16,13 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/feedback"
+	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -46,15 +49,22 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	movies := newMediaFixture(t)
 	mediaHandler := mediaAPIFor(movies.media, movies.admin)
 	mediaVideo := "/api/v1/media/videos/" + movies.film
+	feedbackHandler, feedbackItem := feedbackAPI(t)
+	feedbackPath := "/api/v1/feedback/" + feedbackItem.ID
+	created, createdType := feedbackForm{text: "相册里的视频无法播放", images: [][]byte{feedbackPNG(t)}}.encode(t)
+	edit, editType := feedbackForm{text: "改为：MKV 无法播放", version: feedbackItem.Version, keep: []string{feedbackItem.Images[0].ID}}.encode(t)
+	stale, staleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
+	svg, svgType := feedbackForm{images: [][]byte{[]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)}}.encode(t)
 	tests := []struct {
-		name       string
-		method     string
-		body       string
-		path       string
-		reader     *fake.Reader
-		handler    http.Handler
-		csrf       bool
-		wantStatus int
+		name        string
+		method      string
+		body        string
+		contentType string
+		path        string
+		reader      *fake.Reader
+		handler     http.Handler
+		csrf        bool
+		wantStatus  int
 	}{
 		{name: "photo libraries", path: "/api/v1/photos/libraries", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo timeline", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
@@ -102,6 +112,16 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "media folder missing", path: "/api/v1/media/folders/file:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
 		{name: "media artwork missing", path: "/api/v1/media/artwork/" + movies.film + "/backdrop", handler: mediaHandler, wantStatus: http.StatusNotFound},
 		{name: "media unavailable", path: "/api/v1/media/home", handler: mediaapi.New(nil, nil), wantStatus: http.StatusServiceUnavailable},
+		{name: "feedback list", path: "/api/v1/feedback", handler: feedbackHandler, wantStatus: http.StatusOK},
+		{name: "feedback create", method: http.MethodPost, body: created, contentType: createdType, path: "/api/v1/feedback", handler: feedbackHandler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "feedback svg", method: http.MethodPost, body: svg, contentType: svgType, path: "/api/v1/feedback", handler: feedbackHandler, csrf: true, wantStatus: http.StatusUnsupportedMediaType},
+		{name: "feedback edit", method: http.MethodPut, body: edit, contentType: editType, path: feedbackPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "feedback stale edit", method: http.MethodPut, body: stale, contentType: staleType, path: feedbackPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "feedback resolve", method: http.MethodPatch, body: `{"resolved":true}`, path: feedbackPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "feedback image", path: feedbackPath + "/images/" + feedbackItem.Images[0].ID, handler: feedbackHandler, wantStatus: http.StatusOK},
+		{name: "feedback image missing", path: feedbackPath + "/images/feedback-image:missing", handler: feedbackHandler, wantStatus: http.StatusNotFound},
+		{name: "feedback missing", method: http.MethodDelete, path: "/api/v1/feedback/feedback:missing", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback unavailable", path: "/api/v1/feedback", handler: feedbackapi.New(nil, nil), wantStatus: http.StatusServiceUnavailable},
 		{name: "health", path: "/healthz", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "system", path: "/api/v1/system", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "disks", path: "/api/v1/disks", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
@@ -134,7 +154,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 				}
 				request := httptest.NewRequest(method, "http://127.0.0.1:8080"+test.path, strings.NewReader(test.body))
 				request.AddCookie(&http.Cookie{Name: "anas_session", Value: "contract-test"})
-				if test.body != "" {
+				if test.contentType != "" {
+					request.Header.Set("Content-Type", test.contentType)
+				} else if test.body != "" {
 					request.Header.Set("Content-Type", "application/json")
 				}
 				if test.csrf {
@@ -180,6 +202,22 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// feedbackAPI returns the feedback API acting for one member, and an item
+// with one screenshot.
+func feedbackAPI(t *testing.T) (http.Handler, feedback.Item) {
+	t.Helper()
+	store := openFeedback(t)
+	item, err := store.Create(context.Background(), feedback.Actor{ID: "user:contract", Username: "contract"}, feedback.Content{Text: "截图里的按钮错位", New: [][]byte{feedbackPNG(t)}})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+	api := feedbackapi.New(store, nil)
+	member := accounts.User{ID: "user:contract", Username: "contract", Role: accounts.RoleMember}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.ServeHTTP(w, r.WithContext(feedbackapi.WithUser(r.Context(), member)))
+	}), item
 }
 
 func containerAPI(manager *fakecontainers.Manager) http.Handler {
