@@ -42,6 +42,10 @@ export function onSessionEnded(listener: () => void): () => void {
   return () => { if (sessionEndedListener === listener) sessionEndedListener = undefined; };
 }
 
+// sessionEnded reports a 401 that arrived outside apiFetch, such as on an
+// upload part that tus-js-client sent.
+export function sessionEnded() { sessionEndedListener?.(); }
+
 // apiFetch is fetch for product API calls. Once signed in, every 401 means the
 // session ended (expired, signed out elsewhere or the account was disabled);
 // wrong passwords are 401 only at login, before any listener exists.

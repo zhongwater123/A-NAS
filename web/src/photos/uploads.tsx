@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, ImageUp, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { transferStore } from "../transfers/store";
 import type { PendingPhoto } from "./layout";
 import { messageOf } from "./model";
 import { addToAlbum, uploadPhoto } from "./photosApi";
@@ -46,14 +47,18 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
     for (const item of ready) {
       started.current.add(item.key);
       update(item.key, { state: "uploading", progress: 0 });
+      // The transfer center lists photo uploads beside file uploads.
+      const tracked = transferStore.trackExternal({ key: `photos-${item.key}`, app: "photos", name: item.name, size: item.file.size, label: `相册 · ${item.target.label}` });
       void (async () => {
         try {
-          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => update(item.key, { progress }));
+          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); tracked.progress(progress); });
           if (item.target.albumId) await addToAlbum(item.target.albumId, asset.id);
           update(item.key, { state: "done", progress: 1 });
+          tracked.done();
         } catch (caught) {
           started.current.delete(item.key);
           update(item.key, { state: "failed", error: messageOf(caught) });
+          tracked.fail(messageOf(caught));
         }
       })();
     }
