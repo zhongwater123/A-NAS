@@ -16,11 +16,20 @@ export interface CatalogApp {
   id: string;
   title: string;
   tagline: string;
+  // Markdown from the vendored manifest; notes is its advice before first use, such as a default account.
   description: string;
+  notes: string;
+  // An A-NAS category, or "" from a container agent that predates them.
   category: string;
   version: string;
   author: string;
+  developer: string;
+  // Absolute http(s) links or "".
   website: string;
+  repo: string;
+  docs: string;
+  // YYYY-MM-DD or "".
+  updated: string;
   webPort?: number;
   scheme: string;
   path: string;
