@@ -8,12 +8,14 @@ import (
 	"image/jpeg"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -92,7 +94,9 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mediaStore.Close() })
-	fixture.media, err = media.NewService(mediaStore, media.Options{Files: fixture.files, Spaces: accountService, CacheDir: filepath.Join(t.TempDir(), "cache")})
+	fixture.media, err = media.NewService(mediaStore, media.Options{
+		Files: fixture.files, Spaces: accountService, CacheDir: filepath.Join(t.TempDir(), "cache"), ChangeDelay: 10 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,5 +213,65 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	}
 	if subtitle := send(http.MethodGet, "/api/v1/media/videos/"+fixture.film+"/subtitles/x0", "", ""); subtitle.Code != http.StatusOK || !strings.Contains(subtitle.Body.String(), "你好") {
 		t.Fatalf("subtitle = %d %s", subtitle.Code, subtitle.Body.String())
+	}
+}
+
+func TestWebUploadsShowUpInTheMediaCenterWithoutARescan(t *testing.T) {
+	fixture := newMediaFixture(t)
+	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: fixture.accounts, Files: fixture.files,
+		Media: mediaapi.New(fixture.media, nil), FilesChanged: fixture.media.SpaceChanged, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(`{"username":"owner","password":"correct horse battery staple"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	login := httptest.NewRecorder()
+	handler.ServeHTTP(login, loginRequest)
+	var session struct {
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(login.Body.Bytes(), &session); err != nil || login.Code != http.StatusOK {
+		t.Fatalf("login = %d %s", login.Code, login.Body.String())
+	}
+	cookie := login.Result().Cookies()[0]
+	titles := func() string {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/media/titles?category=movie", nil)
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder.Body.String()
+	}
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	_ = form.WriteField("parentId", fixture.folder)
+	part, _ := form.CreateFormFile("file", "Up (2009).mp4")
+	_, _ = part.Write([]byte("video"))
+	_ = form.Close()
+	upload := httptest.NewRequest(http.MethodPost, "/api/v1/spaces/"+fixture.shared.ID+"/uploads", &body)
+	upload.Header.Set("Content-Type", form.FormDataContentType())
+	upload.Header.Set("X-CSRF-Token", session.CSRFToken)
+	upload.AddCookie(cookie)
+	uploaded := httptest.NewRecorder()
+	handler.ServeHTTP(uploaded, upload)
+	if uploaded.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", uploaded.Code, uploaded.Body.String())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(titles(), `"title":"Up"`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the uploaded film did not appear: %s", titles())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Rescanning answers with the library, which the client shows at once.
+	scan := httptest.NewRequest(http.MethodPost, "/api/v1/media/libraries/"+fixture.library+"/scan", nil)
+	scan.Header.Set("X-CSRF-Token", session.CSRFToken)
+	scan.AddCookie(cookie)
+	scanned := httptest.NewRecorder()
+	handler.ServeHTTP(scanned, scan)
+	var library media.Library
+	if err := json.Unmarshal(scanned.Body.Bytes(), &library); err != nil || scanned.Code != http.StatusAccepted || library.ID != fixture.library {
+		t.Fatalf("scan = %d %s", scanned.Code, scanned.Body.String())
 	}
 }

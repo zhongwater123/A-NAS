@@ -53,7 +53,12 @@ type ProductDependencies struct {
 	// Feedback serves /api/v1/feedback, the list every signed-in user reads
 	// and edits, and receives the user through feedbackapi.WithUser.
 	Feedback http.Handler
-	Logger   *slog.Logger
+	// FilesChanged, when set, is told after a Web upload, move, copy, delete
+	// or restore changed a space, so indexes over ordinary files (the media
+	// center) catch up without waiting for their periodic scan. The context
+	// carries the session token.
+	FilesChanged func(ctx context.Context, user accounts.User, spaceID string)
+	Logger       *slog.Logger
 }
 
 type productHandler struct {
@@ -68,6 +73,7 @@ type productHandler struct {
 	media      http.Handler
 	music      *music.Service
 	feedback   http.Handler
+	changed    func(context.Context, accounts.User, string)
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -82,7 +88,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
-		logger: logger, mux: http.NewServeMux(),
+		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -354,6 +360,7 @@ func (h *productHandler) handleUpload(w http.ResponseWriter, r *http.Request, se
 				h.writeFileError(w, r, uploadErr)
 				return
 			}
+			h.filesChanged(r, session, entry.SpaceID)
 			writeJSON(w, http.StatusCreated, entry)
 			return
 		default:
@@ -406,6 +413,7 @@ func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, 
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusOK, entry)
 }
 
@@ -423,6 +431,7 @@ func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, 
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusCreated, entry)
 }
 
@@ -432,7 +441,15 @@ func (h *productHandler) handleDeleteFile(w http.ResponseWriter, r *http.Request
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, item.SpaceID)
 	writeJSON(w, http.StatusOK, item)
+}
+
+// filesChanged tells FilesChanged, if set, that a Web operation changed a space.
+func (h *productHandler) filesChanged(r *http.Request, session accounts.Session, spaceID string) {
+	if h.changed != nil && spaceID != "" {
+		h.changed(r.Context(), session.User, spaceID)
+	}
 }
 
 func (h *productHandler) handleTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -461,6 +478,7 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusOK, entry)
 }
 
@@ -526,6 +544,7 @@ func (h *productHandler) handleRestoreSnapshotFile(w http.ResponseWriter, r *htt
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusCreated, entry)
 }
 

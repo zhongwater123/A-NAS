@@ -96,7 +96,8 @@ export const listLibraries = () => request<{ items: MediaLibrary[]; processing: 
 export const createLibrary = (input: LibraryInput) => request<MediaLibrary>(`${base}/libraries`, body("POST", input), true);
 export const updateLibrary = (libraryId: string, input: LibraryInput) => request<MediaLibrary>(`${base}/libraries/${id(libraryId)}`, body("PATCH", input), true);
 export const deleteLibrary = (libraryId: string) => request<void>(`${base}/libraries/${id(libraryId)}`, { method: "DELETE" }, true);
-export const scanLibrary = (libraryId: string) => request<void>(`${base}/libraries/${id(libraryId)}/scan`, { method: "POST" }, true);
+// scanLibrary starts a scan and returns the library as it reads while scanning.
+export const scanLibrary = (libraryId: string) => request<MediaLibrary>(`${base}/libraries/${id(libraryId)}/scan`, { method: "POST" }, true);
 
 export const getHome = () => request<Home>(`${base}/home`);
 export interface TitleQuery { category?: Category; library?: string; genre?: string; sort?: SortOrder; q?: string; offset?: number; limit?: number }

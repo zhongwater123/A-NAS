@@ -39,6 +39,9 @@ type Options struct {
 	Processor Processor
 	// CacheDir keeps frames, resized artwork and converted subtitles.
 	CacheDir string
+	// ChangeDelay is how long SpaceChanged waits before scanning, so that a
+	// burst of uploads settles into one scan; it defaults to 3 seconds.
+	ChangeDelay time.Duration
 	// MaxStreams bounds concurrent converted streams; it defaults to 2.
 	MaxStreams int
 	Now        func() time.Time
@@ -64,6 +67,13 @@ type Service struct {
 	mu        sync.Mutex
 	scanning  map[string]bool
 	scanLocks map[string]*sync.Mutex
+	// queued counts background scans requested and not yet finished, again
+	// marks libraries to scan once more after the running scan, and pending
+	// holds the scans SpaceChanged scheduled.
+	queued      map[string]int
+	again       map[string]bool
+	pending     map[string]*time.Timer
+	changeDelay time.Duration
 
 	// closing ends background scans started by requests.
 	closing    context.Context
@@ -84,6 +94,9 @@ func NewService(store *Store, options Options) (*Service, error) {
 	if options.MaxStreams <= 0 {
 		options.MaxStreams = 2
 	}
+	if options.ChangeDelay <= 0 {
+		options.ChangeDelay = 3 * time.Second
+	}
 	if options.CacheDir != "" {
 		for _, directory := range []string{"frames", "artwork", "subtitles"} {
 			if err := os.MkdirAll(filepath.Join(options.CacheDir, directory), 0o700); err != nil {
@@ -98,12 +111,19 @@ func NewService(store *Store, options Options) (*Service, error) {
 		cacheDir: options.CacheDir, now: options.Now, random: options.Random, logger: options.Logger,
 		streams: make(chan struct{}, options.MaxStreams), kick: make(chan struct{}, 1),
 		scanning: map[string]bool{}, scanLocks: map[string]*sync.Mutex{}, sessions: options.Sessions,
+		queued: map[string]int{}, again: map[string]bool{}, pending: map[string]*time.Timer{}, changeDelay: options.ChangeDelay,
 	}, nil
 }
 
 // Close stops the scans that requests started and waits for them.
 func (s *Service) Close() {
+	s.mu.Lock()
 	s.close()
+	for id, timer := range s.pending {
+		timer.Stop()
+		delete(s.pending, id)
+	}
+	s.mu.Unlock()
 	s.background.Wait()
 }
 

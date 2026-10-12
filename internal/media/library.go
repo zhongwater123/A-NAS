@@ -162,7 +162,7 @@ SELECT
 	}
 	library.Scan.State = "idle"
 	s.mu.Lock()
-	scanning := s.scanning[row.ID]
+	scanning := s.scanning[row.ID] || s.queued[row.ID] > 0
 	s.mu.Unlock()
 	if scanning {
 		library.Scan.State = "scanning"

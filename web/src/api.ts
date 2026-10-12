@@ -188,7 +188,8 @@ export async function request<T>(path: string, init: RequestInit = {}, mutation 
     const body = await response.json().catch(() => ({ error: { code: "request_failed", message: `请求失败 (${response.status})` } }));
     throw new APIError(response.status, body?.error?.code ?? "request_failed", body?.error?.message ?? "请求失败");
   }
-  if (response.status === 204) return undefined as T;
+  // A success without a body (204, or an accepted job that reports nothing) is not JSON.
+  if (response.status === 204 || response.headers?.get("Content-Length") === "0") return undefined as T;
   return response.json() as Promise<T>;
 }
 

@@ -33,8 +33,11 @@ type Place =
   | { kind: "show"; id: string };
 
 const narrowWidth = 760;
-const busyPoll = 4000;
-const idlePoll = 60_000;
+const busyPoll = 3000;
+const idlePoll = 20_000;
+// After the user changes or rescans a library, poll quickly for a while so a
+// short scan is not missed between two idle polls.
+const followWindow = 30_000;
 
 function sectionOf(place: Place): Section | undefined {
   switch (place.kind) {
@@ -105,16 +108,31 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       return false;
     }
   }, [refresh]);
+  const poll = useRef<{ timer: number; until: number; tick?: () => void }>({ timer: 0, until: 0 });
   useEffect(() => {
-    let timer = 0;
     let live = true;
+    const state = poll.current;
     const tick = async () => {
+      window.clearTimeout(state.timer);
       const busy = await loadLibraries();
-      if (live) timer = window.setTimeout(() => void tick(), busy ? busyPoll : idlePoll);
+      if (live) state.timer = window.setTimeout(() => void tick(), busy || Date.now() < state.until ? busyPoll : idlePoll);
     };
+    state.tick = () => void tick();
     void tick();
-    return () => { live = false; window.clearTimeout(timer); };
+    return () => { live = false; window.clearTimeout(state.timer); state.tick = undefined; };
   }, [loadLibraries]);
+  // follow refreshes the libraries now and keeps polling quickly for a while.
+  const follow = useCallback(() => {
+    poll.current.until = Date.now() + followWindow;
+    poll.current.tick?.();
+  }, []);
+  const rescan = useCallback((targets: MediaLibrary[], message: string) => {
+    Promise.all(targets.map((library) => scanLibrary(library.id))).then((scanned) => {
+      setLibraries((current) => current?.map((library) => scanned.find((item) => item?.id === library.id) ?? library));
+      toast({ text: message });
+      follow();
+    }, (caught) => onError(messageOf(caught)));
+  }, [follow, toast, onError]);
 
   useEffect(() => {
     if (place.kind !== "home") return;
@@ -181,7 +199,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       message: <>只会删除影视中心里的目录、播放进度和收藏。<strong>文件夹中的视频文件不会被删除</strong>，以后可以重新添加。</>,
     });
     if (!ok) return;
-    try { await deleteLibrary(library.id); toast({ text: `已删除媒体库“${library.name}”` }); void loadLibraries(); refresh(); }
+    try { await deleteLibrary(library.id); toast({ text: `已删除媒体库“${library.name}”` }); follow(); refresh(); }
     catch (caught) { onError(messageOf(caught)); }
   };
 
@@ -240,7 +258,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       page = <LibrariesPage libraries={libraries} processing={processing} canCreate={canCreate}
         onOpen={(library) => navigate({ kind: "library", id: library.id })}
         onCreate={() => void openLibraryDialog()} onEdit={(library) => void openLibraryDialog(library)} onDelete={(library) => void removeLibrary(library)}
-        onScan={(library) => { scanLibrary(library.id).then(() => { toast({ text: `正在重新扫描“${library.name}”` }); void loadLibraries(); }, (caught) => onError(messageOf(caught))); }} />;
+        onScan={(library) => rescan([library], `正在重新扫描“${library.name}”`)} />;
       break;
     case "library": {
       const library = libraryOf(place.id);
@@ -283,7 +301,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
             <span className="mc-topbar-gap" />
             {place.kind === "libraries" && libraries?.some((library) => library.canManage) && (
               <button type="button" className="mc-icon-button" aria-label="全部重新扫描" title="全部重新扫描"
-                onClick={() => { Promise.all(libraries.filter((library) => library.canManage).map((library) => scanLibrary(library.id))).then(() => { toast({ text: "已开始重新扫描全部媒体库" }); void loadLibraries(); }, (caught) => onError(messageOf(caught))); }}>
+                onClick={() => rescan(libraries.filter((library) => library.canManage), "已开始重新扫描全部媒体库")}>
                 <RefreshCw />
               </button>
             )}
@@ -300,7 +318,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
           onSaved={(library) => {
             setEditing(undefined);
             toast({ text: editing.library ? `已保存“${library.name}”，正在重新扫描` : `已创建“${library.name}”，正在扫描` });
-            void loadLibraries();
+            follow();
             refresh();
           }} />}
         {dialogs.dialog}

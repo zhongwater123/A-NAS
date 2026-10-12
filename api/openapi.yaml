@@ -1111,10 +1111,10 @@ paths:
   /api/v1/media/libraries/{libraryId}/scan:
     post:
       operationId: scanMediaLibrary
-      summary: Scan a library the caller manages again, in the background
+      summary: Scan a library the caller manages again, in the background, and retry the videos FFmpeg could not read
       parameters: [{ $ref: "#/components/parameters/MediaLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
-        "202": { description: Scanning }
+        "202": { description: The library while it is being scanned, content: { application/json: { schema: { $ref: "#/components/schemas/MediaLibrary" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/media/home:
