@@ -5,7 +5,7 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
-    the managed photo library, the media center, an opt-in administrator terminal, and container lifecycle actions that go through the separate
+    the managed photo library, the media center, the in-place music library, an opt-in administrator terminal, and container lifecycle actions that go through the separate
     container agent.
 servers:
   - url: http://127.0.0.1:8080
@@ -853,6 +853,156 @@ paths:
       responses:
         "204": { description: Photo asset permanently deleted }
         "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/library:
+    get:
+      operationId: getMusicLibraryStatus
+      summary: Report the caller's library size, version and latest scan
+      responses:
+        "200": { description: Library status, content: { application/json: { schema: { $ref: "#/components/schemas/MusicStatus" } } } }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/library/scan:
+    post:
+      operationId: scanMusicLibrary
+      summary: Bring the caller's library up to date in the background
+      description: Scans the caller's music folders as the caller. Asking while a scan runs schedules one more pass.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "202": { description: Scan started or rescheduled, content: { application/json: { schema: { $ref: "#/components/schemas/MusicStatus" } } } }
+  /api/v1/music/tracks:
+    get:
+      operationId: listMusicTracks
+      summary: List every track in the caller's music folders
+      responses:
+        "200": { description: The caller's library, content: { application/json: { schema: { $ref: "#/components/schemas/MusicLibrary" } } } }
+  /api/v1/music/tracks/{trackId}/stream:
+    get:
+      operationId: streamMusicTrack
+      description: >-
+        Serves a track browsers play directly with Range support. A track marked transcode is decoded to FLAC by the
+        media worker from the start position instead; that stream cannot seek, so players request a new start.
+      parameters:
+        - { $ref: "#/components/parameters/TrackID" }
+        - { name: Range, in: header, schema: { type: string } }
+        - { name: start, in: query, description: Seconds to start a decoded track from; ignored for other tracks., schema: { type: number, minimum: 0 } }
+      responses:
+        "200": { description: Audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
+        "206": { description: Partial audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { description: "The start is past the end (validation_failed), or FFmpeg cannot decode the file (undecodable).", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { description: The media worker that decodes this format is unavailable (decoder_unavailable)., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/music/tracks/{trackId}/lyrics:
+    get:
+      operationId: getMusicLyrics
+      description: Lyrics from a .lrc file of the same name beside the track, or else embedded in its tags. LRC time tags are kept.
+      parameters: [{ $ref: "#/components/parameters/TrackID" }]
+      responses:
+        "200": { description: Lyrics text, content: { application/json: { schema: { type: object, additionalProperties: false, required: [text], properties: { text: { type: string } } } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/covers/{coverId}:
+    get:
+      operationId: getMusicCover
+      parameters: [{ $ref: "#/components/parameters/CoverID" }, { name: size, in: query, schema: { type: string, enum: [small, large], default: small } }]
+      responses:
+        "200": { description: Square JPEG album art, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/sources:
+    get:
+      operationId: listMusicSources
+      summary: List the caller's music folders
+      responses:
+        "200": { description: Music folders, content: { application/json: { schema: { $ref: "#/components/schemas/MusicSources" } } } }
+    put:
+      operationId: setMusicSources
+      summary: Replace the caller's music folders, or return to the whole personal and shared spaces
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [custom]
+              properties:
+                custom: { type: boolean }
+                items: { type: array, maxItems: 32, items: { type: object, additionalProperties: false, required: [spaceId], properties: { spaceId: { type: string }, folderId: { type: string } } } }
+      responses:
+        "200": { description: Music folders, content: { application/json: { schema: { $ref: "#/components/schemas/MusicSources" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/favorites:
+    get:
+      operationId: listMusicFavorites
+      responses:
+        "200": { description: "Favorites, newest first", content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/MusicFavorite" } } } } } } }
+  /api/v1/music/favorites/{trackId}:
+    put:
+      operationId: addMusicFavorite
+      parameters: [{ $ref: "#/components/parameters/TrackID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: The track is a favorite }
+        "404": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: removeMusicFavorite
+      parameters: [{ $ref: "#/components/parameters/TrackID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: The track is not a favorite }
+  /api/v1/music/recent:
+    get:
+      operationId: listRecentMusic
+      responses:
+        "200": { description: "Play history, most recent first", content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/MusicPlay" } } } } } } }
+    delete:
+      operationId: clearRecentMusic
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Play history cleared }
+  /api/v1/music/plays:
+    post:
+      operationId: recordMusicPlay
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [trackId], properties: { trackId: { type: string, minLength: 1 } } } } } }
+      responses:
+        "204": { description: Play recorded }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/playlists:
+    get:
+      operationId: listMusicPlaylists
+      responses:
+        "200": { description: The caller's playlists, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/MusicPlaylist" } } } } } } }
+    post:
+      operationId: createMusicPlaylist
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 80 }, trackIds: { type: array, items: { type: string } } } } } } }
+      responses:
+        "201": { description: Playlist created, content: { application/json: { schema: { $ref: "#/components/schemas/MusicPlaylist" } } } }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/playlists/{playlistId}:
+    patch:
+      operationId: updateMusicPlaylist
+      description: Renames the playlist and/or replaces its tracks in order.
+      parameters: [{ $ref: "#/components/parameters/PlaylistID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80 }, trackIds: { type: array, items: { type: string } } } } } } }
+      responses:
+        "200": { description: Playlist updated, content: { application/json: { schema: { $ref: "#/components/schemas/MusicPlaylist" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteMusicPlaylist
+      parameters: [{ $ref: "#/components/parameters/PlaylistID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Playlist deleted }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/music/playlists/{playlistId}/tracks:
+    post:
+      operationId: addMusicPlaylistTracks
+      parameters: [{ $ref: "#/components/parameters/PlaylistID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [trackIds], properties: { trackIds: { type: array, minItems: 1, items: { type: string } } } } } } }
+      responses:
+        "200": { description: Tracks appended, content: { application/json: { schema: { $ref: "#/components/schemas/MusicPlaylist" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
@@ -1223,6 +1373,9 @@ components:
     MediaLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
     MediaVideoID: { name: videoId, in: path, required: true, schema: { type: string } }
     MediaTitleID: { name: titleId, in: path, required: true, description: A video or show ID., schema: { type: string } }
+    TrackID: { name: trackId, in: path, required: true, description: The track's stable file ID in its space., schema: { type: string } }
+    PlaylistID: { name: playlistId, in: path, required: true, schema: { type: string } }
+    CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
     AppId:
       name: appId
       in: path
@@ -2225,6 +2378,101 @@ components:
         message:
           type: string
           minLength: 1
+    MusicStatus:
+      type: object
+      additionalProperties: false
+      required: [version, tracks, scan]
+      properties:
+        version: { type: integer, format: int64, description: Changes whenever a scan changes any track. }
+        tracks: { type: integer, minimum: 0 }
+        scan:
+          type: object
+          additionalProperties: false
+          required: [state, done, total]
+          properties:
+            state: { type: string, enum: [idle, scanning] }
+            phase: { type: string, enum: [listing, reading, measuring] }
+            done: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: string, format: date-time }
+            error: { type: string, enum: [volume_unavailable, failed] }
+    MusicLibrary:
+      type: object
+      additionalProperties: false
+      required: [version, items]
+      properties:
+        version: { type: integer, format: int64 }
+        items: { type: array, items: { $ref: "#/components/schemas/MusicTrack" } }
+    MusicTrack:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, folder, name, sizeBytes, format, title, albumId, addedAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        folder: { type: string, description: Folder path relative to the space root; empty at the root. }
+        name: { type: string }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        format: { type: string, enum: [mp3, flac, m4a, aac, ogg, opus, wav, ape, wma, wv, aiff, dsf, dff] }
+        codec: { type: string, description: "The audio codec, when the file's container can hold several (aac or alac in m4a), or as FFmpeg names it." }
+        title: { type: string }
+        artist: { type: string }
+        artists: { type: array, items: { type: string } }
+        album: { type: string }
+        albumArtist: { type: string }
+        albumId: { type: string }
+        genres: { type: array, items: { type: string } }
+        year: { type: integer }
+        trackNo: { type: integer }
+        discNo: { type: integer }
+        durationMs: { type: integer, format: int64, minimum: 0 }
+        coverId: { type: string }
+        lyrics: { type: boolean }
+        transcode: { type: boolean, description: "The media worker decodes this track to FLAC while it plays; its stream starts at the start parameter instead of seeking." }
+        addedAt: { type: string, format: date-time }
+    MusicSources:
+      type: object
+      additionalProperties: false
+      required: [custom, items]
+      properties:
+        custom: { type: boolean, description: False while the library covers the whole personal and shared spaces. }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [spaceId, spaceKind, path]
+            properties:
+              spaceId: { type: string }
+              spaceKind: { type: string, enum: [private, shared] }
+              folderId: { type: string }
+              path: { type: string }
+    MusicFavorite:
+      type: object
+      additionalProperties: false
+      required: [trackId, addedAt]
+      properties:
+        trackId: { type: string }
+        addedAt: { type: string, format: date-time }
+    MusicPlay:
+      type: object
+      additionalProperties: false
+      required: [trackId, playedAt, plays]
+      properties:
+        trackId: { type: string }
+        playedAt: { type: string, format: date-time }
+        plays: { type: integer, minimum: 1 }
+    MusicPlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name, trackIds, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        trackIds: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     ErrorResponse:
       type: object
       additionalProperties: false
