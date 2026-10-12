@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -44,7 +45,9 @@ type ProductDependencies struct {
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
-	Media  http.Handler
+	Media http.Handler
+	// Music is the music library; nil answers music_unavailable.
+	Music  *music.Service
 	Logger *slog.Logger
 }
 
@@ -58,6 +61,7 @@ type productHandler struct {
 	apps       http.Handler
 	photos     http.Handler
 	media      http.Handler
+	music      *music.Service
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -71,7 +75,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
-		photos: dependencies.Photos, media: dependencies.Media, logger: logger, mux: http.NewServeMux(),
+		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -134,6 +138,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
+	h.musicRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})

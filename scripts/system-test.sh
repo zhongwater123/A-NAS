@@ -3,7 +3,8 @@
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
 # touches the data volume: Web files (File Broker workers), SMB, the photo API,
-# the media center's FFmpeg worker and the LAN Web entry that Caddy serves on
+# the FFmpeg media worker shared by the media center and music, and the LAN
+# Web entry that Caddy serves on
 # port 80. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
 # catches a unit that takes the Host Agent's CAP_SETUID (issue #38).
@@ -424,6 +425,24 @@ check "the media worker converts the film to fragmented MP4" bash -c \
 check "the media worker takes a frame of the film" bash -c \
   "for _ in \$(seq 1 30); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/media/artwork/$film/thumb') == 200 ]] && exit 0; sleep 1; done; exit 1"
 check "Product Service account cannot read the film itself" denied as a-nas cat "$data/spaces/shared/Movies/Heat (1995).mkv"
+
+# --- Music (ADR 0018) indexes the same files in place and has the shared
+# media worker probe and decode the formats browsers cannot play.
+ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=440:duration=5 -c:a wavpack \
+  -metadata title=Aria -metadata artist=Quartet /tmp/aria.wv
+curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=" \
+  -F "file=@/tmp/aria.wv;filename=aria.wv" "$api/api/v1/spaces/$shared/uploads" || true
+curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X POST "$api/api/v1/music/library/scan" || true
+for _ in $(seq 1 60); do
+  [[ "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/music/library" | jq -r .scan.state || true)" == idle ]] && break
+  sleep 1
+done
+song=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/music/tracks" | jq -c '.items[] | select(.title == "Aria")' || true)
+check "the member's music library holds the WavPack song with its tags" \
+  test "$(jq -r '.artist + " " + (.transcode | tostring)' <<<"${song:-null}" 2>/dev/null)" = "Quartet true"
+check "the media worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
+check "the media worker decodes the song to FLAC from a start position" bash -c \
+  "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
 # A probe in the media worker's own unit, in place of the worker.
 cat > /usr/local/lib/anas-media-probe.py <<'PY'
 import os, socket, sys

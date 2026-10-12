@@ -1,9 +1,11 @@
-// Package mediaworker runs FFmpeg for the media center (ADR 0017).
+// Package mediaworker is the one place A-NAS runs FFmpeg (ADR 0017,
+// ADR 0018). It knows nothing about the apps that use it: the media center
+// and the music library each adapt its typed operations to their own needs.
 //
 // In production systemd starts one worker process per connection on
 // /run/a-nas-media/media.sock, under a dynamic identity with no network and
 // no view of the data volume or the Product Service's state. The Product
-// Service sends a typed request with the video's read-only descriptor
+// Service sends a typed request with the file's read-only descriptor
 // attached; the worker builds the FFmpeg command itself, so a request can
 // never name a path or pass arbitrary arguments. A frame is a 4-byte
 // big-endian length and JSON; after the response header the body runs to
@@ -29,7 +31,19 @@ const (
 	OpProbe    = "probe"
 	OpFrame    = "frame"
 	OpSubtitle = "subtitle"
-	OpStream   = "stream"
+	// OpStream converts a video to fragmented MP4.
+	OpStream = "stream"
+	// OpAudio decodes the first audio stream to FLAC.
+	OpAudio = "audio"
+)
+
+var (
+	// ErrUnavailable reports that no worker could be reached.
+	ErrUnavailable = errors.New("media worker is unavailable")
+	// ErrUnreadable reports that FFmpeg cannot read the file.
+	ErrUnreadable = errors.New("media worker cannot read the file")
+	// ErrInvalid reports a request the worker refused.
+	ErrInvalid = errors.New("media worker request is invalid")
 )
 
 // Error codes in a response.
@@ -59,6 +73,10 @@ type Request struct {
 	MaxBitrate int     `json:"maxBitrate,omitempty"`
 	AudioTrack int     `json:"audioTrack"`
 	CopyAudio  bool    `json:"copyAudio,omitempty"`
+	// Audio: the output sample rate (0 keeps the source's) and bits per
+	// sample, 16 or 24. Start is shared with Stream.
+	SampleRate int `json:"sampleRate,omitempty"`
+	Bits       int `json:"bits,omitempty"`
 }
 
 type Response struct {
@@ -85,6 +103,10 @@ func (r Request) Validate() error {
 	case OpSubtitle:
 		if r.Stream < -1 || r.Stream > 4096 || !charsets[r.Charset] || (r.Stream == -1 && !subtitleFormats[r.Format]) {
 			return errors.New("invalid subtitle request")
+		}
+	case OpAudio:
+		if !finiteIn(r.Start, 0, 1e6) || r.SampleRate != 0 && (r.SampleRate < 8000 || r.SampleRate > 384000) || r.Bits != 16 && r.Bits != 24 {
+			return errors.New("invalid audio request")
 		}
 	case OpStream:
 		if !finiteIn(r.Start, 0, 1e6) || r.AudioTrack < -1 || r.AudioTrack > 64 || r.MaxBitrate < 0 || r.MaxBitrate > 100_000 ||

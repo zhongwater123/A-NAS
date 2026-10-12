@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -311,6 +312,100 @@ func TestSambaRecycleItemIsImportedAndCanBeRestored(t *testing.T) {
 	_ = content.Reader.Close()
 	if string(data) != "smb recycle" {
 		t.Fatalf("restored content = %q", data)
+	}
+}
+
+func TestTreeListsEverythingBelowAFolderWithStableIDs(t *testing.T) {
+	ctx := context.Background()
+	accountStore, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatalf("open account store: %v", err)
+	}
+	t.Cleanup(func() { _ = accountStore.Close() })
+	accountService := accounts.NewService(accountStore, acceptingCredentials{}, accounts.Options{})
+	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("setup administrator: %v", err)
+	}
+	alice, err := accountService.CreateMember(ctx, admin, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatalf("create Alice: %v", err)
+	}
+	adminSpaces, err := accountService.ListSpaces(ctx, admin)
+	if err != nil {
+		t.Fatalf("list spaces: %v", err)
+	}
+	privateSpace := findPrivateSpace(t, adminSpaces)
+	catalog, err := files.OpenSQLite(filepath.Join(t.TempDir(), "files.db"))
+	if err != nil {
+		t.Fatalf("open file catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = catalog.Close() })
+	volumeRoot := filepath.Join(t.TempDir(), "volume")
+	service := files.NewService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	root := filepath.Join(volumeRoot, "spaces", "private", "owner")
+	// "Music Videos" and "Music-2" sort near "Music/" but are not below it.
+	for _, name := range []string{"Music/a.mp3", "Music/Live/b.mp3", "Music Videos/c.mp3", "Music-2/d.mp3", "e.mp3"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := service.Tree(ctx, admin, privateSpace.ID, "")
+	if err != nil {
+		t.Fatalf("Tree(root): %v", err)
+	}
+	var musicID, songID string
+	for _, entry := range all {
+		switch entry.Path {
+		case "Music":
+			musicID = entry.ID
+		case "Music/Live/b.mp3":
+			songID = entry.ID
+		}
+	}
+	if len(all) != 9 || musicID == "" || songID == "" {
+		t.Fatalf("Tree(root) listed %d entries: %+v", len(all), all)
+	}
+	below, err := service.Tree(ctx, admin, privateSpace.ID, musicID)
+	if err != nil {
+		t.Fatalf("Tree(Music): %v", err)
+	}
+	var paths []string
+	for _, entry := range below {
+		paths = append(paths, entry.Path)
+	}
+	if want := []string{"Live", "Live/b.mp3", "a.mp3"}; !slices.Equal(paths, want) {
+		t.Errorf("Tree(Music) = %q, want %q", paths, want)
+	}
+	if _, err := service.Tree(ctx, admin, privateSpace.ID, songID); !errors.Is(err, files.ErrNotFound) {
+		t.Errorf("Tree(file) error = %v, want not found", err)
+	}
+	if _, err := service.Tree(ctx, alice, privateSpace.ID, ""); !errors.Is(err, files.ErrForbidden) {
+		t.Errorf("another member listed the space: %v", err)
+	}
+
+	// A rename keeps the entry ID, which the music library and the media
+	// center rely on; Lookup reports the new path.
+	if err := os.Rename(filepath.Join(root, "Music", "Live"), filepath.Join(root, "Music", "Concerts")); err != nil {
+		t.Fatal(err)
+	}
+	below, err = service.Tree(ctx, admin, privateSpace.ID, musicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(below, func(entry files.TreeEntry) bool { return entry.ID == songID && entry.Path == "Concerts/b.mp3" }) {
+		t.Errorf("renamed folder lost the song's ID: %+v", below)
+	}
+	if _, path, err := service.Lookup(ctx, admin, songID); err != nil || path != "Music/Concerts/b.mp3" {
+		t.Errorf("Lookup(song) = %q, %v", path, err)
+	}
+	if _, _, err := service.Lookup(ctx, alice, songID); !errors.Is(err, files.ErrNotFound) {
+		t.Errorf("another member looked up the song: %v", err)
 	}
 }
 
