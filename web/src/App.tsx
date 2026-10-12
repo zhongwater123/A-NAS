@@ -52,7 +52,7 @@ import {
   listSnapshotEntries, listSpaces, listTrash, listVolumes, login, logout, moveFile, onSessionEnded, purgeTrash, readFileTextPreview,
   restoreSnapshotEntry, restoreTrash, setSession, setupAdministrator, uploadFile,
 } from "./api";
-import { AppCenterPanel } from "./AppCenterPanel";
+import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
@@ -329,7 +329,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "snapshots" && <SnapshotPanel />}
 			  {window.id === "terminal" && <TerminalPanel />}
 			  {window.id === "docker" && <DockerPanel />}
-			  {window.id === "store" && <AppCenterPanel />}
+			  {window.id === "store" && <AppCenterPanel onOpenDocker={() => openWindow("docker")} />}
             </AppWindow>
           );
         })}

@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"net/netip"
+	"slices"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
@@ -23,10 +24,15 @@ type AppDocument struct {
 	Title       string                `json:"title"`
 	Tagline     string                `json:"tagline"`
 	Description string                `json:"description"`
+	Notes       string                `json:"notes"`
 	Category    string                `json:"category"`
 	Version     string                `json:"version"`
 	Author      string                `json:"author"`
+	Developer   string                `json:"developer"`
 	Website     string                `json:"website"`
+	Repo        string                `json:"repo"`
+	Docs        string                `json:"docs"`
+	Updated     string                `json:"updated"`
 	WebPort     uint16                `json:"webPort,omitempty"`
 	Scheme      string                `json:"scheme"`
 	Path        string                `json:"path"`
@@ -88,8 +94,9 @@ func AppsFromDomain(apps []appstore.AppStatus) AppsDocument {
 	document := AppsDocument{Apps: make([]AppDocument, len(apps))}
 	for i, app := range apps {
 		item := AppDocument{
-			ID: app.ID, Title: app.Title, Tagline: app.Tagline, Description: app.Description, Category: app.Category,
-			Version: app.Version, Author: app.Author, Website: app.Website, WebPort: app.WebPort, Scheme: app.Scheme, Path: app.Path,
+			ID: app.ID, Title: app.Title, Tagline: app.Tagline, Description: app.Description, Notes: app.Notes, Category: app.Category,
+			Version: app.Version, Author: app.Author, Developer: app.Developer, Website: app.Website, Repo: app.Repo, Docs: app.Docs,
+			Updated: app.Updated, WebPort: app.WebPort, Scheme: app.Scheme, Path: app.Path,
 			State: app.State, Running: app.Running, Total: app.Total,
 		}
 		if app.Job != nil {
@@ -107,10 +114,15 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 		if !appstore.ValidID(item.ID) {
 			return nil, errors.New("invalid app ID")
 		}
+		// An agent from before A-NAS categories reports the CasaOS ones.
+		if !slices.Contains(appstore.Categories, item.Category) {
+			item.Category = ""
+		}
 		apps[i] = appstore.AppStatus{
 			App: appstore.App{
-				ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Category: item.Category,
-				Version: item.Version, Author: item.Author, Website: item.Website, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
+				ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, Category: item.Category,
+				Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo, Docs: item.Docs,
+				Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
 			},
 			State: item.State, Running: item.Running, Total: item.Total,
 		}

@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-10
+更新时间：2026-10-12
 
 ## 当前阶段
 
@@ -35,7 +35,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - `make check VERSION=v1.0.1-rc.4` 已通过前端类型/测试/构建、文档、运维、Go vet、Go 测试和发布二进制构建；stage 复用了该证明并核对 API SHA-256 `c92fd487…ab3359`、Host Agent SHA-256 `9a9d90be…2616b`。
 - `make check VERSION=v1.0.1-rc.5` 已在 WSL 原生 ext4 工作树完整通过；不可变制品的 API SHA-256 为 `350a58c1…0513`，Host Agent SHA-256 为 `94ca206e…7444`。当时 `/opt/a-nas/current` 指向 `/opt/a-nas/releases/v1.0.1-rc.5-69c97abe191f`（ADR 0008 之前的模型，已被取代）。
 - 桌面“Docker”应用（容器/镜像列表、资源占用、启停重启、日志）已实现，Docker Engine 与专用容器代理的决定见 [ADR 0009](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)；Experimental NAS 于 2026-10-10 按 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 换用 Docker 官方软件源：Docker 29.9.0（API 1.56）与 Compose v5.6.0，存储驱动与地址池不变。容器代理为 `173cbb5499ce`，部署后探针通过，Immich 与 OpenList 的每个挂载都是计划中的子目录。
-- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。会新建 Docker 网络的应用要求 Docker 配置专用地址池，安装后核对网络地址，不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）；实验 NAS 的地址池为 `10.96.64.0/18`，重装的 Immich 网络为 `10.96.65.0/24`。容器代理还在规划时检查 Compose 与 Engine API 的最低版本，安装后核对每个挂载只到计划中的子目录（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
+- 桌面“应用中心”已实现：内置 26 个通过安装策略的 CasaOS 应用，规划→确认摘要→Compose 执行，卸载保留数据，见[应用中心规格](../specs/app-center.md)；2026-10-12 界面按规格重做为侧栏商店式，增加 A-NAS 分类、使用须知与分步安装面板，并按[目录评审](../research/app-catalog-review-2026-10.md)新增 11 个应用、共 37 个（尚未部署，新应用待实机安装验证）；Experimental NAS 已真实拉取、安装并重建 OpenList 4.2.2。其上游清单硬编码用户与 A-NAS 应用身份冲突的问题已由计划渲染策略修复，实机证据见[OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。会新建 Docker 网络的应用要求 Docker 配置专用地址池，安装后核对网络地址，不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）；实验 NAS 的地址池为 `10.96.64.0/18`，重装的 Immich 网络为 `10.96.65.0/24`。容器代理还在规划时检查 Compose 与 Engine API 的最低版本，安装后核对每个挂载只到计划中的子目录（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 - 局域网 Web 入口已实现：安装 Caddy 后，内网浏览器经 `http://<NAS 地址>` 使用全部功能，明文 HTTP 作为 HTTPS 前的过渡（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。2026-10-09 已在实验 NAS 启用（Debian 的 Caddy 2.6.2），从公司 WiFi 上的开发机访问 `http://172.18.45.48` 的健康检查、首页与未登录 `401` 均正常。
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 

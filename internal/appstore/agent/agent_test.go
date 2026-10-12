@@ -30,6 +30,11 @@ func TestClientRoundTripsTheAppCenter(t *testing.T) {
 	if err != nil || len(apps) < 20 {
 		t.Fatalf("Apps() = %d apps, %v", len(apps), err)
 	}
+	for _, app := range apps {
+		if app.ID == "openlist" && (app.Category != appstore.CategoryFiles || !strings.Contains(app.Notes, "admin") || app.Repo == "" || app.Updated == "") {
+			t.Fatalf("openlist = %+v; want its category, first-use notes and links", app.App)
+		}
+	}
 	icon, contentType, err := client.Icon(ctx, "memos")
 	if err != nil || contentType != "image/png" || !bytes.HasPrefix(icon, []byte("\x89PNG")) {
 		t.Fatalf("Icon() = %d bytes %q, %v", len(icon), contentType, err)
@@ -72,6 +77,19 @@ func TestClientIgnoresFieldsANewerAgentAdds(t *testing.T) {
 	apps, err := client.Apps(context.Background())
 	if err != nil || len(apps) != 1 || apps[0].ID != "memos" {
 		t.Fatalf("Apps() = %+v, %v; want the known fields and no error", apps, err)
+	}
+}
+
+// An agent from before A-NAS categories reports the CasaOS ones, which the
+// API contract does not allow.
+func TestClientDropsCategoriesAnOlderAgentReports(t *testing.T) {
+	client := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"apps":[{"id":"memos","title":"Memos","category":"Productivity","state":"available","running":0,"total":0},{"id":"navidrome","title":"Navidrome","category":"media","state":"available","running":0,"total":0}]}`)
+	})))
+	apps, err := client.Apps(context.Background())
+	if err != nil || len(apps) != 2 || apps[0].Category != "" || apps[1].Category != appstore.CategoryMedia {
+		t.Fatalf("Apps() = %+v, %v; want the CasaOS category dropped and the A-NAS one kept", apps, err)
 	}
 }
 

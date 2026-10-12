@@ -23,7 +23,10 @@
     "pinyin-pro": "3.29.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-zoom-pan-pinch": "4.2.0"
+    "react-markdown": "10.1.0",
+    "react-zoom-pan-pinch": "4.2.0",
+    "remark-breaks": "4.0.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "6.1.2",
