@@ -167,7 +167,7 @@ $AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --report /datas
 AI 聚合的阈值按“宁缺毋滥”校准，场景标签的真值来自 COCO-Stuff：只取 `stuff_annotations_trainval2017.zip` 里的 `stuff_val2017.json`（22 MB），用 [remotezip](https://pypi.org/project/remotezip/) 按 HTTP Range 读出，不下载 1.1 GB 的整个压缩包，放在 `/mnt/d/A-NAS-datasets/coco-stuff/`：
 
 ```bash
-$AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --min-precision 0.95 --min-label-precision 0.95 --min-recall 0.1 --write
+$AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --min-precision 0.9 --min-label-precision 0.8 --min-recall 0.1 --write
 ```
 
 分块向量（[M2 实施方案“AI 聚合”](../architecture/photo-ai.md#ai-聚合)）先为 COCO 测试半与 COCO-CN 测试集算每块的向量，再与整图向量比较；中途也可以运行 `eval.tile_search` 查看已算部分的结果：
