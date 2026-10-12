@@ -4,11 +4,14 @@ Reads the vectors cached by eval.embed. Each label's threshold is the lowest
 score whose false-positive rate on the calibration half's COCO negatives
 stays within a limit; a label without enough known negatives, positives or
 recall stays search-only. With --min-label-precision the labels serve as
-clusters (docs/architecture/photo-ai.md): a label is kept only when it is
-right at least that often among the calibration half's COCO photos it takes
-in, and takes in enough of them to tell; a label too common to have enough
-negatives for the limit gets the strictest limit its negatives resolve, since
-that check guards it. The limit is the
+clusters (docs/architecture/photo-ai.md): a label is kept only when the
+calibration half's COCO photos it takes in are credibly right at least that
+often (the one-sided 95% Wilson lower bound), and it takes in enough of them
+to tell; a label too common to have enough negatives for the limit gets the
+strictest limit its negatives resolve, since that check guards it. Scene
+labels, whose truth comes from COCO-Stuff, are too common in photos for any
+false-positive limit to leave them much recall, so they take the widest
+threshold that still passes the check instead. The limit is the
 loosest one in a sweep at which the labels shown on the calibration half's
 COCO photos are still right at least --min-precision of the time (with
 pruning, the one that keeps the most labels); --max-fpr fixes it instead. COCO negatives follow how photos occur; Open
@@ -28,6 +31,7 @@ import math
 import os
 
 import numpy as np
+from scipy.stats import binomtest
 from sklearn.metrics import average_precision_score
 
 from eval import datasets
@@ -136,19 +140,49 @@ def cluster_quality(scores, truth, rows, thresholds):
     return {"precision": right / judged if judged else float("nan"), "judged": judged, "labels": len(thresholds)}
 
 
+def credible(right, judged, min_precision):
+    """Whether right of judged is credibly at least min_precision: the
+    one-sided 95% Wilson lower bound reaches it."""
+    return judged >= MIN_JUDGED and binomtest(right, judged).proportion_ci(0.9, "wilson").low >= min_precision
+
+
 def prune(scores, truth, rows, thresholds, skipped, min_label_precision):
-    """Drops the labels right less than min_label_precision of the time among
-    the photos in rows they take in, or taking in too few to tell; each goes
-    to skipped with its reason."""
+    """Drops the labels not credibly right min_label_precision of the time
+    among the photos in rows they take in, or taking in too few to tell; each
+    goes to skipped with its reason."""
     if not min_label_precision:
         return thresholds
     kept = {}
     for column, (right, judged) in membership(scores, truth, rows, thresholds).items():
-        if judged >= MIN_JUDGED and right >= min_label_precision * judged:
+        if credible(right, judged, min_label_precision):
             kept[column] = thresholds[column]
         else:
             skipped[column] = f"right for {right} of {judged} photos on the calibration half"
     return kept
+
+
+def precision_thresholds(scores, truth, rows, columns, min_precision, min_recall):
+    """For each column, the lowest score whose cluster among the photos in rows
+    is still credibly right min_precision of the time; {column: threshold}
+    and {column: reason} for those without one."""
+    chosen, skipped = {}, {}
+    for column in columns:
+        known = rows & (truth[:, column] >= 0)
+        order = np.argsort(-scores[known, column])
+        ranked = scores[known, column][order]
+        right = np.cumsum(truth[known, column][order] == 1)
+        taken = [k for k in range(MIN_JUDGED, len(ranked) + 1) if credible(int(right[k - 1]), k, min_precision)]
+        if not taken:
+            skipped[column] = "never credibly right enough on the calibration half"
+            continue
+        threshold = float(ranked[taken[-1] - 1])
+        positive = scores[rows & (truth[:, column] == 1), column]
+        recall = float(np.mean(positive >= threshold)) if len(positive) else 0.0
+        if recall < min_recall:
+            skipped[column] = f"recall {recall:.2f}"
+            continue
+        chosen[column] = threshold
+    return chosen, skipped
 
 
 def display_quality(scores, truth, rows, thresholds):
@@ -250,7 +284,7 @@ def main():
                         help="share of shown labels that must be right on the calibration half's COCO photos")
     parser.add_argument("--max-fpr", type=float, help="fix the per-label false-positive limit instead")
     parser.add_argument("--min-label-precision", type=float,
-                        help="use labels as clusters: keep only those right this often among the photos they take in")
+                        help="use labels as clusters: keep only those credibly right this often among the photos they take in")
     parser.add_argument("--min-recall", type=float, default=MIN_RECALL, help="drop labels that find fewer positives")
     parser.add_argument("--write", nargs="?", const=CALIBRATION, metavar="PATH",
                         help=f"write the thresholds (default {os.path.relpath(CALIBRATION, datasets.REPO)})")
@@ -298,10 +332,22 @@ def main():
     report["sweep"] = {}
     max_fpr_chosen = args.max_fpr
     most = 0
+    # Scene thresholds do not depend on the false-positive limit.
+    scenes = [i for i, label in enumerate(ids) if "cocoStuff" in ground_truth.get(label, {})]
+    by_precision, unscened = ({}, {}) if not args.min_label_precision else precision_thresholds(
+        scores, truth, calibration & coco, scenes, args.min_label_precision, args.min_recall)
+
     def select(max_fpr):
         chosen, skipped = thresholds_for(scores, truth, calibration, coco, max_fpr, subclasses,
                                          args.min_recall, adaptive=args.min_label_precision is not None)
-        return prune(scores, truth, calibration & coco, chosen, skipped, args.min_label_precision), skipped
+        if args.min_label_precision:
+            chosen = {column: value for column, value in chosen.items() if column not in scenes}
+            chosen = prune(scores, truth, calibration & coco, chosen, skipped, args.min_label_precision)
+            for column in scenes:
+                skipped.pop(column, None)
+            chosen.update(by_precision)
+            skipped.update(unscened)
+        return chosen, skipped
 
     for max_fpr in (0.0005, 0.001, 0.0015, 0.002, 0.003, 0.005, 0.01):
         chosen, _skipped = select(max_fpr)

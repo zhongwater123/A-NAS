@@ -45,7 +45,7 @@ export const placeLibrary = (place: Place) => "libraryId" in place ? place.libra
 
 // Label categories of the vocabulary, in the order AI 聚合 shows them.
 export const categoryNames: Record<string, string> = {
-  animal: "动物", nature: "自然", food: "食物", vehicle: "交通工具", activity: "运动", object: "物品", scene: "场景", people: "人物", document: "文档",
+  animal: "动物", nature: "自然", scene: "场景", food: "食物", vehicle: "交通工具", activity: "运动", object: "物品", people: "人物", document: "文档",
 };
 // The member library a search or a cluster started from covers.
 export const placeViewing = (caller: Caller, place: Place) => {
