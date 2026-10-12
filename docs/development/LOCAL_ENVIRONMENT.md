@@ -179,6 +179,13 @@ cd ai && ANAS_DATASETS=D:/A-NAS-datasets python -m eval.coco_train --count 20000
 $AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack --tokens 70 --sets coco-train --no-texts
 ```
 
+缓存里有子集的向量后，`eval.calibrate` 自动把它们并入校准半。v1 阈值还用 `--hold-back` 手动留下 8 组不启用（原因见[校准报告](../research/photo-ai-label-calibration.md#ai-聚合的严格校准)），写入的阈值文件记下这份名单：
+
+```bash
+$AI -m eval.calibrate --cache "/datasets/cache/<模型 ID>-e512" --min-precision 0.9 --min-label-precision 0.8 --min-recall 0.1 \
+  --hold-back hot_dog,carrot,wine_glass,scissors,microwave,ball,bridge,sofa --report /datasets/report.json --write
+```
+
 分块向量（[M2 实施方案“AI 聚合”](../architecture/photo-ai.md#ai-聚合)）先为 COCO 测试半与 COCO-CN 测试集算每块的向量，再与整图向量比较；中途也可以运行 `eval.tile_search` 查看已算部分的结果：
 
 ```bash

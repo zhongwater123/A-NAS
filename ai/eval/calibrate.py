@@ -17,7 +17,9 @@ COCO photos are still right at least --min-precision of the time (with
 pruning, the one that keeps the most labels); --max-fpr fixes it instead. COCO negatives follow how photos occur; Open
 Images negatives were picked because a model mistook them, so they are
 reported separately as hard negatives instead of setting thresholds. Recall
-counts positives from both. The test half is never used to choose anything.
+counts positives from both. The test half is never used to choose anything;
+--hold-back keeps labels out by hand after reading it, and the report keeps
+the test-half numbers from before that alongside.
 
     python -m eval.calibrate --cache /datasets/cache/<model>-e512 [--write]
 
@@ -290,8 +292,11 @@ def main():
                         help=f"write the thresholds (default {os.path.relpath(CALIBRATION, datasets.REPO)})")
     parser.add_argument("--calibration", default=CALIBRATION, help="thresholds whose template --compare-with uses")
     parser.add_argument("--report", help="write the full report as JSON to this file")
+    parser.add_argument("--hold-back", default="", metavar="ID,...",
+                        help="labels to keep out by hand after reading the test half; recorded in what is written")
     parser.add_argument("--compare-with", help="another cache to measure against this one")
     args = parser.parse_args()
+    held = sorted(label for label in args.hold_back.split(",") if label)
     if args.compare_with:
         compare(args.cache, args.compare_with, args.calibration)
         return
@@ -301,6 +306,8 @@ def main():
     model = os.path.basename(os.path.normpath(args.cache))
     vocabulary = datasets.load_vocabulary()
     ids = [label["id"] for label in vocabulary]
+    if unknown := sorted(set(held) - set(ids)):
+        raise SystemExit(f"unknown labels to hold back: {', '.join(unknown)}")
     ground_truth = datasets.load_ground_truth()
     samples, vectors, truth = labelled(images, vocabulary, ground_truth)
     calibration = np.array([sample.split == "calibration" for sample in samples])
@@ -369,6 +376,22 @@ def main():
     report["maxFalsePositiveRate"] = max_fpr_chosen
     report["minLabelPrecision"] = args.min_label_precision
     print(f"chosen max FPR {max_fpr_chosen}")
+    if held:
+        # A decision made after reading the test half, so the numbers from
+        # before it stay in the report.
+        columns = {ids.index(label) for label in held}
+        report["beforeHoldBack"] = {
+            "labels": len(chosen),
+            "testClusters": cluster_quality(scores, truth, test & coco, chosen),
+            "heldBack": {ids[column]: f"{right}/{judged}" for column, (right, judged) in membership(
+                scores, truth, test & coco, {column: chosen[column] for column in columns if column in chosen}).items()},
+        }
+        for column in columns:
+            chosen.pop(column, None)
+            skipped[column] = "held back by hand"
+        before = report["beforeHoldBack"]
+        print(f"held back {', '.join(held)}: {before['labels']} labels before, test clusters "
+              f"{before['testClusters']['precision']:.3f} precision of {before['testClusters']['judged']} judged photos")
     report["test"] = {
         "coco": display_quality(scores, truth, test & coco, chosen),
         "openimages": display_quality(scores, truth, test & ~coco, chosen),
@@ -407,6 +430,7 @@ def main():
             "synonyms": synonyms,
             "maxFalsePositiveRate": max_fpr_chosen,
             **({"minLabelPrecision": args.min_label_precision} if args.min_label_precision else {}),
+            **({"heldBack": held} if held else {}),
             "thresholds": {ids[column]: round(value, 4) for column, value in sorted(chosen.items())},
         }
         with open(args.write, "w", encoding="utf-8", newline="\n") as file:

@@ -47,6 +47,9 @@ class VocabularyTest(unittest.TestCase):
         for label, threshold in calibration["thresholds"].items():
             self.assertIn(label, self.ids)
             self.assertTrue(-1 < threshold < 1, label)
+        for label in calibration.get("heldBack", []):
+            self.assertIn(label, self.ids)
+            self.assertNotIn(label, calibration["thresholds"])
 
 
 if __name__ == "__main__":
