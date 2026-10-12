@@ -51,13 +51,13 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 6. 在直连屏幕按[运行手册](../runbooks/operate-local-kiosk.md#验收)验证每次进入屏保只循环一条、重新闲置时再次随机选择、单条失败补选与首次输入唤醒；回退到原五条视频的池执行 `install-screensavers.sh 53e12079d8d50c4c`。
 7. 后续补齐安全移除、运行中 SATA 热拔插、同盘重新接入和自动恢复；相册的用户功能验收与后续切片在基础闭环稳定后继续。
 8. 相册 M1 的切片 1–6 已实现并通过测试，[相册服务](../../internal/photoservice/photoservice.go)的专用身份、Btrfs 子卷、IPC 与隔离边界已随 `ed5368ba998e` 部署；运行期数据卷故障（离线、只读、重新挂载）、上传中途强制终止与导入中途卷满的处理已通过本地故障注入（均尚未部署）；下一步先跑通整体闭环：部署后按[验收相册 M1](../runbooks/accept-photo-library-m1.md)完成桌面上传、跨成员隔离、管理员查看、强制终止与断电；20,000 张规模与缩略图积压测试暂缓。M2 按[实施方案](../architecture/photo-ai.md)推进，步骤 1–7 已合并（不做 OCR；家庭照片人工标注暂缓，其质量门禁保持未通过）。步骤 3 冻结了 70 视觉 token 与 512 px 输入，中文检索 COCO-CN R@1 71.3%（[校准报告](../research/photo-ai-label-calibration.md)）；140 token 与 1024 px 输入的对比没有明显收益。步骤 5 的 AI 标签已于 2026-10-10 按用户决定暂停，搜索改为纯向量排序与两段式结果（#66）；固定类别的目标检测暂不做，整图向量找不到小物体的问题先在开发机评估分块向量（后台评估进行中，结论写入[实施方案](../architecture/photo-ai.md#ai-标签2026-10-10-起暂停)）；向量存储的规模实测按用户决定暂缓。步骤 6 的相册分组、用户标签与 AI 纠错不依赖 AI，已随 `173cbb5499ce` 部署。2026-10-10 决定 AI 随系统内置安装、默认开启，模型由开发机经 SSH 传到设备，设备不联网获取（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）；步骤 7 已据此实现（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）：模型与 Python 运行环境按内容各存一份并由 release 引用，Worker 按需启动，系统测试证明它没有网络、读不到数据卷；整理进度与隐私说明随 #61 的相册界面实现。用户于 2026-10-10 同意在 Experimental NAS 部署本地 AI，已于同日随 `6833c7637f73` 按[启用相册本地 AI](../runbooks/enable-photo-ai.md)部署。USB 存储（[#25](https://github.com/zhongwater123/A-NAS/issues/25)）、账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）和备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)）是相册部分验收的前置能力。
-9. 部署影视中心：用户已于 2026-10-12 在实验 NAS 安装 FFmpeg（只读核对为 7.1.5-0+deb13u1，`ffmpeg` 与 `ffprobe` 均在 `/usr/bin`）；用户评审 ADR 0017 后随下一个 release 安装；部署后由管理员在共享空间建库，验收直接播放、转码、字幕、成员间进度隔离，以及经 SMB 新放入的视频在 15 分钟内或下次打开时出现。
+9. 影视中心：#70 已随主干 `86d675d` 运行在实验 NAS（FFmpeg 7.1.5 由用户安装，ADR 0017 仍待用户评审）。#75（重新扫描不再误报、Web 上传等变更后约 3 秒自动重扫、文件管理跨空间剪切与复制）已合并、尚未部署；[#76](https://github.com/zhongwater123/A-NAS/pull/76) 增加黑色应用图标与影视中心内上传，待合并。下一步随下一个 release 部署，再由管理员在共享空间建库，验收直接播放、转码、字幕、成员间进度隔离、从影视中心上传与从个人空间剪切进共享媒体库后随即出现，以及经 SMB 新放入的视频在 15 分钟内或下次打开时出现。
 10. 音乐：PR 评审 [ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md) 后合并，随下一次部署进入实验 NAS（解码用影视中心已要求的 FFmpeg 与媒体 Worker，不需要新的系统包），再用真实音乐文件验收首次扫描耗时、SMB 加入新歌后的增量扫描与局域网/本机屏幕播放。
 11. 传输中心：PR 评审 [ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md) 后合并，随下一次部署进入实验 NAS；部署后经局域网 Web 入口（Caddy）在 Wi-Fi 上验收几 GB 文件的上传速度、断开 Wi-Fi 后续传、重启产品服务后从头上传与临时文件回收，以及成员对他人个人空间上传被 ACL 拒绝；Caddy 默认不缓冲请求体，分片应直接流入产品服务。
 
 ## 外部条件与限制
 
-- Experimental NAS 当前在线并运行主干提交 `6833c7637f73`，本地 AI 已启用；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、“设置”窗口、新相册界面、文件和共享用户闭环及相册用户功能验收仍未完成。
+- Experimental NAS 当前在线并运行主干提交 `86d675d`（含影视中心），本地 AI 已启用；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、“设置”窗口、新相册界面、文件和共享用户闭环及相册用户功能验收仍未完成。
 - v1.0.1 只使用可丢弃测试数据。单盘 Btrfs 不提供冗余、备份或家庭生产数据可靠性承诺。
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。

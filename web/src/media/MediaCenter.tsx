@@ -16,6 +16,8 @@ import {
 } from "./mediaApi";
 import { Player, type PlayRequest } from "./Player";
 import { type Section, Sidebar } from "./Sidebar";
+import { DropOverlay, hasFiles, UploadDialog, UploadPill } from "./Upload";
+import { pickedFromDrop, useUploads } from "./uploads";
 import "./media.css";
 
 type Place =
@@ -33,8 +35,11 @@ type Place =
   | { kind: "show"; id: string };
 
 const narrowWidth = 760;
-const busyPoll = 4000;
-const idlePoll = 60_000;
+const busyPoll = 3000;
+const idlePoll = 20_000;
+// After the user changes or rescans a library, poll quickly for a while so a
+// short scan is not missed between two idle polls.
+const followWindow = 30_000;
 
 function sectionOf(place: Place): Section | undefined {
   switch (place.kind) {
@@ -105,16 +110,60 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       return false;
     }
   }, [refresh]);
+  const poll = useRef<{ timer: number; until: number; tick?: () => void }>({ timer: 0, until: 0 });
   useEffect(() => {
-    let timer = 0;
     let live = true;
+    const state = poll.current;
     const tick = async () => {
+      window.clearTimeout(state.timer);
       const busy = await loadLibraries();
-      if (live) timer = window.setTimeout(() => void tick(), busy ? busyPoll : idlePoll);
+      if (live) state.timer = window.setTimeout(() => void tick(), busy || Date.now() < state.until ? busyPoll : idlePoll);
     };
+    state.tick = () => void tick();
     void tick();
-    return () => { live = false; window.clearTimeout(timer); };
+    return () => { live = false; window.clearTimeout(state.timer); state.tick = undefined; };
   }, [loadLibraries]);
+  // follow refreshes the libraries now and keeps polling quickly for a while.
+  const follow = useCallback(() => {
+    poll.current.until = Date.now() + followWindow;
+    poll.current.tick?.();
+  }, []);
+  // Uploads outlive their dialog; a finished batch is announced only when
+  // the dialog is not there to show it.
+  const [uploading, setUploading] = useState<{ scope: Category; preferred?: string }>();
+  const uploadShown = useRef(false);
+  useEffect(() => { uploadShown.current = Boolean(uploading); }, [uploading]);
+  const lastUpload = useRef<{ scope: Category; preferred?: string }>({ scope: "all" });
+  const uploads = useUploads({
+    onUploaded: follow,
+    onSettled: (settled) => {
+      follow();
+      if (uploadShown.current) return;
+      const done = settled.filter((item) => item.state === "done").length;
+      const failed = settled.filter((item) => item.state === "failed").length;
+      if (failed) toast({ text: `${failed} 个文件上传失败`, tone: "error", action: { label: "查看", run: () => setUploading(lastUpload.current) } });
+      else if (done) toast({ text: `已上传 ${done} 个文件，新视频稍后出现在影视中心` });
+    },
+  });
+  const openUpload = (scope: Category, preferred?: string) => {
+    // A new visit starts clean unless uploads are still going or some failed.
+    if (!uploads.running && !uploads.items.some((item) => item.state === "failed")) uploads.clear();
+    lastUpload.current = { scope, preferred };
+    setUploading({ scope, preferred });
+  };
+  const closeUpload = () => {
+    setUploading(undefined);
+    if (!uploads.running) uploads.clear();
+  };
+  const [dropping, setDropping] = useState(false);
+
+  const rescan = useCallback((targets: MediaLibrary[], message: string) => {
+    Promise.all(targets.map((library) => scanLibrary(library.id))).then((scanned) => {
+      setLibraries((current) => current?.map((library) => scanned.find((item) => item?.id === library.id) ?? library));
+      toast({ text: message });
+      follow();
+    }, (caught) => onError(messageOf(caught)));
+  }, [follow, toast, onError]);
 
   useEffect(() => {
     if (place.kind !== "home") return;
@@ -181,12 +230,16 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       message: <>只会删除影视中心里的目录、播放进度和收藏。<strong>文件夹中的视频文件不会被删除</strong>，以后可以重新添加。</>,
     });
     if (!ok) return;
-    try { await deleteLibrary(library.id); toast({ text: `已删除媒体库“${library.name}”` }); void loadLibraries(); refresh(); }
+    try { await deleteLibrary(library.id); toast({ text: `已删除媒体库“${library.name}”` }); follow(); refresh(); }
     catch (caught) { onError(messageOf(caught)); }
   };
 
   const libraryOf = (id: string) => libraries?.find((library) => library.id === id);
   const detail = place.kind === "video" || place.kind === "show";
+  // The pages that list a library's titles take uploads into it.
+  const uploadScope: Category | undefined = place.kind === "category" ? place.category : place.kind === "libraries" || place.kind === "library" ? "all" : undefined;
+  const uploadPreferred = place.kind === "library" ? place.id : undefined;
+  const dropLabel = place.kind === "library" ? `“${libraryOf(place.id)?.name ?? "媒体库"}”` : place.kind === "category" ? { all: "影视中心", movie: "“电影”", show: "“电视剧”", other: "“其他”" }[place.category] : "媒体库";
 
   let page;
   switch (place.kind) {
@@ -240,15 +293,15 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       page = <LibrariesPage libraries={libraries} processing={processing} canCreate={canCreate}
         onOpen={(library) => navigate({ kind: "library", id: library.id })}
         onCreate={() => void openLibraryDialog()} onEdit={(library) => void openLibraryDialog(library)} onDelete={(library) => void removeLibrary(library)}
-        onScan={(library) => { scanLibrary(library.id).then(() => { toast({ text: `正在重新扫描“${library.name}”` }); void loadLibraries(); }, (caught) => onError(messageOf(caught))); }} />;
+        onScan={(library) => rescan([library], `正在重新扫描“${library.name}”`)} onUpload={(library) => openUpload("all", library?.id)} />;
       break;
     case "library": {
       const library = libraryOf(place.id);
-      page = library ? <CategoryPage category="all" library={library} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} /> : <Loading />;
+      page = library ? <CategoryPage category="all" library={library} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} onUpload={() => openUpload("all", library.id)} /> : <Loading />;
       break;
     }
     case "category":
-      page = <CategoryPage key={place.category} category={place.category} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} />;
+      page = <CategoryPage key={place.category} category={place.category} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} onUpload={() => openUpload(place.category)} />;
       break;
     case "search":
       page = <CategoryPage key="search" category="all" search={place.query} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} />;
@@ -270,7 +323,9 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
           </div>
         )}
         {narrow && drawer && <div className="mc-scrim" onPointerDown={() => setDrawer(false)} />}
-        <main className={`mc-main ${detail ? "detail" : ""}`}>
+        <main className={`mc-main ${detail ? "detail" : ""}`}
+          onDragEnter={(event) => { if (uploadScope && hasFiles(event) && !uploading) { event.preventDefault(); setDropping(true); } }}
+          onDragOver={(event) => { if (uploadScope && hasFiles(event)) event.preventDefault(); }}>
           <div className="mc-topbar">
             <button type="button" className="mc-icon-button" aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"} onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}><PanelLeft /></button>
             {stack.length > 1 && <button type="button" className="mc-icon-button" aria-label="返回" onClick={back}><ArrowLeft /></button>}
@@ -281,9 +336,10 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
               {query && <button type="button" aria-label="清除搜索" onClick={() => submitSearch("")}><X /></button>}
             </label>
             <span className="mc-topbar-gap" />
+            {!uploading && <UploadPill uploads={uploads} onOpen={() => setUploading(lastUpload.current)} />}
             {place.kind === "libraries" && libraries?.some((library) => library.canManage) && (
               <button type="button" className="mc-icon-button" aria-label="全部重新扫描" title="全部重新扫描"
-                onClick={() => { Promise.all(libraries.filter((library) => library.canManage).map((library) => scanLibrary(library.id))).then(() => { toast({ text: "已开始重新扫描全部媒体库" }); void loadLibraries(); }, (caught) => onError(messageOf(caught))); }}>
+                onClick={() => rescan(libraries.filter((library) => library.canManage), "已开始重新扫描全部媒体库")}>
                 <RefreshCw />
               </button>
             )}
@@ -293,6 +349,10 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
               <div className="mc-state"><CircleAlert /><h2>影视中心暂时不可用</h2><p>{failure}</p><button type="button" className="mc-glass" onClick={() => void loadLibraries()}>重试</button></div>
             ) : page}
           </div>
+          {dropping && uploadScope && (
+            <DropOverlay label={dropLabel} onLeave={() => setDropping(false)}
+              onDrop={(event) => { setDropping(false); void pickedFromDrop(event.dataTransfer).then(uploads.add); openUpload(uploadScope, uploadPreferred); }} />
+          )}
         </main>
         {play && <Player request={play} onClose={() => { setPlay(undefined); refresh(); }} onNavigate={(videoId) => setPlay({ videoId })} onSaved={() => undefined} />}
         {picker && <CollectionPicker title={picker} onClose={() => setPicker(undefined)} onDone={(text) => { setPicker(undefined); toast({ text }); refresh(); }} />}
@@ -300,9 +360,13 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
           onSaved={(library) => {
             setEditing(undefined);
             toast({ text: editing.library ? `已保存“${library.name}”，正在重新扫描` : `已创建“${library.name}”，正在扫描` });
-            void loadLibraries();
+            follow();
             refresh();
           }} />}
+        {uploading && (
+          <UploadDialog uploads={uploads} libraries={libraries ?? []} scope={uploading.scope} preferred={uploading.preferred} onClose={closeUpload}
+            onCreateLibrary={canCreate ? () => { closeUpload(); void openLibraryDialog(); } : undefined} />
+        )}
         {dialogs.dialog}
         {toasts}
       </div>

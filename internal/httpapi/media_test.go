@@ -8,12 +8,14 @@ import (
 	"image/jpeg"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -92,7 +94,9 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mediaStore.Close() })
-	fixture.media, err = media.NewService(mediaStore, media.Options{Files: fixture.files, Spaces: accountService, CacheDir: filepath.Join(t.TempDir(), "cache")})
+	fixture.media, err = media.NewService(mediaStore, media.Options{
+		Files: fixture.files, Spaces: accountService, CacheDir: filepath.Join(t.TempDir(), "cache"), ChangeDelay: 10 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,4 +214,136 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	if subtitle := send(http.MethodGet, "/api/v1/media/videos/"+fixture.film+"/subtitles/x0", "", ""); subtitle.Code != http.StatusOK || !strings.Contains(subtitle.Body.String(), "你好") {
 		t.Fatalf("subtitle = %d %s", subtitle.Code, subtitle.Body.String())
 	}
+}
+
+// signedInMediaHandler serves the product API with the media center told
+// about Web file changes, signed in as the administrator.
+func signedInMediaHandler(t *testing.T, fixture *mediaFixture) (http.Handler, *http.Cookie, string, func() string) {
+	t.Helper()
+	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: fixture.accounts, Files: fixture.files,
+		Media: mediaapi.New(fixture.media, nil), FilesChanged: fixture.media.SpaceChanged, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(`{"username":"owner","password":"correct horse battery staple"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	login := httptest.NewRecorder()
+	handler.ServeHTTP(login, loginRequest)
+	var session struct {
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(login.Body.Bytes(), &session); err != nil || login.Code != http.StatusOK {
+		t.Fatalf("login = %d %s", login.Code, login.Body.String())
+	}
+	cookie := login.Result().Cookies()[0]
+	titles := func() string {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/media/titles?category=all", nil)
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder.Body.String()
+	}
+	return handler, cookie, session.CSRFToken, titles
+}
+
+func TestWebUploadsShowUpInTheMediaCenterWithoutARescan(t *testing.T) {
+	fixture := newMediaFixture(t)
+	handler, cookie, csrf, titles := signedInMediaHandler(t, fixture)
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	_ = form.WriteField("parentId", fixture.folder)
+	part, _ := form.CreateFormFile("file", "Up (2009).mp4")
+	_, _ = part.Write([]byte("video"))
+	_ = form.Close()
+	upload := httptest.NewRequest(http.MethodPost, "/api/v1/spaces/"+fixture.shared.ID+"/uploads", &body)
+	upload.Header.Set("Content-Type", form.FormDataContentType())
+	upload.Header.Set("X-CSRF-Token", csrf)
+	upload.AddCookie(cookie)
+	uploaded := httptest.NewRecorder()
+	handler.ServeHTTP(uploaded, upload)
+	if uploaded.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", uploaded.Code, uploaded.Body.String())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(titles(), `"title":"Up"`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the uploaded film did not appear: %s", titles())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Rescanning answers with the library, which the client shows at once.
+	scan := httptest.NewRequest(http.MethodPost, "/api/v1/media/libraries/"+fixture.library+"/scan", nil)
+	scan.Header.Set("X-CSRF-Token", csrf)
+	scan.AddCookie(cookie)
+	scanned := httptest.NewRecorder()
+	handler.ServeHTTP(scanned, scan)
+	var library media.Library
+	if err := json.Unmarshal(scanned.Body.Bytes(), &library); err != nil || scanned.Code != http.StatusAccepted || library.ID != fixture.library {
+		t.Fatalf("scan = %d %s", scanned.Code, scanned.Body.String())
+	}
+}
+
+func TestCuttingAFilmIntoASharedLibraryMovesItBetweenLibraries(t *testing.T) {
+	fixture := newMediaFixture(t)
+	ctx := context.Background()
+	spaces, err := fixture.accounts.ListSpaces(ctx, fixture.admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var private accounts.Space
+	for _, space := range spaces {
+		if space.Kind == accounts.SpaceKindPrivate {
+			private = space
+		}
+	}
+	folder, err := fixture.files.CreateDirectory(ctx, fixture.admin, private.ID, "", "我的电影")
+	if err != nil {
+		t.Fatal(err)
+	}
+	film, err := fixture.files.Upload(ctx, fixture.admin, private.ID, folder.ID, "Up (2009).mp4", strings.NewReader("video"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.media.CreateLibrary(ctx, fixture.admin, media.LibraryInput{Name: "我的电影", Kind: media.LibraryMovies, SpaceID: private.ID, FolderIDs: []string{folder.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	handler, cookie, csrf, titles := signedInMediaHandler(t, fixture)
+	waitFor := func(what string, done func(string) bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !done(titles()) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %s", what, titles())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	waitFor("the personal library was not scanned", func(body string) bool { return strings.Contains(body, `"title":"Up"`) })
+
+	move := httptest.NewRequest(http.MethodPatch, "/api/v1/files/"+film.ID,
+		strings.NewReader(`{"spaceId":"`+fixture.shared.ID+`","parentId":"`+fixture.folder+`","name":"Up (2009).mp4"}`))
+	move.Header.Set("Content-Type", "application/json")
+	move.Header.Set("X-CSRF-Token", csrf)
+	move.AddCookie(cookie)
+	moved := httptest.NewRecorder()
+	handler.ServeHTTP(moved, move)
+	var entry files.Entry
+	if err := json.Unmarshal(moved.Body.Bytes(), &entry); err != nil || moved.Code != http.StatusOK || entry.SpaceID != fixture.shared.ID || entry.ParentID != fixture.folder {
+		t.Fatalf("move = %d %s", moved.Code, moved.Body.String())
+	}
+	// Both spaces changed: the film leaves the personal library and joins the shared one.
+	waitFor("the film is not in exactly one library", func(body string) bool {
+		var page struct {
+			Items []media.Title `json:"items"`
+		}
+		_ = json.Unmarshal([]byte(body), &page)
+		var libraries []string
+		for _, title := range page.Items {
+			if title.Title == "Up" {
+				libraries = append(libraries, title.LibraryID)
+			}
+		}
+		return len(libraries) == 1 && libraries[0] == fixture.library
+	})
 }

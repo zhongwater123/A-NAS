@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, Check, ChevronRight, Clapperboard, Film, Folder, FolderOpen, FolderPlus, HardDrive, Layers, Pencil, Plus, RefreshCw, Trash2, Tv, Users, Video, X,
+  AlertTriangle, Check, ChevronRight, Clapperboard, CloudUpload, Film, Folder, FolderOpen, FolderPlus, HardDrive, Layers, Pencil, Plus, RefreshCw, Trash2, Tv, Users, Video, X,
 } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 
@@ -45,14 +45,15 @@ function LibraryCovers({ library }: { library: MediaLibrary }) {
   );
 }
 
-export function LibrariesPage({ libraries, processing, canCreate, onOpen, onCreate, onEdit, onScan, onDelete }: {
+export function LibrariesPage({ libraries, processing, canCreate, onOpen, onCreate, onEdit, onScan, onDelete, onUpload }: {
   libraries?: MediaLibrary[]; processing: boolean; canCreate: boolean;
   onOpen: (library: MediaLibrary) => void; onCreate: () => void; onEdit: (library: MediaLibrary) => void;
-  onScan: (library: MediaLibrary) => void; onDelete: (library: MediaLibrary) => void;
+  onScan: (library: MediaLibrary) => void; onDelete: (library: MediaLibrary) => void; onUpload: (library?: MediaLibrary) => void;
 }) {
   return (
     <div className="mc-page">
       <PageHeader title="媒体库" count={libraries?.length}>
+        {libraries && libraries.length > 0 && <button type="button" className="mc-glass small" onClick={() => onUpload()}><CloudUpload />上传</button>}
         {canCreate && <button type="button" className="mc-primary small" onClick={onCreate}><Plus />新建媒体库</button>}
       </PageHeader>
       {libraries && !processing && libraries.length > 0 && (
@@ -76,11 +77,14 @@ export function LibrariesPage({ libraries, processing, canCreate, onOpen, onCrea
                     <strong>{library.name}</strong>
                     <span className={`mc-tag ${library.kind}`}>{kindInfo[library.kind].label}</span>
                     <span className="mc-tag space">{library.spaceKind === "shared" ? <><Users />共享</> : <><HardDrive />个人</>}</span>
-                    {library.canManage && (
+                    {(library.canManage || library.folders.some((folder) => !folder.missing)) && (
                       <Menu label={`${library.name}的操作`} className="mc-library-menu" items={[
-                        { label: "重新扫描", icon: <RefreshCw />, run: () => onScan(library) },
-                        { label: "编辑", icon: <Pencil />, run: () => onEdit(library) },
-                        { label: "删除媒体库", icon: <Trash2 />, danger: true, run: () => onDelete(library) },
+                        ...(library.folders.some((folder) => !folder.missing) ? [{ label: "上传到此媒体库", icon: <CloudUpload />, run: () => onUpload(library) }] : []),
+                        ...(library.canManage ? [
+                          { label: "重新扫描", icon: <RefreshCw />, run: () => onScan(library) },
+                          { label: "编辑", icon: <Pencil />, run: () => onEdit(library) },
+                          { label: "删除媒体库", icon: <Trash2 />, danger: true, run: () => onDelete(library) },
+                        ] : []),
                       ]} />
                     )}
                   </header>

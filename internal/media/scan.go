@@ -16,8 +16,9 @@ import (
 )
 
 // staleScan is how old a scan may be before opening the media center scans
-// the library again.
-const staleScan = 10 * time.Minute
+// the library again. Files added over SMB show up this soon while the media
+// center is open; Web changes trigger a scan of their own (SpaceChanged).
+const staleScan = 2 * time.Minute
 
 // nfoFields is what a scan keeps from an NFO file, so unchanged files are
 // not read again.
@@ -82,13 +83,23 @@ type scannedShow struct {
 // ScanInBackground scans a library as actor without blocking the request.
 // The request's session token stays in the context.
 func (s *Service) ScanInBackground(ctx context.Context, actor accounts.User, libraryID string) {
+	s.mu.Lock()
+	if s.closing.Err() != nil {
+		s.mu.Unlock()
+		return
+	}
+	// The library reads as scanning from now on, so a client that asks
+	// right away sees the scan it requested.
+	s.queued[libraryID]++
+	s.background.Add(1)
+	s.mu.Unlock()
 	scanCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
 	stop := context.AfterFunc(s.closing, cancel)
-	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
 		defer stop()
 		defer cancel()
+		defer s.dequeue(libraryID)
 		library, err := s.library(scanCtx, actor, libraryID)
 		if err != nil {
 			return
@@ -99,24 +110,62 @@ func (s *Service) ScanInBackground(ctx context.Context, actor accounts.User, lib
 	}()
 }
 
+func (s *Service) dequeue(libraryID string) {
+	s.mu.Lock()
+	if s.queued[libraryID]--; s.queued[libraryID] <= 0 {
+		delete(s.queued, libraryID)
+	}
+	s.mu.Unlock()
+}
+
 // Rescan scans a library the actor manages and reads the videos FFmpeg
-// could not read before once more.
-func (s *Service) Rescan(ctx context.Context, actor accounts.User, libraryID string) error {
+// could not read before once more. It returns the library as it reads
+// while the scan runs in the background.
+func (s *Service) Rescan(ctx context.Context, actor accounts.User, libraryID string) (Library, error) {
 	library, err := s.library(ctx, actor, libraryID)
 	if err != nil {
-		return err
+		return Library{}, err
 	}
 	if !library.manageable(actor) {
-		return ErrForbidden
+		return Library{}, ErrForbidden
 	}
 	if _, err := s.store.db.ExecContext(ctx, `
 UPDATE videos SET probe_state = CASE WHEN probe_state = 'failed' THEN 'pending' ELSE probe_state END,
 frame_state = CASE WHEN frame_state = 'failed' THEN 'pending' ELSE frame_state END
 WHERE library_id = ? AND (probe_state = 'failed' OR frame_state = 'failed')`, libraryID); err != nil {
-		return err
+		return Library{}, err
 	}
 	s.ScanInBackground(ctx, actor, libraryID)
-	return nil
+	return s.describeLibrary(ctx, actor, library)
+}
+
+// SpaceChanged scans, shortly after, the actor's libraries in a space whose
+// files the actor changed through the Web (upload, move, copy, delete or
+// restore), so new videos appear without waiting for the periodic scan. A
+// burst of changes settles into one scan.
+func (s *Service) SpaceChanged(ctx context.Context, actor accounts.User, spaceID string) {
+	detached := context.WithoutCancel(ctx)
+	libraries, err := s.visibleLibraries(detached, actor)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing.Err() != nil {
+		return
+	}
+	for _, library := range libraries {
+		if library.SpaceID != spaceID || s.pending[library.ID] != nil {
+			continue
+		}
+		id := library.ID
+		s.pending[id] = time.AfterFunc(s.changeDelay, func() {
+			s.mu.Lock()
+			delete(s.pending, id)
+			s.mu.Unlock()
+			s.ScanInBackground(detached, actor, id)
+		})
+	}
 }
 
 // RefreshStale scans the actor's visible libraries whose last scan is older
@@ -165,17 +214,35 @@ func (s *Service) setScanning(id string, scanning bool) {
 }
 
 // scan reconciles a library's catalog with its folders, reading as actor.
-// Background scans skip a library that is already being scanned.
+// A background scan that finds the library already being scanned asks that
+// scan to run once more when it ends, so a change made meanwhile is not
+// missed.
 func (s *Service) scan(ctx context.Context, actor accounts.User, library libraryRow, wait bool) error {
 	lock := s.scanLock(library.ID)
 	if wait {
 		lock.Lock()
 	} else if !lock.TryLock() {
+		s.mu.Lock()
+		s.again[library.ID] = true
+		s.mu.Unlock()
 		return nil
 	}
 	defer lock.Unlock()
 	s.setScanning(library.ID, true)
 	defer s.setScanning(library.ID, false)
+	for {
+		err := s.scanOnce(ctx, actor, library)
+		s.mu.Lock()
+		again := s.again[library.ID]
+		delete(s.again, library.ID)
+		s.mu.Unlock()
+		if err != nil || !again {
+			return err
+		}
+	}
+}
+
+func (s *Service) scanOnce(ctx context.Context, actor accounts.User, library libraryRow) error {
 	err := s.scanLocked(ctx, actor, library)
 	message := ""
 	if err != nil {

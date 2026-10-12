@@ -266,7 +266,10 @@ func run(logger *slog.Logger) error {
 		Music:      musicService,
 		Feedback:   feedbackapi.New(feedbackStore, logger),
 		Transfers:  transferAPI,
-		Logger:     logger,
+		// Web uploads and other changes rescan the media libraries of their
+		// space a few seconds later.
+		FilesChanged: mediaService.SpaceChanged,
+		Logger:       logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
 		ScreensaverDirectory: configuredScreensaverDirectory(),

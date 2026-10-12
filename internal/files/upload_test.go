@@ -220,7 +220,7 @@ func TestUploadFollowsItsFolderWhenItMoves(t *testing.T) {
 	if _, err := f.service.WriteUpload(f.ctx, upload, 0, strings.NewReader("data")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.Move(f.ctx, f.alice, folder.ID, "", "已整理"); err != nil {
+	if _, err := f.service.Move(f.ctx, f.alice, folder.ID, "", "", "已整理"); err != nil {
 		t.Fatalf("Move() error = %v", err)
 	}
 	if _, err := f.service.CommitUpload(f.ctx, f.alice, upload); err != nil {

@@ -1,5 +1,7 @@
-import { Clapperboard, Film, FolderOpen, Heart, History, House, Layers, LayoutGrid, Library, Tv, Video } from "lucide-react";
+import { Film, FolderOpen, Heart, History, House, Layers, LayoutGrid, Library, Tv, Video } from "lucide-react";
 import { ReactNode } from "react";
+
+import { MediaCenterGlyph } from "../MediaCenterGlyph";
 
 import type { Category, MediaLibrary } from "./mediaApi";
 
@@ -41,7 +43,7 @@ export function Sidebar({ active, libraries, processing, onSelect }: { active?: 
   const pending = (libraries ?? []).reduce((sum, library) => sum + (library.scan.state === "processing" ? library.scan.pending : 0), 0);
   return (
     <nav className="mc-sidebar" aria-label="影视中心导航">
-      <div className="mc-brand"><span className="mc-brand-mark"><Clapperboard /></span><strong>影视中心</strong></div>
+      <div className="mc-brand"><span className="mc-brand-mark"><MediaCenterGlyph aria-hidden="true" /></span><strong>影视中心</strong></div>
       <div className="mc-nav">
         {primary.map((item) => <Item key={item.section} {...item} active={active === item.section} count={counts[item.section]} onSelect={onSelect} />)}
       </div>

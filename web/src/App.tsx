@@ -31,7 +31,6 @@ import {
   Music2,
   PanelLeftClose,
   Pencil,
-  PlaySquare,
   RefreshCw,
   Scissors,
   Search,
@@ -44,7 +43,6 @@ import {
   Upload,
   UsersRound,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
@@ -62,6 +60,7 @@ import { DockerPanel } from "./DockerPanel";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
+import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
 import { MusicPanel } from "./music/MusicPanel";
 import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
@@ -121,11 +120,11 @@ const initialWindows: WindowModel[] = [
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
 ];
 
-const windowIcons: Record<WindowID, LucideIcon> = {
+const windowIcons: Record<WindowID, AppGlyph> = {
   files: FolderClosed,
   transfers: ArrowDownUp,
   photos: Image,
-  media: PlaySquare,
+  media: MediaCenterGlyph,
   music: Music2,
   trash: Trash2,
   snapshots: Camera,
@@ -287,7 +286,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", keywords: "shell 命令行 bash", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
     ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
-    { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <PlaySquare />, active: isOpen("media"), onClick: () => openWindow("media") },
+    { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <MediaCenterGlyph />, active: isOpen("media"), onClick: () => openWindow("media") },
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
     { id: "download", label: "传输中心", ariaLabel: "打开传输中心", keywords: "传输 上传 下载 进度 续传 transfer upload download", tone: "download", icon: <ArrowDownUp />, active: isOpen("transfers"), onClick: () => openWindow("transfers") },
     { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", keywords: "快照 恢复 历史版本 snapshot", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
@@ -607,7 +606,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
 	const canMutateSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
 	const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
-	const canPaste = Boolean(clipboard?.entries.length && !viewing && !activity && !(clipboard.mode === "move" && clipboard.entries.every((entry) => (entry.parentId ?? "") === parentID)));
+	const canPaste = Boolean(clipboard?.entries.length && !viewing && !activity && !(clipboard.mode === "move" && clipboard.entries.every((entry) => entry.spaceId === spaceID && (entry.parentId ?? "") === parentID)));
 	const canDownload = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length);
 	const archiveDownload = selectedEntries.length > 1 || selectedEntries[0]?.kind === "directory";
 	const uploadsHere = transfers.uploads.filter((upload) => upload.target.spaceId === spaceID && ["queued", "running", "paused", "waiting", "conflict"].includes(upload.phase));
@@ -760,12 +759,13 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 		setActivity(`${clipboard.mode === "copy" ? "正在复制" : "正在移动"} ${clipboard.entries.length} 个项目…`);
 		try {
 			for (const source of clipboard.entries) {
-				const name = clipboard.mode === "copy" && (source.parentId ?? "") === parentID ? duplicateFileName(source.name) : source.name;
-				if (clipboard.mode === "copy") await copyFile(source.id, parentID, name);
-				else await moveFile(source.id, parentID, name);
+				const here = source.spaceId === spaceID && (source.parentId ?? "") === parentID;
+				const name = clipboard.mode === "copy" && here ? duplicateFileName(source.name) : source.name;
+				if (clipboard.mode === "copy") await copyFile(source.id, parentID, name, spaceID);
+				else if (!here) await moveFile(source.id, parentID, name, spaceID);
 			}
 			if (clipboard.mode === "move") setClipboard(undefined);
-			setSelectedItemID(""); setSelectedItemIDs([]); await refresh(spaceID, parentID); setError("");
+			setSelectedItemID(""); setSelectedItemIDs([]); await Promise.all([refresh(spaceID, parentID), refreshVolume()]); setError("");
 		} catch (caught) { setError(messageOf(caught)); }
 		finally { setActivity(""); }
 	};
