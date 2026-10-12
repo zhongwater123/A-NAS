@@ -55,14 +55,24 @@ func ProjectName(id string) string {
 const AppLabel = "io.a-nas.app"
 
 type App struct {
-	ID          string
-	Title       string
-	Tagline     string
+	ID      string
+	Title   string
+	Tagline string
+	// Description and Notes are Markdown from the manifest; Notes is its
+	// advice before first use, such as a default account.
 	Description string
-	Category    string
-	Version     string
-	Author      string
-	Website     string
+	Notes       string
+	// Category is the A-NAS category the app is listed under (categories.go).
+	Category  string
+	Version   string
+	Author    string
+	Developer string
+	// Website, Repo and Docs are http(s) links, empty when the manifest has none.
+	Website string
+	Repo    string
+	Docs    string
+	// Updated is the upstream date of the vendored manifest, YYYY-MM-DD.
+	Updated string
 	// WebPort is the published port of the app's web interface, 0 if none.
 	WebPort uint16
 	Scheme  string

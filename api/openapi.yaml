@@ -1598,7 +1598,7 @@ components:
     AppStatus:
       type: object
       additionalProperties: false
-      required: [id, title, tagline, description, category, version, author, website, scheme, path, state, running, total]
+      required: [id, title, tagline, description, notes, category, version, author, developer, website, repo, docs, updated, scheme, path, state, running, total]
       properties:
         id:
           type: string
@@ -1608,14 +1608,32 @@ components:
           type: string
         description:
           type: string
+          description: Markdown from the vendored manifest.
+        notes:
+          type: string
+          description: Markdown advice from the manifest for first use, such as a default account; empty when it has none.
         category:
           type: string
+          description: A-NAS category; empty when the container agent predates A-NAS categories.
+          enum: ["", media, reading, photos, downloads, files, notes, workflow, system]
         version:
           type: string
         author:
           type: string
+        developer:
+          type: string
         website:
           type: string
+          description: Absolute http(s) link, or empty.
+        repo:
+          type: string
+          description: Absolute http(s) link, or empty.
+        docs:
+          type: string
+          description: Absolute http(s) link, or empty.
+        updated:
+          type: string
+          description: Upstream date of the vendored manifest (YYYY-MM-DD), or empty.
         webPort:
           type: integer
           minimum: 1
