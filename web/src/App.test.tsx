@@ -275,7 +275,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     // Other commands stay available while files upload.
     expect(within(dialog).getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(false);
     tus.uploads[0].options.onProgress(5, 5);
-    expect(await within(dialog).findByRole("button", { name: /正在上传 2 个/ })).toBeTruthy();
+    expect(await within(dialog).findByRole("button", { name: /正在上传 2 个文件/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /传输中心：2 个任务/ })).toBeTruthy();
 
     const browser = within(dialog).getByRole("region", { name: "文件浏览器" });

@@ -136,12 +136,15 @@ describe("the upload queue", () => {
     expect(store.getSnapshot().uploads).toEqual([]);
   });
 
-  it("starts a lost upload again once, and fails the folder's uploads when it is gone", () => {
+  it("starts a lost upload again once, and fails the folder's uploads when it is gone", async () => {
     store.enqueue([{ file: file("a.jpg") }], target);
     tus.uploads[0].created("upload-a");
     tus.uploads[0].fail("PATCH", 404);
-    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", restarted: true, transferred: 0 });
+    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", restarted: true, transferred: 0, superseded: ["upload-a"] });
     expect(tus.uploads[1].options.endpoint).toBe("/api/v1/uploads");
+    await vi.advanceTimersByTimeAsync(0);
+    // The NAS's record of the lost upload goes; the restarted one replaces it.
+    expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a", method: "DELETE" });
     tus.uploads[1].created("upload-a2");
     tus.uploads[1].fail("HEAD", 404);
     expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "failed", error: { code: "upload_lost" } });

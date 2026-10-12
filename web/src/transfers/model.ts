@@ -63,7 +63,7 @@ export function transferItems(snapshot: TransferSnapshot): TransferItem[] {
   const owned = new Set<string>();
   const items: TransferItem[] = snapshot.uploads.map((upload) => {
     const remote = upload.transferId ? server.get(upload.transferId) : undefined;
-    if (upload.transferId) owned.add(upload.transferId);
+    for (const id of [upload.transferId, ...(upload.superseded ?? [])]) if (id) owned.add(id);
     return {
       id: upload.key, direction: "upload", kind: "file", name: upload.name, location: upload.target,
       relativePath: upload.directories.join("/") || undefined, total: upload.size, transferred: upload.transferred, speed: upload.speed,
@@ -135,12 +135,11 @@ export interface TransferTotals {
 }
 
 export function transferTotals(items: TransferItem[]): TransferTotals {
-  // Uploads a closed page left behind do not move until reattached.
-  const current = items.filter((item) => isCurrent(item) && !(item.status === "interrupted" && !item.local));
+  const current = items.filter(isCurrent);
   let total = 0;
   let done = 0;
   const totals: TransferTotals = { uploads: 0, downloads: 0, attention: 0, uploadSpeed: 0, downloadSpeed: 0, remainingBytes: 0, progress: 0 };
-  for (const item of items.filter(isCurrent)) {
+  for (const item of current) {
     if (item.direction === "upload") totals.uploads += 1;
     else totals.downloads += 1;
     if (item.status === "conflict" || item.status === "failed" || item.status === "waiting" || (item.status === "interrupted" && !item.local)) totals.attention += 1;

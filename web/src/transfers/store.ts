@@ -36,8 +36,10 @@ export interface LocalUpload {
   hold?: Hold;
   savedName?: string;
   replaced?: boolean;
-  // restarted is set when the NAS lost the upload and it began again.
+  // restarted is set when the NAS lost the upload and it began again;
+  // superseded holds the transfers it replaced, which belong to it.
   restarted?: boolean;
+  superseded?: string[];
   createdAt: number;
   finishedAt?: number;
 }
@@ -458,8 +460,12 @@ export class TransferStore {
       case "lost":
         // The NAS restarted or forgot the upload: start it again from the
         // beginning, once.
-        if (!upload.restarted) this.update(key, { phase: "queued", transferId: undefined, transferred: 0, restarted: true });
-        else this.update(key, { phase: "failed", error: { code: "upload_lost", message: reason.message }, speed: 0 });
+        if (!upload.restarted) {
+          const superseded = upload.transferId ? [...(upload.superseded ?? []), upload.transferId] : upload.superseded;
+          this.update(key, { phase: "queued", transferId: undefined, transferred: 0, restarted: true, superseded });
+          // The NAS's record of the lost upload would only repeat this one.
+          if (upload.transferId) void removeTransfer(upload.transferId).catch(() => undefined);
+        } else this.update(key, { phase: "failed", error: { code: "upload_lost", message: reason.message }, speed: 0 });
         break;
       case "missing":
         // The target folder is gone for every upload still bound for it.

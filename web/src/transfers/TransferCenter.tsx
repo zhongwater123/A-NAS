@@ -28,11 +28,15 @@ export function TransferCenter({ onOpenFiles, onOpenLocation }: { onOpenFiles: (
   const totals = useMemo(() => transferTotals(items), [items]);
   const current = items.filter(isCurrent);
   const history = items.filter((item) => !isCurrent(item));
-  const shown = view === "uploads" ? current.filter((item) => item.direction === "upload")
-    : view === "downloads" ? current.filter((item) => item.direction === "download")
-    : view === "history" ? history.filter((item) => filter === "all" || (filter === "unfinished" ? item.status !== "completed" : item.direction === filter))
-    : current;
-  const groups = useMemo(() => groupItems(shown), [shown]);
+  // A batch stays in progress, finished files included, until its last file
+  // finishes; then all of it moves to the history.
+  const groups = useMemo(() => {
+    const scoped = view === "uploads" ? items.filter((item) => item.direction === "upload")
+      : view === "downloads" ? items.filter((item) => item.direction === "download")
+      : view === "history" ? items.filter((item) => filter === "all" || (filter === "unfinished" ? item.status !== "completed" : item.direction === filter))
+      : items;
+    return groupItems(scoped).filter((group) => group.items.some(isCurrent) !== (view === "history"));
+  }, [items, view, filter]);
   const leftBehind = snapshot.server.filter((transfer) => transfer.direction === "upload" && (transfer.state === "interrupted" || transfer.state === "paused") && !snapshot.uploads.some((upload) => upload.transferId === transfer.id));
   const running = snapshot.uploads.some((upload) => ["queued", "running", "waiting"].includes(upload.phase));
   const paused = snapshot.uploads.some((upload) => upload.phase === "paused");
@@ -193,16 +197,9 @@ function BatchCard({ group, onOpenLocation }: { group: TransferGroup; onOpenLoca
         {group.speed > 0 && <span className="tc-speed">{formatSpeed(group.speed)} · {formatRemaining(group.total - group.transferred, group.speed)}</span>}
       </div>
       {conflicts.length > 0 && (
-        <div className="tc-conflict" role="group" aria-label="同名文件">
-          <CircleAlert />
-          <div><strong>{conflicts.length} 个文件与目标位置的文件同名</strong><span>{conflicts.slice(0, 3).map((item) => item.name).join("、")}{conflicts.length > 3 ? " 等" : ""}</span></div>
-          <div className="tc-conflict-actions">
-            <button type="button" className="tc-button" onClick={() => answer("skip")}><SkipForward />跳过</button>
-            <button type="button" className="tc-button" onClick={() => answer("rename")}><CopyPlus />保留两者</button>
-            <button type="button" className="tc-button warning" onClick={() => answer("replace")}><Replace />替换</button>
-          </div>
+        <ConflictBar title={`${conflicts.length} 个文件与目标位置的文件同名`} detail={`${conflicts.slice(0, 3).map((item) => item.name).join("、")}${conflicts.length > 3 ? " 等" : ""}`} onAnswer={answer}>
           <label className="tc-remember"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />这一批之后的同名文件也这样处理</label>
-        </div>
+        </ConflictBar>
       )}
       {open && (
         <div className="tc-batch-files">
@@ -232,13 +229,34 @@ function ItemRow({ item, compact, onOpenLocation }: { item: TransferItem; compac
         </div>
       </div>
       <div className="tc-actions"><RowActions item={item} /></div>
+      {item.status === "conflict" && item.local && !compact && (
+        <ConflictBar title="目标位置已有同名文件" detail="选择如何处理这个文件；替换时原文件会移到回收站。" onAnswer={(choice) => transferStore.resolveConflict(item.local!.key, choice)} />
+      )}
     </article>
+  );
+}
+
+function ConflictBar({ title, detail, onAnswer, children }: { title: string; detail: string; onAnswer: (choice: ConflictChoice) => void; children?: ReactNode }) {
+  return (
+    <div className="tc-conflict" role="group" aria-label="同名文件">
+      <CircleAlert />
+      <div><strong>{title}</strong><span>{detail}</span></div>
+      <div className="tc-conflict-actions">
+        <button type="button" className="tc-button" onClick={() => onAnswer("skip")}><SkipForward />跳过</button>
+        <button type="button" className="tc-button" onClick={() => onAnswer("rename")}><CopyPlus />保留两者</button>
+        <button type="button" className="tc-button warning" onClick={() => onAnswer("replace")}><Replace />替换</button>
+      </div>
+      {children}
+    </div>
   );
 }
 
 function RowDetail({ item }: { item: TransferItem }) {
   if (item.status === "running") {
-    return <span className="tc-speed">{item.speed > 0 ? `${formatSpeed(item.speed)} · ${formatRemaining(item.total - item.transferred, item.speed)}` : "正在连接…"}</span>;
+    return <>
+      <span className="tc-speed">{item.speed > 0 ? `${formatSpeed(item.speed)} · ${formatRemaining(item.total - item.transferred, item.speed)}` : "正在连接…"}</span>
+      {item.restarted && <span className="warning">NAS 丢失了进度，已从头重新上传</span>}
+    </>;
   }
   if (item.failure && (item.status === "failed" || item.status === "canceled")) return <span className="danger">{item.failure}</span>;
   if (item.status === "waiting" && item.hold) return <span className="warning">{holdText[item.hold].title}</span>;
@@ -255,11 +273,6 @@ function RowActions({ item }: { item: TransferItem }) {
   if (item.external) return item.status !== "running" ? <IconButton label="从列表移除" onClick={() => transferStore.dismiss(item.id)}><X /></IconButton> : null;
   if (local) {
     return <>
-      {item.status === "conflict" && <>
-        <IconButton label="跳过" onClick={() => transferStore.resolveConflict(local.key, "skip")}><SkipForward /></IconButton>
-        <IconButton label="保留两者" onClick={() => transferStore.resolveConflict(local.key, "rename")}><CopyPlus /></IconButton>
-        <IconButton label="替换" onClick={() => transferStore.resolveConflict(local.key, "replace")}><Replace /></IconButton>
-      </>}
       {(item.status === "running" || item.status === "queued" || item.status === "waiting") && <IconButton label="暂停" onClick={() => transferStore.pause(local.key)}><Pause /></IconButton>}
       {item.status === "paused" && <IconButton label="继续" onClick={() => transferStore.resume(local.key)}><Play /></IconButton>}
       {item.status === "failed" && <IconButton label="重试" onClick={() => transferStore.resume(local.key)}><RotateCcw /></IconButton>}
