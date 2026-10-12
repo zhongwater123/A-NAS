@@ -14,7 +14,7 @@ const twoPaneWidth = 700;
 export const snapshotTitle = (snapshot: Pick<Snapshot, "name" | "origin">) => (snapshot.origin === "scheduled" && snapshot.name.startsWith("定时快照 ") ? "定时快照" : snapshot.name);
 
 export function SnapshotsPage() {
-  const { spaces, data, spaceId, setSpaceId, focus, canManage, createSnapshot, navigate, refresh } = useBackup();
+  const { spaces, data, spaceId, setSpaceId, focus, consumeFocus, canManage, createSnapshot, navigate, refresh } = useBackup();
   const space = spaces.find((item) => item.id === spaceId) ?? spaces[0];
   const spaceData = space ? data[space.id] : undefined;
   const snapshots = spaceData?.snapshots;
@@ -38,10 +38,11 @@ export function SnapshotsPage() {
     if (focus && snapshots.some((snapshot) => snapshot.id === focus)) {
       setSelectedId(focus);
       setShowDetail(true);
+      consumeFocus();
       return;
     }
     setSelectedId((current) => (current && snapshots.some((snapshot) => snapshot.id === current) ? current : snapshots[0]?.id));
-  }, [snapshots, focus]);
+  }, [snapshots, focus, consumeFocus]);
 
   const groups = useMemo(() => {
     const result: { day: string; items: Snapshot[] }[] = [];

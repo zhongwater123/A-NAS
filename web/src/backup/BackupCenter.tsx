@@ -32,8 +32,10 @@ interface Backup {
   data: Record<string, SpaceData>;
   spaceId: string;
   setSpaceId: (id: string) => void;
-  // focus is a snapshot the snapshots page should open, once.
+  // focus is a snapshot the snapshots page should open; it calls
+  // consumeFocus once it has, so later refreshes keep the person's choice.
   focus?: string;
+  consumeFocus: () => void;
   // restored counts finished restores, so views of what is in a space reload.
   restored: number;
   navigate: (page: Page, options?: { spaceId?: string; focus?: string }) => void;
@@ -142,6 +144,7 @@ export function BackupCenter({ userId, isAdmin, onOpenFiles }: { userId: string;
     setDrawer(false);
   }, []);
 
+  const consumeFocus = useCallback(() => setFocus(undefined), []);
   const canManage = useCallback((space: Space) => data[space.id]?.schedule?.canManage ?? (space.kind === "shared" ? isAdmin : space.ownerUserId === userId), [data, isAdmin, userId]);
   const setSchedule = useCallback((schedule: SnapshotSchedule) => {
     setData((current) => ({ ...current, [schedule.spaceId]: { ...current[schedule.spaceId], schedule } }));
@@ -152,9 +155,9 @@ export function BackupCenter({ userId, isAdmin, onOpenFiles }: { userId: string;
   const finishRestore = (key: number) => setRestores((current) => current.filter((job) => job.key !== key));
 
   const context = useMemo<Backup>(() => ({
-    userId, isAdmin, spaces: spaces ?? [], data, spaceId, setSpaceId, focus, restored, navigate, refresh, setSchedule, canManage,
+    userId, isAdmin, spaces: spaces ?? [], data, spaceId, setSpaceId, focus, consumeFocus, restored, navigate, refresh, setSchedule, canManage,
     createSnapshot: setCreating, restore, toast, openFiles: onOpenFiles,
-  }), [userId, isAdmin, spaces, data, spaceId, focus, restored, navigate, refresh, setSchedule, canManage, restore, toast, onOpenFiles]);
+  }), [userId, isAdmin, spaces, data, spaceId, focus, consumeFocus, restored, navigate, refresh, setSchedule, canManage, restore, toast, onOpenFiles]);
 
   const background = restores.filter((job) => job.background);
   const sidebarOpen = !narrow || drawer;
