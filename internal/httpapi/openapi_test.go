@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"image"
 	"image/png"
 	"net/http"
@@ -23,11 +24,14 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
+	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
+	"github.com/zhongwater123/A-NAS/internal/transfers"
+	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 )
 
 func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
@@ -50,6 +54,14 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	mediaHandler := mediaAPIFor(movies.media, movies.admin)
 	mediaVideo := "/api/v1/media/videos/" + movies.film
 	feedbackHandler, feedbackItem := feedbackAPI(t)
+	transfer := transfersAPI(t)
+	tusHeaders := func(headers map[string]string) map[string]string {
+		headers["Tus-Resumable"] = "1.0.0"
+		return headers
+	}
+	uploadMetadata := func(name string) string {
+		return "filename " + base64.StdEncoding.EncodeToString([]byte(name)) + ",spaceId " + base64.StdEncoding.EncodeToString([]byte(transfer.space))
+	}
 	feedbackPath := "/api/v1/feedback/" + feedbackItem.ID
 	created, createdType := feedbackForm{text: "相册里的视频无法播放", images: [][]byte{feedbackPNG(t)}}.encode(t)
 	edit, editType := feedbackForm{text: "改为：MKV 无法播放", version: feedbackItem.Version, keep: []string{feedbackItem.Images[0].ID}}.encode(t)
@@ -64,6 +76,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		reader      *fake.Reader
 		handler     http.Handler
 		csrf        bool
+		headers     map[string]string
 		wantStatus  int
 	}{
 		{name: "photo libraries", path: "/api/v1/photos/libraries", handler: photoHandler, wantStatus: http.StatusOK},
@@ -122,6 +135,24 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "feedback image missing", path: feedbackPath + "/images/feedback-image:missing", handler: feedbackHandler, wantStatus: http.StatusNotFound},
 		{name: "feedback missing", method: http.MethodDelete, path: "/api/v1/feedback/feedback:missing", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
 		{name: "feedback unavailable", path: "/api/v1/feedback", handler: feedbackapi.New(nil, nil), wantStatus: http.StatusServiceUnavailable},
+		{name: "transfers", path: "/api/v1/transfers", handler: transfer.handler, wantStatus: http.StatusOK},
+		{name: "transfer", path: "/api/v1/transfers/" + transfer.upload, handler: transfer.handler, wantStatus: http.StatusOK},
+		{name: "transfer missing", path: "/api/v1/transfers/upload-missing", handler: transfer.handler, wantStatus: http.StatusNotFound},
+		{name: "download create", method: http.MethodPost, body: `{"entryIds":["` + transfer.file + `"]}`, path: "/api/v1/transfers/downloads", handler: transfer.handler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "download empty", method: http.MethodPost, body: `{"entryIds":[]}`, path: "/api/v1/transfers/downloads", handler: transfer.handler, csrf: true, wantStatus: http.StatusUnprocessableEntity},
+		{name: "download content", path: "/api/v1/transfers/" + transfer.download + "/content", handler: transfer.handler, wantStatus: http.StatusOK},
+		{name: "download range", path: "/api/v1/transfers/" + transfer.download + "/content", headers: map[string]string{"Range": "bytes=2-"}, handler: transfer.handler, wantStatus: http.StatusPartialContent},
+		{name: "download pause", method: http.MethodPost, path: "/api/v1/transfers/" + transfer.download + "/pause", handler: transfer.handler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "upload offset", method: http.MethodHead, path: "/api/v1/uploads/" + transfer.upload, headers: tusHeaders(map[string]string{}), handler: transfer.handler, wantStatus: http.StatusOK},
+		{name: "upload part", method: http.MethodPatch, body: "ab", contentType: "application/offset+octet-stream", path: "/api/v1/uploads/" + transfer.upload, headers: tusHeaders(map[string]string{"Upload-Offset": "0"}), handler: transfer.handler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "upload pause", method: http.MethodPost, path: "/api/v1/transfers/" + transfer.upload + "/pause", handler: transfer.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "upload create", method: http.MethodPost, path: "/api/v1/uploads", headers: tusHeaders(map[string]string{"Upload-Length": "3", "Upload-Metadata": uploadMetadata("new.bin")}), handler: transfer.handler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "upload create taken", method: http.MethodPost, path: "/api/v1/uploads", headers: tusHeaders(map[string]string{"Upload-Length": "3", "Upload-Metadata": uploadMetadata("clip.bin")}), handler: transfer.handler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "upload terminate", method: http.MethodDelete, path: "/api/v1/uploads/" + transfer.other, headers: tusHeaders(map[string]string{}), handler: transfer.handler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "transfer cancel", method: http.MethodPost, path: "/api/v1/transfers/" + transfer.upload + "/cancel", handler: transfer.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "transfer remove", method: http.MethodDelete, path: "/api/v1/transfers/" + transfer.upload, handler: transfer.handler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "transfers clear", method: http.MethodDelete, path: "/api/v1/transfers", handler: transfer.handler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "transfers unavailable", path: "/api/v1/transfers", handler: unavailableTransfers(t), wantStatus: http.StatusServiceUnavailable},
 		{name: "health", path: "/healthz", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "system", path: "/api/v1/system", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "disks", path: "/api/v1/disks", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
@@ -161,6 +192,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 				}
 				if test.csrf {
 					request.Header.Set("X-CSRF-Token", "contract-test")
+				}
+				for name, value := range test.headers {
+					request.Header.Set(name, value)
 				}
 				return request
 			}
@@ -218,6 +252,85 @@ func feedbackAPI(t *testing.T) (http.Handler, feedback.Item) {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.ServeHTTP(w, r.WithContext(feedbackapi.WithUser(r.Context(), member)))
 	}), item
+}
+
+// transferContract is the transfer API acting for an administrator, with a
+// file in the shared space, a download of it and two uploads in progress.
+type transferContract struct {
+	handler                              http.Handler
+	space, file, download, upload, other string
+}
+
+func transfersAPI(t *testing.T) transferContract {
+	t.Helper()
+	ctx := context.Background()
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
+	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spaces, err := accountService.ListSpaces(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract transferContract
+	for _, space := range spaces {
+		if space.Kind == accounts.SpaceKindShared {
+			contract.space = space.ID
+		}
+	}
+	fileStore, err := files.OpenSQLite(filepath.Join(t.TempDir(), "files.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileStore.Close() })
+	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	entry, err := fileService.Upload(ctx, admin, contract.space, "", "clip.bin", strings.NewReader("0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract.file = entry.ID
+	service, err := transfers.Open(filepath.Join(t.TempDir(), "transfers.db"), fileService, accountService, transfers.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	download, err := service.CreateDownload(ctx, admin, []string{entry.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract.download = download.ID
+	for name, target := range map[string]*string{"first.bin": &contract.upload, "second.bin": &contract.other} {
+		upload, err := service.BeginUpload(ctx, admin, transfers.UploadRequest{UploadRequest: files.UploadRequest{
+			SpaceID: contract.space, Name: name, Size: 4, Conflict: files.ConflictAsk,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		*target = upload.ID
+	}
+	api, err := transfersapi.New(service, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.ServeHTTP(w, r.WithContext(transfersapi.WithUser(r.Context(), admin)))
+	})
+	return contract
+}
+
+func unavailableTransfers(t *testing.T) http.Handler {
+	t.Helper()
+	api, err := transfersapi.New(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return api
 }
 
 func containerAPI(manager *fakecontainers.Manager) http.Handler {
