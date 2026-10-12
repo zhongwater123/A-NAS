@@ -198,9 +198,9 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if snapshottedFile.ID == "" {
 		t.Fatalf("snapshot did not contain %q: %#v", moved.Name, snapshotEntries)
 	}
-	fromSnapshot, err := service.RestoreSnapshotFile(ctx, alice, snapshot.ID, snapshottedFile.ID, directory.ID, "快照恢复.txt")
+	fromSnapshot, err := service.RestoreSnapshotEntry(ctx, alice, snapshot.ID, snapshottedFile.ID, directory.ID, "快照恢复.txt")
 	if err != nil {
-		t.Fatalf("RestoreSnapshotFile() error = %v", err)
+		t.Fatalf("RestoreSnapshotEntry() error = %v", err)
 	}
 	snapshotContent, err := service.OpenContent(ctx, alice, fromSnapshot.ID)
 	if err != nil {

@@ -271,6 +271,8 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
+	// The Host Agent takes scheduled snapshots, so they need no session.
+	go fileService.RunSnapshotSchedules(ctx, accountService, logger)
 	go mediaService.Run(ctx)
 	if photoService != nil {
 		background := make(chan struct{})

@@ -4,7 +4,7 @@ info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
   description: >-
-    Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, snapshots,
+    Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
     the managed photo library, the media center, the in-place music library, the shared feedback list, an opt-in administrator terminal, and container lifecycle actions that go through the separate
     container agent.
 servers:
@@ -300,6 +300,49 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
       responses:
         "201": { description: Snapshot created, content: { application/json: { schema: { $ref: "#/components/schemas/Snapshot" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/spaces/{spaceId}/snapshot-schedule:
+    get:
+      operationId: getSnapshotSchedule
+      summary: Read the snapshot schedule of a space
+      description: >-
+        Spaces without a stored schedule report a disabled default. The schedule is read from the catalog on the
+        system disk and is available while the data volume is offline.
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }]
+      responses:
+        "200": { description: The schedule and its latest run, content: { application/json: { schema: { $ref: "#/components/schemas/SnapshotSchedule" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+    put:
+      operationId: updateSnapshotSchedule
+      summary: Change the snapshot schedule of a space
+      description: >-
+        Only the owner of a personal space and administrators for the shared space may change it. Times are local
+        to the device. After each successful scheduled snapshot, scheduled snapshots beyond the newest keep are
+        deleted; manual snapshots are never deleted by a schedule.
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SnapshotScheduleSettings" } } } }
+      responses:
+        "200": { description: The updated schedule, content: { application/json: { schema: { $ref: "#/components/schemas/SnapshotSchedule" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/spaces/{spaceId}/snapshot-search:
+    get:
+      operationId: searchSnapshots
+      summary: Find files and folders by name in all snapshots of a space
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }, { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }]
+      responses:
+        "200":
+          description: Matching paths, exact names first, each with its distinct versions newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, truncated]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SnapshotMatch" } }
+                  truncated: { type: boolean, description: More paths matched than were returned. }
+        "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/snapshots/{snapshotId}/entries:
     get:
       operationId: listSnapshotEntries
@@ -312,8 +355,26 @@ paths:
       parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { name: entryId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
       responses:
-        "201": { description: File restored as a new entry, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "201": { description: File or folder restored as a new entry; a folder brings everything below it, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
         "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/snapshots/{snapshotId}/entries/{entryId}/content:
+    get:
+      operationId: downloadSnapshotFile
+      summary: Download one file from a snapshot
+      description: The content is streamed from the snapshot and cannot be requested in ranges.
+      parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { name: entryId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/snapshots/{snapshotId}/keep:
+    post:
+      operationId: keepSnapshot
+      summary: Turn a scheduled snapshot into a manual one that schedules never delete
+      parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The kept snapshot, content: { application/json: { schema: { $ref: "#/components/schemas/Snapshot" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
   /api/v1/snapshots/{snapshotId}:
     delete:
       operationId: deleteSnapshot
@@ -1915,13 +1976,16 @@ components:
     Snapshot:
       type: object
       additionalProperties: false
-      required: [id, spaceId, name, createdBy, createdAt]
+      required: [id, spaceId, name, origin, createdBy, createdAt, fileCount, sizeBytes]
       properties:
         id: { type: string }
         spaceId: { type: string }
         name: { type: string }
-        createdBy: { type: string }
+        origin: { type: string, enum: [manual, scheduled], description: Scheduled snapshots are deleted by the retention of their schedule; manual ones only by people. }
+        createdBy: { type: string, description: "The user who created a manual snapshot, or system for a scheduled one." }
         createdAt: { type: string, format: date-time }
+        fileCount: { type: integer, format: int64, minimum: 0 }
+        sizeBytes: { type: integer, format: int64, minimum: 0, description: "Total size of the files held, not the space the snapshot takes on disk." }
     SnapshotEntry:
       type: object
       additionalProperties: false
@@ -1933,6 +1997,65 @@ components:
         name: { type: string }
         kind: { type: string, enum: [file, directory] }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
+        modifiedAt: { type: string, format: date-time, description: Absent for snapshots taken before modification times were recorded. }
+    SnapshotScheduleSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, frequency, time, weekday, keep]
+      properties:
+        enabled: { type: boolean }
+        frequency: { type: string, enum: [hourly, daily, weekly] }
+        time: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: Local time of daily and weekly runs; hourly runs use its minute. }
+        weekday: { type: integer, minimum: 0, maximum: 6, description: "Day of weekly runs, 0 for Sunday." }
+        keep: { type: integer, minimum: 1, maximum: 100, description: Scheduled snapshots kept after each successful run. }
+    SnapshotSchedule:
+      type: object
+      additionalProperties: false
+      required: [spaceId, enabled, frequency, time, weekday, keep, canManage]
+      properties:
+        spaceId: { type: string }
+        enabled: { type: boolean }
+        frequency: { type: string, enum: [hourly, daily, weekly] }
+        time: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        keep: { type: integer, minimum: 1, maximum: 100 }
+        updatedAt: { type: string, format: date-time }
+        lastRun: { $ref: "#/components/schemas/ScheduleRun" }
+        nextRunAt: { type: string, format: date-time, description: When the next attempt is expected; absent while disabled. }
+        canManage: { type: boolean, description: Whether the caller may change this schedule. }
+    ScheduleRun:
+      type: object
+      additionalProperties: false
+      required: [at, status]
+      properties:
+        at: { type: string, format: date-time }
+        status: { type: string, enum: [succeeded, failed] }
+        error: { type: string, enum: [volume_unavailable, space_unavailable, snapshot_failed], description: Why a failed run failed; it is retried after 15 minutes until the next run is due. }
+        snapshotId: { type: string }
+    SnapshotMatch:
+      type: object
+      additionalProperties: false
+      required: [path, name, kind, inSpace, versions]
+      properties:
+        path: { type: string, description: Slash-separated path inside the space. }
+        name: { type: string }
+        kind: { type: string, enum: [file, directory] }
+        inSpace: { type: boolean, description: Whether the file catalog still lists the path in the space. }
+        versions: { type: array, items: { $ref: "#/components/schemas/SnapshotVersion" } }
+    SnapshotVersion:
+      type: object
+      additionalProperties: false
+      required: [snapshotId, snapshotName, origin, createdAt, entryId, sizeBytes, snapshots, oldestAt]
+      properties:
+        snapshotId: { type: string, description: The newest snapshot holding this version. }
+        snapshotName: { type: string }
+        origin: { type: string, enum: [manual, scheduled] }
+        createdAt: { type: string, format: date-time }
+        entryId: { type: string }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        modifiedAt: { type: string, format: date-time }
+        snapshots: { type: integer, minimum: 1, description: How many snapshots hold the same version. }
+        oldestAt: { type: string, format: date-time, description: When the oldest snapshot holding it was taken. }
     AuditEvent:
       type: object
       additionalProperties: false
