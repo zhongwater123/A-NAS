@@ -48,6 +48,44 @@ function serve(libraries: MediaLibrary[], ...routes: Route[]) {
   return fetchMock;
 }
 
+// FakeUpload stands in for XMLHttpRequest, which uploads use for progress.
+// A held upload reports a quarter sent and waits for release().
+class FakeUpload {
+  static sent: FakeUpload[] = [];
+  static hold = false;
+  static respond: (upload: FakeUpload) => { status: number; body: unknown } = () => ({ status: 201, body: { id: "file:new" } });
+  upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
+  status = 0;
+  responseText = "";
+  url = "";
+  headers: Record<string, string> = {};
+  body?: FormData;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  open(_: string, url: string) { this.url = url; }
+  setRequestHeader(name: string, value: string) { this.headers[name] = value; }
+  abort() { this.onabort?.(); }
+  send(body: FormData) {
+    this.body = body;
+    FakeUpload.sent.push(this);
+    if (FakeUpload.hold) this.upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 4 } as ProgressEvent);
+    else queueMicrotask(() => this.release());
+  }
+  release() {
+    const { status, body } = FakeUpload.respond(this);
+    this.status = status;
+    this.responseText = JSON.stringify(body);
+    this.onload?.();
+  }
+  get file() { return this.body?.get("file") as File; }
+}
+
+function withPath(file: File, path: string): File {
+  Object.defineProperty(file, "webkitRelativePath", { value: path });
+  return file;
+}
+
 const calls = (mock: ReturnType<typeof serve>, method: string, prefix: string) =>
   mock.mock.calls.filter(([url, init]) => String(url).startsWith(prefix) && (init?.method ?? "GET") === method);
 
@@ -56,6 +94,10 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   window.localStorage.clear();
+  FakeUpload.sent = [];
+  FakeUpload.hold = false;
+  FakeUpload.respond = () => ({ status: 201, body: { id: "file:new" } });
+  vi.stubGlobal("XMLHttpRequest", FakeUpload);
 });
 
 afterEach(() => {
@@ -217,5 +259,93 @@ describe("MediaCenter", () => {
     await waitFor(() => expect(calls(fetchMock, "POST", "/api/v1/media/collections/collection%3Aweekend/items")).toHaveLength(1));
     const [, init] = calls(fetchMock, "POST", "/api/v1/media/collections/collection%3Aweekend/items")[0];
     expect(JSON.parse(String(init?.body))).toEqual({ items: ["video:heat"] });
+  });
+
+  it("uploads films from the movies page into a library that holds them", async () => {
+    const movies: MediaLibrary = { ...library, id: "library:movies", name: "电影收藏", kind: "movies", folders: [{ entryId: "file:movies", name: "电影", path: "电影" }] };
+    const shows: MediaLibrary = { ...library, id: "library:shows", name: "追剧", kind: "shows", folders: [{ entryId: "file:shows", name: "剧集", path: "剧集" }] };
+    serve([library, movies, shows]);
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /电影/ }));
+    await user.click(await screen.findByRole("button", { name: "上传" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    // The movies page offers the libraries whose films it lists.
+    expect(within(dialog).getAllByRole("radio").map((choice) => choice.textContent)).toEqual([expect.stringContaining("家庭影院"), expect.stringContaining("电影收藏")]);
+    await user.click(within(dialog).getByRole("radio", { name: /电影收藏/ }));
+    fireEvent.change(within(dialog).getByLabelText("选择要上传的文件"), {
+      target: { files: [new File(["video"], "Heat (1995).mkv"), new File(["subtitle"], "Heat (1995).zh.srt"), new File(["x"], "readme.txt")] },
+    });
+    expect(within(dialog).getByText("不是视频、字幕、NFO 或海报，已跳过")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "上传 2 个文件" }));
+    await waitFor(() => expect(within(dialog).getAllByText("已上传")).toHaveLength(2));
+    expect(FakeUpload.sent.map((upload) => [upload.url, upload.body?.get("parentId"), upload.file.name])).toEqual([
+      ["/api/v1/spaces/space%3Ashared/uploads", "file:movies", "Heat (1995).mkv"],
+      ["/api/v1/spaces/space%3Ashared/uploads", "file:movies", "Heat (1995).zh.srt"],
+    ]);
+    expect(FakeUpload.sent[0].headers["X-CSRF-Token"]).toBe("csrf");
+    await user.click(within(dialog).getByRole("button", { name: "完成" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频" })).toBeNull();
+  });
+
+  it("recreates an uploaded show folder and keeps files that already exist", async () => {
+    const fetchMock = serve([library],
+      (url, init) => {
+        if (url !== "/api/v1/spaces/space%3Ashared/directories" || init?.method !== "POST") return undefined;
+        const { parentId, name } = JSON.parse(String(init.body));
+        if (name === "三体") return json({ error: { code: "name_conflict", message: "a file with this name already exists" } }, 409);
+        return json({ id: `file:${name}`, spaceId: "space:shared", parentId, name, kind: "directory", sizeBytes: 0, modifiedAt: "" }, 201);
+      },
+      (url) => (url === "/api/v1/spaces/space%3Ashared/entries?parentId=file%3Afilms"
+        ? json({ items: [{ id: "file:santi", spaceId: "space:shared", name: "三体", kind: "directory", sizeBytes: 0, modifiedAt: "" }] }) : undefined),
+    );
+    FakeUpload.respond = (upload) => (upload.file.name === "poster.jpg"
+      ? { status: 409, body: { error: { code: "name_conflict", message: "a file with this name already exists" } } }
+      : { status: 201, body: { id: "file:new" } });
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /电视剧/ }));
+    await user.click(await screen.findByRole("button", { name: "上传" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    expect(within(dialog).getByText(/才会识别为剧集/)).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("选择要上传的文件夹"), {
+      target: { files: [
+        withPath(new File(["e1"], "三体 S01E01.mp4"), "三体/Season 1/三体 S01E01.mp4"),
+        withPath(new File(["p"], "poster.jpg"), "三体/poster.jpg"),
+        withPath(new File(["junk"], ".DS_Store"), "三体/.DS_Store"),
+      ] },
+    });
+    expect(within(dialog).getByText("三体/Season 1 · 2 B")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "上传 2 个文件" }));
+    expect(await within(dialog).findByText("同名文件已存在，未覆盖")).toBeTruthy();
+    // 三体 was already there; only Season 1 is created, inside it.
+    const made = calls(fetchMock, "POST", "/api/v1/spaces/space%3Ashared/directories").map(([, init]) => JSON.parse(String(init?.body)));
+    expect(made).toEqual([{ parentId: "file:films", name: "三体" }, { parentId: "file:santi", name: "Season 1" }]);
+    expect(FakeUpload.sent.map((upload) => [upload.body?.get("parentId"), upload.file.name])).toEqual([["file:Season 1", "三体 S01E01.mp4"], ["file:santi", "poster.jpg"]]);
+    expect(within(dialog).getByText("已上传 1 个，1 个已存在")).toBeTruthy();
+  });
+
+  it("keeps uploading to a library chosen from its card after the dialog closes", async () => {
+    FakeUpload.hold = true;
+    serve([library]);
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /媒体库/ }));
+    await user.click(await screen.findByRole("button", { name: "家庭影院的操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "上传到此媒体库" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    fireEvent.change(within(dialog).getByLabelText("选择要上传的文件"), { target: { files: [new File(["video"], "Up (2009).mp4")] } });
+    await user.click(within(dialog).getByRole("button", { name: "上传 1 个文件" }));
+    expect(await within(dialog).findByText("25%")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "在后台上传" }));
+    expect(screen.queryByRole("dialog", { name: "上传视频" })).toBeNull();
+    expect(screen.getByRole("button", { name: /正在上传，已完成 25%/ }).textContent).toContain("上传中 1/1");
+    await act(async () => { FakeUpload.sent[0].release(); });
+    expect(await screen.findByText("已上传 1 个文件，新视频稍后出现在影视中心")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /正在上传/ })).toBeNull();
+    expect(FakeUpload.sent[0].body?.get("parentId")).toBe("file:films");
   });
 });

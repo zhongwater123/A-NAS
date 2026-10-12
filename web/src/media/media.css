@@ -486,6 +486,96 @@
 .mc-collection-add { opacity: 0; color: var(--mc-accent) !important; }
 .mc-collection-list button:hover .mc-collection-add { opacity: 1; }
 
+/* Uploads */
+.mc-upload-button svg, .mc-upload-start svg { fill: none !important; stroke-width: 2 !important; }
+.mc-dialog.wide.mc-upload { width: min(720px, 100%); }
+.mc-upload-mark { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 11px; color: #fff; background: var(--mc-gradient); box-shadow: 0 8px 20px rgba(53, 104, 237, .35); }
+.mc-upload-mark svg { width: 20px; height: 20px; }
+.mc-upload-title { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.mc-upload-title small { overflow: hidden; color: var(--mc-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.mc-state.compact { min-height: 0; padding: 36px 20px; }
+.mc-upload-target { display: grid; gap: 10px; }
+.mc-upload-libraries { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 8px; }
+.mc-upload-libraries button { min-width: 0; display: flex; align-items: center; gap: 10px; border: 1px solid var(--mc-line-2); border-radius: 12px; padding: 9px 11px; color: var(--mc-ink-2); background: rgba(255, 255, 255, .03); text-align: left; transition: border-color .15s, background .15s; }
+.mc-upload-libraries button:hover { background: rgba(255, 255, 255, .06); }
+.mc-upload-libraries button.active { border-color: var(--mc-accent); color: var(--mc-ink); background: rgba(76, 157, 255, .1); box-shadow: 0 0 0 3px rgba(76, 157, 255, .14); }
+.mc-upload-libraries button.active .mc-kind-icon { color: #fff; background: var(--mc-gradient); }
+.mc-upload-libraries .mc-kind-icon { width: 30px; height: 30px; flex: none; border-radius: 9px; }
+.mc-upload-libraries .mc-kind-icon svg { width: 16px; height: 16px; }
+.mc-upload-libraries button > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.mc-upload-libraries strong { overflow: hidden; color: var(--mc-ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.mc-upload-libraries small { color: var(--mc-muted); font-size: 11.5px; }
+.mc-upload-where { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 10px; border: 1px solid var(--mc-line); border-radius: 12px; background: rgba(0, 0, 0, .22); }
+.mc-upload-space { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 8px; color: #ffd27a; background: rgba(255, 210, 122, .1); }
+.mc-upload-space svg { width: 15px; height: 15px; }
+.mc-upload-crumbs { min-width: 0; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; color: var(--mc-muted); }
+.mc-upload-crumbs > strong { padding: 0 4px; color: var(--mc-ink); font-size: 13px; }
+.mc-upload-crumbs span { display: inline-flex; align-items: center; gap: 2px; }
+.mc-upload-crumbs svg { width: 13px; height: 13px; }
+.mc-upload-crumbs button, .mc-upload-crumbs select { height: 26px; border: 0; border-radius: 7px; padding: 0 7px; color: var(--mc-ink-2); background: transparent; font-weight: 600; }
+.mc-upload-crumbs select { outline: none; background: rgba(255, 255, 255, .06); cursor: pointer; }
+.mc-upload-crumbs select option { color: #e9edf4; background: #1a1f2b; }
+.mc-upload-crumbs button:hover { color: var(--mc-ink); background: rgba(255, 255, 255, .07); }
+.mc-upload-crumbs span:last-child button { color: var(--mc-ink); }
+.mc-upload-where .mc-link { flex: none; }
+.mc-link svg.flipped { transform: rotate(180deg); }
+.mc-picker-list.short { height: auto; max-height: 168px; min-height: 52px; }
+.mc-picker-new { width: 100%; height: 38px; display: flex; align-items: center; gap: 9px; border: 0; border-top: 1px solid var(--mc-line); padding: 0 16px; color: var(--mc-ink-2); background: transparent; font-weight: 600; }
+.mc-picker-new:hover { color: var(--mc-ink); background: rgba(255, 255, 255, .04); }
+.mc-picker-new svg { width: 16px; height: 16px; color: var(--mc-accent); }
+.mc-picker-naming { margin: 6px; }
+.mc-dropzone { position: relative; display: grid; justify-items: center; gap: 12px; padding: 26px 20px 22px; border: 1.5px dashed rgba(255, 255, 255, .16); border-radius: 16px; text-align: center; background: radial-gradient(80% 120% at 50% 0%, rgba(76, 157, 255, .08), transparent 70%); transition: border-color .15s, background .15s; }
+.mc-dropzone.over { border-color: var(--mc-accent); background: radial-gradient(80% 120% at 50% 0%, rgba(76, 157, 255, .2), rgba(76, 157, 255, .05) 70%); }
+.mc-dropzone-icon { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; color: #9ccaff; background: var(--mc-accent-soft); box-shadow: 0 0 0 8px rgba(76, 157, 255, .06); transition: transform .2s var(--mc-ease); }
+.mc-dropzone.over .mc-dropzone-icon { color: #fff; background: var(--mc-accent-2); transform: translateY(-3px) scale(1.06); }
+.mc-dropzone-icon svg { width: 26px; height: 26px; }
+.mc-dropzone-text { display: grid; gap: 5px; }
+.mc-dropzone-text strong { font-size: 14px; }
+.mc-dropzone-text small { color: var(--mc-muted); font-size: 12px; }
+.mc-dropzone-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.mc-dropzone.compact { grid-template-columns: auto minmax(0, 1fr) auto; justify-items: start; align-items: center; gap: 14px; padding: 12px 14px; text-align: left; }
+.mc-dropzone.compact .mc-dropzone-icon { width: 40px; height: 40px; box-shadow: none; }
+.mc-dropzone.compact .mc-dropzone-icon svg { width: 20px; height: 20px; }
+.mc-dropzone.compact .mc-dropzone-text strong { font-size: 13px; }
+.mc-upload-list { max-height: 268px; display: grid; gap: 2px; margin: 0; padding: 4px; overflow-y: auto; border: 1px solid var(--mc-line); border-radius: 13px; list-style: none; background: rgba(0, 0, 0, .18); }
+.mc-upload-row { min-width: 0; display: flex; align-items: center; gap: 11px; padding: 8px 6px 8px 8px; border-radius: 10px; transition: background .12s; }
+.mc-upload-row:hover { background: rgba(255, 255, 255, .04); }
+.mc-upload-type { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 9px; color: #9ccaff; background: var(--mc-accent-soft); }
+.mc-upload-type svg { width: 16px; height: 16px; }
+.mc-upload-type.subtitle { color: #7fe3cf; background: rgba(78, 214, 186, .12); }
+.mc-upload-type.image { color: #c7a6ff; background: rgba(160, 120, 255, .14); }
+.mc-upload-type.nfo, .mc-upload-type.other { color: var(--mc-ink-2); background: rgba(255, 255, 255, .07); }
+.mc-upload-main { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.mc-upload-line { min-width: 0; display: flex; align-items: baseline; gap: 12px; }
+.mc-upload-line strong { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.mc-upload-main small { overflow: hidden; color: var(--mc-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.mc-upload-status { flex: none; max-width: 52%; display: inline-flex; align-items: center; gap: 4px; overflow: hidden; color: var(--mc-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.mc-upload-status svg { width: 13px; height: 13px; }
+.mc-upload-row.uploading .mc-upload-status { color: var(--mc-accent); font-weight: 700; }
+.mc-upload-row.done .mc-upload-status { color: #5bd19a; }
+.mc-upload-row.exists .mc-upload-status { color: var(--mc-gold); }
+.mc-upload-row.failed .mc-upload-status { color: var(--mc-danger); }
+.mc-upload-row.skipped, .mc-upload-row.canceled { opacity: .62; }
+.mc-upload-bar { height: 3px; overflow: hidden; border-radius: 3px; background: rgba(255, 255, 255, .1); }
+.mc-upload-bar span { display: block; height: 100%; border-radius: 3px; background: var(--mc-gradient); box-shadow: 0 0 8px rgba(76, 157, 255, .6); transition: width .2s linear; }
+.mc-icon-button.small { width: 28px; height: 28px; border-radius: 8px; }
+.mc-icon-button.small svg { width: 15px; height: 15px; }
+.mc-upload-summary { min-width: 0; flex: 1; overflow: hidden; color: var(--mc-ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.mc-upload-pill { height: 34px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--mc-line-2); border-radius: 17px; padding: 0 13px 0 6px; color: var(--mc-ink); background: rgba(20, 25, 35, .78); backdrop-filter: blur(14px); font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; animation: mc-pop .2s ease; }
+.mc-upload-pill:hover { background: rgba(32, 38, 52, .92); }
+.mc-upload-pill.failed { padding-left: 11px; color: #ffc2c8; border-color: rgba(255, 95, 109, .35); }
+.mc-upload-pill > svg { width: 16px; height: 16px; color: var(--mc-danger); }
+.mc-upload-ring { position: relative; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: var(--mc-accent); background: conic-gradient(var(--mc-accent) var(--mc-share, 0deg), rgba(255, 255, 255, .12) 0); }
+.mc-upload-ring::before { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: #141a25; }
+.mc-upload-ring svg { position: relative; width: 12px; height: 12px; }
+.mc-drop { position: absolute; z-index: 45; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(8, 10, 16, .72); backdrop-filter: blur(6px); animation: mc-pop .15s ease; }
+.mc-drop > * { pointer-events: none; }
+.mc-drop-card { width: min(460px, 100%); display: grid; justify-items: center; gap: 10px; padding: 44px 28px; border: 2px dashed var(--mc-accent); border-radius: 22px; text-align: center; background: radial-gradient(90% 90% at 50% 0%, rgba(76, 157, 255, .22), rgba(15, 20, 30, .85) 75%); box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
+.mc-drop-card .mc-dropzone-icon { width: 68px; height: 68px; color: #fff; background: var(--mc-accent-2); box-shadow: 0 0 0 10px rgba(76, 157, 255, .12), 0 14px 34px rgba(53, 104, 237, .45); }
+.mc-drop-card .mc-dropzone-icon svg { width: 32px; height: 32px; }
+.mc-drop-card strong { margin-top: 8px; font-size: 17px; }
+.mc-drop-card small { color: var(--mc-ink-2); }
+
 /* Toasts */
 /* Toasts sit under the top bar, clear of the desktop dock that covers a maximized window's bottom. */
 .mc-toasts { position: absolute; z-index: 70; left: 50%; top: 66px; display: grid; justify-items: center; gap: 8px; transform: translateX(-50%); pointer-events: none; }
