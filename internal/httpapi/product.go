@@ -401,6 +401,7 @@ func browserPreviewableContent(name string) bool {
 
 func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
+		SpaceID  string `json:"spaceId"`
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
@@ -408,10 +409,20 @@ func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Move(r.Context(), session.User, r.PathValue("fileID"), request.ParentID, request.Name)
+	// A move to another space changes both spaces.
+	var from string
+	if request.SpaceID != "" {
+		if source, _, err := h.files.Lookup(r.Context(), session.User, r.PathValue("fileID")); err == nil {
+			from = source.SpaceID
+		}
+	}
+	entry, err := h.files.Move(r.Context(), session.User, r.PathValue("fileID"), request.SpaceID, request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
+	}
+	if from != entry.SpaceID {
+		h.filesChanged(r, session, from)
 	}
 	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusOK, entry)
@@ -419,6 +430,7 @@ func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, 
 
 func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
+		SpaceID  string `json:"spaceId"`
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
@@ -426,7 +438,7 @@ func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Copy(r.Context(), session.User, r.PathValue("fileID"), request.ParentID, request.Name)
+	entry, err := h.files.Copy(r.Context(), session.User, r.PathValue("fileID"), request.SpaceID, request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return

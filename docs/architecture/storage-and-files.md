@@ -58,7 +58,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 磁盘以 Linux 稳定硬件链接形成的 `disk:*` ID 标识，执行前重新验证型号、容量、传输类型和指纹。
 - 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。
-- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由列表时增量扫描吸收。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
+- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由列表时增量扫描吸收。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
 - 后台每 5 分钟的目录对账、Samba 回收导入和回收站到期清除只为本进程见过且仍有效的会话执行；长期未登录用户在下次登录时补做。
 
 ## 文件代理

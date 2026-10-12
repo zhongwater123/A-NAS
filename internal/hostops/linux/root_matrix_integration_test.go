@@ -176,6 +176,20 @@ func TestRootPermissionMatrix(t *testing.T) {
 	if acl := asUser("root", "getfacl", "--omit-header", filepath.Join(shared, "s.txt")).output; !strings.Contains(acl, "group:a-nas-users:rw") {
 		t.Errorf("SMB-created Shared file did not inherit the folder ACL:\n%s", acl)
 	}
+	// Cutting a file from a personal space into Shared: a rename cannot leave
+	// the space's subvolume, so the Web copies it, and the copy takes Shared's
+	// ACL even though the original's mode is narrower.
+	narrow := filepath.Join(private, "narrow.txt")
+	expect("alice terminal writes a 0600 file", true, asUser("alice", "install", "-m", "600", payload, narrow))
+	if err := web.Rename(as("alice"), narrow, filepath.Join(shared, "narrow.txt")); err == nil {
+		t.Error("alice Web renamed a file out of her space's subvolume")
+	}
+	if err := web.Copy(as("alice"), narrow, filepath.Join(shared, "narrow.txt")); err != nil {
+		t.Errorf("alice Web copy into Shared: %v", err)
+	}
+	expect("bob Web reads alice's copy in Shared", true, webRead("bob", filepath.Join(shared, "narrow.txt")))
+	expect("bob SMB reads alice's copy in Shared", true, smb("bob", "Shared", "get narrow.txt /dev/null"))
+	expect("bob terminal appends to alice's copy in Shared", true, asUser("bob", "sh", "-c", "echo bob >> "+filepath.Join(shared, "narrow.txt")))
 	expect("bob SMB deletes in Shared", true, smb("bob", "Shared", "del s.txt"))
 	if _, err := os.Stat(filepath.Join(shared, ".a-nas-trash", "bob", "s.txt")); err != nil {
 		t.Errorf("Shared deletion is not in bob's trash: %v", err)

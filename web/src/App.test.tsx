@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -200,12 +200,34 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(dialog).getByRole("button", { name: "复制" }));
     await user.click(within(dialog).getByRole("button", { name: "粘贴" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/file%3A2/copies", expect.objectContaining({
-      method: "POST", body: JSON.stringify({ parentId: "", name: "A - 副本.txt" }),
+      method: "POST", body: JSON.stringify({ spaceId: "space:owner", parentId: "", name: "A - 副本.txt" }),
     }));
     const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
     expect(within(inspector).queryByRole("button")).toBeNull();
     await user.dblClick(within(dialog).getAllByRole("row").find((row) => row.textContent?.includes("图库"))!);
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
+  });
+
+  it("moves a cut file into the space it is pasted in", async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }, { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [{ id: "file:film", spaceId: "space:owner", name: "Heat (1995).mp4", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click((await within(dialog).findAllByRole("row")).find((row) => row.textContent?.includes("Heat (1995).mp4"))!);
+    await user.click(within(dialog).getByRole("button", { name: "剪切" }));
+    // Pasting where the file already is would do nothing.
+    expect(within(dialog).getByRole("button", { name: "粘贴" }).hasAttribute("disabled")).toBe(true);
+
+    await user.click(within(dialog).getByRole("button", { name: "共享空间共享" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "粘贴" }).hasAttribute("disabled")).toBe(false));
+    await user.click(within(dialog).getByRole("button", { name: "粘贴" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/file%3Afilm", expect.objectContaining({
+      method: "PATCH", body: JSON.stringify({ spaceId: "space:shared", parentId: "", name: "Heat (1995).mp4" }),
+    })));
+    expect(within(dialog).queryByText(/已剪切/)).toBeNull();
   });
 
   it("downloads files only on double click and exposes the file edit context menu", async () => {

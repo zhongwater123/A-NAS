@@ -158,14 +158,14 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if got, want := string(gotContents), "hello A-NAS"; got != want {
 		t.Fatalf("restored content = %q, want %q", got, want)
 	}
-	moved, err := service.Move(ctx, alice, restored.ID, "", "整理后.txt")
+	moved, err := service.Move(ctx, alice, restored.ID, "", "", "整理后.txt")
 	if err != nil {
 		t.Fatalf("Move() error = %v", err)
 	}
 	if got, want := moved.ParentID, ""; got != want {
 		t.Fatalf("moved parent = %q, want root", got)
 	}
-	copied, err := service.Copy(ctx, alice, moved.ID, directory.ID, "副本.txt")
+	copied, err := service.Copy(ctx, alice, moved.ID, "", directory.ID, "副本.txt")
 	if err != nil {
 		t.Fatalf("Copy() error = %v", err)
 	}
@@ -406,6 +406,132 @@ func TestTreeListsEverythingBelowAFolderWithStableIDs(t *testing.T) {
 	}
 	if _, _, err := service.Lookup(ctx, alice, songID); !errors.Is(err, files.ErrNotFound) {
 		t.Errorf("another member looked up the song: %v", err)
+	}
+}
+
+func TestCutAndCopyBetweenSpaces(t *testing.T) {
+	ctx := context.Background()
+	accountStore, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = accountStore.Close() })
+	accountService := accounts.NewService(accountStore, acceptingCredentials{}, accounts.Options{})
+	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := accountService.CreateMember(ctx, admin, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := accountService.CreateMember(ctx, admin, "bob", "bob password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spaces, err := accountService.ListSpaces(ctx, alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := findPrivateSpace(t, spaces)
+	var shared accounts.Space
+	for _, space := range spaces {
+		if space.Kind == accounts.SpaceKindShared {
+			shared = space
+		}
+	}
+	catalog, err := files.OpenSQLite(filepath.Join(t.TempDir(), "files.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close() })
+	service := files.NewService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	read := func(user accounts.User, id string) string {
+		t.Helper()
+		content, err := service.OpenContent(ctx, user, id)
+		if err != nil {
+			t.Fatalf("OpenContent(%s) error = %v", id, err)
+		}
+		defer content.Reader.Close()
+		data, _ := io.ReadAll(content.Reader)
+		return string(data)
+	}
+	names := func(user accounts.User, spaceID, parentID string) []string {
+		t.Helper()
+		entries, err := service.List(ctx, user, spaceID, parentID)
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		var names []string
+		for _, entry := range entries {
+			names = append(names, entry.Name)
+		}
+		return names
+	}
+
+	films, _ := service.CreateDirectory(ctx, alice, private.ID, "", "电影")
+	heat, _ := service.Upload(ctx, alice, private.ID, films.ID, "Heat (1995).mp4", bytes.NewBufferString("heat"))
+	extras, _ := service.CreateDirectory(ctx, alice, private.ID, films.ID, "花絮")
+	if _, err := service.Upload(ctx, alice, private.ID, extras.ID, "making.txt", bytes.NewBufferString("making of")); err != nil {
+		t.Fatal(err)
+	}
+	library, err := service.CreateDirectory(ctx, alice, shared.ID, "", "影视")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	copied, err := service.Copy(ctx, alice, heat.ID, shared.ID, library.ID, "")
+	if err != nil {
+		t.Fatalf("Copy() to the shared space error = %v", err)
+	}
+	if copied.SpaceID != shared.ID || copied.ParentID != library.ID || copied.Name != "Heat (1995).mp4" || read(bob, copied.ID) != "heat" {
+		t.Fatalf("copy = %+v", copied)
+	}
+	if read(alice, heat.ID) != "heat" {
+		t.Fatal("copying to another space changed the original")
+	}
+	// A folder only names a target inside the target space.
+	if _, err := service.Copy(ctx, alice, heat.ID, shared.ID, films.ID, ""); !errors.Is(err, files.ErrNotFound) {
+		t.Fatalf("Copy() into a folder of another space error = %v, want ErrNotFound", err)
+	}
+
+	moved, err := service.Move(ctx, alice, films.ID, shared.ID, "", "")
+	if err != nil {
+		t.Fatalf("Move() of a folder to the shared space error = %v", err)
+	}
+	if moved.SpaceID != shared.ID || moved.ParentID != "" || moved.Name != "电影" || moved.ID == films.ID {
+		t.Fatalf("moved = %+v", moved)
+	}
+	if got := names(alice, private.ID, ""); slices.Contains(got, "电影") {
+		t.Fatalf("the moved folder is still in the private space: %v", got)
+	}
+	if _, err := service.OpenContent(ctx, alice, heat.ID); !errors.Is(err, files.ErrNotFound) {
+		t.Fatalf("OpenContent(moved original) error = %v, want ErrNotFound", err)
+	}
+	tree, err := service.Tree(ctx, bob, shared.ID, moved.ID)
+	if err != nil {
+		t.Fatalf("Tree(moved folder) error = %v", err)
+	}
+	var paths []string
+	for _, entry := range tree {
+		paths = append(paths, entry.Path)
+	}
+	if !slices.Equal(paths, []string{"Heat (1995).mp4", "花絮", "花絮/making.txt"}) {
+		t.Fatalf("moved folder holds %v", paths)
+	}
+
+	again, _ := service.Upload(ctx, alice, private.ID, "", "Heat (1995).mp4", bytes.NewBufferString("heat"))
+	if _, err := service.Move(ctx, alice, again.ID, shared.ID, library.ID, ""); !errors.Is(err, files.ErrConflict) {
+		t.Fatalf("Move() onto an existing name error = %v, want ErrConflict", err)
+	}
+	if read(alice, again.ID) != "heat" {
+		t.Fatal("a refused move removed the original")
+	}
+	if _, err := service.Move(ctx, bob, again.ID, shared.ID, "", ""); !errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("Bob moved Alice's private file: %v", err)
+	}
+	if _, err := service.Copy(ctx, bob, again.ID, shared.ID, "", ""); !errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("Bob copied Alice's private file: %v", err)
 	}
 }
 

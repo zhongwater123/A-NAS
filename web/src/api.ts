@@ -234,8 +234,9 @@ export const listSpaces = async () => (await request<{items: Space[]}>("/api/v1/
 export const listEntries = async (spaceId: string, parentId = "") => (await request<{items: FileEntry[]}>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/entries?parentId=${encodeURIComponent(parentId)}`)).items;
 export const createDirectory = (spaceId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/directories`, json({ parentId, name }), true);
 export function uploadFile(spaceId: string, parentId: string, file: File) { const body = new FormData(); body.set("parentId", parentId); body.set("file", file); return request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/uploads`, { method: "POST", body }, true); }
-export const moveFile = (fileId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}`, { ...json({ parentId, name }), method: "PATCH" }, true);
-export const copyFile = (fileId: string, parentId: string, name: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}/copies`, json({ parentId, name }), true);
+// Without spaceId the target folder is in the entry's own space.
+export const moveFile = (fileId: string, parentId: string, name: string, spaceId?: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}`, { ...json({ spaceId, parentId, name }), method: "PATCH" }, true);
+export const copyFile = (fileId: string, parentId: string, name: string, spaceId?: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}/copies`, json({ spaceId, parentId, name }), true);
 export const deleteFile = (fileId: string) => request<TrashItem>(`/api/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
 export const fileDownloadURL = (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/content`;
 export const filePreviewURL = (fileId: string) => `${fileDownloadURL(fileId)}?disposition=inline`;
