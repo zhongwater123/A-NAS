@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
+	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -40,6 +41,10 @@ type ProductDependencies struct {
 	// photo service; any other handler receives the caller as a
 	// photos.Principal.
 	Photos http.Handler
+	// Media serves /api/v1/media to every signed-in user and receives the
+	// user through mediaapi.WithUser; the session token stays in the context
+	// for the File Broker.
+	Media  http.Handler
 	Logger *slog.Logger
 }
 
@@ -52,6 +57,7 @@ type productHandler struct {
 	containers http.Handler
 	apps       http.Handler
 	photos     http.Handler
+	media      http.Handler
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -65,7 +71,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
-		photos: dependencies.Photos, logger: logger, mux: http.NewServeMux(),
+		photos: dependencies.Photos, media: dependencies.Media, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -81,6 +87,9 @@ func (h *productHandler) routes() {
 	}
 	if h.photos != nil {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
+	}
+	if h.media != nil {
+		h.mux.Handle(mediaapi.PathPrefix+"/", h.withMediaUser(h.media))
 	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)
@@ -861,6 +870,22 @@ func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc 
 			principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
 			next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
 		}
+	}
+	read, write := h.withSession(serve), h.withMutation(serve)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			read(w, r)
+			return
+		}
+		write(w, r)
+	}
+}
+
+// withMediaUser hands the media API the signed-in user; writes need the
+// CSRF token.
+func (h *productHandler) withMediaUser(next http.Handler) http.HandlerFunc {
+	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+		next.ServeHTTP(w, r.WithContext(mediaapi.WithUser(r.Context(), session.User)))
 	}
 	read, write := h.withSession(serve), h.withMutation(serve)
 	return func(w http.ResponseWriter, r *http.Request) {

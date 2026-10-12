@@ -160,6 +160,8 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-photos.service'); Destination = "${target}:$release/anas-photos-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.socket'); Destination = "${target}:$release/anas-ai-system.socket.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.service'); Destination = "${target}:$release/anas-ai-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media.socket'); Destination = "${target}:$release/anas-media-system.socket.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media@.service'); Destination = "${target}:$release/anas-media-system@.service.incoming" },
         @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
         @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
         @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },

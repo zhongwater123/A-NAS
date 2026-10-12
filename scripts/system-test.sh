@@ -2,8 +2,9 @@
 # System test of the multi-user permission model. It installs the built
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
-# touches the data volume: Web files (File Broker workers), SMB, the photo API
-# and the LAN Web entry that Caddy serves on port 80. Unlike tests that start
+# touches the data volume: Web files (File Broker workers), SMB, the photo API,
+# the media center's FFmpeg worker and the LAN Web entry that Caddy serves on
+# port 80. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
 # catches a unit that takes the Host Agent's CAP_SETUID (issue #38).
 #
@@ -89,6 +90,8 @@ stage() {
   done
   install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
   install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
+  install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
+  install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/runtime.json" "$1/ai/"
@@ -385,6 +388,70 @@ check "a staged model that does not match its manifest is refused" \
 check "the refused release changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 1
+
+# --- Media center (ADR 0017): files are read as the user through the File
+# Broker; FFmpeg runs in a per-connection worker without network, data volume
+# or Product Service state.
+check "the installer enables the media worker socket" systemctl is-enabled --quiet anas-media.socket
+check "only the Product Service reaches the media worker socket" \
+  test "$(stat -c '%a %U %G' /run/a-nas-media/media.sock)" = "660 root a-nas"
+movies_dir=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d '{"parentId":"","name":"Movies"}' "$api/api/v1/spaces/$shared/directories" | jq -r .id || true)
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25:duration=6 -f lavfi -i sine=duration=6 \
+  -c:v libx264 -pix_fmt yuv420p -c:a ac3 /tmp/heat.mkv
+curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=$movies_dir" \
+  -F "file=@/tmp/heat.mkv;filename=Heat (1995).mkv" "$api/api/v1/spaces/$shared/uploads" || true
+media_library=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Movies\",\"kind\":\"movies\",\"spaceId\":\"$shared\",\"folderIds\":[\"$movies_dir\"]}" \
+  "$api/api/v1/media/libraries" | jq -r .id || true)
+check "the administrator creates a shared media library" test -n "$media_library" -a "$media_library" != null
+check "a member cannot create a shared media library" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d "{\"name\":\"Mine\",\"kind\":\"movies\",\"spaceId\":\"$shared\",\"folderIds\":[\"$movies_dir\"]}" \
+  "$api/api/v1/media/libraries")" = 403
+film_duration=0
+for _ in $(seq 1 60); do
+  film_duration=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/titles?category=movie" | jq -r '.items[0].duration // 0' || echo 0)
+  [[ "$film_duration" != 0 ]] && break
+  sleep 1
+done
+film=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/titles?category=movie" | jq -r '.items[0].id' || true)
+check "the member sees the scanned film" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/videos/$film" | jq -r .title)" = Heat
+check "the media worker reads the film's duration in its sandbox" test "${film_duration%.*}" -ge 5
+check "the member plays the original with range requests" \
+  test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-99' "$api/api/v1/media/videos/$film/file")" = 206
+check "the media worker converts the film to fragmented MP4" bash -c \
+  "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/media/videos/$film/stream?mode=transcode&start=1&audio=0&quality=original' | head -c 64 | grep -aq ftyp"
+check "the media worker takes a frame of the film" bash -c \
+  "for _ in \$(seq 1 30); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/media/artwork/$film/thumb') == 200 ]] && exit 0; sleep 1; done; exit 1"
+check "Product Service account cannot read the film itself" denied as a-nas cat "$data/spaces/shared/Movies/Heat (1995).mkv"
+# A probe in the media worker's own unit, in place of the worker.
+cat > /usr/local/lib/anas-media-probe.py <<'PY'
+import os, socket, sys
+leaks = []
+for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
+    try:
+        socket.socket(family, kind).close()
+        leaks.append(f"opened a {family.name} socket")
+    except OSError:
+        pass
+for path in ("/srv/a-nas/data", "/var/lib/a-nas", "/run/a-nas"):
+    try:
+        os.listdir(path)
+        leaks.append(f"listed {path}")
+    except OSError:
+        pass
+if not 61184 <= os.getuid() <= 65519:
+    leaks.append(f"ran as UID {os.getuid()}")
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-media-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
+  -e '/^StandardInput=/d' /etc/systemd/system/anas-media@.service > /etc/systemd/system/anas-media-probe.service
+systemctl daemon-reload
+check "the media probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-media-probe.py
+check "the media worker's sandbox has no network, data volume or Product Service state" \
+  systemctl start anas-media-probe.service
+journalctl -u anas-media-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
 
 # --- One password for Web and SMB.
 new_password=$(secret)

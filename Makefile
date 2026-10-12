@@ -92,6 +92,20 @@ ops-check:
 	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-ai.service
 	grep -Fq 'anas-ai-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'ai-worker.tar.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
+	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/main.go
+	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-media.socket
+	grep -Fqx 'SocketGroup=a-nas' deploy/systemd/system/anas-media.socket
+	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-media.socket
+	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api media-worker' deploy/systemd/system/anas-media@.service
+	grep -Fqx 'StandardInput=socket' deploy/systemd/system/anas-media@.service
+	grep -Fqx 'StandardOutput=journal' deploy/systemd/system/anas-media@.service
+	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-media@.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-media@.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-media@.service
+	grep -Fq 'InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas' deploy/systemd/system/anas-media@.service
+	grep -Fq 'anas-media-system@.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ffmpeg ffprobe; do' scripts/install-v1.0.1-system-services.sh
 	! grep -E '^[A-Za-z0-9_.-]+==' ai/requirements.lock | grep -v -- ' --hash=sha256:[0-9a-f]\{64\}$$'
 
 vet:
