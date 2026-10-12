@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
 )
 
@@ -113,7 +115,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = musicStore.Close() })
-	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{})
+	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{Worker: decodingWorker{}})
 	t.Cleanup(library.Close)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
@@ -154,6 +156,9 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	if err := os.WriteFile(song, silentMP3("Song", 40), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(song), "lossless.ape"), []byte("MAC "), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	csrf := client.csrf
 	client.csrf = ""
@@ -178,14 +183,26 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if status.Tracks != 1 {
+	if status.Tracks != 2 {
 		t.Fatalf("library status = %+v", status)
 	}
 	var tracks music.Library
-	if err := json.Unmarshal(client.do(http.MethodGet, "/api/v1/music/tracks", "", nil, http.StatusOK).Body.Bytes(), &tracks); err != nil || len(tracks.Items) != 1 {
+	if err := json.Unmarshal(client.do(http.MethodGet, "/api/v1/music/tracks", "", nil, http.StatusOK).Body.Bytes(), &tracks); err != nil || len(tracks.Items) != 2 {
 		t.Fatalf("tracks = %+v, %v", tracks, err)
 	}
-	id := tracks.Items[0].ID
+	var id, decodedID string
+	for _, track := range tracks.Items {
+		if track.Transcode {
+			decodedID = track.ID
+		} else {
+			id = track.ID
+		}
+	}
+	decoded := client.do(http.MethodGet, "/api/v1/music/tracks/"+decodedID+"/stream?start=12.5", "", map[string]string{"Range": "bytes=0-"}, http.StatusOK)
+	if decoded.Body.String() != "fLaC from 12.5" || decoded.Header().Get("Content-Type") != "audio/flac" || decoded.Header().Get("Accept-Ranges") != "none" {
+		t.Errorf("decoded stream = %q as %q", decoded.Body.String(), decoded.Header().Get("Content-Type"))
+	}
+	client.do(http.MethodGet, "/api/v1/music/tracks/"+decodedID+"/stream?start=999", "", nil, http.StatusUnprocessableEntity)
 
 	partial := client.do(http.MethodGet, "/api/v1/music/tracks/"+id+"/stream", "", map[string]string{"Range": "bytes=0-2"}, http.StatusPartialContent)
 	if partial.Body.String() != "ID3" || partial.Header().Get("Content-Type") != "audio/mpeg" {
@@ -224,4 +241,16 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	client.do(http.MethodGet, "/api/v1/music/sources", "", nil, http.StatusOK)
 	client.do(http.MethodPut, "/api/v1/music/sources", `{"custom":true,"items":[{"spaceId":"space:unknown"}]}`, nil, http.StatusNotFound)
 	client.do(http.MethodPut, "/api/v1/music/sources", `{"custom":false}`, nil, http.StatusOK)
+}
+
+// decodingWorker stands in for the media worker: an APE file probes as a
+// one-minute song, and decoding answers with where it started.
+type decodingWorker struct{ mediaworker.Worker }
+
+func (decodingWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "ape", Duration: 60, Tags: map[string]string{"title": "Lossless"}}}, nil
+}
+
+func (decodingWorker) Audio(_ context.Context, _ *os.File, request mediaworker.AudioRequest) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("fLaC from " + strconv.FormatFloat(request.Start, 'f', -1, 64))), nil
 }

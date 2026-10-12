@@ -1,6 +1,6 @@
 import { request } from "../api";
 
-export type TrackFormat = "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav";
+export type TrackFormat = "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "ape" | "wma" | "wv" | "aiff" | "dsf" | "dff";
 
 export interface Track {
   id: string;
@@ -24,6 +24,9 @@ export interface Track {
   durationMs?: number;
   coverId?: string;
   lyrics?: boolean;
+  // The device decodes this track while it plays; its stream cannot seek, so
+  // the player asks for a new start instead.
+  transcode?: boolean;
   addedAt: string;
 }
 
@@ -56,7 +59,7 @@ export const getMusicStatus = () => request<MusicStatus>(`${base}/library`);
 export const scanMusic = () => request<MusicStatus>(`${base}/library/scan`, { method: "POST" }, true);
 export const listTracks = () => request<MusicLibrary>(`${base}/tracks`);
 export const getLyrics = async (trackId: string) => (await request<{ text: string }>(`${base}/tracks/${id(trackId)}/lyrics`)).text;
-export const streamURL = (trackId: string) => `${base}/tracks/${id(trackId)}/stream`;
+export const streamURL = (trackId: string, start = 0) => `${base}/tracks/${id(trackId)}/stream${start > 0 ? `?start=${start.toFixed(3)}` : ""}`;
 export const coverURL = (coverId: string, size: "small" | "large" = "small") => `${base}/covers/${id(coverId)}?size=${size}`;
 
 export const listSources = () => request<MusicSources>(`${base}/sources`);

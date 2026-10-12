@@ -877,11 +877,20 @@ paths:
   /api/v1/music/tracks/{trackId}/stream:
     get:
       operationId: streamMusicTrack
-      parameters: [{ $ref: "#/components/parameters/TrackID" }, { name: Range, in: header, schema: { type: string } }]
+      description: >-
+        Serves a track browsers play directly with Range support. A track marked transcode is decoded to FLAC by the
+        media worker from the start position instead; that stream cannot seek, so players request a new start.
+      parameters:
+        - { $ref: "#/components/parameters/TrackID" }
+        - { name: Range, in: header, schema: { type: string } }
+        - { name: start, in: query, description: Seconds to start a decoded track from; ignored for other tracks., schema: { type: number, minimum: 0 } }
       responses:
         "200": { description: Audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
         "206": { description: Partial audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
+        "422": { description: "The start is past the end (validation_failed), or FFmpeg cannot decode the file (undecodable).", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { description: The media worker that decodes this format is unavailable (decoder_unavailable)., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/music/tracks/{trackId}/lyrics:
     get:
       operationId: getMusicLyrics
@@ -2387,8 +2396,8 @@ components:
         folder: { type: string, description: Folder path relative to the space root; empty at the root. }
         name: { type: string }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
-        format: { type: string, enum: [mp3, flac, m4a, aac, ogg, opus, wav] }
-        codec: { type: string, description: "The audio codec of an m4a file: aac or alac." }
+        format: { type: string, enum: [mp3, flac, m4a, aac, ogg, opus, wav, ape, wma, wv, aiff, dsf, dff] }
+        codec: { type: string, description: "The audio codec, when the file's container can hold several (aac or alac in m4a), or as FFmpeg names it." }
         title: { type: string }
         artist: { type: string }
         artists: { type: array, items: { type: string } }
@@ -2402,6 +2411,7 @@ components:
         durationMs: { type: integer, format: int64, minimum: 0 }
         coverId: { type: string }
         lyrics: { type: boolean }
+        transcode: { type: boolean, description: "The media worker decodes this track to FLAC while it plays; its stream starts at the start parameter instead of seeking." }
         addedAt: { type: string, format: date-time }
     MusicSources:
       type: object

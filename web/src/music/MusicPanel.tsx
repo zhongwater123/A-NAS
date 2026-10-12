@@ -153,7 +153,7 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
     recordPlay(trackId).catch(() => undefined);
   }, []);
   const onError = useCallback((track: Track) => {
-    toast({ tone: "error", text: track.codec === "alac" ? `“${track.title}”是 ALAC 格式，浏览器无法直接播放` : `无法播放“${track.title}”，已跳过` });
+    toast({ tone: "error", text: track.transcode ? `无法播放“${track.title}”：设备暂时无法转码这个文件` : `无法播放“${track.title}”，已跳过` });
   }, [toast]);
   const player = usePlayer({ storageKey: `a-nas.music.${userId}.player`, tracks: index.byId, ready: Boolean(library), onPlayed, onError });
 

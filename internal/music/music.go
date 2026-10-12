@@ -4,6 +4,8 @@
 // folders. Files are listed and opened through files.Service, so in
 // production every read runs as the signed-in member through the File Broker
 // (ADR 0008, ADR 0018) and the library never opens a file its member cannot.
+// Formats browsers cannot play are probed and decoded by the shared media
+// worker (mediaworker); this package only decides what to ask it for.
 package music
 
 import (
@@ -12,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path"
@@ -25,11 +28,17 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 var (
 	ErrNotFound = errors.New("music resource not found")
 	ErrInvalid  = errors.New("music request is invalid")
+	// ErrDecoderUnavailable reports that a track needs the media worker and
+	// none can be reached.
+	ErrDecoderUnavailable = errors.New("music decoder is unavailable")
+	// ErrUndecodable reports that FFmpeg cannot read a track.
+	ErrUndecodable = errors.New("music file cannot be decoded")
 )
 
 // Files is the part of files.Service the library reads through.
@@ -69,6 +78,9 @@ type Options struct {
 	Now    func() time.Time
 	Random io.Reader
 	Logger *slog.Logger
+	// Worker reads and decodes the formats browsers cannot play. Without
+	// one they are indexed from their names and cannot be played.
+	Worker mediaworker.Worker
 }
 
 type Service struct {
@@ -76,6 +88,7 @@ type Service struct {
 	covers  coverStore
 	files   Files
 	spaces  Spaces
+	worker  mediaworker.Worker
 	now     func() time.Time
 	random  io.Reader
 	logger  *slog.Logger
@@ -95,7 +108,7 @@ type Service struct {
 func New(store *Store, coverRoot string, fileService Files, spaces Spaces, options Options) *Service {
 	base, cancel := context.WithCancel(context.Background())
 	service := &Service{
-		store: store, covers: coverStore{root: coverRoot}, files: fileService, spaces: spaces,
+		store: store, covers: coverStore{root: coverRoot}, files: fileService, spaces: spaces, worker: options.Worker,
 		now: options.Now, random: options.Random, logger: options.Logger,
 		base: base, cancel: cancel, work: make(chan struct{}, 1), scans: map[string]*scanJob{},
 	}
@@ -123,27 +136,30 @@ func (s *Service) Close() {
 // Track is one audio file in the library. Its ID is the file's stable ID in
 // its space, so favorites and playlists survive renames and moves.
 type Track struct {
-	ID          string    `json:"id"`
-	SpaceID     string    `json:"spaceId"`
-	Folder      string    `json:"folder"`
-	Name        string    `json:"name"`
-	SizeBytes   int64     `json:"sizeBytes"`
-	Format      string    `json:"format"`
-	Codec       string    `json:"codec,omitempty"`
-	Title       string    `json:"title"`
-	Artist      string    `json:"artist,omitempty"`
-	Artists     []string  `json:"artists,omitempty"`
-	Album       string    `json:"album,omitempty"`
-	AlbumArtist string    `json:"albumArtist,omitempty"`
-	AlbumID     string    `json:"albumId"`
-	Genres      []string  `json:"genres,omitempty"`
-	Year        int       `json:"year,omitempty"`
-	TrackNo     int       `json:"trackNo,omitempty"`
-	DiscNo      int       `json:"discNo,omitempty"`
-	DurationMs  int64     `json:"durationMs,omitempty"`
-	CoverID     string    `json:"coverId,omitempty"`
-	Lyrics      bool      `json:"lyrics,omitempty"`
-	AddedAt     time.Time `json:"addedAt"`
+	ID          string   `json:"id"`
+	SpaceID     string   `json:"spaceId"`
+	Folder      string   `json:"folder"`
+	Name        string   `json:"name"`
+	SizeBytes   int64    `json:"sizeBytes"`
+	Format      string   `json:"format"`
+	Codec       string   `json:"codec,omitempty"`
+	Title       string   `json:"title"`
+	Artist      string   `json:"artist,omitempty"`
+	Artists     []string `json:"artists,omitempty"`
+	Album       string   `json:"album,omitempty"`
+	AlbumArtist string   `json:"albumArtist,omitempty"`
+	AlbumID     string   `json:"albumId"`
+	Genres      []string `json:"genres,omitempty"`
+	Year        int      `json:"year,omitempty"`
+	TrackNo     int      `json:"trackNo,omitempty"`
+	DiscNo      int      `json:"discNo,omitempty"`
+	DurationMs  int64    `json:"durationMs,omitempty"`
+	CoverID     string   `json:"coverId,omitempty"`
+	Lyrics      bool     `json:"lyrics,omitempty"`
+	// Transcode marks a track the media worker decodes while it plays; its
+	// stream cannot seek, so players restart it from a start position.
+	Transcode bool      `json:"transcode,omitempty"`
+	AddedAt   time.Time `json:"addedAt"`
 }
 
 // discFolder matches folders that hold one disc of an album, such as "CD2".
@@ -186,12 +202,17 @@ func (value row) track() Track {
 		Artists: splitArtists(value.Artist), Album: value.Album, AlbumArtist: value.AlbumArtist,
 		AlbumID: albumID(value), Genres: splitGenres(value.Genre), Year: value.Year, TrackNo: value.TrackNo,
 		DiscNo: value.DiscNo, DurationMs: value.DurationMs, CoverID: cover,
-		Lyrics: value.EmbeddedLyrics || value.LyricsFile != "", AddedAt: value.AddedAt,
+		Lyrics: value.EmbeddedLyrics || value.LyricsFile != "", Transcode: !playsInBrowser(value.Format, value.Codec), AddedAt: value.AddedAt,
 	}
 }
 
 // ContentType is the media type a track is streamed with.
-func (t Track) ContentType() string { return contentTypes[t.Format] }
+func (t Track) ContentType() string {
+	if t.Transcode {
+		return "audio/flac"
+	}
+	return contentTypes[t.Format]
+}
 
 // Library is every track a member can play. Version changes whenever a scan
 // changes any track.
@@ -242,6 +263,51 @@ func (s *Service) visibleTrack(ctx context.Context, actor accounts.User, id stri
 		return row{}, ErrNotFound
 	}
 	return value, nil
+}
+
+// Track returns a track of the member's library.
+func (s *Service) Track(ctx context.Context, actor accounts.User, id string) (Track, error) {
+	value, err := s.visibleTrack(ctx, actor, id)
+	if err != nil {
+		return Track{}, err
+	}
+	return value.track(), nil
+}
+
+// Decode streams a track that browsers cannot play as FLAC from start
+// seconds, decoded by the media worker from the file opened as the member.
+func (s *Service) Decode(ctx context.Context, actor accounts.User, id string, start float64) (io.ReadCloser, error) {
+	value, err := s.visibleTrack(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
+	if playsInBrowser(value.Format, value.Codec) || start < 0 || value.DurationMs > 0 && start*1000 > float64(value.DurationMs) {
+		return nil, ErrInvalid
+	}
+	if s.worker == nil {
+		return nil, ErrDecoderUnavailable
+	}
+	content, err := s.files.OpenContent(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
+	// The worker receives its own descriptor; this one closes once the
+	// request is sent.
+	defer content.Reader.Close()
+	stream, err := s.worker.Audio(ctx, content.Reader, playbackRequest(value.SampleRate, value.BitDepth, start))
+	return stream, decoderError(err)
+}
+
+func decoderError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, mediaworker.ErrUnavailable):
+		return fmt.Errorf("%w: %w", ErrDecoderUnavailable, err)
+	case errors.Is(err, mediaworker.ErrUnreadable), errors.Is(err, mediaworker.ErrInvalid):
+		return fmt.Errorf("%w: %w", ErrUndecodable, err)
+	}
+	return err
 }
 
 // Stream is an open track ready to be served with Range support.

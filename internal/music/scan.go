@@ -12,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // Scan phases: listing the music folders, reading the tags of new and changed
@@ -357,6 +358,11 @@ func (s *Service) scan(ctx context.Context, actor accounts.User, job *scanJob) (
 		}
 		if duration, err := readDuration(content.Reader, value.Format); err == nil && duration > 0 {
 			value.DurationMs, value.DurationState = duration.Milliseconds(), "done"
+		} else if s.worker != nil {
+			// Opus and raw AAC have no Go reader for their length.
+			if probe, err := s.worker.Probe(ctx, content.Reader); err == nil && probe.Format.Duration > 0 {
+				value.DurationMs, value.DurationState = int64(probe.Format.Duration*1000), "done"
+			}
 		}
 		_ = content.Reader.Close()
 		job.step()
@@ -372,6 +378,8 @@ func (s *Service) scan(ctx context.Context, actor accounts.User, job *scanJob) (
 }
 
 // readTrack reads one audio file's tags, cover and, where cheap, duration.
+// Formats the Go readers do not cover, and ALAC, also go through the media
+// worker's probe, which runs FFmpeg in its sandbox.
 func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry files.TreeEntry) (row, error) {
 	content, err := s.files.OpenContent(ctx, actor, entry.ID)
 	if err != nil {
@@ -379,19 +387,47 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 	}
 	defer content.Reader.Close()
 	format := formatOf(entry.Name)
-	tags := readTags(content.Reader, entry.Name, format)
+	var tags metadata
+	if tagFormats[format] {
+		tags = readTags(content.Reader, format)
+	}
+	var probed audioFormat
+	if s.worker != nil && (!tagFormats[format] || !playsInBrowser(format, tags.Codec)) {
+		probe, err := s.worker.Probe(ctx, content.Reader)
+		if errors.Is(err, mediaworker.ErrUnavailable) {
+			// Skip the file rather than index it without its tags; the next
+			// scan reads it again.
+			return row{}, err
+		}
+		if err == nil {
+			probed = fromProbe(&tags, probe)
+		}
+	}
+	fillFromName(&tags, entry.Name)
 	value := row{
 		ID: entry.ID, SpaceID: entry.SpaceID, Dir: dirOf(entry.Path), Name: entry.Name, SizeBytes: entry.SizeBytes,
 		ModifiedAt: entry.ModifiedAt.UTC(), Format: format, Codec: tags.Codec, Title: tags.Title, Artist: tags.Artist,
 		Album: tags.Album, AlbumArtist: tags.AlbumArtist, Genre: tags.Genre, Year: tags.Year, TrackNo: tags.TrackNo,
 		DiscNo: tags.DiscNo, DurationState: "pending", EmbeddedLyrics: tags.Lyrics, AddedAt: s.now().UTC(),
+		SampleRate: probed.SampleRate, BitDepth: probed.Bits,
+	}
+	if len(tags.Picture) == 0 && probed.Cover {
+		// The worker renders the attached picture as a JPEG.
+		if picture, err := s.worker.Frame(ctx, content.Reader, 0, coverPixels[CoverLarge]); err == nil {
+			tags.Picture = picture
+		}
 	}
 	if len(tags.Picture) > 0 {
 		if cover, err := s.covers.Put(tags.Picture); err == nil {
 			value.EmbeddedCover = cover
 		}
 	}
-	if quickDuration[format] {
+	if probed.Duration > 0 {
+		value.DurationMs, value.DurationState = probed.Duration.Milliseconds(), "done"
+	} else if !browserFormats[format] {
+		// Without a probe nothing else can measure these formats.
+		value.DurationState = "failed"
+	} else if quickDuration[format] {
 		value.DurationState = "failed"
 		if duration, err := readDuration(content.Reader, format); err == nil && duration > 0 {
 			value.DurationMs, value.DurationState = duration.Milliseconds(), "done"

@@ -73,6 +73,22 @@ describe("MusicPanel", () => {
     expect(within(console).getByRole("button", { name: "播放队列" }).textContent).toBe("3");
   });
 
+  it("restarts a decoded track's stream from where the listener seeks", async () => {
+    serve([...library, track("file:ape", { title: "无损的歌", format: "ape", transcode: true, durationMs: 300_000 })]);
+    // A playing element: seeking keeps it playing from the new start.
+    vi.spyOn(HTMLMediaElement.prototype, "paused", "get").mockReturnValue(false);
+    render(<MusicPanel userId="user:u1" />);
+    await screen.findByText("无损的歌");
+    expect(within(rowOf("无损的歌")).getByText("APE")).toBeTruthy();
+    fireEvent.doubleClick(rowOf("无损的歌"));
+    await waitFor(() => expect(played.at(-1)).toMatch(/file%3Aape\/stream$/));
+    const progress = screen.getByRole("slider", { name: "播放进度" });
+    expect(progress.getAttribute("aria-valuemax")).toBe("300");
+    fireEvent.keyDown(progress, { key: "PageUp" });
+    await waitFor(() => expect(played.at(-1)).toMatch(/file%3Aape\/stream\?start=20\.000$/));
+    expect(progress.getAttribute("aria-valuenow")).toBe("20");
+  });
+
   it("keeps favorites and shows them under 我的收藏", async () => {
     const fetchMock = serve();
     render(<MusicPanel userId="user:u1" />);

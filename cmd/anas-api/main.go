@@ -177,7 +177,7 @@ func run(logger *slog.Logger) error {
 	}
 	defer musicStore.Close()
 	// Runs before the deferred musicStore.Close, after the server stopped.
-	musicService := music.New(musicStore, filepath.Join(stateDirectory, "music-covers"), fileService, accountService, music.Options{Logger: logger})
+	musicService := music.New(musicStore, filepath.Join(stateDirectory, "music-covers"), fileService, accountService, music.Options{Logger: logger, Worker: mediaWorker})
 	defer musicService.Close()
 	// The Product Service cannot reach the data volume in production; there
 	// the photo service owns the photos subvolume under its own identity and

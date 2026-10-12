@@ -107,6 +107,9 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
   const loaded = useRef<{ generation: number; id: string }>(undefined);
   const wantPlay = useRef(false);
   const resumeAt = useRef(saved?.position ?? 0);
+  // Where the current source starts in the track. A decoded track cannot
+  // seek, so seeking loads its stream again from a new start.
+  const offset = useRef(0);
   const listened = useRef({ seconds: 0, last: 0, counted: false });
   const errors = useRef(0);
   const callbacks = useRef({ onPlayed, onError });
@@ -148,10 +151,21 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     if (!currentId || !ready) return;
     if (loaded.current?.generation === generation && loaded.current.id === currentId) return;
     loaded.current = { generation, id: currentId };
+    const track = tracksRef.current.get(currentId);
+    const duration = (track?.durationMs ?? 0) / 1000;
+    // A track that had played to its end starts again from the beginning.
+    const resume = duration && resumeAt.current > duration - 2 ? 0 : resumeAt.current;
     audio.preload = "metadata";
-    audio.src = streamURL(currentId);
-    listened.current = { seconds: 0, last: 0, counted: false };
-    time.set({ position: resumeAt.current, duration: (tracksRef.current.get(currentId)?.durationMs ?? 0) / 1000, buffered: 0 });
+    if (track?.transcode) {
+      offset.current = resume;
+      resumeAt.current = 0;
+      audio.src = streamURL(currentId, resume);
+    } else {
+      offset.current = 0;
+      audio.src = streamURL(currentId);
+    }
+    listened.current = { seconds: 0, last: resume, counted: false };
+    time.set({ position: resume, duration, buffered: 0 });
     if (wantPlay.current) start();
   }, [audio, currentId, generation, ready, start, time]);
 
@@ -160,9 +174,37 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     audio.muted = state.muted;
   }, [audio, state.volume, state.muted]);
 
+  const positionNow = useCallback(() => offset.current + (audio.currentTime || 0), [audio]);
+  const decoding = useCallback(() => Boolean(loaded.current && tracksRef.current.get(loaded.current.id)?.transcode), []);
+
+  // moveTo jumps within the current track: a decoded track reloads its
+  // stream from there and keeps playing if it was.
+  const moveTo = useCallback((seconds: number) => {
+    const target = Math.max(0, seconds);
+    const id = loaded.current?.id;
+    if (id && decoding()) {
+      const playing = !audio.paused;
+      offset.current = target;
+      audio.src = streamURL(id, target);
+      if (playing) start();
+      time.set({ buffered: target });
+    } else audio.currentTime = target;
+    listened.current.last = target;
+    time.set({ position: target });
+  }, [audio, decoding, start, time]);
+
+  // release lets go of a decoded stream, which holds a media worker process
+  // while it is open; playing loads it again from the same place.
+  const release = useCallback((at: number) => {
+    offset.current = at;
+    audio.removeAttribute("src");
+    audio.load();
+    time.set({ position: at, buffered: at });
+  }, [audio, time]);
+
   const save = useCallback(() => {
-    try { window.localStorage.setItem(storageKey, JSON.stringify({ ...stateRef.current, position: audio.currentTime || resumeAt.current })); } catch { /* storage is optional */ }
-  }, [audio, storageKey]);
+    try { window.localStorage.setItem(storageKey, JSON.stringify({ ...stateRef.current, position: positionNow() || resumeAt.current })); } catch { /* storage is optional */ }
+  }, [positionNow, storageKey]);
   useEffect(() => { save(); }, [state, save]);
 
   const go = useCallback((index: number, play = true) => {
@@ -180,19 +222,19 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     else if (automatic) {
       wantPlay.current = false;
       setPlaying(false);
-      audio.currentTime = 0;
+      if (decoding()) release(0); else moveTo(0);
     } else go(0, false);
-  }, [audio, go]);
+  }, [decoding, go, moveTo, release]);
 
   const previous = useCallback(() => {
     const value = stateRef.current;
-    if (audio.currentTime > 3 || value.index <= 0 && value.repeat !== "all") { audio.currentTime = 0; return; }
+    if (positionNow() > 3 || value.index <= 0 && value.repeat !== "all") { moveTo(0); return; }
     go(value.index > 0 ? value.index - 1 : value.queue.length - 1, wantPlay.current || !audio.paused);
-  }, [audio, go]);
+  }, [audio, go, moveTo, positionNow]);
 
   useEffect(() => {
     const onTime = () => {
-      const position = audio.currentTime;
+      const position = positionNow();
       time.set({ position });
       const heard = listened.current;
       const delta = position - heard.last;
@@ -203,14 +245,15 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
         callbacks.current.onPlayed(loaded.current.id);
       }
     };
-    const onDuration = () => { if (Number.isFinite(audio.duration)) time.set({ duration: audio.duration }); };
+    // A decoded stream reports only what is left of it; the library knows the
+    // whole track's length.
+    const onDuration = () => { if (!decoding() && Number.isFinite(audio.duration)) time.set({ duration: audio.duration }); };
     const onMetadata = () => {
       onDuration();
-      // A track that had played to its end starts again from the beginning.
       if (resumeAt.current > 0 && resumeAt.current < audio.duration - 2) audio.currentTime = resumeAt.current;
       resumeAt.current = 0;
     };
-    const onProgress = () => { if (audio.buffered.length) time.set({ buffered: audio.buffered.end(audio.buffered.length - 1) }); };
+    const onProgress = () => { if (audio.buffered.length) time.set({ buffered: offset.current + audio.buffered.end(audio.buffered.length - 1) }); };
     const onPlay = () => { setPlaying(true); errors.current = 0; };
     const onPause = () => { setPlaying(false); save(); };
     const onWaiting = () => setLoading(true);
@@ -218,7 +261,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     const onEnded = () => {
       const heard = listened.current;
       if (!heard.counted && loaded.current) { heard.counted = true; callbacks.current.onPlayed(loaded.current.id); }
-      if (stateRef.current.repeat === "one") { audio.currentTime = 0; start(); return; }
+      if (stateRef.current.repeat === "one") { moveTo(0); start(); return; }
       next(true);
     };
     const onError = () => {
@@ -240,34 +283,45 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     ];
     for (const [name, handler] of events) audio.addEventListener(name, handler);
     return () => { for (const [name, handler] of events) audio.removeEventListener(name, handler); };
-  }, [audio, next, save, start, time]);
+  }, [audio, decoding, moveTo, next, positionNow, save, start, time]);
 
   // Closing the window stops the music.
   useEffect(() => () => {
     save();
     // A remount, as StrictMode does in development, loads the track again
     // where it was.
-    resumeAt.current = audio.currentTime || resumeAt.current;
+    resumeAt.current = positionNow() || resumeAt.current;
     loaded.current = undefined;
     audio.pause();
     audio.removeAttribute("src");
     audio.load();
-  }, [audio, save]);
+  }, [audio, positionNow, save]);
 
   const toggle = useCallback(() => {
     if (!stateRef.current.queue.length) return;
     if (audio.paused) {
-      if (!audio.getAttribute("src")) { go(Math.max(0, stateRef.current.index)); return; }
+      if (!audio.getAttribute("src")) {
+        const id = loaded.current?.id;
+        if (id && decoding()) { audio.src = streamURL(id, offset.current); start(); return; }
+        go(Math.max(0, stateRef.current.index));
+        return;
+      }
       start();
     } else { wantPlay.current = false; audio.pause(); }
-  }, [audio, go, start]);
+  }, [audio, decoding, go, start]);
+
+  // A decoded track paused for a while gives its worker process back.
+  useEffect(() => {
+    if (playing || !current?.transcode) return;
+    const timer = window.setTimeout(() => {
+      if (audio.paused && audio.getAttribute("src") && decoding()) release(positionNow());
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [audio, current, decoding, playing, positionNow, release]);
 
   const seek = useCallback((seconds: number) => {
-    if (!Number.isFinite(seconds)) return;
-    audio.currentTime = Math.max(0, seconds);
-    listened.current.last = audio.currentTime;
-    time.set({ position: audio.currentTime });
-  }, [audio, time]);
+    if (Number.isFinite(seconds)) moveTo(seconds);
+  }, [moveTo]);
 
   const play = useCallback((ids: string[], startAt = 0) => {
     if (!ids.length) return;

@@ -10,7 +10,10 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/mewkiz/flac/meta"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -40,7 +44,10 @@ type fixture struct {
 	spaceIDs map[string]string
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T) *fixture { return newFixtureWith(t, nil) }
+
+// newFixtureWith gives the library a media worker.
+func newFixtureWith(t *testing.T, worker mediaworker.Worker) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -70,7 +77,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("open music: %v", err)
 	}
 	t.Cleanup(func() { _ = musicStore.Close() })
-	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{})
+	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{Worker: worker})
 	t.Cleanup(library.Close)
 	spaces, err := accountService.ListSpaces(ctx, admin)
 	if err != nil {
@@ -424,5 +431,158 @@ func TestPlaylistsBelongToTheirMember(t *testing.T) {
 	}
 	if err := f.library.DeletePlaylist(f.ctx, f.admin, playlist.ID); !errors.Is(err, music.ErrNotFound) {
 		t.Errorf("second delete: %v", err)
+	}
+}
+
+// fakeWorker answers like the media worker: a probe from the test and FLAC
+// that records how it was asked for.
+type fakeWorker struct {
+	mu          sync.Mutex
+	probe       mediaworker.Probe
+	cover       []byte
+	unavailable bool
+	requests    []mediaworker.AudioRequest
+}
+
+func (w *fakeWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+	if w.unavailable {
+		return mediaworker.Probe{}, mediaworker.ErrUnavailable
+	}
+	return w.probe, nil
+}
+func (w *fakeWorker) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	return w.cover, nil
+}
+func (w *fakeWorker) Subtitle(context.Context, *os.File, mediaworker.SubtitleRequest) ([]byte, error) {
+	return nil, errors.New("not used by music")
+}
+func (w *fakeWorker) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+	return nil, errors.New("not used by music")
+}
+func (w *fakeWorker) Audio(_ context.Context, _ *os.File, request mediaworker.AudioRequest) (io.ReadCloser, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.requests = append(w.requests, request)
+	return io.NopCloser(strings.NewReader("fLaC decoded")), nil
+}
+
+func TestFormatsBrowsersCannotPlayAreProbedAndDecoded(t *testing.T) {
+	worker := &fakeWorker{cover: pngImage(t, 90), probe: mediaworker.Probe{
+		Format: mediaworker.ProbeFormat{Name: "ape", Duration: 245.5, Tags: map[string]string{
+			"Title": "无损的歌", "Artist": "林间", "Album Artist": "林间", "Album": "山野", "Track": "2/9", "Year": "2020", "Genre": "民谣",
+		}},
+		Streams: []mediaworker.ProbeStream{
+			{Index: 0, Type: "audio", Codec: "ape", SampleRate: 96000, SampleFormat: "s32p", Bits: 24},
+			{Index: 1, Type: "video", Codec: "mjpeg", AttachedPic: true},
+		},
+	}}
+	f := newFixtureWith(t, worker)
+	write(t, filepath.Join(f.shared, "Hi-Res", "02.ape"), []byte("MAC lossless audio"))
+	write(t, filepath.Join(f.shared, "plain.mp3"), mp3File(5, id3Frame("TIT2", text("Plain"))))
+	f.scan(t, f.admin)
+	tracks := f.tracks(t, f.admin)
+	song, ok := tracks["无损的歌"]
+	if !ok {
+		t.Fatalf("probed tags were not used: %v", tracks)
+	}
+	if song.Artist != "林间" || song.AlbumArtist != "林间" || song.Album != "山野" || song.TrackNo != 2 || song.Year != 2020 ||
+		song.DurationMs != 245500 || song.Format != "ape" || !song.Transcode || song.CoverID == "" || song.ContentType() != "audio/flac" {
+		t.Fatalf("decoded track = %+v", song)
+	}
+	if plain := tracks["Plain"]; plain.Transcode {
+		t.Errorf("an MP3 is marked for decoding: %+v", plain)
+	}
+
+	body, err := f.library.Decode(f.ctx, f.admin, song.ID, 30)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	data, _ := io.ReadAll(body)
+	_ = body.Close()
+	if string(data) != "fLaC decoded" || len(worker.requests) != 1 || worker.requests[0] != (mediaworker.AudioRequest{Start: 30, Bits: 24}) {
+		t.Fatalf("decoded %q with %+v", data, worker.requests)
+	}
+	if _, err := f.library.Decode(f.ctx, f.admin, song.ID, 400); !errors.Is(err, music.ErrInvalid) {
+		t.Errorf("a start past the end = %v", err)
+	}
+	if _, err := f.library.Decode(f.ctx, f.admin, tracks["Plain"].ID, 0); !errors.Is(err, music.ErrInvalid) {
+		t.Errorf("decoding a track browsers play = %v", err)
+	}
+	if _, err := f.library.Decode(f.ctx, f.member, "file:unknown", 0); !errors.Is(err, music.ErrNotFound) {
+		t.Errorf("decoding an unknown track = %v", err)
+	}
+}
+
+func TestWithoutAWorkerDecodedFormatsKeepTheirNames(t *testing.T) {
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "旧时光合唱团 - 老街.wma"), []byte("ASF"))
+	f.scan(t, f.admin)
+	street, ok := f.tracks(t, f.admin)["老街"]
+	if !ok || street.Artist != "旧时光合唱团" || !street.Transcode || street.DurationMs != 0 {
+		t.Fatalf("track without a worker = %+v (%v)", street, ok)
+	}
+	if _, err := f.library.Decode(f.ctx, f.admin, street.ID, 0); !errors.Is(err, music.ErrDecoderUnavailable) {
+		t.Errorf("Decode() without a worker = %v", err)
+	}
+
+	// A worker that is down for a moment leaves the file for the next scan
+	// rather than indexing it without its tags.
+	worker := &fakeWorker{unavailable: true}
+	g := newFixtureWith(t, worker)
+	write(t, filepath.Join(g.shared, "song.wv"), []byte("wvpk"))
+	if status := g.scan(t, g.admin); status.Tracks != 0 {
+		t.Fatalf("indexed %d tracks while the worker was down", status.Tracks)
+	}
+	worker.unavailable = false
+	worker.probe = mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "wv", Duration: 3, Tags: map[string]string{"TITLE": "Back"}}}
+	if _, ok := g.tracks(t, g.admin)["Back"]; ok {
+		t.Fatal("track appeared before a scan")
+	}
+	g.scan(t, g.admin)
+	if back, ok := g.tracks(t, g.admin)["Back"]; !ok || back.DurationMs != 3000 {
+		t.Fatalf("after the worker returned = %+v (%v)", back, ok)
+	}
+}
+
+// TestRealFFmpegDecodesThroughTheWorker indexes and plays WavPack and AIFF
+// files with FFmpeg when it is installed.
+func TestRealFFmpegDecodesThroughTheWorker(t *testing.T) {
+	tools, ok := mediaworker.LocalTools()
+	if !ok {
+		t.Skip("FFmpeg is not installed")
+	}
+	f := newFixtureWith(t, mediaworker.Local{Tools: tools})
+	for _, sample := range []struct{ name, codec, title string }{{"wavpack.wv", "wavpack", "WavPack 歌曲"}, {"aiff.aiff", "pcm_s24be", "AIFF 歌曲"}} {
+		path := filepath.Join(f.shared, "Lossless", sample.name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=4:sample_rate=96000",
+			"-ac", "2", "-c:a", sample.codec, "-metadata", "title="+sample.title, "-metadata", "artist=北岸", "-metadata", "album=北方以北",
+			"-metadata", "track=3", path)
+		if sample.codec == "pcm_s24be" {
+			// AIFF files carry their tags in an ID3 chunk, as iTunes writes them.
+			generate.Args = append(generate.Args[:len(generate.Args)-1], "-write_id3v2", "1", path)
+		}
+		if output, err := generate.CombinedOutput(); err != nil {
+			t.Skipf("FFmpeg cannot generate %s: %v %s", sample.name, err, output)
+		}
+	}
+	f.scan(t, f.admin)
+	tracks := f.tracks(t, f.admin)
+	for _, title := range []string{"WavPack 歌曲", "AIFF 歌曲"} {
+		track, ok := tracks[title]
+		if !ok || track.Artist != "北岸" || track.Album != "北方以北" || track.DurationMs < 3900 || !track.Transcode {
+			t.Fatalf("%s = %+v (%v); library %v", title, track, ok, tracks)
+		}
+		body, err := f.library.Decode(f.ctx, f.admin, track.ID, 1)
+		if err != nil {
+			t.Fatalf("%s: Decode() error = %v", title, err)
+		}
+		data, _ := io.ReadAll(body)
+		_ = body.Close()
+		if !bytes.HasPrefix(data, []byte("fLaC")) || len(data) < 10_000 {
+			t.Fatalf("%s: decoded %d bytes", title, len(data))
+		}
 	}
 }

@@ -496,7 +496,7 @@ export function LibraryEmpty({ scanning, progress, volumeOffline, onOpenFiles, o
       <span className="mu-welcome-art"><Music2 /></span>
       <h1>还没有音乐</h1>
       <p>把音乐文件放进个人空间或共享空间的任意文件夹（例如新建一个“音乐”文件夹），A-NAS 会自动整理成专辑、歌手和类型，并读取封面与歌词。</p>
-      <p className="mu-welcome-formats">支持 MP3 · FLAC · AAC (M4A) · OGG · Opus · WAV</p>
+      <p className="mu-welcome-formats">支持 MP3 · FLAC · AAC (M4A) · OGG · Opus · WAV，以及由设备转码播放的 ALAC · APE · WMA · WavPack · AIFF · DSD</p>
       <div className="mu-hero-actions">
         {onOpenFiles && <button type="button" className="mu-primary" onClick={onOpenFiles}>打开文件管理</button>}
         <button type="button" className="mu-secondary" onClick={onSources}>选择音乐文件夹</button>

@@ -18,15 +18,24 @@ import (
 	"github.com/jfreymuth/oggvorbis"
 	"github.com/mewkiz/flac"
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // formats maps the audio file extensions the library indexes to their format.
-// Every one of them plays in Chromium without transcoding; ALAC inside .m4a is
-// recognised and reported so the player can explain why it cannot play.
 var formats = map[string]string{
 	".mp3": "mp3", ".flac": "flac", ".m4a": "m4a", ".aac": "aac",
 	".ogg": "ogg", ".oga": "ogg", ".opus": "opus", ".wav": "wav",
+	".ape": "ape", ".wma": "wma", ".wv": "wv", ".aif": "aiff", ".aiff": "aiff", ".dsf": "dsf", ".dff": "dff",
 }
+
+// browserFormats play in Chromium as they are. The others, and ALAC inside
+// .m4a, are decoded to FLAC by the media worker while they play.
+var browserFormats = map[string]bool{"mp3": true, "flac": true, "m4a": true, "aac": true, "ogg": true, "opus": true, "wav": true}
+
+// tagFormats are the formats dhowden/tag reads; the media worker's probe
+// reads the tags of the others.
+var tagFormats = map[string]bool{"mp3": true, "flac": true, "m4a": true, "ogg": true, "opus": true, "dsf": true}
 
 var contentTypes = map[string]string{
 	"mp3": "audio/mpeg", "flac": "audio/flac", "m4a": "audio/mp4", "aac": "audio/aac",
@@ -34,6 +43,8 @@ var contentTypes = map[string]string{
 }
 
 func formatOf(name string) string { return formats[strings.ToLower(path.Ext(name))] }
+
+func playsInBrowser(format, codec string) bool { return browserFormats[format] && codec != "alac" }
 
 // metadata is what one audio file says about itself.
 type metadata struct {
@@ -50,16 +61,16 @@ type metadata struct {
 	Lyrics      bool
 }
 
-// readTags reads the tags of an audio file with dhowden/tag. Files without
-// tags, or with tags it cannot parse, are indexed from their file name.
-func readTags(r io.ReadSeeker, name, format string) (result metadata) {
+// readTags reads the tags of an audio file with dhowden/tag. A file it
+// cannot parse yields no tags; the caller then uses the media worker's probe
+// or the file name.
+func readTags(r io.ReadSeeker, format string) (result metadata) {
 	defer func() {
 		// The tag readers trust lengths stored in the file; a malformed file
 		// must not stop the scan.
 		if recover() != nil {
 			result = metadata{}
 		}
-		fillFromName(&result, name)
 		if format == "m4a" {
 			result.Codec = mp4Codec(r)
 		}
@@ -103,6 +114,106 @@ func readLyrics(r io.ReadSeeker) (lyrics string) {
 		return ""
 	}
 	return repairText(tags.Lyrics())
+}
+
+// audioFormat is what decoding a track for playback needs to know.
+type audioFormat struct {
+	Duration   time.Duration
+	SampleRate int
+	Bits       int
+	// Cover reports album art stored as an attached picture stream.
+	Cover bool
+}
+
+// lossyCodecs decode to 16 bits; more would only add size.
+var lossyCodecs = map[string]bool{
+	"mp3": true, "aac": true, "vorbis": true, "opus": true, "wmav1": true, "wmav2": true, "wmapro": true, "wmavoice": true, "ac3": true, "eac3": true,
+}
+
+// fromProbe fills tags the file's own reader did not provide from the media
+// worker's probe, and reports the audio format. Container tag names differ in
+// case and spelling ("album_artist", "Album Artist"), so they are compared
+// without case or separators.
+func fromProbe(m *metadata, probe mediaworker.Probe) audioFormat {
+	tags := map[string]string{}
+	collect := func(values map[string]string) {
+		for key, value := range values {
+			key = strings.NewReplacer(" ", "", "_", "", "-", "").Replace(strings.ToLower(key))
+			if _, ok := tags[key]; !ok && strings.TrimSpace(value) != "" {
+				tags[key] = value
+			}
+		}
+	}
+	collect(probe.Format.Tags)
+	format := audioFormat{Duration: time.Duration(probe.Format.Duration * float64(time.Second))}
+	for _, stream := range probe.Streams {
+		switch {
+		case stream.Type == "video" && stream.AttachedPic:
+			format.Cover = true
+		case stream.Type == "audio" && format.SampleRate == 0:
+			collect(stream.Tags)
+			if m.Codec == "" {
+				m.Codec = stream.Codec
+			}
+			format.SampleRate = stream.SampleRate
+			format.Bits = 16
+			wide := strings.HasPrefix(stream.SampleFormat, "s32") || strings.HasPrefix(stream.SampleFormat, "flt") || strings.HasPrefix(stream.SampleFormat, "dbl")
+			if !lossyCodecs[stream.Codec] && (stream.Bits > 16 || stream.Bits == 0 && wide) {
+				format.Bits = 24
+			}
+		}
+	}
+	set := func(target *string, keys ...string) {
+		for _, key := range keys {
+			if *target == "" {
+				*target = repairText(tags[key])
+			}
+		}
+	}
+	set(&m.Title, "title")
+	set(&m.Artist, "artist", "performer")
+	set(&m.Album, "album")
+	set(&m.AlbumArtist, "albumartist")
+	set(&m.Genre, "genre")
+	number := func(value string) int {
+		value, _, _ = strings.Cut(strings.TrimSpace(value), "/")
+		parsed, _ := strconv.Atoi(strings.TrimSpace(value))
+		return max(parsed, 0)
+	}
+	if m.Year == 0 {
+		for _, key := range []string{"date", "year", "originaldate"} {
+			if value := tags[key]; len(value) >= 4 {
+				if year := number(value[:4]); year > 0 {
+					m.Year = year
+					break
+				}
+			}
+		}
+	}
+	if m.TrackNo == 0 {
+		m.TrackNo = number(tags["track"] + tags["tracknumber"])
+	}
+	if m.DiscNo == 0 {
+		m.DiscNo = number(tags["disc"] + tags["discnumber"])
+	}
+	return format
+}
+
+// playbackRequest asks the media worker for FLAC that browsers play: 24 bits
+// for wide lossless sources, and sample rates above 192 kHz (DSD decodes to
+// 352.8 kHz) halved within their family.
+func playbackRequest(sampleRate, bits int, start float64) mediaworker.AudioRequest {
+	request := mediaworker.AudioRequest{Start: start, Bits: 16}
+	if bits > 16 {
+		request.Bits = 24
+	}
+	if sampleRate > 192000 {
+		request.SampleRate = 192000
+		if sampleRate%44100 == 0 {
+			request.SampleRate = 176400
+		}
+	}
+	return request
 }
 
 // fillFromName uses the file name for a missing title, and "Artist - Title"

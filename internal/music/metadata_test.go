@@ -3,6 +3,9 @@ package music
 import (
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -101,5 +104,41 @@ func TestAlbumGroupingFollowsAlbumArtistOrFolder(t *testing.T) {
 	}
 	if albumID(row{Dir: "X"}) != "album:unknown" {
 		t.Error("tracks without an album are not grouped as unknown")
+	}
+}
+
+func TestProbeTagsFillWhatTheFileReaderMissed(t *testing.T) {
+	value := metadata{Title: "From the file"}
+	format := fromProbe(&value, mediaworker.Probe{
+		Format:  mediaworker.ProbeFormat{Duration: 61.25, Tags: map[string]string{"title": "From the probe", "ALBUM_ARTIST": "群星", "disc": "2/2", "DATE": "1999-04-01"}},
+		Streams: []mediaworker.ProbeStream{{Type: "audio", Codec: "dsd_lsbf_planar", SampleRate: 352800, SampleFormat: "fltp", Tags: map[string]string{"ARTIST": asLatin1(gbk(t, "王菲"))}}},
+	})
+	if value.Title != "From the file" || value.AlbumArtist != "群星" || value.Artist != "王菲" || value.DiscNo != 2 || value.Year != 1999 || value.Codec != "dsd_lsbf_planar" {
+		t.Errorf("metadata = %+v", value)
+	}
+	if format.Duration != 61250*time.Millisecond || format.SampleRate != 352800 || format.Bits != 24 || format.Cover {
+		t.Errorf("format = %+v", format)
+	}
+	lossy := metadata{}
+	if format := fromProbe(&lossy, mediaworker.Probe{Streams: []mediaworker.ProbeStream{{Type: "audio", Codec: "wmav2", SampleRate: 44100, SampleFormat: "fltp"}}}); format.Bits != 16 {
+		t.Errorf("lossy audio decodes to %d bits", format.Bits)
+	}
+}
+
+func TestPlaybackRequestsFitWhatBrowsersPlay(t *testing.T) {
+	cases := []struct {
+		rate, bits int
+		want       mediaworker.AudioRequest
+	}{
+		{44100, 16, mediaworker.AudioRequest{Start: 5, Bits: 16}},
+		{96000, 24, mediaworker.AudioRequest{Start: 5, Bits: 24}},
+		{352800, 24, mediaworker.AudioRequest{Start: 5, SampleRate: 176400, Bits: 24}},
+		{384000, 24, mediaworker.AudioRequest{Start: 5, SampleRate: 192000, Bits: 24}},
+		{0, 0, mediaworker.AudioRequest{Start: 5, Bits: 16}},
+	}
+	for _, test := range cases {
+		if got := playbackRequest(test.rate, test.bits, 5); got != test.want {
+			t.Errorf("playbackRequest(%d, %d) = %+v, want %+v", test.rate, test.bits, got, test.want)
+		}
 	}
 }

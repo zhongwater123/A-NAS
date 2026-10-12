@@ -2,8 +2,11 @@ package httpapi
 
 import (
 	"errors"
+	"io"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -84,7 +87,16 @@ func (h *productHandler) handleMusicTracks(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-	stream, err := h.music.OpenTrack(r.Context(), session.User, r.PathValue("trackID"))
+	track, err := h.music.Track(r.Context(), session.User, r.PathValue("trackID"))
+	if err != nil {
+		h.writeMusicError(w, r, err)
+		return
+	}
+	if track.Transcode {
+		h.streamDecodedTrack(w, r, session, track)
+		return
+	}
+	stream, err := h.music.OpenTrack(r.Context(), session.User, track.ID)
 	if err != nil {
 		h.writeMusicError(w, r, err)
 		return
@@ -95,6 +107,30 @@ func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Reques
 	}
 	// Audio elements seek with Range requests, which ServeContent answers.
 	http.ServeContent(w, r, stream.Name, stream.ModifiedAt, stream.Reader)
+}
+
+// streamDecodedTrack sends the FLAC the media worker decodes from ?start=
+// seconds. It cannot seek, so players request a new start instead of a Range.
+func (h *productHandler) streamDecodedTrack(w http.ResponseWriter, r *http.Request, session accounts.Session, track music.Track) {
+	start := 0.0
+	if value := r.URL.Query().Get("start"); value != "" {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "start must be a non-negative number of seconds")
+			return
+		}
+		start = parsed
+	}
+	body, err := h.music.Decode(r.Context(), session.User, track.ID, start)
+	if err != nil {
+		h.writeMusicError(w, r, err)
+		return
+	}
+	defer body.Close()
+	w.Header().Set("Content-Type", track.ContentType())
+	w.Header().Set("Accept-Ranges", "none")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, body)
 }
 
 func (h *productHandler) handleMusicLyrics(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -284,6 +320,10 @@ func (h *productHandler) writeMusicError(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusNotFound, "not_found", "music resource was not found")
 	case errors.Is(err, music.ErrInvalid):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "music request is invalid")
+	case errors.Is(err, music.ErrUndecodable):
+		writeError(w, http.StatusUnprocessableEntity, "undecodable", "the music file cannot be decoded")
+	case errors.Is(err, music.ErrDecoderUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "decoder_unavailable", "the media worker that decodes this format is unavailable")
 	case errors.Is(err, accounts.ErrForbidden):
 		writeError(w, http.StatusForbidden, "forbidden", "music library access is forbidden")
 	default:

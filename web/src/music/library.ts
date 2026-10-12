@@ -271,9 +271,13 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return new Date(iso).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
 }
 
-export const formatLabel: Record<string, string> = { mp3: "MP3", flac: "FLAC", m4a: "AAC", aac: "AAC", ogg: "OGG", opus: "OPUS", wav: "WAV" };
+export const formatLabel: Record<string, string> = {
+  mp3: "MP3", flac: "FLAC", m4a: "AAC", aac: "AAC", ogg: "OGG", opus: "OPUS", wav: "WAV", ape: "APE", wma: "WMA", wv: "WavPack", aiff: "AIFF", dsf: "DSD", dff: "DSD",
+};
 export const qualityOf = (track: Track) => track.codec === "alac" ? "ALAC" : formatLabel[track.format] ?? track.format.toUpperCase();
-export const lossless = (track: Track) => track.format === "flac" || track.format === "wav" || track.codec === "alac";
+const losslessFormats = new Set(["flac", "wav", "ape", "wv", "aiff", "dsf", "dff"]);
+// WMA Lossless shares the .wma extension with lossy WMA.
+export const lossless = (track: Track) => losslessFormats.has(track.format) || track.codec === "alac" || track.codec === "wmalossless";
 
 export interface LyricLine { time: number; text: string }
 export interface Lyrics { synced: boolean; lines: LyricLine[] }

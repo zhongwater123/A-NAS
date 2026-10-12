@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     embedded_lyrics INTEGER NOT NULL DEFAULT 0,
     folder_cover TEXT NOT NULL DEFAULT '',
     lyrics_file TEXT NOT NULL DEFAULT '',
-    added_at TEXT NOT NULL
+    added_at TEXT NOT NULL,
+    sample_rate INTEGER NOT NULL DEFAULT 0,
+    bit_depth INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS tracks_scope ON tracks(space_id, dir);
 CREATE TABLE IF NOT EXISTS folder_images (
@@ -112,7 +114,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 const trackColumns = `id, space_id, dir, name, size_bytes, modified_at, format, codec, title, artist, album,
 album_artist, genre, year, track_no, disc_no, duration_ms, duration_state, embedded_cover, embedded_lyrics,
-folder_cover, lyrics_file, added_at`
+folder_cover, lyrics_file, added_at, sample_rate, bit_depth`
 
 // row is a track as stored.
 type row struct {
@@ -129,6 +131,7 @@ type row struct {
 	EmbeddedLyrics          bool
 	FolderCover, LyricsFile string
 	AddedAt                 time.Time
+	SampleRate, BitDepth    int
 }
 
 type rowScanner interface{ Scan(...any) error }
@@ -139,7 +142,7 @@ func scanRow(scanner rowScanner) (row, error) {
 	err := scanner.Scan(&value.ID, &value.SpaceID, &value.Dir, &value.Name, &value.SizeBytes, &modifiedAt,
 		&value.Format, &value.Codec, &value.Title, &value.Artist, &value.Album, &value.AlbumArtist, &value.Genre,
 		&value.Year, &value.TrackNo, &value.DiscNo, &value.DurationMs, &value.DurationState, &value.EmbeddedCover,
-		&value.EmbeddedLyrics, &value.FolderCover, &value.LyricsFile, &addedAt)
+		&value.EmbeddedLyrics, &value.FolderCover, &value.LyricsFile, &addedAt, &value.SampleRate, &value.BitDepth)
 	value.ModifiedAt, _ = time.Parse(time.RFC3339Nano, modifiedAt)
 	value.AddedAt, _ = time.Parse(time.RFC3339Nano, addedAt)
 	return value, err
@@ -253,18 +256,19 @@ func (s *Store) rowByID(ctx context.Context, id string) (row, error) {
 
 func (s *Store) upsert(ctx context.Context, tx *sql.Tx, value row) error {
 	_, err := tx.ExecContext(ctx, `
-INSERT INTO tracks(`+trackColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO tracks(`+trackColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 space_id=excluded.space_id, dir=excluded.dir, name=excluded.name, size_bytes=excluded.size_bytes,
 modified_at=excluded.modified_at, format=excluded.format, codec=excluded.codec, title=excluded.title,
 artist=excluded.artist, album=excluded.album, album_artist=excluded.album_artist, genre=excluded.genre,
 year=excluded.year, track_no=excluded.track_no, disc_no=excluded.disc_no, duration_ms=excluded.duration_ms,
 duration_state=excluded.duration_state, embedded_cover=excluded.embedded_cover,
-embedded_lyrics=excluded.embedded_lyrics, folder_cover=excluded.folder_cover, lyrics_file=excluded.lyrics_file`,
+embedded_lyrics=excluded.embedded_lyrics, folder_cover=excluded.folder_cover, lyrics_file=excluded.lyrics_file,
+sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth`,
 		value.ID, value.SpaceID, value.Dir, value.Name, value.SizeBytes, formatTime(value.ModifiedAt), value.Format,
 		value.Codec, value.Title, value.Artist, value.Album, value.AlbumArtist, value.Genre, value.Year, value.TrackNo,
 		value.DiscNo, value.DurationMs, value.DurationState, value.EmbeddedCover, value.EmbeddedLyrics,
-		value.FolderCover, value.LyricsFile, formatTime(value.AddedAt))
+		value.FolderCover, value.LyricsFile, formatTime(value.AddedAt), value.SampleRate, value.BitDepth)
 	return err
 }
 
