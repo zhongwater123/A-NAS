@@ -1,6 +1,6 @@
 # 相册物体检测与混合检索可行性
 
-> 状态：完成（开发机评估；可行，实施方案另行确认）  
+> 状态：完成（开发机评估；可行，[实施方案](../architecture/photo-objects.md) 2026-10-13 确认）  
 > 更新日期：2026-10-13  
 > 适用范围：D-FINE Objects365 M（Transformers.js 的 ONNX 转换，L 只测了速度），ONNX Runtime 1.31.0，CPU；照片向量为 `embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2`  
 > 关联：[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)、[标签校准报告](photo-ai-label-calibration.md)、[issue #66](https://github.com/zhongwater123/A-NAS/issues/66)
