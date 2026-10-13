@@ -5,7 +5,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { CatalogApp } from "../appsApi";
-import { AppIcon, Folded, JobOutput, Progress, RichText } from "./parts";
+import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
 import { appURL, categoryOf, installFailed, openApp, useElapsed } from "./model";
 
 interface DetailProps {
@@ -206,6 +206,12 @@ function StatusPanel({ app, onInstall, onOpenDocker }: { app: CatalogApp; onInst
             <li className="ac-problems-hint">原因通常在容器日志里，可在 Docker 中查看。</li>
           </ul>
         )}
+        {app.credentials?.length ? (
+          <div className="ac-status-logins" aria-label="登录信息">
+            <strong>登录信息</strong>
+            <Logins credentials={app.credentials} />
+          </div>
+        ) : null}
         {app.job && <JobOutput job={app.job} summary={app.job.action === "install" ? "上次安装的输出" : "上次操作的输出"} />}
       </section>
     );

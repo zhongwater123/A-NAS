@@ -130,6 +130,8 @@ type AppStatus struct {
 	Job     *Job
 	// Problems are the app's containers that are not running.
 	Problems []ContainerProblem
+	// Credentials are the logins generated for the app, shown to its owner.
+	Credentials []Credential
 }
 
 // ContainerProblem is an app container that is not running: restarting,

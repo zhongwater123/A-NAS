@@ -20,7 +20,7 @@ func TestFixedUserImagesRunAsTheAppIdentity(t *testing.T) {
 		if !runAsAppIdentity[entry.App.ID] {
 			continue
 		}
-		plan, err := Render(context.Background(), entry, policy, Identity{Username: "app-" + entry.App.ID, UID: 30006, GID: 30006})
+		plan, err := Render(context.Background(), entry, policy, Identity{Username: "app-" + entry.App.ID, UID: 30006, GID: 30006}, generated(entry.App.ID))
 		if err != nil {
 			t.Fatalf("%s: %v", entry.App.ID, err)
 		}
@@ -33,4 +33,9 @@ func TestFixedUserImagesRunAsTheAppIdentity(t *testing.T) {
 			t.Errorf("%s runs as the app identity but is not in the catalog", id)
 		}
 	}
+}
+
+func generated(appID string) Secrets {
+	secrets, _ := NewSecrets(appID, nil)
+	return secrets
 }

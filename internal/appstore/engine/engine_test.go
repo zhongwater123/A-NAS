@@ -419,3 +419,43 @@ func TestInstalledAppsSayWhyAContainerIsNotRunning(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 }
+
+// An app's logins are drawn once, kept only for the agent, and shown for the
+// installed app; an app installed before they were drawn shows the
+// manifest's own, marked so.
+func TestInstalledAppsShowTheLoginsTheyUse(t *testing.T) {
+	docker := &fakeDocker{containers: []engine.ContainerInfo{
+		{Name: "a-nas-openlist-openlist-1", AppID: "openlist", Service: "openlist", Running: true},
+		{Name: "a-nas-photoprism-photoprism-1", AppID: "photoprism", Service: "photoprism", Running: true},
+	}}
+	store, state := newStore(t, docker, &fakeRunner{})
+	ctx := context.Background()
+
+	plan, err := store.Plan(ctx, "openlist", identity)
+	if err != nil || len(plan.Credentials) != 1 || plan.Credentials[0].Upstream {
+		t.Fatalf("Plan() credentials = %+v, %v", plan.Credentials, err)
+	}
+	again, err := store.Plan(ctx, "openlist", identity)
+	if err != nil || again.Digest != plan.Digest || again.Credentials[0].Secret != plan.Credentials[0].Secret {
+		t.Fatalf("a second plan drew new logins: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(state, "secrets", "openlist.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("stored secrets = %v, %v", info, err)
+	}
+
+	apps, err := store.Apps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(apps, "openlist").Credentials; len(got) != 1 || got[0] != plan.Credentials[0] {
+		t.Fatalf("openlist credentials = %+v", got)
+	}
+	legacy := find(apps, "photoprism").Credentials
+	if len(legacy) != 1 || !legacy[0].Upstream || legacy[0].Secret != "casaos" {
+		t.Fatalf("photoprism credentials = %+v", legacy)
+	}
+	if got := find(apps, "memos").Credentials; got != nil {
+		t.Fatalf("an app that is not installed shows %+v", got)
+	}
+}

@@ -2672,6 +2672,21 @@ components:
               service: { type: string }
               state: { type: string }
               exitCode: { type: integer }
+        credentials:
+          type: array
+          description: The app's logins, shown to the owner.
+          items: { $ref: "#/components/schemas/AppCredential" }
+    AppCredential:
+      type: object
+      additionalProperties: false
+      required: [label, secret]
+      properties:
+        label: { type: string }
+        username: { type: string }
+        secret: { type: string }
+        upstream:
+          type: boolean
+          description: The manifest's published value, still used by an app installed before A-NAS generated its logins.
     AppJob:
       type: object
       additionalProperties: false
@@ -2795,6 +2810,10 @@ components:
           pattern: "^[a-f0-9]{64}$"
         compose:
           type: string
+        credentials:
+          type: array
+          description: Logins generated for this app at its first plan and kept, shown to the owner.
+          items: { $ref: "#/components/schemas/AppCredential" }
     PhotoLibrary:
       type: object
       additionalProperties: false

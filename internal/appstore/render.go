@@ -92,8 +92,10 @@ type Plan struct {
 	// AddressPools are the Docker address pools those networks come from. The
 	// engine fills them in; Render does not know the daemon.
 	AddressPools []netip.Prefix
-	Digest       string
-	Compose      []byte
+	// Credentials are the logins generated for this app (credentials.go).
+	Credentials []Credential
+	Digest      string
+	Compose     []byte
 }
 
 // PolicyError lists every reason a manifest cannot be installed.
@@ -106,9 +108,9 @@ func (e *PolicyError) Error() string {
 }
 
 // Render validates a manifest against policy and produces the Compose file
-// that will run as identity, rewritten to A-NAS paths and labelled with the
-// app ID.
-func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) (Plan, error) {
+// that will run as identity, rewritten to A-NAS paths, labelled with the app
+// ID and holding the app's generated secrets (NewSecrets).
+func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, secrets Secrets) (Plan, error) {
 	if identity.UID <= 0 || identity.GID <= 0 {
 		return Plan{}, &PolicyError{Reasons: []string{"app identity is missing"}}
 	}
@@ -180,6 +182,9 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 		descriptions := casaosDescriptions(service.Extensions)
 		checkService(name, service, reject)
 		applyAppIdentity(&service, identity, runAsAppIdentity[entry.App.ID])
+		if err := applySecrets(entry.App.ID, name, &service, secrets); err != nil {
+			return Plan{}, err
+		}
 
 		volumes := make([]types.ServiceVolumeConfig, 0, len(service.Volumes))
 		for _, volume := range service.Volumes {
@@ -293,6 +298,7 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 	sum := sha256.Sum256(rendered)
 	plan.Digest = hex.EncodeToString(sum[:])
 	plan.Compose = rendered
+	plan.Credentials = Credentials(entry.App.ID, secrets)
 	sort.Slice(plan.Ports, func(i, j int) bool { return plan.Ports[i].HostPort < plan.Ports[j].HostPort })
 	return plan, nil
 }

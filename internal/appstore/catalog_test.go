@@ -31,7 +31,7 @@ func TestEmbeddedCatalogPassesPolicy(t *testing.T) {
 		t.Fatal("catalog is empty")
 	}
 	for _, entry := range entries {
-		plan, err := appstore.Render(context.Background(), entry, testPolicy, testIdentity)
+		plan, err := appstore.Render(context.Background(), entry, testPolicy, testIdentity, secretsFor(entry.App.ID))
 		if err != nil {
 			var policyError *appstore.PolicyError
 			if errors.As(err, &policyError) {
@@ -88,4 +88,10 @@ services: {}
 	if app != want {
 		t.Fatalf("app = %+v, want %+v", app, want)
 	}
+}
+
+// secretsFor generates the secrets an app's manifest needs.
+func secretsFor(appID string) appstore.Secrets {
+	secrets, _ := appstore.NewSecrets(appID, nil)
+	return secrets
 }

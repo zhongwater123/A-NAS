@@ -151,6 +151,39 @@ describe("AppCenterPanel", () => {
     expect(within(status).getByRole("list", { name: "没有运行的容器" }).textContent).toContain("容器 n8n 不断重启（退出码 1）");
   });
 
+  it("keeps a generated login hidden until asked, and copies it", async () => {
+    const secret = "generated-for-this-nas";
+    serve(() => [app("openlist", { state: "installed", running: 1, total: 1, credentials: [{ label: "管理员密码", username: "admin", secret }] })]);
+    const copy = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { value: copy, configurable: true });
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: /^Openlist/ }));
+    const logins = await screen.findByLabelText("登录信息");
+    expect(within(logins).getByText("admin")).toBeTruthy();
+    expect(logins.textContent).not.toContain(secret);
+
+    await user.click(within(logins).getByRole("button", { name: "显示管理员密码" }));
+    expect(within(logins).getByText(secret)).toBeTruthy();
+    const copyButton = within(logins).getByRole("button", { name: "复制管理员密码" });
+    await user.click(copyButton);
+    expect(copy).toHaveBeenCalledWith("copy");
+    expect(within(logins).getByRole("button", { name: "已复制" })).toBe(copyButton);
+    expect(document.activeElement).toBe(copyButton);
+    expect(logins.textContent).toContain("随机生成");
+    Reflect.deleteProperty(document, "execCommand");
+  });
+
+  it("warns that an app installed before generated logins still uses the published one", async () => {
+    serve(() => [app("photoprism", { state: "installed", running: 1, total: 1, credentials: [{ label: "管理员密码", username: "admin", secret: "published", upstream: true }] })]);
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: /^Photoprism/ }));
+    const logins = await screen.findByLabelText("登录信息");
+    expect(within(logins).getByText(/安装清单公开的默认密码/)).toBeTruthy();
+    expect(logins.textContent).not.toContain("随机生成");
+  });
+
   it("follows an install from its plan through progress to opening the app", async () => {
     let memos = app("memos", { webPort: 5230, notes: "默认账号 `admin`" });
     const posts = serve(() => [memos], () => {

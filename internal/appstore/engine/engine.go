@@ -96,6 +96,9 @@ type Store struct {
 	startupWindow time.Duration
 	startupPoll   time.Duration
 
+	// secretsMu serialises generating and storing app secrets.
+	secretsMu sync.Mutex
+
 	mu     sync.Mutex
 	active string
 	jobs   map[string]*appstore.Job
@@ -152,6 +155,13 @@ func (s *Store) Apps(ctx context.Context) ([]appstore.AppStatus, error) {
 		}
 		if status.Total > 0 {
 			status.State = appstore.StateInstalled
+			// Installed before secrets were generated: it still uses the
+			// manifest's own logins.
+			if secrets, err := s.readSecrets(id); err == nil && secrets == nil {
+				status.Credentials = appstore.UpstreamCredentials(id)
+			} else if err == nil {
+				status.Credentials = appstore.Credentials(id, secrets)
+			}
 		}
 		if job := s.jobs[id]; job != nil {
 			copied := copyJob(job)
@@ -180,7 +190,11 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 	if !ok {
 		return appstore.Plan{}, appstore.ErrNotFound
 	}
-	plan, err := appstore.Render(ctx, entry, s.policy, identity)
+	secrets, err := s.appSecrets(id)
+	if err != nil {
+		return appstore.Plan{}, fmt.Errorf("%w: app secrets: %v", appstore.ErrUnavailable, err)
+	}
+	plan, err := appstore.Render(ctx, entry, s.policy, identity, secrets)
 	if err != nil {
 		return plan, err
 	}
