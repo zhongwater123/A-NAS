@@ -1,6 +1,6 @@
 # 启用相册物体检测
 
-状态：draft（尚未在 Experimental NAS 执行）
+状态：verified（2026-10-13 在 Experimental NAS 首次部署 `bb1ec71bff65`）
 更新时间：2026-10-13
 
 ## 目的
@@ -63,7 +63,31 @@
 - **回到不含检测器的 release**：按[实机配置手册的回滚](provision-v1.0.1-experimental-storage.md#回滚)恢复，其中包括恢复上一 release 的 `anas-ai.service` 并删除 `cpu-reserve.conf`。旧 Worker 不认识 `--detector` 参数，只恢复其他单元会让每次连接都启动失败。
 - **只停用 AI**：见[启用相册本地 AI](enable-photo-ai.md#回滚或恢复)。
 - **检测器与运行环境**：回滚不删除 `/opt/a-nas/models` 与 `/opt/a-nas/ai-runtimes` 中的内容，重新升级时直接复用；删除前的核对见[启用相册本地 AI](enable-photo-ai.md#回滚或恢复)。
-- **派生数据**：检测结果保存在相册 Catalog 的 `detections` 表中（migration 7）。旧版本不读这张表，回滚后照片、用户元数据与向量不受影响。
+- **相册 Catalog**：新版本启动时把 Catalog 从版本 6 迁移到 7（新增 `detections` 表，并为已有照片排入 `objects/v1` 任务）。旧版本遇到更新的 Catalog 会拒绝启动（`photo catalog version 7 is newer than this build supports (6)`），所以回到不含检测器的 release 前，必须先把 Catalog 退回版本 6：
+  - 停止 `anas-photos` 与 `anas-ai` 后，以 `a-nas-photos` 身份打开 `/srv/a-nas/data/photos/catalog.db`。
+  - 在一个事务中执行 `DELETE FROM jobs WHERE derivation = 'objects/v1'`、`DROP TABLE detections` 和 `PRAGMA user_version = 6`。
+  - 必须以 `a-nas-photos` 身份执行，否则 SQLite 可能留下 root 所有的 `-wal`/`-shm` 文件，相册服务之后无法打开。
+  - 这一步只删除检测结果，照片、相册、标签、AI 纠错与向量都不受影响。
+  - 首次部署时这一步写在 `/root/rollback-bb1ec71bff65.sh` 中，先在模拟的 Catalog 上验证过。
+  - 部署前另有一份完整备份 `catalog-before-<release>.db`，只在 Catalog 损坏时使用：恢复它会丢失部署之后的上传与修改。
+
+## 首次实机部署证据
+
+2026-10-13 17:51，主干 `bb1ec71bff65`（#83 物体检测、#85 传输中心测速）由用户以 root 执行部署脚本，上一版本为 `e1c1921d5fdb`：
+
+- **升级前**：暂存的二进制哈希核对通过。Catalog 备份为 `catalog-before-bb1ec71bff65.db`，版本 6，`quick_check` 为 ok，703 张照片。
+- **安装器**：
+  - 把检测器复制到 `/opt/a-nas/models/cd832825…/`，把运行环境 `3eca142df9a765c2` 复制到 `/opt/a-nas/ai-runtimes/`；
+  - 写入 `CPUQuota=600%`（8 个逻辑核）。
+  - `systemctl show anas-ai.service` 为 `Slice=anas-ai.slice`、`CPUQuotaPerSecUSec=6s`、`MemoryHigh=1879048192`、`MemoryMax=2147483648`。
+- **服务**：相册服务日志写明门控看 `/sys/fs/cgroup/system.slice` 与 `/sys/fs/cgroup/user.slice`。Catalog 迁移到版本 7，排入 697 个检测任务。九个服务均为 active。
+- **整理**：
+  - 17:57:25 Worker 以 6 个线程开始检测（安装后空闲 5 分钟）。
+  - 18:35:56 全部 697 个照片对象检测完毕，约 38.5 分钟，平均约 3.3 秒/张墙钟时间，含压力暂停后的等待。没有失败的任务。
+  - 期间检测被取消 17 次，Worker 没有重启，18:45:56 空闲 10 分钟后退出。
+  - 这次运行 systemd 记录 CPU 时间 38 分 42 秒（2,322 秒），内存峰值 1 GiB，没有触及 `MemoryHigh`。
+  - Worker 平均只用了约 1 个核，远低于 6 核的额度；每次取消后至少空等 1 分钟（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。
+- **空闲时（19:06）**：`system.slice` 的 CPU 压力为 0，`user.slice` 为 0.17%。新启动的 Worker（只加载了向量模型）内存峰值 659 MB，32 个线程，没有换出。
 
 ## 关联
 
@@ -72,4 +96,4 @@
 - 架构：[物体检测与混合检索](../architecture/photo-objects.md)、[相册本地 AI（M2）](../architecture/photo-ai.md#模型与运行环境的交付)
 - 代码：[`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[暂存](../../scripts/deploy-dev.ps1)、[检测器清单](../../deploy/models/dfine-m-obj365.json)
 - 测试：[系统测试](../../scripts/system-test.sh)
-- 调查：不涉及
+- 调查：[闲时检测只用了约 1 个核](../investigations/2026-10-13-idle-detection-used-one-core.md)
