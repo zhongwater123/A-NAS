@@ -1,4 +1,5 @@
 import {
+  ArrowDownUp,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -14,10 +15,12 @@ import {
   Download,
   Ellipsis,
   FileText,
+  FileUp,
   Film,
   FolderClosed,
   FolderOpen,
   FolderPlus,
+  FolderUp,
   Grid2X2,
   Image,
   List,
@@ -40,14 +43,14 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { Component, CSSProperties, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import {
   APIError, FileEntry, Notification, Session, Space, TrashItem, Volume,
   acknowledgeNotification, changePassword, copyFile, createDirectory, currentSession, deleteFile,
-  endViewing, fileDownloadURL, filePreviewURL, getSetupStatus, listEntries, listNotifications,
+  endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications,
   listSpaces, listTrash, listVolumes, login, logout, moveFile, onSessionEnded, purgeTrash, readFileTextPreview,
-  restoreTrash, setSession, setupAdministrator, uploadFile,
+  restoreTrash, setSession, setupAdministrator,
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { BackupCenter } from "./backup/BackupCenter";
@@ -65,10 +68,18 @@ import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel"
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
 import { TerminalPanel } from "./TerminalPanel";
+import { carriesFiles, PickedFile, pickedFromDrop, pickedFromInput } from "./transfers/picker";
+import { transferStore, useTransfers } from "./transfers/store";
+import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
+import type { TransferLocation } from "./transfers/transfersApi";
 import { useHostState } from "./useHostState";
 import "./styles.css";
 
-type WindowID = "files" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "terminal" | "docker" | "store";
+// The transfer center loads when first opened; the desktop only needs its
+// status-bar pill and toasts.
+const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
+
+type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "terminal" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -98,6 +109,7 @@ type WindowAction =
 
 const initialWindows: WindowModel[] = [
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
+	{ id: "transfers", title: "传输中心", open: false, minimized: false, maximized: false, x: 270, y: 84, width: 900, height: 600, z: 2, opened: 0 },
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
 	{ id: "media", title: "影视中心", open: false, minimized: false, maximized: false, x: 210, y: 46, width: 1120, height: 720, z: 2, opened: 0 },
 	{ id: "music", title: "音乐", open: false, minimized: false, maximized: false, x: 240, y: 56, width: 1080, height: 700, z: 2, opened: 0 },
@@ -111,6 +123,7 @@ const initialWindows: WindowModel[] = [
 
 const windowIcons: Record<WindowID, AppGlyph> = {
   files: FolderClosed,
+  transfers: ArrowDownUp,
   photos: Image,
   media: MediaCenterGlyph,
   music: Music2,
@@ -124,6 +137,7 @@ const windowIcons: Record<WindowID, AppGlyph> = {
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
   files: "files",
+  transfers: "download",
   photos: "photos",
   media: "video",
   music: "music",
@@ -164,7 +178,7 @@ export default function App() {
 	}, [session]);
 	const authenticated = (value: Session) => { setError(""); setSessionState(value); };
 	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={authenticated} />;
-	const signOut = () => { void logout().finally(() => { setSessionState(undefined); setMode("login"); }); };
+	const signOut = () => { transferStore.reset(); void logout().finally(() => { setSessionState(undefined); setMode("login"); }); };
 	if (session.user.mustChangePassword) {
 		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
 	}
@@ -259,6 +273,12 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
   const openSettings = (section?: SettingsSection) => { if (section) setSettingsSection(section); openWindow("settings"); };
+  // Uploads of an earlier visit by the same account continue; another
+  // account's are dropped.
+  useEffect(() => { transferStore.attach(session.user.id); }, [session.user.id]);
+  // A folder the transfer center asks the file manager to show.
+  const [fileNavigation, setFileNavigation] = useState<TransferLocation>();
+  const showInFiles = (location: TransferLocation) => { setFileNavigation(location); openWindow("files"); };
   // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
@@ -268,7 +288,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
     ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
     { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <MediaCenterGlyph />, active: isOpen("media"), onClick: () => openWindow("media") },
-    { id: "download", label: "下载", ariaLabel: "下载，规划中", tone: "download", icon: <Download />, disabled: true },
+    // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
+    { id: "download", label: "传输中心", ariaLabel: "打开传输中心", keywords: "传输 上传 下载 进度 续传 transfer upload download", tone: "download", icon: <ArrowDownUp />, active: isOpen("transfers"), onClick: () => openWindow("transfers") },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
     { id: "backup", label: "备份中心", ariaLabel: "打开备份中心", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup", tone: "backup", icon: <BackupCenterGlyph />, active: isOpen("backup"), onClick: () => openWindow("backup") },
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
@@ -311,7 +332,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 
       <DesktopGrid apps={desktopApps} />
 
-      <StatusBar host={host} />
+      <StatusBar host={host} extra={<TransferIndicator onOpen={() => openWindow("transfers")} />} />
 
       <NotificationCenter />
 
@@ -322,7 +343,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
-			  {window.id === "files" && <FilePanel onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
+			  {window.id === "files" && <FilePanel navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
+			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
 			  {window.id === "photos" && <PhotosPanel userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
@@ -344,6 +366,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
         focusedID={focusedID}
         onSelect={(id, state) => dispatch({ type: state === "focused" ? "minimize" : "open", id: id as WindowID })}
       />
+      <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
       <FeedbackChannel />
       <LocalConsoleScreenSaver enabled={isLocalConsole()} />
     </main>
@@ -450,7 +473,16 @@ const personalFileResources: FileBrowserItem[] = [
 	{ id: "resource:movies", name: "影视", kind: "resource", type: "功能入口", detail: "影视中心", modifiedAt: "", sizeBytes: 0, resource: "movies" },
 ];
 
-function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: () => void; onOpenMedia: () => void; onOpenMusic: () => void }) {
+interface FilePanelProps {
+	navigation?: TransferLocation;
+	onNavigated: () => void;
+	onOpenTransfers: () => void;
+	onOpenPhotos: () => void;
+	onOpenMedia: () => void;
+	onOpenMusic: () => void;
+}
+
+function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onOpenMedia, onOpenMusic }: FilePanelProps) {
 	const [spaces, setSpaces] = useState<Space[]>([]);
 	const [spaceID, setSpaceID] = useState("");
 	const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -475,10 +507,16 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 	const [textPreview, setTextPreview] = useState<{ id: string; content?: string; error?: string }>();
 	const [selectionRect, setSelectionRect] = useState<FileSelectionRect>();
 	const [contextMenu, setContextMenu] = useState<FileContextMenu>();
+	const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+	const [dragging, setDragging] = useState(false);
 	const [error, setError] = useState("");
 	const managerRef = useRef<HTMLDivElement>(null);
 	const listShellRef = useRef<HTMLDivElement>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const folderInputRef = useRef<HTMLInputElement>(null);
+	const dragDepth = useRef(0);
 	const parentID = trail.at(-1)?.id ?? "";
+	const transfers = useTransfers();
 
 	const refresh = useCallback(async (selected: string, parent: string) => {
 		if (!selected) { setEntries([]); return; }
@@ -502,16 +540,34 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 	}, []);
 	useEffect(() => { void loadSpaces(); void refreshVolume(); }, [loadSpaces, refreshVolume]);
 	useEffect(() => { if (spaceID) void refresh(spaceID, parentID); }, [spaceID, parentID, refresh]);
+	useEffect(() => {
+		if (!navigation) return;
+		setSpaceID(navigation.spaceId); setTrail(navigation.folders.map((folder) => ({ id: folder.id, name: folder.name })));
+		setQuery(""); setSelectedItemID(""); setSelectedItemIDs([]); setContextMenu(undefined);
+		onNavigated();
+	}, [navigation, onNavigated]);
+	// Files uploaded into this space show up without a manual refresh.
+	const location = useRef({ spaceID, parentID });
+	location.current = { spaceID, parentID };
+	useEffect(() => {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const stop = transferStore.onUploaded((target) => {
+			if (target.spaceId !== location.current.spaceID) return;
+			clearTimeout(timer);
+			timer = setTimeout(() => { void refresh(location.current.spaceID, location.current.parentID); void refreshVolume(); }, 400);
+		});
+		return () => { stop(); clearTimeout(timer); };
+	}, [refresh, refreshVolume]);
 	useEffect(() => { setFailedPreviewID(""); }, [selectedItemID]);
 	useEffect(() => {
-		if (!pendingDelete && !renaming && !viewMenuOpen && !contextMenu) return;
+		if (!pendingDelete && !renaming && !viewMenuOpen && !contextMenu && !uploadMenuOpen) return;
 		const closeOnEscape = (event: KeyboardEvent) => {
 			if (event.key !== "Escape" || activity) return;
-			setPendingDelete(undefined); setRenaming(undefined); setViewMenuOpen(false); setContextMenu(undefined);
+			setPendingDelete(undefined); setRenaming(undefined); setViewMenuOpen(false); setContextMenu(undefined); setUploadMenuOpen(false);
 		};
 		window.addEventListener("keydown", closeOnEscape);
 		return () => window.removeEventListener("keydown", closeOnEscape);
-	}, [pendingDelete, renaming, viewMenuOpen, contextMenu, activity]);
+	}, [pendingDelete, renaming, viewMenuOpen, contextMenu, uploadMenuOpen, activity]);
 	useEffect(() => {
 		if (!contextMenu) return;
 		const close = () => setContextMenu(undefined);
@@ -552,6 +608,12 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 	const canMutateSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
 	const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
 	const canPaste = Boolean(clipboard?.entries.length && !viewing && !activity && !(clipboard.mode === "move" && clipboard.entries.every((entry) => entry.spaceId === spaceID && (entry.parentId ?? "") === parentID)));
+	const canDownload = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length);
+	const archiveDownload = selectedEntries.length > 1 || selectedEntries[0]?.kind === "directory";
+	const uploadsHere = transfers.uploads.filter((upload) => upload.target.spaceId === spaceID && ["queued", "running", "paused", "waiting", "conflict"].includes(upload.phase));
+	const uploadBytes = uploadsHere.reduce((sum, upload) => sum + upload.size, 0);
+	const uploadPercent = uploadBytes ? Math.round((uploadsHere.reduce((sum, upload) => sum + upload.transferred, 0) / uploadBytes) * 100) : 0;
+	const uploadAttention = uploadsHere.some((upload) => upload.phase === "conflict" || upload.phase === "waiting");
 
 	useEffect(() => {
 		if (!selectedItem?.entry || !isTextPreviewable(selectedItem.name) || selectedItems.length !== 1) { setTextPreview(undefined); return; }
@@ -580,14 +642,15 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 	const openDirectory = (entry: FileEntry) => {
 		setTrail((value) => [...value, { id: entry.id, name: entry.name }]); setQuery(""); setSelectedItemID(""); setSelectedItemIDs([]); setCreatingDirectory(false); setContextMenu(undefined);
 	};
-	const downloadEntry = (entry: FileEntry) => {
-		const link = document.createElement("a");
-		link.href = fileDownloadURL(entry.id); link.download = entry.name; link.hidden = true;
-		document.body.appendChild(link); link.click(); link.remove();
+	// Downloads go through the transfer center, which follows their progress;
+	// a folder or several items arrive as one ZIP archive.
+	const download = (targets: FileEntry[]) => {
+		if (!targets.length) return;
+		void transferStore.download(targets.map((entry) => entry.id)).then(() => setError("")).catch((caught) => setError(messageOf(caught)));
 	};
 	const openItem = (item: FileBrowserItem) => {
 		if (item.entry?.kind === "directory") openDirectory(item.entry);
-		else if (item.entry?.kind === "file") downloadEntry(item.entry);
+		else if (item.entry?.kind === "file") download([item.entry]);
 		else if (item.resource === "photos") onOpenPhotos();
 		else if (item.resource === "movies") onOpenMedia();
 		else if (item.resource === "music") onOpenMusic();
@@ -675,16 +738,22 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 		catch (caught) { setError(messageOf(caught)); }
 		finally { setActivity(""); }
 	};
-	const uploadFiles = async (files: FileList | null) => {
-		if (!files?.length) return;
-		try {
-			for (let index = 0; index < files.length; index += 1) {
-				setActivity(`正在上传 ${index + 1}/${files.length} · ${files[index].name}`);
-				await uploadFile(spaceID, parentID, files[index]);
-			}
-			await Promise.all([refresh(spaceID, parentID), refreshVolume()]); setError("");
-		} catch (caught) { setError(messageOf(caught)); }
-		finally { setActivity(""); }
+	// Uploads run in the transfer center, so the folder stays usable and a
+	// failed file does not stop the others.
+	const upload = (picked: PickedFile[]) => {
+		if (!picked.length || !selectedSpace || viewing) return;
+		transferStore.enqueue(picked, { spaceId: selectedSpace.id, spaceKind: selectedSpace.kind, parentId: parentID, folders: trail });
+	};
+	const dragEvents = {
+		onDragEnter: (event: ReactDragEvent) => { if (!carriesFiles(event.dataTransfer)) return; event.preventDefault(); dragDepth.current += 1; setDragging(true); },
+		onDragOver: (event: ReactDragEvent) => { if (!carriesFiles(event.dataTransfer)) return; event.preventDefault(); event.dataTransfer.dropEffect = viewing || !spaceID ? "none" : "copy"; },
+		onDragLeave: (event: ReactDragEvent) => { if (!carriesFiles(event.dataTransfer)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); },
+		onDrop: (event: ReactDragEvent) => {
+			if (!carriesFiles(event.dataTransfer)) return;
+			event.preventDefault(); dragDepth.current = 0; setDragging(false);
+			if (viewing || !spaceID) return;
+			void pickedFromDrop(event.dataTransfer).then(upload).catch(() => setError("无法读取拖入的文件，请改用上传按钮选择"));
+		},
 	};
 	const pasteEntry = async () => {
 		if (!clipboard || !canPaste) return;
@@ -759,7 +828,7 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 
 		<div className="file-pane-resizer" role="separator" aria-label="调整目录栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPaneResize("left", event)} onKeyDown={(event) => resizePaneWithKeyboard("left", event)} />
 
-		<section className="file-browser" aria-label="文件浏览器">
+		<section className="file-browser" aria-label="文件浏览器" {...dragEvents}>
 			<div className="file-navigation-bar">
 				<div className="file-history-actions">
 					<button className="file-icon-button" aria-label="后退" title="后退" disabled={!trail.length || loading} onClick={() => navigateTo(trail.length - 1)}><ArrowLeft /></button>
@@ -778,6 +847,7 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 				<button className="file-command-button" aria-label="剪切" title="剪切" disabled={!canMutateSelection} onClick={() => setClipboard({ entries: selectedEntries, mode: "move" })}><Scissors /><span>剪切</span></button>
 				<button className="file-command-button" aria-label="复制" title="复制" disabled={!canMutateSelection} onClick={() => setClipboard({ entries: selectedEntries, mode: "copy" })}><Copy /><span>复制</span></button>
 				<button className="file-command-button" aria-label="粘贴" title="粘贴到当前目录" disabled={!canPaste} onClick={() => void pasteEntry()}><ClipboardPaste /><span>粘贴</span></button>
+				<button className="file-command-button" aria-label={archiveDownload ? "打包下载" : "下载"} title={archiveDownload ? "打包为 ZIP 下载" : "下载"} disabled={!canDownload} onClick={() => download(selectedEntries)}><Download /><span>下载</span></button>
 				<button className="file-command-button" aria-label="重命名" title="重命名" disabled={!canRenameSelection} onClick={() => setRenaming(selectedEntry)}><Pencil /><span>重命名</span></button>
 				<button className="file-command-button file-command-optional" aria-label="共享" title="共享功能规划中" disabled><Share2 /><span>共享</span></button>
 				<button className="file-command-button danger" aria-label="删除" title="移到回收站" disabled={!canMutateSelection} onClick={() => setPendingDelete(selectedEntries)}><Trash2 /><span>删除</span></button>
@@ -815,10 +885,20 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 				{loading ? <div className="file-empty-state" role="status"><span className="loader" /><strong>正在读取文件…</strong><span>正在加载这个目录的内容</span></div>
 					: !spaceID ? <div className="file-empty-state"><FolderClosed /><strong>还没有可用空间</strong><span>完成数据卷与账号设置后，空间会显示在这里。</span></div>
 					: !visibleItems.length && query ? <div className="file-empty-state"><Search /><strong>没有匹配的项目</strong><span>请尝试其他名称，或清除搜索条件。</span><button onClick={() => setQuery("")}>清除搜索</button></div>
-					: !visibleItems.length ? <div className="file-empty-state"><FolderPlus /><strong>这个文件夹是空的</strong><span>{viewing ? "这里暂时没有内容。" : "上传文件或新建文件夹，开始整理内容。"}</span></div> : null}
+					: !visibleItems.length ? <div className="file-empty-state"><FolderPlus /><strong>这个文件夹是空的</strong><span>{viewing ? "这里暂时没有内容。" : "把文件或文件夹拖到这里上传，或新建文件夹开始整理。"}</span></div> : null}
 			</div>
-			{!viewing && <label className={`file-floating-upload ${activity ? "disabled" : ""}`} aria-label="上传资源到当前目录" title="上传资源到当前目录" tabIndex={activity ? -1 : 0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector("input")?.click(); } }}><Upload /><span className="sr-only">上传资源到当前目录</span><input type="file" multiple disabled={Boolean(activity)} onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ""; }} /></label>}
-			<footer className="file-status-bar"><span>{resourceCount ? `${resourceCount} 个应用资源，` : ""}{directoryCount ? `${directoryCount} 个文件夹` : ""}{directoryCount && fileCount ? "，" : ""}{fileCount ? `${fileCount} 个文件` : !directoryCount && !resourceCount ? "0 个项目" : ""}</span><span>{query && `已筛选 ${visibleItems.length}/${browserItems.length} 项`}</span><span>{totalSize > 0 && `文件共 ${formatFileSize(totalSize)}`}</span><span>{view === "list" ? "列表视图" : "图标视图"}</span></footer>
+			{!viewing && spaceID && <div className="file-upload-control">
+				{uploadMenuOpen && <><div className="file-upload-scrim" onPointerDown={() => setUploadMenuOpen(false)} /><div className="file-upload-menu" role="menu" aria-label="上传">
+					<button role="menuitem" onClick={() => { setUploadMenuOpen(false); fileInputRef.current?.click(); }}><FileUp /><span><strong>上传文件</strong><small>可多选</small></span></button>
+					<button role="menuitem" onClick={() => { setUploadMenuOpen(false); folderInputRef.current?.click(); }}><FolderUp /><span><strong>上传文件夹</strong><small>保留文件夹结构</small></span></button>
+					<p>也可以把文件或文件夹直接拖进来</p>
+				</div></>}
+				<button className="file-floating-upload" aria-label="上传到当前目录" title="上传到当前目录" aria-haspopup="menu" aria-expanded={uploadMenuOpen} onClick={() => setUploadMenuOpen((value) => !value)}><Upload /></button>
+				<input ref={fileInputRef} type="file" multiple hidden aria-label="选择要上传的文件" onChange={(event) => { upload(pickedFromInput(event.target.files)); event.target.value = ""; }} />
+				<input ref={(element) => { folderInputRef.current = element; element?.setAttribute("webkitdirectory", ""); }} type="file" multiple hidden aria-label="选择要上传的文件夹" onChange={(event) => { upload(pickedFromInput(event.target.files)); event.target.value = ""; }} />
+			</div>}
+			{dragging && <div className={`file-drop-overlay ${viewing ? "refused" : ""}`} aria-hidden="true"><div><FolderUp /><strong>{viewing ? "只读查看时不能上传" : "松开即可上传"}</strong><span>{viewing ? "结束查看后再上传到自己的空间。" : `上传到 ${[selectedSpaceLabel, ...trail.map((item) => item.name)].join(" › ")}，文件夹会保留结构`}</span></div></div>}
+			<footer className="file-status-bar"><span>{resourceCount ? `${resourceCount} 个应用资源，` : ""}{directoryCount ? `${directoryCount} 个文件夹` : ""}{directoryCount && fileCount ? "，" : ""}{fileCount ? `${fileCount} 个文件` : !directoryCount && !resourceCount ? "0 个项目" : ""}</span><span>{query && `已筛选 ${visibleItems.length}/${browserItems.length} 项`}</span><span>{totalSize > 0 && `文件共 ${formatFileSize(totalSize)}`}</span>{uploadsHere.length > 0 && <button className={`file-transfer-chip ${uploadAttention ? "attention" : ""}`} title="在传输中心查看上传" aria-label={uploadAttention ? `${uploadsHere.length} 个上传需要处理，在传输中心查看` : `正在上传 ${uploadsHere.length} 个文件，已完成 ${uploadPercent}%，在传输中心查看`} onClick={onOpenTransfers}><span className="file-transfer-ring" style={{ "--percent": uploadPercent } as CSSProperties} /><span>{uploadAttention ? `${uploadsHere.length} 个需处理` : `上传 ${uploadsHere.length} · ${uploadPercent}%`}</span></button>}<span>{view === "list" ? "列表视图" : "图标视图"}</span></footer>
 		</section>
 
 		<div className="file-pane-resizer" role="separator" aria-label="调整详细信息栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPaneResize("right", event)} onKeyDown={(event) => resizePaneWithKeyboard("right", event)} />
@@ -830,7 +910,8 @@ function FilePanel({ onOpenPhotos, onOpenMedia, onOpenMusic }: { onOpenPhotos: (
 
 		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
 			{contextMenu.item ? <>
-				<button role="menuitem" disabled={Boolean(contextMenu.item.planned)} onClick={() => { openItem(contextMenu.item!); setContextMenu(undefined); }}>{contextMenu.item.entry?.kind === "file" ? <Download /> : <FolderOpen />}<span>{contextMenu.item.entry?.kind === "file" ? "下载" : "打开"}</span></button>
+				<button role="menuitem" disabled={Boolean(contextMenu.item.planned)} onClick={() => { openItem(contextMenu.item!); setContextMenu(undefined); }}>{contextMenu.item.entry?.kind === "file" ? <Download /> : <FolderOpen />}<span>{contextMenu.item.entry?.kind === "file" && selectedEntries.length <= 1 ? "下载" : "打开"}</span></button>
+				{canDownload && archiveDownload && <button role="menuitem" onClick={() => { download(selectedEntries); setContextMenu(undefined); }}><Download /><span>{selectedEntries.length > 1 ? `打包下载 ${selectedEntries.length} 项` : "打包下载"}</span><kbd>ZIP</kbd></button>}
 				<i />
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "move" }); setContextMenu(undefined); }}><Scissors /><span>剪切</span><kbd>Ctrl+X</kbd></button>
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "copy" }); setContextMenu(undefined); }}><Copy /><span>复制</span><kbd>Ctrl+C</kbd></button>

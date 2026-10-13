@@ -23,6 +23,7 @@
 - [影视中心](media-center.md)（implemented）
 - [音乐](music.md)（implemented，尚未部署）
 - [问题反馈](feedback.md)（implemented）
+- [传输中心](transfer-center.md)（implemented，尚未部署）
 - [备份中心](backup-center.md)（implemented，尚未部署）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。

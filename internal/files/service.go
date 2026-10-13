@@ -305,6 +305,9 @@ type Service struct {
 	// scheduledSpaces lets the development snapshot backend find spaces that
 	// scheduled snapshots reach before any request prepared them.
 	scheduledSpaces map[string]accounts.Space
+	// uploads holds the temporaries of pending uploads by name.
+	uploadsMu sync.Mutex
+	uploads   map[string]struct{}
 }
 
 func NewService(store *Store, volumeRoot string, policy Policy, options Options) *Service {
@@ -322,6 +325,7 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
 		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: options.FileSystem,
 		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
+		uploads: make(map[string]struct{}),
 	}
 	if service.location == nil {
 		service.location = time.Local
@@ -1124,16 +1128,18 @@ func (s *Service) Upload(ctx context.Context, actor accounts.User, spaceID, pare
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Entry{}, err
 	}
-	temporary, temporaryPath, err := s.fs.CreateTemp(ctx, parentPath, ".a-nas-upload-")
+	temporary, temporaryPath, err := s.fs.CreateTemp(ctx, parentPath, uploadTemporaryPrefix)
 	if err != nil {
 		return Entry{}, err
 	}
+	s.holdUpload(filepath.Base(temporaryPath), true)
 	committed := false
 	defer func() {
 		_ = temporary.Close()
 		if !committed {
 			_ = s.fs.Remove(context.WithoutCancel(ctx), temporaryPath)
 		}
+		s.holdUpload(filepath.Base(temporaryPath), false)
 	}()
 	buffer := make([]byte, 1024*1024)
 	for {
@@ -1370,10 +1376,11 @@ func scanEntry(row rowScanner) (Entry, error) {
 	return entry, nil
 }
 
-// reconcileSkip hides A-NAS bookkeeping and in-flight temporaries.
+// reconcileSkip hides A-NAS bookkeeping and in-flight copies. Upload
+// temporaries are scanned but never catalogued, so that stale ones are found.
 var reconcileSkip = ScanSkip{
 	Names:    []string{".a-nas-trash", ".a-nas-snapshots", ".a-nas-stale"},
-	Prefixes: []string{".a-nas-upload-", ".a-nas-copy-"},
+	Prefixes: []string{".a-nas-copy-"},
 }
 
 func (s *Service) reconcile(ctx context.Context, space accounts.Space, root string) error {
@@ -1383,7 +1390,12 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 	}
 	parentIDs := map[string]string{".": ""}
 	seen := make(map[uint64]struct{})
+	var temporaries []ScanEntry
 	for _, item := range scanned {
+		if isUploadTemporary(item.Path) {
+			temporaries = append(temporaries, item)
+			continue
+		}
 		if item.Info.Kind != KindFile && item.Info.Kind != KindDirectory {
 			continue
 		}
@@ -1421,6 +1433,7 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 			return err
 		}
 	}
+	s.removeStaleUploads(ctx, root, temporaries)
 	return nil
 }
 

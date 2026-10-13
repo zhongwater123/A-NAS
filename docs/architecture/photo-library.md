@@ -1,6 +1,6 @@
 # 相册技术设计
 
-状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 已按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 实现为随系统内置安装；M3 未开始。模型 revision 与视觉 token 已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量；AI 标签自 2026-10-10 暂停，搜索按向量排序并分两段（[M2 实施方案](photo-ai.md#语义搜索)）。部署与验收进度见[当前状态](../status/CURRENT.md)。
+状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 已按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 实现为随系统内置安装；M3 未开始。模型 revision 与视觉 token 已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量；搜索按向量排序并分两段，AI 标签只在 AI 聚合中展示、不参与搜索（[M2 实施方案](photo-ai.md#ai-聚合)）。部署与验收进度见[当前状态](../status/CURRENT.md)。
 
 本设计落实[相册规格](../specs/photo-library.md)。受管图库的长期边界由 [ADR 0006](../adr/0006-use-a-managed-photo-library.md) 决定，相册服务的身份、存储位置与授权方式由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定；模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -102,7 +102,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 | 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
 | 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
 
-（2026-10-10 起暂停，原因见 [M2 实施方案“AI 标签”](photo-ai.md#ai-标签2026-10-10-起暂停)。）图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
+（2026-10-10 起标签只以 AI 聚合呈现、不参与搜索，见 [M2 实施方案“AI 聚合”](photo-ai.md#ai-聚合)。）图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
 
 Google EmbeddingGemma 2 已选定为首个集成目标：它在本设计更新前一天发布，支持中文在内的 100+ 语言；2026-10-09 决定使用包含音频编码器的全模态 740M 包；其规模与官方本地 CPU 定位都比 2B/3B 候选更符合 8 GB NAS。但“适合消费硬件”不等于已经在 Debian 13 x86 上通过 A-NAS 门禁；官方跨平台量化内存数字也不能代替本机加载、吞吐和长时间运行实测。因此 SigLIP2 Base 保留为成熟回退，EmbeddingGemma 2 通过门禁后才冻结为发行默认。
 

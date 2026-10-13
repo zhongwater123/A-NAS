@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 )
 
 const sessionCookieName = "anas_session"
@@ -54,6 +55,10 @@ type ProductDependencies struct {
 	// Feedback serves /api/v1/feedback, the list every signed-in user reads
 	// and edits, and receives the user through feedbackapi.WithUser.
 	Feedback http.Handler
+	// Transfers serves /api/v1/transfers and the tus endpoint /api/v1/uploads
+	// to every signed-in user and receives the user through
+	// transfersapi.WithUser.
+	Transfers http.Handler
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
 	// center) catch up without waiting for their periodic scan. The context
@@ -74,6 +79,7 @@ type productHandler struct {
 	media      http.Handler
 	music      *music.Service
 	feedback   http.Handler
+	transfers  http.Handler
 	changed    func(context.Context, accounts.User, string)
 	logger     *slog.Logger
 	mux        *http.ServeMux
@@ -89,7 +95,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
-		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
+		transfers: dependencies.Transfers, changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -112,6 +118,12 @@ func (h *productHandler) routes() {
 	if h.feedback != nil {
 		h.mux.Handle(feedbackapi.PathPrefix, h.withUser(h.feedback, feedbackapi.WithUser))
 		h.mux.Handle(feedbackapi.PathPrefix+"/", h.withUser(h.feedback, feedbackapi.WithUser))
+	}
+	if h.transfers != nil {
+		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
+			h.mux.Handle(prefix, h.withUser(h.transfers, transfersapi.WithUser))
+			h.mux.Handle(prefix+"/", h.withUser(h.transfers, transfersapi.WithUser))
+		}
 	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)

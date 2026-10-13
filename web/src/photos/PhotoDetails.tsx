@@ -9,7 +9,7 @@ export interface DetailsActions {
   copy: (asset: PhotoAsset, library: PhotoLibrary) => void;
   addToAlbum: (assets: PhotoAsset[]) => void;
   openAlbum: (album: Pick<PhotoAlbum, "id" | "name" | "libraryId">) => void;
-  searchTag: (tag: string) => void;
+  openTag: (tag: string) => void;
   error: (message: string) => void;
 }
 
@@ -67,7 +67,7 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
         <div className="ph-chips">
           {tags.map((name) => (
             <span className="ph-chip" key={name}>
-              <button type="button" onClick={() => actions.searchTag(name)}>{name}</button>
+              <button type="button" title="查看带这个标签的照片" onClick={() => actions.openTag(name)}>{name}</button>
               {editable && <button type="button" className="ph-chip-remove" aria-label={`删除标签 ${name}`} onClick={() => void run(() => removePhotoTag(asset.id, name))}><X /></button>}
             </span>
           ))}

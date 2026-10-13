@@ -368,6 +368,8 @@ button { font: inherit; }
   backdrop-filter: blur(24px) saturate(150%);
 }
 .status-gauges { display: flex; gap: 2px; }
+.status-extra { display: flex; align-items: center; }
+.status-extra + .status-clock { margin-left: -2px; }
 .status-divider { width: 1px; align-self: stretch; margin: 8px 0; background: linear-gradient(transparent, rgba(255,255,255,.3), transparent); }
 .status-bar.stale .status-gauges, .status-bar.stale .net-rates { opacity: .5; }
 
@@ -609,14 +611,37 @@ button { font: inherit; }
 .file-empty-state strong { color: #3c4d60; font-size: 12px; }
 .file-empty-state span { font-size: 9px; }
 .file-empty-state button { margin-top: 6px; }
-.file-floating-upload { position: absolute; z-index: 5; right: 15px; bottom: 42px; width: 43px; height: 43px; border: 1px solid #216cb7; border-radius: 50%; display: grid; place-items: center; color: #fff; background: linear-gradient(#3b8fdc,#2675c5); box-shadow: 0 8px 20px rgba(27,94,159,.28); cursor: pointer; }
+.file-upload-control { position: absolute; z-index: 6; right: 15px; bottom: 42px; }
+.file-floating-upload { position: relative; z-index: 2; width: 43px; height: 43px; padding: 0; border: 1px solid #216cb7; border-radius: 50%; display: grid; place-items: center; color: #fff; background: linear-gradient(#3b8fdc,#2675c5); box-shadow: 0 8px 20px rgba(27,94,159,.28); transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s; }
 .file-floating-upload:hover { transform: translateY(-1px); box-shadow: 0 11px 24px rgba(27,94,159,.34); }
+.file-floating-upload[aria-expanded="true"] { background: linear-gradient(#2f7fcd,#1f63ab); box-shadow: 0 0 0 4px rgba(59,143,220,.22), 0 8px 20px rgba(27,94,159,.28); }
 .file-floating-upload:focus-visible { outline: 3px solid rgba(55,132,214,.28); outline-offset: 3px; }
-.file-floating-upload.disabled { pointer-events: none; opacity: .45; }
 .file-floating-upload svg { width: 18px; }
-.file-floating-upload input { display: none; }
+.file-upload-scrim { position: fixed; inset: 0; z-index: 1; }
+.file-upload-menu { position: absolute; z-index: 2; right: 0; bottom: 52px; width: 196px; display: grid; gap: 2px; padding: 6px; border: 1px solid #d8e0e8; border-radius: 12px; color: #35485b; background: rgba(255,255,255,.98); box-shadow: 0 16px 42px rgba(24,39,57,.22); backdrop-filter: blur(16px); transform-origin: 100% 100%; animation: file-menu-in .2s cubic-bezier(.22,1,.36,1); }
+.file-upload-menu button { min-height: 40px; display: grid; grid-template-columns: 30px minmax(0,1fr); align-items: center; gap: 8px; padding: 4px 8px; border: 0; border-radius: 8px; color: inherit; background: transparent; text-align: left; }
+.file-upload-menu button:hover { color: #225f9c; background: #edf5fd; }
+.file-upload-menu button > svg { width: 30px; height: 30px; padding: 7px; border-radius: 8px; color: #fff; background: linear-gradient(160deg, #5cc8f5, #1a8fd0); }
+.file-upload-menu button:nth-of-type(2) > svg { background: linear-gradient(160deg, #8a96ff, #4f52dd); }
+.file-upload-menu strong { display: block; font-size: var(--file-font-body); font-weight: 650; }
+.file-upload-menu small { color: #7d8996; font-size: var(--file-font-caption); }
+.file-upload-menu p { margin: 4px 8px 2px; padding-top: 6px; border-top: 1px solid #e7ecf1; color: #8a96a3; font-size: var(--file-font-caption); }
+@keyframes file-menu-in { from { opacity: 0; transform: translateY(6px) scale(.96); } }
+.file-drop-overlay { position: absolute; inset: 48px 8px 37px; z-index: 7; display: grid; place-items: center; border: 2px dashed rgba(47,111,228,.55); border-radius: 14px; background: rgba(233,240,253,.92); pointer-events: none; animation: file-menu-in .18s ease-out; }
+.file-drop-overlay > div { display: grid; justify-items: center; gap: 6px; max-width: 320px; padding: 0 16px; text-align: center; }
+.file-drop-overlay svg { width: 34px; height: 34px; color: #2f6fe4; }
+.file-drop-overlay strong { color: #1d4f9a; font-size: var(--file-font-heading); }
+.file-drop-overlay span { color: #4f6b8f; font-size: var(--file-font-body); }
+.file-drop-overlay.refused { border-color: rgba(176,106,16,.5); background: rgba(253,243,225,.93); }
+.file-drop-overlay.refused svg, .file-drop-overlay.refused strong { color: #9a5d0e; }
+.file-transfer-chip { flex: none; height: 21px; margin: 0 -4px 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px 0 4px; border: 1px solid #cfe0f3; border-radius: 999px; color: #2c5d93; background: #eef5fd; font-size: var(--file-font-meta); font-weight: 600; white-space: nowrap; }
+.file-transfer-chip:hover { border-color: #a9c8ec; background: #e3effc; }
+.file-transfer-chip.attention { border-color: #f1d4a5; color: #8a5509; background: #fdf3e1; }
+.file-transfer-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.file-transfer-ring { --percent: 0; width: 13px; height: 13px; flex: none; border-radius: 50%; background: conic-gradient(currentColor calc(var(--percent) * 1%), rgba(44,93,147,.18) 0); -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px); mask: radial-gradient(circle, transparent 3.5px, #000 4px); }
 .file-status-bar { min-height: 29px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: #7d8996; border-top: 1px solid #e5e9ee; background: #f3f6f9; font-size: 9px; }
-.file-status-bar span:last-child { margin-left: auto; }
+.file-status-bar > span:last-child { margin-left: auto; }
+.file-status-bar > .file-transfer-chip + span:last-child { margin-left: 0; }
 
 .file-inspector { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; background: #f2f5f8; }
 .file-inspector > header { min-height: 43px; flex: none; display: flex; align-items: center; padding: 0 14px; color: #2c3b4a; border-bottom: 1px solid #dfe5ec; font-size: var(--file-font-nav); font-weight: 760; }

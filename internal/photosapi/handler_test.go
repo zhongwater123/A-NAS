@@ -301,7 +301,7 @@ func TestHiddenItemsAnswerExactlyLikeMissingOnes(t *testing.T) {
 	}
 }
 
-func TestTimelineByMonth(t *testing.T) {
+func TestTimelineByMonthAndClustersWithoutLocalAI(t *testing.T) {
 	handler, _ := newAPI(t)
 	owner := client{t: t, handler: handler, as: alice}
 	private, _ := librariesOf(owner)
@@ -326,15 +326,24 @@ func TestTimelineByMonth(t *testing.T) {
 		!strings.Contains(response.Body.String(), "invalid_month") {
 		t.Fatalf("bad month = %d %s", response.Code, response.Body.String())
 	}
-	// AI labels are off: nothing lists or hides them any more.
-	for _, request := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/photos/labels"},
-		{http.MethodDelete, "/api/v1/photos/assets/" + url.PathEscape(timeline.Items[0].ID) + "/ai-labels/cat"},
-	} {
-		if response := owner.do(request.method, request.path, nil, ""); response.Code != http.StatusNotFound {
-			t.Fatalf("%s %s = %d, want 404", request.method, request.path, response.Code)
-		}
+	// Without local AI there are no clusters yet, and a label without one is
+	// not found.
+	var labels struct {
+		Items []photos.LabelCount `json:"items"`
+		Ready bool                `json:"ready"`
 	}
+	owner.json(http.MethodGet, "/api/v1/photos/labels", nil, http.StatusOK, &labels)
+	if labels.Ready || labels.Items == nil || len(labels.Items) != 0 {
+		t.Fatalf("labels without local AI = %+v", labels)
+	}
+	var cluster struct {
+		Items []photos.Asset `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/labels/cat/assets", nil, http.StatusOK, &cluster)
+	if cluster.Items == nil || len(cluster.Items) != 0 {
+		t.Fatalf("cat cluster without local AI = %+v", cluster)
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/labels/no-such-label/assets", nil, http.StatusNotFound, nil)
 }
 
 func TestAIStatusReportsProgressOverVisiblePhotos(t *testing.T) {
@@ -388,7 +397,7 @@ func TestSearchMatchesNamesWithoutLocalAI(t *testing.T) {
 	}
 }
 
-func TestAlbumsAndTags(t *testing.T) {
+func TestAlbumsTagsAndCorrections(t *testing.T) {
 	handler, _ := newAPI(t)
 	owner := client{t: t, handler: handler, as: alice}
 	private, _ := librariesOf(owner)
@@ -421,6 +430,27 @@ func TestAlbumsAndTags(t *testing.T) {
 	if untagged.ID != photo.ID || len(untagged.Tags) != 0 {
 		t.Fatalf("details after removing the tag = %+v", untagged)
 	}
+	owner.json(http.MethodPost, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/tags", map[string]string{"name": "小黑"}, http.StatusOK, nil)
+	var tags struct {
+		Items []photos.TagCount `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/tags", nil, http.StatusOK, &tags)
+	if len(tags.Items) != 1 || tags.Items[0].Name != "小黑" || tags.Items[0].Photos != 1 || tags.Items[0].CoverID != photo.ID {
+		t.Fatalf("tag groups = %+v", tags.Items)
+	}
+	var group struct {
+		Items []photos.Asset `json:"items"`
+	}
+	owner.json(http.MethodGet, "/api/v1/photos/tags/"+url.PathEscape("小黑")+"/assets", nil, http.StatusOK, &group)
+	if len(group.Items) != 1 || group.Items[0].ID != photo.ID {
+		t.Fatalf("photos tagged 小黑 = %+v", group.Items)
+	}
+	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/tags", nil, http.StatusOK, &tags)
+	if len(tags.Items) != 0 {
+		t.Fatalf("another member sees tag groups %+v", tags.Items)
+	}
+	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/no-such-label", nil, http.StatusNotFound, nil)
+	owner.json(http.MethodDelete, "/api/v1/photos/assets/"+url.PathEscape(photo.ID)+"/ai-labels/cat", nil, http.StatusOK, nil)
 
 	client{t: t, handler: handler, as: bob}.json(http.MethodGet, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets", nil, http.StatusNotFound, nil)
 	owner.json(http.MethodDelete, "/api/v1/photos/albums/"+url.PathEscape(album.ID)+"/assets/"+url.PathEscape(photo.ID), nil, http.StatusNoContent, nil)
