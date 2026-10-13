@@ -63,6 +63,7 @@ const (
 	codeUnauthenticated   = "unauthenticated"
 	codeUnsupported       = "unsupported"
 	codeInvalidName       = "invalid_name"
+	codeNameTooLong       = "name_too_long"
 	codeNoSpace           = "no_space"
 	codeVolumeUnavailable = "volume_unavailable"
 	codeUnavailable       = "unavailable"
@@ -98,6 +99,8 @@ func (e *wireError) Is(target error) bool {
 		return target == files.ErrUnsupportedType
 	case codeInvalidName:
 		return target == files.ErrInvalidName
+	case codeNameTooLong:
+		return target == files.ErrInvalidName || target == files.ErrNameTooLong || target == syscall.ENAMETOOLONG
 	case codeNoSpace:
 		return target == files.ErrInsufficientSpace
 	case codeVolumeUnavailable:
@@ -124,6 +127,8 @@ func encodeError(err error) *wireError {
 		code = codeForbidden
 	case errors.Is(err, files.ErrUnsupportedType), errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.ENOTDIR):
 		code = codeUnsupported
+	case errors.Is(err, files.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):
+		code = codeNameTooLong
 	case errors.Is(err, files.ErrInvalidName):
 		code = codeInvalidName
 	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):

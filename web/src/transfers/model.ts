@@ -217,6 +217,8 @@ const failures: Record<string, string> = {
   name_conflict: "目标位置已有同名文件",
   folder_blocked: "已有同名文件，无法创建文件夹",
   validation_failed: "文件名无效，或 NAS 不接受这个请求",
+  name_too_long: "文件名太长：最多 255 字节，约 85 个汉字",
+  name_not_portable: "文件名含 Windows 或 macOS 不能使用的字符，或是系统保留名",
   volume_unavailable: "数据卷离线或只读",
   insufficient_storage: "数据卷空间不足",
   file_too_large: "文件大于数据卷可用空间",

@@ -1,4 +1,5 @@
 import { APIError, request, type FileEntry } from "../api";
+import { nameNotPortableText, nameTooLongText } from "../fileNames";
 
 export type SnapshotOrigin = "manual" | "scheduled";
 
@@ -103,6 +104,8 @@ export function messageOf(error: unknown): string {
       case "volume_unavailable": return "数据卷当前不可用，请检查存储状态";
       case "insufficient_storage": return "数据卷剩余空间不足";
       case "validation_failed": return "填写的内容不符合要求";
+      case "name_too_long": return nameTooLongText;
+      case "name_not_portable": return nameNotPortableText;
       case "network_error": return "网络连接中断";
     }
     return error.status >= 500 ? "服务暂时不可用，请稍后重试" : error.message;
