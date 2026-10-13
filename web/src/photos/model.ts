@@ -91,12 +91,6 @@ export function formatDateTime(value: string) {
   return new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatSize(bytes: number) {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
 export function daysLeft(until: string, now = Date.now()) {
   return Math.max(0, Math.ceil((new Date(until).getTime() - now) / 86_400_000));
 }

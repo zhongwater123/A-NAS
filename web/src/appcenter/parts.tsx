@@ -36,14 +36,18 @@ export function AppAction({ app, onInstall }: { app: CatalogApp; onInstall: (app
   return <button className="ac-get" aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>安装</button>;
 }
 
-// Manifest Markdown; plain text shows until the renderer has loaded.
+// Manifest Markdown. Until the renderer has loaded, a few placeholder lines
+// stand in, so raw Markdown never reaches the screen or a screen reader.
 export function RichText({ text }: { text: string }) {
   const [, setLoaded] = useState(Boolean(markdown));
   useEffect(() => {
     if (!markdown) void preloadMarkdown().then(() => setLoaded(true));
   }, []);
   const Markdown = markdown?.default;
-  return <div className="ac-prose">{Markdown ? <Markdown>{text}</Markdown> : <p className="ac-prose-plain">{text}</p>}</div>;
+  if (!Markdown) {
+    return <div className="ac-prose ac-prose-loading" role="status" aria-label="正在载入说明"><span /><span /><span /></div>;
+  }
+  return <div className="ac-prose"><Markdown>{text}</Markdown></div>;
 }
 
 // Long text folds to a few lines with a control to show the rest.

@@ -210,7 +210,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dialog).getByRole("button", { name: "个人空间owner" })).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: "共享空间共享" })).toBeTruthy();
     expect(within(dialog).getAllByRole("separator")).toHaveLength(2);
-    expect(within(dialog).getByText("202 GB")).toBeTruthy();
+    expect(within(dialog).getByText("202 GiB")).toBeTruthy();
     const rows = within(dialog).getAllByRole("row");
     expect(rows[1].textContent).toContain("家庭");
     expect(rows[1].querySelector(".file-type-cell .directory")).toBeTruthy();
@@ -278,6 +278,57 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(menu).getByRole("menuitem", { name: "下载" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: /重命名/ })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: /移到回收站/ })).toBeTruthy();
+  });
+
+  it("previews images and PDFs in place on double click and keeps download a separate action", async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [
+        { id: "file:beach", spaceId: "space:owner", name: "beach.jpg", kind: "file", sizeBytes: 20 * 1024 ** 2, modifiedAt: "2026-10-08T10:00:00Z" },
+        { id: "file:cat", spaceId: "space:owner", name: "cat.png", kind: "file", sizeBytes: 300 * 1024, modifiedAt: "2026-10-08T10:00:00Z" },
+        { id: "file:manual", spaceId: "space:owner", name: "manual.pdf", kind: "file", sizeBytes: 90 * 1024, modifiedAt: "2026-10-08T10:00:00Z" },
+        { id: "file:archive", spaceId: "space:owner", name: "photos.zip", kind: "file", sizeBytes: 5, modifiedAt: "2026-10-08T10:00:00Z" },
+      ],
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const rows = await within(dialog).findAllByRole("row");
+    const row = (name: string) => rows.find((item) => item.textContent?.includes(name))!;
+    expect(row("beach.jpg").textContent).toContain("双击预览");
+    expect(row("manual.pdf").textContent).toContain("双击预览");
+    expect(row("photos.zip").textContent).toContain("双击下载");
+
+    await user.dblClick(row("beach.jpg"));
+    const viewer = await within(dialog).findByRole("dialog", { name: "预览 beach.jpg" });
+    expect(within(viewer).getByText("20.0 MiB · 1 / 3")).toBeTruthy();
+    expect(within(viewer).getByRole("img", { name: "beach.jpg" }).getAttribute("src")).toContain("/api/v1/files/file%3Abeach/content?disposition=inline");
+    expect(click).not.toHaveBeenCalled();
+    await user.keyboard("{ArrowRight}");
+    const cat = await within(dialog).findByRole("dialog", { name: "预览 cat.png" });
+    await user.click(within(cat).getByRole("button", { name: "下载" }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    const created = fetchMock.mock.calls.find(([path]) => path === "/api/v1/transfers/downloads");
+    expect(JSON.parse(String(created?.[1]?.body))).toEqual({ entryIds: ["file:cat"] });
+    await user.keyboard("{Escape}");
+    expect(within(dialog).queryByRole("dialog", { name: /^预览/ })).toBeNull();
+    // The last file viewed stays selected.
+    expect(row("cat.png").getAttribute("aria-selected")).toBe("true");
+
+    const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
+    manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
+    fireEvent.contextMenu(row("beach.jpg"), { clientX: 120, clientY: 160 });
+    const menu = await screen.findByRole("menu", { name: "文件操作" });
+    await user.click(within(menu).getByRole("menuitem", { name: "预览" }));
+    await user.click(within(await within(dialog).findByRole("dialog", { name: "预览 beach.jpg" })).getByRole("button", { name: "关闭预览" }));
+    fireEvent.contextMenu(row("beach.jpg"), { clientX: 120, clientY: 160 });
+    await user.click(within(await screen.findByRole("menu", { name: "文件操作" })).getByRole("menuitem", { name: "下载" }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+
+    await user.dblClick(row("photos.zip"));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(3));
+    expect(within(dialog).queryByRole("dialog", { name: /^预览/ })).toBeNull();
   });
 
   // Opening the transfer center loads its window code on first use.
@@ -392,7 +443,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const values = dialog.querySelectorAll(".file-volume-values strong");
 
     expect(values[0]?.textContent).toBe("—");
-    expect(values[1]?.textContent).toBe("466 GB");
+    expect(values[1]?.textContent).toBe("466 GiB");
   });
 
   it("enables photos, trash, the backup center, and one settings entry", async () => {
@@ -1287,7 +1338,7 @@ describe("Settings", () => {
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
     const settings = screen.getByRole("dialog", { name: "设置" });
-    expect(await within(settings).findByText("已用空间未知 · 共 465.8 GiB")).toBeTruthy();
+    expect(await within(settings).findByText("已用空间未知 · 共 466 GiB")).toBeTruthy();
     expect(within(settings).getByText("在线")).toBeTruthy();
     expect(within(settings).queryByRole("meter", { name: "数据卷已用空间" })).toBeNull();
     expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();

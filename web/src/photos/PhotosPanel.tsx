@@ -17,6 +17,7 @@ import {
   runEach, sharedLibrary,
 } from "./model";
 import { PhotoPicker } from "./PhotoPicker";
+import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
   addPhotoTag, addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
   listPhotoTrash, listSimilarPhotos, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
@@ -84,6 +85,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   // How many of the current search's results are the closest, as the photo
   // service says; the less related follow.
   const [closest, setClosest] = useState<number>();
+  // The one library a search is narrowed to; empty searches them all.
+  const [searchLibrary, setSearchLibrary] = useState("");
   // What the object detector found for it, when the query is about things.
   const [found, setFound] = useState<PhotoObjectsFound>();
   // Whether the photo similar ones are shown for has been organised.
@@ -105,6 +108,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const dialogs = useDialogs();
   const { toast, element: toastElement } = useToasts();
   const reportError = useCallback((message: string) => toast({ text: message, tone: "error" }), [toast]);
+  // Results that mix libraries mark the photos that are not the caller's own.
+  const sourceBadge = useCallback((asset: PhotoAsset) => <SourceBadge caller={caller} asset={asset} />, [caller]);
 
   const mine = ownLibrary(caller);
   const shared = sharedLibrary(caller);
@@ -471,6 +476,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
       : count !== undefined && closest >= count ? `找到 ${count} 张`
         : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`;
   const things = found ? joinWords(found.words) : "";
+  // A narrowed search keeps its library only while that library is in scope.
+  const scope = place.kind === "search" && searchLibraries(caller, place.viewing).some((library) => library.id === searchLibrary) ? searchLibrary : "";
   const title = (() => {
     switch (place.kind) {
       case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : `${count} 张照片` };
@@ -478,8 +485,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
       case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
       case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
       case "search": return place.query
-        ? { text: "AI 聚合", detail: searchDetail, back: { ...place, query: "" } as Place }
-        : { text: "AI 聚合", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
+        ? { text: "AI 聚合", detail: [searchDetail, scopeText(caller, place.viewing, scope)].filter(Boolean).join(" · "), back: { ...place, query: "" } as Place }
+        : { text: "AI 聚合", detail: scopeText(caller, place.viewing, "") };
       case "cluster": return { text: place.label.name, detail: `${count ?? place.label.photos} 张 · 本地 AI 聚合`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
       case "tag": {
         const photos = count ?? (place.tag.photos || undefined);
@@ -499,6 +506,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setPlace({ ...place, query: "" }); } }} />
       </form>
+      <SearchScope caller={caller} viewing={place.viewing} value={scope} onChange={setSearchLibrary} />
       {found && <ObjectsStatus objects={found} results={viewAssets.length > 0} />}
     </div>
   ) : place.kind === "similar" ? (
@@ -560,9 +568,10 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
             onOpenCluster={(label, snapshot) => { setPlace({ kind: "cluster", viewing: place.viewing, label }); aiHomeReturn.current = snapshot; }}
             onOpenTag={(tag, snapshot) => { setPlace({ kind: "tag", viewing: place.viewing, tag }); aiHomeReturn.current = snapshot; }} onError={reportError} />;
         }
-        return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor)}
+        return <AssetGrid key={`search:${place.query}:${scope}`} {...grid} listKey={`search:${place.viewing}:${place.query}:${scope}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor, scope)}
           onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); } }}
           onCount={setCount} onError={reportError}
+          badge={scope ? undefined : sourceBadge}
           split={closest === undefined ? undefined : found && found.detected > 0
             ? {
               at: closest, title: `没有检测到${things}的照片`,
@@ -575,17 +584,17 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
             : <Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
       case "similar":
         return <AssetGrid key={`similar:${place.asset.id}`} {...grid} listKey={`similar:${place.viewing}:${place.asset.id}`} load={(cursor) => listSimilarPhotos(place.asset.id, place.viewing, cursor)}
-          onPage={(page, first) => { if (first) setSimilarReady((page as PhotoSimilarPage).ready); }} onCount={setCount} onError={reportError}
+          onPage={(page, first) => { if (first) setSimilarReady((page as PhotoSimilarPage).ready); }} onCount={setCount} onError={reportError} badge={sourceBadge}
           empty={similarReady === false
             ? <Empty icon={<Hourglass />} title="这张照片还在整理中" text="本地 AI 会在设备空闲时整理照片，整理好后就能找到和它相似的照片。" />
             : <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和它画面相近的照片。" />} />;
       case "cluster":
         return <AssetGrid key={`cluster:${place.label.id}`} {...grid} listKey={`cluster:${place.viewing}:${place.label.id}`} load={(cursor) => listLabelPhotos(place.label.id, place.viewing, cursor)}
-          onCount={setCount} onError={reportError}
+          onCount={setCount} onError={reportError} badge={sourceBadge}
           empty={<Empty icon={<Shapes />} title="这一类里没有照片了" text="被移出的照片仍在图库中，只是不再归在这一类。" />} />;
       case "tag":
         return <AssetGrid key={`tag:${place.tag.name}`} {...grid} listKey={`tag:${place.viewing}:${place.tag.name}`} load={(cursor) => listTagPhotos(place.tag.name, place.viewing, cursor)}
-          onCount={setCount} onError={reportError}
+          onCount={setCount} onError={reportError} badge={sourceBadge}
           empty={<Empty icon={<Hash />} title="没有带这个标签的照片了" text="在照片信息里给照片加上标签，就会出现在这里。" />} />;
       case "albums":
         return <AlbumsView libraryId={place.libraryId} readOnly={readOnlyPlace} refreshKey={albumsKey} topInset={topInset} onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })} onCreate={() => void newAlbum()} onError={reportError} />;

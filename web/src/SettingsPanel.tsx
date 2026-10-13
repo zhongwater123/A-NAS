@@ -8,6 +8,7 @@ import {
   Health, HostState, Session, StoragePlan, User, ViewingScope, Volume,
   changePassword, confirmStoragePlan, createMember, createStoragePlan, disableMember, executeStoragePlan, listUsers, listVolumes, resetMember, startViewing,
 } from "./api";
+import { formatBytes, formatNominalCapacity } from "./bytes";
 import { isLocalConsole } from "./LocalConsoleScreenSaver";
 import { LogsSection, type LogsPreset } from "./logs/LogsSection";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
@@ -220,12 +221,12 @@ function OverviewSection({ host, volumes, isAdmin, onOpenStorage }: { host: Host
       </div>
       <div className="ov-stats">
         <div className="ov-stat"><span><Clock3 />运行时间</span><strong>{formatUptime(snapshot.system.uptimeSeconds)}</strong><small>观测于 {formatTime(snapshot.observedAt)}</small></div>
-        <div className="ov-stat"><span><HardDrive />磁盘</span><strong>{snapshot.disks.length} 块</strong><small>{snapshot.disks.length ? `总容量 ${formatCapacity(totalCapacity)}` : "尚未发现块设备"}</small></div>
+        <div className="ov-stat"><span><HardDrive />磁盘</span><strong>{snapshot.disks.length} 块</strong><small>{snapshot.disks.length ? `总容量 ${formatBytes(totalCapacity)}` : "尚未发现块设备"}</small></div>
         <button className="ov-stat" onClick={onOpenStorage} aria-label="查看存储">
           <span><Database />数据卷<ChevronRight className="ov-stat-go" /></span>
           {volumes.items === undefined ? <><strong>—</strong><small>正在读取</small></>
             : !volume ? <><strong>未初始化</strong><small>{isAdmin ? "前往存储完成初始化" : "等待管理员初始化"}</small></>
-              : usage?.known ? <><strong>已用 {usage.percent}%</strong><small>可用 {formatCapacity(usage.available)}</small><span className="ov-stat-bar"><i style={{ width: `${usage.percent}%` }} /></span></>
+              : usage?.known ? <><strong>已用 {usage.percent}%</strong><small>可用 {formatBytes(usage.available)}</small><span className="ov-stat-bar"><i style={{ width: `${usage.percent}%` }} /></span></>
                 : <><strong>{volumeState(volume.state).label}</strong><small>已用空间未知</small></>}
         </button>
       </div>
@@ -313,13 +314,13 @@ function VolumeCard({ volume }: { volume: Volume }) {
       </div>
       {usage.known ? (
         <div>
-          <div className="vol-numbers"><strong>{formatCapacity(usage.used)}</strong><span>已用，共 {formatCapacity(usage.capacity)}</span><em>{usage.percent}%</em></div>
+          <div className="vol-numbers"><strong>{formatBytes(usage.used)}</strong><span>已用，共 {formatBytes(usage.capacity)}</span><em>{usage.percent}%</em></div>
           <div className={`vol-bar ${usage.percent >= 85 ? "high" : ""}`} role="meter" aria-label="数据卷已用空间" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usage.percent}><span style={{ width: `${usage.percent}%` }} /></div>
-          <div className="vol-legend"><span><i className="used" />已用 {formatCapacity(usage.used)}</span><span><i className="free" />可用 {formatCapacity(usage.available)}</span></div>
+          <div className="vol-legend"><span><i className="used" />已用 {formatBytes(usage.used)}</span><span><i className="free" />可用 {formatBytes(usage.available)}</span></div>
         </div>
       ) : (
         // Missing usage is unknown, never "full".
-        <p className="vol-unknown">{usage.capacity > 0 ? `已用空间未知 · 共 ${formatCapacity(usage.capacity)}` : "容量未知"}</p>
+        <p className="vol-unknown">{usage.capacity > 0 ? `已用空间未知 · 共 ${formatBytes(usage.capacity)}` : "容量未知"}</p>
       )}
       <div className="vol-meta"><span>文件系统 UUID</span><code>{volume.filesystemUuid ?? "等待 UUID"}</code></div>
     </div>
@@ -337,7 +338,7 @@ function DiskRow({ disk }: { disk: HostState["disks"][number] }) {
         <small>{disk.transport.toUpperCase()} · {disk.rotational ? "机械硬盘" : "固态存储"} · <span className="set-mono">{shortID(disk.id)}</span></small>
       </div>
       <div className="disk-end">
-        <strong>{formatCapacity(disk.capacityBytes)}</strong>
+        <strong title={`硬盘标称 ${formatNominalCapacity(disk.capacityBytes)}：厂商按 1000 进制计算，这里按 1024 进制（GiB），所以数字更小`}>{formatBytes(disk.capacityBytes)}<span className="disk-nominal">标称 {formatNominalCapacity(disk.capacityBytes)}</span></strong>
         <small className={`tone-${health.tone}`}><span className="set-dot" />{health.label}{disk.temperatureCelsius === undefined ? "" : ` · ${disk.temperatureCelsius}°C`}</small>
       </div>
     </div>
@@ -388,7 +389,7 @@ function VolumeSetup({ disks, flow, onClose }: { disks: HostState["disks"]; flow
                       <small>{disk.transport.toUpperCase()} · <span className="set-mono">{shortID(disk.id)}</span></small>
                       {!disk.eligibleForDataVolume && <small className="wiz-reason">{disk.ineligibleReasons.join("；")}</small>}
                     </span>
-                    <strong className="wiz-disk-size">{formatCapacity(disk.capacityBytes)}</strong>
+                    <strong className="wiz-disk-size">{formatBytes(disk.capacityBytes)}</strong>
                   </label>
                 ))}
               </div>
@@ -398,7 +399,7 @@ function VolumeSetup({ disks, flow, onClose }: { disks: HostState["disks"]; flow
           <>
             <h4 className="wiz-title">破坏性操作计划</h4>
             <dl className="wiz-facts">
-              <dt>目标磁盘</dt><dd>{plan.diskModel} · {formatCapacity(plan.capacityBytes)}</dd>
+              <dt>目标磁盘</dt><dd>{plan.diskModel} · {formatBytes(plan.capacityBytes)}</dd>
               <dt>身份指纹</dt><dd><code>{plan.fingerprint}</code></dd>
               <dt>将清除的签名</dt><dd>{plan.signatures?.length ? plan.signatures.join("、") : "未检测到文件系统签名"}</dd>
               <dt>计划有效期</dt><dd>{new Date(plan.expiresAt).toLocaleString("zh-CN")}{pending && !expired ? `（还剩约 ${minutesLeft} 分钟）` : ""}</dd>
@@ -717,12 +718,6 @@ function planTone(state: string): Tone {
   if (state === "failed" || state === "needs_attention") return "danger";
   if (state === "expired") return "warning";
   return "accent";
-}
-
-function formatCapacity(bytes: number): string {
-  const gib = bytes / 1024 ** 3;
-  if (gib >= 1024) return `${(gib / 1024).toFixed(1)} TiB`;
-  return `${gib.toFixed(1)} GiB`;
 }
 
 function formatUptime(seconds: number): string {

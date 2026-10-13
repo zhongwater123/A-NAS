@@ -2,6 +2,7 @@ import { ArrowLeft, CircleAlert } from "lucide-react";
 import { KeyboardEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError } from "../api";
+import { formatBytes } from "../bytes";
 import { useDialogs, useToasts } from "../photos/feedback";
 import { type Music, MusicContext, type Place } from "./context";
 import { buildIndex, formatDuration, type PinyinMatch, qualityOf, search, type SongSort, unknownAlbum, unknownArtist } from "./library";
@@ -351,11 +352,6 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
       </div>
     </MusicContext.Provider>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function TrackInfo({ track, sources, onClose }: { track: Track; sources?: MusicSources; onClose: () => void }) {

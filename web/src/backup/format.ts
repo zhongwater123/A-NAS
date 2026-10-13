@@ -5,19 +5,6 @@ import type { Frequency, ScheduleSettings, Snapshot, SnapshotSchedule } from "./
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 export const weekdayShort = ["日", "一", "二", "三", "四", "五", "六"];
 
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
-}
-
 export const formatCount = (count: number) => count.toLocaleString("zh-CN");
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());

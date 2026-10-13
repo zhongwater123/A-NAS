@@ -19,6 +19,8 @@ export interface CatalogApp {
   // Markdown from the vendored manifest; notes is its advice before first use, such as a default account.
   description: string;
   notes: string;
+  // The manifest's own notes, set only when notes is written for A-NAS because they describe CasaOS.
+  upstreamNotes?: string;
   // An A-NAS category, or "" from a container agent that predates them.
   category: string;
   version: string;

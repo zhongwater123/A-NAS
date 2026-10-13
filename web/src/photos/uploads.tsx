@@ -32,7 +32,7 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
     const batch = `photos-${Date.now().toString(36)}-${counter.current + 1}`;
     const added = files.map((file): UploadItem => {
       const key = `upload-${++counter.current}`;
-      const error = !accepted.has(file.type) ? "只支持 JPEG 和 PNG 照片" : file.size > maxBytes ? "照片超过 256 MB" : undefined;
+      const error = !accepted.has(file.type) ? "只支持 JPEG 和 PNG 照片" : file.size > maxBytes ? "照片超过 256 MiB" : undefined;
       const handle = transferStore.trackExternal({ key: `photos-${key}`, app: "photos", name: file.name, size: file.size, label: `相册 · ${target.label}`, batch }, { queued: !error });
       if (error) handle.fail(error);
       tracked.current.set(key, handle);

@@ -25,14 +25,6 @@ export function remaining(position: number, duration: number): string {
   return left < 60 ? "即将看完" : `剩余 ${runtime(left)}`;
 }
 
-export function bytes(value: number): string {
-  if (!value) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const exponent = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
-  const scaled = value / 1024 ** exponent;
-  return `${scaled >= 100 || exponent === 0 ? Math.round(scaled) : scaled.toFixed(1)} ${units[exponent]}`;
-}
-
 export function ago(iso?: string, now = Date.now()): string {
   if (!iso) return "";
   const elapsed = Math.max(0, now - new Date(iso).getTime()) / 1000;

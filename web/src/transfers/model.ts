@@ -1,3 +1,4 @@
+import { formatRate } from "../bytes";
 import type { ExternalUpload, Hold, LocalUpload, TransferRates, TransferSnapshot, UploadPhase } from "./store";
 import type { Transfer, TransferDirection, TransferLocation } from "./transfersApi";
 
@@ -176,22 +177,6 @@ export function locationParts(location?: TransferLocation): string[] {
   return [location.spaceKind === "shared" ? "共享空间" : "个人空间", ...location.folders.map((folder) => folder.name)];
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
-}
-
-export function formatSpeed(bytesPerSecond: number): string {
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
 export function formatRemaining(bytes: number, bytesPerSecond: number): string {
   if (bytesPerSecond < 1 || bytes <= 0) return "";
   const seconds = bytes / bytesPerSecond;
@@ -204,7 +189,7 @@ export function formatRemaining(bytes: number, bytesPerSecond: number): string {
 
 // speedText is a speed and, while bytes are left, about how long they take.
 export function speedText(bytesPerSecond: number, remainingBytes: number): string {
-  return [formatSpeed(bytesPerSecond), formatRemaining(remainingBytes, bytesPerSecond)].filter(Boolean).join(" · ");
+  return [formatRate(bytesPerSecond), formatRemaining(remainingBytes, bytesPerSecond)].filter(Boolean).join(" · ");
 }
 
 export function formatClock(value: number): string {

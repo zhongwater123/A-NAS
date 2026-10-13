@@ -59,9 +59,12 @@ type App struct {
 	Title   string
 	Tagline string
 	// Description and Notes are Markdown from the manifest; Notes is its
-	// advice before first use, such as a default account.
-	Description string
-	Notes       string
+	// advice before first use, such as a default account. Where upstream
+	// notes describe CasaOS, Notes is written for A-NAS (copy.go) and
+	// UpstreamNotes keeps the manifest's own.
+	Description   string
+	Notes         string
+	UpstreamNotes string
 	// Category is the A-NAS category the app is listed under (categories.go).
 	Category  string
 	Version   string

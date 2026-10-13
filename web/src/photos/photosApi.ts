@@ -69,9 +69,10 @@ export const listTimelineMonths = async (libraryId: string) =>
   (await request<{ items: PhotoMonth[] }>(`${base}/libraries/${id(libraryId)}/timeline/months`)).items;
 export const listTimelineMonth = (libraryId: string, month: string, cursor = "", limit = 500) =>
   request<PhotoPage>(`${base}/libraries/${id(libraryId)}/timeline?month=${id(month)}&${page(cursor, limit)}`);
-// viewing adds a member library the caller is viewing read-only.
-export const searchPhotos = (query: string, viewing = "", cursor = "", limit = 120) =>
-  request<PhotoSearchPage>(`${base}/search?q=${id(query)}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+// viewing adds a member library the caller is viewing read-only; library
+// narrows the search to one library of that scope.
+export const searchPhotos = (query: string, viewing = "", cursor = "", library = "", limit = 120) =>
+  request<PhotoSearchPage>(`${base}/search?q=${id(query)}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}${library ? `&library=${id(library)}` : ""}`);
 // Photos that look like this one, in the same scope as a search.
 export const listSimilarPhotos = (assetId: string, viewing = "", cursor = "", limit = 120) =>
   request<PhotoSimilarPage>(`${base}/assets/${id(assetId)}/similar?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);

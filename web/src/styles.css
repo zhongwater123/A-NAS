@@ -664,6 +664,8 @@ button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .file-inspector-preview svg { width: 40px; height: 40px; }
 .file-inspector-preview.image { height: auto; min-height: 0; display: block; overflow: hidden; background: #e8eef3; }
 .file-inspector-preview.image img { width: 100%; height: auto; display: block; }
+.file-inspector-zoom { width: 100%; display: block; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.file-inspector-zoom:focus-visible { outline: 2px solid #2f6fe4; outline-offset: -2px; }
 .file-inspector-preview.pdf { height: auto; min-height: 280px; aspect-ratio: 3 / 4; overflow: hidden; background: #fff; }
 .file-inspector-preview.pdf iframe { width: 100%; height: 100%; border: 0; background: #fff; }
 .file-inspector-preview.text { height: min(330px, 42vh); display: block; overflow: auto; color: #283849; background: #fff; }
@@ -1018,6 +1020,7 @@ button.ov-stat:hover { border-color: rgba(47, 111, 228, .35); box-shadow: 0 6px 
 .vol-meta code { min-width: 0; color: var(--set-text); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; text-align: right; }
 .disk-end { flex: none; display: grid; justify-items: end; gap: 3px; }
 .disk-end strong { font-size: 13.5px; font-weight: 600; }
+.disk-end .disk-nominal { margin-left: 6px; color: var(--set-muted); font-size: 12px; font-weight: 400; }
 .disk-end small { display: flex; align-items: center; gap: 6px; color: var(--set-muted); font-size: 12px; }
 
 /* Data volume wizard */

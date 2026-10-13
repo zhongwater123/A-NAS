@@ -304,3 +304,40 @@ func TestSearchAddsAViewedLibraryOnlyOnRequest(t *testing.T) {
 		t.Fatalf("an expired grant error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSearchNarrowsToOneLibraryOfItsScope(t *testing.T) {
+	service, embedder, c := searchService(t)
+	ctx := context.Background()
+	alicePrivate, shared := libraries(t, service, namedAlice)
+	bobPrivate, _ := libraries(t, service, namedBob)
+	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "alice.png", red)
+	importPhoto(t, service, namedBob, shared.ID, "", "shared.png", solidPNG(200, 50, 50))
+	importPhoto(t, service, namedBob, bobPrivate.ID, "", "bob.png", solidPNG(210, 40, 40))
+	index(t, service, embedder)
+	in := func(p photos.Principal, library, viewing string) ([]string, error) {
+		page, err := service.Search(ctx, p, photos.SearchRequest{Query: "红", Library: library, Viewing: viewing})
+		return names(page.Assets), err
+	}
+
+	if got, err := in(namedAlice, "", ""); err != nil || !slices.Equal(got, []string{"alice.png", "shared.png"}) {
+		t.Fatalf("the whole scope = %v, %v", got, err)
+	}
+	if got, err := in(namedAlice, alicePrivate.ID, ""); err != nil || !slices.Equal(got, []string{"alice.png"}) {
+		t.Fatalf("her own library = %v, %v", got, err)
+	}
+	if got, err := in(namedAlice, shared.ID, ""); err != nil || !slices.Equal(got, []string{"shared.png"}) {
+		t.Fatalf("the shared library = %v, %v", got, err)
+	}
+	if _, err := in(namedAlice, bobPrivate.ID, ""); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("another member's library error = %v, want ErrNotFound", err)
+	}
+	admin := photos.Principal{UserID: "user:admin", Admin: true, Viewing: []photos.ViewingGrant{
+		{GrantID: "grant:1", OwnerUserID: namedAlice.UserID, ExpiresAt: c.Now().Add(time.Hour)},
+	}}
+	if got, err := in(admin, alicePrivate.ID, alicePrivate.ID); err != nil || !slices.Equal(got, []string{"alice.png"}) {
+		t.Fatalf("the viewed library alone = %v, %v", got, err)
+	}
+	if _, err := in(admin, alicePrivate.ID, ""); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("a viewed library outside a viewing search error = %v, want ErrNotFound", err)
+	}
+}

@@ -40,6 +40,9 @@ type AppDocument struct {
 	Running     int                   `json:"running"`
 	Total       int                   `json:"total"`
 	Job         *JobDocument          `json:"job,omitempty"`
+
+	// UpstreamNotes is empty from an agent that predates A-NAS notes.
+	UpstreamNotes string `json:"upstreamNotes,omitempty"`
 }
 
 type JobDocument struct {
@@ -94,9 +97,9 @@ func AppsFromDomain(apps []appstore.AppStatus) AppsDocument {
 	document := AppsDocument{Apps: make([]AppDocument, len(apps))}
 	for i, app := range apps {
 		item := AppDocument{
-			ID: app.ID, Title: app.Title, Tagline: app.Tagline, Description: app.Description, Notes: app.Notes, Category: app.Category,
-			Version: app.Version, Author: app.Author, Developer: app.Developer, Website: app.Website, Repo: app.Repo, Docs: app.Docs,
-			Updated: app.Updated, WebPort: app.WebPort, Scheme: app.Scheme, Path: app.Path,
+			ID: app.ID, Title: app.Title, Tagline: app.Tagline, Description: app.Description, Notes: app.Notes, UpstreamNotes: app.UpstreamNotes,
+			Category: app.Category, Version: app.Version, Author: app.Author, Developer: app.Developer, Website: app.Website, Repo: app.Repo,
+			Docs: app.Docs, Updated: app.Updated, WebPort: app.WebPort, Scheme: app.Scheme, Path: app.Path,
 			State: app.State, Running: app.Running, Total: app.Total,
 		}
 		if app.Job != nil {
@@ -120,9 +123,9 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 		}
 		apps[i] = appstore.AppStatus{
 			App: appstore.App{
-				ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, Category: item.Category,
-				Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo, Docs: item.Docs,
-				Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
+				ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, UpstreamNotes: item.UpstreamNotes,
+				Category: item.Category, Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo,
+				Docs: item.Docs, Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
 			},
 			State: item.State, Running: item.Running, Total: item.Total,
 		}
