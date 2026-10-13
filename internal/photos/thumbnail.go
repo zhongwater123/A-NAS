@@ -14,19 +14,25 @@ const thumbnailEdge = 512
 
 // renderThumbnail scales an original to fit thumbnailEdge, turns it upright
 // according to its EXIF orientation and encodes a JPEG on a white background.
-// Scaling happens before the orientation transform so that only the small
-// image is copied. The original was already bounded by maxImagePixels at
-// import.
 func renderThumbnail(r io.Reader, orientation int) ([]byte, int, int, error) {
+	return renderUpright(r, orientation, thumbnailEdge, 82)
+}
+
+// renderUpright scales an original to fit edge, turns it upright and encodes
+// a JPEG of the given quality on a white background. Scaling happens before
+// the orientation transform so that only the small image is copied; images
+// already within edge keep their size. The original was already bounded by
+// maxImagePixels at import.
+func renderUpright(r io.Reader, orientation, edge, quality int) ([]byte, int, int, error) {
 	src, err := imaging.Decode(r)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	thumbnail := orient(imaging.Fit(src, thumbnailEdge, thumbnailEdge, imaging.Lanczos), orientation)
-	bounds := thumbnail.Bounds()
-	flattened := imaging.Overlay(imaging.New(bounds.Dx(), bounds.Dy(), color.White), thumbnail, image.Point{}, 1)
+	scaled := orient(imaging.Fit(src, edge, edge, imaging.Lanczos), orientation)
+	bounds := scaled.Bounds()
+	flattened := imaging.Overlay(imaging.New(bounds.Dx(), bounds.Dy(), color.White), scaled, image.Point{}, 1)
 	var buffer bytes.Buffer
-	if err := imaging.Encode(&buffer, flattened, imaging.JPEG, imaging.JPEGQuality(82)); err != nil {
+	if err := imaging.Encode(&buffer, flattened, imaging.JPEG, imaging.JPEGQuality(quality)); err != nil {
 		return nil, 0, 0, err
 	}
 	return buffer.Bytes(), bounds.Dx(), bounds.Dy(), nil

@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderPlus, Info, Pause, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderPlus, Info, Pause, Play, ScanSearch, Trash2 } from "lucide-react";
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TransformComponent, TransformWrapper, type ReactZoomPanPinchContentRef } from "react-zoom-pan-pinch";
 
@@ -10,6 +10,8 @@ export interface ViewerActions extends DetailsActions {
   trash: (asset: PhotoAsset) => void;
   addToAlbum: (assets: PhotoAsset[]) => void;
   download: (assets: PhotoAsset[]) => void;
+  // Leaves the viewer for the photos that look like this one.
+  findSimilar: (asset: PhotoAsset) => void;
 }
 
 interface Props {
@@ -153,6 +155,7 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
       case "Escape": handled(); if (playing) setPlaying(false); else void close(); break;
       case "i": case "I": handled(); onInfo(!info); break;
       case " ": handled(); setPlaying(!playing); break;
+      case "s": case "S": handled(); actions.findSimilar(asset); break;
       case "Delete": case "Backspace": if (editable) { handled(); actions.trash(asset); } break;
       case "+": case "=": handled(); zoom.current?.zoomIn(0.5); break;
       case "-": handled(); zoom.current?.zoomOut(0.5); break;
@@ -180,6 +183,7 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
           </div>
           <div className="ph-viewer-tools">
             <button type="button" aria-label={playing ? "暂停幻灯片" : "播放幻灯片"} title="幻灯片 (空格)" onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button>
+            <button type="button" aria-label="找相似" title="找相似的照片 (S)" onClick={() => actions.findSimilar(asset)}><ScanSearch /></button>
             {!libraryReadOnly(caller, asset) && <button type="button" aria-label="加入相册" title="加入相册" onClick={() => actions.addToAlbum([asset])}><FolderPlus /></button>}
             <button type="button" aria-label="下载原图" title="下载原图" onClick={() => actions.download([asset])}><Download /></button>
             {editable && <button type="button" aria-label="移到回收站" title="移到回收站 (Delete)" onClick={() => actions.trash(asset)}><Trash2 /></button>}

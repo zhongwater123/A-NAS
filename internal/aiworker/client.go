@@ -34,6 +34,12 @@ const (
 	// OpEmbedQuery encodes Text as a search query; the Worker adds the
 	// model's own query prompt.
 	OpEmbedQuery = "embed_query"
+	// OpDetectObjects finds the objects in an image. Hanging up cancels it,
+	// and the Worker does not answer.
+	OpDetectObjects = "detect_objects"
+	// OpRelease frees memory: What is "detector" to drop the detector's
+	// session, or "all" for the Worker to exit after answering.
+	OpRelease = "release"
 )
 
 // Error codes the Worker answers with.
@@ -49,15 +55,20 @@ const (
 type Request struct {
 	Op   string `json:"op"`
 	Text string `json:"text,omitempty"`
+	What string `json:"what,omitempty"`
 }
 
 type Response struct {
 	OK         bool   `json:"ok"`
 	Model      string `json:"model,omitempty"`
 	Dimensions int    `json:"dimensions,omitempty"`
+	// Detector is the object detector's model, in answer to info.
+	Detector string `json:"detector,omitempty"`
 	// Vector holds little-endian float32 values (base64 in JSON).
-	Vector []byte     `json:"vector,omitempty"`
-	Error  *WireError `json:"error,omitempty"`
+	Vector []byte `json:"vector,omitempty"`
+	// Boxes are [class, score, x0, y0, x1, y1], corners as fractions.
+	Boxes [][]float64 `json:"boxes,omitempty"`
+	Error *WireError  `json:"error,omitempty"`
 }
 
 type WireError struct {
@@ -65,7 +76,7 @@ type WireError struct {
 	Message string `json:"message"`
 }
 
-// Client implements photos.Embedder.
+// Client implements photos.Embedder and photos.Detector.
 type Client struct {
 	SocketPath string
 	// Timeout bounds one call, including loading the model after the Worker
@@ -73,7 +84,10 @@ type Client struct {
 	Timeout time.Duration
 }
 
-var _ photos.Embedder = Client{}
+var (
+	_ photos.Embedder = Client{}
+	_ photos.Detector = Client{}
+)
 
 func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 	response, err := c.call(ctx, Request{Op: OpInfo}, nil)
@@ -83,7 +97,7 @@ func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 	if response.Model == "" || response.Dimensions <= 0 {
 		return photos.EmbedderInfo{}, errors.New("AI worker described no model")
 	}
-	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions}, nil
+	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector}, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {
@@ -102,6 +116,34 @@ func (c Client) EmbedQuery(ctx context.Context, text string) ([]float32, error) 
 	return vectorOf(response)
 }
 
+func (c Client) DetectObjects(ctx context.Context, image *os.File) (string, []photos.Box, error) {
+	response, err := c.call(ctx, Request{Op: OpDetectObjects}, image)
+	if err != nil {
+		return "", nil, err
+	}
+	if response.Model == "" {
+		return "", nil, errors.New("AI worker named no detector")
+	}
+	boxes := make([]photos.Box, 0, len(response.Boxes))
+	for _, box := range response.Boxes {
+		if len(box) != 6 || box[0] != math.Trunc(box[0]) {
+			return "", nil, errors.New("AI worker returned a malformed box")
+		}
+		boxes = append(boxes, photos.Box{Class: int(box[0]), Score: float32(box[1]),
+			X0: float32(box[2]), Y0: float32(box[3]), X1: float32(box[4]), Y1: float32(box[5])})
+	}
+	return response.Model, boxes, nil
+}
+
+func (c Client) Release(ctx context.Context, all bool) error {
+	what := "detector"
+	if all {
+		what = "all"
+	}
+	_, err := c.call(ctx, Request{Op: OpRelease, What: what}, nil)
+	return err
+}
+
 func vectorOf(response Response) ([]float32, error) {
 	if len(response.Vector)%4 != 0 {
 		return nil, errors.New("AI worker returned a malformed vector")
@@ -116,7 +158,8 @@ func vectorOf(response Response) ([]float32, error) {
 // call sends one request. Only failing to reach the Worker is
 // photos.ErrAIUnavailable, which leaves the work waiting for free; a Worker
 // that fails after receiving an input spends the job's attempt, so an input
-// that keeps killing it cannot be retried forever.
+// that keeps killing it cannot be retried forever. Cancelling ctx hangs up,
+// which stops a detection; the error then wraps context.Canceled.
 func (c Client) call(ctx context.Context, request Request, file *os.File) (Response, error) {
 	timeout := c.Timeout
 	if timeout <= 0 {
@@ -151,6 +194,9 @@ func (c Client) call(ctx context.Context, request Request, file *os.File) (Respo
 
 	var header [4]byte
 	if _, err := io.ReadFull(conn, header[:]); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Response{}, fmt.Errorf("%w: %v", ctxErr, err)
+		}
 		return Response{}, fmt.Errorf("read from AI worker: %w", err)
 	}
 	length := binary.BigEndian.Uint32(header[:])

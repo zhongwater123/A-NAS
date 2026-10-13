@@ -13,10 +13,11 @@
 #        scripts/system-test.sh [IMAGE]
 # Prints PASS/FAIL lines and exits non-zero on any failure.
 #
-# Local AI runs on a stand-in model and runtime with the Worker's fake
-# provider. With ANAS_SYSTEM_TEST_AI=real, after scripts/build-ai-runtime.sh and
-# with ANAS_AI_MODEL naming the model file, it installs the real runtime and
-# model instead.
+# Local AI runs on a stand-in model, detector and runtime with the Worker's
+# fake providers. With ANAS_SYSTEM_TEST_AI=real, after
+# scripts/build-ai-runtime.sh and with ANAS_AI_MODEL and ANAS_AI_DETECTOR
+# naming the model and detector files, it installs the real runtime and models
+# instead.
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -29,7 +30,8 @@ if [[ "${1:-}" != --inside ]]; then
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
     [[ -f "${ANAS_AI_MODEL:-}" ]] || { echo "ANAS_AI_MODEL must name the model file" >&2; exit 2; }
-    real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro")
+    [[ -f "${ANAS_AI_DETECTOR:-}" ]] || { echo "ANAS_AI_DETECTOR must name the detector file" >&2; exit 2; }
+    real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro")
   fi
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
@@ -54,20 +56,27 @@ fi
 # private mounts, which would hide that.
 mount --make-rshared /
 
-# The model and runtime the releases pin (ADR 0016), staged once as
+# The models and runtime the releases pin (ADR 0016), staged once as
 # deploy-dev.ps1 stages them. The stand-in runtime is a virtual environment
-# around Debian's Python alone, which the fake provider needs.
+# around Debian's Python alone, which the fake providers need.
 ai=/tmp/ai-staged
 install -d "$ai"
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   cp /src/deploy/models/embeddinggemma-2-740m.json "$ai/model.json"
   ln -s "/ai-model/$(jq -r .file "$ai/model.json")" "$ai/model.litertlm"
+  cp /src/deploy/models/dfine-m-obj365.json "$ai/detector.json"
+  ln -s "/ai-detector/$(jq -r .file "$ai/detector.json")" "$ai/detector.onnx"
   cp /src/build/ai-runtime.json "$ai/runtime.json"
   ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
+  detector_model="$(jq -r .name "$ai/detector.json")@$(jq -r .sha256 "$ai/detector.json" | cut -c1-12)+"
 else
   head -c 65536 /dev/urandom > "$ai/model.litertlm"
   printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
     "$(stat -c %s "$ai/model.litertlm")" "$(sha256sum "$ai/model.litertlm" | cut -d ' ' -f 1)" > "$ai/model.json"
+  head -c 4096 /dev/urandom > "$ai/detector.onnx"
+  printf '{"name":"system-test-detector","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' \
+    "$(stat -c %s "$ai/detector.onnx")" "$(sha256sum "$ai/detector.onnx" | cut -d ' ' -f 1)" > "$ai/detector.json"
+  detector_model=fake-detector
   install -d "$ai/venv/bin"
   ln -s /usr/bin/python3 "$ai/venv/bin/python"
   printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
@@ -78,9 +87,13 @@ else
     "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$ai/runtime.tar.gz")" \
     "$runtime_sha" > "$ai/runtime.json"
   install -d /etc/systemd/system/anas-ai.service.d
-  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake\n' \
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector\n' \
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
+# AI starts once the photo library has gone unused for this long, so that the
+# test sees a photo organised in the Worker's sandbox.
+install -d /etc/systemd/system/anas-photos.service.d
+printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
 
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
@@ -95,8 +108,9 @@ stage() {
   install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
-  install -m 0644 "$ai/model.json" "$ai/runtime.json" "$1/ai/"
+  install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/runtime.json" "$1/ai/"
   ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
+  ln -s "$ai/detector.onnx" "$1/ai/detector.onnx"
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
@@ -399,15 +413,38 @@ dynamic_identity() { # UNIT: runs under a UID systemd allocates for it, not root
 check "the installer enables the AI socket" systemctl is-enabled --quiet anas-ai.socket
 check "only the photo service reaches the AI socket" \
   test "$(stat -c '%a %U %G' /run/a-nas-ai/ai.sock)" = "660 root a-nas-photos"
-check "the release links the model and runtime kept once by content" \
+check "the release links the models and runtime kept once by content" \
   test "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/model.json")/$(jq -r .file "$ai/model.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/detector.json")/$(jq -r .file "$ai/detector.json")" \
   -a "$(readlink /opt/a-nas/current/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(jq -r .id "$ai/runtime.json")"
+ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
+check "the Worker may use every core but two" \
+  test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
+check "the kernel reclaims the Worker's memory before its hard limit" \
+  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 1879048192:2147483648
+check "the Worker runs in its own slice, apart from the device's other work" \
+  test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
+check "AI work yields to the pressure of the device's other work, not its own" \
+  journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
 check "search starts the Worker through its socket" semantic_search 猫
 check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   check "the Worker serves the real model in its sandbox" \
     journal_has anas-ai.service "$installed_at" "serving $(jq -r .name "$ai/model.json")@$(jq -r .sha256 "$ai/model.json" | cut -c1-12)"
 fi
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+organised() { # the member's photo has its vector and its detection
+  local status
+  for _ in $(seq 1 180); do
+    status=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/photos/ai" || true)
+    jq -e --arg model "$detector_model" '.pending == 0 and .ready >= 1 and (.objectModel // "" | startswith($model))' <<<"$status" >/dev/null && return
+    sleep 1
+  done
+  echo "$status"
+  return 1
+}
+check "the Worker organises the photo with its vector and detector in its sandbox" organised
+echo "INFO the Worker's memory peak: $(systemctl show -p MemoryPeak --value anas-ai.service) bytes"
 # A probe in the Worker's own unit, in place of the Worker.
 cat > /usr/local/lib/anas-ai-probe.py <<'PY'
 import os, socket, sys
@@ -444,7 +481,18 @@ check "a staged model that does not match its manifest is refused" \
   denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused release changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 1
+  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 2
+staged_tampered=/tmp/tampered-detector
+stage "$staged_tampered"
+rm "$staged_tampered/ai/detector.onnx"
+head -c 1024 /dev/urandom > "$staged_tampered/ai/detector.onnx"
+jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
+  "$ai/detector.json" > "$staged_tampered/ai/detector.json"
+check "a staged detector that does not match its manifest is refused" \
+  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+check "the refused detector changes nothing" \
+  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
+  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 2
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
@@ -604,9 +652,10 @@ check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools
 stage /tmp/upgrade
 check "a release installs" install_release upgrade
 check "the upgrade keeps the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
-check "the upgrade copies neither the model nor the runtime again" \
-  test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = 2 \
-  -a "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "$(readlink /opt/a-nas/releases/system-test/ai/model.litertlm)"
+check "the upgrade copies neither the models nor the runtime again" \
+  test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = 3 \
+  -a "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "$(readlink /opt/a-nas/releases/system-test/ai/model.litertlm)" \
+  -a "$(readlink /opt/a-nas/current/ai/detector.onnx)" = "$(readlink /opt/a-nas/releases/system-test/ai/detector.onnx)"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "search reaches the upgraded release's Worker" semantic_search 猫
 stage_pool "$v2" "$v3"

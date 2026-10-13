@@ -990,6 +990,20 @@ paths:
         "200": { description: Upright JPEG thumbnail at most 512 pixels on its longer side, content: { image/jpeg: { schema: { type: string, format: binary } } } }
         "304": { description: The client's copy still matches the ETag }
         "404": { description: "Not found, or thumbnail_unavailable while it is pending or failed (use the original)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/assets/{assetId}/similar:
+    get:
+      operationId: listSimilarPhotos
+      summary: The untrashed photos in the caller's search scope most like this one, closest first, by image vectors and the objects found in both; never its copies or duplicates
+      parameters:
+        - { $ref: "#/components/parameters/PhotoAssetID" }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to look in it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of similar photos, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoSimilarResults" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { description: "Not found: missing, trashed, or outside the caller's search scope", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/assets/{assetId}/copies:
     post:
       operationId: copyPhotoAsset
@@ -2899,7 +2913,24 @@ components:
         closest:
           type: integer
           minimum: 0
-          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches and the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+        objects:
+          type: object
+          additionalProperties: false
+          required: [words, detected, undetected]
+          description: "Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found."
+          properties:
+            words: { type: array, items: { type: string }, description: The query's class words. }
+            detected: { type: integer, minimum: 0, description: Photos over all pages in which the detector found them. }
+            undetected: { type: integer, minimum: 0, description: Photos in the search's scope the detector has not processed yet. }
+    PhotoSimilarResults:
+      type: object
+      additionalProperties: false
+      required: [items, ready]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
+        next: { type: string }
+        ready: { type: boolean, description: "False while local AI has not organised the photo yet; there are no results then." }
     PhotoAIStatus:
       type: object
       additionalProperties: false
@@ -2908,7 +2939,8 @@ components:
         state: { type: string, enum: [unavailable, paused, working, idle], description: "unavailable: the AI Worker is not installed or not running; paused: waiting for the device to be idle" }
         reason: { type: string, description: "Why work is paused, such as foreground or cpu_pressure." }
         model: { type: string }
-        ready: { type: integer, minimum: 0, description: Originals with a vector of the current pipeline. }
+        objectModel: { type: string, description: The object detector's model while the AI Worker has one. }
+        ready: { type: integer, minimum: 0, description: "Originals with a vector of the current pipeline and, while the AI Worker has a detector, its detection." }
         pending: { type: integer, minimum: 0 }
         failed: { type: integer, minimum: 0 }
         clusters: { type: string, enum: [ready, preparing], description: "Whether AI 聚合 can list its groups; preparing while label texts wait for the Worker, which runs only once the photo library has been idle for a while. Absent when the Worker's model has no calibrated clusters." }

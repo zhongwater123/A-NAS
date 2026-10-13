@@ -104,6 +104,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("DELETE "+p+"/assets/{assetID}", h.trashAsset)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/original", h.original)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/thumbnail", h.thumbnail)
+	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/similar", h.similar)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/copies", h.copyAsset)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
@@ -131,6 +132,15 @@ type searchResponse struct {
 	// Closest counts the results, over all pages, in the closest group; the
 	// results after them are less related.
 	Closest int `json:"closest"`
+	// Objects is set when the query is about things the detector finds
+	// reliably: the closest group is then the photos it found them in.
+	Objects *objectsFound `json:"objects,omitempty"`
+}
+
+type objectsFound struct {
+	Words      []string `json:"words"`
+	Detected   int      `json:"detected"`
+	Undetected int      `json:"undetected"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +281,35 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest})
+	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest}
+	if page.Objects != nil {
+		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type similarResponse struct {
+	Items []photos.Asset `json:"items"`
+	Next  string         `json:"next,omitempty"`
+	// Ready is false while the photo has no vector yet.
+	Ready bool `json:"ready"`
+}
+
+func (h *handler) similar(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	page, err := h.service.Similar(r.Context(), principal, r.PathValue("assetID"), photos.SimilarRequest{
+		Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, similarResponse{Items: page.Assets, Next: page.Next, Ready: page.Ready})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {

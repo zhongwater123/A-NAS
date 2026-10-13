@@ -630,6 +630,92 @@ describe("PhotosPanel search and viewing", () => {
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
   });
 
+  it("says which photos the object detector found the query's things in, and when it found none", async () => {
+    const results: Record<string, object> = {
+      [encodeURIComponent("手机")]: {
+        items: [asset("photo:phone"), asset("photo:desk-phone"), asset("photo:desk")], semantic: true, closest: 2,
+        objects: { words: ["手机"], detected: 2, undetected: 5 },
+      },
+      [encodeURIComponent("长颈鹿")]: { items: [asset("photo:zoo"), asset("photo:park")], semantic: true, closest: 1, objects: { words: ["长颈鹿"], detected: 0, undetected: 0 } },
+      [encodeURIComponent("猫和狗")]: { items: [], semantic: true, closest: 0, objects: { words: ["猫", "狗"], detected: 0, undetected: 3 } },
+    };
+    serve(
+      (url) => {
+        const query = url.match(/^\/api\/v1\/photos\/search\?q=([^&]+)/)?.[1];
+        return query ? json(results[query]) : undefined;
+      },
+      timeline(privateLibrary.id, () => [asset("photo:home")]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:home.jpg" });
+    const search = async (text: string) => {
+      const box = screen.getByRole("searchbox", { name: "搜索照片" });
+      await user.clear(box);
+      await user.type(box, `${text}{Enter}`);
+    };
+    const chip = () => document.querySelector(".ph-found-chip")?.textContent;
+
+    await search("手机");
+    expect(await screen.findByRole("separator", { name: "没有检测到手机的照片" })).toBeTruthy();
+    // Photos still waiting for the detector may show one too.
+    expect(screen.getByText("按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有手机")).toBeTruthy();
+    expect(chip()).toBe("检测到手机的照片 2 张");
+    expect(screen.getByText("还有 5 张尚未识别完")).toBeTruthy();
+    expect(screen.getByText("共 3 张")).toBeTruthy();
+    const order = [...document.querySelectorAll(".ph-entry")].flatMap((entry) => entry.querySelector("[role=separator]")
+      ? ["divider"] : [...entry.querySelectorAll("button[aria-label^='查看 ']")].map((button) => button.getAttribute("aria-label")));
+    expect(order).toEqual(["查看 photo:phone.jpg", "查看 photo:desk-phone.jpg", "divider", "查看 photo:desk.jpg"]);
+
+    // Nothing found: the closest photos follow, as for any search.
+    await search("长颈鹿");
+    expect(await screen.findByRole("separator", { name: "相关度较低" })).toBeTruthy();
+    expect(chip()).toBe("没有检测到长颈鹿");
+    expect(screen.getByText("下面是画面最接近的照片")).toBeTruthy();
+    expect(screen.getByText("最接近 1 张 · 共 2 张")).toBeTruthy();
+    expect(screen.queryByText(/尚未识别完/)).toBeNull();
+
+    // While photos wait for the detector, "none" says so.
+    await search("猫和狗");
+    expect(await screen.findByText("还有 3 张照片尚未识别完，稍后再搜一次试试。")).toBeTruthy();
+    expect(chip()).toBe("没有检测到猫和狗");
+    expect(screen.queryByText("下面是画面最接近的照片")).toBeNull();
+  });
+
+  it("finds photos similar to the one shown and goes back to where they were asked for", async () => {
+    const fetchMock = serve(
+      (url) => {
+        if (url === "/api/v1/photos/assets/photo%3Aa/similar?limit=120") return json({ items: [asset("photo:c"), asset("photo:d")], ready: true });
+        if (url === "/api/v1/photos/assets/photo%3Asea/similar?limit=120") return json({ items: [], ready: false });
+        if (url.startsWith("/api/v1/photos/search?q=")) return json({ items: [asset("photo:sea")], semantic: true, closest: 1 });
+        return undefined;
+      },
+      timeline(privateLibrary.id, () => [asset("photo:a"), asset("photo:b", { takenAt: "2026-05-01T07:00:00Z" })]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:a.jpg");
+    await user.click(screen.getByRole("button", { name: "找相似" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByRole("button", { name: "查看 photo:c.jpg" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "相似的照片" })).toBeTruthy();
+    expect(screen.getByText("2 张")).toBeTruthy();
+    expect(document.querySelector(".ph-similar-source strong")?.textContent).toBe("photo:a.jpg");
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:b.jpg" })).toBeTruthy();
+
+    // From a search, S asks from the viewer and going back returns to the search.
+    await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "海边{Enter}");
+    await openPhoto(user, "photo:sea.jpg");
+    await user.keyboard("s");
+    expect(await screen.findByText("这张照片还在整理中")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/assets/photo%3Asea/similar?limit=120", expect.anything());
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:sea.jpg" })).toBeTruthy();
+    expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("海边");
+  });
+
   it("browses a viewed member library read-only, searches it only from there and ends the viewing", async () => {
     const viewed: PhotoLibrary = { id: "library:alice", kind: "private", ownerUserId: "user:alice", ownerName: "alice", createdAt: "2026-10-08T00:00:00Z", viewing: { grantId: "viewing:7", expiresAt: "2026-10-09T09:00:00Z" } };
     const own: PhotoLibrary = { ...privateLibrary, id: "library:admin", ownerUserId: "user:admin", ownerName: "admin" };

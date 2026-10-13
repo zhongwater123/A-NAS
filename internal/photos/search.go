@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/photos/objects"
 )
 
 // Search finds photos by meaning and by name in the caller's private library
@@ -22,6 +24,12 @@ import (
 // (docs/research/photo-ai-label-calibration.md#搜索结果的取舍). So nothing
 // is cut off: the results come in two groups, the closest first and then
 // the less related, and the caller is told where the first group ends.
+//
+// The object detector adds what whole-photo vectors miss
+// (docs/architecture/photo-objects.md): a query's class words add their
+// detector score to the similarity, weighted by how much of the query they
+// make up, and a query about things the detector finds reliably puts the
+// photos it found them in first, so that search can say when there are none.
 
 var ErrInvalidQuery = errors.New("invalid photo search query")
 
@@ -30,9 +38,12 @@ const (
 	MaxQueryRunes = 200
 	// maxSemanticResults keeps the long tail of weak matches out of results.
 	maxSemanticResults = 500
-	// nameMatch ranks photos whose name contains the query above every
-	// similarity, which lies within [-1, 1].
-	nameMatch = 2
+	// Results come in bands that never overlap, so that the score alone
+	// orders them and resumes a page: photos whose name or user tags contain
+	// the query, then the photos in which the detector found what the query
+	// names, then the rest. A score within a band lies in [-1, 1 + weight].
+	nameBand     = 6
+	detectedBand = 3
 	// closestGap ends the closest group at this similarity below the best
 	// match. On COCO about 90% of the group is right when the library holds
 	// the thing; it cannot tell when the library does not, so the group is
@@ -59,9 +70,25 @@ type SearchPage struct {
 	// results then match names and user tags only.
 	Semantic bool
 	// Closest counts the results, over all pages, in the closest group: the
-	// name and user tag matches and the photos within closestGap of the best
+	// name and user tag matches, then the photos the detector found the
+	// thing in or, without those, the photos within closestGap of the best
 	// match. The results after them are less related.
 	Closest int
+	// Objects is set when the query is about things the detector finds
+	// reliably.
+	Objects *ObjectsFound
+}
+
+// ObjectsFound is what the detector found for a query about things.
+type ObjectsFound struct {
+	// Words are the query's class words, such as 手机.
+	Words []string
+	// Detected counts the photos, over all pages, in which the detector
+	// found them; they follow the name matches.
+	Detected int
+	// Undetected counts the photos in the search's scope still waiting for
+	// the detector, so that "none found" is not said too early.
+	Undetected int
 }
 
 type searchHit struct {
@@ -87,31 +114,48 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	if err != nil {
 		return SearchPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.name, IFNULL(group_concat(t.name, char(31)), '')
-FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
-WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+`)
-GROUP BY a.id`, args...)
+	candidates, err := s.searchCandidates(ctx, args)
 	if err != nil {
 		return SearchPage{}, err
+	}
+	page := SearchPage{Assets: []Asset{}}
+	hits, err := s.queryHits(ctx, query, candidates, &page)
+	if err != nil {
+		return SearchPage{}, err
+	}
+	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
+	if err != nil {
+		return SearchPage{}, err
+	}
+	return page, nil
+}
+
+// searchCandidates lists the untrashed photos of the libraries in scope with
+// their user tags.
+func (s *Service) searchCandidates(ctx context.Context, scope []any) ([]candidate, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.name, IFNULL(group_concat(t.name, char(31)), '')
+FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
+WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+GROUP BY a.id`, scope...)
+	if err != nil {
+		return nil, err
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.objectID, &c.name, &c.tags); err != nil {
 			_ = rows.Close()
-			return SearchPage{}, err
+			return nil, err
 		}
 		candidates = append(candidates, c)
 	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return SearchPage{}, err
-	}
+	return candidates, errors.Join(rows.Err(), rows.Close())
+}
 
-	page := SearchPage{Assets: []Asset{}}
-	hits, err := s.queryHits(ctx, query, candidates, &page)
-	if err != nil {
-		return SearchPage{}, err
-	}
+// hitPage returns the page of ranked hits after the cursor and the cursor of
+// the next page, with duplicate hints. A photo trashed since the candidates
+// were read drops out.
+func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
 		if start < len(hits) && hits[start] == *after {
@@ -119,24 +163,25 @@ GROUP BY a.id`, args...)
 		}
 		hits = hits[start:]
 	}
-	limit := pageSize(request.Limit)
+	limit = pageSize(limit)
+	next := ""
 	if len(hits) > limit {
 		last := hits[limit-1]
-		page.Next = encodeCursor(strconv.FormatFloat(last.score, 'g', -1, 64), last.id)
+		next = encodeCursor(strconv.FormatFloat(last.score, 'g', -1, 64), last.id)
 		hits = hits[:limit]
 	}
+	assets := []Asset{}
 	if len(hits) == 0 {
-		return page, nil
+		return assets, next, nil
 	}
 	ids := make([]any, len(hits))
 	for i, hit := range hits {
 		ids[i] = hit.id
 	}
-	// A photo trashed since the candidates were read drops out here.
 	records, err := s.queryAssets(ctx, s.db,
 		"WHERE a.trashed_at IS NULL AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
 	if err != nil {
-		return SearchPage{}, err
+		return nil, "", err
 	}
 	position := make(map[string]int, len(hits))
 	for i, hit := range hits {
@@ -144,12 +189,12 @@ GROUP BY a.id`, args...)
 	}
 	slices.SortFunc(records, func(a, b assetRecord) int { return position[a.ID] - position[b.ID] })
 	if err := s.addDuplicateHints(ctx, s.db, p, records); err != nil {
-		return SearchPage{}, err
+		return nil, "", err
 	}
 	for _, record := range records {
-		page.Assets = append(page.Assets, record.Asset)
+		assets = append(assets, record.Asset)
 	}
-	return page, nil
+	return assets, next, nil
 }
 
 // queryHits ranks the candidates for a query: name or user tag matches first,
@@ -159,30 +204,53 @@ GROUP BY a.id`, args...)
 func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate, page *SearchPage) ([]searchHit, error) {
 	queryVector, model := s.embedQuery(ctx, query)
 	folded := strings.ToLower(query)
-	var named, similar []searchHit
-	err := s.index.read(ctx, s, model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			vector, embedded := vectors[c.objectID]
-			score := 0.0
-			if embedded && queryVector != nil {
-				score = dot(vector, queryVector)
-			}
-			switch {
-			case strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded):
-				named = append(named, searchHit{c.id, nameMatch + score})
-			case embedded && queryVector != nil:
-				similar = append(similar, searchHit{c.id, score})
-			}
+	calibration := s.objectCalibration
+	mentions := s.matcher.Mentions(query)
+	enabled := calibration.Enabled(mentions)
+	share := objects.Coverage(query, enabled)
+	tierScores := calibration.TierScores(query, mentions)
+	tiered := tierScores != nil
+	var named, detected, similar []searchHit
+	var waiting []candidate
+	var vectorErr error
+	err := s.detected.read(ctx, s, calibration.Model, func(found map[string][]classScore) {
+		if len(found) == 0 {
+			// Nothing detected by the calibrated model yet: vectors alone.
+			enabled, share, tierScores, tiered = nil, 0, nil, false
 		}
+		vectorErr = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
+			for _, c := range candidates {
+				vector, embedded := vectors[c.objectID]
+				score := 0.0
+				if embedded && queryVector != nil {
+					score = dot(vector, queryVector)
+				}
+				scores, wasDetected := found[c.objectID]
+				if !wasDetected {
+					waiting = append(waiting, c)
+				}
+				detector := mentionScore(scores, enabled)
+				score += calibration.Weight * share * detector
+				switch {
+				case strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded):
+					named = append(named, searchHit{c.id, nameBand + score})
+				case tiered && showsAll(scores, mentions, tierScores):
+					detected = append(detected, searchHit{c.id, detectedBand + score})
+				case embedded && queryVector != nil:
+					similar = append(similar, searchHit{c.id, score})
+				}
+			}
+		})
 	})
-	if err != nil {
+	if err = errors.Join(err, vectorErr); err != nil {
 		return nil, err
 	}
 	sortHits(named)
+	sortHits(detected)
 	sortHits(similar)
 	similar = similar[:min(len(similar), maxSemanticResults)]
-	closest := 0
-	if len(similar) > 0 {
+	closest := len(detected)
+	if closest == 0 && len(similar) > 0 {
 		floor := similar[0].score - closestGap
 		for closest < len(similar) && similar[closest].score >= floor {
 			closest++
@@ -190,7 +258,77 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 	}
 	page.Semantic = queryVector != nil
 	page.Closest = len(named) + closest
-	return append(named, similar...), nil
+	if tiered {
+		undetected, err := s.awaitingDetection(ctx, waiting)
+		if err != nil {
+			return nil, err
+		}
+		words := make([]string, len(mentions))
+		for i, mention := range mentions {
+			words[i] = mention.Word
+		}
+		page.Objects = &ObjectsFound{Words: words, Detected: len(detected), Undetected: undetected}
+	}
+	return append(append(named, detected...), similar...), nil
+}
+
+// mentionScore is the detector's score for a photo with these best scores per
+// class. Every mentioned word must be found, so it is the lowest, over the
+// words, of each word's best class.
+func mentionScore(scores []classScore, mentions []objects.Mention) float64 {
+	if len(mentions) == 0 {
+		return 0
+	}
+	lowest := 1.0
+	for _, mention := range mentions {
+		lowest = min(lowest, bestScore(scores, mention.Classes))
+	}
+	return lowest
+}
+
+// showsAll reports whether a photo with these best scores per class shows
+// every mentioned thing: each word's best class reaches that word's score.
+func showsAll(scores []classScore, mentions []objects.Mention, tierScores []float64) bool {
+	for i, mention := range mentions {
+		if bestScore(scores, mention.Classes) < tierScores[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// bestScore is the highest score of any of the classes.
+func bestScore(scores []classScore, classes []int) float64 {
+	best := float32(0)
+	for _, class := range classes {
+		if i, ok := slices.BinarySearchFunc(scores, class, func(s classScore, c int) int { return s.class - c }); ok {
+			best = max(best, scores[i].score)
+		}
+	}
+	return float64(best)
+}
+
+// awaitingDetection counts the candidates without a detection whose job has
+// not failed for good: the detector will still look at them.
+func (s *Service) awaitingDetection(ctx context.Context, candidates []candidate) (int, error) {
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	failed, err := s.strings(ctx, "SELECT object_id FROM jobs WHERE derivation = ? AND state = 'failed'", detectionDerivation)
+	if err != nil {
+		return 0, err
+	}
+	gaveUp := make(map[string]bool, len(failed))
+	for _, id := range failed {
+		gaveUp[id] = true
+	}
+	count := 0
+	for _, c := range candidates {
+		if !gaveUp[c.objectID] {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // searchScope returns the IDs of the libraries a search covers.

@@ -40,9 +40,13 @@ func TestAnotherMembersPrivateLibraryIsIndistinguishableFromNothing(t *testing.T
 
 	type probe func(library, directory, asset string) error
 	probes := map[string]probe{
-		"get":         func(_, _, a string) error { _, err := service.Get(ctx, namedBob, a); return err },
-		"open":        func(_, _, a string) error { _, err := service.Open(ctx, namedBob, a); return err },
-		"thumbnail":   func(_, _, a string) error { _, err := service.Thumbnail(ctx, namedBob, a); return err },
+		"get":       func(_, _, a string) error { _, err := service.Get(ctx, namedBob, a); return err },
+		"open":      func(_, _, a string) error { _, err := service.Open(ctx, namedBob, a); return err },
+		"thumbnail": func(_, _, a string) error { _, err := service.Thumbnail(ctx, namedBob, a); return err },
+		"similar": func(_, _, a string) error {
+			_, err := service.Similar(ctx, namedBob, a, photos.SimilarRequest{})
+			return err
+		},
 		"timeline":    func(l, _, _ string) error { _, err := service.Timeline(ctx, namedBob, l, "", 10); return err },
 		"entries":     func(l, d, _ string) error { _, err := service.ListDirectory(ctx, namedBob, l, d, "", 0); return err },
 		"trash":       func(l, _, _ string) error { _, err := service.ListTrash(ctx, namedBob, l); return err },

@@ -1,13 +1,18 @@
 """Runs an Objects365 detector over the evaluation images and caches its boxes.
 
-Development only: this is the feasibility study of an object detector beside
-the image vectors (docs/research/photo-ai-object-detection.md). The detector
-is D-FINE trained on Objects365 (365 classes), in the ONNX conversion that
-Transformers.js publishes, run with ONNX Runtime on the CPU. Each image gets
-its boxes above a low score, so that the analysis can choose thresholds
-later; boxes are normalised corners (x0, y0, x1, y1).
+Development only: this is the evaluation of the object detector beside the
+image vectors (docs/research/photo-ai-object-detection.md). The detector is
+D-FINE trained on Objects365 (365 classes), run with ONNX Runtime on the CPU.
+Each image gets its boxes above a low score, so that the analysis can choose
+thresholds later; boxes are normalised corners (x0, y0, x1, y1).
+
+--model takes either the Transformers.js conversion's directory (config.json
+and onnx/), measured first, or the official export's .onnx file, which runs
+through the Worker's own provider (anas_ai.providers.OnnxDetector) with the
+manifest from deploy/models, so that what is measured is what ships:
 
     python -m eval.detect --model /models/dfine_m_obj365 --sets coco,coco-cn
+    python -m eval.detect --model /models/official/dfine_m_obj365.onnx --sets coco,coco-cn,openimages
 
 --bench N times the detector against the photo vectors' EmbeddingGemma on the
 same N images, interleaved so that both meet the same load, and reports wall
@@ -39,6 +44,7 @@ class Detector:
     def __init__(self, directory, threads, variant="model.onnx"):
         import onnxruntime
 
+        threads = threads or 4
         self.path = os.path.join(directory, "onnx", variant)
         with open(os.path.join(directory, "config.json"), encoding="utf-8") as file:
             self.labels = {int(key): name for key, name in json.load(file)["id2label"].items()}
@@ -77,6 +83,45 @@ class Detector:
         cx, cy, w, h = boxes[0][query].T
         corners = np.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], axis=1).clip(0, 1)
         return classes.astype(np.int16), flat[top].astype(np.float32), corners.astype(np.float32)
+
+
+DETECTOR_MANIFEST = os.path.join(datasets.REPO, "deploy", "models", "dfine-m-obj365.json")
+CLASSES = os.path.join(datasets.REPO, "internal", "photos", "objects", "v1.json")
+
+
+class ProductDetector:
+    """The official export through the Worker's own provider."""
+
+    def __init__(self, path, threads):
+        from anas_ai import providers
+
+        self.provider = providers.OnnxDetector(path, DETECTOR_MANIFEST, threads)
+        self.model = self.provider.model
+        with open(DETECTOR_MANIFEST, encoding="utf-8") as file:
+            manifest = json.load(file)
+        self.sha256, self.revision = manifest["sha256"], manifest["revision"]
+        with open(CLASSES, encoding="utf-8") as file:
+            self.labels = {entry["id"]: entry["en"] for entry in json.load(file)["classes"]}
+
+    @staticmethod
+    def pixels(path):
+        # The Worker decodes the JPEG the photo service sends; here the
+        # dataset's own file.
+        with open(path, "rb") as file:
+            return file.read()
+
+    def detect(self, data):
+        boxes = self.provider.detect(data, self.provider.run_options())
+        classes = np.array([box[0] for box in boxes], dtype=np.int16)
+        scores = np.array([box[1] for box in boxes], dtype=np.float32)
+        corners = np.array([box[2:] for box in boxes], dtype=np.float32).reshape(-1, 4)
+        return classes, scores, corners
+
+
+def open_detector(model, threads, variant):
+    if model.endswith(".onnx"):
+        return ProductDetector(model, threads)
+    return Detector(model, threads, variant)
 
 
 class Detections:
@@ -143,9 +188,9 @@ def bench(detector, embedder_path, weight_cache, count, threads):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", required=True, help="directory with config.json and onnx/")
+    parser.add_argument("--model", required=True, help="the conversion's directory, or the official .onnx file")
     parser.add_argument("--variant", default="model.onnx")
-    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--threads", type=int, help="ONNX Runtime threads (default: 4, or the Worker's own choice)")
     parser.add_argument("--sets", default="coco,coco-cn")
     parser.add_argument("--limit", type=int, default=0, help="detect at most this many images per set (0: all)")
     parser.add_argument("--bench", type=int, default=0, help="time N images instead of caching boxes")
@@ -155,7 +200,7 @@ def main():
     args = parser.parse_args()
 
     started = time.monotonic()
-    detector = Detector(args.model, args.threads, args.variant)
+    detector = open_detector(args.model, args.threads, args.variant)
     print(f"model {detector.model} (hub revision {detector.revision[:12]}) loaded in "
           f"{time.monotonic() - started:.1f} s, peak RSS {peak_rss_mib():.0f} MiB", flush=True)
     if args.bench:

@@ -10,6 +10,8 @@ RUN python3 -m venv /opt/anas-ai \
  && /opt/anas-ai/bin/pip install --no-cache-dir mediapipe==1.1.0 \
  && /opt/anas-ai/bin/pip uninstall -y opencv-contrib-python \
  && /opt/anas-ai/bin/pip install --no-cache-dir opencv-contrib-python-headless==5.0.0.93
+# The object detector (docs/architecture/photo-objects.md).
+RUN /opt/anas-ai/bin/pip install --no-cache-dir onnxruntime==1.31.0 protobuf==7.36.2
 # Label calibration on the development machine only (ai/eval).
 RUN /opt/anas-ai/bin/pip install --no-cache-dir scikit-learn==1.7.2
 ENTRYPOINT []
