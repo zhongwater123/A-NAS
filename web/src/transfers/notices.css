@@ -63,10 +63,31 @@
 .status-transfers-ring .value { stroke: #7fd8ff; stroke-linecap: round; transition: stroke-dasharray .4s cubic-bezier(.22, 1, .36, 1); }
 .status-transfers-ring > svg:last-child { position: relative; width: 14px; height: 14px; stroke-width: 2.6; }
 .status-transfers.attention .status-transfers-ring .value { stroke: #ffc35c; }
-.status-transfers-copy { display: grid; justify-items: start; line-height: 1.1; }
-.status-transfers-copy strong { font-size: 14px; font-variant-numeric: tabular-nums; }
-.status-transfers-copy small { color: rgba(255, 255, 255, .7); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.status-transfers-copy { min-width: 0; display: grid; justify-items: start; gap: 1px; line-height: 1.2; text-align: left; }
+.status-transfers-copy strong { max-width: 128px; display: flex; align-items: center; gap: 3px; overflow: hidden; font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+.status-transfers-copy strong svg { width: 12px; height: 12px; flex: none; stroke-width: 2.8; color: #7fd8ff; }
+.status-transfers-copy strong { text-overflow: ellipsis; }
+.status-transfers-copy small { color: rgba(255, 255, 255, .7); font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .status-transfers.attention .status-transfers-copy small { color: #ffd88a; }
+
+/* The list under the pill, shown while it is hovered or focused. */
+.status-transfers-wrap { position: relative; }
+.status-transfers-pop { position: absolute; z-index: 5; top: calc(100% + 12px); right: -10px; width: 286px; display: grid; gap: 8px; padding: 12px 12px 10px; border: 1px solid rgba(255, 255, 255, .7); border-radius: 15px; color: #1b2430; background: rgba(250, 252, 255, .97); box-shadow: 0 18px 48px rgba(15, 22, 44, .3); backdrop-filter: blur(18px); opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .16s, transform .2s cubic-bezier(.22, 1, .36, 1), visibility 0s .16s; pointer-events: none; }
+.status-transfers-wrap:hover .status-transfers-pop, .status-transfers-wrap:focus-within .status-transfers-pop { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.status-transfers-pop header { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; }
+.status-transfers-pop header span { color: #66717f; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.status-transfers-pop ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.status-transfers-pop li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; font-size: 12px; }
+.status-transfers-pop .name { min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.status-transfers-pop .name svg { width: 11px; height: 11px; flex: none; stroke-width: 2.8; color: #2f6fe4; }
+.status-transfers-pop .state { color: #66717f; font-size: 11px; font-variant-numeric: tabular-nums; }
+.status-transfers-pop li.conflict .state, .status-transfers-pop li.waiting .state { color: #b06a10; }
+.status-transfers-pop li.failed .state { color: #d23b48; }
+.status-transfers-pop .bar { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 999px; background: rgba(20, 30, 45, .08); }
+.status-transfers-pop .bar i { display: block; height: 100%; border-radius: inherit; background: #2f6fe4; }
+.status-transfers-pop li:not(.running) .bar i { background: #b4bcc8; }
+.status-transfers-pop footer { padding-top: 7px; border-top: 1px solid rgba(20, 30, 45, .08); color: #66717f; font-size: 11.5px; }
+@media (prefers-reduced-motion: reduce) { .status-transfers-pop { transition: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .tc-toast { animation: none; }

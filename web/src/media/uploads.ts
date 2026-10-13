@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { APIError, createDirectory, listEntries, sendFile } from "../api";
-import { transferStore } from "../transfers/store";
-import { messageOf } from "./Browse";
+import { failureText } from "../transfers/model";
+import { type LocalUpload, transferStore, useTransfers } from "../transfers/store";
 
 // The files a library scan reads: the scanner's video extensions plus the
 // subtitles, NFO documents and artwork it picks up beside them.
@@ -57,25 +56,13 @@ async function walk(entry: FileSystemEntry, folder: string): Promise<Picked[]> {
 }
 
 // Where a batch goes: a folder of a library, by its file entry.
-export interface Destination { libraryId: string; libraryName: string; spaceId: string; parentId: string; place: string }
+export interface Destination { libraryId: string; libraryName: string; spaceId: string; spaceKind: "private" | "shared"; parentId: string; place: string }
 
 export type UploadState = "ready" | "waiting" | "uploading" | "done" | "exists" | "skipped" | "failed" | "canceled";
 export interface UploadItem { id: number; file: File; folder: string; role: FileRole; state: UploadState; progress: number; error?: string; to?: Destination }
 
 const active = (item: UploadItem) => item.state === "waiting" || item.state === "uploading";
 const hidden = (picked: Picked) => [...picked.folder.split("/"), picked.file.name].some((part) => part.startsWith(".")) || /^(thumbs\.db|desktop\.ini)$/i.test(picked.file.name);
-
-// ensureFolder returns the ID of a folder, creating it when it is missing.
-async function ensureFolder(spaceId: string, parentId: string, name: string): Promise<string> {
-  try {
-    return (await createDirectory(spaceId, parentId, name)).id;
-  } catch (caught) {
-    if (!(caught instanceof APIError && caught.status === 409)) throw caught;
-    const existing = (await listEntries(spaceId, parentId)).find((entry) => entry.kind === "directory" && entry.name === name);
-    if (!existing) throw caught;
-    return existing.id;
-  }
-}
 
 export interface Uploads {
   items: UploadItem[];
@@ -90,133 +77,101 @@ export interface Uploads {
   clear: () => void;
 }
 
-// useUploads uploads one file at a time through the file service, as the
-// signed-in user, so the space's permissions decide and the media center
-// rescans the library on its own once a file lands.
+// Staged is a picked file: ready until the user chooses where it goes, then
+// a file of the transfer center's queue under key.
+interface Staged { id: number; file: File; folder: string; role: FileRole; key?: string; to?: Destination }
+
+// stateOf tells a queued upload's state in the media center's words.
+function stateOf(upload: LocalUpload): Pick<UploadItem, "state" | "progress" | "error"> {
+  const progress = upload.size ? Math.min(1, upload.transferred / upload.size) : 0;
+  switch (upload.phase) {
+    case "running": return { state: "uploading", progress };
+    case "completed": return { state: "done", progress: 1 };
+    case "skipped": return { state: "exists", progress: 0 };
+    case "failed": return { state: "failed", progress: 0, error: upload.error?.code === "forbidden" ? "没有权限上传到这个文件夹" : failureText(upload.error?.code ?? "") };
+    case "canceled": return { state: "canceled", progress: 0 };
+    default: return { state: "waiting", progress };
+  }
+}
+
+// useUploads sends the chosen files through the transfer center's queue: the
+// whole batch shows there at once, three files go in parallel in resumable
+// parts, and folders of a folder upload are created by the NAS as the
+// signed-in user. Files that already exist are left alone, never replaced
+// or duplicated; the media center rescans the library once a file lands.
 export function useUploads({ onUploaded, onSettled }: { onUploaded: (item: UploadItem) => void; onSettled: (items: UploadItem[]) => void }): Uploads {
-  const list = useRef<UploadItem[]>([]);
-  const [, setVersion] = useState(0);
+  const snapshot = useTransfers();
+  const [staged, setStaged] = useState<Staged[]>([]);
   const next = useRef(0);
-  const run = useRef({ running: false, live: true, controller: undefined as AbortController | undefined, current: -1, folders: new Map<string, Promise<string>>() });
   const callbacks = useRef({ onUploaded, onSettled });
   callbacks.current = { onUploaded, onSettled };
 
-  const commit = useCallback((items: UploadItem[]) => { list.current = items; setVersion((value) => value + 1); }, []);
-  const patch = useCallback((id: number, change: Partial<UploadItem>) => commit(list.current.map((item) => (item.id === id ? { ...item, ...change } : item))), [commit]);
+  const items = useMemo(() => {
+    const queued = new Map(snapshot.uploads.map((upload) => [upload.key, upload]));
+    return staged.map((entry): UploadItem => {
+      const base = { id: entry.id, file: entry.file, folder: entry.folder, role: entry.role, to: entry.to };
+      if (!entry.key) return { ...base, state: entry.role === "other" ? "skipped" : "ready", progress: 0 };
+      const upload = queued.get(entry.key);
+      // Signing out empties the queue.
+      return upload ? { ...base, ...stateOf(upload) } : { ...base, state: "canceled", progress: 0 };
+    });
+  }, [staged, snapshot.uploads]);
+  const running = items.some(active);
 
-  const folderFor = useCallback((to: Destination, folder: string): Promise<string> => {
-    if (!folder) return Promise.resolve(to.parentId);
-    const key = `${to.spaceId}\n${to.parentId}\n${folder}`;
-    const known = run.current.folders.get(key);
-    if (known) return known;
-    const slash = folder.lastIndexOf("/");
-    const made = folderFor(to, slash < 0 ? "" : folder.slice(0, slash)).then((parent) => ensureFolder(to.spaceId, parent, folder.slice(slash + 1)));
-    run.current.folders.set(key, made);
-    made.catch(() => run.current.folders.delete(key));
-    return made;
-  }, []);
-
-  const drain = useCallback(async () => {
-    const state = run.current;
-    if (state.running) return;
-    state.running = true;
-    setVersion((value) => value + 1);
-    const settled: UploadItem[] = [];
-    for (;;) {
-      const item = list.current.find((candidate) => candidate.state === "waiting");
-      if (!item || !item.to || !state.live) break;
-      const controller = new AbortController();
-      state.controller = controller;
-      state.current = item.id;
-      patch(item.id, { state: "uploading", progress: 0, error: undefined });
-      // The transfer center lists media uploads beside file uploads.
-      const tracked = transferStore.trackExternal({
-        key: `media-${item.id}`, app: "media", name: item.file.name, size: item.file.size,
-        label: `影视中心 · ${item.to.libraryName}${item.folder ? ` · ${item.folder}` : ""}`,
-      });
-      let result: Partial<UploadItem>;
-      try {
-        const parent = await folderFor(item.to, item.folder);
-        if (controller.signal.aborted) throw new DOMException("upload aborted", "AbortError");
-        await sendFile(item.to.spaceId, parent, item.file, (fraction) => { patch(item.id, { progress: fraction }); tracked.progress(fraction); }, controller.signal);
-        result = { state: "done", progress: 1 };
-        tracked.done();
-      } catch (caught) {
-        if (controller.signal.aborted) result = { state: "canceled", progress: 0 };
-        else if (caught instanceof APIError && caught.status === 409) result = { state: "exists", progress: 0 };
-        else result = { state: "failed", progress: 0, error: caught instanceof APIError && caught.status === 403 ? "没有权限上传到这个文件夹" : messageOf(caught) };
-        if (result.state === "canceled") tracked.cancel();
-        else tracked.fail(result.state === "exists" ? "同名文件已存在，未覆盖" : result.error ?? "上传失败");
-      }
-      if (!state.live) break;
-      patch(item.id, result);
-      const finished = list.current.find((candidate) => candidate.id === item.id)!;
-      settled.push(finished);
-      if (finished.state === "done") callbacks.current.onUploaded(finished);
+  // Each finished file is announced once; the batch when nothing is left.
+  const announced = useRef(new Set<number>());
+  const settled = useRef<UploadItem[]>([]);
+  useEffect(() => {
+    for (const item of items) {
+      if (!item.to || active(item) || announced.current.has(item.id)) continue;
+      announced.current.add(item.id);
+      settled.current.push(item);
+      if (item.state === "done") callbacks.current.onUploaded(item);
     }
-    state.running = false;
-    state.controller = undefined;
-    state.current = -1;
-    state.folders.clear();
-    if (!state.live) return;
-    setVersion((value) => value + 1);
-    if (settled.length) callbacks.current.onSettled(settled);
-  }, [folderFor, patch]);
+    if (!running && settled.current.length) {
+      const batch = settled.current;
+      settled.current = [];
+      callbacks.current.onSettled(batch);
+    }
+  }, [items, running]);
 
-  useEffect(() => {
-    const state = run.current;
-    state.live = true;
-    return () => { state.live = false; state.controller?.abort(); };
-  }, []);
-
-  // Leaving the page would drop what is still uploading.
-  const running = run.current.running;
-  useEffect(() => {
-    if (!running) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [running]);
-
-  const add = useCallback((picked: Picked[]) => {
-    const known = new Set(list.current.filter((item) => item.state === "ready" || active(item)).map((item) => `${item.folder}/${item.file.name}/${item.file.size}`));
-    const added: UploadItem[] = [];
+  const add = useCallback((picked: Picked[]) => setStaged((current) => {
+    const known = new Set(current.filter((entry) => !entry.key || items.some((item) => item.id === entry.id && active(item))).map((entry) => `${entry.folder}/${entry.file.name}/${entry.file.size}`));
+    const added: Staged[] = [];
     for (const entry of picked) {
       const key = `${entry.folder}/${entry.file.name}/${entry.file.size}`;
       if (hidden(entry) || known.has(key)) continue;
       known.add(key);
-      const role = roleOf(entry.file.name);
-      added.push({ id: ++next.current, file: entry.file, folder: entry.folder, role, state: role === "other" ? "skipped" : "ready", progress: 0 });
+      added.push({ id: ++next.current, file: entry.file, folder: entry.folder, role: roleOf(entry.file.name) });
     }
-    if (added.length) commit([...list.current, ...added]);
-  }, [commit]);
+    return added.length ? [...current, ...added] : current;
+  }), [items]);
 
+  const latest = useRef(staged);
+  latest.current = staged;
   const start = useCallback((to: Destination) => {
-    commit(list.current.map((item) => (item.state === "ready" ? { ...item, state: "waiting", to } : item)));
-    void drain();
-  }, [commit, drain]);
+    const ready = latest.current.filter((entry) => !entry.key && entry.role !== "other");
+    if (!ready.length) return;
+    const batch = transferStore.enqueue(
+      ready.map((entry) => ({ file: entry.file, directories: entry.folder ? entry.folder.split("/") : [] })),
+      { spaceId: to.spaceId, spaceKind: to.spaceKind, parentId: to.parentId, folders: [], label: `影视中心 · ${to.place}` },
+      { choice: "skip" },
+    );
+    // The queue keeps the batch in the order it was given.
+    const keys = new Map(transferStore.getSnapshot().uploads.filter((upload) => upload.batch === batch).map((upload, index) => [ready[index].id, upload.key]));
+    setStaged((current) => current.map((entry) => (keys.has(entry.id) ? { ...entry, key: keys.get(entry.id), to } : entry)));
+  }, []);
 
-  const cancel = useCallback((id: number) => {
-    const item = list.current.find((candidate) => candidate.id === id);
-    if (item?.state === "uploading" && run.current.current === id) run.current.controller?.abort();
-    else if (item?.state === "waiting") patch(id, { state: "canceled" });
-  }, [patch]);
-
+  const keyOf = (id: number) => staged.find((entry) => entry.id === id)?.key;
   return {
-    items: list.current,
+    items,
     running,
     add,
     start,
-    remove: useCallback((id: number) => commit(list.current.filter((item) => item.id !== id || active(item))), [commit]),
-    cancel,
-    cancelAll: useCallback(() => {
-      commit(list.current.map((item) => (item.state === "waiting" ? { ...item, state: "canceled" } : item)));
-      run.current.controller?.abort();
-    }, [commit]),
-    retry: useCallback((id: number) => {
-      commit(list.current.map((item) => (item.id === id && item.to && (item.state === "failed" || item.state === "canceled") ? { ...item, state: "waiting", progress: 0, error: undefined } : item)));
-      void drain();
-    }, [commit, drain]),
-    clear: useCallback(() => commit(list.current.filter(active)), [commit]),
+    remove: (id) => setStaged((current) => current.filter((entry) => entry.id !== id || items.some((item) => item.id === id && active(item)))),
+    cancel: (id) => { const key = keyOf(id); if (key) transferStore.cancel(key); },
+    cancelAll: () => { for (const item of items) if (active(item)) { const key = keyOf(item.id); if (key) transferStore.cancel(key); } },
+    retry: (id) => { const key = keyOf(id); if (key) transferStore.retry(key); },
+    clear: () => setStaged((current) => current.filter((entry) => items.some((item) => item.id === entry.id && active(item)))),
   };
 }

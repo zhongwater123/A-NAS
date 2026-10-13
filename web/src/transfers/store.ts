@@ -17,6 +17,9 @@ export type Hold = "offline" | "session" | "volume" | "space";
 
 export interface UploadTarget extends TransferLocation {
   parentId: string;
+  // label names the target where its folders are not known, such as a media
+  // center library ("影视中心 · 家庭影院 / 剧集").
+  label?: string;
 }
 
 export interface LocalUpload {
@@ -61,8 +64,10 @@ export interface ExternalUpload {
   name: string;
   size: number;
   label: string;
+  // batch groups the files one action added, as for this browser's uploads.
+  batch?: string;
   progress: number;
-  phase: "running" | "completed" | "failed" | "canceled";
+  phase: "queued" | "running" | "completed" | "failed" | "canceled";
   error?: string;
   createdAt: number;
   finishedAt?: number;
@@ -215,14 +220,16 @@ export class TransferStore {
       + this.snapshot.external.filter((upload) => upload.phase === "running").length;
   }
 
-  enqueue(files: Array<{ file: File; directories?: string[] }>, target: UploadTarget): string {
+  // enqueue queues files as one batch; choice answers its name conflicts in
+  // advance, for callers that never want to be asked.
+  enqueue(files: Array<{ file: File; directories?: string[] }>, target: UploadTarget, options: { choice?: ConflictChoice } = {}): string {
     const now = Date.now();
     const batch = `b-${now.toString(36)}-${(this.counter += 1).toString(36)}`;
     const uploads = files.map(({ file, directories = [] }): LocalUpload => ({
       key: `u${(this.counter += 1)}`, batch, file, name: file.name, directories, size: file.size, target,
       conflict: "ask", phase: "queued", transferred: 0, speed: 0, createdAt: now,
     }));
-    this.set({ uploads: [...this.snapshot.uploads, ...uploads], batches: [...this.snapshot.batches, { id: batch, target, createdAt: now }] });
+    this.set({ uploads: [...this.snapshot.uploads, ...uploads], batches: [...this.snapshot.batches, { id: batch, target, createdAt: now, choice: options.choice }] });
     this.schedule();
     return batch;
   }
@@ -241,6 +248,16 @@ export class TransferStore {
     if (!upload || !["paused", "failed", "waiting"].includes(upload.phase)) return;
     this.update(key, { phase: "queued", error: undefined, hold: undefined });
     this.schedule();
+  }
+
+  // retry sends a failed or canceled upload again; a canceled one starts
+  // over, since the NAS discarded what it had.
+  retry(key: string) {
+    const upload = this.find(key);
+    if (upload?.phase === "canceled") {
+      this.update(key, { phase: "queued", transferId: undefined, transferred: 0, error: undefined, finishedAt: undefined });
+      this.schedule();
+    } else this.resume(key);
   }
 
   cancel(key: string) {
@@ -365,19 +382,28 @@ export class TransferStore {
   }
 
   // trackExternal shows another app's upload here and returns how to report it.
-  trackExternal(upload: Pick<ExternalUpload, "key" | "app" | "name" | "size" | "label">) {
-    const entry: ExternalUpload = { ...upload, progress: 0, phase: "running", createdAt: Date.now() };
-    this.set({ external: [entry, ...this.snapshot.external.filter((item) => item.key !== upload.key)] });
+  // An app that keeps its own queue reports each file as soon as it is
+  // added (queued), so the transfer center lists the whole queue at once.
+  trackExternal(upload: Pick<ExternalUpload, "key" | "app" | "name" | "size" | "label" | "batch">, options: { queued?: boolean } = {}) {
+    const entry: ExternalUpload = { ...upload, progress: 0, phase: options.queued ? "queued" : "running", createdAt: Date.now() };
+    this.set({ external: [...this.snapshot.external.filter((item) => item.key !== upload.key), entry] });
     const change = (value: Partial<ExternalUpload>, immediate = true) => this.set({ external: this.snapshot.external.map((item) => item.key === upload.key ? { ...item, ...value } : item) }, immediate);
     this.sent.set(upload.key, 0);
     return {
+      start: () => {
+        this.sent.set(upload.key, 0);
+        change({ phase: "running", progress: 0, error: undefined, finishedAt: undefined });
+      },
       progress: (fraction: number) => {
-        this.count(upload.key, undefined, Math.round(fraction * upload.size));
+        this.count(upload.key, upload.batch, Math.round(fraction * upload.size));
         change({ progress: fraction }, false);
       },
-      done: () => change({ phase: "completed", progress: 1, finishedAt: Date.now() }),
+      done: () => {
+        this.count(upload.key, upload.batch, upload.size);
+        change({ phase: "completed", progress: 1, finishedAt: Date.now() });
+      },
       fail: (error: string) => change({ phase: "failed", error, finishedAt: Date.now() }),
-      cancel: () => change({ phase: "canceled", finishedAt: Date.now() }),
+      cancel: (reason?: string) => change({ phase: "canceled", error: reason, finishedAt: Date.now() }),
     };
   }
 
@@ -504,15 +530,29 @@ export class TransferStore {
     this.meters.download.add(now, this.moved.download);
   }
 
+  // tick samples the meters of whatever still runs each second. A file
+  // waiting for the NAS to take a part then counts as moving slowly, not as
+  // a pause after which its next part would show as a burst of speed.
+  private tick() {
+    const now = Date.now();
+    const running = [...this.snapshot.uploads, ...this.snapshot.external].filter((upload) => upload.phase === "running");
+    if (running.length) this.meters.upload.add(now, this.moved.upload);
+    for (const upload of this.snapshot.uploads) if (upload.phase === "running") this.meters.items.get(upload.key)?.add(now, upload.transferred);
+    const batches = new Set(running.map((upload) => upload.batch));
+    for (const [batch, meter] of this.meters.batches) if (batches.has(batch)) meter.add(now, this.moved.batches.get(batch) ?? 0);
+    this.measure();
+  }
+
   // measure publishes the speeds and keeps them fresh while bytes move, so a
   // stall shows as a falling speed rather than the last value.
   private measure(immediate = true) {
     const now = Date.now();
     const batches: Record<string, number> = {};
+    const runningBatches = new Set([...this.snapshot.uploads, ...this.snapshot.external].filter((upload) => upload.phase === "running").map((upload) => upload.batch));
     for (const [batch, meter] of this.meters.batches) {
       const rate = meter.rate(now);
       if (rate > 0) batches[batch] = rate;
-      else if (!this.snapshot.uploads.some((upload) => upload.batch === batch && upload.phase === "running")) this.meters.batches.delete(batch);
+      else if (!runningBatches.has(batch)) this.meters.batches.delete(batch);
     }
     const rates: TransferRates = { upload: this.meters.upload.rate(now), download: this.meters.download.rate(now), batches };
     const uploads = this.snapshot.uploads.map((upload) => {
@@ -520,13 +560,13 @@ export class TransferStore {
       const speed = this.meters.items.get(upload.key)?.rate(now) ?? 0;
       return speed === upload.speed ? upload : { ...upload, speed };
     });
-    const moving = rates.upload > 0 || rates.download > 0 || this.running.size > 0;
+    const moving = rates.upload > 0 || rates.download > 0 || this.running.size > 0 || runningBatches.size > 0;
     const previous = this.snapshot.rates;
     const changed = Math.round(previous.upload) !== Math.round(rates.upload) || Math.round(previous.download) !== Math.round(rates.download)
       || Object.keys(previous.batches).length !== Object.keys(batches).length || Object.entries(batches).some(([batch, rate]) => Math.round(previous.batches[batch] ?? 0) !== Math.round(rate))
       || uploads.some((upload, index) => upload !== this.snapshot.uploads[index]);
     if (changed) this.set({ rates, uploads }, immediate);
-    if (moving && !this.rateTimer) this.rateTimer = setInterval(() => this.measure(), 1000);
+    if (moving && !this.rateTimer) this.rateTimer = setInterval(() => this.tick(), 1000);
     if (!moving && this.rateTimer) {
       clearInterval(this.rateTimer);
       this.rateTimer = undefined;

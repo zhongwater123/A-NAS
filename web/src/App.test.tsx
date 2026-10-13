@@ -299,7 +299,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dialog).getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(false);
     tus.uploads[0].options.onProgress(5, 5);
     expect(await within(dialog).findByRole("button", { name: /正在上传 2 个文件/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /传输中心：2 个任务/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /传输中心：正在上传 .+ 等 2 个任务/ })).toBeTruthy();
 
     const browser = within(dialog).getByRole("region", { name: "文件浏览器" });
     const dataTransfer = { types: ["Files"], items: [], files: [new File(["dropped"], "c.txt")], dropEffect: "none" };
@@ -313,7 +313,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const before = listed();
     tus.uploads[0].options.onSuccess();
     await waitFor(() => expect(listed()).toBeGreaterThan(before));
-    await user.click(screen.getByRole("button", { name: /传输中心：2 个任务/ }));
+    await user.click(screen.getByRole("button", { name: /传输中心：正在上传 .+ 等 2 个任务/ }));
     const center = await screen.findByRole("dialog", { name: "传输中心" });
     expect(await within(center).findByRole("heading", { name: "正在传输" })).toBeTruthy();
   });

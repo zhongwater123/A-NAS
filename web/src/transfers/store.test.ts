@@ -208,6 +208,22 @@ describe("the upload queue", () => {
     expect(store.getSnapshot().rates.upload).toBe(0);
   });
 
+  it("does not show a burst of speed when a running upload reports a part late", async () => {
+    store.enqueue([{ file: file("film.mkv", 32_000_000) }], target);
+    await vi.advanceTimersByTimeAsync(100);
+    tus.uploads[0].options.onProgress(8_000_000, 32_000_000);
+    // The next part takes 4 s to be taken, longer than the speed window.
+    await vi.advanceTimersByTimeAsync(4000);
+    tus.uploads[0].options.onProgress(16_000_000, 32_000_000);
+    const snapshot = store.getSnapshot();
+    const batch = snapshot.batches[0].id;
+    // 8 MB over the last 3 s or so, not 8 MB in the last second.
+    for (const speed of [snapshot.rates.upload, snapshot.rates.batches[batch], snapshot.uploads[0].speed]) {
+      expect(speed).toBeGreaterThan(2_000_000);
+      expect(speed).toBeLessThan(3_000_000);
+    }
+  });
+
   it("measures downloads by what the NAS sent between polls", async () => {
     const download = (sent: number, state: Transfer["state"]): Transfer => ({
       id: "download-1", direction: "download", kind: "file", name: "film.mkv", location: target, totalBytes: 100_000_000, transferredBytes: sent,
@@ -224,6 +240,22 @@ describe("the upload queue", () => {
     await vi.advanceTimersByTimeAsync(1500);
     await store.refresh();
     expect(store.getSnapshot().rates.download).toBeGreaterThan(30_000_000);
+  });
+
+  it("answers a batch's conflicts in advance when asked to", () => {
+    store.enqueue([{ file: file("Heat (1995).mkv") }], target, { choice: "skip" });
+    tus.uploads[0].fail("POST", 409, "name_conflict");
+    expect(phases()).toEqual(["skipped"]);
+    expect(tus.uploads).toHaveLength(1);
+  });
+
+  it("sends a canceled upload again from the beginning", () => {
+    store.enqueue([{ file: file("a.jpg") }], target);
+    tus.uploads[0].created("upload-a");
+    store.cancel(store.getSnapshot().uploads[0].key);
+    store.retry(store.getSnapshot().uploads[0].key);
+    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", transferId: undefined, transferred: 0 });
+    expect(tus.uploads[1].options.endpoint).toBe("/api/v1/uploads");
   });
 
   it("asks before the page closes while uploads are unfinished", () => {

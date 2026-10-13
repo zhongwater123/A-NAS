@@ -7,7 +7,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { type ConflictChoice, type Hold, transferStore, useTransfers } from "./store";
 import {
   dayLabel, formatBytes, formatClock, formatRemaining, formatSpeed, groupItems, groupStatus, holdText, isCurrent,
-  type ItemStatus, locationParts, statusText, type TransferGroup, type TransferItem, transferItems, transferTotals,
+  type ItemStatus, locationParts, speedText, statusText, type TransferGroup, type TransferItem, transferItems, transferTotals,
 } from "./model";
 import type { TransferLocation } from "./transfersApi";
 import "./transfers.css";
@@ -107,7 +107,7 @@ function Overview({ totals, active }: { totals: ReturnType<typeof transferTotals
         <strong>{active ? `${active} 个任务` : "全部完成"}</strong>
         <span className="up"><ArrowUp />{formatSpeed(totals.uploadSpeed)}</span>
         <span className="down"><ArrowDown />{formatSpeed(totals.downloadSpeed)}</span>
-        {active > 0 && totals.remainingBytes > 0 && <small>剩余 {formatBytes(totals.remainingBytes)}{speed > 0 ? ` · ${formatRemaining(totals.remainingBytes, speed)}` : ""}</small>}
+        {active > 0 && totals.remainingBytes > 0 && <small>剩余 {[formatBytes(totals.remainingBytes), formatRemaining(totals.remainingBytes, speed)].filter(Boolean).join(" · ")}</small>}
       </div>
     </section>
   );
@@ -181,7 +181,7 @@ function BatchCard({ group, onOpenLocation }: { group: TransferGroup; onOpenLoca
         <span className="tc-file-tile batch"><FolderUp /><i className="up"><ArrowUp /></i></span>
         <div className="tc-batch-copy">
           <div className="tc-title-line"><strong>上传 {count} 个文件</strong><StatusChip status={status} /></div>
-          <Location prefix="到" location={group.location} onOpen={onOpenLocation} />
+          {group.label ? <span className="tc-location">{group.label}</span> : <Location prefix="到" location={group.location} onOpen={onOpenLocation} />}
         </div>
         <div className="tc-actions">
           {local && moving > 0 && <IconButton label="暂停这一批" onClick={() => transferStore.pauseBatch(batch)}><Pause /></IconButton>}
@@ -194,7 +194,7 @@ function BatchCard({ group, onOpenLocation }: { group: TransferGroup; onOpenLoca
       <div className="tc-meta">
         <span>{formatBytes(group.transferred)} / {formatBytes(group.total)}</span>
         <span>已完成 {done}{failed ? <em className="danger"> · 失败 {failed}</em> : null}{count - done - failed > 0 ? ` · 剩余 ${count - done - failed}` : ""}</span>
-        {group.speed > 0 && <span className="tc-speed">{formatSpeed(group.speed)} · {formatRemaining(group.total - group.transferred, group.speed)}</span>}
+        {group.speed > 0 && <span className="tc-speed">{speedText(group.speed, group.total - group.transferred)}</span>}
       </div>
       {conflicts.length > 0 && (
         <ConflictBar title={`${conflicts.length} 个文件与目标位置的文件同名`} detail={`${conflicts.slice(0, 3).map((item) => item.name).join("、")}${conflicts.length > 3 ? " 等" : ""}`} onAnswer={answer}>
@@ -254,7 +254,7 @@ function ConflictBar({ title, detail, onAnswer, children }: { title: string; det
 function RowDetail({ item }: { item: TransferItem }) {
   if (item.status === "running") {
     return <>
-      <span className="tc-speed">{item.speed > 0 ? `${formatSpeed(item.speed)} · ${formatRemaining(item.total - item.transferred, item.speed)}` : "正在连接…"}</span>
+      <span className="tc-speed">{item.speed > 0 ? speedText(item.speed, item.total - item.transferred) : "正在连接…"}</span>
       {item.restarted && <span className="warning">NAS 丢失了进度，已从头重新上传</span>}
     </>;
   }
@@ -345,7 +345,7 @@ function HistoryBatch({ group, onOpenLocation }: { group: TransferGroup; onOpenL
         <span className="tc-file-tile batch"><FolderUp /><i className="up"><ArrowUp /></i></span>
         <div className="tc-row-body">
           <div className="tc-title-line"><strong>上传 {group.items.length} 个文件</strong>{other > 0 && <StatusChip status="failed" label={`${other} 个未完成`} />}</div>
-          <div className="tc-history-sub"><Location prefix="上传到" location={group.location} onOpen={onOpenLocation} /></div>
+          <div className="tc-history-sub">{group.label ? <span className="tc-location">{group.label}</span> : <Location prefix="上传到" location={group.location} onOpen={onOpenLocation} />}</div>
         </div>
         <span className="tc-history-size">{formatBytes(group.total)}</span>
         <time>{formatClock(group.finishedAt ?? group.createdAt)}</time>

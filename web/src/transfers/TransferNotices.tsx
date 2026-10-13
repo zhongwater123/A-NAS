@@ -1,29 +1,60 @@
-import { ArrowDownUp, CircleAlert, CircleCheck, CopyPlus, HardDrive, LogIn, Replace, RotateCcw, SkipForward, WifiOff, X } from "lucide-react";
+import { ArrowDown, ArrowDownUp, ArrowUp, CircleAlert, CircleCheck, CopyPlus, HardDrive, LogIn, Replace, RotateCcw, SkipForward, WifiOff, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { holdText, isCurrent, locationParts, transferItems, transferTotals } from "./model";
+import { formatSpeed, holdText, isActive, isCurrent, type ItemStatus, locationParts, statusText, transferItems, transferTotals } from "./model";
 import { type Hold, transferStore, useTransfers } from "./store";
 import "./notices.css";
 
+// listOrder puts what moves first in the indicator's list.
+const listOrder: ItemStatus[] = ["running", "conflict", "waiting", "failed", "pending", "queued", "paused", "interrupted"];
+const listed = 6;
+
 // TransferIndicator sits in the status bar while anything moves, so the
-// transfer center is one click away.
+// transfer center is one click away. It names the file being sent and how
+// many are left; hovering lists the first tasks.
 export function TransferIndicator({ onOpen }: { onOpen: () => void }) {
   const snapshot = useTransfers();
   const items = useMemo(() => transferItems(snapshot), [snapshot]);
   const totals = useMemo(() => transferTotals(items, snapshot.rates), [items, snapshot.rates]);
-  const active = items.filter(isCurrent).length;
-  if (!active) return null;
+  const current = useMemo(() => items.filter(isCurrent).sort((left, right) => listOrder.indexOf(left.status) - listOrder.indexOf(right.status)), [items]);
+  if (!current.length) return null;
   const percent = Math.round(totals.progress * 100);
   const attention = totals.attention > 0 || snapshot.holds.length > 0;
-  const label = `传输中心：${active} 个任务，${attention ? "有任务需要处理" : `已完成 ${percent}%`}`;
+  const lead = current[0];
+  const left = current.filter((item) => isActive(item.status)).length;
+  const others = current.length - 1;
+  const speed = totals.uploadSpeed + totals.downloadSpeed;
+  const label = `传输中心：${lead.direction === "upload" ? "正在上传" : "正在下载"} ${lead.name}${others ? ` 等 ${current.length} 个任务` : ""}，${attention ? "有任务需要处理" : `已完成 ${percent}%`}`;
+  const Direction = lead.direction === "upload" ? ArrowUp : ArrowDown;
   return (
-    <button type="button" className={`status-transfers ${attention ? "attention" : ""}`} aria-label={label} title={label} onClick={onOpen}>
-      <span className="status-transfers-ring" aria-hidden="true">
-        <svg viewBox="0 0 36 36"><circle className="track" cx="18" cy="18" r="15" /><circle className="value" cx="18" cy="18" r="15" pathLength={100} strokeDasharray={`${percent} 100`} /></svg>
-        <ArrowDownUp />
-      </span>
-      <span className="status-transfers-copy"><strong>{active}</strong><small>{attention ? "需处理" : `${percent}%`}</small></span>
-    </button>
+    <div className="status-transfers-wrap">
+      <button type="button" className={`status-transfers ${attention ? "attention" : ""}`} aria-label={label} onClick={onOpen}>
+        <span className="status-transfers-ring" aria-hidden="true">
+          <svg viewBox="0 0 36 36"><circle className="track" cx="18" cy="18" r="15" /><circle className="value" cx="18" cy="18" r="15" pathLength={100} strokeDasharray={`${percent} 100`} /></svg>
+          <ArrowDownUp />
+        </span>
+        <span className="status-transfers-copy" aria-hidden="true">
+          <strong><Direction />{lead.name}</strong>
+          <small>{attention ? `${totals.attention || snapshot.holds.length} 个需处理` : left > 1 ? `还剩 ${left} 个 · ${percent}%` : `${percent}%`}</small>
+        </span>
+      </button>
+      <div className="status-transfers-pop" aria-hidden="true">
+        <header><strong>{current.length} 个任务</strong>{speed > 0 && <span>{formatSpeed(speed)}</span>}</header>
+        <ul>
+          {current.slice(0, listed).map((item) => {
+            const share = item.total ? Math.min(100, Math.round((item.transferred / item.total) * 100)) : 0;
+            return (
+              <li key={item.id} className={item.status}>
+                <span className="name">{item.direction === "upload" ? <ArrowUp /> : <ArrowDown />}{item.name}</span>
+                <span className="state">{item.status === "running" ? `${share}%` : statusText[item.status]}</span>
+                <span className="bar"><i style={{ width: `${share}%` }} /></span>
+              </li>
+            );
+          })}
+        </ul>
+        <footer>{current.length > listed ? `还有 ${current.length - listed} 个，` : ""}点击打开传输中心</footer>
+      </div>
+    </div>
   );
 }
 
@@ -46,7 +77,7 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
       announced.current.add(batch.id);
       const done = uploads.filter((upload) => upload.phase === "completed").length;
       const failed = uploads.filter((upload) => upload.phase === "failed").length;
-      if (done + failed) fresh.push({ batch: batch.id, done, failed, place: locationParts(batch.target).join(" › ") });
+      if (done + failed) fresh.push({ batch: batch.id, done, failed, place: batch.target.label ?? locationParts(batch.target).join(" › ") });
     }
     if (fresh.length) setFinished((current) => [...current, ...fresh]);
   }, [snapshot.batches, snapshot.uploads]);
@@ -73,7 +104,7 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
           <CircleAlert className="tc-toast-icon" />
           <div className="tc-toast-copy">
             <strong>{names.length} 个文件已存在</strong>
-            <span>{locationParts(batch.target).join(" › ")} 中已有 {names.slice(0, 2).join("、")}{names.length > 2 ? " 等文件" : ""}。这一批的同名文件都按你的选择处理。</span>
+            <span>{batch.target.label ?? locationParts(batch.target).join(" › ")} 中已有 {names.slice(0, 2).join("、")}{names.length > 2 ? " 等文件" : ""}。这一批的同名文件都按你的选择处理。</span>
             <div className="tc-toast-actions">
               <button type="button" className="tc-button" onClick={() => transferStore.resolveConflicts(batch.id, "skip", true)}><SkipForward />跳过</button>
               <button type="button" className="tc-button" onClick={() => transferStore.resolveConflicts(batch.id, "rename", true)}><CopyPlus />保留两者</button>
