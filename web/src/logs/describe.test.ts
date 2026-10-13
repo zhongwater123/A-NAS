@@ -58,6 +58,17 @@ describe("activity sentences", () => {
     expect(sentence(event({ category: "photo", action: "photo.ai_label_hidden", actor: alice, detail: "cat" }), alice.id)).toBe("你 从 AI 聚合中移出了 1 张照片");
   });
 
+  it("describes scheduled snapshots", () => {
+    const shared = { id: "space:shared", kind: "shared" as const };
+    const weekly = event({ action: "snapshot.schedule_updated", actor: owner, detail: "weekly 03:30 weekday=1 keep=4", space: shared });
+    expect(sentence(weekly)).toBe("你 修改了定时快照");
+    expect(describeActivity(weekly, owner.id).meta).toEqual(["共享空间", "每周一 03:30 · 保留最近 4 份"]);
+    expect(describeActivity(event({ action: "snapshot.schedule_updated", actor: owner, detail: "hourly 00:15 weekday=0 keep=24" }), owner.id).meta).toEqual(["每小时第 15 分 · 保留最近 24 份"]);
+    expect(describeActivity(event({ action: "snapshot.schedule_updated", actor: owner, detail: "disabled" }), owner.id).meta).toEqual(["已关闭定时快照"]);
+    expect(sentence(event({ action: "snapshot.expired", system: true, detail: "定时快照 2026-10-12 03:00", space: shared }))).toBe("系统 清理了到期的定时快照 定时快照 2026-10-12 03:00");
+    expect(sentence(event({ action: "snapshot.folder_restored", actor: alice, detail: "snapshot:1" }))).toBe("alice 从快照恢复了 1 个文件夹");
+  });
+
   it("describes storage plans and unknown actions", () => {
     const failed = describeActivity(event({ category: "storage", action: "storage.plan.failed", system: true, detail: "mkfs.btrfs failed" }), owner.id);
     expect(plainText(failed.parts)).toBe("系统 数据卷初始化失败");

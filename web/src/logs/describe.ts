@@ -76,6 +76,9 @@ const fileVerbs: Record<string, Verb> = {
   "snapshot.created": { named: (item) => ["创建了快照", item], counted: (n) => `创建了 ${n} 个快照` },
   "snapshot.file_restored": { counted: (n) => `从快照恢复了 ${n} 个文件` },
   "snapshot.deleted": { named: (item) => ["删除了快照", item], counted: (n) => `删除了 ${n} 个快照` },
+  "snapshot.kept": { named: (item) => ["把定时快照保留为手动快照", item], counted: (n) => `保留了 ${n} 个定时快照` },
+  "snapshot.expired": { named: (item) => ["清理了到期的定时快照", item], counted: (n) => `清理了 ${n} 个到期的定时快照` },
+  "snapshot.folder_restored": { counted: (n) => `从快照恢复了 ${n} 个文件夹` },
 };
 
 const photoVerbs: Record<string, Verb> = {
@@ -108,6 +111,23 @@ const storageStates: Record<string, { text: string; tone?: Described["tone"] }> 
   failed: { text: "数据卷初始化失败", tone: "danger" },
   needs_attention: { text: "数据卷初始化需要人工处理", tone: "danger" },
 };
+
+const frequencies: Record<string, string> = { hourly: "每小时", daily: "每天", weekly: "每周" };
+const weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+// scheduleLabel reads a snapshot schedule as recorded: "disabled", or
+// "<frequency> <HH:MM> weekday=<0-6> keep=<n>".
+function scheduleLabel(detail?: string): string | undefined {
+  if (!detail) return undefined;
+  if (detail === "disabled") return "已关闭定时快照";
+  const match = /^(\w+) (\d{2}):(\d{2}) weekday=(\d) keep=(\d+)$/.exec(detail);
+  if (!match) return detail;
+  const [, frequency, hour, minute, weekday, keep] = match;
+  const when = frequency === "hourly" ? `每小时第 ${Number(minute)} 分`
+    : frequency === "weekly" ? `每周${weekdayNames[Number(weekday)]?.slice(1) ?? ""} ${hour}:${minute}`
+      : `${frequencies[frequency] ?? frequency} ${hour}:${minute}`;
+  return `${when} · 保留最近 ${keep} 份`;
+}
 
 function spaceLabel(event: ActivityEvent, viewerId: string): string | undefined {
   if (!event.space) return undefined;
@@ -161,6 +181,9 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
     case "space.viewing_ended": return { parts: [actor, "结束了对", owner, "个人空间的只读查看"], meta: [] };
     case "photos.viewing_started": return { parts: [actor, "开始只读查看", subject, "的私有图库"], meta: viewingMeta(), tone: "warning" };
     case "photos.viewing_ended": return { parts: [actor, "结束了对", subject, "私有图库的只读查看"], meta: [] };
+  }
+  if (event.action === "snapshot.schedule_updated") {
+    return { parts: [actor, "修改了定时快照"], meta: [spaceLabel(event, viewerId), scheduleLabel(event.detail)].filter(Boolean) as string[] };
   }
   if (event.action.startsWith("storage.plan.")) {
     const state = storageStates[event.action.slice("storage.plan.".length)];
