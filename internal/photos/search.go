@@ -114,31 +114,48 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	if err != nil {
 		return SearchPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.name, IFNULL(group_concat(t.name, char(31)), '')
-FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
-WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+`)
-GROUP BY a.id`, args...)
+	candidates, err := s.searchCandidates(ctx, args)
 	if err != nil {
 		return SearchPage{}, err
+	}
+	page := SearchPage{Assets: []Asset{}}
+	hits, err := s.queryHits(ctx, query, candidates, &page)
+	if err != nil {
+		return SearchPage{}, err
+	}
+	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
+	if err != nil {
+		return SearchPage{}, err
+	}
+	return page, nil
+}
+
+// searchCandidates lists the untrashed photos of the libraries in scope with
+// their user tags.
+func (s *Service) searchCandidates(ctx context.Context, scope []any) ([]candidate, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.name, IFNULL(group_concat(t.name, char(31)), '')
+FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
+WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+GROUP BY a.id`, scope...)
+	if err != nil {
+		return nil, err
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.objectID, &c.name, &c.tags); err != nil {
 			_ = rows.Close()
-			return SearchPage{}, err
+			return nil, err
 		}
 		candidates = append(candidates, c)
 	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return SearchPage{}, err
-	}
+	return candidates, errors.Join(rows.Err(), rows.Close())
+}
 
-	page := SearchPage{Assets: []Asset{}}
-	hits, err := s.queryHits(ctx, query, candidates, &page)
-	if err != nil {
-		return SearchPage{}, err
-	}
+// hitPage returns the page of ranked hits after the cursor and the cursor of
+// the next page, with duplicate hints. A photo trashed since the candidates
+// were read drops out.
+func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
 		if start < len(hits) && hits[start] == *after {
@@ -146,24 +163,25 @@ GROUP BY a.id`, args...)
 		}
 		hits = hits[start:]
 	}
-	limit := pageSize(request.Limit)
+	limit = pageSize(limit)
+	next := ""
 	if len(hits) > limit {
 		last := hits[limit-1]
-		page.Next = encodeCursor(strconv.FormatFloat(last.score, 'g', -1, 64), last.id)
+		next = encodeCursor(strconv.FormatFloat(last.score, 'g', -1, 64), last.id)
 		hits = hits[:limit]
 	}
+	assets := []Asset{}
 	if len(hits) == 0 {
-		return page, nil
+		return assets, next, nil
 	}
 	ids := make([]any, len(hits))
 	for i, hit := range hits {
 		ids[i] = hit.id
 	}
-	// A photo trashed since the candidates were read drops out here.
 	records, err := s.queryAssets(ctx, s.db,
 		"WHERE a.trashed_at IS NULL AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
 	if err != nil {
-		return SearchPage{}, err
+		return nil, "", err
 	}
 	position := make(map[string]int, len(hits))
 	for i, hit := range hits {
@@ -171,12 +189,12 @@ GROUP BY a.id`, args...)
 	}
 	slices.SortFunc(records, func(a, b assetRecord) int { return position[a.ID] - position[b.ID] })
 	if err := s.addDuplicateHints(ctx, s.db, p, records); err != nil {
-		return SearchPage{}, err
+		return nil, "", err
 	}
 	for _, record := range records {
-		page.Assets = append(page.Assets, record.Asset)
+		assets = append(assets, record.Asset)
 	}
-	return page, nil
+	return assets, next, nil
 }
 
 // queryHits ranks the candidates for a query: name or user tag matches first,

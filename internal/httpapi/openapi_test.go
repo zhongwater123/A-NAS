@@ -97,6 +97,8 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo trash", path: "/api/v1/photos/libraries/" + photoLibraryID + "/trash", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo AI status", path: "/api/v1/photos/ai", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo search", path: "/api/v1/photos/search?q=" + url.QueryEscape("海边的猫"), handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo similar", path: "/api/v1/photos/assets/" + photoAssetID + "/similar?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo similar missing", path: "/api/v1/photos/assets/photo:missing/similar", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photos unavailable", path: "/api/v1/photos/libraries", handler: withPhotoPrincipal(photosapi.New(nil, nil)), wantStatus: http.StatusServiceUnavailable},

@@ -103,6 +103,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("DELETE "+p+"/assets/{assetID}", h.trashAsset)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/original", h.original)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/thumbnail", h.thumbnail)
+	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/similar", h.similar)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/copies", h.copyAsset)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
@@ -284,6 +285,30 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+type similarResponse struct {
+	Items []photos.Asset `json:"items"`
+	Next  string         `json:"next,omitempty"`
+	// Ready is false while the photo has no vector yet.
+	Ready bool `json:"ready"`
+}
+
+func (h *handler) similar(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	page, err := h.service.Similar(r.Context(), principal, r.PathValue("assetID"), photos.SimilarRequest{
+		Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, similarResponse{Items: page.Assets, Next: page.Next, Ready: page.Ready})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
