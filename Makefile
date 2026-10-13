@@ -92,6 +92,12 @@ ops-check:
 	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-ai.service
 	grep -Fq 'anas-ai-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'ai-worker.tar.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-detector.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq -- '--detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json' deploy/systemd/system/anas-ai.service
+	grep -Fq 'ai_roles=(model:litertlm detector:onnx)' scripts/install-v1.0.1-system-services.sh
+	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
+	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
 	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/main.go
 	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-media.socket

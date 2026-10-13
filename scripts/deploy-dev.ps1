@@ -17,6 +17,11 @@ param(
     # on this machine (docs/architecture/photo-ai.md).
     [string]$ModelDirectory = 'D:\A-NAS-models\embeddinggemma-2-740m',
 
+    # Where the object detector that deploy\models\dfine-m-obj365.json pins
+    # lives, as exported from the official weights
+    # (docs/research/photo-ai-object-detection.md).
+    [string]$DetectorDirectory = 'D:\A-NAS-models\dfine-obj365\official',
+
     [switch]$StageOnly
 )
 
@@ -96,18 +101,27 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
     }
 
-    # Local AI is part of every release (ADR 0016). The model and the Python
+    # Local AI is part of every release (ADR 0016). The models and the Python
     # runtime travel once per content; the release carries their manifests.
+    # Each model has the role its release link is named after.
     $modelManifestPath = Join-Path $repoRoot 'deploy\models\embeddinggemma-2-740m.json'
-    $modelManifest = Get-Content -LiteralPath $modelManifestPath -Raw | ConvertFrom-Json
-    $modelPath = Join-Path $ModelDirectory $modelManifest.file
+    $detectorManifestPath = Join-Path $repoRoot 'deploy\models\dfine-m-obj365.json'
+    $models = @(
+        @{ Manifest = $modelManifestPath; Directory = $ModelDirectory },
+        @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory }
+    )
+    foreach ($model in $models) {
+        $model.Pinned = Get-Content -LiteralPath $model.Manifest -Raw | ConvertFrom-Json
+        $model.Path = Join-Path $model.Directory $model.Pinned.file
+    }
     $runtimeManifestPath = Join-Path $repoRoot 'build\ai-runtime.json'
     if (-not (Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf)) {
         throw 'Missing build\ai-runtime.json: run scripts/build-ai-runtime.sh in WSL first.'
     }
     $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
     $runtimePath = Join-Path $repoRoot "build\ai-runtime\$($runtimeManifest.file)"
-    foreach ($content in @(@{ Path = $modelPath; Sha = $modelManifest.sha256 }, @{ Path = $runtimePath; Sha = $runtimeManifest.sha256 })) {
+    $contents = @($models | ForEach-Object { @{ Path = $_.Path; Sha = $_.Pinned.sha256 } }) + @(@{ Path = $runtimePath; Sha = $runtimeManifest.sha256 })
+    foreach ($content in $contents) {
         if (-not (Test-Path -LiteralPath $content.Path -PathType Leaf)) {
             throw "Missing local AI file: $($content.Path)"
         }
@@ -147,7 +161,9 @@ try {
         & ssh.exe @sshOptions $target "printf '%s  %s\n' $Sha ~/$remote.incoming | sha256sum --check --quiet - && mv -f ~/$remote.incoming ~/$remote"
         if ($LASTEXITCODE -ne 0) { throw "The uploaded file does not match its manifest: $Name" }
     }
-    Send-StagedContent $modelPath "apps/a-nas/models/$($modelManifest.sha256)" $modelManifest.file $modelManifest.sha256
+    foreach ($model in $models) {
+        Send-StagedContent $model.Path "apps/a-nas/models/$($model.Pinned.sha256)" $model.Pinned.file $model.Pinned.sha256
+    }
     Send-StagedContent $runtimePath 'apps/a-nas/ai-runtimes' $runtimeManifest.file $runtimeManifest.sha256
 
     $uploads = @(
@@ -164,6 +180,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media@.service'); Destination = "${target}:$release/anas-media-system@.service.incoming" },
         @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
         @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
+        @{ Source = $detectorManifestPath; Destination = "${target}:$release/ai-detector.json.incoming" },
         @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },

@@ -7,15 +7,16 @@ After=anas-ai.socket
 [Service]
 Type=simple
 # Turns thumbnails the photo service passes as descriptors, and search text,
-# into vectors. It has no network and no data volume, so photos cannot leave
-# the device through it (ADR 0011, ADR 0016); the system test proves both.
+# into vectors, and finds the things in photos. It has no network and no data
+# volume, so photos cannot leave the device through it (ADR 0011, ADR 0016);
+# the system test proves both.
 User=a-nas-ai
 DynamicUser=true
-# The installer links the release's runtime and model to the copies it keeps
+# The installer links the release's runtime and models to the copies it keeps
 # once per content under /opt/a-nas.
 Environment=PYTHONPATH=/opt/a-nas/current/ai
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai
+ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json
 # XNNPack keeps repacked weights here so later starts load faster.
 CacheDirectory=a-nas-ai
 CacheDirectoryMode=0700
@@ -39,10 +40,14 @@ RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
-# About 1.4 GiB at peak with 70 vision tokens (docs/architecture/photo-ai.md).
+# The embedding model peaked at 815 MB on the Experimental NAS, the detector
+# adds about 400 MiB while it is loaded (docs/architecture/photo-objects.md).
+# Above MemoryHigh the kernel reclaims first; MemoryMax is the hard limit.
+MemoryHigh=1792M
 MemoryMax=2G
-CPUQuota=200%
-# AI runs only while the photo library is idle and still yields to anything
-# else on the machine.
+# AI works while the photo library is idle with every core but two, which stay
+# free for what the user does next: the Worker runs that many threads, and the
+# installer caps it at that many cores in anas-ai.service.d/cpu-reserve.conf.
+# It still yields to anything else on the machine.
 CPUWeight=10
 IOWeight=10
