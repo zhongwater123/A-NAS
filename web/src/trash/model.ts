@@ -5,15 +5,6 @@ export type TrashSort = "deleted" | "expiry";
 
 const day = 86_400_000;
 
-// retentionDays reads how long the recycle bin keeps items from the items
-// themselves, falling back to the default of 30 days.
-export function retentionDays(items: TrashItem[]): number {
-  const item = items[0];
-  if (!item) return 30;
-  const days = Math.round((Date.parse(item.purgeAt) - Date.parse(item.deletedAt)) / day);
-  return Number.isFinite(days) && days > 0 ? days : 30;
-}
-
 export type ExpiryTone = "calm" | "soon" | "urgent";
 
 // expiryOf words when an item is deleted for good, how urgent that is and

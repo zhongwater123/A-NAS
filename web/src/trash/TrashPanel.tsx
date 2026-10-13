@@ -8,7 +8,7 @@ import { formatBytes } from "../bytes";
 import { fileTypeLabel } from "../fileTypes";
 import type { TransferLocation } from "../transfers/transfersApi";
 import {
-  type BatchOutcome, expiryOf, type ExpiryTone, groupItems, locationOf, matches, messageOf, restoredName, restoreSummary, retentionDays, sortItems, spaceName,
+  type BatchOutcome, expiryOf, type ExpiryTone, groupItems, locationOf, matches, messageOf, restoredName, restoreSummary, sortItems, spaceName,
   type TrashSort,
 } from "./model";
 import "../backup/backup.css";
@@ -55,7 +55,6 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   const spaceOf = useCallback((item: TrashItem) => spaces.find((space) => space.id === item.spaceId), [spaces]);
   const visible = useMemo(() => sortItems(all.filter((item) => matches(item, spaceFilter, query)), sort), [all, spaceFilter, query, sort]);
   const groups = useMemo(() => groupItems(visible, sort), [visible, sort]);
-  const days = retentionDays(all);
   const total = all.reduce((sum, item) => sum + item.sizeBytes, 0);
   const soon = all.filter((item) => expiryOf(item).tone !== "calm").length;
   const trashSpaces = spaces.filter((space) => all.some((item) => item.spaceId === space.id));
@@ -147,7 +146,6 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
         <span className="tr-mark" aria-hidden="true"><Trash2 /></span>
         <div className="tr-title">
           <h2>回收站</h2>
-          <p>删除的文件和文件夹在这里保留 {days} 天，到期后自动永久删除；只有删除它的人能看到和恢复。</p>
         </div>
         <div className="tr-head-actions">
           <button type="button" className="bk-icon-button" aria-label="刷新" title="刷新" disabled={loading || busy} onClick={() => void refresh()}>

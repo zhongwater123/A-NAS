@@ -203,7 +203,7 @@ describe("TrashPanel", () => {
     serve([]);
     render(<TrashPanel onShowInFiles={() => undefined} />);
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
-    expect(screen.getByText(/保留 30 天，到期后自动永久删除/)).toBeTruthy();
+    expect(screen.queryByText(/保留 30 天/)).toBeNull();
     expect(screen.getByText(/到期前随时可以恢复到原来的位置/)).toBeTruthy();
     expect((screen.getByRole("button", { name: /清空回收站/ }) as HTMLButtonElement).disabled).toBe(true);
   });

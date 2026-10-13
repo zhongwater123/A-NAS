@@ -1,5 +1,5 @@
-/* 回收站: the 备份中心's calm workspace. A header with the bin's rules and
-   totals, then one card: filters or the selection's actions, column heads,
+/* 回收站: the 备份中心's calm workspace. A header with the totals, then
+   one card: filters or the selection's actions, column heads,
    and the items grouped by the day they were deleted. */
 .window-content-trash { position: relative; overflow: hidden; background: #f4f6f9; container: trashwindow / inline-size; }
 
@@ -12,7 +12,6 @@
 .tr-mark svg { width: 22px; height: 22px; }
 .tr-title { min-width: 0; flex: 1; }
 .tr-title h2 { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
-.tr-title p { margin-top: 3px; color: var(--bk-muted); font-size: 12.5px; line-height: 1.55; }
 .tr-head-actions { flex: none; display: flex; align-items: center; gap: 8px; }
 
 /* Totals */
@@ -125,7 +124,6 @@ button.tr-origin-path:hover .tr-origin-open, button.tr-origin-path:focus-visible
 }
 
 @container trashwindow (max-width: 520px) {
-  .tr-title p { display: none; }
   .tr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tr-stats > div:nth-child(2) { display: none; }
 }
