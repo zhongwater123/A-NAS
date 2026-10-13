@@ -113,7 +113,7 @@ func Run(parent context.Context, config Config) error {
 	if config.AIQuietPeriod <= 0 {
 		config.AIQuietPeriod = QuietPeriod
 	}
-	gate := NewGate(config.AIQuietPeriod)
+	gate := NewGate(config.AIQuietPeriod, config.Logger)
 	if config.AIPressure != nil {
 		gate.pressure = config.AIPressure
 	} else if len(gate.watched) > 0 {
