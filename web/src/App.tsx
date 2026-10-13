@@ -46,11 +46,11 @@ import {
 import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import {
-  APIError, FileEntry, Notification, Session, Space, TrashItem, Volume,
+  APIError, FileEntry, Notification, Session, Space, Volume,
   acknowledgeNotification, changePassword, copyFile, createDirectory, currentSession, deleteFile,
   endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications,
-  listSpaces, listTrash, listVolumes, login, logout, moveFile, onSessionEnded, purgeTrash, readFileTextPreview,
-  restoreTrash, setSession, setupAdministrator,
+  listSpaces, listVolumes, login, logout, moveFile, onSessionEnded, readFileTextPreview,
+  setSession, setupAdministrator,
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { BackupCenter } from "./backup/BackupCenter";
@@ -60,6 +60,7 @@ import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
+import { fileTypeLabel, isBrowserPreviewableImage, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
@@ -70,6 +71,7 @@ import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel"
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
 import { TerminalPanel } from "./TerminalPanel";
+import { TrashPanel } from "./trash/TrashPanel";
 import { carriesFiles, PickedFile, pickedFromDrop, pickedFromInput } from "./transfers/picker";
 import { transferStore, useTransfers } from "./transfers/store";
 import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
@@ -351,7 +353,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
-			  {window.id === "trash" && <TrashPanel />}
+			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "terminal" && <TerminalPanel />}
 			  {window.id === "docker" && <DockerPanel />}
@@ -934,13 +936,6 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	</div>;
 }
 
-function TrashPanel() {
-	const [items, setItems] = useState<TrashItem[]>([]); const [error, setError] = useState("");
-	const refresh = useCallback(() => listTrash().then(setItems).catch((caught) => setError(messageOf(caught))), []);
-	useEffect(() => { void refresh(); }, [refresh]);
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">RECYCLE BIN</p><h2>回收站</h2><p>项目默认保留 30 天</p></div><button onClick={() => void refresh()}>刷新</button></div>{error && <PanelNotice error={error} />}<div className="data-list">{items.map((item) => <div className="data-row" key={item.id}><Trash2 /><strong>{item.name}</strong><small>{new Date(item.deletedAt).toLocaleString("zh-CN")}</small><button onClick={() => void restoreTrash(item.id, item.name).then(refresh).catch((caught) => setError(messageOf(caught)))}>恢复</button><button className="danger-link" onClick={() => void purgeTrash(item.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>永久删除</button></div>)}</div>{!items.length && <div className="empty-compact">回收站为空</div>}</div>;
-}
-
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : "请求失败"; }
 
@@ -989,36 +984,6 @@ function compareFileBrowserItems(left: FileBrowserItem, right: FileBrowserItem, 
 	else result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
 	if (!result) result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
 	return direction === "ascending" ? result : -result;
-}
-
-function fileTypeLabel(name: string): string {
-	const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-	if (["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(extension ?? "")) return "图片";
-	if (["mp4", "mkv", "mov", "avi", "webm"].includes(extension ?? "")) return "视频";
-	if (["mp3", "flac", "wav", "m4a", "aac"].includes(extension ?? "")) return "音频";
-	if (extension === "pdf") return "PDF 文档";
-	if (["xls", "xlsx", "csv"].includes(extension ?? "")) return "电子表格";
-	if (["doc", "docx", "txt", "md"].includes(extension ?? "")) return "文档";
-	return extension ? `${extension.toLocaleUpperCase("en-US")} 文件` : "文件";
-}
-
-function isBrowserPreviewableImage(name: string): boolean {
-	const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-	return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(extension ?? "");
-}
-
-function isPDFPreviewable(name: string): boolean {
-	return name.toLocaleLowerCase("en-US").endsWith(".pdf");
-}
-
-function isTextPreviewable(name: string): boolean {
-	const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-	return ["txt", "md", "markdown", "json", "yaml", "yml", "csv", "log", "xml", "html", "css", "js", "jsx", "ts", "tsx", "go", "py", "sh", "ini", "conf"].includes(extension ?? "");
-}
-
-function isOfficeDocument(name: string): boolean {
-	const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-	return ["doc", "docx", "ppt", "pptx"].includes(extension ?? "");
 }
 
 function fileSortLabel(sort: FileSort): string {

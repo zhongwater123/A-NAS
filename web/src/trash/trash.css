@@ -1,0 +1,54 @@
+/* 回收站: the 备份中心's calm workspace, one card of rows that say where each
+   item goes back to and when it is deleted for good. */
+.window-content-trash { position: relative; overflow: hidden; background: #f4f6f9; container: trashwindow / inline-size; }
+
+.tr-app { flex-direction: column; }
+.tr-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.tr-page { max-width: 980px; margin: 0 auto; padding: 22px 24px 32px; display: grid; gap: 16px; align-content: start; }
+.tr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.tr-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.tr-head p { margin-top: 4px; max-width: 560px; color: var(--bk-muted); font-size: 13px; line-height: 1.6; }
+.tr-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 56px 0; color: var(--bk-muted); }
+.tr-spin { animation: bk-spin .8s linear infinite; }
+
+.tr-card { overflow: hidden; border: 1px solid var(--bk-line); border-radius: 16px; background: var(--bk-card); box-shadow: var(--bk-shadow); }
+.tr-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 12px 10px 18px; border-bottom: 1px solid var(--bk-line); background: #fafbfc; }
+.tr-summary { color: var(--bk-ink-2); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tr-toolbar .bk-segmented button { height: 26px; padding: 0 11px; font-size: 12px; }
+
+.tr-list { margin: 0; padding: 6px; list-style: none; }
+.tr-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px; min-height: 62px; padding: 9px 10px 9px 12px; border-radius: 12px; transition: background .12s; }
+.tr-row + .tr-row { box-shadow: 0 -1px 0 var(--bk-line); }
+.tr-row:hover, .tr-row:focus-within { background: #f5f8fa; box-shadow: none; }
+.tr-row:hover + .tr-row, .tr-row:focus-within + .tr-row { box-shadow: none; }
+.tr-row-main { min-width: 0; display: grid; gap: 4px; }
+.tr-row-main strong { overflow: hidden; font-size: 13.5px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.tr-row-meta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; color: var(--bk-muted); font-size: 12px; }
+.tr-row-meta > span { display: inline-flex; align-items: center; min-width: 0; white-space: nowrap; }
+/* The dot ends the part before it, so a wrapped line never starts with one. */
+.tr-row-meta > span:not(:last-child)::after { content: "·"; margin: 0 7px; color: var(--bk-faint); }
+.tr-origin { gap: 5px; max-width: 100%; color: var(--bk-ink-2); }
+.tr-origin svg { width: 13px; height: 13px; flex: none; color: var(--bk-faint); }
+.tr-origin > span { overflow: hidden; text-overflow: ellipsis; }
+.tr-origin em { flex: none; margin-left: 2px; padding: 1px 6px; border-radius: 5px; color: var(--bk-warn); background: var(--bk-warn-soft); font-size: 11px; font-style: normal; font-weight: 650; }
+
+.tr-expiry { height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tr-expiry svg { width: 13px; height: 13px; }
+.tr-expiry.calm { color: var(--bk-ink-2); background: rgba(16, 36, 52, .055); }
+.tr-expiry.soon { color: var(--bk-warn); background: var(--bk-warn-soft); }
+.tr-expiry.urgent { color: var(--bk-danger); background: var(--bk-danger-soft); }
+
+.tr-actions { display: flex; align-items: center; gap: 4px; }
+.tr-purge:hover:not(:disabled) { color: var(--bk-danger); background: var(--bk-danger-soft); }
+
+/* A narrow window stacks the expiry under the actions' column. */
+@container trashwindow (max-width: 620px) {
+  .tr-page { padding: 18px 14px 24px; }
+  .tr-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .tr-expiry { grid-column: 2; justify-self: start; }
+  .tr-actions { grid-column: 3; grid-row: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tr-spin { animation: none; }
+}

@@ -320,6 +320,7 @@ paths:
   /api/v1/trash/{trashId}/restore:
     post:
       operationId: restoreTrash
+      summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. A taken name answers 409 name_conflict and never overwrites.
       parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
       responses:
@@ -2169,14 +2170,30 @@ components:
     TrashItem:
       type: object
       additionalProperties: false
-      required: [id, entryId, spaceId, name, deletedBy, deletedAt]
+      required: [id, entryId, spaceId, name, kind, sizeBytes, originalPath, originalGone, deletedBy, deletedAt, purgeAt]
       properties:
         id: { type: string }
         entryId: { type: string }
         spaceId: { type: string }
         name: { type: string }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total size of the files the item holds, as last indexed.
+        originalPath:
+          type: string
+          description: >-
+            Folder the item was deleted from, relative to the space root and empty for the root;
+            restoring without a parentId puts it back there. When originalGone is true it is where
+            the folder was, or empty when that was not recorded.
+        originalGone:
+          type: boolean
+          description: The original folder no longer exists, so restoring without a parentId puts the item at the space root.
         deletedBy: { type: string }
         deletedAt: { type: string, format: date-time }
+        purgeAt: { type: string, format: date-time, description: When the recycle bin deletes the item for good. }
     Volume:
       type: object
       additionalProperties: false

@@ -35,6 +35,8 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - 剪切或复制后在另一个空间粘贴时，条目先完整复制到目标位置，新文件继承目标空间的权限并获得新的文件 ID；剪切在复制完成后删除原条目，不经过回收站。剪切需要两个空间的写权限，复制只需能读取原条目。目标文件夹只在目标空间中查找，未指定空间时为原条目所在空间。
 - 路径穿越、符号链接和设备文件被拒绝；名称冲突返回 `409`，目录不能移动或复制到自身之内。
 - Web 与 Samba 删除均进入隐藏的按空间、按删除者回收站，默认保留 30 天。回收站条目只有删除者能看到、恢复和清空（[统一身份与文件授权](unified-identity-and-file-acl.md)）。
+- 回收站窗口逐项显示名称、类型与大小（文件夹为其中已索引文件的合计）、原位置（空间与文件夹路径）、删除时间和剩余天数；剩余 7 天以内标黄、1 天以内标红，可按“最近删除”或“即将清理”排序。原文件夹被改名或移动后显示它现在的位置；原文件夹已被删除时标注“已不在”，恢复会放到该空间的根目录，而不是失败。
+- 恢复前确认恢复位置与名称；目标位置已有同名项目时返回 `409`，界面提示改用“名称 (恢复)”这样的新名称，绝不覆盖。永久删除需要再次确认。恢复成功后可直接在文件管理中打开所在文件夹。
 - 个人空间所有者管理自己的手动快照；共享空间快照仅管理员创建和删除。快照只读且不通过 SMB 暴露。快照的浏览、找回与定时快照在[备份中心](backup-center.md)。
 - 恢复始终复制或移动到指定新位置，不覆盖已有文件，不提供整卷回滚。
 
@@ -61,6 +63,8 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [统一身份与文件授权规格](unified-identity-and-file-acl.md)：取代本规格中的空间权限实现方式
 - [`internal/httpapi/product_test.go`](../../internal/httpapi/product_test.go)
 - [`internal/files/service_test.go`](../../internal/files/service_test.go)
+- [`internal/files/trash_test.go`](../../internal/files/trash_test.go)：回收项的原位置、大小、到期时间，原文件夹已删除时恢复到根目录
+- [`web/src/trash/TrashPanel.tsx`](../../web/src/trash/TrashPanel.tsx) 与 [`TrashPanel.test.tsx`](../../web/src/trash/TrashPanel.test.tsx)：回收站窗口
 - [`web/src/App.tsx`](../../web/src/App.tsx)
 - [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：文件管理交互、会话过期回到登录页、本机屏幕申请持久会话
 - [`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut`](../../internal/httpapi/product_test.go)：本机会话只授予直接回环连接、跨越 12 小时、退出后失效
