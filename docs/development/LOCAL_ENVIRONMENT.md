@@ -193,6 +193,18 @@ $AI -m eval.embed --model /models/embeddinggemma-2-740m.litertlm --weight-cache 
 $AI -m eval.tile_search --cache "/datasets/cache/<模型 ID>-e512" --tiles "/datasets/cache/<模型 ID>-e512-tiles2"
 ```
 
+物体检测与混合检索（[研究](../research/photo-ai-object-detection.md)）用另一个评估镜像：在 `anas-ai-dev:trixie` 上加装 ONNX Runtime（`FROM anas-ai-dev:trixie` 后 `RUN /opt/anas-ai/bin/pip install onnxruntime`，标记为 `anas-ai-dev-ort:trixie`）。D-FINE 的 ONNX 转换放在 `D:\A-NAS-models\dfine-obj365\dfine_m_obj365\`（`config.json`、`onnx/model.onnx` 与记下 revision 的 `hub.json`）。`eval.detect` 为 COCO、COCO-CN 测试集与 Open Images 缓存检测框，可中断续跑；`eval.hybrid_search` 把检测框与已缓存的照片向量组合比较，`--embedder` 第一次运行时编码中文类名，`--half calibration` 在 COCO 另一半上复核：
+
+```bash
+DET="docker run --rm -v $PWD:/src -w /src/ai -v /mnt/d/A-NAS-datasets:/datasets \
+  -v /mnt/d/A-NAS-models/dfine-obj365:/models:ro -v /mnt/d/A-NAS-models/embeddinggemma-2-740m:/models-eg:ro \
+  -v $HOME/.cache/anas-ai-xnnpack:/xnnpack -e PYTHONDONTWRITEBYTECODE=1 anas-ai-dev-ort:trixie /opt/anas-ai/bin/python"
+$DET -m eval.detect --model /models/dfine_m_obj365 --threads 4 --sets coco,coco-cn,openimages
+$DET -m eval.detect --model /models/dfine_m_obj365 --threads 4 --bench 30 --embedder /models-eg/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack
+$DET -m eval.hybrid_search --vectors "/datasets/cache/<模型 ID>-e512" --detections "/datasets/cache/<检测模型 ID>" \
+  --embedder /models-eg/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack --report /datasets/runs/detector/report.json
+```
+
 相册的规模基线（4 名成员、20,000 张，约 5 分钟）与 12 MP 缩略图计时默认跳过，在同一 cgo 容器中加 `-e ANAS_PHOTO_SCALE=1` 运行 `go test -count=1 -timeout 60m -run 'TestScale' -v ./internal/photos/`；结果的解读见[相册技术设计](../architecture/photo-library.md)切片 7。
 
 device-mapper 与 loop 设备属于宿主内核而不是容器，脚本退出时会停止服务并删除自己的 `anas-smoke-<容器名>` 设备。若脚本被强行中断，用 `ls /dev/mapper` 检查残留，再在特权容器中执行 `dmsetup remove <名称>`。容器缺少 `curl` 或 `dmsetup` 时脚本会临时安装：
