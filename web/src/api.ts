@@ -170,8 +170,6 @@ export interface FileEntry { id: string; spaceId: string; parentId?: string; nam
 export interface TrashItem { id: string; entryId: string; spaceId: string; name: string; deletedBy: string; deletedAt: string }
 export interface Volume { id: string; diskId: string; filesystemUuid?: string; capacityBytes?: number; availableBytes?: number; state: "creating" | "available" | "unavailable" | "read_only" }
 export interface StoragePlan { id: string; diskId: string; diskModel: string; capacityBytes: number; fingerprint: string; signatures: string[]; confirmationPhrase: string; actions: Array<{kind: string; description: string}>; state: string; expiresAt: string; failure?: string; volume?: Volume }
-export interface Snapshot { id: string; spaceId: string; name: string; createdBy: string; createdAt: string }
-export interface SnapshotEntry { id: string; snapshotId: string; parentId?: string; name: string; kind: "file" | "directory"; sizeBytes: number }
 
 export class APIError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -262,8 +260,3 @@ export const listVolumes = async () => (await request<{items: Volume[]}>("/api/v
 export const createStoragePlan = (diskId: string) => request<StoragePlan>("/api/v1/storage/plans", json({ diskId }), true);
 export const confirmStoragePlan = (id: string, confirmationPhrase: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/confirm`, json({ confirmationPhrase }), true);
 export const executeStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/execute`, json({}), true);
-export const listSnapshots = async (spaceId: string) => (await request<{items: Snapshot[]}>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/snapshots`)).items;
-export const createSnapshot = (spaceId: string, name: string) => request<Snapshot>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/snapshots`, json({ name }), true);
-export const deleteSnapshot = (id: string) => request<void>(`/api/v1/snapshots/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
-export const listSnapshotEntries = async (id: string, parentId = "") => (await request<{items: SnapshotEntry[]}>(`/api/v1/snapshots/${encodeURIComponent(id)}/entries?parentId=${encodeURIComponent(parentId)}`)).items;
-export const restoreSnapshotEntry = (snapshotId: string, entryId: string, name: string) => request<FileEntry>(`/api/v1/snapshots/${encodeURIComponent(snapshotId)}/entries/${encodeURIComponent(entryId)}/restore`, json({ parentId: "", name }), true);

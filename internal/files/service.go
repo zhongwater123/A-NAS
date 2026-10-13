@@ -34,6 +34,8 @@ var (
 	ErrUnsupportedType   = errors.New("unsupported file type")
 	ErrVolumeUnavailable = errors.New("data volume is unavailable")
 	ErrInsufficientSpace = errors.New("data volume reserve would be exhausted")
+	ErrInvalidQuery      = errors.New("search text must hold 1 to 100 characters")
+	ErrInvalidSchedule   = errors.New("invalid snapshot schedule")
 )
 
 type EntryKind string
@@ -138,6 +140,9 @@ type Options struct {
 	VolumeGuard            VolumeGuard
 	SnapshotBackend        SnapshotBackend
 	TrashRetention         time.Duration
+	// Location is the time zone snapshot schedules are read in; it defaults
+	// to the system's.
+	Location *time.Location
 	// FileSystem performs file operations. Production passes the File Broker
 	// client; the default operates directly beneath the volume root.
 	FileSystem FileSystem
@@ -220,8 +225,65 @@ CREATE TABLE IF NOT EXISTS audit_events (
     occurred_at TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS snapshot_schedules (
+    space_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL,
+    frequency TEXT NOT NULL CHECK (frequency IN ('hourly', 'daily', 'weekly')),
+    minute_of_day INTEGER NOT NULL,
+    weekday INTEGER NOT NULL,
+    keep INTEGER NOT NULL,
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_run_at TEXT NOT NULL DEFAULT '',
+    last_status TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    last_snapshot_id TEXT NOT NULL DEFAULT ''
+);
 `
-	_, err := s.db.ExecContext(ctx, schema)
+	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	// Columns that catalogs created by earlier versions lack. Totals of -1 are
+	// filled in below from the snapshot's entries.
+	for _, column := range []struct{ table, name, definition string }{
+		{"snapshots", "origin", "TEXT NOT NULL DEFAULT 'manual'"},
+		{"snapshots", "file_count", "INTEGER NOT NULL DEFAULT -1"},
+		{"snapshots", "size_bytes", "INTEGER NOT NULL DEFAULT -1"},
+		{"snapshot_entries", "modified_at", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.ensureColumn(ctx, column.table, column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS snapshots_by_space ON snapshots(space_id, created_at);
+UPDATE snapshots SET
+    file_count = (SELECT COUNT(*) FROM snapshot_entries e WHERE e.snapshot_id = snapshots.id AND e.kind = 'file'),
+    size_bytes = (SELECT COALESCE(SUM(e.size_bytes), 0) FROM snapshot_entries e WHERE e.snapshot_id = snapshots.id AND e.kind = 'file')
+WHERE file_count < 0 OR size_bytes < 0;`)
+	return err
+}
+
+// ensureColumn adds a column that databases created by earlier versions lack.
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
 	return err
 }
 
@@ -237,8 +299,12 @@ type Service struct {
 	snapshots              SnapshotBackend
 	fs                     FileSystem
 	trashRetention         time.Duration
+	location               *time.Location
 	spaceRootsMu           sync.RWMutex
 	spaceRoots             map[string]string
+	// scheduledSpaces lets the development snapshot backend find spaces that
+	// scheduled snapshots reach before any request prepared them.
+	scheduledSpaces map[string]accounts.Space
 	// uploads holds the temporaries of pending uploads by name.
 	uploadsMu sync.Mutex
 	uploads   map[string]struct{}
@@ -258,7 +324,11 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 		now: now, random: random, disableCapacityReserve: options.DisableCapacityReserve,
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
 		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: options.FileSystem,
+		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
 		uploads: make(map[string]struct{}),
+	}
+	if service.location == nil {
+		service.location = time.Local
 	}
 	if service.fs == nil {
 		service.fs = NewRootFileSystem(service.volumeRoot, true)
@@ -269,7 +339,7 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 	if options.SnapshotBackend != nil {
 		service.snapshots = options.SnapshotBackend
 	} else {
-		service.snapshots = newDirectorySnapshotBackend(service.volumeRoot, service.registeredSpaceRoot)
+		service.snapshots = newDirectorySnapshotBackend(service.volumeRoot, service.snapshotSpaceRoot)
 	}
 	return service
 }
@@ -1163,6 +1233,20 @@ func (s *Service) registeredSpaceRoot(spaceID string) (string, error) {
 		return "", ErrNotFound
 	}
 	return root, nil
+}
+
+// snapshotSpaceRoot resolves a space for the development snapshot backend.
+func (s *Service) snapshotSpaceRoot(spaceID string) (string, error) {
+	if root, err := s.registeredSpaceRoot(spaceID); err == nil {
+		return root, nil
+	}
+	s.spaceRootsMu.RLock()
+	space, ok := s.scheduledSpaces[spaceID]
+	s.spaceRootsMu.RUnlock()
+	if !ok {
+		return "", ErrNotFound
+	}
+	return s.spaceRoot(space), nil
 }
 
 func (s *Service) spaceRoot(space accounts.Space) string {

@@ -101,6 +101,13 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - Host Agent 启动时和此后每分钟撤销到期授权；数据卷离线时保留记录，卷恢复后撤销。撤销同样逐级移除条目，再恢复根目录的精确 ACL。
 - SQLite 各模块使用 WAL 和单连接串行化写事务。密码摘要、会话令牌摘要、目录、回收站、快照、计划和审计均在系统盘持久化。
 
+## 快照
+
+- 手动快照与定时快照都是空间子卷的 Btrfs 只读快照，由 root Host Agent 创建、列出、读出对象与删除；快照目录在系统盘的 `files.db`，为每个文件记录大小与修改时间，供备份中心把相同的版本合并显示。
+- 每个空间至多一份快照计划。Product Service 每分钟检查一次，到期时直接请求 Host Agent 拍摄，不经过文件代理，因此不需要任何用户会话；拍摄前确认挂载的是预期数据卷，否则记录失败并在 15 分钟后重试。成功后只删除该空间超出保留份数的定时快照。
+- 恢复文件夹时，文件代理以用户身份先建目录、再逐个复制文件，新条目照常继承目标空间的默认 ACL；快照对象仍由 Host Agent 读出（见上文的例外）。
+- 行为、权限与失败处理见[备份中心](../specs/backup-center.md)。
+
 ## 失败语义
 
 - 计划十分钟过期；执行期间重启会把 `running` 恢复为 `needs_attention`，不自动重新格式化。
@@ -116,6 +123,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md) 与[系统测试](../../scripts/system-test.sh)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)、[传输中心规格](../specs/transfer-center.md)
 - [ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)：分片上传与持有的临时文件
+- [备份中心规格](../specs/backup-center.md)与[快照计划](../../internal/files/schedule.go)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)

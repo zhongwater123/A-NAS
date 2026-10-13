@@ -143,7 +143,7 @@ journalctl -u anas-host-agent | grep -E 'repaired drifted|file worker'
 1. 创建管理员与两个成员，确认 Web 与 Windows SMB 都无法列出或读取另一成员个人空间。
 2. 在个人空间和 `\\<NAS-IP>\Shared` 中分别由 Web 与 SMB 创建文件和子目录，再由另一端读取、改名和删除；用 SHA-256 核对大文件。
 3. 先由 Web 删除一个文件，再由 SMB 删除另一个文件；确认两者都进入 Web 回收站、均可恢复相同哈希，并确认 smbd journal 没有 recycle `purging`。
-4. 为个人空间和 Shared 创建只读快照；验证浏览、重名 `409`、按文件恢复和删除，不执行整卷回滚。
+4. 在备份中心为个人空间和 Shared 创建只读快照；验证浏览、重名 `409`、按文件与按文件夹恢复、找回文件和删除，不执行整卷回滚。为个人空间开启每小时定时快照并保留 2 份，经过三个整点后确认只剩最新 2 份定时快照、手动快照仍在。
 5. 验证禁用账号、guest/SMB1 拒绝、SMB3 加密与签名，以及无效 Samba candidate 不替换旧配置。
 6. 保持数据盘连接并正常重启，验证数据卷按 UUID 自动挂载，空间和 SMB 自动恢复；本版不执行运行中热拔插。
 7. 导出 `timedatectl`、SMART、温度、容量、mount、`anas-host-agent`/`anas-photos`/`anas-api` 服务状态和审计记录作为 RC 证据。

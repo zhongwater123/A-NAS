@@ -6,7 +6,6 @@ import {
   ArrowUpDown,
   Bot,
   Box,
-  Camera,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -47,13 +46,15 @@ import {
 import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import {
-  APIError, FileEntry, Notification, Session, Snapshot, SnapshotEntry, Space, TrashItem, Volume,
-  acknowledgeNotification, changePassword, copyFile, createDirectory, createSnapshot, currentSession, deleteFile,
-  deleteSnapshot, endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications, listSnapshots,
-  listSnapshotEntries, listSpaces, listTrash, listVolumes, login, logout, moveFile, onSessionEnded, purgeTrash, readFileTextPreview,
-  restoreSnapshotEntry, restoreTrash, setSession, setupAdministrator,
+  APIError, FileEntry, Notification, Session, Space, TrashItem, Volume,
+  acknowledgeNotification, changePassword, copyFile, createDirectory, currentSession, deleteFile,
+  endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications,
+  listSpaces, listTrash, listVolumes, login, logout, moveFile, onSessionEnded, purgeTrash, readFileTextPreview,
+  restoreTrash, setSession, setupAdministrator,
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
+import { BackupCenter } from "./backup/BackupCenter";
+import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
@@ -78,7 +79,7 @@ import "./styles.css";
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "snapshots" | "settings" | "terminal" | "docker" | "store";
+type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "terminal" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -113,7 +114,7 @@ const initialWindows: WindowModel[] = [
 	{ id: "media", title: "影视中心", open: false, minimized: false, maximized: false, x: 210, y: 46, width: 1120, height: 720, z: 2, opened: 0 },
 	{ id: "music", title: "音乐", open: false, minimized: false, maximized: false, x: 240, y: 56, width: 1080, height: 700, z: 2, opened: 0 },
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
-	{ id: "snapshots", title: "文件快照", open: false, minimized: false, maximized: false, x: 300, y: 100, width: 800, height: 560, z: 2, opened: 0 },
+	{ id: "backup", title: "备份中心", open: false, minimized: false, maximized: false, x: 220, y: 52, width: 1080, height: 700, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
   { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 320, y: 82, width: 900, height: 620, z: 0, opened: 0 },
@@ -127,7 +128,7 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   media: MediaCenterGlyph,
   music: Music2,
   trash: Trash2,
-  snapshots: Camera,
+  backup: BackupCenterGlyph,
   settings: Settings,
   terminal: SquareTerminal,
   docker: Box,
@@ -141,7 +142,7 @@ const windowTones: Record<WindowID, string> = {
   media: "video",
   music: "music",
   trash: "trash",
-  snapshots: "snapshot",
+  backup: "backup",
   settings: "settings",
   terminal: "terminal",
   docker: "docker",
@@ -289,12 +290,12 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <MediaCenterGlyph />, active: isOpen("media"), onClick: () => openWindow("media") },
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
     { id: "download", label: "传输中心", ariaLabel: "打开传输中心", keywords: "传输 上传 下载 进度 续传 transfer upload download", tone: "download", icon: <ArrowDownUp />, active: isOpen("transfers"), onClick: () => openWindow("transfers") },
-    { id: "snapshot", label: "文件快照", ariaLabel: "打开文件快照", keywords: "快照 恢复 历史版本 snapshot", tone: "snapshot", icon: <Camera />, active: isOpen("snapshots"), onClick: () => openWindow("snapshots") },
+    // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
+    { id: "backup", label: "备份中心", ariaLabel: "打开备份中心", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup", tone: "backup", icon: <BackupCenterGlyph />, active: isOpen("backup"), onClick: () => openWindow("backup") },
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <Image />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "logs", label: "日志", ariaLabel: "日志，规划中", tone: "logs", icon: <FileText />, disabled: true },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
-    { id: "backup", label: "备份", ariaLabel: "备份，规划中", tone: "backup", icon: <ShieldCheck />, disabled: true },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
     { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
   ];
@@ -348,7 +349,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel />}
-			  {window.id === "snapshots" && <SnapshotPanel />}
+			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "terminal" && <TerminalPanel />}
 			  {window.id === "docker" && <DockerPanel />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={() => openWindow("docker")} />}
@@ -935,15 +936,6 @@ function TrashPanel() {
 	const refresh = useCallback(() => listTrash().then(setItems).catch((caught) => setError(messageOf(caught))), []);
 	useEffect(() => { void refresh(); }, [refresh]);
 	return <div className="product-page"><div className="page-heading"><div><p className="section-label">RECYCLE BIN</p><h2>回收站</h2><p>项目默认保留 30 天</p></div><button onClick={() => void refresh()}>刷新</button></div>{error && <PanelNotice error={error} />}<div className="data-list">{items.map((item) => <div className="data-row" key={item.id}><Trash2 /><strong>{item.name}</strong><small>{new Date(item.deletedAt).toLocaleString("zh-CN")}</small><button onClick={() => void restoreTrash(item.id, item.name).then(refresh).catch((caught) => setError(messageOf(caught)))}>恢复</button><button className="danger-link" onClick={() => void purgeTrash(item.id).then(refresh).catch((caught) => setError(messageOf(caught)))}>永久删除</button></div>)}</div>{!items.length && <div className="empty-compact">回收站为空</div>}</div>;
-}
-
-function SnapshotPanel() {
-	const [spaces, setSpaces] = useState<Space[]>([]); const [spaceID, setSpaceID] = useState(""); const [snapshots, setSnapshots] = useState<Snapshot[]>([]); const [selected, setSelected] = useState<Snapshot>(); const [entries, setEntries] = useState<SnapshotEntry[]>([]); const [error, setError] = useState("");
-	const refresh = useCallback(async (id = spaceID) => { if (!id) return; try { setSnapshots(await listSnapshots(id)); setError(""); } catch (caught) { setError(messageOf(caught)); } }, [spaceID]);
-	useEffect(() => { void listSpaces().then((items) => { setSpaces(items); if (items[0]) setSpaceID(items[0].id); }).catch((caught) => setError(messageOf(caught))); }, []);
-	useEffect(() => { setSelected(undefined); setEntries([]); if (spaceID) void refresh(spaceID); }, [spaceID]);
-	const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; try { await createSnapshot(spaceID, String(new FormData(form).get("name"))); form.reset(); await refresh(); } catch (caught) { setError(messageOf(caught)); } };
-	return <div className="product-page"><div className="page-heading"><div><p className="section-label">READ-ONLY SNAPSHOTS</p><h2>文件快照</h2></div><select aria-label="快照空间" value={spaceID} onChange={(event) => setSpaceID(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}</select></div>{error && <PanelNotice error={error} />}<form className="inline-form" onSubmit={(event) => void create(event)}><input name="name" placeholder="快照名称" required /><button>创建只读快照</button></form><div className="split-list"><div className="data-list">{snapshots.map((snapshot) => <div className="data-row" key={snapshot.id}><Camera /><button className="link-button" onClick={() => { setSelected(snapshot); void listSnapshotEntries(snapshot.id).then(setEntries).catch((caught) => setError(messageOf(caught))); }}>{snapshot.name}</button><button className="danger-link" onClick={() => void deleteSnapshot(snapshot.id).then(() => refresh()).catch((caught) => setError(messageOf(caught)))}>删除</button></div>)}</div><div className="data-list">{selected ? entries.map((entry) => <div className="data-row" key={entry.id}><FileText /><strong>{entry.name}</strong>{entry.kind === "file" && <button onClick={() => void restoreSnapshotEntry(selected.id, entry.id, entry.name).then(() => setError("")).catch((caught) => setError(messageOf(caught)))}>恢复为新文件</button>}</div>) : <div className="empty-compact">选择快照浏览</div>}</div></div></div>;
 }
 
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
