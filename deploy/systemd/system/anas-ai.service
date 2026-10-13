@@ -51,3 +51,8 @@ MemoryMax=2G
 # It still yields to anything else on the machine.
 CPUWeight=10
 IOWeight=10
+# A slice of its own, beside system.slice and user.slice: the photo service
+# stops AI work when the pressure of those, the device's other work, rises,
+# and the Worker's threads waiting on each other must not count
+# (internal/photoservice/gate.go).
+Slice=anas-ai.slice

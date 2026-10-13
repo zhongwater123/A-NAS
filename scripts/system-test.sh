@@ -422,6 +422,10 @@ check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
 check "the kernel reclaims the Worker's memory before its hard limit" \
   test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 1879048192:2147483648
+check "the Worker runs in its own slice, apart from the device's other work" \
+  test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
+check "AI work yields to the pressure of the device's other work, not its own" \
+  journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
 check "search starts the Worker through its socket" semantic_search 猫
 check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
