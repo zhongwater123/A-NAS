@@ -189,15 +189,19 @@ type Service struct {
 	// RunAI that a thumbnail did.
 	mediaWake chan struct{}
 	aiWake    chan struct{}
-	// ai is what RunAI last observed; aiModel is the model whose stale
-	// vectors have already been queued again.
-	ai        aiProgress
-	aiModelMu sync.Mutex
-	aiModel   string
-	// embedder encodes search queries, and index holds image vectors for
-	// search and AI clusters.
+	// ai is what RunAI last observed; aiModel and aiDetector are the models
+	// whose stale vectors and detections have already been queued again,
+	// and detectorLoaded whether the Worker may still hold the detector.
+	ai             aiProgress
+	aiModelMu      sync.Mutex
+	aiModel        string
+	aiDetector     string
+	detectorLoaded bool
+	// embedder encodes search queries, index holds image vectors for search
+	// and AI clusters, and detected the detector's best score per class.
 	embedder   Embedder
 	index      vectorIndex
+	detected   objectIndex
 	labels     labels.Set
 	labelIndex labelIndex
 

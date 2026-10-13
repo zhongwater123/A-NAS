@@ -41,4 +41,15 @@ func TestGateWaitsForQuietAndLowPressure(t *testing.T) {
 	if ok, _ := open(); !ok {
 		t.Fatal("Open() without I/O pressure information = closed")
 	}
+
+	// AI leaves a reserve of memory for the user.
+	free := uint64(4 << 30)
+	gate.available = func() (uint64, error) { return free, nil }
+	if ok, _ := open(); !ok {
+		t.Fatal("Open() with memory to spare = closed")
+	}
+	free = MemoryReserve - 1
+	if ok, reason := open(); ok || reason != "memory_low" {
+		t.Fatalf("Open() below the memory reserve = %v, %q", ok, reason)
+	}
 }

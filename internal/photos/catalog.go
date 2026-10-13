@@ -182,6 +182,24 @@ CREATE TABLE ai_tag_corrections (
 );
 CREATE INDEX ai_tag_corrections_by_label ON ai_tag_corrections(label_id);
 `,
+	// 7: the objects the detector found in each content object
+	// (docs/architecture/photo-objects.md), with the model that found them;
+	// an empty list means the detector found nothing. Originals that already
+	// have thumbnails are queued for detection.
+	`
+CREATE TABLE detections (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    derivation TEXT NOT NULL,
+    model TEXT NOT NULL,
+    boxes BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, derivation)
+);
+
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+SELECT object_id, 'objects/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
+ON CONFLICT(object_id, derivation) DO NOTHING;
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

@@ -13,7 +13,8 @@ import (
 // library and the system is not under pressure (docs/architecture/photo-ai.md).
 // Activity elsewhere on the device, such as Web files and SMB transfers,
 // reaches it as CPU and I/O pressure until the Host Agent reports it directly.
-// Work already started is allowed to finish.
+// A running detection is stopped when the gate closes; other work already
+// started is allowed to finish.
 type Gate struct {
 	quiet   time.Duration
 	now     func() time.Time
@@ -21,7 +22,15 @@ type Gate struct {
 	// pressure returns the share of the last 10 seconds in which some task
 	// stalled on a resource, in percent.
 	pressure func(resource string) (float64, error)
+	// available returns the memory the system could still give out, in bytes.
+	available func() (uint64, error)
 }
+
+// MemoryReserve is the memory AI work leaves for the user: below it the gate
+// closes and the AI Worker is asked to release its models
+// (docs/architecture/photo-objects.md#资源策略). A starting value, to be
+// tuned on the device.
+const MemoryReserve = 1536 << 20
 
 // pressureLimits are starting values, to be tuned on the device.
 var pressureLimits = []struct {
@@ -36,7 +45,7 @@ const QuietPeriod = 5 * time.Minute
 // NewGate returns a gate that stays closed for quiet after any use, starting
 // now.
 func NewGate(quiet time.Duration) *Gate {
-	gate := &Gate{quiet: quiet, now: time.Now, pressure: someAvg10}
+	gate := &Gate{quiet: quiet, now: time.Now, pressure: someAvg10, available: memAvailable}
 	gate.Touch()
 	return gate
 }
@@ -59,7 +68,27 @@ func (g *Gate) Open(context.Context) (bool, string) {
 			return false, check.resource + "_pressure"
 		}
 	}
+	if g.available != nil {
+		if free, err := g.available(); err == nil && free < MemoryReserve {
+			return false, "memory_low"
+		}
+	}
 	return true, ""
+}
+
+func memAvailable() (uint64, error) {
+	fs, err := procfs.NewDefaultFS()
+	if err != nil {
+		return 0, err
+	}
+	info, err := fs.Meminfo()
+	if err != nil {
+		return 0, err
+	}
+	if info.MemAvailableBytes == nil {
+		return 0, errors.New("no MemAvailable")
+	}
+	return *info.MemAvailableBytes, nil
 }
 
 func someAvg10(resource string) (float64, error) {

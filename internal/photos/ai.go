@@ -96,7 +96,11 @@ type AIStatus struct {
 	// Reason says why work is paused, such as foreground activity.
 	Reason string `json:"reason,omitempty"`
 	Model  string `json:"model,omitempty"`
-	// The counts cover the originals of the caller's visible photos.
+	// ObjectModel is the detector's model while the Worker has one.
+	ObjectModel string `json:"objectModel,omitempty"`
+	// The counts cover the originals of the caller's visible photos. An
+	// original is ready once it has its vector and, while the Worker has a
+	// detector, its detection.
 	Ready   int `json:"ready"`
 	Pending int `json:"pending"`
 	Failed  int `json:"failed"`
@@ -128,9 +132,9 @@ func (p *aiProgress) get() (state, reason, model string) {
 	return p.state, p.reason, p.model
 }
 
-// RunAI processes embedding jobs through embedder until ctx ends, whenever
-// gate allows. An empty or closed queue is rechecked every idle interval or
-// as soon as a thumbnail adds work.
+// RunAI processes embedding and detection jobs through embedder until ctx
+// ends, whenever gate allows. An empty or closed queue is rechecked every idle
+// interval or as soon as a thumbnail adds work.
 func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle time.Duration, logError func(error)) {
 	for {
 		processed, err := s.ProcessAIJob(ctx, embedder, gate)
@@ -150,11 +154,15 @@ func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle 
 }
 
 // ProcessAIJob fetches one missing label text vector or runs one ready
-// embedding job, and reports whether it did. It does nothing while gate is closed or the Worker is away; the error
-// returned is only for Catalog or storage faults.
+// embedding or detection job, and reports whether it did. Vectors come before
+// detections, since search needs them. It does nothing while gate is closed or
+// the Worker is away, and frees the Worker's memory when its work stops; the
+// error returned is only for Catalog or storage faults.
 func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (bool, error) {
+	detector, _ := embedder.(Detector)
 	if open, reason := gate.Open(ctx); !open {
 		s.ai.set(AIPaused, reason, "")
+		s.releaseModels(ctx, detector, reason)
 		return false, nil
 	}
 	// Any call starts the Worker through its socket and keeps it from
@@ -167,6 +175,9 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 			if state, _, _ := s.ai.get(); err == nil && state != AIUnavailable {
 				s.ai.set(AIIdle, "", model)
 			}
+			if err == nil {
+				s.releaseModels(ctx, detector, "")
+			}
 			return false, err
 		}
 	}
@@ -178,7 +189,10 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	if err != nil {
 		return false, err
 	}
-	if err := s.requeueStale(ctx, info.Model); err != nil {
+	if detector == nil {
+		info.Detector = ""
+	}
+	if err := s.requeueStale(ctx, info); err != nil {
 		return false, err
 	}
 	// Label texts are few and short; they come before photos.
@@ -190,8 +204,11 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	}
 	job, err := s.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
-		s.ai.set(AIIdle, "", info.Model)
-		return false, nil
+		if info.Detector == "" {
+			s.ai.set(AIIdle, "", info.Model)
+			return false, nil
+		}
+		return s.processDetection(ctx, detector, gate, info)
 	}
 	if err != nil {
 		return false, err
@@ -222,23 +239,150 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	return true, s.completeEmbedding(ctx, job, info.Model, vector)
 }
 
-// requeueStale queues every vector of another model again the first time a
-// model is seen. The old vectors stay until their replacements exist.
-func (s *Service) requeueStale(ctx context.Context, model string) error {
+// gateWatchInterval is how often a running detection checks the gate, so
+// that it stops soon after someone starts using the device.
+const gateWatchInterval = 200 * time.Millisecond
+
+// processDetection runs one ready detection job on the detector's enlarged
+// input. When gate closes meanwhile, the detection is cancelled and the job
+// given back without spending its attempt.
+func (s *Service) processDetection(ctx context.Context, detector Detector, gate Gate, info EmbedderInfo) (bool, error) {
+	job, err := s.claimJob(ctx, detectionDerivation)
+	if errors.Is(err, sql.ErrNoRows) {
+		s.ai.set(AIIdle, "", info.Model)
+		s.releaseModels(ctx, detector, "")
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	s.ai.set(AIWorking, "", info.Model)
+	input, class, err := s.openAIInput(job)
+	if err != nil {
+		return false, errors.Join(err, s.releaseJob(ctx, job))
+	}
+	if class != "" {
+		return true, s.failJob(ctx, job, class)
+	}
+	// The Worker loads its detector for the first detection and keeps it
+	// until released.
+	s.aiModelMu.Lock()
+	s.detectorLoaded = true
+	s.aiModelMu.Unlock()
+	detectCtx, cancel := context.WithCancel(ctx)
+	stopWatching := watchGate(detectCtx, gate, cancel)
+	model, boxes, err := detector.DetectObjects(detectCtx, input)
+	paused := stopWatching()
+	cancel()
+	_ = input.Close()
+	switch {
+	case ctx.Err() != nil:
+		return false, s.releaseJob(context.WithoutCancel(ctx), job)
+	case paused != "":
+		s.ai.set(AIPaused, paused, "")
+		err := s.releaseJob(ctx, job)
+		s.releaseModels(ctx, detector, paused)
+		return false, err
+	case errors.Is(err, ErrAIUnavailable):
+		// Look again next round: the Worker may have lost its detector.
+		s.forgetDetector()
+		return false, s.releaseJob(ctx, job)
+	case errors.Is(err, ErrAIRejected):
+		return true, s.failJob(ctx, job, jobErrorUndecodable)
+	case err != nil:
+		return true, s.failJob(ctx, job, jobErrorIO)
+	case model != info.Detector:
+		s.forgetDetector()
+		return false, s.releaseJob(ctx, job)
+	case !validBoxes(boxes):
+		return true, s.failJob(ctx, job, jobErrorInvalidResult)
+	}
+	return true, s.completeDetection(ctx, job, model, boxes)
+}
+
+// watchGate cancels a running detection when gate closes. stop ends the
+// watch and returns why gate closed, or "" when it stayed open.
+func watchGate(ctx context.Context, gate Gate, cancel context.CancelFunc) (stop func() string) {
+	done := make(chan struct{})
+	var reason string
+	var watcher sync.WaitGroup
+	watcher.Go(func() {
+		ticker := time.NewTicker(gateWatchInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if open, why := gate.Open(ctx); !open {
+					reason = why
+					cancel()
+					return
+				}
+			}
+		}
+	})
+	return func() string {
+		close(done)
+		watcher.Wait()
+		return reason
+	}
+}
+
+// releaseModels frees the Worker's memory when background work stops
+// (docs/architecture/photo-objects.md#资源策略): the detector once there is
+// nothing to detect or someone uses the device, and the whole Worker under
+// memory pressure. It only calls a Worker that detected since the last
+// release, so it never starts one just to stop it.
+func (s *Service) releaseModels(ctx context.Context, detector Detector, reason string) {
+	if detector == nil {
+		return
+	}
+	s.aiModelMu.Lock()
+	loaded := s.detectorLoaded
+	s.detectorLoaded = false
+	s.aiModelMu.Unlock()
+	if loaded {
+		// A Worker that has gone has released everything already.
+		_ = detector.Release(ctx, strings.HasPrefix(reason, "memory"))
+	}
+}
+
+// requeueStale queues every vector and detection of another model again the
+// first time a model is seen. The old results stay until their replacements
+// exist.
+func (s *Service) requeueStale(ctx context.Context, info EmbedderInfo) error {
 	s.aiModelMu.Lock()
 	defer s.aiModelMu.Unlock()
-	if s.aiModel == model {
-		return nil
-	}
 	now := formatTime(s.now())
-	if _, err := s.db.ExecContext(ctx, `
+	if s.aiModel != info.Model {
+		if _, err := s.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, derivation, 'pending', ?, ? FROM embeddings WHERE derivation = ? AND model <> ?
-ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, model); err != nil {
-		return err
+ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, info.Model); err != nil {
+			return err
+		}
+		s.aiModel = info.Model
 	}
-	s.aiModel = model
+	if info.Detector != "" && s.aiDetector != info.Detector {
+		if _, err := s.db.ExecContext(ctx, `
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+SELECT object_id, derivation, 'pending', ?, ? FROM detections WHERE derivation = ? AND model <> ?
+ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, detectionDerivation, info.Detector); err != nil {
+			return err
+		}
+	}
+	s.aiDetector = info.Detector
 	return nil
+}
+
+// forgetDetector makes the next round ask the Worker which models it has.
+func (s *Service) forgetDetector() {
+	s.aiModelMu.Lock()
+	defer s.aiModelMu.Unlock()
+	s.aiModel, s.aiDetector = "", ""
 }
 
 // knownModel is the Worker's model this service last worked for, or "" before
@@ -264,7 +408,8 @@ func (s *Service) noticeModel(model string) {
 }
 
 // aiWorkWaiting reports whether the Worker has anything to do for model: a
-// label text still without its vector, or an embedding job that is due.
+// label text still without its vector, an embedding job that is due, or a
+// detection job that is due while the Worker has a detector.
 func (s *Service) aiWorkWaiting(ctx context.Context, model string) (bool, error) {
 	if model == s.labels.Model {
 		s.labelIndex.mu.Lock()
@@ -274,12 +419,15 @@ func (s *Service) aiWorkWaiting(ctx context.Context, model string) (bool, error)
 			return true, nil
 		}
 	}
+	s.aiModelMu.Lock()
+	detecting := s.aiDetector != ""
+	s.aiModelMu.Unlock()
 	now := formatTime(s.now())
 	var due bool
 	err := s.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation = ?
+SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?))
   AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
-		embeddingDerivation, now, now).Scan(&due)
+		embeddingDerivation, detecting, detectionDerivation, now, now).Scan(&due)
 	return due, err
 }
 
@@ -345,25 +493,33 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 		return AIStatus{}, err
 	}
 	state, reason, model := s.ai.get()
-	status := AIStatus{State: state, Reason: reason, Model: model}
+	s.aiModelMu.Lock()
+	detector := s.aiDetector
+	s.aiModelMu.Unlock()
+	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector}
 	if len(libraries) == 0 {
 		return status, nil
 	}
-	var args []any
+	detecting := detector != ""
+	args := []any{detecting, detecting}
 	for _, lib := range libraries {
 		args = append(args, lib.ID)
 	}
-	args = append(args, embeddingDerivation, embeddingDerivation, thumbnailDerivation)
+	args = append(args, embeddingDerivation, detectionDerivation, embeddingDerivation, thumbnailDerivation, detectionDerivation)
 	var total int
 	err = s.db.QueryRowContext(ctx, `
-SELECT COUNT(*),
-       COUNT(e.object_id),
-       COUNT(CASE WHEN e.object_id IS NULL AND (j.state = 'failed' OR t.state = 'failed') THEN 1 END)
-FROM (SELECT DISTINCT object_id FROM assets
-      WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)) a
-LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
-LEFT JOIN jobs j ON j.object_id = a.object_id AND j.derivation = ?
-LEFT JOIN jobs t ON t.object_id = a.object_id AND t.derivation = ?`, args...).Scan(&total, &status.Ready, &status.Failed)
+SELECT COUNT(*), COUNT(CASE WHEN ready THEN 1 END), COUNT(CASE WHEN NOT ready AND failed THEN 1 END)
+FROM (
+  SELECT e.object_id IS NOT NULL AND (NOT ? OR d.object_id IS NOT NULL) AS ready,
+         IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed'), 0) AS failed
+  FROM (SELECT DISTINCT object_id FROM assets
+        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)) a
+  LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
+  LEFT JOIN detections d ON d.object_id = a.object_id AND d.derivation = ?
+  LEFT JOIN jobs j ON j.object_id = a.object_id AND j.derivation = ?
+  LEFT JOIN jobs t ON t.object_id = a.object_id AND t.derivation = ?
+  LEFT JOIN jobs k ON k.object_id = a.object_id AND k.derivation = ?
+)`, args...).Scan(&total, &status.Ready, &status.Failed)
 	if err != nil {
 		return AIStatus{}, err
 	}
