@@ -1,6 +1,6 @@
 # 闲时检测只用了约 1 个核
 
-状态：open
+状态：fixed locally；Experimental NAS verification pending
 更新时间：2026-10-13
 
 ## 症状与影响
@@ -51,31 +51,55 @@
 | 假设 | 验证方法 | 结果 |
 |---|---|---|
 | 每次压力暂停后固定等 1 分钟，是墙钟时间的最大损失 | 读代码；对照取消间隔 | 确认：间隔约为 60 秒的整数倍加一段压力回升时间 |
-| 关门的是控制台 Chromium 等 CPU（`user.slice`） | 每次暂停记录原因、cgroup 与数值，在 NAS 上复测 | pending；支持证据：控制台在这段时间等了 42.5 秒 CPU，空闲时为 0；根层级 AI 与它同权 |
+| 关门的是控制台 Chromium 等 CPU（`user.slice`） | 每次暂停记录原因、cgroup 与数值，在 NAS 上复测 | pending：修复加入了这份日志；支持证据：控制台在这段时间等了 42.5 秒 CPU，空闲时为 0；根层级 AI 与它同权 |
 | 关门的是 `system.slice` 的 I/O（Host Agent 的底噪加上相册读原图、写 Catalog，都在同一块机械盘） | 同上 | pending |
-| 工作期间也只用到 2–3 个核：渲染输入与推理串行，渲染时 6 个推理线程空闲 | 每个任务记录渲染与推理耗时 | pending；按 1 分钟等待推算，工作期间 Worker 约用 1.8–2.7 个核 |
-| ONNX Runtime 线程自旋（默认开启）占着核，加重控制台的等待，也虚增了 CPU 时间 | 开发机上对比 `session.intra_op.allow_spinning` 为 0 与 1 时每张的 CPU 秒与墙钟 | pending |
+| 工作期间也只用到 2–3 个核：渲染输入与推理串行，渲染时 6 个推理线程空闲 | 读代码 | 确认：渲染在推理之前、在同一个循环里；按 1 分钟等待推算，工作期间 Worker 约用 1.8–2.7 个核 |
+| ONNX Runtime 线程自旋（默认开启）占着核，加重控制台的等待，也虚增了 CPU 时间 | 开发机上对比 `session.intra_op.allow_spinning` 为 0 与 1 | 确认，见下面的开发机对照 |
+
+### 开发机对照（2026-10-13）
+
+环境：Core Ultra 5 125U 笔记本，Docker 限定 8 个 CPU（同 NAS 的逻辑核数）。检测器用 6 个线程，对 24 张照片循环推理。旁边是一个类似控制台的负载：3 个进程每 16 ms 计算 4 ms，约 0.75 个核，与实机控制台相当。负载单独运行时，它等核的时间为 0.08%。权重 10 由 Docker 的 `--cpu-shares=50` 换算得到。脚本保存在会话的临时目录，不进仓库。
+
+| 检测器设置 | 负载等核的时间 | 负载的 p99 延迟 | 检测 秒/张 | CPU 秒/张 |
+|---|---|---|---|---|
+| 自旋，权重 100（部署时的实际情况） | 5.71% | 140 ms | 2.33 | 13.9 |
+| 不自旋，权重 100 | 0.81% | 7 ms | 1.20 | 4.4 |
+| 自旋，权重 10 | 2.47% | 9.5 ms | 1.18 | 7.1 |
+| 不自旋，权重 10 | 1.16% | 9 ms | 1.16 | 4.1 |
+
+没有负载时，自旋每张 0.84 秒、5.0 CPU 秒，不自旋 0.94 秒、3.5 CPU 秒：自旋只在独占机器时快约 11%。笔记本的大小核与频率波动让绝对数字只能参考，方向一致。
 
 ## 根因
 
-未完全确定。已确认的是：门控每次因压力关闭后，AI 至少空等 1 分钟。哪一种压力触发了关闭，还要靠日志确认。
+已确认四个原因，都能从代码或开发机上确认，不依赖实机：
+
+1. 门控每次因压力关闭后，AI 至少空等 1 分钟，被中止的任务还被推后 1 分钟。
+2. 渲染检测输入与推理串行，渲染时推理线程空闲。
+3. AI 的低 CPU 权重写在没有兄弟的层级，在根这一层与控制台、系统服务同权。
+4. ONNX Runtime 线程自旋，争用时既拖慢别人也拖慢自己。
+
+哪一种压力触发了关闭仍未确定，修复加入的日志会写明。
 
 ## 修复与回归证据
 
-- 修复：待定
-- 测试：待定
+修复在 [#88](https://github.com/zhongwater123/A-NAS/pull/88)，每个原因一个提交：
+
+- **1 分钟等待**（`a4932f6`）：CPU 或 I/O 压力暂停后每 5 秒复查，被中止的任务回到队列原位。
+  - 测试 `TestWorkResumesWithinSecondsOfThePressurePassing` 把空闲复查间隔设为 1 小时。去掉修复时 10 秒内 0 张完成，加上修复后通过。
+- **暂停原因日志**（`0ffdc98`）：测试 `TestGateRecordsWhatHeldAIWorkBack`。
+- **权重**（`d180227`）：新单元 `anas.slice` 带 `CPUWeight=10`，Worker 单元不再自带权重。系统测试核对 `anas.slice` 的权重，以及 `anas-ai.slice` 位于它之下。
+- **渲染与推理重叠**（`8e6a886`）：测试 `TestTheNextInputIsRenderedWhileTheWorkerDetects` 在 `-race` 下通过，覆盖三点：
+  - 推理期间下一张已被领取；
+  - 先做向量时，预先领取的任务回到队列；
+  - 暂停时两个任务都回到队列，不计尝试次数。
+- **自旋**（`5b88b79`）：真实检测器测试 `test_idle_threads_give_their_cores_back`；数据见上面的开发机对照。
+- **实机**：待部署后按[复测整理速度](../runbooks/enable-photo-objects.md#复测整理速度可选)重排全部任务，对比每张的墙钟时间、Worker 平均核数与暂停日志。
 
 ## 后续工作
 
-按预期收益排序：
-
-1. 压力暂停后按 PSI 的刷新间隔（约 2–5 秒）复查门控，不再等 1 分钟；“有人使用”之后的 5 分钟安静期不变。
-2. 门控每次关闭与重新打开时记一条日志，写明原因、cgroup 与数值，作为调上限的依据。
-3. 让 AI 的低权重在根这一层生效，例如给 `anas.slice` 设 `CPUWeight=10`。架构文档中“争用时前台立即占优”和 `IOWeight` 的说法要按实情改写。
-4. 当前检测推理时就开始渲染下一张的输入，让两步重叠。
-5. 在开发机上测量 ONNX Runtime 线程自旋的代价，再决定是否关闭。
-6. 修好后在 NAS 上重排一批检测任务复测（需要 root，由用户执行），对比每张的墙钟时间、Worker 平均核数与控制台的 CPU 等待。
-7. 另行查明两件事：控制台为什么空闲时也用 0.7 个核；Host Agent 为什么持续等磁盘。
+1. 部署后在 NAS 上复测（需要 root，由用户执行），并从暂停日志读出是哪种压力、哪些成员让 AI 停下，据此调上限。
+2. 若相册服务自己在 `system.slice` 中的等待（渲染输入、读原图）常常触发暂停，考虑在没人使用相册时不计它的压力。
+3. 另行查明两件事：控制台为什么空闲时也用 0.7 个核；Host Agent 为什么持续等磁盘。
 
 ## 关联
 
@@ -83,5 +107,6 @@
 - ADR：不涉及
 - 架构：[物体检测与混合检索的资源策略](../architecture/photo-objects.md#资源策略)
 - 运行手册：[启用相册物体检测](../runbooks/enable-photo-objects.md#首次实机部署证据)
-- 代码：[`ai.go`](../../internal/photos/ai.go)（`RunAI`、`processDetection`）、[`gate.go`](../../internal/photoservice/gate.go)、[`photoservice.go`](../../internal/photoservice/photoservice.go)、[`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)、[`providers.py`](../../ai/anas_ai/providers.py)
+- 代码：[`ai.go`](../../internal/photos/ai.go)（`RunAI`、`processDetection`）、[`aiinput.go`](../../internal/photos/aiinput.go)、[`gate.go`](../../internal/photoservice/gate.go)、[`photoservice.go`](../../internal/photoservice/photoservice.go)、[`anas.slice`](../../deploy/systemd/system/anas.slice)、[`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)、[`providers.py`](../../ai/anas_ai/providers.py)
+- 测试：[`detections_test.go`](../../internal/photos/detections_test.go)、[`gate_test.go`](../../internal/photoservice/gate_test.go)、[`test_detector_model.py`](../../ai/tests/test_detector_model.py)、[系统测试](../../scripts/system-test.sh)
 - 调查：[AI Worker 留着被取消的检测会话](2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)

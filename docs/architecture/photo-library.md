@@ -82,7 +82,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 
 任务分为两类，共用同一张表和租约语义：
 
-- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
+- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。`IOWeight` 只在 BFQ 或 `io.cost` 下生效，实验 NAS 数据盘的 `mq-deadline` 下不起作用（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
 - **AI 任务**：Embedding、标签、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
 
 默认执行策略：

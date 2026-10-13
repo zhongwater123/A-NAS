@@ -53,15 +53,51 @@
   - 搜一句话（如“海边的日落”），结果照常分为“最接近”与“相关度较低”两段。
   - 在查看器中点“找相似”，出现相似的照片；返回回到原来的位置。
 - **突发时释放**：整理进行中打开相册浏览或搜索，`journalctl -u anas-ai -b` 出现 `detection cancelled`，相册操作不明显变慢。
-- **不自己卡住自己**：`systemctl show -p Slice --value anas-ai.service` 输出 `anas-ai.slice`；`journalctl -u anas-photos -b` 含 `AI work yields to the pressure of`，后面列出 `system.slice` 与 `user.slice`。整理期间没人使用设备时，侧栏 AI 卡片不应长时间显示暂停，`journalctl -u anas-ai -b` 中 `detection cancelled` 应只在有人操作时出现。同时记录 `cat /sys/fs/cgroup/system.slice/cpu.pressure /sys/fs/cgroup/anas.slice/anas-ai.slice/cpu.pressure`：若 AI 因 `cpu_pressure` 反复暂停而设备上没有别的负载，停止部署，按[资源策略](../architecture/photo-objects.md#资源策略)调整门控上限。
+- **不自己卡住自己**：
+  - `systemctl show -p Slice --value anas-ai.slice` 输出 `anas.slice`，`systemctl show -p CPUWeight --value anas.slice` 输出 `10`。
+  - `journalctl -u anas-photos -b` 含 `AI work yields to the pressure of`，后面列出 `system.slice` 与 `user.slice`。
+  - 每次因压力暂停，`journalctl -u anas-photos -b` 有一条 `AI work yields to pressure`，写明资源、数值，以及各 slice 中等得最久的成员；恢复时有一条 `AI work no longer yields to pressure`。
+  - 整理期间没人使用设备时，暂停应少见且只持续几秒。若暂停反复出现，而日志列出的成员是相册服务自己或设备上的常驻负载，记录这些日志，按[资源策略](../architecture/photo-objects.md#资源策略)调整门控上限。
 - **线程与内存不随取消上涨**：整理期间每隔几分钟记录 `grep -E 'Threads|RssAnon' /proc/$(systemctl show -p MainPID --value anas-ai.service)/status`，线程数与内存应保持平稳。
 - **资源记录**：整理完成后记录 `systemctl show anas-ai.service -p MemoryPeak -p CPUUsageNSec`、总耗时与张数，以及整理期间与空闲时打开相册、搜索的响应时间，补充到[实施方案](../architecture/photo-objects.md)。`MemoryPeak` 接近 2 GiB 时先调整单元再继续。
 - **空闲退出**：最后一次请求约 10 分钟后 `systemctl is-active anas-ai.service` 输出 `inactive`，`anas-ai.socket` 仍为 `active`。
+
+## 复测整理速度（可选）
+
+要在不上传新照片的情况下复测，把已有结果全部重新排队。旧结果保留到新结果写入，搜索与 AI 卡片照常；同一模型算出的结果相同。
+
+1. 记下开始时间，以 root 运行：
+
+   ```bash
+   cd / && runuser -u a-nas-photos -- python3 - /srv/a-nas/data/photos/catalog.db <<'PY'
+   import sqlite3, sys
+   db = sqlite3.connect(sys.argv[1], timeout=5)
+   now = "strftime('%Y-%m-%dT%H:%M:%S.000000000Z')"  # the Catalog's time format
+   with db:
+       queued = db.execute(f"""INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+           SELECT object_id, derivation, 'pending', {now}, {now}
+           FROM (SELECT object_id, derivation FROM embeddings UNION ALL SELECT object_id, derivation FROM detections)
+           WHERE true ON CONFLICT(object_id, derivation) DO NOTHING""").rowcount
+   print("queued", queued)
+   PY
+   ```
+
+   - 必须以 `a-nas-photos` 身份执行，理由同下文的 Catalog 回退。
+   - 只想复测检测时，去掉 `embeddings` 那一半。
+   - 完成标准：输出的数目等于向量数加检测数。
+2. 相册空闲 5 分钟后整理开始：先做向量，再做检测。
+3. 整理完成后记录：
+   - Worker 那次运行的 `Consumed … CPU time`（`journalctl -u anas-ai`）；
+   - `embeddings` 与 `detections` 中 `created_at` 的最早与最晚时间；
+   - `journalctl -u anas-photos` 中每条 `AI work yields` 日志。
+   用 CPU 时间除以整理用时，得到平均用了几个核。
+4. 撤销：`DELETE FROM jobs WHERE derivation IN ('embedding/v1', 'objects/v1') AND state = 'pending'`，同样以 `a-nas-photos` 身份执行。已经重算的结果与原来相同，不需要处理。
 
 ## 回滚或恢复
 
 - **回到不含检测器的 release**：按[实机配置手册的回滚](provision-v1.0.1-experimental-storage.md#回滚)恢复，其中包括恢复上一 release 的 `anas-ai.service` 并删除 `cpu-reserve.conf`。旧 Worker 不认识 `--detector` 参数，只恢复其他单元会让每次连接都启动失败。
 - **只停用 AI**：见[启用相册本地 AI](enable-photo-ai.md#回滚或恢复)。
+- **`anas.slice`**：回滚时可以保留。更早的 release 不使用它；`bb1ec71bff65` 的 Worker 位于其下，同样借此让出 CPU。
 - **检测器与运行环境**：回滚不删除 `/opt/a-nas/models` 与 `/opt/a-nas/ai-runtimes` 中的内容，重新升级时直接复用；删除前的核对见[启用相册本地 AI](enable-photo-ai.md#回滚或恢复)。
 - **相册 Catalog**：新版本启动时把 Catalog 从版本 6 迁移到 7（新增 `detections` 表，并为已有照片排入 `objects/v1` 任务）。旧版本遇到更新的 Catalog 会拒绝启动（`photo catalog version 7 is newer than this build supports (6)`），所以回到不含检测器的 release 前，必须先把 Catalog 退回版本 6：
   - 停止 `anas-photos` 与 `anas-ai` 后，以 `a-nas-photos` 身份打开 `/srv/a-nas/data/photos/catalog.db`。
