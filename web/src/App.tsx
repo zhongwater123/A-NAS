@@ -334,7 +334,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 
       <DesktopGrid apps={desktopApps} />
 
-      <StatusBar host={host} extra={<TransferIndicator onOpen={() => openWindow("transfers")} />} />
+      <StatusBar host={host} extra={<TransferIndicator onOpen={() => openWindow("transfers")} />} onOpenTransfers={() => openWindow("transfers")} />
 
       <NotificationCenter />
 

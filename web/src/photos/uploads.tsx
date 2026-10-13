@@ -23,12 +23,19 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
   const started = useRef(new Set<string>());
   const counter = useRef(0);
   const settled = useRef(new Set<string>());
+  // The transfer center lists every photo as soon as it is added, as one
+  // batch, not only the two being sent.
+  const tracked = useRef(new Map<string, ReturnType<typeof transferStore.trackExternal>>());
   const update = useCallback((key: string, change: Partial<UploadItem>) => setItems((current) => current.map((item) => item.key === key ? { ...item, ...change } : item)), []);
 
   const add = useCallback((files: File[], target: UploadTarget) => {
+    const batch = `photos-${Date.now().toString(36)}-${counter.current + 1}`;
     const added = files.map((file): UploadItem => {
       const key = `upload-${++counter.current}`;
       const error = !accepted.has(file.type) ? "只支持 JPEG 和 PNG 照片" : file.size > maxBytes ? "照片超过 256 MB" : undefined;
+      const handle = transferStore.trackExternal({ key: `photos-${key}`, app: "photos", name: file.name, size: file.size, label: `相册 · ${target.label}`, batch }, { queued: !error });
+      if (error) handle.fail(error);
+      tracked.current.set(key, handle);
       return { key, name: file.name, file, target, url: URL.createObjectURL(file), aspect: 4 / 3, progress: 0, state: error ? "failed" : "waiting", error, rejected: Boolean(error) };
     });
     setItems((current) => [...added, ...current]);
@@ -47,18 +54,18 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
     for (const item of ready) {
       started.current.add(item.key);
       update(item.key, { state: "uploading", progress: 0 });
-      // The transfer center lists photo uploads beside file uploads.
-      const tracked = transferStore.trackExternal({ key: `photos-${item.key}`, app: "photos", name: item.name, size: item.file.size, label: `相册 · ${item.target.label}` });
+      const handle = tracked.current.get(item.key);
+      handle?.start();
       void (async () => {
         try {
-          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); tracked.progress(progress); });
+          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); handle?.progress(progress); });
           if (item.target.albumId) await addToAlbum(item.target.albumId, asset.id);
           update(item.key, { state: "done", progress: 1 });
-          tracked.done();
+          handle?.done();
         } catch (caught) {
           started.current.delete(item.key);
           update(item.key, { state: "failed", error: messageOf(caught) });
-          tracked.fail(messageOf(caught));
+          handle?.fail(messageOf(caught));
         }
       })();
     }
@@ -80,7 +87,13 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
   const retry = useCallback((key: string) => update(key, { state: "waiting", error: undefined, progress: 0 }), [update]);
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  useEffect(() => () => { for (const item of itemsRef.current) URL.revokeObjectURL(item.url); }, []);
+  useEffect(() => () => {
+    for (const item of itemsRef.current) {
+      URL.revokeObjectURL(item.url);
+      // The queue lives in the photo window: photos not started stay unsent.
+      if (item.state === "waiting") tracked.current.get(item.key)?.cancel("相册窗口已关闭，未上传");
+    }
+  }, []);
   return { items, add, prune, clear, retry };
 }
 

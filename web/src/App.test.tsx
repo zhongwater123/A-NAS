@@ -226,7 +226,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
-  it("moves a cut file into the space it is pasted in", async () => {
+  // Switching spaces and pasting re-renders the whole file manager several times.
+  it("moves a cut file into the space it is pasted in", { timeout: 15_000 }, async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }, { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [{ id: "file:film", spaceId: "space:owner", name: "Heat (1995).mp4", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" }],
@@ -298,7 +299,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dialog).getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(false);
     tus.uploads[0].options.onProgress(5, 5);
     expect(await within(dialog).findByRole("button", { name: /正在上传 2 个文件/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /传输中心：2 个任务/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /传输中心：正在上传 .+ 等 2 个任务/ })).toBeTruthy();
 
     const browser = within(dialog).getByRole("region", { name: "文件浏览器" });
     const dataTransfer = { types: ["Files"], items: [], files: [new File(["dropped"], "c.txt")], dropEffect: "none" };
@@ -312,7 +313,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const before = listed();
     tus.uploads[0].options.onSuccess();
     await waitFor(() => expect(listed()).toBeGreaterThan(before));
-    await user.click(screen.getByRole("button", { name: /传输中心：2 个任务/ }));
+    await user.click(screen.getByRole("button", { name: /传输中心：正在上传 .+ 等 2 个任务/ }));
     const center = await screen.findByRole("dialog", { name: "传输中心" });
     expect(await within(center).findByRole("heading", { name: "正在传输" })).toBeTruthy();
   });
@@ -474,8 +475,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
   });
 
-  it("shows utilisation gauges, network rates and the clock in the status bar", async () => {
+  it("shows utilisation gauges, network rates and the clock in the status bar, and opens transfers from the rates", async () => {
     stubFetch(healthyState);
+    const user = userEvent.setup();
     render(<App />);
 
     const statusBar = await screen.findByRole("banner", { name: "设备状态" });
@@ -483,11 +485,13 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuenow")).toBe("24");
     expect(within(statusBar).getByRole("meter", { name: "内存占用" }).getAttribute("aria-valuenow")).toBe("40");
     expect(within(statusBar).getByText("3.2 / 8.0 GiB")).toBeTruthy();
-    const network = within(statusBar).getByRole("group", { name: "网络速率" });
+    const network = within(statusBar).getByRole("button", { name: "网络速率，打开传输中心" });
     expect(network.textContent).toContain("下行2.5MB/s");
     expect(network.textContent).toContain("上行328KB/s");
     expect(within(statusBar).getByText(/^\d{2}:\d{2}$/)).toBeTruthy();
     expect(within(statusBar).getByText("设备在线")).toBeTruthy();
+    await user.click(network);
+    expect(await screen.findByRole("dialog", { name: "传输中心" })).toBeTruthy();
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {

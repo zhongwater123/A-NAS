@@ -125,7 +125,7 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
   };
   const start = () => {
     if (!library || !parentId || !ready.length) return;
-    const to: Destination = { libraryId: library.id, libraryName: library.name, spaceId: library.spaceId, parentId, place };
+    const to: Destination = { libraryId: library.id, libraryName: library.name, spaceId: library.spaceId, spaceKind: library.spaceKind, parentId, place };
     remember(library.id);
     setError("");
     uploads.start(to);
@@ -153,7 +153,7 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
   else if (ready.length) summary = <>{ready.length} 个文件 · {bytes(readyBytes)}</>;
   else if (progress.count) {
     const count = (state: UploadItem["state"]) => items.filter((item) => item.state === state).length;
-    summary = [count("done") && `已上传 ${count("done")} 个`, count("exists") && `${count("exists")} 个已存在`, count("failed") && `${count("failed")} 个失败`].filter(Boolean).join("，");
+    summary = [count("done") && `已上传 ${count("done")} 个`, count("exists") && `${count("exists")} 个已存在`, count("failed") && `${count("failed")} 个失败`, count("canceled") && `${count("canceled")} 个已取消`].filter(Boolean).join("，");
   }
 
   return (

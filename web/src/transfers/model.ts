@@ -1,4 +1,4 @@
-import type { ExternalUpload, Hold, LocalUpload, TransferSnapshot, UploadPhase } from "./store";
+import type { ExternalUpload, Hold, LocalUpload, TransferRates, TransferSnapshot, UploadPhase } from "./store";
 import type { Transfer, TransferDirection, TransferLocation } from "./transfersApi";
 
 export type ItemStatus = "queued" | "pending" | "running" | "paused" | "waiting" | "conflict" | "interrupted" | "completed" | "failed" | "canceled" | "skipped";
@@ -39,6 +39,8 @@ export interface TransferGroup {
   batch?: string;
   items: TransferItem[];
   location?: TransferLocation;
+  // label names the place instead of location, for other apps' uploads.
+  label?: string;
   total: number;
   transferred: number;
   speed: number;
@@ -65,7 +67,10 @@ export function transferItems(snapshot: TransferSnapshot): TransferItem[] {
     const remote = upload.transferId ? server.get(upload.transferId) : undefined;
     for (const id of [upload.transferId, ...(upload.superseded ?? [])]) if (id) owned.add(id);
     return {
-      id: upload.key, direction: "upload", kind: "file", name: upload.name, location: upload.target,
+      // The NAS knows the folders a folder upload created; before it answers,
+      // the target stands in.
+      id: upload.key, direction: "upload", kind: "file", name: upload.name, location: remote?.location ?? upload.target,
+      label: remote ? undefined : upload.target.label,
       relativePath: upload.directories.join("/") || undefined, total: upload.size, transferred: upload.transferred, speed: upload.speed,
       status: phaseStatus[upload.phase], failure: upload.error ? failureText(upload.error.code) : undefined, hold: upload.hold,
       savedName: upload.savedName ?? remote?.savedName, replaced: upload.replaced ?? remote?.replaced, restarted: upload.restarted,
@@ -86,21 +91,23 @@ export function transferItems(snapshot: TransferSnapshot): TransferItem[] {
     items.push({
       id: upload.key, direction: "upload", kind: "file", name: upload.name, label: upload.label, total: upload.size,
       transferred: Math.round(upload.size * upload.progress), speed: 0, status: upload.phase, failure: upload.error,
-      createdAt: upload.createdAt, finishedAt: upload.finishedAt, external: upload,
+      createdAt: upload.createdAt, finishedAt: upload.finishedAt, batch: upload.batch, external: upload,
     });
   }
   return items.sort((left, right) => right.createdAt - left.createdAt);
 }
 
-// groupItems keeps each batch together, at the place of its newest item.
-export function groupItems(items: TransferItem[]): TransferGroup[] {
+// groupItems keeps each batch together, at the place of its newest item. A
+// batch this browser uploads takes its speed from batchRates, which also
+// counts files too short to have a speed of their own.
+export function groupItems(items: TransferItem[], batchRates: Record<string, number> = {}): TransferGroup[] {
   const groups: TransferGroup[] = [];
   const byBatch = new Map<string, TransferGroup>();
   for (const item of items) {
     const key = item.batch && item.direction === "upload" ? `batch:${item.batch}` : `item:${item.id}`;
     let group = byBatch.get(key);
     if (!group) {
-      group = { key, direction: item.direction, batch: key.startsWith("batch:") ? item.batch : undefined, items: [], location: item.location, total: 0, transferred: 0, speed: 0, createdAt: item.createdAt, counts: {} };
+      group = { key, direction: item.direction, batch: key.startsWith("batch:") ? item.batch : undefined, items: [], location: item.location, label: item.label, total: 0, transferred: 0, speed: 0, createdAt: item.createdAt, counts: {} };
       byBatch.set(key, group);
       groups.push(group);
     }
@@ -111,6 +118,12 @@ export function groupItems(items: TransferItem[]): TransferGroup[] {
     group.counts[item.status] = (group.counts[item.status] ?? 0) + 1;
     group.createdAt = Math.min(group.createdAt, item.createdAt);
     if (item.finishedAt) group.finishedAt = Math.max(group.finishedAt ?? 0, item.finishedAt);
+  }
+  for (const group of groups) {
+    if (group.batch && group.items.some((item) => item.local || item.external)) group.speed = batchRates[group.batch] ?? 0;
+    // Once the NAS reports a batch member, its location replaces the label.
+    const located = group.items.find((item) => item.location && !item.label);
+    if (located && !group.items.every((item) => item.external)) { group.location = located.location; group.label = undefined; }
   }
   return groups;
 }
@@ -134,7 +147,9 @@ export interface TransferTotals {
   progress: number;
 }
 
-export function transferTotals(items: TransferItem[]): TransferTotals {
+// transferTotals sums the transfers; the speeds come from rates, measured
+// over all bytes moved, so many small files still show a speed.
+export function transferTotals(items: TransferItem[], rates: TransferRates = { upload: 0, download: 0, batches: {} }): TransferTotals {
   const current = items.filter(isCurrent);
   let total = 0;
   let done = 0;
@@ -144,11 +159,9 @@ export function transferTotals(items: TransferItem[]): TransferTotals {
     else totals.downloads += 1;
     if (item.status === "conflict" || item.status === "failed" || item.status === "waiting" || (item.status === "interrupted" && !item.local)) totals.attention += 1;
   }
+  totals.uploadSpeed = rates.upload;
+  totals.downloadSpeed = rates.download;
   for (const item of current) {
-    if (item.status === "running") {
-      if (item.direction === "upload") totals.uploadSpeed += item.speed;
-      else totals.downloadSpeed += item.speed;
-    }
     if (item.status === "failed" || item.status === "skipped") continue;
     total += item.total;
     done += item.transferred;
@@ -187,6 +200,11 @@ export function formatRemaining(bytes: number, bytesPerSecond: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.round((seconds % 3600) / 60);
   return minutes ? `约 ${hours} 小时 ${minutes} 分钟` : `约 ${hours} 小时`;
+}
+
+// speedText is a speed and, while bytes are left, about how long they take.
+export function speedText(bytesPerSecond: number, remainingBytes: number): string {
+  return [formatSpeed(bytesPerSecond), formatRemaining(remainingBytes, bytesPerSecond)].filter(Boolean).join(" · ");
 }
 
 export function formatClock(value: number): string {

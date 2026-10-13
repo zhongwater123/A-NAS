@@ -189,6 +189,75 @@ describe("the upload queue", () => {
     expect(store.getSnapshot().uploads[0]).toMatchObject({ transferred: 4, target: { parentId: "file:photos" } });
   });
 
+  it("shows the upload speed of a batch of files too short to have their own", async () => {
+    store.enqueue(Array.from({ length: 9 }, (_, index) => ({ file: file(`photo-${index}.jpg`, 4_000_000) })), target);
+    for (let index = 0; index < 9; index += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+      const upload = tus.uploads[index];
+      upload.options.onProgress(2_000_000, 4_000_000);
+      upload.options.onSuccess();
+    }
+    const batch = store.getSnapshot().batches[0].id;
+    const { rates } = store.getSnapshot();
+    // 36 MB in 0.9 s, measured over at least a second.
+    expect(rates.upload).toBeGreaterThan(30_000_000);
+    expect(rates.batches[batch]).toBe(rates.upload);
+    expect(store.getSnapshot().uploads.every((upload) => upload.phase === "completed")).toBe(true);
+    // Once nothing moves the speed falls to zero by itself.
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(store.getSnapshot().rates.upload).toBe(0);
+  });
+
+  it("does not show a burst of speed when a running upload reports a part late", async () => {
+    store.enqueue([{ file: file("film.mkv", 32_000_000) }], target);
+    await vi.advanceTimersByTimeAsync(100);
+    tus.uploads[0].options.onProgress(8_000_000, 32_000_000);
+    // The next part takes 4 s to be taken, longer than the speed window.
+    await vi.advanceTimersByTimeAsync(4000);
+    tus.uploads[0].options.onProgress(16_000_000, 32_000_000);
+    const snapshot = store.getSnapshot();
+    const batch = snapshot.batches[0].id;
+    // 8 MB over the last 3 s or so, not 8 MB in the last second.
+    for (const speed of [snapshot.rates.upload, snapshot.rates.batches[batch], snapshot.uploads[0].speed]) {
+      expect(speed).toBeGreaterThan(2_000_000);
+      expect(speed).toBeLessThan(3_000_000);
+    }
+  });
+
+  it("measures downloads by what the NAS sent between polls", async () => {
+    const download = (sent: number, state: Transfer["state"]): Transfer => ({
+      id: "download-1", direction: "download", kind: "file", name: "film.mkv", location: target, totalBytes: 100_000_000, transferredBytes: sent,
+      bytesPerSecond: 0, state, createdAt: "2026-10-13T08:00:00Z", updatedAt: "2026-10-13T08:00:00Z",
+    });
+    server = [download(0, "pending")];
+    await store.refresh();
+    server = [download(30_000_000, "running")];
+    await vi.advanceTimersByTimeAsync(1500);
+    await store.refresh();
+    expect(store.getSnapshot().rates.download).toBe(20_000_000);
+    // A download finishing between two polls still counts.
+    server = [download(100_000_000, "completed")];
+    await vi.advanceTimersByTimeAsync(1500);
+    await store.refresh();
+    expect(store.getSnapshot().rates.download).toBeGreaterThan(30_000_000);
+  });
+
+  it("answers a batch's conflicts in advance when asked to", () => {
+    store.enqueue([{ file: file("Heat (1995).mkv") }], target, { choice: "skip" });
+    tus.uploads[0].fail("POST", 409, "name_conflict");
+    expect(phases()).toEqual(["skipped"]);
+    expect(tus.uploads).toHaveLength(1);
+  });
+
+  it("sends a canceled upload again from the beginning", () => {
+    store.enqueue([{ file: file("a.jpg") }], target);
+    tus.uploads[0].created("upload-a");
+    store.cancel(store.getSnapshot().uploads[0].key);
+    store.retry(store.getSnapshot().uploads[0].key);
+    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", transferId: undefined, transferred: 0 });
+    expect(tus.uploads[1].options.endpoint).toBe("/api/v1/uploads");
+  });
+
   it("asks before the page closes while uploads are unfinished", () => {
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);

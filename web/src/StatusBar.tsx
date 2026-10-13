@@ -13,8 +13,9 @@ const sweep = 210;
 const startAngle = -sweep / 2;
 
 // extra shows beside the clock while it has something to say, such as
-// transfers in progress.
-export function StatusBar({ host, extra }: { host: HostStateView; extra?: ReactNode }) {
+// transfers in progress; onOpenTransfers makes the network rates open the
+// transfer center.
+export function StatusBar({ host, extra, onOpenTransfers }: { host: HostStateView; extra?: ReactNode; onOpenTransfers?: () => void }) {
   const { metrics, disconnected: metricsDisconnected } = useHostMetrics();
   const disconnected = host.disconnected || metricsDisconnected;
   const connection = disconnected ? "offline" : host.snapshot ? "online" : "pending";
@@ -38,10 +39,17 @@ export function StatusBar({ host, extra }: { host: HostStateView; extra?: ReactN
         />
       </div>
       <span className="status-divider" aria-hidden="true" />
-      <div className="net-rates" role="group" aria-label="网络速率">
-        <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
-        <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
-      </div>
+      {onOpenTransfers ? (
+        <button type="button" className="net-rates" aria-label="网络速率，打开传输中心" title="打开传输中心" onClick={onOpenTransfers}>
+          <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
+          <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
+        </button>
+      ) : (
+        <div className="net-rates" role="group" aria-label="网络速率">
+          <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
+          <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
+        </div>
+      )}
       <span className="status-divider" aria-hidden="true" />
       {extra && <div className="status-extra">{extra}</div>}
       <div className="status-clock">
