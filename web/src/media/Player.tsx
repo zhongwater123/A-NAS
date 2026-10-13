@@ -1,11 +1,13 @@
 import {
-  ArrowLeft, Captions, Check, ChevronRight, Gauge, Languages, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Settings2, SkipBack, SkipForward, Volume1, Volume2, VolumeX,
+  ArrowLeft, Captions, Check, ChevronRight, Clapperboard, Gauge, Languages, ListVideo, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Settings2, SkipBack, SkipForward, Volume1, Volume2,
+  VolumeX,
 } from "lucide-react";
 import { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { messageOf } from "./Browse";
 import { episodeCode, timecode } from "./format";
 import { browserCapabilities, getPlayback, getVideo, saveProgress, streamURL, subtitleURL, type Playback, type Quality, type VideoDetail } from "./mediaApi";
+import { PlayerPanel, type PanelTab } from "./PlayerPanel";
 
 const qualityLabels: Record<Quality, string> = { original: "原画", "1080p": "1080p", "720p": "720p", "480p": "480p" };
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -56,6 +58,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   const [subtitle, setSubtitle] = useState("off");
   const [cues, setCues] = useState<Cue[]>([]);
   const [menu, setMenu] = useState<MenuName>();
+  const [panel, setPanel] = useState<PanelTab>();
   const [chrome, setChrome] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [scrub, setScrub] = useState<number>();
@@ -183,7 +186,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     hideTimer.current = window.setTimeout(() => setChrome(false), 2800);
   }, []);
   useEffect(() => () => window.clearTimeout(hideTimer.current), []);
-  const showChrome = chrome || paused || Boolean(menu) || scrub !== undefined || Boolean(failure);
+  const showChrome = chrome || paused || Boolean(menu) || Boolean(panel) || scrub !== undefined || Boolean(failure);
 
   useEffect(() => { container.current?.focus(); }, []);
   useEffect(() => {
@@ -272,7 +275,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       case "f": case "F": toggleFullscreen(); break;
       case "m": case "M": setMuted((value) => !value); break;
       case "Escape":
-        if (menu) setMenu(undefined);
+        if (panel) setPanel(undefined);
+        else if (menu) setMenu(undefined);
         else if (document.fullscreenElement) toggleFullscreen();
         else onClose();
         break;
@@ -312,12 +316,14 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   const titleText = detail ? (detail.type === "episode" && detail.showTitle ? detail.showTitle : detail.title) : "";
   const subtitleText = detail?.type === "episode" ? [episodeCode(detail.season, detail.episode), detail.title?.startsWith("第 ") ? "" : detail.title].filter(Boolean).join(" · ") : "";
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const episodic = detail?.type === "episode" && Boolean(detail.showId);
+  const togglePanel = () => { setMenu(undefined); setPanel(panel ? undefined : episodic ? "episodes" : "library"); };
   const modeLabel = playback ? playback.mode === "direct" ? "原画直连" : playback.mode === "remux" ? "转换封装" : `实时转码 · ${qualityLabels[playback.quality]}` : "";
 
   return (
-    <div ref={container} className={`mc-player ${showChrome ? "chrome" : "bare"}`} tabIndex={-1} role="dialog" aria-label={titleText ? `播放 ${titleText}` : "播放器"}
+    <div ref={container} className={`mc-player ${showChrome ? "chrome" : "bare"} ${panel ? "paneled" : ""}`} tabIndex={-1} role="dialog" aria-label={titleText ? `播放 ${titleText}` : "播放器"}
       onKeyDown={keys} onPointerMove={wake} onPointerDown={() => wake()}>
-      <video ref={video} src={source || undefined} className="mc-video" playsInline preload="auto" onClick={toggle} onDoubleClick={toggleFullscreen} {...events}>
+      <video ref={video} src={source || undefined} className="mc-video" playsInline preload="auto" onClick={() => (panel ? setPanel(undefined) : toggle())} onDoubleClick={toggleFullscreen} {...events}>
         {subtitle !== "off" && detail && <track key={`${subtitle}-${source}`} ref={trackElement} kind="subtitles" default src={subtitleURL(detail.id, subtitle)} />}
       </video>
       {activeCues.length > 0 && <div className="mc-cues" aria-live="off">{activeCues.map((cue, index) => <span key={index}>{cue.text}</span>)}</div>}
@@ -381,10 +387,15 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
           </div>
           <span className="mc-time">{timecode(shown)}<span> / {timecode(duration)}</span></span>
           <span className="mc-controls-gap" />
+          {detail && (
+            <button type="button" className={`mc-player-button labeled ${panel ? "on" : ""}`} aria-label={episodic ? "选集" : "片库"} aria-expanded={Boolean(panel)} onClick={togglePanel}>
+              {episodic ? <ListVideo /> : <Clapperboard />}<span>{episodic ? "选集" : "片库"}</span>
+            </button>
+          )}
           {detail && detail.subtitles.length > 0 && (
             <button type="button" className={`mc-player-button ${subtitle !== "off" ? "on" : ""}`} aria-label="字幕" aria-expanded={menu === "subtitles"} onClick={() => setMenu(menu === "subtitles" ? undefined : "subtitles")}><Captions /></button>
           )}
-          <button type="button" className="mc-player-button" aria-label="播放设置" aria-expanded={menu === "settings"} onClick={() => setMenu(menu ? undefined : "settings")}><Settings2 /></button>
+          <button type="button" className="mc-player-button" aria-label="播放设置" aria-expanded={menu === "settings"} onClick={() => { setPanel(undefined); setMenu(menu ? undefined : "settings"); }}><Settings2 /></button>
           <button type="button" className="mc-player-button" aria-label={fullscreen ? "退出全屏" : "全屏"} onClick={toggleFullscreen}>{fullscreen ? <Minimize /> : <Maximize />}</button>
         </div>
         {menu && detail && playback && (
@@ -420,6 +431,10 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
           </div>
         )}
       </footer>
+      {panel && detail && (
+        <PlayerPanel detail={detail} tab={panel} onTab={setPanel} onClose={() => setPanel(undefined)}
+          onPick={(videoId) => { setPanel(undefined); go(videoId); }} />
+      )}
     </div>
   );
 }

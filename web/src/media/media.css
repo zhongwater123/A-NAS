@@ -642,6 +642,48 @@
 .mc-player-menu button small { color: #8a95a8; font-size: 11.5px; }
 .mc-player-menu button[aria-checked="true"] svg { color: var(--mc-accent); }
 .mc-menu-blank { width: 16px; flex: none !important; }
+.mc-player-button.labeled { width: auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; font-size: 13px; font-weight: 650; }
+.mc-player-button.labeled svg { width: 18px; height: 18px; }
+
+/* Picking another episode or title while playing */
+.mc-player { --mc-panel-w: min(380px, 92%); }
+.mc-player.paneled .mc-player-top, .mc-player.paneled .mc-player-bottom { right: var(--mc-panel-w); }
+.mc-player.paneled .mc-player-menu { right: calc(var(--mc-panel-w) + 20px); }
+.mc-player-panel { position: absolute; z-index: 6; top: 0; right: 0; bottom: 0; width: var(--mc-panel-w); display: flex; flex-direction: column; border-left: 1px solid rgba(255, 255, 255, .08); color: #eef2f8; background: rgba(13, 16, 23, .95); backdrop-filter: blur(22px); box-shadow: -28px 0 70px rgba(0, 0, 0, .45); animation: mc-panel-in .24s var(--mc-ease); }
+@keyframes mc-panel-in { from { opacity: 0; transform: translateX(28px); } }
+.mc-player-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 10px 12px 14px; }
+.mc-pick-tabs { display: flex; gap: 4px; }
+.mc-pick-tabs button { height: 34px; border: 0; border-radius: 10px; padding: 0 14px; color: #9aa4b5; background: transparent; font-size: 15px; font-weight: 750; transition: color .15s, background .15s; }
+.mc-pick-tabs button:hover { color: #fff; }
+.mc-pick-tabs button.active { color: #fff; background: rgba(255, 255, 255, .1); }
+.mc-pick-filters { display: grid; gap: 10px; padding: 0 14px 10px; }
+.mc-pick-filters .mc-pick-chips { padding: 0; }
+.mc-pick-search { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 11px; background: rgba(0, 0, 0, .28); transition: border-color .15s; }
+.mc-pick-search:focus-within { border-color: rgba(76, 157, 255, .6); }
+.mc-pick-search svg { width: 15px; height: 15px; color: #8a95a8; }
+.mc-pick-search input { min-width: 0; flex: 1; border: 0; outline: none; color: #eef2f8; background: transparent; font: inherit; }
+.mc-pick-search input::placeholder { color: #727d90; }
+.mc-pick-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 10px; }
+.mc-pick-chips button { height: 28px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px; padding: 0 12px; color: #c6cedb; background: rgba(255, 255, 255, .04); font-size: 12px; font-weight: 600; transition: background .15s, color .15s; }
+.mc-pick-chips button:hover { color: #fff; background: rgba(255, 255, 255, .09); }
+.mc-pick-chips button.active { color: #fff; border-color: transparent; background: var(--mc-accent-2); }
+.mc-pick-chips button.scope.active { background: rgba(255, 255, 255, .18); }
+.mc-pick-gap { flex: 1; }
+.mc-pick-list { min-height: 0; flex: 1; display: grid; align-content: start; gap: 2px; margin: 0; padding: 2px 8px 16px; overflow-y: auto; list-style: none; }
+.mc-pick { width: 100%; display: flex; align-items: center; gap: 12px; border: 0; border-radius: 12px; padding: 7px; color: inherit; background: transparent; text-align: left; transition: background .15s; }
+.mc-pick:hover:not(:disabled) { background: rgba(255, 255, 255, .07); }
+.mc-pick.playing { cursor: default; background: rgba(76, 157, 255, .13); box-shadow: inset 0 0 0 1px rgba(76, 157, 255, .32); }
+.mc-pick-thumb { position: relative; width: 132px; flex: none; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: #151a24; box-shadow: 0 4px 12px rgba(0, 0, 0, .35); }
+.mc-pick-thumb.poster { width: 56px; aspect-ratio: 2 / 3; }
+.mc-pick-thumb .mc-art-icon { top: 8px; left: 8px; width: 16px; height: 16px; }
+.mc-pick-text { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.mc-pick-text strong { overflow: hidden; font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.mc-pick-text small { overflow: hidden; color: #8a95a8; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.mc-pick-text em { color: #8a95a8; font-size: 11.5px; font-style: normal; }
+.mc-pick-now { display: inline-flex; align-items: center; gap: 4px; color: var(--mc-accent); font-size: 11.5px; font-weight: 700; }
+.mc-pick-now svg { width: 13px; height: 13px; }
+.mc-pick-empty { margin: 36px 18px; color: #8a95a8; text-align: center; }
+.mc-pick-loading { display: block; margin: 36px auto; }
 .mc-player-reason { margin: 4px 6px 4px; padding: 8px 10px; border-radius: 9px; color: #ffe3a3; background: rgba(245, 196, 81, .1); font-size: 12px; line-height: 1.5; }
 .mc-resume { position: absolute; left: 24px; bottom: 120px; display: flex; align-items: center; gap: 12px; padding: 9px 9px 9px 16px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 13px; color: #eef2f8; background: rgba(18, 22, 31, .9); backdrop-filter: blur(12px); animation: mc-rise .3s var(--mc-ease); }
 .mc-resume button { height: 30px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; padding: 0 11px; color: #fff; background: rgba(255, 255, 255, .12); font-weight: 650; }
