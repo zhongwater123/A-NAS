@@ -34,6 +34,28 @@ type EmbedderInfo struct {
 	// makes earlier vectors stale.
 	Model      string
 	Dimensions int
+	// Detector names the object detector in the same way, or is empty when
+	// the Worker has none it can use.
+	Detector string
+}
+
+// Detector is the AI Worker's object detector
+// (docs/architecture/photo-objects.md). An Embedder that is also a Detector
+// gets detection jobs while its Info names a detector.
+type Detector interface {
+	// DetectObjects returns the detector's model and the objects in an
+	// upright image. Cancelling ctx stops the detection in the Worker.
+	DetectObjects(ctx context.Context, image *os.File) (string, []Box, error)
+	// Release frees the detector's memory, or with all, the Worker's.
+	Release(ctx context.Context, all bool) error
+}
+
+// Box is one object a detector found: its class, how sure the detector is,
+// and its corners as fractions of the image.
+type Box struct {
+	Class          int
+	Score          float32
+	X0, Y0, X1, Y1 float32
 }
 
 // Gate tells background AI work whether it may start another item now, and
