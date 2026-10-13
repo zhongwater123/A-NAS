@@ -149,11 +149,6 @@ COVERAGE_WEIGHTS = (0.1, 0.2, 0.5)
 FUSION_WEIGHT = 0.2  # the coverage weight that ranked best on both COCO halves
 TIER_COVERAGE = 0.6  # a query is about a thing when its class words make up this much
 TIER_GRID = tuple(round(0.25 + 0.05 * step, 2) for step in range(14))  # tier scores tried, 0.25 to 0.9
-# Open Images classes whose verified labels mean something else than the
-# detector's class (docs/research/photo-ai-object-detection.md#coco-之外open-images98-类):
-# at 0.6 the detector is "right" on 13% of Person and 10% of Glasses photos.
-# They measure nothing for the calibration.
-OPENIMAGES_UNRELATED = {"Person", "Glasses"}
 STUDY_TIER_SCORE = 0.6  # the "detected" group: about 92% right on COCO in the study
 CALIBRATION = os.path.join(datasets.REPO, "internal", "photos", "objects", "v1.calibration.json")
 CALIBRATION_ABOUT = ("Written by ai/eval/hybrid_search.py --write-calibration; do not edit. Search adds weight x coverage x "
@@ -298,7 +293,7 @@ def derive_lists(label_halves, oi_classes, table_path=TABLE, min_delta=-0.02, ti
             word["deltas"].append(entry["coverage x 0.2"]["AP"] - entry["vector"]["AP"])
             word["curves"].append(entry["curve"])
     for entry in oi_classes:
-        if entry.get("mentions", 1) != 1 or entry["class"] in OPENIMAGES_UNRELATED:
+        if entry.get("mentions", 1) != 1:
             continue
         word = measured[frozenset(entry["classIds"])]
         word["names"].add(entry["zh"])
