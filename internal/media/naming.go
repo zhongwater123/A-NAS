@@ -14,9 +14,11 @@ import (
 // rules here only add what it does not know: the Plex/Jellyfin/Kodi folder
 // conventions, Chinese season and episode markers, and camera file names.
 
+// The web uploader keeps the same list (web/src/media/uploads.ts). F4V is
+// Flash's MP4 and plays like one.
 var videoExtensions = map[string]bool{
 	".mp4": true, ".m4v": true, ".mkv": true, ".webm": true, ".mov": true, ".avi": true, ".wmv": true,
-	".flv": true, ".ts": true, ".m2ts": true, ".mts": true, ".mpg": true, ".mpeg": true, ".rmvb": true,
+	".flv": true, ".f4v": true, ".ts": true, ".m2ts": true, ".mts": true, ".mpg": true, ".mpeg": true, ".rmvb": true,
 	".rm": true, ".3gp": true, ".vob": true, ".ogv": true, ".asf": true, ".divx": true,
 }
 
