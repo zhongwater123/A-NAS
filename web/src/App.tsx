@@ -135,6 +135,8 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   docker: Box,
   store: ShoppingBag,
 };
+// Apps on a white tile (相册) keep it in their window's title bar too.
+const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
   files: "files",
@@ -421,7 +423,7 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
   return (
     <section className={`app-window app-window-${model.id} ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
       <div className="window-titlebar" onPointerDown={beginDrag}>
-        <div className="window-title"><span className="window-app-icon"><Icon size={17} /></span>{model.title}</div>
+        <div className="window-title"><span className={`window-app-icon${lightTitleIcons.has(model.id) ? " light" : ""}`}><Icon size={17} /></span>{model.title}</div>
         <div className="window-actions">
           <button aria-label={`最小化${model.title}`} onClick={() => dispatch({ type: "minimize", id: model.id })}><Minus /></button>
           <button aria-label={`${model.maximized ? "还原" : "最大化"}${model.title}`} onClick={() => dispatch({ type: "maximize", id: model.id })}>{model.maximized ? <PanelLeftClose /> : <Maximize2 />}</button>

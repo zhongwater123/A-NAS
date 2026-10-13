@@ -4,13 +4,14 @@ import type { GlyphProps } from "./MediaCenterGlyph";
 
 // PhotosGlyph is the 相册 mark, flat and in colour (2026-10-13): a coral
 // print behind a landscape print of sky, sun, a teal peak and a green hill,
-// drawn for the app's white tile. A white rim parts the two prints. Each copy
-// names its own clip path, because a copy inside a hidden window would hide a
-// shared one.
+// drawn for the app's white tile. A white rim parts the two prints. The view
+// box fits the prints with no margin, so the mark fills what it is given.
+// Each copy names its own clip path, because a copy inside a hidden window
+// would hide a shared one.
 export function PhotosGlyph({ size = 24, ...props }: GlyphProps) {
   const clip = `ph-glyph-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" {...props}>
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="1.2 1.6 20.8 20.8" fill="none" {...props}>
       <defs>
         <clipPath id={clip}>
           <rect x="2.4" y="7.4" width="15.6" height="13.4" rx="2.7" />
