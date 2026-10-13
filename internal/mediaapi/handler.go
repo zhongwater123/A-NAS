@@ -54,6 +54,7 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 		"GET /titles":                           h.titles,
 		"GET /shows/{id}":                       h.show,
 		"GET /videos/{id}":                      h.video,
+		"PATCH /videos/{id}":                    h.renameVideo,
 		"GET /videos/{id}/playback":             h.playback,
 		"GET /videos/{id}/file":                 h.original,
 		"GET /videos/{id}/stream":               h.stream,
@@ -141,6 +142,10 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusServiceUnavailable, "media_worker_unavailable", "video conversion is unavailable")
 	case errors.Is(err, media.ErrUnreadable):
 		writeError(w, http.StatusUnprocessableEntity, "media_unreadable", "the video cannot be read")
+	case errors.Is(err, files.ErrConflict):
+		writeError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
+	case errors.Is(err, files.ErrInvalidName):
+		writeError(w, http.StatusBadRequest, "invalid_request", "the file name is invalid")
 	case errors.Is(err, files.ErrVolumeUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "volume_unavailable", "the data volume is unavailable")
 	case errors.Is(err, context.Canceled):
@@ -464,6 +469,23 @@ func (h *handler) createCollection(w http.ResponseWriter, r *http.Request, user 
 
 func (h *handler) collection(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	detail, err := h.service.CollectionDetail(r.Context(), user, r.PathValue("id"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// renameVideo renames the video's file, the 片源, as the user.
+func (h *handler) renameVideo(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var input struct {
+		FileName string `json:"fileName"`
+	}
+	if err := decode(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	detail, err := h.service.RenameVideo(r.Context(), user, r.PathValue("id"), input.FileName)
 	if err != nil {
 		h.fail(w, r, err)
 		return

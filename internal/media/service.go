@@ -22,6 +22,9 @@ type Files interface {
 	Tree(ctx context.Context, actor accounts.User, spaceID, directoryID string) ([]files.TreeEntry, error)
 	Lookup(ctx context.Context, actor accounts.User, entryID string) (files.Entry, string, error)
 	OpenContent(ctx context.Context, actor accounts.User, entryID string) (files.Content, error)
+	// List and Move let a user rename a video's file from the media center.
+	List(ctx context.Context, actor accounts.User, spaceID, parentID string) ([]files.Entry, error)
+	Move(ctx context.Context, actor accounts.User, entryID, targetSpaceID, targetParentID, targetName string) (files.Entry, error)
 }
 
 // Spaces lists the spaces an actor can see.

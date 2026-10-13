@@ -639,3 +639,81 @@ func TestWebChangesRescanTheLibrariesOfTheirSpace(t *testing.T) {
 		t.Fatalf("member rescanned a shared library: %v", err)
 	}
 }
+
+func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
+	env := newTestEnv(t, nil)
+	old := "超凡蜘蛛侠2.The.Amazing.Spider-Man.2.2014.1080p"
+	env.write(t, env.shared, "电影/"+old+".mkv", "video")
+	env.write(t, env.shared, "电影/"+old+".chs.srt", "1\n00:00:01,000 --> 00:00:02,000\n你好\n")
+	env.write(t, env.shared, "电影/"+old+"-poster.jpg", "poster")
+	env.write(t, env.shared, "电影/"+old+".part2.mkv", "another video")
+	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	movies, err := env.media.Titles(env.ctx, env.alice, TitleQuery{Category: "movie"})
+	if err != nil || movies.Total == 0 {
+		t.Fatalf("Titles() = %+v, %v", movies, err)
+	}
+	var id string
+	for _, title := range movies.Items {
+		video, _ := env.media.Video(env.ctx, env.alice, title.ID)
+		if video.File.Name == old+".mkv" {
+			id = title.ID
+		}
+	}
+	if id == "" {
+		t.Fatalf("the film is not listed: %+v", movies.Items)
+	}
+	if _, err := env.media.SaveProgress(env.ctx, env.alice, id, 600, 7000); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "Heat (1995).mkv"); !errors.Is(err, files.ErrConflict) {
+		t.Fatalf("renaming onto another film error = %v, want files.ErrConflict", err)
+	}
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2.txt"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renaming without a video extension error = %v, want ErrInvalid", err)
+	}
+	detail, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2 (2014).mkv")
+	if err != nil || detail.File.Name != "超凡蜘蛛侠2 (2014).mkv" {
+		t.Fatalf("RenameVideo() = %+v, %v", detail.File, err)
+	}
+	folder := filepath.Join(env.spaceRoot(env.shared), "电影")
+	for name, want := range map[string]bool{
+		"超凡蜘蛛侠2 (2014).mkv": true, "超凡蜘蛛侠2 (2014).chs.srt": true, "超凡蜘蛛侠2 (2014)-poster.jpg": true,
+		old + ".mkv": false, old + ".chs.srt": false, old + "-poster.jpg": false,
+		// Another video that starts with the old name is its own 片源.
+		old + ".part2.mkv": true, "Heat (1995).mkv": true,
+	} {
+		if _, err := os.Stat(filepath.Join(folder, name)); (err == nil) != want {
+			t.Errorf("%s exists = %v, want %v", name, err == nil, want)
+		}
+	}
+
+	// The scan reads the title from the new name; the video keeps its ID,
+	// progress and subtitle.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		video, err := env.media.Video(env.ctx, env.alice, id)
+		if err == nil && video.Title.Title == "超凡蜘蛛侠2" && video.Year == 2014 {
+			if video.Progress == nil || video.Progress.Position != 600 || len(video.Subtitles) != 1 {
+				t.Fatalf("renamed video = %+v", video)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the title did not follow the new name: %+v, %v", video, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	private := env.private[env.admin.ID]
+	env.write(t, private, "我的电影/Up (2009).mkv", "video")
+	env.library(t, env.admin, private, LibraryMovies, "我的电影")
+	mine, _ := env.media.Titles(env.ctx, env.admin, TitleQuery{Search: "Up"})
+	if mine.Total != 1 {
+		t.Fatalf("admin titles = %+v", mine)
+	}
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, mine.Items[0].ID, "Up.mkv"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Alice renamed the owner's private film: %v", err)
+	}
+}

@@ -333,4 +333,35 @@ describe("MediaCenter", () => {
     expect(screen.queryByRole("button", { name: /正在上传/ })).toBeNull();
     expect(tus.uploads[0].metadata.parentId).toBe("file:films");
   });
+
+  it("renames a film's file from its card, keeping the extension", async () => {
+    let attempts = 0;
+    const fetchMock = serve([library],
+      (url, init) => {
+        if (url !== "/api/v1/media/videos/video%3Aheat") return undefined;
+        if (init?.method !== "PATCH") return json(detail(film));
+        attempts++;
+        if (attempts === 1) return json({ error: { code: "name_conflict", message: "a file with this name already exists" } }, 409);
+        return json(detail(film, { file: { name: "盗火线 (1995).mkv", folder: "影视/电影", sizeBytes: 8e9, modifiedAt: "2026-10-01T00:00:00Z" } }));
+      },
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const recent = await screen.findByRole("region", { name: "最近添加" });
+    await user.click(within(recent).getByRole("button", { name: "盗火线的更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名片源…" }));
+    const dialog = await screen.findByRole("dialog", { name: "重命名片源" });
+    const input = await within(dialog).findByRole("textbox", { name: "新文件名" });
+    expect((input as HTMLInputElement).value).toBe("Heat (1995)");
+    expect(within(dialog).getByText(".mkv")).toBeTruthy();
+    await user.clear(input);
+    await user.type(input, "盗火线 (1995)");
+    await user.click(within(dialog).getByRole("button", { name: "重命名" }));
+    expect(await within(dialog).findByText("这个文件夹里已经有同名的文件。")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "重命名" }));
+    expect(await screen.findByText("已重命名为“盗火线 (1995).mkv”，正在重新识别片名")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "重命名片源" })).toBeNull();
+    const renames = calls(fetchMock, "PATCH", "/api/v1/media/videos/video%3Aheat");
+    expect(renames.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ fileName: "盗火线 (1995).mkv" }, { fileName: "盗火线 (1995).mkv" }]);
+  });
 });

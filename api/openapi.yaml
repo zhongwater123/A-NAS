@@ -1331,6 +1331,18 @@ paths:
       responses:
         "200": { description: The video, content: { application/json: { schema: { $ref: "#/components/schemas/MediaVideoDetail" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: renameMediaVideoFile
+      summary: Rename the video's file, with the subtitles, NFO and artwork named after it, as the caller
+      description: The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name.
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [fileName], properties: { fileName: { type: string, minLength: 1, maxLength: 255 } } } } } }
+      responses:
+        "200": { description: The renamed video, content: { application/json: { schema: { $ref: "#/components/schemas/MediaVideoDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/media/videos/{videoId}/playback:
     get:
       operationId: getMediaPlayback

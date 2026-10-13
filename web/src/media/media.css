@@ -371,6 +371,14 @@
 .mc-detail-facts dt svg { width: 13px; height: 13px; }
 .mc-detail-facts dd { margin: 0; overflow: hidden; color: var(--mc-ink-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .mc-detail-facts dd.warn { color: var(--mc-gold); white-space: normal; }
+.mc-detail-facts .mc-detail-file dd { display: flex; align-items: center; gap: 6px; }
+.mc-detail-file dd > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-detail-file .mc-link { flex: none; padding: 2px 6px; color: #9ccaff; }
+.mc-detail-file .mc-link:hover { color: #fff; }
+.mc-rename-input { height: 40px; display: flex; align-items: center; overflow: hidden; border: 1px solid var(--mc-line-2); border-radius: 11px; background: rgba(0, 0, 0, .25); transition: border-color .15s, box-shadow .15s; }
+.mc-rename-input:focus-within { border-color: var(--mc-accent); box-shadow: 0 0 0 3px rgba(76, 157, 255, .18); }
+.mc-field .mc-rename-input input { min-width: 0; height: 100%; flex: 1; border: 0; border-radius: 0; padding: 0 4px 0 13px; background: transparent; box-shadow: none; }
+.mc-rename-extension { flex: none; padding: 0 13px 0 2px; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
 .mc-seasons { position: relative; padding: 34px clamp(20px, 4cqw, 48px) 0; }
 .mc-season-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
 .mc-season-tabs button { height: 34px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--mc-line); border-radius: 17px; padding: 0 15px; color: var(--mc-ink-2); background: rgba(255, 255, 255, .03); font-weight: 600; }

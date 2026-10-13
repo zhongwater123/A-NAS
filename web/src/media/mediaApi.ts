@@ -108,6 +108,9 @@ export function listTitles(query: TitleQuery) {
 }
 export const getShow = (showId: string) => request<ShowDetail>(`${base}/shows/${id(showId)}`);
 export const getVideo = (videoId: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`);
+// renameVideoFile renames the 片源, the video's file, with the subtitles, NFO
+// and artwork named after it.
+export const renameVideoFile = (videoId: string, fileName: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`, body("PATCH", { fileName }), true);
 export function getPlayback(videoId: string, options: { caps: string; audio?: number; quality?: Quality }) {
   const parameters = new URLSearchParams({ caps: options.caps, audio: String(options.audio ?? -1), quality: options.quality ?? "original" });
   return request<Playback>(`${base}/videos/${id(videoId)}/playback?${parameters}`);
