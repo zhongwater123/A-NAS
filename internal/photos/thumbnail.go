@@ -9,25 +9,33 @@ import (
 	"github.com/disintegration/imaging"
 )
 
-// thumbnailEdge bounds the longer side of a grid thumbnail.
-const thumbnailEdge = 512
+// A grid thumbnail's longer side is at most thumbnailEdge.
+const (
+	thumbnailEdge    = 512
+	thumbnailQuality = 82
+)
 
 // renderThumbnail scales an original to fit thumbnailEdge, turns it upright
 // according to its EXIF orientation and encodes a JPEG on a white background.
 func renderThumbnail(r io.Reader, orientation int) ([]byte, int, int, error) {
-	return renderUpright(r, orientation, thumbnailEdge, 82)
+	return renderUpright(r, orientation, thumbnailEdge, thumbnailQuality)
 }
 
-// renderUpright scales an original to fit edge, turns it upright and encodes
-// a JPEG of the given quality on a white background. Scaling happens before
-// the orientation transform so that only the small image is copied; images
-// already within edge keep their size. The original was already bounded by
-// maxImagePixels at import.
+// renderUpright decodes an original and renders it with uprightJPEG. The
+// original was already bounded by maxImagePixels at import.
 func renderUpright(r io.Reader, orientation, edge, quality int) ([]byte, int, int, error) {
 	src, err := imaging.Decode(r)
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	return uprightJPEG(src, orientation, edge, quality)
+}
+
+// uprightJPEG scales an image to fit edge, turns it upright and encodes a
+// JPEG of the given quality on a white background. Scaling happens before
+// the orientation transform so that only the small image is copied; images
+// already within edge keep their size.
+func uprightJPEG(src image.Image, orientation, edge, quality int) ([]byte, int, int, error) {
 	scaled := orient(imaging.Fit(src, edge, edge, imaging.Lanczos), orientation)
 	bounds := scaled.Bounds()
 	flattened := imaging.Overlay(imaging.New(bounds.Dx(), bounds.Dy(), color.White), scaled, image.Point{}, 1)

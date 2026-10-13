@@ -21,7 +21,8 @@ const (
 	similarObjectScore = 0.3
 )
 
-// SimilarRequest asks for the photos like one photo.
+// SimilarRequest asks for a page of the photos like one photo, or like the
+// image of an image search.
 type SimilarRequest struct {
 	// Viewing names a member's private library the caller is viewing through
 	// an unexpired grant, to look in it as well.
@@ -83,27 +84,36 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 				return
 			}
 			page.Ready = true
-			objects := found[source.objectID]
-			for _, c := range candidates {
-				other, ok := vectors[c.objectID]
-				if !ok || c.objectID == source.objectID {
-					continue
-				}
-				score := dot(vector, other) + similarObjectWeight*objectOverlap(objects, found[c.objectID])
-				hits = append(hits, searchHit{c.id, score})
-			}
+			hits = likeHits(candidates, vectors, found, vector, found[source.objectID], source.objectID)
 		})
 	})
 	if err = errors.Join(err, vectorErr); err != nil {
 		return SimilarPage{}, err
 	}
-	sortHits(hits)
-	hits = hits[:min(len(hits), maxSemanticResults)]
 	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
 	if err != nil {
 		return SimilarPage{}, err
 	}
 	return page, nil
+}
+
+// likeHits ranks the candidates with a vector by how much they look like an
+// image with this vector and these objects, closest first and at most
+// maxSemanticResults of them. Photos of the content object exclude, the
+// image's own, are left out.
+func likeHits(candidates []candidate, vectors map[string][]float32, found map[string][]classScore,
+	vector []float32, objects []classScore, exclude string) []searchHit {
+	var hits []searchHit
+	for _, c := range candidates {
+		other, ok := vectors[c.objectID]
+		if !ok || c.objectID == exclude {
+			continue
+		}
+		score := dot(vector, other) + similarObjectWeight*objectOverlap(objects, found[c.objectID])
+		hits = append(hits, searchHit{c.id, score})
+	}
+	sortHits(hits)
+	return hits[:min(len(hits), maxSemanticResults)]
 }
 
 // objectOverlap is the weighted Jaccard index of the objects two photos
