@@ -342,7 +342,13 @@ button { font: inherit; }
 .icon-video::before { opacity: .55; }
 .icon-download { background: linear-gradient(155deg, #66eb83, #11b944); }
 .icon-docker { background: linear-gradient(155deg, #5ba2ff, #3152d4); }
-.icon-photos { color: #7f5ed8; background: linear-gradient(155deg, #ffffff, #e4e8f1); }
+/* 相册 is a flat white tile: its coloured mark needs no gloss, shadow or gradient. */
+.icon-photos { background: #fff; }
+.icon-photos::before { display: none; }
+.icon-photos svg { filter: none !important; }
+.desktop-icon.icon-photos svg { width: 36px; height: 36px; }
+.dock-icon.icon-photos svg { width: 28px; height: 28px; }
+.launcher-icon.icon-photos svg { width: 31px; height: 31px; }
 .icon-vm { background: linear-gradient(155deg, #7e9cff, #4e69de); }
 /* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
 .icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
