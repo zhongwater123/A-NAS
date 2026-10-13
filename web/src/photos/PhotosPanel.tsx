@@ -1,6 +1,6 @@
 import {
-  ArrowLeft, CircleAlert, CircleMinus, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck,
-  Hash, Shapes, Trash2, X, ZoomIn, ZoomOut,
+  ArrowLeft, CircleAlert, CircleMinus, Copy, Download, FolderMinus, FolderPlus, Hourglass, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, ScanSearch, Search,
+  SearchX, ShieldCheck, Hash, Shapes, Trash2, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -19,10 +19,11 @@ import {
 import { PhotoPicker } from "./PhotoPicker";
 import {
   addPhotoTag, addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
-  listPhotoTrash, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
-  type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoSearchPage,
+  listPhotoTrash, listSimilarPhotos, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
+  type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoSearchPage, type PhotoSimilarPage,
 } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
+import { joinWords, ObjectsStatus, SimilarSource } from "./results";
 import { useSelection } from "./selection";
 import { Sidebar } from "./Sidebar";
 import { Timeline } from "./Timeline";
@@ -55,6 +56,7 @@ const placeKey = (place: Place) => {
     case "search": return `search:${place.viewing}:${place.query}`;
     case "cluster": return `cluster:${place.viewing}:${place.label.id}`;
     case "tag": return `tag:${place.viewing}:${place.tag.name}`;
+    case "similar": return `similar:${place.viewing}:${place.asset.id}`;
     default: return `${place.kind}:${place.libraryId}`;
   }
 };
@@ -82,6 +84,10 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   // How many of the current search's results are the closest, as the photo
   // service says; the less related follow.
   const [closest, setClosest] = useState<number>();
+  // What the object detector found for it, when the query is about things.
+  const [found, setFound] = useState<PhotoObjectsFound>();
+  // Whether the photo similar ones are shown for has been organised.
+  const [similarReady, setSimilarReady] = useState<boolean>();
   const [recent, setRecent] = useStored<string[]>("a-nas.photos.recentSearches", []);
   const [query, setQuery] = useState("");
   const [picker, setPicker] = useState<PhotoAsset[]>();
@@ -160,7 +166,9 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     setHidden(new Set());
     setCount(undefined);
     setClosest(undefined);
-    if (next.kind !== "search") setQuery("");
+    setFound(undefined);
+    setSimilarReady(undefined);
+    setQuery(next.kind === "search" ? next.query : "");
   }, [selection.clear]);
 
   const libraryId = place ? placeLibrary(place) : "";
@@ -392,6 +400,7 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
     copy: (asset, library) => void copyTo(library, [asset]),
     openAlbum: (album) => void openAlbumById(album),
     openTag: (tag) => { setViewer(undefined); if (place) setPlace({ kind: "tag", viewing: placeViewing(caller, place), tag: { name: tag, photos: 0, coverId: "" } }); },
+    findSimilar: (asset) => { setViewer(undefined); if (place) setPlace({ kind: "similar", viewing: placeViewing(caller, place), asset, from: place }); },
     error: reportError,
   };
   const closeViewer = useCallback(() => {
@@ -449,10 +458,14 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   }
 
   // ---- Toolbar ----
-  // Search results name their closest group while less related ones follow.
+  // Search results name their closest group while less related ones follow;
+  // when the detector found the query's things, the status under the search
+  // box names that group instead.
   const searchDetail = closest === undefined ? ""
-    : count !== undefined && closest >= count ? `找到 ${count} 张`
-      : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`;
+    : found && found.detected > 0 ? (count === undefined ? "" : `共 ${count} 张`)
+      : count !== undefined && closest >= count ? `找到 ${count} 张`
+        : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`;
+  const things = found ? joinWords(found.words) : "";
   const title = (() => {
     switch (place.kind) {
       case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : `${count} 张照片` };
@@ -467,9 +480,11 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
         const photos = count ?? (place.tag.photos || undefined);
         return { text: place.tag.name, detail: photos === undefined ? "你的标签" : `${photos} 张 · 你的标签`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
       }
+      case "similar": return { text: "相似的照片", detail: count === undefined ? "" : `${count} 张`, back: place.from };
     }
   })();
-  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "cluster" || place.kind === "tag" || (place.kind === "search" && Boolean(place.query));
+  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "cluster" || place.kind === "tag" || place.kind === "similar"
+    || (place.kind === "search" && Boolean(place.query));
   // On AI search the search box sits under the toolbar.
   const subbar: ReactNode = place.kind === "search" && place.query ? (
     <div className="ph-subbar ph-search-bar">
@@ -479,7 +494,10 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setPlace({ ...place, query: "" }); } }} />
       </form>
+      {found && <ObjectsStatus objects={found} results={viewAssets.length > 0} />}
     </div>
+  ) : place.kind === "similar" ? (
+    <div className="ph-subbar ph-similar-bar"><SimilarSource asset={place.asset} /></div>
   ) : null;
 
   // ---- Selection bar ----
@@ -537,9 +555,20 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
             onOpenTag={(tag) => setPlace({ kind: "tag", viewing: place.viewing, tag })} onError={reportError} />;
         }
         return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor)}
-          onPage={(page, first) => { if (first && "closest" in page) setClosest((page as PhotoSearchPage).closest); }} onCount={setCount} onError={reportError}
-          split={closest === undefined ? undefined : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
-          empty={<Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+          onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); } }}
+          onCount={setCount} onError={reportError}
+          split={closest === undefined ? undefined : found && found.detected > 0
+            ? { at: closest, title: `没有检测到${things}的照片`, text: `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来` }
+            : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
+          empty={found
+            ? <Empty icon={<SearchX />} title={`没有检测到${things}`} text={found.undetected > 0 ? `还有 ${found.undetected} 张照片尚未识别完，稍后再搜一次试试。` : "图库里的照片都已识别过。换个说法试试，比如“海边的日落”。"} />
+            : <Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+      case "similar":
+        return <AssetGrid key={`similar:${place.asset.id}`} {...grid} listKey={`similar:${place.viewing}:${place.asset.id}`} load={(cursor) => listSimilarPhotos(place.asset.id, place.viewing, cursor)}
+          onPage={(page, first) => { if (first) setSimilarReady((page as PhotoSimilarPage).ready); }} onCount={setCount} onError={reportError}
+          empty={similarReady === false
+            ? <Empty icon={<Hourglass />} title="这张照片还在整理中" text="本地 AI 会在设备空闲时整理照片，整理好后就能找到和它相似的照片。" />
+            : <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和它画面相近的照片。" />} />;
       case "cluster":
         return <AssetGrid key={`cluster:${place.label.id}`} {...grid} listKey={`cluster:${place.viewing}:${place.label.id}`} load={(cursor) => listLabelPhotos(place.label.id, place.viewing, cursor)}
           onCount={setCount} onError={reportError}
