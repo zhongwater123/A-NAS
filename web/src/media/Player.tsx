@@ -8,6 +8,7 @@ import { messageOf } from "./Browse";
 import { episodeCode, timecode } from "./format";
 import { browserCapabilities, getPlayback, getVideo, saveProgress, streamURL, subtitleURL, type Playback, type Quality, type VideoDetail } from "./mediaApi";
 import { PlayerPanel, type PanelTab } from "./PlayerPanel";
+import { canFeed, StreamFeed } from "./streamFeed";
 
 const qualityLabels: Record<Quality, string> = { original: "原画", "1080p": "1080p", "720p": "720p", "480p": "480p" };
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -124,6 +125,34 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     return () => { live = false; };
   }, [request, caps]);
 
+  // A converted stream plays through a feed that buffers it ahead, where
+  // the browser allows; otherwise the element fetches it itself.
+  const feed = useRef<StreamFeed | undefined>(undefined);
+  const attach = (url: string, mime: string | undefined, remaining: number | undefined) => {
+    feed.current?.close();
+    feed.current = undefined;
+    if (!canFeed(mime)) { setSource(url); return; }
+    const next: StreamFeed = new StreamFeed(url, mime, () => video.current, {
+      duration: remaining,
+      onError: (message) => {
+        if (feed.current !== next) return;
+        setWaiting(false);
+        setFrozen(false);
+        setJump(undefined);
+        setFailure(message);
+      },
+      onFallback: () => {
+        if (feed.current !== next) return;
+        next.close();
+        feed.current = undefined;
+        setSource(url);
+      },
+    });
+    feed.current = next;
+    setSource(next.url);
+  };
+  useEffect(() => () => feed.current?.close(), []);
+
   // begin points the video at a decision, starting at an absolute position.
   const begin = (decision: Playback, start: number, play: boolean) => {
     resumePlaying.current = play;
@@ -133,11 +162,13 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     if (decision.mode === "direct") {
       pendingStart.current = start;
       setOffset(0);
+      feed.current?.close();
+      feed.current = undefined;
       setSource(decision.url);
     } else {
       pendingStart.current = 0;
       setOffset(start);
-      setSource(`${decision.url}${decision.url.includes("?") ? "&" : "?"}start=${start.toFixed(3)}`);
+      attach(`${decision.url}${decision.url.includes("?") ? "&" : "?"}start=${start.toFixed(3)}`, decision.mime, decision.duration ? Math.max(1, decision.duration - start) : undefined);
     }
     setTime(start);
   };
@@ -298,7 +329,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       // The original did not play after all: convert it instead, once.
       if (playback.mode === "direct" && !fellBack.current) {
         fellBack.current = true;
-        begin({ ...playback, mode: "transcode", url: streamURL(detail.id, "transcode", playback.audio, playback.quality, caps), reason: "原文件无法直接播放，已切换为实时转码" }, absolute(), true);
+        const mime = `video/mp4; codecs="avc1.640033${playback.audio >= 0 ? ",mp4a.40.2" : ""}"`;
+        begin({ ...playback, mode: "transcode", url: streamURL(detail.id, "transcode", playback.audio, playback.quality, caps), mime, reason: "原文件无法直接播放，已切换为实时转码" }, absolute(), true);
         return;
       }
       setWaiting(false);

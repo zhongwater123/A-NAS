@@ -81,7 +81,8 @@ export interface VideoDetail extends Title {
   collections: CollectionRef[];
   collection?: string;
 }
-export interface Playback { mode: "direct" | "remux" | "transcode"; url: string; duration?: number; reason?: string; audio: number; quality: Quality; qualities: Quality[] }
+// mime names a converted stream's codecs, so the player can buffer it itself.
+export interface Playback { mode: "direct" | "remux" | "transcode"; url: string; duration?: number; reason?: string; audio: number; quality: Quality; qualities: Quality[]; mime?: string }
 export interface Collection { id: string; name: string; automatic: boolean; count: number; updatedAt: string; covers: string[] }
 export interface CollectionDetail extends Collection { items: Title[] }
 export interface FolderRoot { libraryId: string; libraryName: string; entryId: string; name: string; path: string; videos: number; cover?: string; missing?: boolean }

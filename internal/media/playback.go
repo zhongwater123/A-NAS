@@ -190,7 +190,32 @@ func (s *Service) Playback(ctx context.Context, actor accounts.User, videoID str
 	}
 	choice := decide(info, video.FileName, caps, audio, chosen)
 	playback.Mode, playback.Reason, playback.Audio = choice.mode, choice.reason, choice.options.AudioTrack
+	if choice.mode != ModeDirect {
+		playback.Mime = streamMime(info, choice.options)
+	}
 	return playback, nil
+}
+
+// streamMime is the type of the fragmented MP4 a stream with these options
+// produces. Browsers take each codec's profile and level from the stream
+// itself, so the codec strings only name the codec.
+func streamMime(info MediaInfo, options StreamOptions) string {
+	var codecs []string
+	switch {
+	case info.Video == nil:
+	case options.CopyVideo && options.HEVC:
+		codecs = append(codecs, "hvc1.1.6.L153.B0")
+	default:
+		codecs = append(codecs, "avc1.640033")
+	}
+	if options.AudioTrack >= 0 && options.AudioTrack < len(info.Audio) {
+		if options.CopyAudio && info.Audio[options.AudioTrack].Codec == "mp3" {
+			codecs = append(codecs, "mp4a.69")
+		} else {
+			codecs = append(codecs, "mp4a.40.2")
+		}
+	}
+	return `video/mp4; codecs="` + strings.Join(codecs, ",") + `"`
 }
 
 // Original opens the video file itself for direct play, as the actor.

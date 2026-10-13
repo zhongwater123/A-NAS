@@ -756,3 +756,22 @@ func TestASeekWaitsForTheStreamItReplaces(t *testing.T) {
 	_ = second.Close()
 	_ = third.Close()
 }
+
+func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
+	h264 := &VideoStream{Codec: "h264", Height: 1080}
+	hevc := &VideoStream{Codec: "hevc", Height: 2160}
+	cases := []struct {
+		info    MediaInfo
+		options StreamOptions
+		want    string
+	}{
+		{MediaInfo{Video: h264, Audio: []AudioStream{{Codec: "ac3"}}}, StreamOptions{CopyVideo: true, AudioTrack: 0}, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
+		{MediaInfo{Video: hevc, Audio: []AudioStream{{Codec: "mp3"}}}, StreamOptions{CopyVideo: true, HEVC: true, CopyAudio: true, AudioTrack: 0}, `video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.69"`},
+		{MediaInfo{Video: hevc}, StreamOptions{AudioTrack: -1}, `video/mp4; codecs="avc1.640033"`},
+	}
+	for _, test := range cases {
+		if got := streamMime(test.info, test.options); got != test.want {
+			t.Errorf("streamMime(%+v) = %s, want %s", test.options, got, test.want)
+		}
+	}
+}

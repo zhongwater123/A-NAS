@@ -3343,6 +3343,7 @@ components:
         audio: { type: integer }
         quality: { type: string, enum: [original, 1080p, 720p, 480p] }
         qualities: { type: array, items: { type: string, enum: [original, 1080p, 720p, 480p] } }
+        mime: { type: string, description: "A converted stream's MIME type with codecs, for Media Source Extensions; absent for direct play." }
     Transfer:
       type: object
       additionalProperties: false
