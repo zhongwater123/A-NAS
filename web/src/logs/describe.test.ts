@@ -52,6 +52,10 @@ describe("activity sentences", () => {
     expect(sentence(hidden)).toBe("alice 在个人空间上传了 1 个文件");
     const purged = event({ action: "file.purged.retention", system: true, redacted: true, space: { id: "space:alice", kind: "private", owner: alice } });
     expect(sentence(purged)).toBe("系统 在 alice 的个人空间清除了回收站中 1 个到期项目");
+    const replaced = event({ actor: alice, detail: "行程单.xlsx (replaced)", space: { id: "space:shared", kind: "shared" } });
+    expect(sentence(replaced)).toBe("alice 上传了 行程单.xlsx");
+    expect(describeActivity(replaced, owner.id).meta).toEqual(["共享空间", "替换了同名文件"]);
+    expect(sentence(event({ category: "photo", action: "photo.ai_label_hidden", actor: alice, detail: "cat" }), alice.id)).toBe("你 从 AI 聚合中移出了 1 张照片");
   });
 
   it("describes storage plans and unknown actions", () => {

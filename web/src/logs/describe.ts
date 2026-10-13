@@ -97,6 +97,7 @@ const photoVerbs: Record<string, Verb> = {
   "photo.directory_deleted": { named: (item) => ["删除了文件夹", item], counted: (n) => `删除了 ${n} 个文件夹` },
   "photo.tag_added": { named: (item) => ["添加了标签", item], counted: (n) => `添加了 ${n} 个标签` },
   "photo.tag_removed": { named: (item) => ["移除了标签", item], counted: (n) => `移除了 ${n} 个标签` },
+  "photo.ai_label_hidden": { counted: (n) => `从 AI 聚合中移出了 ${n} 张照片` },
 };
 
 const storageStates: Record<string, { text: string; tone?: Described["tone"] }> = {
@@ -120,6 +121,13 @@ function hiddenIn(event: ActivityEvent, what: string): Part[] {
   const owner = event.space?.owner;
   if (!event.space || !owner) return [`在其他成员的空间${what}`];
   return owner.id === event.actor?.id ? [`在个人空间${what}`] : ["在", name(owner.username), `的个人空间${what}`];
+}
+
+// An upload that replaced a file of the same name says so after the name.
+const replacedSuffix = " (replaced)";
+
+function itemName(event: ActivityEvent): string | undefined {
+  return event.detail?.endsWith(replacedSuffix) ? event.detail.slice(0, -replacedSuffix.length) : event.detail;
 }
 
 function verbOf(action: string): Verb | undefined {
@@ -161,9 +169,11 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
   const verb = verbOf(event.action);
   if (verb) {
     const where = spaceLabel(event, viewerId);
-    const meta = [where, verb.meta].filter(Boolean) as string[];
+    const replaced = event.detail?.endsWith(replacedSuffix) ? "替换了同名文件" : "";
+    const meta = [where, verb.meta, replaced].filter(Boolean) as string[];
     if (event.redacted) return { parts: [actor, ...hiddenIn(event, verb.counted(1))], meta: verb.meta ? [verb.meta] : [] };
-    if (verb.named && event.detail) return { parts: [actor, ...verb.named(name(event.detail))], meta };
+    const item = itemName(event);
+    if (verb.named && item) return { parts: [actor, ...verb.named(name(item))], meta };
     return { parts: [actor, verb.counted(1)], meta };
   }
   return { parts: [actor, "执行了", name(event.action)], meta: event.detail ? [event.detail] : [] };
@@ -198,7 +208,7 @@ export function describeGroup(group: ActivityGroup, viewerId: string): Described
   const where = spaceLabel(first, viewerId);
   const counted = verb.counted(group.events.length);
   const parts: Part[] = [actorOf(first, viewerId), ...(first.redacted ? hiddenIn(first, counted) : [counted])];
-  const names = first.redacted ? [] : group.events.map((event) => event.detail).filter(Boolean) as string[];
+  const names = first.redacted ? [] : group.events.map(itemName).filter(Boolean) as string[];
   const meta = [first.redacted ? "" : where, verb.named && names.length ? `${names.slice(0, 3).join("、")}${names.length > 3 ? " 等" : ""}` : "", verb.meta].filter(Boolean) as string[];
   return { parts, meta };
 }
