@@ -265,7 +265,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	page, err := h.service.Search(r.Context(), principal, photos.SearchRequest{
-		Query: query.Get("q"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+		Query: query.Get("q"), Viewing: query.Get("viewing"), Library: query.Get("library"), Cursor: query.Get("cursor"), Limit: limit,
 	})
 	if err != nil {
 		h.fail(w, r, err)

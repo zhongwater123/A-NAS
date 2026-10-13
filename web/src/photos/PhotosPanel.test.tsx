@@ -613,7 +613,7 @@ describe("PhotosPanel search and viewing", () => {
     await user.type(box, "电动车{Enter}");
     expect(await screen.findByRole("separator", { name: "相关度较低" })).toBeTruthy();
     expect(screen.getByText("以下照片与搜索的内容差距较大，可能并不相关")).toBeTruthy();
-    expect(screen.getByText("最接近 2 张 · 共 3 张")).toBeTruthy();
+    expect(screen.getByText("最接近 2 张 · 共 3 张 · 我的图库和共享图库")).toBeTruthy();
     // The less related photos come after the divider, in the order given.
     const order = [...document.querySelectorAll(".ph-entry")].flatMap((entry) => entry.querySelector("[role=separator]")
       ? ["divider"] : [...entry.querySelectorAll("button[aria-label^='查看 ']")].map((button) => button.getAttribute("aria-label")));
@@ -628,6 +628,46 @@ describe("PhotosPanel search and viewing", () => {
     await user.click(screen.getByRole("button", { name: /^照片/ }));
     expect(await screen.findByRole("button", { name: "查看 photo:home.jpg" })).toBeTruthy();
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("names where results come from and narrows a search to one library", async () => {
+    const sea = asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" });
+    const beach = asset("photo:beach");
+    const fetchMock = serve(
+      (url) => {
+        if (!url.startsWith("/api/v1/photos/search?")) return undefined;
+        const library = new URL(url, "http://nas").searchParams.get("library");
+        const items = [sea, beach].filter((photo) => !library || photo.libraryId === library);
+        return json({ items, semantic: true, closest: items.length });
+      },
+      timeline(privateLibrary.id, () => [asset("photo:home")]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:home.jpg" });
+    await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "海边{Enter}");
+
+    expect(await screen.findByText("找到 2 张 · 我的图库和共享图库")).toBeTruthy();
+    const scope = screen.getByRole("radiogroup", { name: "搜索范围" });
+    expect(within(scope).getByRole("radio", { name: "全部", checked: true })).toBeTruthy();
+    // Results mixing libraries mark the shared photo, not the caller's own.
+    const tile = (name: string) => screen.getByRole("button", { name: `查看 ${name}` }).closest(".ph-tile")!;
+    expect(tile("photo:sea.jpg").querySelector(".ph-tile-source")?.textContent).toBe("共享");
+    expect(tile("photo:beach.jpg").querySelector(".ph-tile-source")).toBeNull();
+
+    await user.click(within(scope).getByRole("radio", { name: "共享" }));
+    expect(await screen.findByText("找到 1 张 · 共享图库")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E6%B5%B7%E8%BE%B9&limit=120&library=library%3Ashared", expect.anything());
+    expect(screen.queryByRole("button", { name: "查看 photo:beach.jpg" })).toBeNull();
+    expect(tile("photo:sea.jpg").querySelector(".ph-tile-source")).toBeNull();
+
+    // The choice holds for the next search.
+    const box = screen.getByRole("searchbox", { name: "搜索照片" });
+    await user.clear(box);
+    await user.type(box, "沙滩{Enter}");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/search?q=%E6%B2%99%E6%BB%A9&limit=120&library=library%3Ashared", expect.anything()));
+    await user.click(within(screen.getByRole("radiogroup", { name: "搜索范围" })).getByRole("radio", { name: "我的" }));
+    expect(await screen.findByText("找到 1 张 · 我的图库")).toBeTruthy();
   });
 
   it("browses a viewed member library read-only, searches it only from there and ends the viewing", async () => {
