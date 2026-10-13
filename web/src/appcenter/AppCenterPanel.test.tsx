@@ -114,6 +114,33 @@ describe("AppCenterPanel", () => {
     expect(container.querySelector(".ac-prose img")).toBeNull();
   });
 
+  it("shows notes written for A-NAS and keeps the manifest's own folded away", async () => {
+    serve(() => [app("immich", {
+      notes: "照片保存在**共享空间 › Gallery › immich**。\n\n## 手机备份\n\n服务器地址填 `http://<NAS 地址>:2283`。",
+      upstreamNotes: "## 授权的媒体文件和数据\n1. 点击应用右上角的设置图标。\n2. 在 Volumes 部分映射您的相册存储位置。",
+    }), app("memos", { notes: "默认账号 `admin`" })]);
+    const user = userEvent.setup();
+    const { container } = render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: "Immich，可安装" }));
+
+    const notes = screen.getByRole("region", { name: "使用须知" });
+    expect(await within(notes).findByText("共享空间 › Gallery › immich")).toHaveProperty("tagName", "STRONG");
+    // Note headings sit below the section's own h3.
+    expect(within(notes).getByRole("heading", { name: "手机备份" }).tagName).toBe("H4");
+    const upstream = notes.querySelector("details")!;
+    expect(upstream.open).toBe(false);
+    expect(within(upstream).getByText("上游原始说明")).toBeTruthy();
+    expect(within(upstream).getByText(/在 A-NAS 中不适用/)).toBeTruthy();
+    expect(within(upstream).getByText(/右上角的设置图标/)).toBeTruthy();
+    expect(within(notes).queryByText(/文件夹与端口以安装计划为准/)).toBeNull();
+
+    await user.click(container.querySelector<HTMLButtonElement>(".ac-back")!);
+    await user.click(await screen.findByRole("button", { name: "Memos，可安装" }));
+    const memosNotes = screen.getByRole("region", { name: "使用须知" });
+    expect(memosNotes.querySelector("details")).toBeNull();
+    expect(within(memosNotes).getByText("来自应用的上游清单；文件夹与端口以安装计划为准。")).toBeTruthy();
+  });
+
   it("follows an install from its plan through progress to opening the app", async () => {
     let memos = app("memos", { webPort: 5230, notes: "默认账号 `admin`" });
     const posts = serve(() => [memos], () => {

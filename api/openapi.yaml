@@ -2601,7 +2601,10 @@ components:
           description: Markdown from the vendored manifest.
         notes:
           type: string
-          description: Markdown advice from the manifest for first use, such as a default account; empty when it has none.
+          description: Markdown advice for first use, such as a default account; empty when there is none. Written for A-NAS where the manifest's own notes describe CasaOS.
+        upstreamNotes:
+          type: string
+          description: The manifest's own first-use notes, set only when notes replaces them.
         category:
           type: string
           description: A-NAS category; empty when the container agent predates A-NAS categories.
