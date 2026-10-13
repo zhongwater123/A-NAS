@@ -59,7 +59,9 @@ type Box struct {
 }
 
 // Gate tells background AI work whether it may start another item now, and
-// why not otherwise.
+// why not otherwise: "foreground" while someone uses the photo library,
+// "cpu_pressure", "io_pressure" or "memory_pressure" while the device's
+// other work waits on that resource, or "memory_low".
 type Gate interface {
 	Open(ctx context.Context) (open bool, reason string)
 }
@@ -143,7 +145,8 @@ func (p *aiProgress) get() (state, reason, model string) {
 
 // RunAI processes embedding and detection jobs through embedder until ctx
 // ends, whenever gate allows. An empty or closed queue is rechecked every idle
-// interval or as soon as a thumbnail adds work.
+// interval or as soon as a thumbnail adds work; work stopped by processor or
+// disk pressure looks again within seconds.
 func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle time.Duration, logError func(error)) {
 	for {
 		processed, err := s.ProcessAIJob(ctx, embedder, gate)
@@ -153,13 +156,32 @@ func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle 
 		if processed && err == nil {
 			continue
 		}
+		wait := idle
+		if state, reason, _ := s.ai.get(); state == AIPaused && pausedByPressure(reason) {
+			wait = min(wait, pressureRecheck)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.aiWake:
-		case <-time.After(idle):
+		case <-time.After(wait):
 		}
 	}
+}
+
+// pressureRecheck is how soon work stopped by processor or disk pressure
+// looks again. The kernel averages pressure over 10 seconds and updates it
+// every 2, and the gate waits for it to halve, so work resumes within seconds
+// of the pressure passing, not a minute later
+// (docs/investigations/2026-10-13-idle-detection-used-one-core.md).
+var pressureRecheck = 5 * time.Second
+
+// pausedByPressure reports whether work stopped because the device's other
+// work waits on the processor or the disk, which passes within seconds. Use of
+// the photo library and short memory keep it stopped longer, and a memory
+// pause has unloaded the models, so looking again often would reload them.
+func pausedByPressure(reason string) bool {
+	return reason == "cpu_pressure" || reason == "io_pressure"
 }
 
 // ProcessAIJob fetches one missing label text vector or runs one ready
@@ -286,10 +308,10 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, gate 
 	_ = input.Close()
 	switch {
 	case ctx.Err() != nil:
-		return false, s.releaseJob(context.WithoutCancel(ctx), job)
+		return false, s.returnJob(context.WithoutCancel(ctx), job)
 	case paused != "":
 		s.ai.set(AIPaused, paused, "")
-		err := s.releaseJob(ctx, job)
+		err := s.returnJob(ctx, job)
 		s.releaseModels(ctx, detector, paused)
 		return false, err
 	case errors.Is(err, ErrAIUnavailable):
@@ -450,6 +472,16 @@ func (s *Service) releaseJob(ctx context.Context, job claimedJob) error {
 	_, err := s.db.ExecContext(ctx,
 		"UPDATE jobs SET state = 'pending', attempts = attempts - 1, lease_until = NULL, not_before = ? WHERE object_id = ? AND derivation = ?",
 		formatTime(s.now().Add(aiRetryDelay)), job.objectID, job.derivation)
+	return err
+}
+
+// returnJob puts a claimed job back in its place in the queue without
+// spending its attempt, for work the gate or a shutdown stopped: it is the
+// first to run once work resumes.
+func (s *Service) returnJob(ctx context.Context, job claimedJob) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE jobs SET state = 'pending', attempts = attempts - 1, lease_until = NULL WHERE object_id = ? AND derivation = ?",
+		job.objectID, job.derivation)
 	return err
 }
 

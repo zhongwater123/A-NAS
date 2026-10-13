@@ -278,6 +278,49 @@ func TestProcessorPressureCancelsButKeepsTheDetector(t *testing.T) {
 	}
 }
 
+func TestWorkResumesWithinSecondsOfThePressurePassing(t *testing.T) {
+	defer photos.SetPressureRecheck(20 * time.Millisecond)()
+	service, _, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &switchGate{open: true}
+	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	importPhoto(t, service, alice, private.ID, "", "b.png", encodePNG(2))
+	processAll(t, service)
+	var once sync.Once
+	worker.wait = func(ctx context.Context, detection int) {
+		once.Do(func() {
+			// Another service holds the processor for a moment.
+			gate.set(false, "cpu_pressure")
+			<-ctx.Done()
+			time.AfterFunc(100*time.Millisecond, func() { gate.set(true, "") })
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		// An hour between looks at an empty queue, as long as never.
+		service.RunAI(ctx, worker, gate, time.Hour, func(err error) { t.Error(err) })
+	}()
+	defer func() { cancel(); <-stopped }()
+
+	db := catalogDB(t, root)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var detected int
+		if err := db.QueryRow("SELECT COUNT(*) FROM detections").Scan(&detected); err != nil {
+			t.Fatal(err)
+		}
+		if detected == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of 2 photos detected 10 s after a brief pressure; work must resume soon after it passes", detected)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestMemoryPressureEndsTheWholeWorker(t *testing.T) {
 	service, _, _ := newService(t)
 	private, _ := libraries(t, service, alice)
