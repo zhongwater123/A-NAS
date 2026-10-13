@@ -14,9 +14,12 @@ class FakeBuffer extends EventTarget {
   end = 0;
   start = 0;
   fail?: Error;
+  // quota is how many seconds the browser holds at most.
+  quota = Infinity;
   get buffered() { return ranges(this.end > this.start ? [[this.start, this.end]] : []); }
   appendBuffer() {
     if (this.fail) throw this.fail;
+    if (this.end - this.start >= this.quota) throw new DOMException("full", "QuotaExceededError");
     this.updating = true;
     queueMicrotask(() => { this.end += chunkSeconds; this.updating = false; this.dispatchEvent(new Event("updateend")); });
   }
@@ -83,6 +86,25 @@ describe("StreamFeed", () => {
     video.currentTime = 16;
     await vi.advanceTimersByTimeAsync(2000);
     expect(FakeSource.last.buffer.end).toBe(50);
+    feed.close();
+  });
+
+  it("waits while the browser's buffer is full, however long playback is paused", async () => {
+    vi.useFakeTimers();
+    const video = { currentTime: 0 } as HTMLVideoElement;
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, body: stream(100).body })));
+    const onError = vi.fn();
+    const feed = new StreamFeed("/stream", "video/mp4", () => video, { ahead: 30, onError, onFallback: vi.fn() });
+    FakeSource.last.buffer.quota = 20;
+    FakeSource.last.open();
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(FakeSource.last.buffer.end).toBe(20);
+    expect(onError).not.toHaveBeenCalled();
+    // Playing on frees what is ten seconds behind, and the feed reads again.
+    video.currentTime = 15;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(FakeSource.last.buffer.end).toBeGreaterThan(20);
+    expect(onError).not.toHaveBeenCalled();
     feed.close();
   });
 

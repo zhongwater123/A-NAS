@@ -131,7 +131,7 @@ export class StreamFeed {
   }
 
   private async append(buffer: SourceBuffer, chunk: Uint8Array) {
-    for (let attempt = 0; ; attempt++) {
+    for (;;) {
       try {
         await settled(buffer);
         buffer.appendBuffer(chunk as BufferSource);
@@ -139,9 +139,10 @@ export class StreamFeed {
         this.appended = true;
         return;
       } catch (caught) {
-        // The buffer is full: drop more of what has played, or wait for
-        // playback to use some of what is ahead.
-        if (!(caught instanceof DOMException && caught.name === "QuotaExceededError") || attempt >= 60 || this.closed) throw caught;
+        // The browser's buffer is full, which a high-bitrate stream reaches
+        // before thirty seconds: like a full read-ahead, wait for playback
+        // to use some, however long it is paused, dropping what has played.
+        if (!(caught instanceof DOMException && caught.name === "QuotaExceededError") || this.closed) throw caught;
         await this.trim(buffer, 10);
         await sleep(500);
       }
