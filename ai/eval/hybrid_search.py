@@ -7,7 +7,7 @@ eval.detect cached, and compares ways of ranking:
 - the COCO test half as a family-sized library: each vocabulary label with COCO
   truth and enough positives is typed as a query, the way a user would
   ("task: search result | query: 手机"); the query maps to detector classes
-  through the Chinese table (objects365_zh.json). Recall within the top R
+  through the Chinese table (internal/photos/objects/v1.json). Recall within the top R
   (R = the label's positives) and average precision, overall and by how much
   of the frame the label's largest instance covers; for the first tier, its
   precision and recall, and how many photos it still shows when the library
@@ -40,8 +40,7 @@ from eval import datasets
 from eval.detect import load as load_detections
 from eval.embed import MANIFEST, QUERY_PROMPT, Cache, load_vectors
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-TABLE = os.path.join(HERE, "objects365_zh.json")
+TABLE = os.path.join(datasets.REPO, "internal", "photos", "objects", "v1.json")
 MIN_POSITIVES = 20
 GAP = 0.04  # internal/photos/search.go closestGap
 SIZES = (("<1%", 0.0, 0.01), ("1-5%", 0.01, 0.05), ("5-20%", 0.05, 0.2), (">=20%", 0.2, 1.01))

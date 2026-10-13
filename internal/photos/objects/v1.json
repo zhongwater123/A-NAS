@@ -1,5 +1,5 @@
 {
- "about": "Chinese names for the 365 Objects365 classes of the D-FINE detector (ids as in its config.json) and the broader words that cover several of them. Draft for the detector study (docs/research/photo-ai-object-detection.md): a query maps to the classes whose name, synonym or group word it contains, the longest match first. Entries marked guess are not certain from the English name. Words in ignore are skipped as a whole, so that 马路 does not name a horse.",
+ "about": "Chinese names for the 365 Objects365 classes of the D-FINE detector (ids as in its output), the broader words that cover several of them, and words that are skipped as a whole so that 马路 does not name a horse. A query names the classes whose name, synonym or group word it contains, the longest word first (internal/photos/objects, docs/architecture/photo-objects.md). Entries with a note are not certain from the English name and stay disabled until checked.",
  "classes": [
   {"id": 1, "en": "Person", "zh": "人", "synonyms": ["人物", "行人", "人们"]},
   {"id": 2, "en": "Sneakers", "zh": "运动鞋", "synonyms": ["球鞋", "跑鞋"]},
@@ -62,7 +62,7 @@
   {"id": 59, "en": "Motorcycle", "zh": "摩托车", "synonyms": ["机车"]},
   {"id": 60, "en": "Guitar", "zh": "吉他", "synonyms": []},
   {"id": 61, "en": "Carpet", "zh": "地毯", "synonyms": []},
-  {"id": 62, "en": "Cell Phone", "zh": "手机", "synonyms": ["智能手机", "移动电话"]},
+  {"id": 62, "en": "Cell Phone", "zh": "手机", "synonyms": ["智能手机", "移动电话", "苹果手机", "iPhone"]},
   {"id": 63, "en": "Bread", "zh": "面包", "synonyms": []},
   {"id": 64, "en": "Camera", "zh": "相机", "synonyms": ["照相机", "单反"]},
   {"id": 65, "en": "Canned", "zh": "罐头", "synonyms": ["易拉罐"]},
@@ -74,7 +74,7 @@
   {"id": 71, "en": "Stuffed Toy", "zh": "毛绒玩具", "synonyms": ["玩偶", "公仔", "泰迪熊"]},
   {"id": 72, "en": "Candle", "zh": "蜡烛", "synonyms": []},
   {"id": 73, "en": "Sailboat", "zh": "帆船", "synonyms": []},
-  {"id": 74, "en": "Laptop", "zh": "笔记本电脑", "synonyms": ["笔记本", "手提电脑"]},
+  {"id": 74, "en": "Laptop", "zh": "笔记本电脑", "synonyms": ["笔记本", "手提电脑", "苹果电脑", "MacBook"]},
   {"id": 75, "en": "Awning", "zh": "遮阳篷", "synonyms": ["雨棚"]},
   {"id": 76, "en": "Bed", "zh": "床", "synonyms": []},
   {"id": 77, "en": "Faucet", "zh": "水龙头", "synonyms": []},

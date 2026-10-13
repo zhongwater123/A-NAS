@@ -1,0 +1,3873 @@
+[
+ {
+  "query": "人物",
+  "mentions": [
+   {
+    "word": "人物",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "婴儿",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "儿童",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "人群",
+  "mentions": [
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "合影",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "自拍",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "老人",
+  "mentions": [
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "动物",
+  "mentions": [
+   {
+    "word": "动物",
+    "classes": [
+     57,
+     79,
+     93,
+     97,
+     100,
+     104,
+     137,
+     140,
+     145,
+     165,
+     179,
+     181,
+     222,
+     241,
+     242,
+     258,
+     263,
+     274,
+     296,
+     301,
+     308,
+     319,
+     320,
+     321,
+     322,
+     324,
+     325,
+     327,
+     331,
+     342,
+     343,
+     345
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "宠物",
+  "mentions": [
+   {
+    "word": "宠物",
+    "classes": [
+     93,
+     140,
+     274,
+     320,
+     343
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "猫",
+  "mentions": [
+   {
+    "word": "猫",
+    "classes": [
+     140
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "狗",
+  "mentions": [
+   {
+    "word": "狗",
+    "classes": [
+     93
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鸟",
+  "mentions": [
+   {
+    "word": "鸟",
+    "classes": [
+     57,
+     137,
+     165,
+     242,
+     258,
+     263,
+     320
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鱼",
+  "mentions": [
+   {
+    "word": "鱼",
+    "classes": [
+     104,
+     274
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "金鱼",
+  "mentions": [
+   {
+    "word": "金鱼",
+    "classes": [
+     274
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "马",
+  "mentions": [
+   {
+    "word": "马",
+    "classes": [
+     79
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "羊",
+  "mentions": [
+   {
+    "word": "羊",
+    "classes": [
+     100
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "山羊",
+  "mentions": [
+   {
+    "word": "羊",
+    "classes": [
+     100
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "牛",
+  "mentions": [
+   {
+    "word": "牛",
+    "classes": [
+     97
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "大象",
+  "mentions": [
+   {
+    "word": "大象",
+    "classes": [
+     145
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "熊",
+  "mentions": [
+   {
+    "word": "熊",
+    "classes": [
+     296
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "斑马",
+  "mentions": [
+   {
+    "word": "斑马",
+    "classes": [
+     179
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "长颈鹿",
+  "mentions": [
+   {
+    "word": "长颈鹿",
+    "classes": [
+     181
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "兔子",
+  "mentions": [
+   {
+    "word": "兔子",
+    "classes": [
+     343
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "仓鼠",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "鸭子",
+  "mentions": [
+   {
+    "word": "鸭子",
+    "classes": [
+     137
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鸡",
+  "mentions": [
+   {
+    "word": "鸡",
+    "classes": [
+     222
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鹅",
+  "mentions": [
+   {
+    "word": "鹅",
+    "classes": [
+     242
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "天鹅",
+  "mentions": [
+   {
+    "word": "天鹅",
+    "classes": [
+     263
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鹦鹉",
+  "mentions": [
+   {
+    "word": "鹦鹉",
+    "classes": [
+     320
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鹰",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "猫头鹰",
+  "mentions": [
+   {
+    "word": "猫",
+    "classes": [
+     140
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "企鹅",
+  "mentions": [
+   {
+    "word": "企鹅",
+    "classes": [
+     258
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "蝴蝶",
+  "mentions": [
+   {
+    "word": "蝴蝶",
+    "classes": [
+     322
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "昆虫",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "蜘蛛",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "熊猫",
+  "mentions": [
+   {
+    "word": "熊",
+    "classes": [
+     296
+    ]
+   },
+   {
+    "word": "猫",
+    "classes": [
+     140
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "猴子",
+  "mentions": [
+   {
+    "word": "猴子",
+    "classes": [
+     342
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "老虎",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "狮子",
+  "mentions": [
+   {
+    "word": "狮子",
+    "classes": [
+     325
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "狐狸",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "鹿",
+  "mentions": [
+   {
+    "word": "鹿",
+    "classes": [
+     241
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "骆驼",
+  "mentions": [
+   {
+    "word": "骆驼",
+    "classes": [
+     308
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "袋鼠",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "猪",
+  "mentions": [
+   {
+    "word": "猪",
+    "classes": [
+     301
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "松鼠",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "乌龟",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "蛇",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "蜥蜴",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "青蛙",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "海豚",
+  "mentions": [
+   {
+    "word": "海豚",
+    "classes": [
+     327
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鲸鱼",
+  "mentions": [
+   {
+    "word": "鱼",
+    "classes": [
+     104,
+     274
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "鲨鱼",
+  "mentions": [
+   {
+    "word": "鱼",
+    "classes": [
+     104,
+     274
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "水母",
+  "mentions": [
+   {
+    "word": "水母",
+    "classes": [
+     331
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "螃蟹",
+  "mentions": [
+   {
+    "word": "螃蟹",
+    "classes": [
+     312
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "海豹",
+  "mentions": [
+   {
+    "word": "海豹",
+    "classes": [
+     321
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "汽车",
+  "mentions": [
+   {
+    "word": "汽车",
+    "classes": [
+     6,
+     35,
+     50,
+     88,
+     127,
+     309
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "自行车",
+  "mentions": [
+   {
+    "word": "自行车",
+    "classes": [
+     47
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "摩托车",
+  "mentions": [
+   {
+    "word": "摩托车",
+    "classes": [
+     59
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "电动车",
+  "mentions": [
+   {
+    "word": "动车",
+    "classes": [
+     117
+    ]
+   }
+  ],
+  "coverage": 0.666667
+ },
+ {
+  "query": "公交车",
+  "mentions": [
+   {
+    "word": "公交车",
+    "classes": [
+     56
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "卡车",
+  "mentions": [
+   {
+    "word": "卡车",
+    "classes": [
+     66
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "面包车",
+  "mentions": [
+   {
+    "word": "面包车",
+    "classes": [
+     50
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "火车",
+  "mentions": [
+   {
+    "word": "火车",
+    "classes": [
+     117
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "有轨电车",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "飞机",
+  "mentions": [
+   {
+    "word": "飞机",
+    "classes": [
+     115
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "直升机",
+  "mentions": [
+   {
+    "word": "直升机",
+    "classes": [
+     264
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "船",
+  "mentions": [
+   {
+    "word": "船",
+    "classes": [
+     22,
+     73,
+     212
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "帆船",
+  "mentions": [
+   {
+    "word": "帆船",
+    "classes": [
+     73
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "皮划艇",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "出租车",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "车牌",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "轮椅",
+  "mentions": [
+   {
+    "word": "轮椅",
+    "classes": [
+     193
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "婴儿车",
+  "mentions": [
+   {
+    "word": "婴儿车",
+    "classes": [
+     131
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "美食",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "披萨",
+  "mentions": [
+   {
+    "word": "披萨",
+    "classes": [
+     144
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "蛋糕",
+  "mentions": [
+   {
+    "word": "蛋糕",
+    "classes": [
+     98
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "香蕉",
+  "mentions": [
+   {
+    "word": "香蕉",
+    "classes": [
+     113
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "苹果",
+  "mentions": [
+   {
+    "word": "苹果",
+    "classes": [
+     83
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "橙子",
+  "mentions": [
+   {
+    "word": "橙子",
+    "classes": [
+     105
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "三明治",
+  "mentions": [
+   {
+    "word": "三明治",
+    "classes": [
+     266
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "热狗",
+  "mentions": [
+   {
+    "word": "热狗",
+    "classes": [
+     235
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "甜甜圈",
+  "mentions": [
+   {
+    "word": "甜甜圈",
+    "classes": [
+     151
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "西兰花",
+  "mentions": [
+   {
+    "word": "西兰花",
+    "classes": [
+     142
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "胡萝卜",
+  "mentions": [
+   {
+    "word": "胡萝卜",
+    "classes": [
+     153
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "西红柿",
+  "mentions": [
+   {
+    "word": "西红柿",
+    "classes": [
+     108
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "草莓",
+  "mentions": [
+   {
+    "word": "草莓",
+    "classes": [
+     156
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "西瓜",
+  "mentions": [
+   {
+    "word": "西瓜",
+    "classes": [
+     224
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "葡萄",
+  "mentions": [
+   {
+    "word": "葡萄",
+    "classes": [
+     180
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "菠萝",
+  "mentions": [
+   {
+    "word": "菠萝",
+    "classes": [
+     247
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "面条",
+  "mentions": [
+   {
+    "word": "面条",
+    "classes": [
+     351
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "米饭",
+  "mentions": [
+   {
+    "word": "米饭",
+    "classes": [
+     238
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "饺子",
+  "mentions": [
+   {
+    "word": "饺子",
+    "classes": [
+     353
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "火锅",
+  "mentions": [
+   {
+    "word": "锅",
+    "classes": [
+     96
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "烧烤",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "寿司",
+  "mentions": [
+   {
+    "word": "寿司",
+    "classes": [
+     280
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "汉堡",
+  "mentions": [
+   {
+    "word": "汉堡",
+    "classes": [
+     201
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "薯条",
+  "mentions": [
+   {
+    "word": "薯条",
+    "classes": [
+     231
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "面包",
+  "mentions": [
+   {
+    "word": "面包",
+    "classes": [
+     63
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "饼干",
+  "mentions": [
+   {
+    "word": "饼干",
+    "classes": [
+     175
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "糕点",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "奶酪",
+  "mentions": [
+   {
+    "word": "奶酪",
+    "classes": [
+     281
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "巧克力",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "糖果",
+  "mentions": [
+   {
+    "word": "糖果",
+    "classes": [
+     188
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鸡蛋",
+  "mentions": [
+   {
+    "word": "鸡蛋",
+    "classes": [
+     186
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "水果",
+  "mentions": [
+   {
+    "word": "水果",
+    "classes": [
+     83,
+     105,
+     113,
+     136,
+     156,
+     180,
+     199,
+     224,
+     237,
+     247,
+     251,
+     272,
+     275,
+     283,
+     289,
+     290,
+     299,
+     310,
+     318,
+     334,
+     360
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "蔬菜",
+  "mentions": [
+   {
+    "word": "蔬菜",
+    "classes": [
+     108,
+     112,
+     118,
+     142,
+     153,
+     159,
+     182,
+     196,
+     217,
+     218,
+     234,
+     260,
+     261,
+     262,
+     265,
+     292,
+     297,
+     337,
+     346,
+     348,
+     361
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "海鲜",
+  "mentions": [
+   {
+    "word": "海鲜",
+    "classes": [
+     279,
+     312,
+     350,
+     354,
+     359
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "沙拉",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "甜点",
+  "mentions": [
+   {
+    "word": "甜点",
+    "classes": [
+     98,
+     129,
+     151,
+     172,
+     175,
+     188,
+     228,
+     330
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "冰淇淋",
+  "mentions": [
+   {
+    "word": "冰淇淋",
+    "classes": [
+     228
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "咖啡",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "茶",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "果汁",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "鸡尾酒",
+  "mentions": [
+   {
+    "word": "鸡",
+    "classes": [
+     222
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "葡萄酒",
+  "mentions": [
+   {
+    "word": "葡萄",
+    "classes": [
+     180
+    ]
+   }
+  ],
+  "coverage": 0.666667
+ },
+ {
+  "query": "啤酒",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "饮料",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "月饼",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "粽子",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "花",
+  "mentions": [
+   {
+    "word": "花",
+    "classes": [
+     24
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "玫瑰",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "向日葵",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "樱花",
+  "mentions": [
+   {
+    "word": "花",
+    "classes": [
+     24
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "树",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "盆栽",
+  "mentions": [
+   {
+    "word": "盆栽",
+    "classes": [
+     26
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "树叶",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "仙人掌",
+  "mentions": [
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "蘑菇",
+  "mentions": [
+   {
+    "word": "蘑菇",
+    "classes": [
+     292
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "竹子",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "天空",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "云",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "日落",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "彩虹",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "月亮",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "星空",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "雪",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "冰",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "大海",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "沙滩",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "沙子",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "岩石",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "山",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "湖",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "河",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "瀑布",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "池塘",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "森林",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "草地",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "田野",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "沙漠",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "建筑",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "房子",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "高楼",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "桥",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "塔",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "寺庙",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "教堂",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "城堡",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "雕塑",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "纪念碑",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "喷泉",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "灯塔",
+  "mentions": [
+   {
+    "word": "灯",
+    "classes": [
+     7
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "道路",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "街道",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "城市",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "乡村",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "公园",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "花园",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "游乐场",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "游乐园",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "动物园",
+  "mentions": [
+   {
+    "word": "动物",
+    "classes": [
+     57,
+     79,
+     93,
+     97,
+     100,
+     104,
+     137,
+     140,
+     145,
+     165,
+     179,
+     181,
+     222,
+     241,
+     242,
+     258,
+     263,
+     274,
+     296,
+     301,
+     308,
+     319,
+     320,
+     321,
+     322,
+     324,
+     325,
+     327,
+     331,
+     342,
+     343,
+     345
+    ]
+   }
+  ],
+  "coverage": 0.666667
+ },
+ {
+  "query": "水族馆",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "博物馆",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "体育场",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "游泳池",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "机场",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "火车站",
+  "mentions": [
+   {
+    "word": "火车",
+    "classes": [
+     117
+    ]
+   }
+  ],
+  "coverage": 0.666667
+ },
+ {
+  "query": "餐厅",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "咖啡馆",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "超市",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "商场",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "厨房",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "客厅",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "卧室",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "卫生间",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "办公室",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "教室",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "图书馆",
+  "mentions": [
+   {
+    "word": "书",
+    "classes": [
+     19
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "楼梯",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "栅栏",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "帐篷",
+  "mentions": [
+   {
+    "word": "帐篷",
+    "classes": [
+     78
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "3D 打印机",
+  "mentions": [
+   {
+    "word": "打印机",
+    "classes": [
+     223
+    ]
+   }
+  ],
+  "coverage": 0.6
+ },
+ {
+  "query": "电脑",
+  "mentions": [
+   {
+    "word": "电脑",
+    "classes": [
+     74,
+     160
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "笔记本电脑",
+  "mentions": [
+   {
+    "word": "笔记本电脑",
+    "classes": [
+     74
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "显示器",
+  "mentions": [
+   {
+    "word": "显示器",
+    "classes": [
+     38
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "键盘",
+  "mentions": [
+   {
+    "word": "键盘",
+    "classes": [
+     107
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鼠标",
+  "mentions": [
+   {
+    "word": "鼠标",
+    "classes": [
+     116
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "手机",
+  "mentions": [
+   {
+    "word": "手机",
+    "classes": [
+     62
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "平板电脑",
+  "mentions": [
+   {
+    "word": "平板电脑",
+    "classes": [
+     244
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "电视",
+  "mentions": [
+   {
+    "word": "电视",
+    "classes": [
+     38
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "遥控器",
+  "mentions": [
+   {
+    "word": "遥控器",
+    "classes": [
+     133
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "相机",
+  "mentions": [
+   {
+    "word": "相机",
+    "classes": [
+     64
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "耳机",
+  "mentions": [
+   {
+    "word": "耳机",
+    "classes": [
+     126,
+     208
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "音箱",
+  "mentions": [
+   {
+    "word": "音箱",
+    "classes": [
+     42
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "麦克风",
+  "mentions": [
+   {
+    "word": "麦克风",
+    "classes": [
+     32
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "手表",
+  "mentions": [
+   {
+    "word": "手表",
+    "classes": [
+     43
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "时钟",
+  "mentions": [
+   {
+    "word": "时钟",
+    "classes": [
+     95
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "书",
+  "mentions": [
+   {
+    "word": "书",
+    "classes": [
+     19
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "笔",
+  "mentions": [
+   {
+    "word": "笔",
+    "classes": [
+     55
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "纸",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "箱子",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "手提包",
+  "mentions": [
+   {
+    "word": "手提包",
+    "classes": [
+     14
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "背包",
+  "mentions": [
+   {
+    "word": "背包",
+    "classes": [
+     39
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "行李箱",
+  "mentions": [
+   {
+    "word": "行李箱",
+    "classes": [
+     121
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "雨伞",
+  "mentions": [
+   {
+    "word": "雨伞",
+    "classes": [
+     40
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "瓶子",
+  "mentions": [
+   {
+    "word": "瓶子",
+    "classes": [
+     9
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "杯子",
+  "mentions": [
+   {
+    "word": "杯子",
+    "classes": [
+     11
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "酒杯",
+  "mentions": [
+   {
+    "word": "酒杯",
+    "classes": [
+     36
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "碗",
+  "mentions": [
+   {
+    "word": "碗",
+    "classes": [
+     27
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "盘子",
+  "mentions": [
+   {
+    "word": "盘子",
+    "classes": [
+     16
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "茶壶",
+  "mentions": [
+   {
+    "word": "茶壶",
+    "classes": [
+     123
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "水壶",
+  "mentions": [
+   {
+    "word": "水壶",
+    "classes": [
+     141
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "眼镜",
+  "mentions": [
+   {
+    "word": "眼镜",
+    "classes": [
+     8
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "墨镜",
+  "mentions": [
+   {
+    "word": "墨镜",
+    "classes": [
+     8
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "帽子",
+  "mentions": [
+   {
+    "word": "帽子",
+    "classes": [
+     5
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "头盔",
+  "mentions": [
+   {
+    "word": "头盔",
+    "classes": [
+     18
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鞋",
+  "mentions": [
+   {
+    "word": "鞋",
+    "classes": [
+     4
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "连衣裙",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "领带",
+  "mentions": [
+   {
+    "word": "领带",
+    "classes": [
+     44
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "泳衣",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "手套",
+  "mentions": [
+   {
+    "word": "手套",
+    "classes": [
+     20
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "围巾",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "首饰",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "玩具",
+  "mentions": [
+   {
+    "word": "玩具",
+    "classes": [
+     71
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "毛绒玩具",
+  "mentions": [
+   {
+    "word": "毛绒玩具",
+    "classes": [
+     71
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "娃娃",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "乐高",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "气球",
+  "mentions": [
+   {
+    "word": "气球",
+    "classes": [
+     91
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "风筝",
+  "mentions": [
+   {
+    "word": "风筝",
+    "classes": [
+     155
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "礼物",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "圣诞树",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "灯笼",
+  "mentions": [
+   {
+    "word": "灯笼",
+    "classes": [
+     109
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "蜡烛",
+  "mentions": [
+   {
+    "word": "蜡烛",
+    "classes": [
+     72
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "旗帜",
+  "mentions": [
+   {
+    "word": "旗帜",
+    "classes": [
+     28
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "吉他",
+  "mentions": [
+   {
+    "word": "吉他",
+    "classes": [
+     60
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "钢琴",
+  "mentions": [
+   {
+    "word": "钢琴",
+    "classes": [
+     143
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "小提琴",
+  "mentions": [
+   {
+    "word": "小提琴",
+    "classes": [
+     185
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "鼓",
+  "mentions": [
+   {
+    "word": "鼓",
+    "classes": [
+     54
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "乐器",
+  "mentions": [
+   {
+    "word": "乐器",
+    "classes": [
+     54,
+     60,
+     68,
+     143,
+     185,
+     225,
+     230,
+     246,
+     256,
+     271,
+     295,
+     316,
+     340
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "剪刀",
+  "mentions": [
+   {
+    "word": "剪刀",
+    "classes": [
+     170
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "工具",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "梯子",
+  "mentions": [
+   {
+    "word": "梯子",
+    "classes": [
+     173
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "缝纫机",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "打印机",
+  "mentions": [
+   {
+    "word": "打印机",
+    "classes": [
+     223
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "机器人",
+  "mentions": [
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "冰箱",
+  "mentions": [
+   {
+    "word": "冰箱",
+    "classes": [
+     134
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "微波炉",
+  "mentions": [
+   {
+    "word": "微波炉",
+    "classes": [
+     164
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "烤箱",
+  "mentions": [
+   {
+    "word": "烤箱",
+    "classes": [
+     135
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "灶台",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "洗衣机",
+  "mentions": [
+   {
+    "word": "洗衣机",
+    "classes": [
+     221
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "电风扇",
+  "mentions": [
+   {
+    "word": "电风扇",
+    "classes": [
+     111
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "沙发",
+  "mentions": [
+   {
+    "word": "沙发",
+    "classes": [
+     51
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "床",
+  "mentions": [
+   {
+    "word": "床",
+    "classes": [
+     76
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "枕头",
+  "mentions": [
+   {
+    "word": "枕头",
+    "classes": [
+     29
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "椅子",
+  "mentions": [
+   {
+    "word": "椅子",
+    "classes": [
+     3
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "桌子",
+  "mentions": [
+   {
+    "word": "桌子",
+    "classes": [
+     10,
+     99,
+     168,
+     169
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "书桌",
+  "mentions": [
+   {
+    "word": "书桌",
+    "classes": [
+     10
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "架子",
+  "mentions": [
+   {
+    "word": "架子",
+    "classes": [
+     13
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "灯",
+  "mentions": [
+   {
+    "word": "灯",
+    "classes": [
+     7
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "花瓶",
+  "mentions": [
+   {
+    "word": "花瓶",
+    "classes": [
+     31
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "画",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "水槽",
+  "mentions": [
+   {
+    "word": "水槽",
+    "classes": [
+     82
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "马桶",
+  "mentions": [
+   {
+    "word": "马桶",
+    "classes": [
+     154
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "浴缸",
+  "mentions": [
+   {
+    "word": "浴缸",
+    "classes": [
+     192
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "镜子",
+  "mentions": [
+   {
+    "word": "镜子",
+    "classes": [
+     80
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "窗户",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "门",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "窗帘",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "长椅",
+  "mentions": [
+   {
+    "word": "长椅",
+    "classes": [
+     25
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "红绿灯",
+  "mentions": [
+   {
+    "word": "红绿灯",
+    "classes": [
+     41
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "交通标志",
+  "mentions": [
+   {
+    "word": "交通标志",
+    "classes": [
+     90
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "滑板",
+  "mentions": [
+   {
+    "word": "滑板",
+    "classes": [
+     146
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "冲浪板",
+  "mentions": [
+   {
+    "word": "冲浪板",
+    "classes": [
+     147
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "球",
+  "mentions": [
+   {
+    "word": "球",
+    "classes": [
+     119,
+     157,
+     166,
+     178,
+     207,
+     211,
+     240,
+     248,
+     365
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "硬币",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "纸币",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "无人机",
+  "mentions": [
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "文字",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "文档",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "票据",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "截图",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "证件",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "白板",
+  "mentions": [
+   {
+    "word": "白板",
+    "classes": [
+     102
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "海报",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "菜单",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "地图",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "手写",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "二维码",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "图表",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "票",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "生日",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "婚礼",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "聚会",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "毕业",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "圣诞节",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "春节",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "烟花",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "游泳",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "滑雪",
+  "mentions": [
+   {
+    "word": "滑雪",
+    "classes": [
+     120,
+     149,
+     174
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "单板滑雪",
+  "mentions": [
+   {
+    "word": "单板",
+    "classes": [
+     174
+    ]
+   },
+   {
+    "word": "滑雪",
+    "classes": [
+     120,
+     149,
+     174
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "网球",
+  "mentions": [
+   {
+    "word": "网球",
+    "classes": [
+     205,
+     211
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "棒球",
+  "mentions": [
+   {
+    "word": "棒球",
+    "classes": [
+     114,
+     138,
+     166
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "飞盘",
+  "mentions": [
+   {
+    "word": "飞盘",
+    "classes": [
+     220
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "足球",
+  "mentions": [
+   {
+    "word": "足球",
+    "classes": [
+     119
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "篮球",
+  "mentions": [
+   {
+    "word": "篮球",
+    "classes": [
+     178
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "羽毛球",
+  "mentions": [
+   {
+    "word": "球",
+    "classes": [
+     119,
+     157,
+     166,
+     178,
+     207,
+     211,
+     240,
+     248,
+     365
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "乒乓球",
+  "mentions": [
+   {
+    "word": "乒乓球",
+    "classes": [
+     365
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "跑步",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "骑行",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "徒步",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "露营",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "钓鱼",
+  "mentions": [
+   {
+    "word": "鱼",
+    "classes": [
+     104,
+     274
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "做饭",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "吃饭",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "阅读",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "瑜伽",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "跳舞",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "拳击",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "演唱会",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "睡觉",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "桌上的手机",
+  "mentions": [
+   {
+    "word": "手机",
+    "classes": [
+     62
+    ]
+   }
+  ],
+  "coverage": 0.4
+ },
+ {
+  "query": "海边的狗",
+  "mentions": [
+   {
+    "word": "狗",
+    "classes": [
+     93
+    ]
+   }
+  ],
+  "coverage": 0.25
+ },
+ {
+  "query": "生日蛋糕和蜡烛",
+  "mentions": [
+   {
+    "word": "生日蛋糕",
+    "classes": [
+     98
+    ]
+   },
+   {
+    "word": "蜡烛",
+    "classes": [
+     72
+    ]
+   }
+  ],
+  "coverage": 0.857143
+ },
+ {
+  "query": "一碗面条",
+  "mentions": [
+   {
+    "word": "碗",
+    "classes": [
+     27
+    ]
+   },
+   {
+    "word": "面条",
+    "classes": [
+     351
+    ]
+   }
+  ],
+  "coverage": 0.75
+ },
+ {
+  "query": "派对上的气球",
+  "mentions": [
+   {
+    "word": "气球",
+    "classes": [
+     91
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "马路上的车",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "热狗和薯条",
+  "mentions": [
+   {
+    "word": "热狗",
+    "classes": [
+     235
+    ]
+   },
+   {
+    "word": "薯条",
+    "classes": [
+     231
+    ]
+   }
+  ],
+  "coverage": 0.8
+ },
+ {
+  "query": "两只猫在沙发上",
+  "mentions": [
+   {
+    "word": "猫",
+    "classes": [
+     140
+    ]
+   },
+   {
+    "word": "沙发",
+    "classes": [
+     51
+    ]
+   }
+  ],
+  "coverage": 0.428571
+ },
+ {
+  "query": "孩子在滑梯上玩",
+  "mentions": [
+   {
+    "word": "滑梯",
+    "classes": [
+     215
+    ]
+   }
+  ],
+  "coverage": 0.285714
+ },
+ {
+  "query": "厨房里的电饭煲",
+  "mentions": [
+   {
+    "word": "电饭煲",
+    "classes": [
+     315
+    ]
+   }
+  ],
+  "coverage": 0.428571
+ },
+ {
+  "query": "包子和饺子",
+  "mentions": [
+   {
+    "word": "包子",
+    "classes": [
+     338
+    ]
+   },
+   {
+    "word": "饺子",
+    "classes": [
+     353
+    ]
+   }
+  ],
+  "coverage": 0.8
+ },
+ {
+  "query": "阳台上的盆栽",
+  "mentions": [
+   {
+    "word": "盆栽",
+    "classes": [
+     26
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "穿运动鞋的人",
+  "mentions": [
+   {
+    "word": "运动鞋",
+    "classes": [
+     2
+    ]
+   },
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.666667
+ },
+ {
+  "query": "红色的杯子",
+  "mentions": [
+   {
+    "word": "杯子",
+    "classes": [
+     11
+    ]
+   }
+  ],
+  "coverage": 0.4
+ },
+ {
+  "query": "笔记本电脑和鼠标",
+  "mentions": [
+   {
+    "word": "笔记本电脑",
+    "classes": [
+     74
+    ]
+   },
+   {
+    "word": "鼠标",
+    "classes": [
+     116
+    ]
+   }
+  ],
+  "coverage": 0.875
+ },
+ {
+  "query": "小狗在草地上跑",
+  "mentions": [
+   {
+    "word": "小狗",
+    "classes": [
+     93
+    ]
+   }
+  ],
+  "coverage": 0.285714
+ },
+ {
+  "query": "爸爸抱着宝宝",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "去年夏天在海边",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "停车场里的汽车",
+  "mentions": [
+   {
+    "word": "汽车",
+    "classes": [
+     6,
+     35,
+     50,
+     88,
+     127,
+     309
+    ]
+   }
+  ],
+  "coverage": 0.285714
+ },
+ {
+  "query": "鸟在树上",
+  "mentions": [
+   {
+    "word": "鸟",
+    "classes": [
+     57,
+     137,
+     165,
+     242,
+     258,
+     263,
+     320
+    ]
+   }
+  ],
+  "coverage": 0.25
+ },
+ {
+  "query": "一群鸭子在水里",
+  "mentions": [
+   {
+    "word": "鸭子",
+    "classes": [
+     137
+    ]
+   }
+  ],
+  "coverage": 0.285714
+ },
+ {
+  "query": "冰箱里的水果",
+  "mentions": [
+   {
+    "word": "冰箱",
+    "classes": [
+     134
+    ]
+   },
+   {
+    "word": "水果",
+    "classes": [
+     83,
+     105,
+     113,
+     136,
+     156,
+     180,
+     199,
+     224,
+     237,
+     247,
+     251,
+     272,
+     275,
+     283,
+     289,
+     290,
+     299,
+     310,
+     318,
+     334,
+     360
+    ]
+   }
+  ],
+  "coverage": 0.666667
+ },
+ {
+  "query": "放在床头柜上的台灯",
+  "mentions": [
+   {
+    "word": "床头柜",
+    "classes": [
+     122
+    ]
+   },
+   {
+    "word": "台灯",
+    "classes": [
+     7
+    ]
+   }
+  ],
+  "coverage": 0.555556
+ },
+ {
+  "query": "地上的鞋子",
+  "mentions": [
+   {
+    "word": "鞋子",
+    "classes": [
+     2,
+     4,
+     23,
+     30,
+     46,
+     52,
+     58,
+     149
+    ]
+   }
+  ],
+  "coverage": 0.4
+ },
+ {
+  "query": "拿着雨伞的女孩",
+  "mentions": [
+   {
+    "word": "雨伞",
+    "classes": [
+     40
+    ]
+   }
+  ],
+  "coverage": 0.285714
+ },
+ {
+  "query": "公交车和自行车",
+  "mentions": [
+   {
+    "word": "公交车",
+    "classes": [
+     56
+    ]
+   },
+   {
+    "word": "自行车",
+    "classes": [
+     47
+    ]
+   }
+  ],
+  "coverage": 0.857143
+ },
+ {
+  "query": "吃火锅",
+  "mentions": [
+   {
+    "word": "锅",
+    "classes": [
+     96
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "身份证",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "猫咪",
+  "mentions": [
+   {
+    "word": "猫咪",
+    "classes": [
+     140
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "苹果手机",
+  "mentions": [
+   {
+    "word": "苹果手机",
+    "classes": [
+     62
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "乒乓球拍",
+  "mentions": [
+   {
+    "word": "乒乓球拍",
+    "classes": [
+     355
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "网球比赛",
+  "mentions": [
+   {
+    "word": "网球",
+    "classes": [
+     205,
+     211
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "滑雪的人",
+  "mentions": [
+   {
+    "word": "滑雪",
+    "classes": [
+     120,
+     149,
+     174
+    ]
+   },
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   }
+  ],
+  "coverage": 0.75
+ },
+ {
+  "query": "下面的盘子",
+  "mentions": [
+   {
+    "word": "盘子",
+    "classes": [
+     16
+    ]
+   }
+  ],
+  "coverage": 0.4
+ },
+ {
+  "query": "上面有一本书",
+  "mentions": [
+   {
+    "word": "书",
+    "classes": [
+     19
+    ]
+   }
+  ],
+  "coverage": 0.166667
+ },
+ {
+  "query": "Model 3D 1024",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "iPad 和键盘",
+  "mentions": [
+   {
+    "word": "ipad",
+    "classes": [
+     244
+    ]
+   },
+   {
+    "word": "键盘",
+    "classes": [
+     107
+    ]
+   }
+  ],
+  "coverage": 0.857143
+ },
+ {
+  "query": "SUV",
+  "mentions": [
+   {
+    "word": "suv",
+    "classes": [
+     35
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "F1赛车",
+  "mentions": [
+   {
+    "word": "f1赛车",
+    "classes": [
+     309
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "海鲜大餐",
+  "mentions": [
+   {
+    "word": "海鲜",
+    "classes": [
+     279,
+     312,
+     350,
+     354,
+     359
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "水果拼盘",
+  "mentions": [
+   {
+    "word": "水果",
+    "classes": [
+     83,
+     105,
+     113,
+     136,
+     156,
+     180,
+     199,
+     224,
+     237,
+     247,
+     251,
+     272,
+     275,
+     283,
+     289,
+     290,
+     299,
+     310,
+     318,
+     334,
+     360
+    ]
+   }
+  ],
+  "coverage": 0.5
+ },
+ {
+  "query": "家电",
+  "mentions": [
+   {
+    "word": "家电",
+    "classes": [
+     38,
+     84,
+     111,
+     134,
+     135,
+     150,
+     164,
+     210,
+     214,
+     221,
+     236,
+     269,
+     278,
+     311,
+     315,
+     329
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "球场上的足球",
+  "mentions": [
+   {
+    "word": "足球",
+    "classes": [
+     119
+    ]
+   }
+  ],
+  "coverage": 0.333333
+ },
+ {
+  "query": "地球仪",
+  "mentions": [
+   {
+    "word": "地球仪",
+    "classes": [
+     303
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "一个男人站在厨房里切菜，旁边放着一个锅",
+  "mentions": [
+   {
+    "word": "人",
+    "classes": [
+     1
+    ]
+   },
+   {
+    "word": "锅",
+    "classes": [
+     96
+    ]
+   }
+  ],
+  "coverage": 0.111111
+ },
+ {
+  "query": "两个孩子坐在餐桌前吃蛋糕，桌上有蜡烛和气球",
+  "mentions": [
+   {
+    "word": "餐桌",
+    "classes": [
+     99
+    ]
+   },
+   {
+    "word": "蛋糕",
+    "classes": [
+     98
+    ]
+   },
+   {
+    "word": "蜡烛",
+    "classes": [
+     72
+    ]
+   },
+   {
+    "word": "气球",
+    "classes": [
+     91
+    ]
+   }
+  ],
+  "coverage": 0.4
+ },
+ {
+  "query": "一只猫躺在键盘上，旁边是一杯咖啡",
+  "mentions": [
+   {
+    "word": "猫",
+    "classes": [
+     140
+    ]
+   },
+   {
+    "word": "键盘",
+    "classes": [
+     107
+    ]
+   },
+   {
+    "word": "杯",
+    "classes": [
+     11,
+     36
+    ]
+   }
+  ],
+  "coverage": 0.266667
+ },
+ {
+  "query": "“海边”的日落！",
+  "mentions": [],
+  "coverage": 0.0
+ },
+ {
+  "query": "  手机  ",
+  "mentions": [
+   {
+    "word": "手机",
+    "classes": [
+     62
+    ]
+   }
+  ],
+  "coverage": 1.0
+ },
+ {
+  "query": "",
+  "mentions": [],
+  "coverage": 0.0
+ }
+]

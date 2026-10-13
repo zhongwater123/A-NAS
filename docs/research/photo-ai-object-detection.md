@@ -43,7 +43,7 @@
 
 ## 选型：D-FINE Objects365
 
-- **类别**：365 类（[类别表](https://huggingface.co/ustc-community/dfine-large-obj365/blob/main/config.json)），包含不少中国家庭物品，如包子、饺子、电饭煲、筷子、榴莲、哈密瓜，以及家电、电子产品、随身物品与儿童用品。缺少电动车（只有自行车、三轮车、滑板车）、3D 打印机、圣诞树与泛指的玩具，这些由向量兜底。中文名、同义词、覆盖多个类别的词（鞋子、鸟、水果、宠物等）和整体跳过的词（马路、上面等）在 [`objects365_zh.json`](../../ai/eval/objects365_zh.json)，是评估用的草稿，标为 guess 的条目需核实。
+- **类别**：365 类（[类别表](https://huggingface.co/ustc-community/dfine-large-obj365/blob/main/config.json)），包含不少中国家庭物品，如包子、饺子、电饭煲、筷子、榴莲、哈密瓜，以及家电、电子产品、随身物品与儿童用品。缺少电动车（只有自行车、三轮车、滑板车）、3D 打印机、圣诞树与泛指的玩具，这些由向量兜底。中文名、同义词、覆盖多个类别的词（鞋子、鸟、水果、宠物等）和整体跳过的词（马路、上面等）在 [`objects/v1.json`](../../internal/photos/objects/v1.json)，是评估用的草稿，标为 guess 的条目需核实。
 - **许可**：代码 Apache-2.0，Hugging Face 上的权重卡标注 Apache-2.0；但作者在 README 中写明，在 Objects365 上训练或预训练的权重“可能受 Objects365 数据集条款约束，不应默认已获商用许可”。按准入规则它通过，对外发行前单独确认一次。
 - **转换来源**：评估使用 Transformers.js 社区的 ONNX 转换（[M](https://huggingface.co/onnx-community/dfine_m_obj365-ONNX) revision `f78e6984`，`model.onnx` SHA-256 `2fb7d73e…19356c`；[L](https://huggingface.co/onnx-community/dfine_l_obj365-ONNX) revision `32323e9a`），该仓库没有标注许可。发行时应以官方权重和官方导出脚本自行导出。
 
@@ -143,7 +143,7 @@ AI 聚合（[#69](https://github.com/zhongwater123/A-NAS/pull/69)）的红线是
 
 ## 关联
 
-- 代码：[`eval/detect.py`](../../ai/eval/detect.py)、[`eval/hybrid_search.py`](../../ai/eval/hybrid_search.py)、[`objects365_zh.json`](../../ai/eval/objects365_zh.json)、[`eval/tile_search.py`](../../ai/eval/tile_search.py)
+- 代码：[`eval/detect.py`](../../ai/eval/detect.py)、[`eval/hybrid_search.py`](../../ai/eval/hybrid_search.py)、[`objects/v1.json`](../../internal/photos/objects/v1.json)、[`eval/tile_search.py`](../../ai/eval/tile_search.py)
 - 设计：[M2 实施方案](../architecture/photo-ai.md)、[人物识别方案（#64）](https://github.com/zhongwater123/A-NAS/pull/64)
 - 研究：[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)、[标签校准报告](photo-ai-label-calibration.md)
 - 报告：开发机 `D:\A-NAS-datasets\runs\detector\final-main.json`（COCO 测试半、COCO-CN、Open Images）与 `final-main-calhalf.json`（COCO 另一半）
