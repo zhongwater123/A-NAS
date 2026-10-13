@@ -246,6 +246,12 @@ class OnnxDetector:
             options = onnxruntime.SessionOptions()
             options.intra_op_num_threads = self.threads
             options.inter_op_num_threads = 1
+            # Idle threads sleep instead of spinning. Spinning held every
+            # thread's core between operators: beside a kiosk-like load on
+            # eight cores it tripled the CPU each photo took and the load's
+            # waiting for a core, and slowed detection itself
+            # (docs/investigations/2026-10-13-idle-detection-used-one-core.md).
+            options.add_session_config_entry("session.intra_op.allow_spinning", "0")
             self._session = onnxruntime.InferenceSession(self._path, options, providers=["CPUExecutionProvider"])
         return self._session
 
