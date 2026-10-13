@@ -82,7 +82,7 @@ export function FeedbackEditor({
     let rejected = "";
     for (const image of images) {
       if (!IMAGE_TYPES.includes(image.blob.type)) { rejected = "只支持 PNG、JPEG、GIF 或 WebP 图片"; continue; }
-      if (image.blob.size > MAX_IMAGE_BYTES) { rejected = "单张图片不能超过 10 MB"; continue; }
+      if (image.blob.size > MAX_IMAGE_BYTES) { rejected = "单张图片不能超过 10 MiB"; continue; }
       if (accepted.length >= room) { rejected = `每条反馈最多 ${MAX_IMAGES} 张图片`; break; }
       accepted.push(addedImage(image.blob, image.label));
     }

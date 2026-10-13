@@ -1,7 +1,8 @@
 import { Copy, FolderPlus, Pencil, Plus, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 
-import { type Caller, canChange, formatDateTime, formatSize, libraryName, libraryOf, messageOf, ownLibrary, sharedLibrary } from "./model";
+import { formatBytes } from "../bytes";
+import { type Caller, canChange, formatDateTime, libraryName, libraryOf, messageOf, ownLibrary, sharedLibrary } from "./model";
 import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
 
 export interface DetailsActions {
@@ -55,7 +56,7 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
       <p className="ph-details-when">{current.takenAt ? formatDateTime(current.takenAt) : "没有拍摄时间"}</p>
       <dl>
         {current.width > 0 && <><dt>尺寸</dt><dd>{current.width} × {current.height}{megapixels >= 1 ? ` · ${megapixels.toFixed(1)} MP` : ""}</dd></>}
-        <dt>大小</dt><dd>{formatSize(current.sizeBytes)} · {current.mediaType === "image/png" ? "PNG" : "JPEG"}</dd>
+        <dt>大小</dt><dd>{formatBytes(current.sizeBytes)} · {current.mediaType === "image/png" ? "PNG" : "JPEG"}</dd>
         <dt>位置</dt><dd>{libraryName(caller, library)}</dd>
         <dt>导入</dt><dd>{formatDateTime(current.importedAt)}</dd>
         {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}

@@ -210,7 +210,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dialog).getByRole("button", { name: "个人空间owner" })).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: "共享空间共享" })).toBeTruthy();
     expect(within(dialog).getAllByRole("separator")).toHaveLength(2);
-    expect(within(dialog).getByText("202 GB")).toBeTruthy();
+    expect(within(dialog).getByText("202 GiB")).toBeTruthy();
     const rows = within(dialog).getAllByRole("row");
     expect(rows[1].textContent).toContain("家庭");
     expect(rows[1].querySelector(".file-type-cell .directory")).toBeTruthy();
@@ -392,7 +392,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const values = dialog.querySelectorAll(".file-volume-values strong");
 
     expect(values[0]?.textContent).toBe("—");
-    expect(values[1]?.textContent).toBe("466 GB");
+    expect(values[1]?.textContent).toBe("466 GiB");
   });
 
   it("enables photos, trash, the backup center, and one settings entry", async () => {
@@ -1287,7 +1287,7 @@ describe("Settings", () => {
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
     const settings = screen.getByRole("dialog", { name: "设置" });
-    expect(await within(settings).findByText("已用空间未知 · 共 465.8 GiB")).toBeTruthy();
+    expect(await within(settings).findByText("已用空间未知 · 共 466 GiB")).toBeTruthy();
     expect(within(settings).getByText("在线")).toBeTruthy();
     expect(within(settings).queryByRole("meter", { name: "数据卷已用空间" })).toBeNull();
     expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();

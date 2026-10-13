@@ -1,7 +1,8 @@
 import { ArrowDown, ArrowDownUp, ArrowUp, CircleAlert, CircleCheck, CopyPlus, HardDrive, LogIn, Replace, RotateCcw, SkipForward, WifiOff, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { formatSpeed, holdText, isActive, isCurrent, type ItemStatus, locationParts, statusText, transferItems, transferTotals } from "./model";
+import { formatRate } from "../bytes";
+import { holdText, isActive, isCurrent, type ItemStatus, locationParts, statusText, transferItems, transferTotals } from "./model";
 import { type Hold, transferStore, useTransfers } from "./store";
 import "./notices.css";
 
@@ -39,7 +40,7 @@ export function TransferIndicator({ onOpen }: { onOpen: () => void }) {
         </span>
       </button>
       <div className="status-transfers-pop" aria-hidden="true">
-        <header><strong>{current.length} 个任务</strong>{speed > 0 && <span>{formatSpeed(speed)}</span>}</header>
+        <header><strong>{current.length} 个任务</strong>{speed > 0 && <span>{formatRate(speed)}</span>}</header>
         <ul>
           {current.slice(0, listed).map((item) => {
             const share = item.total ? Math.min(100, Math.round((item.transferred / item.total) * 100)) : 0;

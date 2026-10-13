@@ -1018,6 +1018,7 @@ button.ov-stat:hover { border-color: rgba(47, 111, 228, .35); box-shadow: 0 6px 
 .vol-meta code { min-width: 0; color: var(--set-text); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; text-align: right; }
 .disk-end { flex: none; display: grid; justify-items: end; gap: 3px; }
 .disk-end strong { font-size: 13.5px; font-weight: 600; }
+.disk-end .disk-nominal { margin-left: 6px; color: var(--set-muted); font-size: 12px; font-weight: 400; }
 .disk-end small { display: flex; align-items: center; gap: 6px; color: var(--set-muted); font-size: 12px; }
 
 /* Data volume wizard */

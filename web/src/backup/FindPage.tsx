@@ -1,9 +1,10 @@
 import { ArchiveRestore, Download, FileSearch, Search, X } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
 
+import { formatBytes } from "../bytes";
 import { useBackup } from "./BackupCenter";
 import { messageOf, searchSnapshots, snapshotDownloadURL, type SnapshotMatch, type SnapshotVersion } from "./backupApi";
-import { formatBytes, formatDateTime, formatDay, spaceLabel } from "./format";
+import { formatDateTime, formatDay, spaceLabel } from "./format";
 import { EmptyState, EntryIcon, Notice, SpaceSwitcher, Spinner } from "./parts";
 import { snapshotTitle } from "./SnapshotsPage";
 

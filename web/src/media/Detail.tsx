@@ -1,9 +1,10 @@
 import { Check, FileVideo, Heart, Languages, ListPlus, Play, RotateCcw, Star, Subtitles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { formatBytes } from "../bytes";
 import { Empty, Loading, messageOf } from "./Browse";
 import { Artwork, useMediaActions } from "./Cards";
-import { bytes, episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
+import { episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
 import { getShow, getVideo, type Episode, type ShowDetail, type Title, type VideoDetail } from "./mediaApi";
 
 function Meta({ title, extra = [] }: { title: Title; extra?: (string | undefined)[] }) {
@@ -80,7 +81,7 @@ export function VideoPage({ id, refreshKey, onBack, onError }: { id: string; ref
           <dl className="mc-detail-facts">
             <div><dt>文件</dt><dd title={`${detail.file.folder}/${detail.file.name}`}>{detail.file.name}</dd></div>
             <div><dt>位置</dt><dd>{detail.file.folder}</dd></div>
-            <div><dt>大小</dt><dd>{bytes(detail.file.sizeBytes)}</dd></div>
+            <div><dt>大小</dt><dd>{formatBytes(detail.file.sizeBytes)}</dd></div>
             {detail.media && <div><dt>格式</dt><dd>{[detail.media.container, detail.media.videoCodec, detail.media.audioCodec, detail.media.width && detail.media.height ? `${detail.media.width}×${detail.media.height}` : ""].filter(Boolean).join(" · ")}</dd></div>}
             {detail.audio.length > 1 && <div><dt><Languages />音轨</dt><dd>{detail.audio.map((track) => track.label).join("、")}</dd></div>}
             {detail.subtitles.length > 0 && <div><dt><Subtitles />字幕</dt><dd>{detail.subtitles.map((track) => track.label).join("、")}</dd></div>}

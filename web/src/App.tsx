@@ -55,6 +55,7 @@ import {
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { BackupCenter } from "./backup/BackupCenter";
 import { BackupCenterGlyph } from "./BackupCenterGlyph";
+import { formatBytes } from "./bytes";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
@@ -619,7 +620,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 
 	useEffect(() => {
 		if (!selectedItem?.entry || !isTextPreviewable(selectedItem.name) || selectedItems.length !== 1) { setTextPreview(undefined); return; }
-		if (selectedItem.sizeBytes > 1024 * 1024) { setTextPreview({ id: selectedItem.id, error: "文本超过 1 MB，请下载后查看完整内容。" }); return; }
+		if (selectedItem.sizeBytes > 1024 * 1024) { setTextPreview({ id: selectedItem.id, error: "文本超过 1 MiB，请下载后查看完整内容。" }); return; }
 		let cancelled = false;
 		setTextPreview({ id: selectedItem.id });
 		void readFileTextPreview(selectedItem.entry.id).then((content) => {
@@ -824,7 +825,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 			<div className="file-volume-card">
 				<header><strong>数据卷</strong><span className={`file-volume-state ${volume?.state ?? "unavailable"}`}>{volume?.state === "available" ? "在线" : "不可用"}</span></header>
 				<div className={`file-volume-track ${usageKnown ? "" : "unknown"}`} role="progressbar" aria-label={usageKnown ? `数据卷已使用 ${usedPercent}%` : "数据卷使用情况暂不可用"} aria-valuenow={usageKnown ? usedPercent : undefined} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${usedPercent}%` }} /></div>
-				<div className="file-volume-values"><span>已用空间</span><span>总空间</span><strong>{usageKnown ? formatFileSize(usedBytes) : "—"}</strong><strong>{capacityBytes ? formatFileSize(capacityBytes) : "—"}</strong></div>
+				<div className="file-volume-values"><span>已用空间</span><span>总空间</span><strong>{usageKnown ? formatBytes(usedBytes) : "—"}</strong><strong>{capacityBytes ? formatBytes(capacityBytes) : "—"}</strong></div>
 			</div>
 		</aside>
 
@@ -878,7 +879,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 						<div className="file-name-cell" role="cell"><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><span className="file-name-copy"><span><strong>{item.name}{item.kind === "resource" && <em>{item.planned ? "规划中" : "应用资源"}</em>}</strong><small>{item.entry?.kind === "file" ? "双击下载" : item.detail}</small></span></span></div>
 						<div className="file-date-cell file-date-column" role="cell">{item.modifiedAt ? <><Clock3 />{formatFileDate(item.modifiedAt)}</> : "—"}</div>
 						<div className="file-type-cell file-type-column" role="cell"><span className={item.kind === "directory" ? "directory" : item.kind === "resource" ? "resource" : ""}>{item.type}</span></div>
-						<div className="file-size-cell" role="cell">{item.kind === "file" ? formatFileSize(item.sizeBytes) : "—"}</div>
+						<div className="file-size-cell" role="cell">{item.kind === "file" ? formatBytes(item.sizeBytes) : "—"}</div>
 					</div>)}
 				</div> : <div className="file-icon-view" role="listbox" aria-label="文件图标">
 					{!loading && visibleItems.map((item) => <button className={`file-icon-card ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="option" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><strong>{item.name}</strong><small>{item.entry?.kind === "file" ? "双击下载" : item.detail}</small></button>)}
@@ -900,14 +901,14 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 				<input ref={(element) => { folderInputRef.current = element; element?.setAttribute("webkitdirectory", ""); }} type="file" multiple hidden aria-label="选择要上传的文件夹" onChange={(event) => { upload(pickedFromInput(event.target.files)); event.target.value = ""; }} />
 			</div>}
 			{dragging && <div className={`file-drop-overlay ${viewing ? "refused" : ""}`} aria-hidden="true"><div><FolderUp /><strong>{viewing ? "只读查看时不能上传" : "松开即可上传"}</strong><span>{viewing ? "结束查看后再上传到自己的空间。" : `上传到 ${[selectedSpaceLabel, ...trail.map((item) => item.name)].join(" › ")}，文件夹会保留结构`}</span></div></div>}
-			<footer className="file-status-bar"><span>{resourceCount ? `${resourceCount} 个应用资源，` : ""}{directoryCount ? `${directoryCount} 个文件夹` : ""}{directoryCount && fileCount ? "，" : ""}{fileCount ? `${fileCount} 个文件` : !directoryCount && !resourceCount ? "0 个项目" : ""}</span><span>{query && `已筛选 ${visibleItems.length}/${browserItems.length} 项`}</span><span>{totalSize > 0 && `文件共 ${formatFileSize(totalSize)}`}</span>{uploadsHere.length > 0 && <button className={`file-transfer-chip ${uploadAttention ? "attention" : ""}`} title="在传输中心查看上传" aria-label={uploadAttention ? `${uploadsHere.length} 个上传需要处理，在传输中心查看` : `正在上传 ${uploadsHere.length} 个文件，已完成 ${uploadPercent}%，在传输中心查看`} onClick={onOpenTransfers}><span className="file-transfer-ring" style={{ "--percent": uploadPercent } as CSSProperties} /><span>{uploadAttention ? `${uploadsHere.length} 个需处理` : `上传 ${uploadsHere.length} · ${uploadPercent}%`}</span></button>}<span>{view === "list" ? "列表视图" : "图标视图"}</span></footer>
+			<footer className="file-status-bar"><span>{resourceCount ? `${resourceCount} 个应用资源，` : ""}{directoryCount ? `${directoryCount} 个文件夹` : ""}{directoryCount && fileCount ? "，" : ""}{fileCount ? `${fileCount} 个文件` : !directoryCount && !resourceCount ? "0 个项目" : ""}</span><span>{query && `已筛选 ${visibleItems.length}/${browserItems.length} 项`}</span><span>{totalSize > 0 && `文件共 ${formatBytes(totalSize)}`}</span>{uploadsHere.length > 0 && <button className={`file-transfer-chip ${uploadAttention ? "attention" : ""}`} title="在传输中心查看上传" aria-label={uploadAttention ? `${uploadsHere.length} 个上传需要处理，在传输中心查看` : `正在上传 ${uploadsHere.length} 个文件，已完成 ${uploadPercent}%，在传输中心查看`} onClick={onOpenTransfers}><span className="file-transfer-ring" style={{ "--percent": uploadPercent } as CSSProperties} /><span>{uploadAttention ? `${uploadsHere.length} 个需处理` : `上传 ${uploadsHere.length} · ${uploadPercent}%`}</span></button>}<span>{view === "list" ? "列表视图" : "图标视图"}</span></footer>
 		</section>
 
 		<div className="file-pane-resizer" role="separator" aria-label="调整详细信息栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPaneResize("right", event)} onKeyDown={(event) => resizePaneWithKeyboard("right", event)} />
 
 		<aside className="file-inspector" aria-label="详细信息">
 			<header>详细信息</header>
-			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isBrowserPreviewableImage(selectedItem.name) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatFileSize(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.resource === "movies" && <p className="file-inspector-hint">打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。</p>}{selectedItem.resource === "music" && <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
+			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isBrowserPreviewableImage(selectedItem.name) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatBytes(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.resource === "movies" && <p className="file-inspector-hint">打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。</p>}{selectedItem.resource === "music" && <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
 		</aside>
 
 		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
@@ -965,18 +966,6 @@ function windowReducer(windows: WindowModel[], action: WindowAction): WindowMode
       case "resize": return { ...window, width: action.width, height: action.height };
     }
   });
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = units[0];
-  for (let index = 1; index < units.length && value >= 1024; index += 1) {
-    value /= 1024;
-    unit = units[index];
-  }
-  return `${value < 10 ? value.toFixed(1) : value.toFixed(0)} ${unit}`;
 }
 
 function formatFileDate(value: string): string {

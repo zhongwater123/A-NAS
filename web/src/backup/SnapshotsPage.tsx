@@ -1,9 +1,10 @@
 import { ArchiveRestore, ArrowLeft, CalendarClock, Camera, ChevronRight, Download, FolderOpen, Pin, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { formatBytes } from "../bytes";
 import { useBackup } from "./BackupCenter";
 import { deleteSnapshot, keepSnapshot, listSnapshotEntries, messageOf, snapshotDownloadURL, type Snapshot, type SnapshotEntry } from "./backupApi";
-import { formatBytes, formatClock, formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
+import { formatClock, formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
 import { Dialog, EmptyState, EntryIcon, Notice, OriginBadge, SpaceSwitcher, Spinner } from "./parts";
 
 interface Crumb { id: string; name: string }
