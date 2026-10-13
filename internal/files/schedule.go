@@ -132,7 +132,7 @@ ON CONFLICT(space_id) DO UPDATE SET enabled = excluded.enabled, frequency = excl
 	if settings.Enabled {
 		detail = fmt.Sprintf("%s %s weekday=%d keep=%d", settings.Frequency, settings.Time, settings.Weekday, settings.Keep)
 	}
-	_ = s.audit(ctx, actor.ID, "snapshot.schedule_updated", spaceID, detail)
+	_ = s.audit(ctx, actor.ID, "snapshot.schedule_updated", spaceID, spaceID, detail)
 	return s.SnapshotSchedule(ctx, actor, spaceID)
 }
 
@@ -374,7 +374,7 @@ func (s *Service) expireScheduledSnapshots(ctx context.Context, spaceID string, 
 			failures = append(failures, fmt.Errorf("expire snapshot %s: %w", snapshot.ID, err))
 			continue
 		}
-		_ = s.audit(ctx, systemActor, "snapshot.expired", snapshot.ID, snapshot.Name)
+		_ = s.audit(ctx, systemActor, "snapshot.expired", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 	}
 	return errors.Join(failures...)
 }

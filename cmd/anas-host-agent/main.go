@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
+	"github.com/zhongwater123/A-NAS/internal/systemlog/journal"
 )
 
 var version = "dev"
@@ -80,6 +81,7 @@ func run(logger *slog.Logger) error {
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
 			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
+			SystemLogs: journal.New(),
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}

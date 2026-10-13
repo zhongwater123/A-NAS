@@ -400,8 +400,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
-    // 文件快照 and the planned 备份 entry became the one 备份中心.
-    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "打开文件快照", "备份，规划中"]) {
+    // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
+    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "打开文件快照", "备份，规划中", "日志，规划中"]) {
       expect(within(desktop).queryByRole("button", { name: retired })).toBeNull();
     }
     await user.click(within(desktop).getByRole("button", { name: "打开相册" }));
@@ -662,6 +662,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toContain("打开相册");
     expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("AI 助手");
 
+    expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).not.toContain("日志");
+    await user.type(search, "日志");
+    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开设置"]);
+    await user.clear(search);
     await user.type(search, "命令行");
     expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开终端"]);
     await user.keyboard("{Enter}");
@@ -1198,13 +1202,27 @@ describe("Settings", () => {
     const settings = screen.getByRole("dialog", { name: "设置" });
     const sections = within(settings).getByRole("navigation", { name: "设置分区" });
     const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
-    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "存储"]);
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "存储", "日志"]);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
     expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();
     expect(within(settings).queryByRole("button", { name: "初始化数据卷…" })).toBeNull();
     expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/users")).toBe(false);
+  });
+
+  it("opens a member's sign-in records from My account", async () => {
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    await user.click(screen.getByRole("button", { name: "查看" }));
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(within(settings).getByRole("button", { name: "日志" }).getAttribute("aria-current")).toBe("page");
+    expect(within(settings).getByRole("heading", { name: "我的活动" })).toBeTruthy();
+    expect(within(settings).getByRole("radio", { name: "登录" }).getAttribute("aria-checked")).toBe("true");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith("/api/v1/activity?") && String(path).includes("category=session"))).toBe(true));
+    expect(within(settings).queryByRole("tab", { name: "系统日志" })).toBeNull();
   });
 
   it("lets a member change their own password", async () => {

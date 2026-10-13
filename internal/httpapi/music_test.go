@@ -43,7 +43,7 @@ func silentMP3(title string, frames int) []byte {
 	return file
 }
 
-type musicClient struct {
+type contractClient struct {
 	t       *testing.T
 	handler http.Handler
 	router  routers.Router
@@ -53,7 +53,7 @@ type musicClient struct {
 
 // do sends a request, checks its status and validates request and response
 // against the OpenAPI contract.
-func (c *musicClient) do(method, path, body string, headers map[string]string, want int) *httptest.ResponseRecorder {
+func (c *contractClient) do(method, path, body string, headers map[string]string, want int) *httptest.ResponseRecorder {
 	c.t.Helper()
 	newRequest := func() *http.Request {
 		request := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
@@ -130,7 +130,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &musicClient{t: t, handler: handler, router: router}
+	client := &contractClient{t: t, handler: handler, router: router}
 
 	unauthenticated := httptest.NewRecorder()
 	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/v1/music/tracks", nil))

@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 )
 
@@ -59,6 +60,9 @@ type ProductDependencies struct {
 	// to every signed-in user and receives the user through
 	// transfersapi.WithUser.
 	Transfers http.Handler
+	// SystemLogs reads the allowlisted service logs for administrators; nil
+	// answers logs_unavailable.
+	SystemLogs systemlog.Reader
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
 	// center) catch up without waiting for their periodic scan. The context
@@ -80,6 +84,8 @@ type productHandler struct {
 	music      *music.Service
 	feedback   http.Handler
 	transfers  http.Handler
+	systemLogs systemlog.Reader
+	dataSource DataSource
 	changed    func(context.Context, accounts.User, string)
 	logger     *slog.Logger
 	mux        *http.ServeMux
@@ -95,7 +101,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
-		transfers: dependencies.Transfers, changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
+		transfers: dependencies.Transfers, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
+		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -173,6 +180,8 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
+	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
+	h.mux.HandleFunc("GET /api/v1/system-logs", h.withSession(h.handleSystemLogs))
 	h.musicRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -265,10 +274,11 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 // SSH tunnels connect directly; the LAN entry (Caddy, ADR 0012) always adds
 // X-Forwarded-For, so LAN browsers get ordinary sessions.
 func (h *productHandler) authenticate(r *http.Request, username, password string, localConsole bool) (accounts.Session, error) {
+	ctx := withClientOrigin(r)
 	if localConsole && directLoopback(r) {
-		return h.accounts.AuthenticateLocalConsole(r.Context(), username, password)
+		return h.accounts.AuthenticateLocalConsole(ctx, username, password)
 	}
-	return h.accounts.Authenticate(r.Context(), username, password)
+	return h.accounts.Authenticate(ctx, username, password)
 }
 
 func directLoopback(r *http.Request) bool {
@@ -283,7 +293,7 @@ func directLoopback(r *http.Request) bool {
 func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	cookie, _ := r.Cookie(sessionCookieName)
 	if cookie != nil {
-		_ = h.accounts.EndSession(r.Context(), cookie.Value)
+		_ = h.accounts.EndSession(withClientOrigin(r), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)

@@ -41,6 +41,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
@@ -117,6 +118,12 @@ func run(logger *slog.Logger) error {
 	reader, dataSource, operations, live, err := configuredServices()
 	if err != nil {
 		return err
+	}
+	// Development shows invented service logs; the Host Agent reads the
+	// journal (ADR 0020).
+	var systemLogs systemlog.Reader = systemlog.NewFake(nil)
+	if logs, ok := operations.(systemlog.Reader); ok && live {
+		systemLogs = logs
 	}
 	accountStore, err := accounts.OpenSQLite(filepath.Join(stateDirectory, "control.db"))
 	if err != nil {
@@ -266,6 +273,7 @@ func run(logger *slog.Logger) error {
 		Music:      musicService,
 		Feedback:   feedbackapi.New(feedbackStore, logger),
 		Transfers:  transferAPI,
+		SystemLogs: systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,

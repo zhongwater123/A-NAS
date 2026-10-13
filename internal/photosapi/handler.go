@@ -84,6 +84,7 @@ func (h *handler) routes() {
 	p := PathPrefix
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
+	h.mux.HandleFunc("GET "+ActivityPath, h.activity)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
 	h.mux.HandleFunc("GET "+p+"/labels", h.labels)
 	h.mux.HandleFunc("GET "+p+"/labels/{labelID}/assets", h.labelPhotos)

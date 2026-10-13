@@ -3,7 +3,7 @@ import { KeyboardEvent, ReactNode, RefObject, useEffect, useId, useRef, useState
 
 import type { Session } from "./api";
 import type { DesktopApp } from "./DesktopGrid";
-import { avatarTone } from "./SettingsPanel";
+import { avatarTone } from "./settings/parts";
 import { useDesktopOrder } from "./useDesktopOrder";
 
 // "windows": some app window is visible; "revealed": the rail hid them and can

@@ -261,7 +261,7 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	if replaced {
 		detail += " (replaced)"
 	}
-	_ = s.audit(ctx, actor.ID, "file.uploaded", entry.ID, detail)
+	_ = s.audit(ctx, actor.ID, "file.uploaded", space.ID, entry.ID, detail)
 	return CommittedUpload{Entry: entry, Replaced: replaced}, nil
 }
 
@@ -345,7 +345,7 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 		return Entry{}, "", err
 	}
 	if created {
-		_ = s.audit(ctx, actor.ID, "file.directory_created", entry.ID, entry.Name)
+		_ = s.audit(ctx, actor.ID, "file.directory_created", spaceID, entry.ID, entry.Name)
 	}
 	return entry, target, nil
 }

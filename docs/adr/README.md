@@ -23,6 +23,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0017：影视中心经文件代理读取媒体，FFmpeg 在隔离 Worker 中运行](0017-run-the-media-center-through-the-file-broker.md)（proposed）
 - [0018：音乐原地索引普通文件，经文件代理以成员身份读取](0018-index-music-in-place-through-the-file-broker.md)
 - [0019：上传经 tus 分片到达，写入文件代理以用户身份创建的临时文件](0019-resume-uploads-over-tus-with-broker-held-files.md)（proposed）
+- [0020：系统日志经 Host Agent 的白名单 journal 查询读取](0020-read-service-logs-through-the-host-agent.md)（proposed）
 
 ## 格式
 

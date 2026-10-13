@@ -203,7 +203,7 @@ VALUES(?,?,?,?,?,?,?,?)`)
 		return Snapshot{}, err
 	}
 	committed = true
-	_ = s.audit(ctx, actorID, "snapshot.created", snapshot.ID, snapshot.Name)
+	_ = s.audit(ctx, actorID, "snapshot.created", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 	return snapshot, nil
 }
 
@@ -333,7 +333,7 @@ func (s *Service) RestoreSnapshotEntry(ctx context.Context, actor accounts.User,
 	if err != nil {
 		return Entry{}, err
 	}
-	_ = s.audit(ctx, actor.ID, action, restored.ID, snapshot.ID)
+	_ = s.audit(ctx, actor.ID, action, snapshot.SpaceID, restored.ID, snapshot.ID)
 	return restored, nil
 }
 
@@ -505,7 +505,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, actor accounts.User, snaps
 	if err := s.deleteSnapshot(ctx, snapshot); err != nil {
 		return err
 	}
-	return s.audit(ctx, actor.ID, "snapshot.deleted", snapshot.ID, snapshot.Name)
+	return s.audit(ctx, actor.ID, "snapshot.deleted", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 }
 
 func (s *Service) deleteSnapshot(ctx context.Context, snapshot Snapshot) error {
@@ -533,7 +533,7 @@ func (s *Service) KeepSnapshot(ctx context.Context, actor accounts.User, snapsho
 		return Snapshot{}, err
 	}
 	snapshot.Origin = SnapshotOriginManual
-	_ = s.audit(ctx, actor.ID, "snapshot.kept", snapshot.ID, snapshot.Name)
+	_ = s.audit(ctx, actor.ID, "snapshot.kept", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 	return snapshot, nil
 }
 

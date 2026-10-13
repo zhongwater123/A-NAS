@@ -309,6 +309,27 @@ download_url=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Co
   -d "{\"entryIds\":[\"$alice_file\"]}" "$api/api/v1/transfers/downloads" | jq -r .contentUrl || true)
 check "a followed download returns the uploaded bytes" cmp -s /tmp/alice.txt <(curl -fsS -b /tmp/alice.jar "$api$download_url")
 
+# --- Logs (ADR 0020): sign-ins are recorded with how the client connected,
+# and the Host Agent reads A-NAS service logs from the journal under its
+# production unit.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+signed_in_from() { # VIA ADDRESS: the administrator sees alice's sign-in from there
+  curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=session&q=alice" | jq -e --arg via "$1" --arg address "$2" \
+    'any(.items[]; .action == "session.signed_in" and .actor.username == "alice"
+      and (.detail | fromjson | .via == $via and (.address // "") == $address))' >/dev/null
+}
+check "the activity log records the LAN sign-in with the client's address" signed_in_from lan "$ip"
+check "the activity log records the local console sign-in" signed_in_from local-console ""
+check "a member's activity holds only the member's own events" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/activity?limit=200" | jq '[.items[] | select(.actor.username == "owner" and .subject.username != "alice")] | length')" = 0
+check "administrators read the Product Service's log through the Host Agent" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system-logs?service=api&q=A-NAS%20API%20listening' |
+    jq -e '.dataSource == \"live\" and any(.items[]; .message == \"A-NAS API listening\" and .level == \"info\")' >/dev/null"
+check "systemd's own lines about a unit are included" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system-logs?service=host-agent&q=Started' | jq -e '.items | length > 0' >/dev/null"
+check "members cannot read system logs" test "$(status_of -b /tmp/alice.jar "$api/api/v1/system-logs")" = 403
+check "a unit outside the allowlist is refused" test "$(status_of -b /tmp/owner.jar "$api/api/v1/system-logs?service=ssh")" = 400
+
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"
 check "Product Service account cannot list Shared" denied as a-nas ls "$data/spaces/shared"
