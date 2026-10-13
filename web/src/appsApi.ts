@@ -39,6 +39,8 @@ export interface CatalogApp {
   running: number;
   total: number;
   job?: AppJob;
+  // Containers that are not running: restarting, exited or never started.
+  problems?: Array<{ service: string; state: string; exitCode: number }>;
 }
 
 export interface AppList {

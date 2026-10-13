@@ -141,6 +141,16 @@ describe("AppCenterPanel", () => {
     expect(within(memosNotes).getByText("来自应用的上游清单；文件夹与端口以安装计划为准。")).toBeTruthy();
   });
 
+  it("says why an installed app's container is not running", async () => {
+    serve(() => [app("n8n", { state: "installed", running: 0, total: 1, webPort: 5678, problems: [{ service: "n8n", state: "restarting", exitCode: 1 }] })]);
+    const user = userEvent.setup();
+    render(<AppCenterPanel onOpenDocker={() => undefined} />);
+    await user.click(await screen.findByRole("button", { name: /^N8n/ }));
+    const status = await screen.findByRole("region", { name: "运行状态" });
+    expect(within(status).getByText("已安装 · 0/1 个容器运行中")).toBeTruthy();
+    expect(within(status).getByRole("list", { name: "没有运行的容器" }).textContent).toContain("容器 n8n 不断重启（退出码 1）");
+  });
+
   it("follows an install from its plan through progress to opening the app", async () => {
     let memos = app("memos", { webPort: 5230, notes: "默认账号 `admin`" });
     const posts = serve(() => [memos], () => {

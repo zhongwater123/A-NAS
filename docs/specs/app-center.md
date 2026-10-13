@@ -50,7 +50,7 @@
 
 - Given：用户已查看安装计划。
 - When：点击“确认安装”。
-- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”和访问地址，容器同时出现在 Docker 窗口。
+- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`，再观察约 20 秒：有容器不断重启、以非零退出码退出、没有启动或健康检查失败时，取 Compose 日志最后 20 行写入输出，执行 `compose down` 回滚，任务以“容器 n8n 启动后不断重启（退出码 1），安装已回滚”这样的原因失败。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”和访问地址，容器同时出现在 Docker 窗口。安装后才停止运行的容器在详情页逐个说明原因（不断重启、已退出及退出码、没有启动），并提示在 Docker 中查看日志。
 
 ### 打开与管理已安装应用
 
@@ -77,7 +77,7 @@
 - **打开应用**：本机屏幕同样在新窗口中打开；Kiosk 中新窗口会盖住桌面，浏览器约束见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 - 路径：`/DATA/AppData/<app>/…` → `ANAS_APP_DATA_ROOT/<app>/…`（默认数据卷上的 `/srv/a-nas/data/apps`，不经 SMB 发布，成员不可列出）；其余 `/DATA/…`（含整个 `/DATA`）→ `ANAS_SHARED_DATA_ROOT/…`（默认 Shared 共享文件夹 `/srv/a-nas/data/spaces/shared`，绝不映射到数据卷根目录）；`/etc/localtime` 强制只读，`/etc/timezone` 被移除并以 `TZ` 代替。其他应用的数据目录、相对路径、`..` 逃逸和其余宿主机路径一律拒绝。
 - **挂载方式**：数据卷上的文件夹不以绑定挂载交给 Docker（Docker 每次启动都会跟随绑定源路径中的符号链接，而能写共享空间或应用自身数据的人可以把其中的文件夹换成指向宿主机的链接）。渲染结果改为两个 A-NAS 卷：`a-nas-appdata` 以 `apps/<app>`、`a-nas-shared` 以共享空间为根（`local` 驱动、`o=bind`，根目录的名称只有 root 能改），具体文件夹作为 `volume.subpath`，并设 `nocopy`。Docker 每次启动在卷内解析子路径，链接指向卷外时拒绝启动；它既不创建卷根也不创建子路径。清单不能声明 `a-nas-` 前缀的卷。子目录挂载需要 Docker Compose 2.30 及以上与 Engine API 1.45 及以上：容器代理在规划时检查，不满足时返回 `409 docker_runtime_outdated`。Compose 2.29 及以前把子目录交给旧的绑定接口，引擎会挂载整个卷（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)）。安装后，容器代理核对每个容器对 A-NAS 卷的挂载都是计划中的子目录；有任一不符或无法检查时立即 `compose down` 回滚，任务失败并写明容器、卷与挂载点。Docker 来自官方软件源（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
-- **运行身份**（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）：每个应用对应 Host Agent 分配的 Linux 账号 `app-<id>`（UID/GID 30000–30999，永不复用）。查看计划只在 Host Agent 登记表中预留 UID，账号在安装前预建文件夹时才创建。计划按该身份渲染：清单显式声明 `user` 时把它改为该 UID/GID，声明 `PUID`/`PGID` 时无论原值是变量还是字面量都改为该 UID/GID，并在安装计划中显示。环境变量插值只提供 `AppID`、`TZ`、`PUID`、`PGID`，不读取容器代理自身环境。既不声明 `user` 也不支持 `PUID`/`PGID` 的镜像保留其镜像默认用户，必须在入库评审中确认它能使用所挂载目录；固定 UID 或 root 初始化等第三种身份策略进入内置目录前需要扩展安装策略并增加兼容性证据。
+- **运行身份**（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）：每个应用对应 Host Agent 分配的 Linux 账号 `app-<id>`（UID/GID 30000–30999，永不复用）。查看计划只在 Host Agent 登记表中预留 UID，账号在安装前预建文件夹时才创建。计划按该身份渲染：清单显式声明 `user` 时把它改为该 UID/GID，声明 `PUID`/`PGID` 时无论原值是变量还是字面量都改为该 UID/GID，并在安装计划中显示。环境变量插值只提供 `AppID`、`TZ`、`PUID`、`PGID`，不读取容器代理自身环境。固定以非 root 用户运行、且能以任意 UID 运行的镜像（n8n、Grafana、PsiTransfer，见 [`render.go`](../../internal/appstore/render.go) 的 `runAsAppIdentity`）同样改为该 UID/GID，否则镜像用户写不了属于 `app-<id>` 的文件夹（2026-10-13 Demo 测试中 n8n 因此不断重启）。其余既不声明 `user` 也不支持 `PUID`/`PGID` 的镜像保留其镜像默认用户，必须在入库评审中确认它能使用所挂载目录，安装后的运行检查兜底；固定 UID 或 root 初始化等第三种身份策略进入内置目录前需要扩展安装策略并增加兼容性证据。
 - **共享空间授权**：计划挂载共享空间内的文件夹时，计划明示“该应用将获得共享空间的读写权限（与成员相同）”；确认安装后 `app-<id>` 加入 `a-nas-users`，从而经共享空间的 ACL 获得访问，新文件继承该 ACL，成员可读写。卸载时立即撤销该成员资格，应用身份与其数据保留。应用身份永远无法访问任何个人空间。
 - **文件夹由 Host Agent 预建**：安装前 Host Agent 校验计划中的每个宿主机文件夹只在 `apps/<app>` 或（已同意时）共享空间内，创建 `apps` 子卷（仅 root）、应用数据文件夹（属主 `app-<id>`）与共享空间文件夹（继承 ACL）；每一级都经不跟随符号链接的描述符创建并改属主，路径中出现链接时拒绝。Docker 不会创建任何宿主机文件夹，数据卷离线时应用无法启动，也绝不会把数据写到系统盘。
 - 数据卷离线时安装返回 `423 volume_unavailable`，不预建任何文件夹。

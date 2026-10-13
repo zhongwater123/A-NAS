@@ -179,7 +179,7 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 		service := project.Services[name]
 		descriptions := casaosDescriptions(service.Extensions)
 		checkService(name, service, reject)
-		applyAppIdentity(&service, identity)
+		applyAppIdentity(&service, identity, runAsAppIdentity[entry.App.ID])
 
 		volumes := make([]types.ServiceVolumeConfig, 0, len(service.Volumes))
 		for _, volume := range service.Volumes {
@@ -297,15 +297,24 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 	return plan, nil
 }
 
+// runAsAppIdentity lists apps whose images run as a fixed non-root user and
+// work under any UID. Their manifests set neither user nor PUID/PGID, so the
+// image user (n8n's node, UID 1000; Grafana's 472; PsiTransfer's node) could
+// not write the folders the Host Agent creates for app-<id>, and the
+// container kept restarting (Demo test report, n8n). They run as the app
+// identity instead.
+var runAsAppIdentity = map[string]bool{"n8n": true, "grafana": true, "psitransfer": true}
+
 // applyAppIdentity adapts the two runtime-identity conventions accepted by
 // the reviewed catalog to the stable Linux identity allocated by the Host
 // Agent. An explicit Compose user overrides the image user, while PUID/PGID
 // are image-specific environment conventions; literal upstream values must
-// not escape the A-NAS identity boundary in either form.
-func applyAppIdentity(service *types.ServiceConfig, identity Identity) {
+// not escape the A-NAS identity boundary in either form. force sets the
+// user for images listed in runAsAppIdentity.
+func applyAppIdentity(service *types.ServiceConfig, identity Identity, force bool) {
 	uid := strconv.Itoa(identity.UID)
 	gid := strconv.Itoa(identity.GID)
-	if strings.TrimSpace(service.User) != "" {
+	if force || strings.TrimSpace(service.User) != "" {
 		service.User = uid + ":" + gid
 	}
 	for name, value := range map[string]string{"PUID": uid, "PGID": gid} {

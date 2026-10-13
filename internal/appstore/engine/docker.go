@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
@@ -26,7 +27,10 @@ func (d DockerInspector) Containers(ctx context.Context) ([]ContainerInfo, error
 	}
 	infos := make([]ContainerInfo, 0, len(list.Items))
 	for _, item := range list.Items {
-		info := ContainerInfo{AppID: item.Labels[appstore.AppLabel], Running: item.State == container.StateRunning}
+		info := ContainerInfo{
+			AppID: item.Labels[appstore.AppLabel], Running: item.State == container.StateRunning,
+			Service: item.Labels[composeServiceLabel], State: string(item.State), ExitCode: exitCode(item.Status),
+		}
 		if len(item.Names) > 0 {
 			info.Name = strings.TrimPrefix(item.Names[0], "/")
 		}
@@ -114,6 +118,53 @@ func (d DockerInspector) ProjectMounts(ctx context.Context, project string) ([]M
 	return mounts, nil
 }
 
+// ProjectContainers reads each project container's state, exit code,
+// restart count and health.
+func (d DockerInspector) ProjectContainers(ctx context.Context, project string) ([]ContainerState, error) {
+	list, err := d.Client.ContainerList(ctx, client.ContainerListOptions{
+		All: true, Filters: make(client.Filters).Add("label", composeProjectLabel+"="+project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	states := make([]ContainerState, 0, len(list.Items))
+	for _, item := range list.Items {
+		inspected, err := d.Client.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return nil, err
+		}
+		state := ContainerState{Service: item.Labels[composeServiceLabel], State: string(item.State), RestartCount: inspected.Container.RestartCount}
+		if state.Service == "" {
+			state.Service = strings.TrimPrefix(inspected.Container.Name, "/")
+		}
+		if current := inspected.Container.State; current != nil {
+			state.ExitCode = current.ExitCode
+			if current.Health != nil {
+				state.Health = string(current.Health.Status)
+			}
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+// exitCode reads the code from a container status such as "Exited (1) 2
+// minutes ago" or "Restarting (1) 5 seconds ago"; 0 when there is none.
+func exitCode(status string) int {
+	open, end := strings.Index(status, "("), strings.Index(status, ")")
+	if open < 0 || end < open {
+		return 0
+	}
+	code, err := strconv.Atoi(status[open+1 : end])
+	if err != nil {
+		return 0
+	}
+	return code
+}
+
 // composeProjectLabel is the label Compose puts on every container and
-// network it creates.
-const composeProjectLabel = "com.docker.compose.project"
+// network it creates; composeServiceLabel names the container's service.
+const (
+	composeProjectLabel = "com.docker.compose.project"
+	composeServiceLabel = "com.docker.compose.service"
+)

@@ -244,6 +244,10 @@ button.ac-get.open:hover { background: #2862cd; }
 .ac-output pre, .ac-compose pre { max-height: 240px; overflow: auto; margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; color: #d8dee9; background: #0f1520; font: 11px/1.6 var(--ac-mono); white-space: pre-wrap; word-break: break-word; text-align: left; }
 
 /* First-use notes */
+.ac-problems { display: grid; gap: 6px; margin: 4px 0 0; padding: 10px 12px; border-radius: 10px; list-style: none; background: rgba(214, 120, 18, .08); font-size: 12.5px; }
+.ac-problems li { display: flex; align-items: center; gap: 7px; color: #9a5208; font-weight: 600; }
+.ac-problems li svg { width: 14px; height: 14px; flex: none; }
+.ac-problems .ac-problems-hint { color: var(--ac-faint); font-weight: 400; }
 .ac-notes { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid rgba(236, 133, 16, .22); border-radius: 14px; background: linear-gradient(180deg, #fffaf0, #fff 85%); }
 .ac-notes h3 { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 650; }
 .ac-notes h3 svg { width: 16px; height: 16px; color: #ec8510; }

@@ -2661,6 +2661,17 @@ components:
           minimum: 0
         job:
           $ref: "#/components/schemas/AppJob"
+        problems:
+          type: array
+          description: The app's containers that are not running, with their state and last exit code.
+          items:
+            type: object
+            additionalProperties: false
+            required: [service, state, exitCode]
+            properties:
+              service: { type: string }
+              state: { type: string }
+              exitCode: { type: integer }
     AppJob:
       type: object
       additionalProperties: false

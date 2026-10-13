@@ -43,6 +43,15 @@ type AppDocument struct {
 
 	// UpstreamNotes is empty from an agent that predates A-NAS notes.
 	UpstreamNotes string `json:"upstreamNotes,omitempty"`
+	// Problems lists the containers that are not running; an older agent
+	// reports none.
+	Problems []ProblemDocument `json:"problems,omitempty"`
+}
+
+type ProblemDocument struct {
+	Service  string `json:"service"`
+	State    string `json:"state"`
+	ExitCode int    `json:"exitCode"`
 }
 
 type JobDocument struct {
@@ -106,6 +115,9 @@ func AppsFromDomain(apps []appstore.AppStatus) AppsDocument {
 			job := JobFromDomain(*app.Job)
 			item.Job = &job
 		}
+		for _, problem := range app.Problems {
+			item.Problems = append(item.Problems, ProblemDocument{Service: problem.Service, State: problem.State, ExitCode: problem.ExitCode})
+		}
 		document.Apps[i] = item
 	}
 	return document
@@ -135,6 +147,9 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 				return nil, err
 			}
 			apps[i].Job = &job
+		}
+		for _, problem := range item.Problems {
+			apps[i].Problems = append(apps[i].Problems, appstore.ContainerProblem{Service: problem.Service, State: problem.State, ExitCode: problem.ExitCode})
 		}
 	}
 	return apps, nil
