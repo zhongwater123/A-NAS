@@ -1,32 +1,24 @@
 import { APIError, type Space, type TrashItem } from "../api";
 import { formatDay } from "../backup/format";
 
-export type TrashSort = "deleted" | "expiry";
+export type SortKey = "name" | "size" | "deleted" | "expiry";
+export interface TrashSort { key: SortKey; ascending: boolean }
+
+// The direction a column sorts in first: names A to Z, the biggest, the
+// latest deleted and the soonest to go first.
+export const firstDirection: Record<SortKey, boolean> = { name: true, size: false, deleted: false, expiry: true };
 
 const day = 86_400_000;
 
-// retentionDays reads how long the recycle bin keeps items from the items
-// themselves, falling back to the default of 30 days.
-export function retentionDays(items: TrashItem[]): number {
-  const item = items[0];
-  if (!item) return 30;
-  const days = Math.round((Date.parse(item.purgeAt) - Date.parse(item.deletedAt)) / day);
-  return Number.isFinite(days) && days > 0 ? days : 30;
-}
-
 export type ExpiryTone = "calm" | "soon" | "urgent";
 
-// expiryOf words when an item is deleted for good, how urgent that is and
-// how much of its time in the bin is left (0 to 1).
-export function expiryOf(item: Pick<TrashItem, "deletedAt" | "purgeAt">, now = Date.now()): { label: string; short: string; tone: ExpiryTone; left: number } {
-  const purge = Date.parse(item.purgeAt);
-  const span = purge - Date.parse(item.deletedAt);
-  const remaining = purge - now;
-  const left = span > 0 ? Math.min(1, Math.max(0, remaining / span)) : 0;
-  if (!(remaining > 0)) return { label: "即将清理", short: "即将清理", tone: "urgent", left: 0 };
+// expiryOf words how long an item has left in the bin and how urgent that is.
+export function expiryOf(item: Pick<TrashItem, "purgeAt">, now = Date.now()): { label: string; tone: ExpiryTone } {
+  const remaining = Date.parse(item.purgeAt) - now;
+  if (!(remaining > 0)) return { label: "即将清理", tone: "urgent" };
   const days = Math.ceil(remaining / day);
-  if (days === 1) return { label: "1 天内清理", short: "1 天内", tone: "urgent", left };
-  return { label: `${days} 天后清理`, short: `${days} 天`, tone: days <= 7 ? "soon" : "calm", left };
+  if (days === 1) return { label: "不到 1 天", tone: "urgent" };
+  return { label: `${days} 天`, tone: days <= 7 ? "soon" : "calm" };
 }
 
 export const spaceName = (space?: Pick<Space, "kind">) => (space?.kind === "shared" ? "共享空间" : "个人空间");
@@ -48,25 +40,29 @@ export function restoredName(name: string, kind: TrashItem["kind"], attempt = 1)
 }
 
 export function sortItems(items: TrashItem[], sort: TrashSort): TrashItem[] {
-  return [...items].sort((left, right) => sort === "expiry"
-    ? Date.parse(left.purgeAt) - Date.parse(right.purgeAt)
-    : Date.parse(right.deletedAt) - Date.parse(left.deletedAt));
+  const compare = (left: TrashItem, right: TrashItem) => {
+    switch (sort.key) {
+      case "name": return left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
+      case "size": return left.sizeBytes - right.sizeBytes;
+      case "deleted": return Date.parse(left.deletedAt) - Date.parse(right.deletedAt);
+      case "expiry": return Date.parse(left.purgeAt) - Date.parse(right.purgeAt);
+    }
+  };
+  return [...items].sort((left, right) => (sort.ascending ? 1 : -1) * compare(left, right));
 }
 
-export interface TrashGroup { key: string; label: string; items: TrashItem[] }
+export interface TrashGroup { key: string; label?: string; items: TrashItem[] }
 
-// groupItems groups sorted items by the day they were deleted, or, sorted
-// by expiry, into those that go within a week and the rest.
+// groupItems groups items sorted by deletion time by the day they were
+// deleted; any other order is one group without a heading.
 export function groupItems(items: TrashItem[], sort: TrashSort, now = new Date()): TrashGroup[] {
+  if (sort.key !== "deleted") return items.length ? [{ key: "all", items }] : [];
   const groups: TrashGroup[] = [];
   for (const item of items) {
-    const key = sort === "expiry"
-      ? (expiryOf(item, now.getTime()).tone === "calm" ? "later" : "week")
-      : new Date(item.deletedAt).toDateString();
+    const key = new Date(item.deletedAt).toDateString();
     let group = groups.at(-1);
     if (group?.key !== key) {
-      const label = sort === "expiry" ? (key === "week" ? "7 天内清理" : "更晚清理") : formatDay(item.deletedAt, now);
-      group = { key, label, items: [] };
+      group = { key, label: formatDay(item.deletedAt, now), items: [] };
       groups.push(group);
     }
     group.items.push(item);
