@@ -254,10 +254,8 @@ func (s *Service) Stream(ctx context.Context, actor accounts.User, videoID strin
 		options.CopyVideo, options.HEVC = false, false
 	}
 	options.Start = request.Start
-	select {
-	case s.streams <- struct{}{}:
-	default:
-		return nil, ErrBusy
+	if err := s.takeStream(ctx); err != nil {
+		return nil, err
 	}
 	release := sync.OnceFunc(func() { <-s.streams })
 	content, err := s.files.OpenContent(ctx, actor, video.EntryID)
@@ -272,6 +270,28 @@ func (s *Service) Stream(ctx context.Context, actor accounts.User, videoID strin
 		return nil, err
 	}
 	return &releasingStream{ReadCloser: stream, release: release}, nil
+}
+
+// takeStream claims a stream slot. A seek replaces the viewer's stream with
+// one starting elsewhere, and its request can arrive before the stream it
+// replaces has let go of its slot, so a full device waits briefly for one
+// instead of failing the seek.
+func (s *Service) takeStream(ctx context.Context) error {
+	select {
+	case s.streams <- struct{}{}:
+		return nil
+	default:
+	}
+	timer := time.NewTimer(s.streamWait)
+	defer timer.Stop()
+	select {
+	case s.streams <- struct{}{}:
+		return nil
+	case <-timer.C:
+		return ErrBusy
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type releasingStream struct {

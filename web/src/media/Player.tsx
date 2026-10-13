@@ -14,6 +14,17 @@ const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const saveEvery = 10_000;
 const resumeFloor = 30;
 const nextCountdown = 8;
+// Skips in quick succession restart a converted stream once, where they end.
+const settleSkips = 400;
+
+// buffered tells whether the media element holds enough at a position to
+// play from it at once.
+function buffered(element: HTMLVideoElement, at: number): boolean {
+  for (let index = 0; index < element.buffered.length; index++) {
+    if (element.buffered.start(index) - 0.1 <= at && at <= element.buffered.end(index) - 1) return true;
+  }
+  return false;
+}
 
 interface Cue { start: number; end: number; text: string }
 
@@ -36,7 +47,8 @@ export interface PlayRequest { videoId: string; restart?: boolean }
 
 // Player plays one video over the media center. A converted stream cannot
 // seek, so the player restarts it at the new position and adds that offset
-// to the stream's own clock.
+// to the stream's own clock; positions it has already received play from
+// where they are, and the last picture stays while a restart loads.
 export function Player({ request, onClose, onNavigate, onSaved }: {
   request: PlayRequest; onClose: () => void; onNavigate: (videoId: string) => void; onSaved: () => void;
 }) {
@@ -49,7 +61,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   const [offset, setOffset] = useState(0);
   const [failure, setFailure] = useState("");
   const [time, setTime] = useState(0);
-  const [buffered, setBuffered] = useState(0);
+  const [ranges, setRanges] = useState<[number, number][]>([]);
   const [paused, setPaused] = useState(true);
   const [waiting, setWaiting] = useState(true);
   const [volume, setVolume] = useState(() => readStored("a-nas.media.volume", 1));
@@ -65,6 +77,12 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   const [hover, setHover] = useState<{ x: number; time: number }>();
   const [countdown, setCountdown] = useState<number>();
   const [resumed, setResumed] = useState<number>();
+  // jump is where a seek is going while the picture is not there yet.
+  const [jump, setJump] = useState<number>();
+  const [frozen, setFrozen] = useState(false);
+  const still = useRef<HTMLCanvasElement>(null);
+  const restart = useRef(0);
+  const pendingSeek = useRef<number | undefined>(undefined);
   const fellBack = useRef(false);
   const pendingStart = useRef(0);
   const resumePlaying = useRef(true);
@@ -80,6 +98,11 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   // Load the video and decide how to play it.
   useEffect(() => {
     let live = true;
+    window.clearTimeout(restart.current);
+    pendingSeek.current = undefined;
+    setJump(undefined);
+    setFrozen(false);
+    setRanges([]);
     fellBack.current = false;
     started.current = false;
     lastSaved.current = 0;
@@ -135,18 +158,55 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   useEffect(() => () => saveRef.current(true), []);
   const go = (videoId: string) => { saveRef.current(true); setCountdown(undefined); onNavigate(videoId); };
 
-  const seek = (target: number) => {
+  // holdFrame keeps the last picture on screen while a restarted stream
+  // loads, instead of a black frame.
+  const holdFrame = () => {
+    const element = video.current;
+    const canvas = still.current;
+    if (!element || !canvas || element.readyState < 2 || !element.videoWidth) return;
+    try {
+      canvas.width = element.videoWidth;
+      canvas.height = element.videoHeight;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.drawImage(element, 0, 0);
+      setFrozen(true);
+    } catch { /* the picture is a courtesy */ }
+  };
+  useEffect(() => () => window.clearTimeout(restart.current), []);
+
+  // seek moves to an absolute position. Skips pass settle, so a burst of
+  // them restarts a converted stream once.
+  const seek = (target: number, settle = 0) => {
     const element = video.current;
     if (!element || !playback) return;
     target = Math.max(0, Math.min(duration ? duration - 1 : target, target));
     setCountdown(undefined);
+    setTime(target);
     if (!converted) {
+      if (!buffered(element, target)) setJump(target);
       element.currentTime = target;
-      setTime(target);
       return;
     }
-    begin(playback, target, !element.paused || resumePlaying.current);
+    window.clearTimeout(restart.current);
+    const local = target - offset;
+    if (local >= 0 && buffered(element, local)) {
+      pendingSeek.current = undefined;
+      setJump(undefined);
+      element.currentTime = local;
+      return;
+    }
+    pendingSeek.current = target;
+    setJump(target);
+    const playing = !element.paused || resumePlaying.current;
+    restart.current = window.setTimeout(() => {
+      pendingSeek.current = undefined;
+      holdFrame();
+      begin(playback, target, playing);
+    }, settle);
   };
+  // Where the next skip starts: a pending seek's target, or the picture.
+  const position = () => pendingSeek.current ?? absolute();
 
   const reconfigure = async (options: { audio?: number; quality?: Quality }) => {
     if (!detail || !playback) return;
@@ -155,6 +215,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     setMenu(undefined);
     try {
       const decision = await getPlayback(detail.id, { caps, audio: options.audio ?? playback.audio, quality: options.quality ?? playback.quality });
+      holdFrame();
       begin(decision, position, playing);
     } catch (caught) { setFailure(messageOf(caught)); }
   };
@@ -213,14 +274,17 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     onTimeUpdate: () => {
       const element = video.current;
       if (!element) return;
-      if (scrub === undefined) setTime(absolute());
-      if (element.buffered.length) setBuffered((converted ? offset : 0) + element.buffered.end(element.buffered.length - 1));
+      if (scrub === undefined && pendingSeek.current === undefined) setTime(absolute());
+      readRanges();
       if (!element.paused) save();
     },
+    onProgress: () => readRanges(),
+    onLoadedData: () => { setFrozen(false); if (pendingSeek.current === undefined) setJump(undefined); },
+    onSeeked: () => { if (pendingSeek.current === undefined) setJump(undefined); },
     onPlay: () => { setPaused(false); wake(); },
     onPause: () => { setPaused(true); save(true); },
     onWaiting: () => setWaiting(true),
-    onPlaying: () => { started.current = true; setWaiting(false); },
+    onPlaying: () => { started.current = true; setWaiting(false); setFrozen(false); if (pendingSeek.current === undefined) setJump(undefined); },
     onCanPlay: () => setWaiting(false),
     onEnded: () => {
       setPaused(true);
@@ -228,6 +292,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       if (detail?.nextId) setCountdown(nextCountdown);
     },
     onError: () => {
+      setFrozen(false);
+      setJump(undefined);
       if (!detail || !playback) return;
       // The original did not play after all: convert it instead, once.
       if (playback.mode === "direct" && !fellBack.current) {
@@ -238,6 +304,17 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       setWaiting(false);
       setFailure(playback.mode === "direct" ? "这个视频无法播放。" : "转码失败，或设备正在为其他人转码。请稍后重试。");
     },
+  };
+
+  // The seek bar shows every stretch the browser holds, so a skip into one
+  // of them is known to be instant.
+  const readRanges = () => {
+    const element = video.current;
+    if (!element) return;
+    const shift = converted ? offset : 0;
+    const next: [number, number][] = [];
+    for (let index = 0; index < element.buffered.length; index++) next.push([shift + element.buffered.start(index), shift + element.buffered.end(index)]);
+    setRanges((current) => (current.length === next.length && current.every(([start, end], index) => start === next[index][0] && Math.abs(end - next[index][1]) < 0.5) ? current : next));
   };
 
   // Subtitles load into a hidden track; the overlay shows the cues for the
@@ -268,8 +345,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     let handled = true;
     switch (event.key) {
       case " ": case "k": case "K": toggle(); break;
-      case "ArrowLeft": seek(absolute() - 10); break;
-      case "ArrowRight": seek(absolute() + 10); break;
+      case "ArrowLeft": seek(position() - 10, settleSkips); break;
+      case "ArrowRight": seek(position() + 10, settleSkips); break;
       case "ArrowUp": setVolume((value) => Math.min(1, value + 0.1)); setMuted(false); break;
       case "ArrowDown": setVolume((value) => Math.max(0, value - 0.1)); break;
       case "f": case "F": toggleFullscreen(); break;
@@ -312,7 +389,6 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
 
   const shown = scrub ?? time;
   const share = duration ? Math.min(1, shown / duration) : 0;
-  const bufferedShare = duration ? Math.min(1, buffered / duration) : 0;
   const titleText = detail ? (detail.type === "episode" && detail.showTitle ? detail.showTitle : detail.title) : "";
   const subtitleText = detail?.type === "episode" ? [episodeCode(detail.season, detail.episode), detail.title?.startsWith("第 ") ? "" : detail.title].filter(Boolean).join(" · ") : "";
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
@@ -326,8 +402,10 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       <video ref={video} src={source || undefined} className="mc-video" playsInline preload="auto" onClick={() => (panel ? setPanel(undefined) : toggle())} onDoubleClick={toggleFullscreen} {...events}>
         {subtitle !== "off" && detail && <track key={`${subtitle}-${source}`} ref={trackElement} kind="subtitles" default src={subtitleURL(detail.id, subtitle)} />}
       </video>
+      <canvas ref={still} className={`mc-still ${frozen ? "shown" : ""}`} aria-hidden="true" />
       {activeCues.length > 0 && <div className="mc-cues" aria-live="off">{activeCues.map((cue, index) => <span key={index}>{cue.text}</span>)}</div>}
-      {(waiting && !failure) && <span className="mc-player-spinner" aria-label="正在载入" />}
+      {((waiting || jump !== undefined) && !failure) && <span className="mc-player-spinner" aria-label="正在载入" />}
+      {jump !== undefined && !failure && <span className="mc-jump" role="status">跳转到 {timecode(jump)}</span>}
       {failure && (
         <div className="mc-player-failure" role="alert">
           <p>{failure}</p>
@@ -368,7 +446,9 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
           aria-valuetext={`${timecode(shown)} / ${timecode(duration)}`} tabIndex={0}
           onPointerDown={startScrub} onPointerMove={moveScrub} onPointerUp={endScrub} onPointerLeave={() => setHover(undefined)}>
           <span className="mc-seek-track">
-            <span className="mc-seek-buffer" style={{ width: `${bufferedShare * 100}%` }} />
+            {duration > 0 && ranges.map(([start, end]) => (
+              <span key={start} className="mc-seek-buffer" style={{ left: `${Math.min(100, (start / duration) * 100)}%`, width: `${Math.max(0, Math.min(1, (end - start) / duration)) * 100}%` }} />
+            ))}
             <span className="mc-seek-fill" style={{ width: `${share * 100}%` }} />
           </span>
           <span className="mc-seek-thumb" style={{ left: `${share * 100}%` }} />
@@ -378,8 +458,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
           {detail?.previousId && <button type="button" className="mc-player-button" aria-label="上一集" onClick={() => go(detail.previousId!)}><SkipBack /></button>}
           <button type="button" className="mc-player-button big" aria-label={paused ? "播放" : "暂停"} onClick={toggle}>{paused ? <Play /> : <Pause />}</button>
           {detail?.nextId && <button type="button" className="mc-player-button" aria-label="下一集" onClick={() => go(detail.nextId!)}><SkipForward /></button>}
-          <button type="button" className="mc-player-button" aria-label="后退 10 秒" onClick={() => seek(absolute() - 10)}><RotateCcw /></button>
-          <button type="button" className="mc-player-button" aria-label="前进 10 秒" onClick={() => seek(absolute() + 10)}><RotateCw /></button>
+          <button type="button" className="mc-player-button" aria-label="后退 10 秒" onClick={() => seek(position() - 10, settleSkips)}><RotateCcw /></button>
+          <button type="button" className="mc-player-button" aria-label="前进 10 秒" onClick={() => seek(position() + 10, settleSkips)}><RotateCw /></button>
           <div className="mc-volume">
             <button type="button" className="mc-player-button" aria-label={muted ? "取消静音" : "静音"} onClick={() => setMuted(!muted)}><VolumeIcon /></button>
             <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume} aria-label="音量"

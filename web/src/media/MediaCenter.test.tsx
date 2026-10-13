@@ -397,4 +397,40 @@ describe("MediaCenter", () => {
     expect(navigate).toHaveBeenLastCalledWith("video:heat");
     expect(within(player).queryByRole("complementary")).toBeNull();
   });
+
+  it("plays what a converted stream already holds and restarts it once after quick skips", async () => {
+    const stream = "/api/v1/media/videos/video%3Adune/stream?mode=remux&audio=0&quality=original";
+    serve([library],
+      (url) => (url === "/api/v1/media/videos/video%3Adune" ? json(detail(resuming)) : undefined),
+      (url) => (url.startsWith("/api/v1/media/videos/video%3Adune/playback?") ? json({ mode: "remux", url: stream, duration: 9300, audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(within(await screen.findByRole("region", { name: "精选" })).getByRole("button", { name: /继续播放/ }));
+    const player = await screen.findByRole("dialog", { name: "播放 沙丘" });
+    const video = player.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBe(`${stream}&start=600.000`));
+    // The stream, started at 10:00, has sent its first 30 seconds.
+    let at = 0;
+    Object.defineProperty(video, "currentTime", { configurable: true, get: () => at, set: (value: number) => { at = value; } });
+    Object.defineProperty(video, "buffered", { configurable: true, get: () => ({ length: 1, start: () => 0, end: () => 30 }) });
+    const sources: string[] = [];
+    new MutationObserver(() => sources.push(video.getAttribute("src") ?? "")).observe(video, { attributes: true, attributeFilter: ["src"] });
+    fireEvent.progress(video);
+    expect(player.querySelectorAll(".mc-seek-buffer")).toHaveLength(1);
+
+    // Within what arrived, a skip plays from there at once.
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    expect(at).toBe(10);
+    expect(within(player).queryByText(/跳转到/)).toBeNull();
+
+    // Past it, three quick skips restart the stream once, where they end.
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    expect(at).toBe(20);
+    expect(within(player).getByText("跳转到 10:40")).toBeTruthy();
+    await waitFor(() => expect(video.getAttribute("src")).toBe(`${stream}&start=640.000`));
+    expect(sources).toEqual([`${stream}&start=640.000`]);
+  });
 });

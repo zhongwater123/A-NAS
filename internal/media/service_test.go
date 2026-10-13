@@ -101,7 +101,7 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 	clock := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond,
+		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -716,4 +716,43 @@ func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
 	if _, err := env.media.RenameVideo(env.ctx, env.alice, mine.Items[0].ID, "Up.mkv"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Alice renamed the owner's private film: %v", err)
 	}
+}
+
+func TestASeekWaitsForTheStreamItReplaces(t *testing.T) {
+	env := newTestEnv(t, &fakeProcessor{})
+	env.write(t, env.shared, "电影/Heat (1995).mkv", video("matroska,webm", "h264", "ac3", 1080, 10200))
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	env.media.processPending(withSessions(t, env))
+	movies, _ := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+	if movies.Total != 1 {
+		t.Fatalf("movies = %+v", movies)
+	}
+	id := movies.Items[0].ID
+	open := func(start float64) (io.ReadCloser, error) {
+		return env.media.Stream(env.ctx, env.bob, id, StreamRequest{Mode: ModeTranscode, Start: start, Audio: -1})
+	}
+	first, err := open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both slots are taken; the seek's stream gets the first one as soon as
+	// the stream it replaces closes.
+	go func() { time.Sleep(50 * time.Millisecond); _ = first.Close() }()
+	third, err := open(300)
+	if err != nil {
+		t.Fatalf("a seek while the old stream closes: %v", err)
+	}
+	began := time.Now()
+	if _, err := open(600); !errors.Is(err, ErrBusy) {
+		t.Fatalf("a stream past every slot: %v, want ErrBusy", err)
+	}
+	if waited := time.Since(began); waited < 150*time.Millisecond {
+		t.Fatalf("a full device answered busy after %v, without waiting", waited)
+	}
+	_ = second.Close()
+	_ = third.Close()
 }
