@@ -1,0 +1,12 @@
+{
+  "name": "dfine-m-obj365",
+  "source": "https://github.com/Peterande/D-FINE",
+  "revision": "956d1709314c2c6a4df6f34de232054578a7449f",
+  "weights": "https://github.com/Peterande/storage/releases/download/dfinev1.0/dfine_m_obj365.pth",
+  "weightsSha256": "20b0c3d2a725d3bc6b6b34b257ad453553d0ad3a3c585f967cac94d63a5181b3",
+  "export": "tools/deployment/export_onnx.py with configs/dfine/objects365/dfine_hgnetv2_m_obj365.yml, opset 16, PyTorch 2.14.1+cpu with dynamo=False and a trace batch of 1; not simplified with onnxsim (docs/research/photo-ai-object-detection.md)",
+  "file": "dfine_m_obj365.onnx",
+  "sizeBytes": 78517092,
+  "sha256": "cd832825f8831b5a6e315c575a36dbcad1a2f7611566b36942957f004be4531a",
+  "license": "code Apache-2.0; the authors' README (revision above) says checkpoints trained or pretrained on Objects365 'may be subject to the Objects365 dataset terms and should not be assumed to be commercially cleared under the D-FINE license'. Internal testing only until confirmed before any external release (user, 2026-10-13)."
+}
