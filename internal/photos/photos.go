@@ -19,6 +19,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
+	"github.com/zhongwater123/A-NAS/internal/photos/objects"
 )
 
 var (
@@ -166,6 +167,8 @@ type Options struct {
 	AI Embedder
 	// Labels defaults to the built-in vocabulary and calibration.
 	Labels *labels.Set
+	// Objects defaults to the built-in calibration of the object detector.
+	Objects *objects.Calibration
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -204,6 +207,10 @@ type Service struct {
 	detected   objectIndex
 	labels     labels.Set
 	labelIndex labelIndex
+	// objectCalibration says how search uses detections, and matcher finds
+	// the detector classes a query names.
+	objectCalibration objects.Calibration
+	matcher           *objects.Matcher
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -258,6 +265,18 @@ func Open(root string, options Options) (*Service, error) {
 	if options.Labels != nil {
 		service.labels = *options.Labels
 	} else if service.labels, err = labels.V1(); err != nil {
+		_ = service.Close()
+		return nil, err
+	}
+	table, err := objects.V1()
+	if err != nil {
+		_ = service.Close()
+		return nil, err
+	}
+	service.matcher = objects.NewMatcher(table)
+	if options.Objects != nil {
+		service.objectCalibration = *options.Objects
+	} else if service.objectCalibration, err = objects.V1Calibration(); err != nil {
 		_ = service.Close()
 		return nil, err
 	}

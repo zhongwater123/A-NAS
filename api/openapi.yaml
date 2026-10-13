@@ -2781,7 +2781,16 @@ components:
         closest:
           type: integer
           minimum: 0
-          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches and the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+        objects:
+          type: object
+          additionalProperties: false
+          required: [words, detected, undetected]
+          description: "Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found."
+          properties:
+            words: { type: array, items: { type: string }, description: The query's class words. }
+            detected: { type: integer, minimum: 0, description: Photos over all pages in which the detector found them. }
+            undetected: { type: integer, minimum: 0, description: Photos in the search's scope the detector has not processed yet. }
     PhotoAIStatus:
       type: object
       additionalProperties: false

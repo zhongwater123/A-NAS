@@ -130,6 +130,15 @@ type searchResponse struct {
 	// Closest counts the results, over all pages, in the closest group; the
 	// results after them are less related.
 	Closest int `json:"closest"`
+	// Objects is set when the query is about things the detector finds
+	// reliably: the closest group is then the photos it found them in.
+	Objects *objectsFound `json:"objects,omitempty"`
+}
+
+type objectsFound struct {
+	Words      []string `json:"words"`
+	Detected   int      `json:"detected"`
+	Undetected int      `json:"undetected"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +279,11 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest})
+	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest}
+	if page.Objects != nil {
+		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {

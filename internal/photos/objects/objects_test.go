@@ -86,6 +86,63 @@ func TestCoverageCountsCharactersWithoutPunctuation(t *testing.T) {
 	}
 }
 
+func TestBuiltInCalibrationFitsTheTable(t *testing.T) {
+	calibration, err := objects.V1Calibration()
+	if err != nil {
+		t.Fatalf("V1Calibration() error = %v", err)
+	}
+	if len(calibration.Fusion) == 0 || len(calibration.Tier) == 0 || len(calibration.Tier) > len(calibration.Fusion) {
+		t.Fatalf("%d fusion and %d tier classes", len(calibration.Fusion), len(calibration.Tier))
+	}
+}
+
+func TestCalibrationDecidesWhichWordsCount(t *testing.T) {
+	for name, text := range map[string]string{
+		"no model":            `{"weight": 0.2, "tierScore": 0.6, "tierCoverage": 0.6}`,
+		"weight out of range": `{"model": "m", "weight": 2, "tierScore": 0.6, "tierCoverage": 0.6}`,
+		"tier not fused":      `{"model": "m", "weight": 0.2, "tierScore": 0.6, "tierCoverage": 0.6, "fusion": [62], "tier": [140]}`,
+		"class out of range":  `{"model": "m", "weight": 0.2, "tierScore": 0.6, "tierCoverage": 0.6, "fusion": [366]}`,
+		"tier score of one":   `{"model": "m", "weight": 0.2, "tierScore": 1, "tierCoverage": 0.6}`,
+	} {
+		if _, err := objects.ParseCalibration([]byte(text)); err == nil {
+			t.Errorf("ParseCalibration() accepted a calibration with %s", name)
+		}
+	}
+	calibration, err := objects.ParseCalibration([]byte(`{"model": "m", "weight": 0.2, "tierScore": 0.6,
+		"tierCoverage": 0.6, "fusion": [62, 140, 93], "tier": [62], "disabledWords": ["小猫"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := matcher(t)
+	enabled := func(text string) []string {
+		var words []string
+		for _, mention := range calibration.Enabled(m.Mentions(text)) {
+			words = append(words, mention.Word)
+		}
+		return words
+	}
+	for text, want := range map[string][]string{
+		"手机和猫":  {"手机", "猫"},
+		"小猫和杯子": nil, // 小猫 is disabled; cups are not fused
+		"宠物":    nil, // the group covers rabbits and parrots too
+		"猫和狗":   {"猫", "狗"},
+	} {
+		if got := enabled(text); !slices.Equal(got, want) {
+			t.Errorf("Enabled(%q) = %v, want %v", text, got, want)
+		}
+	}
+	for text, want := range map[string]bool{
+		"手机":      true,
+		"桌上的手机":   false, // too little of the query
+		"手机和猫":    false, // cats are not on the tier list
+		"拍日落用的手机": false,
+	} {
+		if got := calibration.Tiered(text, m.Mentions(text)); got != want {
+			t.Errorf("Tiered(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
 // The evaluation measured the Python matcher; eval.matcher_golden writes what
 // it finds, and Go must find the same.
 func TestMatcherAgreesWithTheEvaluation(t *testing.T) {
