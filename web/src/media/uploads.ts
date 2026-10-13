@@ -6,7 +6,7 @@ import { messageOf } from "./Browse";
 
 // The files a library scan reads: the scanner's video extensions plus the
 // subtitles, NFO documents and artwork it picks up beside them.
-const videoTypes = [".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".wmv", ".flv", ".ts", ".m2ts", ".mts", ".mpg", ".mpeg", ".rmvb", ".rm", ".3gp", ".vob", ".ogv", ".asf", ".divx"];
+const videoTypes = [".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".wmv", ".flv", ".f4v", ".ts", ".m2ts", ".mts", ".mpg", ".mpeg", ".rmvb", ".rm", ".3gp", ".vob", ".ogv", ".asf", ".divx"];
 const subtitleTypes = [".srt", ".ass", ".ssa", ".vtt"];
 const imageTypes = [".jpg", ".jpeg", ".png", ".webp"];
 export const acceptedTypes = [...videoTypes, ...subtitleTypes, ".nfo", ...imageTypes].join(",");

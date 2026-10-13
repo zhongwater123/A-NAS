@@ -62,6 +62,7 @@ import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
+import { PhotosGlyph } from "./PhotosGlyph";
 import { MusicPanel } from "./music/MusicPanel";
 import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
@@ -124,7 +125,7 @@ const initialWindows: WindowModel[] = [
 const windowIcons: Record<WindowID, AppGlyph> = {
   files: FolderClosed,
   transfers: ArrowDownUp,
-  photos: Image,
+  photos: PhotosGlyph,
   media: MediaCenterGlyph,
   music: Music2,
   trash: Trash2,
@@ -134,6 +135,8 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   docker: Box,
   store: ShoppingBag,
 };
+// Apps on a white tile (相册) keep it in their window's title bar too.
+const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
   files: "files",
@@ -293,7 +296,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
     { id: "backup", label: "备份中心", ariaLabel: "打开备份中心", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup", tone: "backup", icon: <BackupCenterGlyph />, active: isOpen("backup"), onClick: () => openWindow("backup") },
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
-    { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <Image />, active: isOpen("photos"), onClick: () => openWindow("photos") },
+    { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
     { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
@@ -344,7 +347,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
 			  {window.id === "files" && <FilePanel navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
-			  {window.id === "photos" && <PhotosPanel userId={session.user.id} isAdmin={session.user.role === "admin"} />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel />}
@@ -420,7 +423,7 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
   return (
     <section className={`app-window app-window-${model.id} ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
       <div className="window-titlebar" onPointerDown={beginDrag}>
-        <div className="window-title"><span className="window-app-icon"><Icon size={17} /></span>{model.title}</div>
+        <div className="window-title"><span className={`window-app-icon${lightTitleIcons.has(model.id) ? " light" : ""}`}><Icon size={17} /></span>{model.title}</div>
         <div className="window-actions">
           <button aria-label={`最小化${model.title}`} onClick={() => dispatch({ type: "minimize", id: model.id })}><Minus /></button>
           <button aria-label={`${model.maximized ? "还原" : "最大化"}${model.title}`} onClick={() => dispatch({ type: "maximize", id: model.id })}>{model.maximized ? <PanelLeftClose /> : <Maximize2 />}</button>

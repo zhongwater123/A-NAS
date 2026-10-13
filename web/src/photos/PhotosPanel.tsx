@@ -7,7 +7,7 @@ import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect,
 import { endViewing } from "../api";
 import { AlbumPicker } from "./AlbumPicker";
 import { AssetGrid } from "./AssetGrid";
-import { AIHome } from "./AIHome";
+import { AIHome, type AIHomeSnapshot } from "./AIHome";
 import { AlbumsView, Empty } from "./Collections";
 import { useDialogs, useToasts } from "./feedback";
 import type { GridProps } from "./grid";
@@ -31,7 +31,7 @@ import { DropOverlay, type UploadTarget, UploadTray, useUploads } from "./upload
 import { Viewer, type ViewerActions } from "./Viewer";
 import "./photos.css";
 
-interface Props { userId: string; isAdmin: boolean }
+interface Props { userId: string; userName: string; isAdmin: boolean }
 
 const aiPollInterval = 15_000;
 const narrowWidth = 720;
@@ -64,7 +64,7 @@ const placeKey = (place: Place) => {
 // PhotosPanel is the photos window: libraries and albums on the side, photos
 // filling the rest, a viewer over everything. The photo service decides
 // every permission; the panel only leaves out what it would refuse.
-export function PhotosPanel({ userId, isAdmin }: Props) {
+export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const [libraries, setLibraries] = useState<PhotoLibrary[]>();
   const [failure, setFailure] = useState("");
   const [place, setPlaceState] = useState<Place>();
@@ -158,9 +158,14 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
   // already shown changes nothing.
   const placeRef = useRef(place);
   placeRef.current = place;
+  // How AI 聚合 looked when it opened a group; kept while that group is open
+  // so that going back returns to the same spot.
+  const aiHomeReturn = useRef<AIHomeSnapshot | undefined>(undefined);
   const setPlace = useCallback((next: Place) => {
     setDrawer(false);
     if (placeKey(next) === (placeRef.current && placeKey(placeRef.current))) return;
+    const leaving = placeRef.current;
+    if (!(leaving && (leaving.kind === "cluster" || leaving.kind === "tag") && next.kind === "search" && !next.query)) aiHomeReturn.current = undefined;
     setPlaceState(next);
     selection.clear();
     setHidden(new Set());
@@ -550,9 +555,10 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />} />;
       case "search":
         if (!place.query) {
-          return <AIHome viewing={place.viewing} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent} onSearch={startSearch} onForget={() => setRecent([])}
-            onOpenCluster={(label) => setPlace({ kind: "cluster", viewing: place.viewing, label })}
-            onOpenTag={(tag) => setPlace({ kind: "tag", viewing: place.viewing, tag })} onError={reportError} />;
+          return <AIHome viewing={place.viewing} userName={userName} snapshot={aiHomeReturn.current} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent}
+            onSearch={startSearch} onForget={() => setRecent([])}
+            onOpenCluster={(label, snapshot) => { setPlace({ kind: "cluster", viewing: place.viewing, label }); aiHomeReturn.current = snapshot; }}
+            onOpenTag={(tag, snapshot) => { setPlace({ kind: "tag", viewing: place.viewing, tag }); aiHomeReturn.current = snapshot; }} onError={reportError} />;
         }
         return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor)}
           onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); } }}

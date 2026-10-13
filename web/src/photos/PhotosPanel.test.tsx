@@ -113,7 +113,7 @@ describe("PhotosPanel timeline", () => {
     serve(timeline(privateLibrary.id, () => [
       asset("photo:a"), asset("photo:b", { thumbnail: "pending", duplicate: "duplicate" }), asset("photo:c", { takenAt: undefined }),
     ]));
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
 
     expect(await screen.findByRole("heading", { name: "2026年10月" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "2026年5月" })).toBeTruthy();
@@ -138,7 +138,7 @@ describe("PhotosPanel timeline", () => {
         (url) => url === "/api/v1/photos/assets/photo%3Ap" ? json(asset("photo:p", { thumbnail: ready ? "ready" : "pending" })) : undefined,
         timeline(privateLibrary.id, () => [asset("photo:p", { thumbnail: "pending" })]),
       );
-      render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+      render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
       expect((await screen.findByRole("img", { name: "photo:p.jpg" })).getAttribute("src")).toBe("/api/v1/photos/assets/photo%3Ap/original");
       ready = true;
       await vi.advanceTimersByTimeAsync(3000);
@@ -158,7 +158,7 @@ describe("PhotosPanel timeline", () => {
       return { status: 201, body: asset("photo:new", { name: file.name }) };
     };
     serve(timeline(privateLibrary.id, () => uploaded ? [asset("photo:new", { name: "cat.jpg" })] : []));
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     expect(await screen.findByText("把照片拖到这里")).toBeTruthy();
 
     const app = document.querySelector(".ph-app") as HTMLElement;
@@ -188,7 +188,7 @@ describe("PhotosPanel viewer", () => {
       timeline(privateLibrary.id, () => [asset("photo:a", { alsoKeptBy: ["bob", "carol"] }), asset("photo:b", { takenAt: "2026-05-01T07:00:00Z" })]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await openPhoto(user, "photo:a.jpg");
 
     const viewer = screen.getByRole("dialog", { name: "查看 photo:a.jpg" });
@@ -213,7 +213,7 @@ describe("PhotosPanel viewer", () => {
       timeline(privateLibrary.id, () => trashed ? [] : [asset("photo:a")]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await openPhoto(user, "photo:a.jpg");
     await user.click(screen.getByRole("button", { name: "移到回收站" }));
 
@@ -232,7 +232,7 @@ describe("PhotosPanel viewer", () => {
       timeline(sharedLibrary.id, () => [shared]),
     );
     const user = userEvent.setup();
-    const { unmount } = render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    const { unmount } = render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("tab", { name: "共享" }));
     await openPhoto(user, "photo:s.jpg");
     expect(screen.queryByRole("button", { name: "移到回收站" })).toBeNull();
@@ -243,7 +243,7 @@ describe("PhotosPanel viewer", () => {
     expect(JSON.parse(String(copy?.[1]?.body))).toEqual({ libraryId: privateLibrary.id });
     unmount();
 
-    render(<PhotosPanel userId="user:admin" isAdmin />);
+    render(<PhotosPanel userId="user:admin" userName="alice" isAdmin />);
     await user.click(await screen.findByRole("tab", { name: "共享" }));
     await openPhoto(user, "photo:s.jpg");
     expect(screen.getByRole("button", { name: "移到回收站" })).toBeTruthy();
@@ -261,7 +261,7 @@ describe("PhotosPanel viewer", () => {
       timeline(privateLibrary.id, () => [asset("photo:cat")]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await openPhoto(user, "photo:cat.jpg");
 
     await user.type(await screen.findByRole("textbox", { name: "添加标签" }), "小橘{Enter}");
@@ -283,7 +283,7 @@ describe("PhotosPanel selection", () => {
   it("selects with the check, ranges with Shift, all with Ctrl+A and clears with Escape", async () => {
     serve(timeline(privateLibrary.id, photos));
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("checkbox", { name: "选择 photo:1.jpg" }));
     expect(screen.getByRole("toolbar", { name: "所选照片的操作" }).textContent).toContain("已选 1 张");
     // While selecting, a click on a photo selects it instead of opening it.
@@ -312,7 +312,7 @@ describe("PhotosPanel selection", () => {
       timeline(privateLibrary.id, () => photos().filter((photo) => !trashed.has(photo.id))),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("checkbox", { name: /选择5月1日.*的 1 张照片/ }));
     await user.click(screen.getByRole("checkbox", { name: "选择 photo:2.jpg" }));
     await user.click(screen.getByRole("button", { name: "删除" }));
@@ -334,7 +334,7 @@ describe("PhotosPanel selection", () => {
       timeline(privateLibrary.id, photos),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("checkbox", { name: "选择 photo:1.jpg" }));
     await user.click(screen.getByRole("checkbox", { name: "选择 photo:2.jpg" }));
     await user.click(screen.getByRole("button", { name: "加入相册" }));
@@ -366,7 +366,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       return undefined;
     });
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: /^相册/ }));
     await user.click(await screen.findByRole("button", { name: "打开相册 旅行" }));
     expect(await screen.findByRole("heading", { name: "旅行" })).toBeTruthy();
@@ -395,7 +395,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       return undefined;
     });
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "回收站" }));
     expect((await screen.findAllByText("3 天后删除")).length).toBe(2);
 
@@ -432,11 +432,11 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     });
     window.localStorage.setItem("a-nas.photos.recentSearches", JSON.stringify(["海边的日落"]));
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     expect(await screen.findByText("正在整理 3 / 6")).toBeTruthy();
     expect(screen.getByText(/1 张无法识别/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "AI 聚合" }));
-    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
     expect(within(screen.getByLabelText("最近搜索")).getByRole("button", { name: "海边的日落" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: /^动物/ })).toBeTruthy();
     expect(within(await screen.findByRole("button", { name: "打开 猫" })).getByText("2 张")).toBeTruthy();
@@ -458,7 +458,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "查看 photo:fox.jpg" })).toBeNull());
     expect(await screen.findByText("已从“猫”移出 1 张，照片仍在图库中")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "返回" }));
-    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
 
     // The users' own tags are groups too; a tag can be taken off from there.
     expect(within(screen.getByLabelText("你的标签")).getByText("2 张")).toBeTruthy();
@@ -483,11 +483,13 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       });
       const listed = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/v1/photos/labels")).length;
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+      render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
       await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
       const browse = await screen.findByRole("region", { name: "按内容聚合" });
-      const note = "本地 AI 正在整理，相册空闲几分钟后，有把握的照片会自动聚合在这里";
-      expect(within(browse).getByText(note)).toBeTruthy();
+      // Placeholder cards under the bare heading say the groups are coming.
+      const coming = () => screen.getByRole("region", { name: "按内容聚合" }).getAttribute("aria-busy") === "true";
+      expect(browse.querySelectorAll(".ph-ghost").length).toBeGreaterThan(0);
+      expect(within(browse).getByRole("banner").textContent).toBe("按内容聚合");
       expect(screen.queryByRole("region", { name: "可以这样搜" })).toBeNull();
 
       // Waiting polls only the AI status: any other request would hold the
@@ -499,7 +501,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       phase = 1;
       await vi.advanceTimersByTimeAsync(15_000);
       expect(listed()).toBe(1);
-      expect(screen.getByText(note)).toBeTruthy();
+      expect(coming()).toBe(true);
       phase = 2;
       await vi.advanceTimersByTimeAsync(15_000);
       expect(await screen.findByRole("button", { name: "打开 猫" })).toBeTruthy();
@@ -510,16 +512,57 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     }
   });
 
-  it("says so when local AI is sure of no photos yet", async () => {
-    serve((url) => {
-      if (url === "/api/v1/photos/ai") return json({ state: "idle", ready: 3, pending: 0, failed: 0, clusters: "ready" });
-      if (url.startsWith("/api/v1/photos/labels")) return json({ items: [], ready: true });
+  it("lists the clusters above the user's tags and comes back from a group to where it was", async () => {
+    const animals = ["猫", "狗", "鸟", "马", "羊", "牛", "熊", "斑马"].map((name, index) => ({ id: `animal-${index}`, name, category: "animal", photos: 8 - index, coverId: `photo:a${index}` }));
+    const fetchMock = serve((url) => {
+      if (url === "/api/v1/photos/ai") return json({ state: "idle", ready: 8, pending: 0, failed: 0, clusters: "ready" });
+      if (url === "/api/v1/photos/labels") return json({ items: animals, ready: true });
+      if (url === "/api/v1/photos/tags") return json({ items: [{ name: "小橘", photos: 2, coverId: "photo:orange" }] });
+      if (url.startsWith("/api/v1/photos/labels/animal-7/assets")) return json({ items: [asset("photo:zebra")] });
       return undefined;
     });
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    const { container } = render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
-    expect(await within(await screen.findByRole("region", { name: "按内容聚合" })).findByText("还没有本地 AI 有把握的照片，宁可少放，不放错")).toBeTruthy();
+    const clusters = await screen.findByRole("region", { name: "按内容聚合" });
+    const tags = await screen.findByRole("region", { name: "你的标签" });
+    expect(clusters.compareDocumentPosition(tags) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The headings stand alone.
+    expect(within(clusters).getByRole("banner").textContent).toBe("按内容聚合");
+    expect(within(tags).getByRole("banner").textContent).toBe("你的标签");
+
+    await user.click(screen.getByRole("button", { name: "展开全部 8 类" }));
+    const scroller = container.querySelector<HTMLElement>(".ph-discover")!;
+    scroller.scrollTop = 420;
+    await user.click(screen.getByRole("button", { name: "打开 斑马" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:zebra.jpg" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("button", { name: "收起" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开 斑马" })).toBeTruthy();
+    expect(container.querySelector<HTMLElement>(".ph-discover")!.scrollTop).toBe(420);
+    expect(document.activeElement).not.toBe(screen.getByRole("searchbox", { name: "用一句话搜索照片" }));
+
+    // Opened from the sidebar, AI 聚合 starts from the top again.
+    await user.click(screen.getByRole("button", { name: "照片" }));
+    await user.click(screen.getByRole("button", { name: "AI 聚合" }));
+    expect(await screen.findByRole("button", { name: "展开全部 8 类" })).toBeTruthy();
+    expect(container.querySelector<HTMLElement>(".ph-discover")!.scrollTop).toBe(0);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("leaves 按内容聚合 out when local AI is sure of no photos", async () => {
+    const fetchMock = serve((url) => {
+      if (url === "/api/v1/photos/ai") return json({ state: "idle", ready: 3, pending: 0, failed: 0, clusters: "ready" });
+      if (url.startsWith("/api/v1/photos/labels")) return json({ items: [], ready: true });
+      if (url === "/api/v1/photos/tags") return json({ items: [{ name: "小橘", photos: 2, coverId: "photo:orange" }] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+    expect(await screen.findByRole("region", { name: "你的标签" })).toBeTruthy();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v1\/photos\/labels/), expect.anything()));
+    expect(screen.queryByRole("region", { name: "按内容聚合" })).toBeNull();
   });
 
   it("leaves the clusters out while local AI is away, and never says AI is off", async () => {
@@ -528,9 +571,9 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       return undefined;
     });
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
-    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v1\/photos\/labels/), expect.anything()));
     expect(screen.queryByRole("region", { name: "按内容聚合" })).toBeNull();
     expect(screen.queryByRole("region", { name: "可以这样搜" })).toBeNull();
@@ -554,7 +597,7 @@ describe("PhotosPanel search and viewing", () => {
       timeline(privateLibrary.id, () => [asset("photo:home")]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await screen.findByRole("button", { name: "查看 photo:home.jpg" });
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "海边的猫{Enter}");
 
@@ -581,7 +624,7 @@ describe("PhotosPanel search and viewing", () => {
     expect(screen.queryByText(/不可用/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "返回" }));
-    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /^照片/ }));
     expect(await screen.findByRole("button", { name: "查看 photo:home.jpg" })).toBeTruthy();
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
@@ -687,7 +730,7 @@ describe("PhotosPanel search and viewing", () => {
       timeline(viewed.id, () => [asset("photo:w", { libraryId: viewed.id })]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:admin" isAdmin />);
+    render(<PhotosPanel userId="user:admin" userName="alice" isAdmin />);
     await user.click(await screen.findByRole("tab", { name: "alice" }));
     expect((await screen.findByText(/只读查看 alice的图库/)).textContent).toContain("本次访问已写入审计");
     expect(screen.queryByRole("button", { name: /上传/ })).toBeNull();
@@ -713,7 +756,7 @@ describe("PhotosPanel search and viewing", () => {
       ? json({ error: { code: "photos_unavailable", message: "the photo library is not available on this device" } }, 503)
       : undefined);
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     expect(await screen.findByText(/相册暂时不可用：数据卷未就绪/)).toBeTruthy();
     available = true;
     await act(async () => { await user.click(screen.getByRole("button", { name: "重试" })); });

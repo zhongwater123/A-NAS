@@ -342,7 +342,13 @@ button { font: inherit; }
 .icon-video::before { opacity: .55; }
 .icon-download { background: linear-gradient(155deg, #66eb83, #11b944); }
 .icon-docker { background: linear-gradient(155deg, #5ba2ff, #3152d4); }
-.icon-photos { color: #7f5ed8; background: linear-gradient(155deg, #ffffff, #e4e8f1); }
+/* 相册 is a flat white tile: its coloured mark needs no gloss, shadow or gradient. */
+.icon-photos { background: #fff; }
+.icon-photos::before { display: none; }
+.icon-photos svg { filter: none !important; }
+.desktop-icon.icon-photos svg { width: 42px; height: 42px; }
+.dock-icon.icon-photos svg { width: 32px; height: 32px; }
+.launcher-icon.icon-photos svg { width: 36px; height: 36px; }
 .icon-vm { background: linear-gradient(155deg, #7e9cff, #4e69de); }
 /* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
 .icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
@@ -444,6 +450,9 @@ button { font: inherit; }
 .window-titlebar:active { cursor: grabbing; }
 .window-title { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 750; }
 .window-app-icon { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center; color: #fff; background: linear-gradient(155deg, #253346, #05090f); }
+/* A white tile on the white title bar: a hairline keeps its edge. */
+.window-app-icon.light { background: #fff; box-shadow: inset 0 0 0 1px rgba(16, 24, 40, .1), 0 1px 2px rgba(16, 24, 40, .08); }
+.window-app-icon.light svg { width: 20px; height: 20px; }
 .window-actions { height: 100%; display: flex; }
 .window-actions button { position: relative; width: 46px; height: 100%; border: 0; border-radius: 0; display: grid; place-items: center; color: #171b20; background: transparent; cursor: pointer; }
 .window-actions button:hover { background: rgba(33,42,52,.08); }

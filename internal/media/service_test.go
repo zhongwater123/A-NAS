@@ -213,6 +213,7 @@ func TestMixedLibraryRecognisesFilmsShowsAndOtherVideos(t *testing.T) {
 	env.write(t, shared, "影视/剧集/繁花/[字幕组] 繁花 第06集.mkv", "video")
 	env.write(t, shared, "影视/剧集/繁花/[字幕组] 繁花 第05集.mkv", "video")
 	env.write(t, shared, "影视/家庭/VID_20240501_123456.mp4", "video")
+	env.write(t, shared, "影视/家庭/VID_20080808_200000.f4v", "video")
 	env.write(t, shared, "影视/家庭/.hidden/skip.mp4", "video")
 	env.write(t, shared, "影视/家庭/notes.txt", "not a video")
 	env.library(t, env.admin, shared, LibraryMixed, "影视")
@@ -249,8 +250,8 @@ func TestMixedLibraryRecognisesFilmsShowsAndOtherVideos(t *testing.T) {
 	if len(detail.SeasonList) != 1 || detail.SeasonList[0].Number != 1 || detail.SeasonList[0].Episodes[0].Episode != 5 || detail.Next == nil || detail.Next.Episode != 5 {
 		t.Fatalf("show detail = %+v", detail)
 	}
-	others, err := env.media.Titles(env.ctx, env.alice, TitleQuery{Category: "other"})
-	if err != nil || others.Total != 1 || others.Items[0].Title != "VID_20240501_123456" {
+	others, err := env.media.Titles(env.ctx, env.alice, TitleQuery{Category: "other", Sort: "name"})
+	if err != nil || others.Total != 2 || others.Items[0].Title != "VID_20080808_200000" || others.Items[1].Title != "VID_20240501_123456" {
 		t.Fatalf("others = %+v, %v", others, err)
 	}
 	search, err := env.media.Titles(env.ctx, env.alice, TitleQuery{Search: "季节"})
@@ -516,6 +517,7 @@ func TestPlaybackPicksDirectRemuxOrTranscode(t *testing.T) {
 		check   func(StreamOptions) bool
 	}{
 		{name: "mp4", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.mp4", mode: ModeDirect},
+		{name: "Flash MP4", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.f4v", mode: ModeDirect},
 		{name: "mkv in Chromium", info: MediaInfo{Container: mkv, Video: h264, Audio: aac}, file: "a.mkv", caps: Capabilities{Matroska: true}, mode: ModeDirect},
 		{name: "mkv elsewhere", info: MediaInfo{Container: mkv, Video: h264, Audio: aac}, file: "a.mkv", mode: ModeRemux,
 			check: func(o StreamOptions) bool { return o.CopyVideo && o.CopyAudio }},
