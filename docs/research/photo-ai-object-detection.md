@@ -2,7 +2,7 @@
 
 > 状态：完成（开发机评估；可行，[实施方案](../architecture/photo-objects.md) 2026-10-13 确认）  
 > 更新日期：2026-10-13  
-> 适用范围：D-FINE Objects365 M（Transformers.js 的 ONNX 转换，L 只测了速度），ONNX Runtime 1.31.0，CPU；照片向量为 `embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2`  
+> 适用范围：D-FINE Objects365 M（选型时用 Transformers.js 的 ONNX 转换，L 只测了速度；产品用官方权重导出的 ONNX，两者结果一致，见“官方导出与产品规则”），ONNX Runtime 1.31.0，CPU；照片向量为 `embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2`  
 > 关联：[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)、[标签校准报告](photo-ai-label-calibration.md)、[issue #66](https://github.com/zhongwater123/A-NAS/issues/66)
 
 2026-10-10 部署后的决定是：关闭由 EmbeddingGemma 向量零样本算出的 AI 标签，EmbeddingGemma 回到纯向量检索，物体识别交给开源检测模型（[issue #66](https://github.com/zhongwater123/A-NAS/issues/66)）。当天用户选定 D-FINE，并给出检测器的职责：在空闲时给照片打标，框出照片里的所有物体，记下类别、置信度、框和数量这些客观数据；用户文搜图或以图搜图时，这些数据与向量一起提供混合检索。本文记录候选调研、选型，以及在开发机上评估检测器能否补上整图向量的短板。数据集只在开发机使用，来源与许可见[标签校准报告](photo-ai-label-calibration.md#数据集与许可)。
@@ -45,7 +45,7 @@
 
 - **类别**：365 类（[类别表](https://huggingface.co/ustc-community/dfine-large-obj365/blob/main/config.json)），包含不少中国家庭物品，如包子、饺子、电饭煲、筷子、榴莲、哈密瓜，以及家电、电子产品、随身物品与儿童用品。缺少电动车（只有自行车、三轮车、滑板车）、3D 打印机、圣诞树与泛指的玩具，这些由向量兜底。中文名、同义词、覆盖多个类别的词（鞋子、鸟、水果、宠物等）和整体跳过的词（马路、上面等）在 [`objects/v1.json`](../../internal/photos/objects/v1.json)，是评估用的草稿，标为 guess 的条目需核实。
 - **许可**：代码 Apache-2.0，Hugging Face 上的权重卡标注 Apache-2.0；但作者在 README 中写明，在 Objects365 上训练或预训练的权重“可能受 Objects365 数据集条款约束，不应默认已获商用许可”。按准入规则它通过，对外发行前单独确认一次。
-- **转换来源**：评估使用 Transformers.js 社区的 ONNX 转换（[M](https://huggingface.co/onnx-community/dfine_m_obj365-ONNX) revision `f78e6984`，`model.onnx` SHA-256 `2fb7d73e…19356c`；[L](https://huggingface.co/onnx-community/dfine_l_obj365-ONNX) revision `32323e9a`），该仓库没有标注许可。发行时应以官方权重和官方导出脚本自行导出。
+- **转换来源**：评估使用 Transformers.js 社区的 ONNX 转换（[M](https://huggingface.co/onnx-community/dfine_m_obj365-ONNX) revision `f78e6984`，`model.onnx` SHA-256 `2fb7d73e…19356c`；[L](https://huggingface.co/onnx-community/dfine_l_obj365-ONNX) revision `32323e9a`），该仓库没有标注许可。发行用的模型已于 2026-10-13 以官方权重和官方导出脚本自行导出，见“官方导出与产品规则”。
 
 ## 开发机实测
 
@@ -133,6 +133,51 @@ COCO 之外检测更强的类别（平均精度，整图向量 → 检测分数�
 
 AI 聚合（[#69](https://github.com/zhongwater123/A-NAS/pull/69)）的红线是：由向量模型产生的标签不参与搜索。检测器的类别不由向量产生，用户的计划是让它参与搜索；它能否成为 AI 聚合的来源另行决定。参考：COCO 物体类在检测分数 ≥ 0.6 时约 92% 正确、收入约 70% 的真实照片，且每张照片都有框为证。
 
+## 官方导出与产品规则（2026-10-13）
+
+实施方案确认后，发行用的模型改由官方权重导出，评估也改为按产品的确切规则重跑：检测框经 Worker 自己的 Provider 产生，排序与分段用相册服务的同一套规则（[`eval/hybrid_search.py`](../../ai/eval/hybrid_search.py) 的 `product`），以图搜图用 [`eval/image_search.py`](../../ai/eval/image_search.py)。
+
+**导出**：
+- 官方仓库 revision `956d1709`，配置 `configs/dfine/objects365/dfine_hgnetv2_m_obj365.yml`，权重 `dfine_m_obj365.pth`（SHA-256 `20b0c3d2…81b3`），`tools/deployment/export_onnx.py`，opset 16，PyTorch 2.14.1 CPU 版。
+- 与官方脚本的出入：
+  - 追踪用的批大小从 32 改为 1，否则开发机内存不够；
+  - PyTorch 2.14 默认用 dynamo 导出、需要 onnxscript，改为 `dynamo=False`，即旧的追踪导出；
+  - 没有用 onnxsim 简化；
+  - 导出脚本还需要 tensorboard、calflops（及其依赖的 transformers）、rich 与 defusedxml。
+- 结果为 78,517,092 字节的 `dfine_m_obj365.onnx`，SHA-256 `cd832825…4531a`。图中已含后处理：输入 `images` 与 `orig_target_sizes`，输出 `labels`、`boxes`、`scores`。清单见 [`deploy/models/dfine-m-obj365.json`](../../deploy/models/dfine-m-obj365.json)。
+
+**与社区转换版一致**：在 COCO、COCO-CN 与 Open Images 共 13,000 张照片上：
+- 每张照片每类最高分之差的中位数为 0，99 分位为 0.0001；
+- 分数不低于 0.5 的类别 47,774 对 47,782，平均 Jaccard 0.9999。
+
+据此，之前用社区转换版做的结论都适用于发行模型。
+
+**按产品规则的结果**：
+- 启用名单只在校准半（COCO 与 Open Images 各一半）上选出，以下数字都来自测试半。
+- 名单为融合 74 类、“检测到”分段 37 类；小船、滑雪、眼镜、花、西红柿 5 个词融合后变差，不启用。
+- 官方导出与社区转换版逐项相同，到小数点后三位。
+
+| COCO 测试半，物体类查询 | 纯向量 | 产品规则 |
+|---|---|---|
+| 全部 69 个：前 R 名召回 / 平均精度 | 63.9% / 0.674 | 81.1% / 0.868 |
+| 其中不到画面 1% 的物体：前 R 名召回 | 36.0% | 62.4% |
+| 进入“检测到”分段的 32 个查询：召回 / 平均精度 | 71.0% / 0.758 | 87.5% / 0.929 |
+| 其余 37 个：召回 / 平均精度 | 57.7% / 0.602 | 75.6% / 0.816 |
+
+- “检测到”分段（32 个查询）94.1% 正确，收入 77.2% 的真实照片。去掉真实照片、模拟图库里没有该物体时，第一段中位只有 2 张误报，8 个查询为空。
+- 句子类查询（COCO-CN）R@1/5/10 为 71.6/91.6/96.8，纯向量为 71.3/92.7/96.6。
+- Open Images 测试半（25 类、4,970 张）：平均精度从纯向量的 0.696 升到 0.739。
+- 以图搜图（COCO 测试半 2,455 张，与查询照片的主要物体同类即算相似）：
+
+  | 排序 | 平均精度 | 前 10 张准确率 |
+  |---|---|---|
+  | 余弦相似度 | 0.551 | 78.4% |
+  | 余弦 + 0.1 × 共有物体（产品） | 0.612 | 81.9% |
+  | 余弦 + 0.2 × 共有物体 | 0.645 | 83.2% |
+
+  这里的“相似”按物体判断，天然偏向更大的权重；用户说“相似”时更多指画面，所以产品只取 0.1。
+- 开发机上与其他评估同时运行时，检测约 0.6–0.95 秒/张，进程峰值约 430 MiB。
+
 ## 限制
 
 - COCO 图片约 640 px，与检测器输入相当；家庭照片多为 1200 万像素，缩到 640 px 后小物体会更小。切片推理能否找回，需要用真实照片在 NAS 上评估。
@@ -146,4 +191,4 @@ AI 聚合（[#69](https://github.com/zhongwater123/A-NAS/pull/69)）的红线是
 - 代码：[`eval/detect.py`](../../ai/eval/detect.py)、[`eval/hybrid_search.py`](../../ai/eval/hybrid_search.py)、[`objects/v1.json`](../../internal/photos/objects/v1.json)、[`eval/tile_search.py`](../../ai/eval/tile_search.py)
 - 设计：[M2 实施方案](../architecture/photo-ai.md)、[人物识别方案（#64）](https://github.com/zhongwater123/A-NAS/pull/64)
 - 研究：[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)、[标签校准报告](photo-ai-label-calibration.md)
-- 报告：开发机 `D:\A-NAS-datasets\runs\detector\final-main.json`（COCO 测试半、COCO-CN、Open Images）与 `final-main-calhalf.json`（COCO 另一半）
+- 报告：开发机 `D:\A-NAS-datasets\runs\detector\final-main.json`（COCO 测试半、COCO-CN、Open Images）与 `final-main-calhalf.json`（COCO 另一半）；官方导出按产品规则的结果在 `runs\detector-official\product.json` 与 `image-search.json`

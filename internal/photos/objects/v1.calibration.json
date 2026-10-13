@@ -1,6 +1,6 @@
 {
  "about": "Written by ai/eval/hybrid_search.py --write-calibration; do not edit. Search adds weight x coverage x detector score for words whose classes are all on the fusion list, and puts the photos with a detector score of at least tierScore first when the query is at least tierCoverage words on the tier list (docs/architecture/photo-objects.md). Only boxes of this model count.",
- "model": "dfine_m_obj365@2fb7d73e2df5+ort-1.31.0+640",
+ "model": "dfine-m-obj365@cd832825f883+ort-1.31.0+640+s0.05k100",
  "weight": 0.2,
  "tierScore": 0.6,
  "tierCoverage": 0.6,
