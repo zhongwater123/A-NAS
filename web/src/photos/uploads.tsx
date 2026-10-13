@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, ImageUp, RotateCcw, X } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, ImageUp, RotateCcw, ScanSearch, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { transferStore } from "../transfers/store";
@@ -130,8 +130,20 @@ export function UploadTray({ items, onRetry, onClear }: { items: UploadItem[]; o
   );
 }
 
-// DropOverlay tells where files dropped on the window will go.
-export function DropOverlay({ target }: { target?: UploadTarget }) {
+// DropOverlay tells where files dropped on the window will go: a search
+// box searches by an image dropped onto it instead.
+export function DropOverlay({ target, search }: { target?: UploadTarget; search: boolean }) {
+  if (search) {
+    return (
+      <div className="ph-drop search">
+        <div>
+          <ScanSearch />
+          <strong>松开以图搜图</strong>
+          <span>在图库中找出与这张图片相似的照片，图片不会被保存</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`ph-drop${target ? "" : " refused"}`}>
       <div>

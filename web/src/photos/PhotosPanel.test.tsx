@@ -6,6 +6,12 @@ import { setSession } from "../api";
 import { PhotosPanel } from "./PhotosPanel";
 import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./photosApi";
 
+// jsdom decodes no images: the image searched by is the file as it came.
+vi.mock("./imageSearch", async (original) => ({
+  ...await original<typeof import("./imageSearch")>(),
+  prepareImageQuery: async (file: Blob, name: string) => ({ key: `query-${name}-${Math.random()}`, name, blob: file, url: "blob:query", width: 4, height: 3 }),
+}));
+
 const privateLibrary: PhotoLibrary = { id: "library:mine", kind: "private", ownerUserId: "user:alice", createdAt: "2026-10-08T00:00:00Z" };
 const sharedLibrary: PhotoLibrary = { id: "library:shared", kind: "shared", createdAt: "2026-10-08T00:00:00Z" };
 const trip: PhotoAlbum = { id: "album:trip", libraryId: privateLibrary.id, name: "旅行", createdBy: "user:alice", createdAt: "2026-10-09T00:00:00Z", photos: 1, coverId: "photo:a" };
@@ -21,7 +27,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-type Route = (url: string, init?: RequestInit) => Response | Promise<Response> | undefined;
+type Route = (url: string, init?: RequestInit) => Response | Promise<Response | undefined> | undefined;
 
 // timeline serves one library's photos the way the photo service does: by
 // month of their capture (or import) time.
@@ -100,6 +106,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   for (const name of ["offsetHeight", "offsetWidth"] as const) Object.defineProperty(HTMLElement.prototype, name, sizes[name]);
   window.localStorage.clear();
   FakeUpload.sent = [];
@@ -714,6 +721,89 @@ describe("PhotosPanel search and viewing", () => {
     await user.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByRole("button", { name: "查看 photo:sea.jpg" })).toBeTruthy();
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("海边");
+  });
+
+  it("searches by an image chosen, dropped or pasted, and sends it again once the photo service has let it go", async () => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:query", revokeObjectURL: () => undefined }));
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    let posted = 0;
+    let available = true;
+    const expired = new Set<string>();
+    const fetchMock = serve(
+      async (url, init) => {
+        if (url === "/api/v1/photos/image-searches" && init?.method === "POST") {
+          if (!available) return json({ error: { code: "ai_unavailable", message: "local AI cannot read the image right now" } }, 503);
+          const image = (init.body as FormData).get("file") as File;
+          return json({ id: `${await image.text()}-${++posted}` }, 201);
+        }
+        const id = url.match(/^\/api\/v1\/photos\/image-searches\/([^/]+)\/assets\?limit=120$/)?.[1];
+        if (!id) return undefined;
+        if (expired.has(id)) return json({ error: { code: "search_expired", message: "the image search is no longer kept" } }, 404);
+        return json({ items: id.startsWith("cat") ? [asset("photo:c"), asset("photo:d", { libraryId: sharedLibrary.id })] : [] });
+      },
+      timeline(privateLibrary.id, () => [asset("photo:a")]),
+    );
+    const chosen: File[] = [];
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (this: HTMLInputElement) {
+      if (this.type !== "file") return;
+      Object.defineProperty(this, "files", { value: chosen.splice(0) });
+      this.dispatchEvent(new Event("change"));
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:a.jpg" });
+
+    // Chosen with the camera at the end of the search box.
+    chosen.push(new File(["cat"], "cat.jpg", { type: "image/jpeg" }));
+    await user.click(screen.getByRole("button", { name: "以图搜图" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:c.jpg" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "以图搜图" })).toBeTruthy();
+    expect(screen.getByText("2 张")).toBeTruthy();
+    expect(document.querySelector(".ph-image-source strong")?.textContent).toBe("cat.jpg");
+    expect(screen.getByText("按画面和画中物品的相似程度排列，最像的在前")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/image-searches", expect.objectContaining({ method: "POST" }));
+    const post = fetchMock.mock.calls.find(([url]) => url === "/api/v1/photos/image-searches")!;
+    expect(new Headers(post[1]?.headers).get("X-CSRF-Token")).toBe("csrf-photo");
+    // Results mix libraries, so the shared photo says where it is from.
+    expect(screen.getByRole("button", { name: "查看 photo:d.jpg" }).closest(".ph-tile")?.querySelector(".ph-tile-source")?.textContent).toBe("共享");
+
+    // The photo service let the search go: coming back sends the image again.
+    expired.add("cat-1");
+    await openPhoto(user, "photo:c.jpg");
+    await user.click(screen.getByRole("button", { name: "找相似" }));
+    expect(await screen.findByRole("heading", { name: "相似的照片" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:d.jpg" })).toBeTruthy();
+    expect(posted).toBe(2);
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:a.jpg" })).toBeTruthy();
+
+    // Dropped on the search box it is searched by, not uploaded.
+    const app = document.querySelector(".ph-app")!;
+    const box = screen.getByRole("search");
+    const dog = { types: ["Files"], files: [new File(["dog"], "dog.png", { type: "image/png" })] };
+    fireEvent.dragEnter(app, { dataTransfer: dog });
+    fireEvent.dragOver(box, { dataTransfer: dog });
+    expect(screen.getByText("松开以图搜图")).toBeTruthy();
+    fireEvent.drop(box, { dataTransfer: dog });
+    expect(await screen.findByText("没有找到相似的照片")).toBeTruthy();
+    expect(document.querySelector(".ph-image-source strong")?.textContent).toBe("dog.png");
+    expect(FakeUpload.sent).toHaveLength(0);
+    expect(screen.queryByText("松开以图搜图")).toBeNull();
+
+    // When local AI cannot read it, the image can be tried again.
+    available = false;
+    await user.click(screen.getByRole("button", { name: "AI 聚合" }));
+    const hero = await screen.findByRole("searchbox", { name: "用一句话搜索照片" });
+    fireEvent.paste(hero, { clipboardData: { files: [new File(["cat"], "image.png", { type: "image/png" })] } });
+    expect(await screen.findByText("没能识别这张图片", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("暂时无法识别图片，请稍后再试")).toBeTruthy();
+    expect(document.querySelector(".ph-image-source strong")?.textContent).toBe("粘贴的图片");
+    available = true;
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByRole("button", { name: "查看 photo:c.jpg" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
   });
 
   it("names where results come from and narrows a search to one library", async () => {

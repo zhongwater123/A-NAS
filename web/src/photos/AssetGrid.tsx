@@ -16,6 +16,8 @@ interface Props extends GridProps {
   onError: (message: string) => void;
   badge?: (asset: PhotoAsset) => ReactNode;
   empty: ReactNode;
+  // loading replaces the spinner shown until the first page arrives.
+  loading?: ReactNode;
   end?: string;
   // split ends the first group after that many of the loaded photos.
   split?: Split;
@@ -99,7 +101,10 @@ export function AssetGrid(props: Props) {
       floatingLabel={Boolean(split)}
       handle={props.scroller}
     >
-      {assets === undefined ? <div className="ph-loading" style={{ paddingTop: props.topInset }}><span className="ph-spinner" /></div> : !shown?.length && props.empty}
+      {assets === undefined ? props.loading ?? <div className="ph-loading" style={{ paddingTop: props.topInset }}><span className="ph-spinner" /></div> : !shown?.length && (
+        // A taller toolbar, such as one with a search box under it, moves the empty state down with it.
+        <div className="ph-empty-place" style={{ top: Math.max(0, props.topInset - 72) }}>{props.empty}</div>
+      )}
     </PhotoScroller>
   );
 }
