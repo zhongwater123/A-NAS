@@ -1,4 +1,4 @@
-import { ArrowDownWideNarrow, Clapperboard, Heart, History, Search, Trash2, X } from "lucide-react";
+import { ArrowDownWideNarrow, Clapperboard, CloudUpload, Heart, History, Search, Trash2, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError } from "../api";
@@ -66,8 +66,9 @@ function useSentinel(onVisible: () => void, enabled: boolean) {
 }
 
 // CategoryPage lists one category, or a search, with sorting and filters.
-export function CategoryPage({ category, libraries, library: fixedLibrary, search, refreshKey, onError }: {
+export function CategoryPage({ category, libraries, library: fixedLibrary, search, refreshKey, onError, onUpload }: {
   category: Category; libraries: MediaLibrary[]; library?: MediaLibrary; search?: string; refreshKey: number; onError: (message: string) => void;
+  onUpload?: () => void;
 }) {
   const [sort, setSort] = useState<SortOrder>(search ? "name" : "added");
   const [library, setLibrary] = useState(fixedLibrary?.id ?? "");
@@ -116,6 +117,7 @@ export function CategoryPage({ category, libraries, library: fixedLibrary, searc
             {(Object.keys(sortLabels) as SortOrder[]).map((key) => <option key={key} value={key}>{sortLabels[key]}</option>)}
           </select>
         </label>
+        {onUpload && <button type="button" className="mc-primary small mc-upload-button" onClick={onUpload}><CloudUpload />上传</button>}
       </PageHeader>
       {genres.length > 1 && (
         <div className="mc-chips" role="group" aria-label="类型">
@@ -126,7 +128,12 @@ export function CategoryPage({ category, libraries, library: fixedLibrary, searc
       {!items ? <Loading /> : items.length === 0 ? (
         search
           ? <Empty icon={<Search />} title="没有找到匹配的影片" text="换个片名、原名或文件名试试。" />
-          : <Empty icon={<Clapperboard />} title={`还没有${categoryTitles[category] === "全部" ? "视频" : categoryTitles[category]}`} text="把视频放进媒体库的文件夹，扫描后会出现在这里。" />
+          : (
+            <Empty icon={<Clapperboard />} title={`还没有${categoryTitles[category] === "全部" ? "视频" : categoryTitles[category]}`}
+              text={onUpload ? "上传视频，或把视频放进媒体库的文件夹，扫描后会出现在这里。" : "把视频放进媒体库的文件夹，扫描后会出现在这里。"}>
+              {onUpload && <button type="button" className="mc-primary mc-upload-button" onClick={onUpload}><CloudUpload />上传{category === "all" || fixedLibrary ? "视频" : categoryTitles[category]}</button>}
+            </Empty>
+          )
       ) : (
         <>
           <TitleGrid items={items} still={category === "other"} />

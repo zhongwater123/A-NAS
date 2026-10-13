@@ -4,8 +4,9 @@ Documentation=https://github.com/zhongwater123/A-NAS
 
 [Service]
 Type=simple
-# Runs FFmpeg on the one video the Product Service opened as the signed-in
-# user and passed as a descriptor. It has no network and sees neither the
+# Runs FFmpeg on the one file (a video for the media center, a song for
+# music) the Product Service opened as the signed-in user and passed as a
+# descriptor. It has no network and sees neither the
 # data volume nor the Product Service's state (ADR 0017); the system test
 # proves both. The connection is standard input; logs go to the journal so
 # they never mix with the protocol.

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -14,12 +15,15 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 )
 
 const sessionCookieName = "anas_session"
@@ -44,8 +48,22 @@ type ProductDependencies struct {
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
-	Media  http.Handler
-	Logger *slog.Logger
+	Media http.Handler
+	// Music is the music library; nil answers music_unavailable.
+	Music *music.Service
+	// Feedback serves /api/v1/feedback, the list every signed-in user reads
+	// and edits, and receives the user through feedbackapi.WithUser.
+	Feedback http.Handler
+	// Transfers serves /api/v1/transfers and the tus endpoint /api/v1/uploads
+	// to every signed-in user and receives the user through
+	// transfersapi.WithUser.
+	Transfers http.Handler
+	// FilesChanged, when set, is told after a Web upload, move, copy, delete
+	// or restore changed a space, so indexes over ordinary files (the media
+	// center) catch up without waiting for their periodic scan. The context
+	// carries the session token.
+	FilesChanged func(ctx context.Context, user accounts.User, spaceID string)
+	Logger       *slog.Logger
 }
 
 type productHandler struct {
@@ -58,6 +76,10 @@ type productHandler struct {
 	apps       http.Handler
 	photos     http.Handler
 	media      http.Handler
+	music      *music.Service
+	feedback   http.Handler
+	transfers  http.Handler
+	changed    func(context.Context, accounts.User, string)
 	logger     *slog.Logger
 	mux        *http.ServeMux
 }
@@ -71,7 +93,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
-		photos: dependencies.Photos, media: dependencies.Media, logger: logger, mux: http.NewServeMux(),
+		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
+		transfers: dependencies.Transfers, changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -89,7 +112,17 @@ func (h *productHandler) routes() {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
 	}
 	if h.media != nil {
-		h.mux.Handle(mediaapi.PathPrefix+"/", h.withMediaUser(h.media))
+		h.mux.Handle(mediaapi.PathPrefix+"/", h.withUser(h.media, mediaapi.WithUser))
+	}
+	if h.feedback != nil {
+		h.mux.Handle(feedbackapi.PathPrefix, h.withUser(h.feedback, feedbackapi.WithUser))
+		h.mux.Handle(feedbackapi.PathPrefix+"/", h.withUser(h.feedback, feedbackapi.WithUser))
+	}
+	if h.transfers != nil {
+		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
+			h.mux.Handle(prefix, h.withUser(h.transfers, transfersapi.WithUser))
+			h.mux.Handle(prefix+"/", h.withUser(h.transfers, transfersapi.WithUser))
+		}
 	}
 	h.mux.HandleFunc("GET /api/v1/setup/status", h.handleSetupStatus)
 	h.mux.HandleFunc("POST /api/v1/setup/admin", h.handleSetupAdministrator)
@@ -134,6 +167,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
+	h.musicRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -338,6 +372,7 @@ func (h *productHandler) handleUpload(w http.ResponseWriter, r *http.Request, se
 				h.writeFileError(w, r, uploadErr)
 				return
 			}
+			h.filesChanged(r, session, entry.SpaceID)
 			writeJSON(w, http.StatusCreated, entry)
 			return
 		default:
@@ -378,6 +413,7 @@ func browserPreviewableContent(name string) bool {
 
 func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
+		SpaceID  string `json:"spaceId"`
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
@@ -385,16 +421,28 @@ func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Move(r.Context(), session.User, r.PathValue("fileID"), request.ParentID, request.Name)
+	// A move to another space changes both spaces.
+	var from string
+	if request.SpaceID != "" {
+		if source, _, err := h.files.Lookup(r.Context(), session.User, r.PathValue("fileID")); err == nil {
+			from = source.SpaceID
+		}
+	}
+	entry, err := h.files.Move(r.Context(), session.User, r.PathValue("fileID"), request.SpaceID, request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
 	}
+	if from != entry.SpaceID {
+		h.filesChanged(r, session, from)
+	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusOK, entry)
 }
 
 func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
+		SpaceID  string `json:"spaceId"`
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
@@ -402,11 +450,12 @@ func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Copy(r.Context(), session.User, r.PathValue("fileID"), request.ParentID, request.Name)
+	entry, err := h.files.Copy(r.Context(), session.User, r.PathValue("fileID"), request.SpaceID, request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusCreated, entry)
 }
 
@@ -416,7 +465,15 @@ func (h *productHandler) handleDeleteFile(w http.ResponseWriter, r *http.Request
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, item.SpaceID)
 	writeJSON(w, http.StatusOK, item)
+}
+
+// filesChanged tells FilesChanged, if set, that a Web operation changed a space.
+func (h *productHandler) filesChanged(r *http.Request, session accounts.Session, spaceID string) {
+	if h.changed != nil && spaceID != "" {
+		h.changed(r.Context(), session.User, spaceID)
+	}
 }
 
 func (h *productHandler) handleTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -445,6 +502,7 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusOK, entry)
 }
 
@@ -510,6 +568,7 @@ func (h *productHandler) handleRestoreSnapshotFile(w http.ResponseWriter, r *htt
 		h.writeFileError(w, r, err)
 		return
 	}
+	h.filesChanged(r, session, entry.SpaceID)
 	writeJSON(w, http.StatusCreated, entry)
 }
 
@@ -881,11 +940,11 @@ func (h *productHandler) withPhotoPrincipal(next http.Handler) http.HandlerFunc 
 	}
 }
 
-// withMediaUser hands the media API the signed-in user; writes need the
+// withUser hands an API the signed-in user through attach; writes need the
 // CSRF token.
-func (h *productHandler) withMediaUser(next http.Handler) http.HandlerFunc {
+func (h *productHandler) withUser(next http.Handler, attach func(context.Context, accounts.User) context.Context) http.HandlerFunc {
 	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		next.ServeHTTP(w, r.WithContext(mediaapi.WithUser(r.Context(), session.User)))
+		next.ServeHTTP(w, r.WithContext(attach(r.Context(), session.User)))
 	}
 	read, write := h.withSession(serve), h.withMutation(serve)
 	return func(w http.ResponseWriter, r *http.Request) {

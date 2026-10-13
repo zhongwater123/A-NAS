@@ -15,6 +15,10 @@ func TestParseNameReadsReleaseChineseAndCameraNames(t *testing.T) {
 		{name: "Inception (2010)", mode: nameMovie, title: "Inception", year: 2010},
 		{name: "1917", mode: nameMovie, title: "1917"},
 		{name: "Movie.Name.2019.1080p.x264-GROUP", mode: nameMovie, title: "Movie Name", year: 2019},
+		// A hyphen inside a title is not a release group.
+		{name: "超凡蜘蛛侠2.The.Amazing.Spider-Man.2.2014", mode: nameMovie, title: "超凡蜘蛛侠2 The Amazing Spider-Man 2", year: 2014},
+		{name: "X-Men.2000.1080p.BluRay.x264-SPARKS", mode: nameMovie, title: "X-Men", year: 2000},
+		{name: "Spider-Man.No.Way.Home.2021.WEB-DL", mode: nameMovie, title: "Spider-Man No Way Home", year: 2021},
 		{name: "Breaking.Bad.S01E02.720p.BluRay.x264", mode: nameAuto, title: "Breaking Bad", season: 1, episode: 2, marked: true},
 		{name: "Friends - S02E05 - The One With Five Steaks", mode: nameAuto, title: "Friends", episodeTitle: "The One With Five Steaks", season: 2, episode: 5, marked: true},
 		{name: "Show.Name.1x03", mode: nameAuto, title: "Show Name", season: 1, episode: 3, marked: true},

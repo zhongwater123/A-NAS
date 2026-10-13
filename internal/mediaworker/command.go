@@ -77,6 +77,24 @@ func (t Tools) command(request Request) (string, []string) {
 		}
 		return t.FFmpeg, append(args, "-max_muxing_queue_size", "1024",
 			"-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
+	case OpAudio:
+		// FLAC keeps decoded audio exactly, so a lossy source is not
+		// encoded lossily a second time; the fastest level suits streaming.
+		args := append([]string{"-nostdin"}, quiet...)
+		if request.Start > 0 {
+			args = append(args, "-ss", seconds(request.Start))
+		}
+		args = append(args, "-i", "fd:", "-map", "0:a:0", "-vn", "-sn", "-dn", "-map_metadata", "-1")
+		if request.SampleRate > 0 {
+			args = append(args, "-ar", strconv.Itoa(request.SampleRate))
+		}
+		args = append(args, "-c:a", "flac", "-compression_level", "1")
+		if request.Bits == 24 {
+			args = append(args, "-sample_fmt", "s32", "-bits_per_raw_sample", "24")
+		} else {
+			args = append(args, "-sample_fmt", "s16")
+		}
+		return t.FFmpeg, append(args, "-f", "flac", "pipe:1")
 	}
 	return "", nil
 }

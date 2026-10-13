@@ -17,7 +17,7 @@ anas-api（a-nas）
    │     └── 播放、探测、截图、字幕：files.Service.OpenContent 得到只读 fd
    │                 │ SCM_RIGHTS + 类型化请求
    │                 ▼
-   └── internal/mediaworker.Client ──► /run/a-nas-media/media.sock（root:a-nas 0660）
+   └── media.WorkerProcessor ──► internal/mediaworker.Client ──► /run/a-nas-media/media.sock（root:a-nas 0660）
                                           │ Accept=yes，每个连接一个实例
                                           ▼
                                 anas-media@.service（DynamicUser，无网络，
@@ -27,12 +27,15 @@ anas-api（a-nas）
 
 开发模式（`ANAS_HOSTSTATE_MODE=fake`）用 `mediaworker.Local` 在进程内的 socketpair 上运行同一个服务端，协议与命令完全相同；找不到 FFmpeg 时影视中心只按文件名与 NFO 工作，所有视频都尝试直接播放。
 
+`internal/mediaworker` 是 A-NAS 共用的 FFmpeg 边界，不引用任何应用的类型：探测返回 ffprobe 的中性结果，错误是它自己的 `ErrUnavailable`、`ErrUnreadable`、`ErrInvalid`。影视中心的 [`media.WorkerProcessor`](../../internal/media/worker.go) 把它适配为 `media.Processor`：挑选视频、音轨与字幕流，判断 HDR，并把错误换成影视中心的错误。音乐用同一个 Worker 探测与解码浏览器不能播放的音频（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)）。
+
 ## 身份与可见性
 
 - 媒体库记录空间 ID、空间类型和所有者。共享空间的库对全体有效账号可见，个人空间的库只对所有者可见（[`library.go`](../../internal/media/library.go)）；不可见的资源一律按不存在处理。共享空间的库由管理员管理，个人空间的库由所有者管理。
 - 同一空间内的媒体库文件夹不得互相包含，以免同一视频在首页出现两次。
 - 读取视频、NFO、图片和字幕都调用 `files.Service`，在生产中由文件代理以请求者身份打开，内核 ACL 是最终裁决。后台扫描与整理通过 `accounts.Service.RememberedSessions` 借用能读取该空间的会话：个人空间用所有者的，共享空间优先用创建者的、否则任一有效会话（[`service.go`](../../internal/media/service.go)）。
-- 打开影视中心（`GET /libraries`、`GET /home`）时，距上次扫描超过 10 分钟的库以当前用户身份在后台重扫；后台循环每 15 分钟扫描全部库，之后逐个探测、截图（[`process.go`](../../internal/media/process.go)）。
+- Web 上传、移动、复制、删除与恢复成功后，产品 API 调用 `ProductDependencies.FilesChanged`，影视中心以操作者身份在约 3 秒后重扫该空间的媒体库（`SpaceChanged`，同一库的连续变更合并为一次）。打开影视中心（`GET /libraries` 每 20 秒轮询一次、`GET /home`）时，距上次扫描超过 2 分钟的库以当前用户身份在后台重扫，SMB 放入的视频靠这一途径和每 15 分钟的后台循环出现；之后逐个探测、截图（[`process.go`](../../internal/media/process.go)）。扫描进行中又收到扫描请求时，当前扫描结束后再扫描一次。`POST /libraries/{id}/scan` 返回扫描中的媒体库。
+- 影视中心的上传没有自己的接口：Web 客户端用文件服务的 `POST /spaces/{id}/uploads` 与 `POST /spaces/{id}/directories` 逐个写入媒体库文件夹（[`uploads.ts`](../../web/src/media/uploads.ts)），因此授权、容量检查和上传后的重扫都与文件管理相同。可上传的扩展名与扫描器读取的视频、字幕、NFO 和图片扩展名保持一致。
 
 ## 扫描与识别
 
@@ -64,8 +67,8 @@ anas-api（a-nas）
 ## Worker 协议
 
 - 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/mediaworker/protocol.go)）。
-- 请求只有四种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/mediaworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
-- 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
+- 请求只有五种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位，把第一条音轨解码为 FLAC，供音乐使用）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/mediaworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
+- 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
 
 ## 关联
 

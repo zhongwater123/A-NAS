@@ -378,6 +378,9 @@ func (r *RootFileSystem) CreateTemp(_ context.Context, directory, prefix string)
 }
 
 // Copy copies a regular file or directory tree to a target that must not exist.
+// The copies are new files with the modes of files created through the Web,
+// so they take the target's default ACL; the original's mode bits could
+// mask it, for example a 0600 file copied into the shared space.
 func (r *RootFileSystem) Copy(ctx context.Context, from, to string) error {
 	sourceDir, sourceName, source, err := r.parent(from)
 	if err != nil {
@@ -403,12 +406,11 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 	if err := unix.Fstatat(sourceDir, sourceName, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return err
 	}
-	mode := uint32(stat.Mode & 0o777)
 	switch stat.Mode & unix.S_IFMT {
 	case unix.S_IFREG:
-		return copyFileAt(sourceDir, sourceName, targetDir, targetName, mode)
+		return copyFileAt(sourceDir, sourceName, targetDir, targetName)
 	case unix.S_IFDIR:
-		if err := unix.Mkdirat(targetDir, targetName, mode); err != nil {
+		if err := unix.Mkdirat(targetDir, targetName, 0o770); err != nil {
 			return err
 		}
 		sourceFD, err := unix.Openat(sourceDir, sourceName, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
@@ -437,14 +439,14 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 	}
 }
 
-func copyFileAt(sourceDir int, sourceName string, targetDir int, targetName string, mode uint32) error {
+func copyFileAt(sourceDir int, sourceName string, targetDir int, targetName string) error {
 	inputFD, err := unix.Openat(sourceDir, sourceName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return err
 	}
 	input := os.NewFile(uintptr(inputFD), sourceName)
 	defer input.Close()
-	outputFD, err := unix.Openat(targetDir, targetName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, mode)
+	outputFD, err := unix.Openat(targetDir, targetName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o660)
 	if err != nil {
 		return err
 	}

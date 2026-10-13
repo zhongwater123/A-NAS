@@ -24,6 +24,8 @@ import (
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/feedback"
+	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -33,12 +35,15 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
+	"github.com/zhongwater123/A-NAS/internal/transfers"
+	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -164,6 +169,20 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
+	// The media center and the music library share one FFmpeg boundary and
+	// adapt its operations to their own needs (ADR 0017, ADR 0018).
+	mediaWorker, err := configuredMediaWorker(live)
+	if err != nil {
+		return err
+	}
+	musicStore, err := music.OpenSQLite(filepath.Join(stateDirectory, "music.db"))
+	if err != nil {
+		return err
+	}
+	defer musicStore.Close()
+	// Runs before the deferred musicStore.Close, after the server stopped.
+	musicService := music.New(musicStore, filepath.Join(stateDirectory, "music-covers"), fileService, accountService, music.Options{Logger: logger, Worker: mediaWorker})
+	defer musicService.Close()
 	// The Product Service cannot reach the data volume in production; there
 	// the photo service owns the photos subvolume under its own identity and
 	// the Product Service only forwards the photo API to it (ADR 0011).
@@ -185,9 +204,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer mediaStore.Close()
-	processor, err := configuredMediaProcessor(live)
-	if err != nil {
-		return err
+	var processor media.Processor
+	if mediaWorker != nil {
+		processor = media.WorkerProcessor{Worker: mediaWorker}
 	}
 	mediaService, err := media.NewService(mediaStore, media.Options{
 		Files: fileService, Spaces: accountService, Sessions: accountService.RememberedSessions,
@@ -197,6 +216,22 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer mediaService.Close()
+	feedbackStore, err := feedback.Open(filepath.Join(stateDirectory, "feedback.db"), feedback.Options{})
+	if err != nil {
+		return err
+	}
+	defer feedbackStore.Close()
+	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
+		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer transferService.Close()
+	transferAPI, err := transfersapi.New(transferService, logger)
+	if err != nil {
+		return err
+	}
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -228,7 +263,13 @@ func run(logger *slog.Logger) error {
 		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
 		Photos:     photoAPI,
 		Media:      mediaapi.New(mediaService, logger),
-		Logger:     logger,
+		Music:      musicService,
+		Feedback:   feedbackapi.New(feedbackStore, logger),
+		Transfers:  transferAPI,
+		// Web uploads and other changes rescan the media libraries of their
+		// space a few seconds later.
+		FilesChanged: mediaService.SpaceChanged,
+		Logger:       logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
 		ScreensaverDirectory: configuredScreensaverDirectory(),
@@ -245,6 +286,7 @@ func run(logger *slog.Logger) error {
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	go mediaService.Run(ctx)
+	go transferService.Run(ctx)
 	if photoService != nil {
 		background := make(chan struct{})
 		go func() {
@@ -297,10 +339,10 @@ func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bo
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
 }
 
-// configuredMediaProcessor picks where FFmpeg runs. Production uses the
+// configuredMediaWorker picks where FFmpeg runs. Production uses the
 // sandboxed worker socket; development runs FFmpeg in this process when it
-// is installed, and otherwise the media center works without it.
-func configuredMediaProcessor(live bool) (media.Processor, error) {
+// is installed, and otherwise the media center and music work without it.
+func configuredMediaWorker(live bool) (mediaworker.Worker, error) {
 	mode := os.Getenv("ANAS_MEDIA_WORKER")
 	if mode == "" {
 		mode = "local"

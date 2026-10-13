@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { ReactNode, useEffect, useId, useState } from "react";
 
 import { HostState } from "./api";
 import { HostStateView } from "./useHostState";
@@ -12,7 +12,9 @@ const radius = 44;
 const sweep = 210;
 const startAngle = -sweep / 2;
 
-export function StatusBar({ host }: { host: HostStateView }) {
+// extra shows beside the clock while it has something to say, such as
+// transfers in progress.
+export function StatusBar({ host, extra }: { host: HostStateView; extra?: ReactNode }) {
   const { metrics, disconnected: metricsDisconnected } = useHostMetrics();
   const disconnected = host.disconnected || metricsDisconnected;
   const connection = disconnected ? "offline" : host.snapshot ? "online" : "pending";
@@ -41,6 +43,7 @@ export function StatusBar({ host }: { host: HostStateView }) {
         <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
       </div>
       <span className="status-divider" aria-hidden="true" />
+      {extra && <div className="status-extra">{extra}</div>}
       <div className="status-clock">
         <Clock />
         <div className="status-meta">

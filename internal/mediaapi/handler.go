@@ -206,11 +206,12 @@ func (h *handler) deleteLibrary(w http.ResponseWriter, r *http.Request, user acc
 }
 
 func (h *handler) scanLibrary(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	if err := h.service.Rescan(r.Context(), user, r.PathValue("id")); err != nil {
+	library, err := h.service.Rescan(r.Context(), user, r.PathValue("id"))
+	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, http.StatusAccepted, library)
 }
 
 func (h *handler) home(w http.ResponseWriter, r *http.Request, user accounts.User) {
