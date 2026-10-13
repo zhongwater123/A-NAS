@@ -12,6 +12,7 @@ import {
   readContainerLogs,
   readContainers,
 } from "./containersApi";
+import { formatBytes } from "./bytes";
 
 export const containerPollInterval = 5_000;
 
@@ -285,12 +286,6 @@ function actionFailure(error: unknown, action: ContainerAction): string {
   if (code === "container_not_found") return "容器已不存在，列表即将刷新";
   if (code === "containers_unavailable" || code === "network_error") return `无法连接 Docker，${actionLabels[action]}未执行`;
   return `${actionLabels[action]}失败，请查看日志`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MiB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KiB`;
 }
 
 function formatDate(value: string): string {

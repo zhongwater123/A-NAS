@@ -64,12 +64,25 @@ type Content struct {
 }
 
 type TrashItem struct {
-	ID        string    `json:"id"`
-	EntryID   string    `json:"entryId"`
-	SpaceID   string    `json:"spaceId"`
-	Name      string    `json:"name"`
-	DeletedBy string    `json:"deletedBy"`
-	DeletedAt time.Time `json:"deletedAt"`
+	ID      string    `json:"id"`
+	EntryID string    `json:"entryId"`
+	SpaceID string    `json:"spaceId"`
+	Name    string    `json:"name"`
+	Kind    EntryKind `json:"kind"`
+	// SizeBytes totals the files the item holds, as last indexed.
+	SizeBytes int64 `json:"sizeBytes"`
+	// OriginalPath is the folder the item was deleted from, relative to the
+	// space root and empty for the root. Restoring puts it back there, so a
+	// folder that has moved since is named where it is now.
+	OriginalPath string `json:"originalPath"`
+	// OriginalGone says the original folder no longer exists: restoring then
+	// puts the item at the space root, and OriginalPath is where the folder
+	// was, or empty when that was not recorded.
+	OriginalGone bool      `json:"originalGone"`
+	DeletedBy    string    `json:"deletedBy"`
+	DeletedAt    time.Time `json:"deletedAt"`
+	// PurgeAt is when the recycle bin deletes the item for good.
+	PurgeAt time.Time `json:"purgeAt"`
 }
 
 type AuditEvent struct {
@@ -250,6 +263,7 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 		{"snapshots", "file_count", "INTEGER NOT NULL DEFAULT -1"},
 		{"snapshots", "size_bytes", "INTEGER NOT NULL DEFAULT -1"},
 		{"snapshot_entries", "modified_at", "TEXT NOT NULL DEFAULT ''"},
+		{"trash", "original_path", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(ctx, column.table, column.name, column.definition); err != nil {
 			return err
@@ -257,6 +271,9 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 	}
 	if _, err := s.db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS snapshots_by_space ON snapshots(space_id, created_at);
+UPDATE trash SET original_path = (SELECT relative_path FROM entries p WHERE p.id = trash.original_parent_id AND p.trashed = 0)
+WHERE original_path = '' AND original_parent_id <> ''
+    AND EXISTS (SELECT 1 FROM entries p WHERE p.id = trash.original_parent_id AND p.trashed = 0);
 UPDATE snapshots SET
     file_count = (SELECT COUNT(*) FROM snapshot_entries e WHERE e.snapshot_id = snapshots.id AND e.kind = 'file'),
     size_bytes = (SELECT COALESCE(SUM(e.size_bytes), 0) FROM snapshot_entries e WHERE e.snapshot_id = snapshots.id AND e.kind = 'file')
@@ -505,10 +522,18 @@ WHERE space_id = ? AND (relative_path = ? OR substr(relative_path, 1, length(?) 
 		rollback()
 		return TrashItem{}, err
 	}
-	item := TrashItem{ID: trashID, EntryID: entry.ID, SpaceID: spaceID, Name: entry.Name, DeletedBy: actor.ID, DeletedAt: now}
+	// Earlier items deleted from these folders keep where the folders were.
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO trash(id, entry_id, space_id, original_parent_id, original_name, trash_relative_path, deleted_by, deleted_at)
-VALUES(?,?,?,?,?,?,?,?)`, item.ID, item.EntryID, item.SpaceID, entry.ParentID, entry.Name, trashRelative, item.DeletedBy, formatTime(now)); err != nil {
+UPDATE trash SET original_path = (
+    SELECT ? || substr(p.relative_path, length(?) + 1) FROM entries p WHERE p.id = trash.original_parent_id)
+WHERE original_parent_id IN (SELECT id FROM entries WHERE trash_id = ? AND kind = 'directory')`,
+		oldRelative, trashRelative, trashID); err != nil {
+		rollback()
+		return TrashItem{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO trash(id, entry_id, space_id, original_parent_id, original_path, original_name, trash_relative_path, deleted_by, deleted_at)
+VALUES(?,?,?,?,?,?,?,?,?)`, trashID, entry.ID, spaceID, entry.ParentID, folderOf(oldRelative), entry.Name, trashRelative, actor.ID, formatTime(now)); err != nil {
 		rollback()
 		return TrashItem{}, err
 	}
@@ -517,7 +542,15 @@ VALUES(?,?,?,?,?,?,?,?)`, item.ID, item.EntryID, item.SpaceID, entry.ParentID, e
 		return TrashItem{}, err
 	}
 	_ = s.audit(ctx, actor.ID, "file.trashed", spaceID, entry.ID, entry.Name)
-	return item, nil
+	return s.trashItem(ctx, trashID)
+}
+
+// folderOf is the folder of a space-relative path, empty for the root.
+func folderOf(relative string) string {
+	if folder := path.Dir(relative); folder != "." {
+		return folder
+	}
+	return ""
 }
 
 func (s *Service) DeleteByID(ctx context.Context, actor accounts.User, entryID string) (TrashItem, error) {
@@ -557,16 +590,15 @@ func (s *Service) ListTrash(ctx context.Context, actor accounts.User) ([]TrashIt
 			return nil, err
 		}
 	}
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id, entry_id, space_id, original_name, deleted_by, deleted_at FROM trash ORDER BY deleted_at DESC")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+trashItemColumns+" ORDER BY t.deleted_at DESC")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []TrashItem
 	for rows.Next() {
-		var item TrashItem
-		var deletedAt string
-		if err := rows.Scan(&item.ID, &item.EntryID, &item.SpaceID, &item.Name, &item.DeletedBy, &deletedAt); err != nil {
+		item, err := s.scanTrashItem(rows)
+		if err != nil {
 			return nil, err
 		}
 		// Deleted files live in the deleter's own trash directory, which no
@@ -574,10 +606,48 @@ func (s *Service) ListTrash(ctx context.Context, actor accounts.User) ([]TrashIt
 		if _, ok := visible[item.SpaceID]; !ok || item.DeletedBy != actor.ID {
 			continue
 		}
-		item.DeletedAt, _ = time.Parse(time.RFC3339Nano, deletedAt)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// trashItemColumns reads a trash item with its kind, the size of the files
+// it holds and the current path of its original folder while that is still
+// in the space.
+const trashItemColumns = `t.id, t.entry_id, t.space_id, t.original_name, IFNULL(e.kind, 'file'),
+    (SELECT IFNULL(SUM(f.size_bytes), 0) FROM entries f WHERE f.trash_id = t.id AND f.kind = 'file'),
+    t.original_parent_id, t.original_path, p.relative_path, t.deleted_by, t.deleted_at
+FROM trash t
+LEFT JOIN entries e ON e.id = t.entry_id
+LEFT JOIN entries p ON t.original_parent_id <> '' AND p.id = t.original_parent_id AND p.trashed = 0`
+
+func (s *Service) scanTrashItem(row interface{ Scan(...any) error }) (TrashItem, error) {
+	var item TrashItem
+	var parentID, recordedPath, deletedAt string
+	var livePath sql.NullString
+	if err := row.Scan(&item.ID, &item.EntryID, &item.SpaceID, &item.Name, &item.Kind, &item.SizeBytes,
+		&parentID, &recordedPath, &livePath, &item.DeletedBy, &deletedAt); err != nil {
+		return TrashItem{}, err
+	}
+	switch {
+	case livePath.Valid:
+		item.OriginalPath = livePath.String
+	case parentID != "" || recordedPath != "":
+		// The folder was deleted or purged, or was already gone when SMB
+		// recycle reported the file.
+		item.OriginalPath, item.OriginalGone = recordedPath, true
+	}
+	item.DeletedAt, _ = time.Parse(time.RFC3339Nano, deletedAt)
+	item.PurgeAt = item.DeletedAt.Add(s.trashRetention)
+	return item, nil
+}
+
+func (s *Service) trashItem(ctx context.Context, trashID string) (TrashItem, error) {
+	item, err := s.scanTrashItem(s.store.db.QueryRowContext(ctx, "SELECT "+trashItemColumns+" WHERE t.id = ?", trashID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return TrashItem{}, ErrNotFound
+	}
+	return item, err
 }
 
 func (s *Service) ListAudit(ctx context.Context, actor accounts.User) ([]AuditEvent, error) {
@@ -746,8 +816,8 @@ VALUES(?,?,?,?,?,?,?,?,?,1,?)`, entryID, spaceID, "", info.Name, EntryKindFile, 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO trash
-(id, entry_id, space_id, original_parent_id, original_name, trash_relative_path, deleted_by, deleted_at)
-VALUES(?,?,?,?,?,?,?,?)`, trashID, entryID, spaceID, originalParentID, info.Name, trashRelative, deletedBy, formatTime(s.now().UTC())); err != nil {
+(id, entry_id, space_id, original_parent_id, original_path, original_name, trash_relative_path, deleted_by, deleted_at)
+VALUES(?,?,?,?,?,?,?,?,?)`, trashID, entryID, spaceID, originalParentID, folderOf(path.Join(deletedFrom, info.Name)), info.Name, trashRelative, deletedBy, formatTime(s.now().UTC())); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -799,7 +869,8 @@ FROM trash WHERE id = ?`, trashID).Scan(
 	if item.DeletedBy != actor.ID {
 		return Entry{}, ErrForbidden
 	}
-	if targetParentID == "" {
+	toOriginal := targetParentID == ""
+	if toOriginal {
 		targetParentID = originalParentID
 	}
 	if targetName == "" {
@@ -809,6 +880,11 @@ FROM trash WHERE id = ?`, trashID).Scan(
 		return Entry{}, ErrInvalidName
 	}
 	parent, err := s.parentPath(ctx, root, item.SpaceID, targetParentID)
+	if errors.Is(err, ErrNotFound) && toOriginal {
+		// The original folder was deleted or purged since: the item comes
+		// back at the space root, as the recycle bin says beforehand.
+		targetParentID, parent, err = "", root, nil
+	}
 	if err != nil {
 		return Entry{}, err
 	}

@@ -4,8 +4,8 @@ import {
 import { CSSProperties, DragEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { createDirectory, listEntries, type FileEntry } from "../api";
+import { formatBytes } from "../bytes";
 import { messageOf } from "./Browse";
-import { bytes } from "./format";
 import { kindInfo } from "./Libraries";
 import type { Category, LibraryKind, MediaLibrary } from "./mediaApi";
 import { acceptedTypes, pickedFromDrop, pickedFromList, type Destination, type FileRole, type UploadItem, type Uploads } from "./uploads";
@@ -150,7 +150,7 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
 
   let summary: ReactNode;
   if (uploads.running) summary = <>正在上传 {Math.min(progress.finished + 1, progress.count)}/{progress.count} · {Math.floor(progress.share * 100)}%</>;
-  else if (ready.length) summary = <>{ready.length} 个文件 · {bytes(readyBytes)}</>;
+  else if (ready.length) summary = <>{ready.length} 个文件 · {formatBytes(readyBytes)}</>;
   else if (progress.count) {
     const count = (state: UploadItem["state"]) => items.filter((item) => item.state === state).length;
     summary = [count("done") && `已上传 ${count("done")} 个`, count("exists") && `${count("exists")} 个已存在`, count("failed") && `${count("failed")} 个失败`, count("canceled") && `${count("canceled")} 个已取消`].filter(Boolean).join("，");
@@ -254,7 +254,7 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
                         <strong title={item.folder ? `${item.folder}/${item.file.name}` : item.file.name}>{item.file.name}</strong>
                         <span className="mc-upload-status">{item.state === "failed" && <CircleAlert />}{statusOf(item)}</span>
                       </div>
-                      <small>{[item.folder, bytes(item.file.size), places.size > 1 && item.to ? `到 ${item.to.place}` : ""].filter(Boolean).join(" · ")}</small>
+                      <small>{[item.folder, formatBytes(item.file.size), places.size > 1 && item.to ? `到 ${item.to.place}` : ""].filter(Boolean).join(" · ")}</small>
                       {item.state === "uploading" && (
                         <span className="mc-upload-bar" role="progressbar" aria-label={`${item.file.name}上传进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.floor(item.progress * 100)}>
                           <span style={{ width: `${Math.max(2, item.progress * 100)}%` }} />

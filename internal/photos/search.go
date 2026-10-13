@@ -57,6 +57,9 @@ type SearchRequest struct {
 	// Viewing names a member's private library the caller is viewing through
 	// an unexpired grant, to search it as well.
 	Viewing string
+	// Library narrows the search to one library of that scope; empty
+	// searches all of it.
+	Library string
 	Cursor  string
 	Limit   int
 }
@@ -113,6 +116,13 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	args, err := s.searchScope(ctx, p, request.Viewing)
 	if err != nil {
 		return SearchPage{}, err
+	}
+	if request.Library != "" {
+		// Only a library the search covers anyway; any other is not found.
+		if !slices.Contains(args, any(request.Library)) {
+			return SearchPage{}, ErrNotFound
+		}
+		args = []any{request.Library}
 	}
 	candidates, err := s.searchCandidates(ctx, args)
 	if err != nil {

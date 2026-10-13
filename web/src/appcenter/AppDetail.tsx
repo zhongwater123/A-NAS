@@ -59,7 +59,14 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
         <section className="ac-notes" aria-label="使用须知">
           <h3><KeyRound />使用须知</h3>
           <Folded lines={9}><RichText text={app.notes} /></Folded>
-          <small>来自 CasaOS 应用清单，其中提到的 CasaOS 设置在 A-NAS 中不适用；文件夹与端口以安装计划为准。</small>
+          {app.upstreamNotes ? (
+            <details className="ac-upstream">
+              <summary><span>上游原始说明</span><small>来自 CasaOS 应用商店，其中的设置步骤和路径针对 CasaOS，在 A-NAS 中不适用</small></summary>
+              <RichText text={app.upstreamNotes} />
+            </details>
+          ) : (
+            <small>来自应用的上游清单；文件夹与端口以安装计划为准。</small>
+          )}
         </section>
       )}
 
@@ -89,7 +96,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
           </div>
         </section>
       )}
-      <p className="ac-source">清单来自 CasaOS AppStore（Apache-2.0），由 A-NAS 审查后内置。</p>
+      <p className="ac-source">清单来自 CasaOS AppStore（Apache-2.0），由 A-NAS 审查后内置；介绍和使用须知已按 A-NAS 校订。</p>
     </div>
   );
 }
