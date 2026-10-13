@@ -14,6 +14,7 @@ import {
   Copy,
   Download,
   Ellipsis,
+  Eye,
   FileText,
   FileUp,
   Film,
@@ -60,6 +61,7 @@ import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import { DockerPanel } from "./DockerPanel";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
+import { FileViewer } from "./files/FileViewer";
 import { fileTypeLabel, isBrowserPreviewableImage, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
@@ -509,6 +511,8 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	const [renaming, setRenaming] = useState<FileEntry>();
 	const [pendingDelete, setPendingDelete] = useState<FileEntry[]>();
 	const [failedPreviewID, setFailedPreviewID] = useState("");
+	// The file the viewer shows; images and PDFs open there instead of downloading.
+	const [viewingID, setViewingID] = useState("");
 	const [textPreview, setTextPreview] = useState<{ id: string; content?: string; error?: string }>();
 	const [selectionRect, setSelectionRect] = useState<FileSelectionRect>();
 	const [contextMenu, setContextMenu] = useState<FileContextMenu>();
@@ -589,7 +593,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 		...(showResources ? personalFileResources : []),
 		...entries.map((entry) => ({
 			id: entry.id, name: entry.name, kind: entry.kind, type: entry.kind === "directory" ? "文件夹" : fileTypeLabel(entry.name),
-			detail: entry.kind === "directory" ? "文件夹" : "双击名称下载", modifiedAt: entry.modifiedAt, sizeBytes: entry.sizeBytes, entry,
+			detail: entry.kind === "directory" ? "文件夹" : isViewable(entry.name) ? "双击预览" : "双击下载", modifiedAt: entry.modifiedAt, sizeBytes: entry.sizeBytes, entry,
 		} as FileBrowserItem)),
 	];
 	const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
@@ -600,6 +604,8 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	const selectedItem = browserItems.find((item) => item.id === selectedItemID) ?? selectedItems.at(-1);
 	const selectedEntry = selectedItem?.entry;
 	const selectedEntries = selectedItems.flatMap((item) => item.entry ? [item.entry] : []);
+	const viewable = visibleItems.flatMap((item) => item.entry?.kind === "file" && isViewable(item.name) ? [item.entry] : []);
+	const viewingIndex = viewable.findIndex((entry) => entry.id === viewingID);
 	const fileCount = visibleItems.filter((item) => item.kind === "file").length;
 	const directoryCount = visibleItems.filter((item) => item.kind === "directory").length;
 	const resourceCount = visibleItems.filter((item) => item.kind === "resource").length;
@@ -653,8 +659,10 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 		if (!targets.length) return;
 		void transferStore.download(targets.map((entry) => entry.id)).then(() => setError("")).catch((caught) => setError(messageOf(caught)));
 	};
+	const showViewer = (entry: FileEntry) => { setViewingID(entry.id); setSelectedItemIDs([entry.id]); setSelectedItemID(entry.id); };
 	const openItem = (item: FileBrowserItem) => {
 		if (item.entry?.kind === "directory") openDirectory(item.entry);
+		else if (item.entry?.kind === "file" && isViewable(item.name)) showViewer(item.entry);
 		else if (item.entry?.kind === "file") download([item.entry]);
 		else if (item.resource === "photos") onOpenPhotos();
 		else if (item.resource === "movies") onOpenMedia();
@@ -796,7 +804,8 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	const itemArtwork = (item: FileBrowserItem) => <>{itemIcon(item)}{item.entry?.kind === "file" && isBrowserPreviewableImage(item.name) && <img src={filePreviewURL(item.entry.id)} alt="" loading="lazy" onError={(event) => { event.currentTarget.hidden = true; }} />}</>;
 	let inspectorPreview: ReactNode;
 	if (selectedItem?.entry?.kind === "file" && isBrowserPreviewableImage(selectedItem.name) && failedPreviewID !== selectedItem.id) {
-		inspectorPreview = <img src={filePreviewURL(selectedItem.entry.id)} alt={`${selectedItem.name} 的预览`} onError={() => setFailedPreviewID(selectedItem.id)} />;
+		const entry = selectedItem.entry;
+		inspectorPreview = <button type="button" className="file-inspector-zoom" title="点击预览" aria-label={`预览 ${selectedItem.name}`} onClick={() => showViewer(entry)}><img src={filePreviewURL(entry.id)} alt={`${selectedItem.name} 的预览`} onError={() => setFailedPreviewID(selectedItem.id)} /></button>;
 	} else if (selectedItem?.entry?.kind === "file" && isPDFPreviewable(selectedItem.name)) {
 		inspectorPreview = <iframe src={filePreviewURL(selectedItem.entry.id)} title={`${selectedItem.name} 的预览`} />;
 	} else if (selectedItem?.entry?.kind === "file" && isTextPreviewable(selectedItem.name)) {
@@ -878,13 +887,13 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 						<div role="columnheader" aria-sort={sortBy === "sizeBytes" ? sortDirection : "none"}><button onClick={() => changeSort("sizeBytes")}>大小{sortBy === "sizeBytes" && <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />}</button></div>
 					</div>
 					{!loading && visibleItems.map((item) => <div className={`file-list-row ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="row" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}>
-						<div className="file-name-cell" role="cell"><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><span className="file-name-copy"><span><strong>{item.name}{item.kind === "resource" && <em>{item.planned ? "规划中" : "应用资源"}</em>}</strong><small>{item.entry?.kind === "file" ? "双击下载" : item.detail}</small></span></span></div>
+						<div className="file-name-cell" role="cell"><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><span className="file-name-copy"><span><strong>{item.name}{item.kind === "resource" && <em>{item.planned ? "规划中" : "应用资源"}</em>}</strong><small>{item.detail}</small></span></span></div>
 						<div className="file-date-cell file-date-column" role="cell">{item.modifiedAt ? <><Clock3 />{formatFileDate(item.modifiedAt)}</> : "—"}</div>
 						<div className="file-type-cell file-type-column" role="cell"><span className={item.kind === "directory" ? "directory" : item.kind === "resource" ? "resource" : ""}>{item.type}</span></div>
 						<div className="file-size-cell" role="cell">{item.kind === "file" ? formatBytes(item.sizeBytes) : "—"}</div>
 					</div>)}
 				</div> : <div className="file-icon-view" role="listbox" aria-label="文件图标">
-					{!loading && visibleItems.map((item) => <button className={`file-icon-card ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="option" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><strong>{item.name}</strong><small>{item.entry?.kind === "file" ? "双击下载" : item.detail}</small></button>)}
+					{!loading && visibleItems.map((item) => <button className={`file-icon-card ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="option" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><strong>{item.name}</strong><small>{item.detail}</small></button>)}
 				</div>}
 				{selectionRect && <div className="file-selection-box" aria-hidden="true" style={selectionRect} />}
 				{loading ? <div className="file-empty-state" role="status"><span className="loader" /><strong>正在读取文件…</strong><span>正在加载这个目录的内容</span></div>
@@ -915,7 +924,8 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 
 		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
 			{contextMenu.item ? <>
-				<button role="menuitem" disabled={Boolean(contextMenu.item.planned)} onClick={() => { openItem(contextMenu.item!); setContextMenu(undefined); }}>{contextMenu.item.entry?.kind === "file" ? <Download /> : <FolderOpen />}<span>{contextMenu.item.entry?.kind === "file" && selectedEntries.length <= 1 ? "下载" : "打开"}</span></button>
+				<button role="menuitem" disabled={Boolean(contextMenu.item.planned)} onClick={() => { openItem(contextMenu.item!); setContextMenu(undefined); }}>{contextMenu.item.entry?.kind === "file" ? isViewable(contextMenu.item.name) ? <Eye /> : <Download /> : <FolderOpen />}<span>{contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name) ? "预览" : contextMenu.item.entry?.kind === "file" && selectedEntries.length <= 1 ? "下载" : "打开"}</span></button>
+				{contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name) && selectedEntries.length <= 1 && <button role="menuitem" onClick={() => { download([contextMenu.item!.entry!]); setContextMenu(undefined); }}><Download /><span>下载</span></button>}
 				{canDownload && archiveDownload && <button role="menuitem" onClick={() => { download(selectedEntries); setContextMenu(undefined); }}><Download /><span>{selectedEntries.length > 1 ? `打包下载 ${selectedEntries.length} 项` : "打包下载"}</span><kbd>ZIP</kbd></button>}
 				<i />
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "move" }); setContextMenu(undefined); }}><Scissors /><span>剪切</span><kbd>Ctrl+X</kbd></button>
@@ -931,6 +941,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 			</>}
 		</div>}
 
+		{viewingIndex >= 0 && <FileViewer entries={viewable} index={viewingIndex} onIndex={(index) => showViewer(viewable[index])} onClose={() => setViewingID("")} onDownload={(entry) => download([entry])} />}
 		{pendingDelete && <div className="file-dialog-backdrop"><section className="file-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="file-delete-title"><span className="file-confirm-icon"><Trash2 /></span><div><h3 id="file-delete-title">移到回收站？</h3><p>{pendingDelete.length === 1 ? `“${pendingDelete[0].name}”` : `选中的 ${pendingDelete.length} 个项目`}将移到回收站，可在 30 天内恢复。</p></div><div className="file-confirm-actions"><button disabled={Boolean(activity)} onClick={() => setPendingDelete(undefined)}>取消</button><button className="danger-button" disabled={Boolean(activity)} onClick={() => void removeEntry()}>{activity ? "正在移动…" : "移到回收站"}</button></div></section></div>}
 		{renaming && <div className="file-dialog-backdrop"><form className="file-rename-dialog" aria-label={`重命名 ${renaming.name}`} onSubmit={(event) => void renameEntry(event)}><span><Pencil /></span><div><h3>重命名</h3><p>为“{renaming.name}”输入新名称。</p><input autoFocus name="name" aria-label="新名称" defaultValue={renaming.name} required /></div><footer><button type="button" disabled={Boolean(activity)} onClick={() => setRenaming(undefined)}>取消</button><button className="primary" disabled={Boolean(activity)}>保存</button></footer></form></div>}
 	</div>;
@@ -984,6 +995,11 @@ function compareFileBrowserItems(left: FileBrowserItem, right: FileBrowserItem, 
 	else result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
 	if (!result) result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
 	return direction === "ascending" ? result : -result;
+}
+
+// isViewable says whether the file manager's viewer can show a file.
+function isViewable(name: string): boolean {
+	return isBrowserPreviewableImage(name) || isPDFPreviewable(name);
 }
 
 function fileSortLabel(sort: FileSort): string {
