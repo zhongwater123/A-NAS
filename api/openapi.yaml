@@ -616,6 +616,54 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/labels:
+    get:
+      operationId: listPhotoLabels
+      summary: List the AI clusters of untrashed photos in the caller's private and the shared library, most photos first; clusters never take part in search
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+      responses:
+        "200": { description: Cluster counts, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLabelCounts" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/labels/{labelId}/assets:
+    get:
+      operationId: listPhotoLabelCluster
+      summary: List the photos in an AI cluster within the caller's private and the shared library, clearest match first; empty while AI clusters are not available
+      parameters:
+        - { name: labelId, in: path, required: true, description: "A label that has a cluster, such as cat.", schema: { type: string } }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of the cluster, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/tags:
+    get:
+      operationId: listPhotoTagGroups
+      summary: List the users' own tags on untrashed photos in the caller's private and the shared library as groups, most photos first
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+      responses:
+        "200": { description: Tag groups, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTagCounts" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/tags/{name}/assets:
+    get:
+      operationId: listPhotoTagGroup
+      summary: List the untrashed photos in the caller's private and the shared library that carry a user tag, newest first
+      parameters:
+        - { name: name, in: path, required: true, description: "A user tag, such as 小橘.", schema: { type: string } }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of the group, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/libraries/{libraryId}/albums:
     get:
       operationId: listPhotoAlbums
@@ -702,6 +750,15 @@ paths:
       operationId: removePhotoTag
       summary: Remove a user tag
       parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: name, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/ai-labels/{labelId}:
+    delete:
+      operationId: hidePhotoAILabel
+      summary: Take this photo out of an AI cluster; the correction holds for this photo only and outlives model upgrades
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: labelId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
@@ -2539,6 +2596,39 @@ components:
             properties:
               month: { type: string, description: "YYYY-MM in the device's time zone." }
               photos: { type: integer, minimum: 1 }
+    PhotoLabelCounts:
+      type: object
+      additionalProperties: false
+      required: [items, ready]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, category, photos, coverId]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              category: { type: string, description: "animal, food, object, vehicle, activity, nature, scene, people or document." }
+              photos: { type: integer, minimum: 1 }
+              coverId: { type: string, description: The photo that matches the label most clearly. }
+        ready: { type: boolean, description: "False while AI clusters are not available; there are no items then." }
+    PhotoTagCounts:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, photos, coverId]
+            properties:
+              name: { type: string }
+              photos: { type: integer, minimum: 1 }
+              coverId: { type: string, description: The photo most recently given the tag. }
     PhotoAlbum:
       type: object
       additionalProperties: false

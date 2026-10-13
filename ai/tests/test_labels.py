@@ -31,8 +31,8 @@ class VocabularyTest(unittest.TestCase):
     def test_ground_truth_maps_known_labels(self):
         for label, mapping in datasets.load_ground_truth().items():
             self.assertIn(label, self.ids)
-            self.assertTrue(set(mapping) <= {"coco", "cocoAbsentUnless", "openimages"}, label)
-            self.assertFalse("coco" in mapping and "cocoAbsentUnless" in mapping, label)
+            self.assertTrue(set(mapping) <= {"coco", "cocoAbsentUnless", "cocoStuff", "openimages"}, label)
+            self.assertLessEqual(len(set(mapping) & {"coco", "cocoAbsentUnless", "cocoStuff"}), 1, label)
             self.assertTrue(mapping, label)
 
     def test_calibration_names_known_labels(self):
@@ -47,6 +47,9 @@ class VocabularyTest(unittest.TestCase):
         for label, threshold in calibration["thresholds"].items():
             self.assertIn(label, self.ids)
             self.assertTrue(-1 < threshold < 1, label)
+        for label in calibration.get("heldBack", []):
+            self.assertIn(label, self.ids)
+            self.assertNotIn(label, calibration["thresholds"])
 
 
 if __name__ == "__main__":

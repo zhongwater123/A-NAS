@@ -115,6 +115,8 @@ def image_jobs(sets, test_only=False):
     if "coco" in sets:
         jobs += [(sample.key, sample.path) for sample in datasets.coco_samples(ground_truth)
                  if not test_only or sample.split == "test"]
+    if "coco-train" in sets:
+        jobs += [(sample.key, sample.path) for sample in datasets.coco_train_samples(ground_truth)]
     if "openimages" in sets:
         ids = datasets.select_openimages(ground_truth)
         jobs += [(sample.key, sample.path) for sample in datasets.openimages_samples(ground_truth, ids)
@@ -155,6 +157,7 @@ def main():
     parser.add_argument("--shard", default="0/1", help="I/N: embed only the I-th of N stable parts")
     parser.add_argument("--tiles", type=int, default=1, help="embed the tiles of an N x N grid instead of whole images")
     parser.add_argument("--split", choices=("all", "test"), default="all", help="test: only the images search is measured on")
+    parser.add_argument("--skip-missing", action="store_true", help="leave images not downloaded yet for a later run")
     parser.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"),
                         help="writable directory for the runtime's repacked weights; a local disk loads faster")
     args = parser.parse_args()
@@ -188,7 +191,8 @@ def main():
             jobs = jobs[: args.limit]
         # A tiled image counts as done once its last tile is.
         last = "" if args.tiles == 1 else f"#{args.tiles - 1}{args.tiles - 1}"
-        todo = [(key, path) for key, path in jobs if key + last not in known and in_shard(key, shard)]
+        todo = [(key, path) for key, path in jobs if key + last not in known and in_shard(key, shard)
+                and not (args.skip_missing and not os.path.exists(path))]
         print(f"{name}: {len(jobs)} images, {len(todo)} to embed", flush=True)
         started, done, failed = time.monotonic(), 0, []
         for key, path in todo:
