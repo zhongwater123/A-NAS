@@ -31,6 +31,7 @@ var (
 	ErrCredentialProvision = errors.New("account credential provisioning failed")
 	ErrForbidden           = errors.New("operation is forbidden")
 	ErrUserNotFound        = errors.New("user not found")
+	ErrSpaceNotFound       = errors.New("space not found")
 	// ErrIdentityConflict reports that the host already has an account,
 	// group, or UID that A-NAS did not allocate for this user.
 	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
@@ -741,6 +742,24 @@ func (s *Service) CanAccessSpace(ctx context.Context, actor User, spaceID string
 	}
 	grant, err := s.activeGrant(ctx, actor, spaceID)
 	return err == nil && grant.ID != "", err
+}
+
+// Space returns one space for work that runs without a signed-in user, such
+// as scheduled snapshots; callers authorize the request themselves.
+func (s *Service) Space(ctx context.Context, spaceID string) (Space, error) {
+	var space Space
+	var createdAt string
+	err := s.store.db.QueryRowContext(ctx,
+		"SELECT id, kind, name, COALESCE(owner_user_id, ''), created_at FROM spaces WHERE id = ?", spaceID,
+	).Scan(&space.ID, &space.Kind, &space.Name, &space.OwnerUserID, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Space{}, ErrSpaceNotFound
+	}
+	if err != nil {
+		return Space{}, err
+	}
+	space.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	return space, nil
 }
 
 func (s *Service) UserIDForUsername(ctx context.Context, username string) (string, error) {

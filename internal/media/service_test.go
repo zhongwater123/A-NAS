@@ -178,6 +178,10 @@ func (e *testEnv) library(t *testing.T, actor accounts.User, space accounts.Spac
 	if err != nil {
 		t.Fatalf("CreateLibrary() error = %v", err)
 	}
+	// CreateLibrary also scans in the background. On a slow machine that scan
+	// can start after Scan below returned and pick up files the test writes
+	// next, so let it finish first.
+	e.media.background.Wait()
 	if err := e.media.Scan(e.ctx, actor, library.ID); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}

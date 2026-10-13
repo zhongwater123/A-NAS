@@ -132,6 +132,7 @@ func walkSnapshot(root string) ([]files.SnapshotObject, error) {
 		}
 		objects = append(objects, files.SnapshotObject{
 			Key: filepath.ToSlash(relative), ParentKey: parentKey, Name: info.Name(), Kind: kind, SizeBytes: info.Size(),
+			ModifiedAt: info.ModTime().UTC(),
 		})
 		return nil
 	})

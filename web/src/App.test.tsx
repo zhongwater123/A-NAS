@@ -394,13 +394,14 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(values[1]?.textContent).toBe("466 GB");
   });
 
-  it("enables photos, trash, snapshots, and one settings entry", async () => {
+  it("enables photos, trash, the backup center, and one settings entry", async () => {
     installAPI(); const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
-    expect(within(desktop).getByRole("button", { name: "打开文件快照" }).hasAttribute("disabled")).toBe(false);
+    expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
-    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "日志，规划中"]) {
+    // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
+    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "打开文件快照", "备份，规划中", "日志，规划中"]) {
       expect(within(desktop).queryByRole("button", { name: retired })).toBeNull();
     }
     await user.click(within(desktop).getByRole("button", { name: "打开相册" }));

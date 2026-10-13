@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,8 +162,13 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("DELETE /api/v1/trash/{trashID}", h.withMutation(h.handlePurgeTrash))
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshots", h.withSession(h.handleSnapshots))
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/snapshots", h.withMutation(h.handleCreateSnapshot))
+	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshot-schedule", h.withSession(h.handleSnapshotSchedule))
+	h.mux.HandleFunc("PUT /api/v1/spaces/{spaceID}/snapshot-schedule", h.withMutation(h.handleUpdateSnapshotSchedule))
+	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshot-search", h.withSession(h.handleSearchSnapshots))
 	h.mux.HandleFunc("GET /api/v1/snapshots/{snapshotID}/entries", h.withSession(h.handleSnapshotEntries))
-	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/entries/{entryID}/restore", h.withMutation(h.handleRestoreSnapshotFile))
+	h.mux.HandleFunc("GET /api/v1/snapshots/{snapshotID}/entries/{entryID}/content", h.withSession(h.handleSnapshotContent))
+	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/entries/{entryID}/restore", h.withMutation(h.handleRestoreSnapshotEntry))
+	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/keep", h.withMutation(h.handleKeepSnapshot))
 	h.mux.HandleFunc("DELETE /api/v1/snapshots/{snapshotID}", h.withMutation(h.handleDeleteSnapshot))
 	h.mux.HandleFunc("GET /api/v1/users", h.withSession(h.handleUsers))
 	h.mux.HandleFunc("POST /api/v1/users", h.withMutation(h.handleCreateUser))
@@ -564,7 +570,70 @@ func (h *productHandler) handleSnapshotEntries(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *productHandler) handleRestoreSnapshotFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *productHandler) handleSnapshotContent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	content, err := h.files.OpenSnapshotContent(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	defer content.Reader.Close()
+	// The Host Agent streams snapshot objects, so downloads cannot resume.
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(content.SizeBytes, 10))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": content.Name}))
+	if !content.ModifiedAt.IsZero() {
+		w.Header().Set("Last-Modified", content.ModifiedAt.UTC().Format(http.TimeFormat))
+	}
+	if _, err := io.Copy(w, content.Reader); err != nil {
+		h.logger.WarnContext(r.Context(), "snapshot download interrupted", "snapshot", r.PathValue("snapshotID"), "error", err)
+	}
+}
+
+func (h *productHandler) handleSearchSnapshots(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	items, truncated, err := h.files.SearchSnapshots(r.Context(), session.User, r.PathValue("spaceID"), r.URL.Query().Get("q"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	if items == nil {
+		items = []files.SnapshotMatch{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
+}
+
+func (h *productHandler) handleSnapshotSchedule(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	schedule, err := h.files.SnapshotSchedule(r.Context(), session.User, r.PathValue("spaceID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, schedule)
+}
+
+func (h *productHandler) handleUpdateSnapshotSchedule(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	var request files.SnapshotScheduleSettings
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	schedule, err := h.files.UpdateSnapshotSchedule(r.Context(), session.User, r.PathValue("spaceID"), request)
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, schedule)
+}
+
+func (h *productHandler) handleKeepSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	snapshot, err := h.files.KeepSnapshot(r.Context(), session.User, r.PathValue("snapshotID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (h *productHandler) handleRestoreSnapshotEntry(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
@@ -573,7 +642,7 @@ func (h *productHandler) handleRestoreSnapshotFile(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.RestoreSnapshotFile(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"), request.ParentID, request.Name)
+	entry, err := h.files.RestoreSnapshotEntry(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"), request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
@@ -1071,7 +1140,8 @@ func (h *productHandler) writeFileError(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "not_found", "file resource was not found")
 	case errors.Is(err, files.ErrConflict):
 		writeError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
-	case errors.Is(err, files.ErrInvalidName), errors.Is(err, files.ErrUnsupportedType):
+	case errors.Is(err, files.ErrInvalidName), errors.Is(err, files.ErrUnsupportedType),
+		errors.Is(err, files.ErrInvalidQuery), errors.Is(err, files.ErrInvalidSchedule):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, files.ErrVolumeUnavailable):
 		writeError(w, http.StatusLocked, "volume_unavailable", err.Error())
