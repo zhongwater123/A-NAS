@@ -170,11 +170,17 @@ def openimages_classes(root=ROOT):
 
 
 def openimages_verified(root=ROOT):
-    """Returns {image ID: {class ID: True when present, False when absent}}."""
+    """Returns {image ID: {class ID: True when present, False when absent}}.
+
+    The file writes confidence as "1"/"0" for crowdsourced labels but as
+    "1.0"/"0.0" for the 540,000 others; until 2026-10-13 only "1" counted as
+    present, which read most verified positives as absent
+    (docs/investigations/2026-10-13-open-images-positives-read-as-absent.md).
+    """
     verified = collections.defaultdict(dict)
     with open(os.path.join(root, OPENIMAGES, "oidv7-val-annotations-human-imagelabels.csv"), encoding="utf-8") as file:
         for row in csv.DictReader(file):
-            verified[row["ImageID"]][row["LabelName"]] = row["Confidence"] == "1"
+            verified[row["ImageID"]][row["LabelName"]] = float(row["Confidence"]) >= 0.5
     return verified
 
 

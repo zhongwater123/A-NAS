@@ -7,7 +7,7 @@ eval.detect cached, and compares ways of ranking:
 - the COCO test half as a family-sized library: each vocabulary label with COCO
   truth and enough positives is typed as a query, the way a user would
   ("task: search result | query: 手机"); the query maps to detector classes
-  through the Chinese table (objects365_zh.json). Recall within the top R
+  through the Chinese table (internal/photos/objects/v1.json). Recall within the top R
   (R = the label's positives) and average precision, overall and by how much
   of the frame the label's largest instance covers; for the first tier, its
   precision and recall, and how many photos it still shows when the library
@@ -40,8 +40,7 @@ from eval import datasets
 from eval.detect import load as load_detections
 from eval.embed import MANIFEST, QUERY_PROMPT, Cache, load_vectors
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-TABLE = os.path.join(HERE, "objects365_zh.json")
+TABLE = os.path.join(datasets.REPO, "internal", "photos", "objects", "v1.json")
 MIN_POSITIVES = 20
 GAP = 0.04  # internal/photos/search.go closestGap
 SIZES = (("<1%", 0.0, 0.01), ("1-5%", 0.01, 0.05), ("5-20%", 0.05, 0.2), (">=20%", 0.2, 1.01))
@@ -148,6 +147,16 @@ def rrf_rank(vector, detector):
 SOFT_WEIGHTS = (0.02, 0.05, 0.1, 0.2)
 COVERAGE_WEIGHTS = (0.1, 0.2, 0.5)
 FUSION_WEIGHT = 0.2  # the coverage weight that ranked best on both COCO halves
+TIER_COVERAGE = 0.6  # a query is about a thing when its class words make up this much
+TIER_GRID = tuple(round(0.25 + 0.05 * step, 2) for step in range(14))  # tier scores tried, 0.25 to 0.9
+STUDY_TIER_SCORE = 0.6  # the "detected" group: about 92% right on COCO in the study
+CALIBRATION = os.path.join(datasets.REPO, "internal", "photos", "objects", "v1.calibration.json")
+CALIBRATION_ABOUT = ("Written by ai/eval/hybrid_search.py --write-calibration; do not edit. Search adds weight x coverage x "
+                     "detector score for the enabled words of a query: a word measured on its own, keyed in words by the "
+                     "classes it names, counts when its fusion is true; any other word when all its classes are on the "
+                     "fusion list. When enabled words make up at least tierCoverage of the query and each has a tierScore, "
+                     "the photos whose best class for every word reaches that word's tierScore come first "
+                     "(docs/architecture/photo-objects.md). Only boxes of this model count.")
 PUNCTUATION = set(" \t，。、！？；：,.!?;:\"'“”‘’（）()")
 
 
@@ -181,6 +190,131 @@ def mention_any_score(scores, mentions):
     return np.max(np.stack([scores[:, sorted(ids)].max(axis=1) for _word, ids in mentions]), axis=0)
 
 
+def word_verdict(calibration, ids):
+    """What the calibration measured for a word naming these classes, or None."""
+    return calibration["words"].get(frozenset(ids))
+
+
+def word_enabled(calibration, ids):
+    """A measured word counts when fusing it did not hurt; an unmeasured one when all its classes are on the fusion list."""
+    verdict = word_verdict(calibration, ids)
+    return verdict["fusion"] if verdict is not None else set(ids) <= calibration["fusion"]
+
+
+def product(text, mentions, scores, vector, calibration):
+    """The photo service's rule (internal/photos/search.go): fused scores, and the
+    "detected" tier when the query is mostly words found reliably, else None.
+
+    Only enabled words count. They make up the coverage and the detector
+    score; other words are matched but add nothing. A word is found reliably
+    when it was measured and given its own tier score; a photo is in the tier
+    when each word's best class reaches that word's score.
+    """
+    enabled = [(word, ids) for word, ids in mentions if word_enabled(calibration, ids)]
+    share = coverage(text, enabled)
+    detector = mention_score(scores, enabled) if enabled else np.zeros(len(vector))
+    fused = vector + calibration["weight"] * share * detector
+    limits = [(word_verdict(calibration, ids) or {}).get("tierScore") for _word, ids in mentions]
+    if not mentions or len(enabled) != len(mentions) or share < calibration["tierCoverage"] or None in limits:
+        return fused, None
+    found = [scores[:, sorted(ids)].max(axis=1) >= limit for (_word, ids), limit in zip(mentions, limits)]
+    return fused, np.logical_and.reduce(found)
+
+
+def product_order(fused, tier):
+    if tier is None:
+        return np.argsort(-fused, kind="stable")
+    return rank_order(tier.astype(np.float32), fused)
+
+
+def product_first_group(fused, tier):
+    """What the photo service marks as the closest group: the tier, or within GAP of the best."""
+    if tier is not None and tier.any():
+        return tier
+    return fused >= fused.max() - GAP
+
+
+def tier_curve(detector, truth):
+    """{tier score: [precision, recall]} of the photos the detector scores at least that."""
+    curve = {}
+    for limit in TIER_GRID:
+        shown = detector >= limit
+        curve[f"{limit:.2f}"] = [round(float(truth[shown].mean()), 3) if shown.any() else None,
+                                 round(float(shown[truth == 1].mean()), 3)]
+    return curve
+
+
+TIER_RULES = ("nearest", "lowest", "highest")
+
+
+def tier_score(curves, precision=0.85, recall=0.5, rule=None):
+    """A tier score at which every measurement is at least that precise and finds that much, or None.
+
+    The study's 0.6 is kept when it passes; otherwise the passing score
+    nearest to it, so a word moves only as far as its detector scores need
+    ("nearest"). "lowest" and "highest" are kept for comparison.
+    """
+    rule = rule or os.environ.get("ANAS_EVAL_TIER_RULE", "nearest")
+    passing = [limit for limit in TIER_GRID
+               if all(p is not None and p >= precision and r >= recall
+                      for p, r in (curve[f"{limit:.2f}"] for curve in curves))]
+    if not passing:
+        return None
+    if rule == "lowest":
+        return passing[0]
+    if rule == "highest":
+        return passing[-1]
+    return min(passing, key=lambda limit: (abs(limit - STUDY_TIER_SCORE), -limit))
+
+
+def derive_lists(label_halves, oi_classes, table_path=TABLE, min_delta=-0.02, tier_precision=0.85, tier_recall=0.5):
+    """The calibration from the per-query results, by the classes a word names.
+
+    Each word measured on its own (COCO, Open Images) gets a verdict for the
+    classes it names: fine for fusion when fusing does not cost more than
+    min_delta of average precision on average over what measured it, and its
+    own tier score, the lowest at which the "detected" group is at least
+    tier_precision right and finds at least tier_recall of the true photos
+    wherever it was measured. A word that names several classes, such as 汽车,
+    stands on its own measurement. For words never measured, a class is on the
+    fusion list when a measured word naming at most three classes, it among
+    them, is fine and none is not; classes whose meaning is a guess stay off.
+    """
+    with open(table_path, encoding="utf-8") as file:
+        noted = {entry["id"] for entry in json.load(file)["classes"] if entry.get("note")}
+    measured = collections.defaultdict(lambda: {"names": set(), "deltas": [], "curves": []})
+    for per_query in label_halves:
+        for entry in per_query:
+            # Only a query that is one word measures that word.
+            if "coverage x 0.2" not in entry or len(entry["classes"]) != 1:
+                continue
+            word = measured[frozenset(entry["classIds"])]
+            word["names"].add(entry["label"])
+            word["deltas"].append(entry["coverage x 0.2"]["AP"] - entry["vector"]["AP"])
+            word["curves"].append(entry["curve"])
+    for entry in oi_classes:
+        if entry.get("mentions", 1) != 1:
+            continue
+        word = measured[frozenset(entry["classIds"])]
+        word["names"].add(entry["zh"])
+        word["deltas"].append(entry["fusedAP"] - entry["vectorAP"])
+        word["curves"].append(entry["curve"])
+    words = {}
+    for ids, word in measured.items():
+        fine = float(np.mean(word["deltas"])) >= min_delta
+        words[ids] = {"fusion": fine, "tierScore": tier_score(word["curves"], tier_precision, tier_recall) if fine else None}
+    fusion = set()
+    for cls in range(1, 366):
+        if cls in noted:
+            continue
+        specific = [ids for ids in words if cls in ids and len(ids) <= 3]
+        if specific and all(words[ids]["fusion"] for ids in specific):
+            fusion.add(cls)
+    return {"fusion": fusion, "words": words}, {
+        "、".join(sorted(word["names"])): {"classes": sorted(ids), "deltaAP": round(float(np.mean(word["deltas"])), 3),
+                                          **words[ids]} for ids, word in sorted(measured.items(), key=lambda i: sorted(i[0]))}
+
+
 def calibrated_threshold(detector, truth, target=TARGET_PRECISION):
     """Lowest score whose photos at or above it are at least target precise; None when none is."""
     order = np.argsort(-detector, kind="stable")
@@ -190,8 +324,9 @@ def calibrated_threshold(detector, truth, target=TARGET_PRECISION):
     return float(detector[order][good[-1]]) if len(good) else None
 
 
-def label_report(vectors, detections, matcher, half="test"):
-    """Ranks on one COCO half; per-class thresholds come from the other."""
+def label_report(vectors, detections, matcher, half="test", calibration=None):
+    """Ranks on one COCO half; per-class thresholds come from the other. With
+    calibration, "product" is the photo service's ranking."""
     other = "calibration" if half == "test" else "test"
     vocabulary = datasets.load_vocabulary()
     ground_truth = datasets.load_ground_truth()
@@ -218,10 +353,23 @@ def label_report(vectors, detections, matcher, half="test"):
         r = int(truth.sum())
         sizes = np.array([max(largest.get((s.key, name), 0.0) for name in coco) for s in test_samples])
         entry = {"label": label["name"], "positives": r,
-                 "classes": [sorted(matcher.names[i] for i in ids) for _w, ids in mentions]}
+                 "classes": [sorted(matcher.names[i] for i in ids) for _w, ids in mentions],
+                 "classIds": sorted(set().union(*[ids for _w, ids in mentions]))}
         rankings = {"vector": np.argsort(-vector, kind="stable")}
         detector = mention_score(test_classes, mentions)
-        tiers = {}
+        tiers, absent = {}, {}
+        if calibration is not None:
+            fused, tier = product(label["name"], mentions, test_classes, vector, calibration)
+            rankings["product"] = product_order(fused, tier)
+            tiers["product"] = product_first_group(fused, tier)
+            entry["productTier"] = tier is not None
+            if tier is not None:
+                # Without the thing in the library the tier shows only false
+                # detections, and when it is empty the page says nothing was found.
+                absent["product"] = int(tier[~truth].sum())
+            else:
+                negatives = fused[~truth]
+                absent["product"] = int((negatives >= negatives.max() - GAP).sum())
         if detector is not None:
             rankings["detector"] = rank_order(detector, vector)
             rankings["rrf"] = rrf_rank(vector, detector)
@@ -234,6 +382,7 @@ def label_report(vectors, detections, matcher, half="test"):
             cal_truth = np.array([label["id"] in s.positive for s in cal_samples])
             calibrated = calibrated_threshold(mention_score(cal_classes, mentions), cal_truth)
             entry["calibratedThreshold"] = calibrated
+            entry["curve"] = tier_curve(detector, truth)
             if calibrated is not None:
                 rankings["tiers @calibrated"], tiers["tiers @calibrated"] = tier_rank(vector, detector, calibrated)
         # The vector rule search uses today to mark the closest group.
@@ -255,8 +404,12 @@ def label_report(vectors, detections, matcher, half="test"):
                                    "precision": round(float(truth[shown].mean()), 3) if shown.any() else None,
                                    "recall": round(float(shown[truth].mean()), 3)}
             # Without the thing in the library: how many photos would the first tier still show?
-            entry[name]["tier"]["shownWhenAbsent"] = int(shown[~truth].sum()) if name != "vector closest" else int(
-                (vector[~truth] >= vector[~truth].max() - GAP).sum())
+            if name in absent:
+                entry[name]["tier"]["shownWhenAbsent"] = absent[name]
+            elif name == "vector closest":
+                entry[name]["tier"]["shownWhenAbsent"] = int((vector[~truth] >= vector[~truth].max() - GAP).sum())
+            else:
+                entry[name]["tier"]["shownWhenAbsent"] = int(shown[~truth].sum())
         per_query.append(entry)
     return summarize(per_query), per_query
 
@@ -291,7 +444,7 @@ def summarize(per_query):
     return summary
 
 
-def caption_report(vectors, detections, matcher, kind="written"):
+def caption_report(vectors, detections, matcher, kind="written", calibration=None):
     images = load_vectors(vectors, "images")
     texts = load_vectors(vectors, "texts")
     found, captions = datasets.coco_cn("test")
@@ -319,6 +472,9 @@ def caption_report(vectors, detections, matcher, kind="written"):
             for threshold in THRESHOLDS:
                 rankings[f"tiers @{threshold:.1f}"] = tier_rank(vector, detector, threshold)[0]
             rankings.update(hybrid_rankings(vector, detector, mention_any_score(classes, mentions), shares[-1]))
+        if calibration is not None:
+            rankings["product"] = product_order(*product(caption, mentions, classes, vector, calibration))
+            hits["product"].append(int(np.flatnonzero(rankings["product"] == target)[0]))
         hits["vector"].append(int(np.flatnonzero(rankings["vector"] == target)[0]))
         for ranking in RANKINGS_FOR_CAPTIONS:
             order = rankings.get(ranking, rankings["vector"])
@@ -368,11 +524,13 @@ def openimages_classes_for(table=TABLE, root=datasets.ROOT):
     return found
 
 
-def openimages_report(vectors, detections, query_vectors, matcher):
+def openimages_report(vectors, detections, query_vectors, matcher, calibration=None, half=None):
+    """Ranks Open Images classes on the verified photos, of one half when given."""
     images = load_vectors(vectors, "images")
     texts = {**load_vectors(vectors, "texts"), **query_vectors}
     verified = datasets.openimages_verified()
-    keys = sorted(k for k in images if k.startswith("oi:") and k in detections)
+    keys = sorted(k for k in images if k.startswith("oi:") and k in detections
+                  and (half is None or datasets.Sample(k, "").split == half))
     if not keys:
         return {"images": 0}
     gallery = np.stack([images[k] for k in keys])
@@ -394,10 +552,18 @@ def openimages_report(vectors, detections, query_vectors, matcher):
         detector = mention_score(classes[known], mentions)
         y = truth[known]
         result = {"class": entry["en"], "zh": entry["zh"], "positives": positives, "negatives": int((y == 0).sum()),
+                  "classIds": sorted(set().union(*[ids for _w, ids in mentions])), "mentions": len(mentions),
+                  "curve": tier_curve(detector, y),
                   "inCoco": any(part.strip().lower() in coco_names for part in entry["en"].split("/")),
                   "vectorAP": round(float(average_precision_score(y, vector)), 3),
                   "detectorAP": round(float(average_precision_score(y, detector + 1e-6 * vector)), 3)}
-        for threshold in (0.3, 0.5):
+        if calibration is not None:
+            fused, tier = product(entry["zh"], mentions, classes[known], vector, calibration)
+            order = product_order(fused, tier)
+            ranked = np.empty(len(order))
+            ranked[order] = np.arange(len(order), 0, -1)
+            result["productAP"] = round(float(average_precision_score(y, ranked)), 3)
+        for threshold in (0.3, 0.5, 0.6):
             shown = detector >= threshold
             result[f"detector@{threshold:.1f}"] = {
                 "precision": round(float(y[shown].mean()), 3) if shown.any() else None,
@@ -417,8 +583,9 @@ def openimages_report(vectors, detections, query_vectors, matcher):
             continue
         summary[group] = {"classes": len(chosen),
                           **{name: round(float(np.mean([c[name] for c in chosen])), 3)
-                             for name in ("vectorAP", "detectorAP", "tiersAP", "fusedAP")}}
-        for threshold in ("0.3", "0.5"):
+                             for name in ("vectorAP", "detectorAP", "tiersAP", "fusedAP", "productAP")
+                             if all(name in c for c in chosen)}}
+        for threshold in ("0.3", "0.5", "0.6"):
             precise = [c[f"detector@{threshold}"]["precision"] for c in chosen if c[f"detector@{threshold}"]["precision"] is not None]
             summary[group][f"detector@{threshold}"] = {
                 "precision": round(float(np.mean(precise)), 3) if precise else None,
@@ -432,26 +599,75 @@ def main():
     parser.add_argument("--detections", required=True, help="eval.detect cache directory")
     parser.add_argument("--embedder", help="EmbeddingGemma .litertlm to encode the Chinese class names")
     parser.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
-    parser.add_argument("--half", default="test", choices=("test", "calibration"),
-                        help="COCO half the label queries rank (the other half calibrates)")
     parser.add_argument("--report", help="write the full report as JSON")
+    parser.add_argument("--write-calibration", action="store_true",
+                        help=f"write the fusion and tier lists to {CALIBRATION}")
     args = parser.parse_args()
     if args.embedder:
         encode_queries(args.embedder, args.detections, args.weight_cache)
     detections = load_detections(os.path.join(args.detections, "detections.npz"))
     queries_path = os.path.join(args.detections, "queries.npz")
     query_vectors = Cache(queries_path).vectors if os.path.exists(queries_path) else {}
+    with open(os.path.join(args.detections, "labels.json"), encoding="utf-8") as file:
+        model = json.load(file)["model"]
     matcher = Matcher()
-    summary, per_query = label_report(args.vectors, detections, matcher, args.half)
-    captions = caption_report(args.vectors, detections, matcher)
-    openimages = openimages_report(args.vectors, detections, query_vectors, matcher)
-    oi_summary, oi_classes = openimages if isinstance(openimages, tuple) else (openimages, [])
-    print(json.dumps({"labels": summary, "captions": captions, "openimages": oi_summary}, ensure_ascii=False, indent=1))
+
+    # The lists come from the calibration halves of COCO and Open Images only;
+    # everything reported below is measured on the test halves, which choose
+    # nothing, and on COCO-CN.
+    _summary, calibration_queries = label_report(args.vectors, detections, matcher, "calibration")
+    openimages = openimages_report(args.vectors, detections, query_vectors, matcher, half="calibration")
+    _oi_summary, oi_calibration = openimages if isinstance(openimages, tuple) else (openimages, [])
+    lists, words = derive_lists([calibration_queries], oi_calibration)
+    calibration = {"weight": FUSION_WEIGHT, "tierCoverage": TIER_COVERAGE, **lists}
+
+    report = {"model": model, "words": words,
+              "lists": {"fusion": sorted(lists["fusion"]),
+                        "enabledWords": sum(1 for v in lists["words"].values() if v["fusion"]),
+                        "tieredWords": sum(1 for v in lists["words"].values() if v["tierScore"] is not None),
+                        "harmfulWords": sum(1 for v in lists["words"].values() if not v["fusion"])}}
+    report["labels"], report["perQuery"] = label_report(args.vectors, detections, matcher, "test", calibration)
+    report["captions"] = caption_report(args.vectors, detections, matcher, calibration=calibration)
+    openimages = openimages_report(args.vectors, detections, query_vectors, matcher, calibration, half="test")
+    report["openimages"], report["openimagesClasses"] = openimages if isinstance(openimages, tuple) else (openimages, [])
+    print(json.dumps({key: report[key] for key in ("lists", "labels", "captions", "openimages")},
+                     ensure_ascii=False, indent=1))
     if args.report:
         with open(args.report, "w", encoding="utf-8") as file:
-            json.dump({"labels": summary, "perQuery": per_query, "captions": captions,
-                       "openimages": oi_summary, "openimagesClasses": oi_classes}, file, ensure_ascii=False, indent=1)
+            json.dump(report, file, ensure_ascii=False, indent=1)
+    if args.write_calibration:
+        write_calibration(model, calibration)
 
+
+def word_key(ids):
+    """A word's key in the calibration file: the classes it names, ascending."""
+    return ",".join(str(cls) for cls in sorted(ids))
+
+
+def write_calibration(model, calibration, path=CALIBRATION):
+    """The photo service's calibration for one detector model."""
+    words = sorted(calibration["words"].items(), key=lambda item: sorted(item[0]))
+    entries = []
+    for ids, verdict in words:
+        fields = {"fusion": verdict["fusion"]}
+        if verdict["tierScore"] is not None:
+            fields["tierScore"] = verdict["tierScore"]
+        entries.append(f'  {json.dumps(word_key(ids))}: {json.dumps(fields)}')
+    lines = ["{",
+             f' "about": {json.dumps(CALIBRATION_ABOUT, ensure_ascii=False)},',
+             f' "model": {json.dumps(model)},',
+             f' "weight": {calibration["weight"]},',
+             f' "tierCoverage": {calibration["tierCoverage"]},',
+             f' "fusion": {json.dumps(sorted(calibration["fusion"]))},',
+             ' "words": {',
+             ",\n".join(entries),
+             " }",
+             "}"]
+    with open(path, "w", encoding="utf-8", newline="\n") as file:
+        file.write("\n".join(lines) + "\n")
+    tiered = sum(1 for verdict in calibration["words"].values() if verdict["tierScore"] is not None)
+    print(f"wrote {path}: {len(calibration['fusion'])} fusion classes, {len(words)} measured words, "
+          f"{tiered} with a tier score")
 
 if __name__ == "__main__":
     main()

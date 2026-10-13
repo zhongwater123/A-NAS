@@ -50,7 +50,7 @@
 
 屏保视频不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)），安装器保留当前视频池。首次升级时，安装器会导入旧安装器留下的池。更换视频的步骤见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
 
-本地 AI 随每个 release 安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：安装器把 release 引用的模型与运行环境按内容各存一份，已有时直接复用，并启用 `anas-ai.socket`。第一次安装带 AI 的 release 时按[启用相册本地 AI](enable-photo-ai.md)核对。
+本地 AI 随每个 release 安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：安装器把 release 引用的模型与运行环境按内容各存一份，已有时直接复用，并启用 `anas-ai.socket`。第一次安装带 AI 的 release 时按[启用相册本地 AI](enable-photo-ai.md)核对，第一次安装带物体检测器的 release 时按[启用相册物体检测](enable-photo-objects.md)核对。安装器还按本机逻辑核数写入 `/etc/systemd/system/anas-ai.service.d/cpu-reserve.conf`，让 AI 至多用到核数减 2。
 
 安装器最后核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时以退出码 5 结束，此时新版本已切换但 Web 文件与终端不可用，按[回滚](#回滚)恢复上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 
@@ -159,12 +159,20 @@ test -d "/opt/a-nas/releases/$previous"
 for unit in anas-host-agent anas-api anas-photos; do
   install -o root -g root -m 0644 "$stage/$unit-system.service" "/etc/systemd/system/$unit.service"
 done
+if [[ -f "$stage/anas-ai-system.service" ]]; then
+  install -o root -g root -m 0644 "$stage/anas-ai-system.service" /etc/systemd/system/anas-ai.service
+  grep -Fq -- --detector /etc/systemd/system/anas-ai.service ||
+    rm -f /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
+  systemctl stop anas-ai.service
+fi
 ln -sfn -- "/opt/a-nas/releases/$previous" /opt/a-nas/current
 runuser -u anas-dev -- ln -sfn "$stage" /home/anas-dev/apps/a-nas/current.next
 runuser -u anas-dev -- mv -Tf /home/anas-dev/apps/a-nas/current.next /home/anas-dev/apps/a-nas/current
 systemctl daemon-reload
 systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
 ```
+
+AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。
 
 `/etc/a-nas/*.env` 由安装器按固定内容生成，旧版本忽略新增的变量，不需要恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。另外：
 

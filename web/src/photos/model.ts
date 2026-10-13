@@ -4,7 +4,8 @@ import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoTagCou
 // A place is what the main area shows. AI 聚合 (a search with an empty query
 // is its start page), its clusters and the user tag groups cover the caller's and the shared
 // library; viewing adds the member library it was started from, so ordinary
-// searches never mix it in.
+// searches never mix it in. Similar photos cover what a search would and go
+// back to where they were asked for.
 export type Place =
   | { kind: "timeline"; libraryId: string }
   | { kind: "albums"; libraryId: string }
@@ -12,7 +13,8 @@ export type Place =
   | { kind: "trash"; libraryId: string }
   | { kind: "search"; viewing: string; query: string }
   | { kind: "cluster"; viewing: string; label: PhotoLabelCount }
-  | { kind: "tag"; viewing: string; tag: PhotoTagCount };
+  | { kind: "tag"; viewing: string; tag: PhotoTagCount }
+  | { kind: "similar"; viewing: string; asset: PhotoAsset; from: Place };
 
 export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
 

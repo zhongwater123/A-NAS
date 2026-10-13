@@ -107,6 +107,51 @@ func Deterministic(model string, dimensions int) Handler {
 	}
 }
 
+// WithDetector adds an object detector named model to a Worker: info names
+// it, detect_objects answers boxes that come from the image bytes, and release
+// succeeds.
+func WithDetector(handle Handler, model string) Handler {
+	return func(request aiworker.Request, file *os.File) *aiworker.Response {
+		switch request.Op {
+		case aiworker.OpInfo:
+			response := handle(request, file)
+			if response != nil && response.OK {
+				response.Detector = model
+			}
+			return response
+		case aiworker.OpDetectObjects:
+			if file == nil {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
+			}
+			content, err := io.ReadAll(file)
+			if err != nil || len(content) == 0 {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
+			}
+			return &aiworker.Response{OK: true, Model: model, Boxes: HashBoxes(content)}
+		case aiworker.OpRelease:
+			return &aiworker.Response{OK: true}
+		}
+		return handle(request, file)
+	}
+}
+
+// HashBoxes are up to three boxes that come from the image bytes, best first.
+func HashBoxes(content []byte) [][]float64 {
+	sum := sha256.Sum256(content)
+	boxes := [][]float64{}
+	for i := range int(sum[0] % 4) {
+		part := sum[1+6*i : 7+6*i]
+		x0, y0 := float64(part[2])/510, float64(part[3])/510
+		boxes = append(boxes, []float64{float64(1 + int(part[0])%365), 0.3 + float64(part[1])/255*0.7, x0, y0, x0 + 0.5, y0 + 0.5})
+	}
+	for i := 1; i < len(boxes); i++ {
+		for j := i; j > 0 && boxes[j][1] > boxes[j-1][1]; j-- {
+			boxes[j], boxes[j-1] = boxes[j-1], boxes[j]
+		}
+	}
+	return boxes
+}
+
 func hashVector(content []byte, dimensions int) []float32 {
 	sum := sha256.Sum256(content)
 	vector := make([]float32, dimensions)

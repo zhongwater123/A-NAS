@@ -44,10 +44,19 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   exit 2
 fi
 # Local AI is part of every release (ADR 0016): the Worker's code, its units,
-# and manifests that pin the model and Python runtime by content.
-for file in anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/model.json ai/runtime.json; do
+# and manifests that pin its models and Python runtime by content. Each model
+# has a role: its manifest is ai/ROLE.json and the release links its file as
+# ai/ROLE.EXTENSION, where the Worker's unit looks for it.
+ai_roles=(model:litertlm detector:onnx)
+for file in anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing local AI file: $source_release/$file" >&2
+    exit 2
+  fi
+done
+for role in "${ai_roles[@]}"; do
+  if [[ ! -f "$source_release/ai/${role%%:*}.json" ]]; then
+    echo "missing local AI file: $source_release/ai/${role%%:*}.json" >&2
     exit 2
   fi
 done
@@ -68,16 +77,21 @@ done
 
 # manifest_field FILE KEY: one field of a JSON manifest.
 manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
-model_sha=$(manifest_field "$source_release/ai/model.json" sha256)
-model_size=$(manifest_field "$source_release/ai/model.json" sizeBytes)
-model_file=$(manifest_field "$source_release/ai/model.json" file)
+declare -A model_sha model_size model_file model_path
+for role in "${ai_roles[@]}"; do
+  name=${role%%:*}
+  model_sha[$name]=$(manifest_field "$source_release/ai/$name.json" sha256)
+  model_size[$name]=$(manifest_field "$source_release/ai/$name.json" sizeBytes)
+  model_file[$name]=$(manifest_field "$source_release/ai/$name.json" file)
+  if [[ ! "${model_sha[$name]}" =~ ^[0-9a-f]{64}$ || ! "${model_size[$name]}" =~ ^[0-9]+$ ||
+    ! "${model_file[$name]}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    echo "invalid $name manifest: $source_release/ai/$name.json" >&2
+    exit 2
+  fi
+done
 runtime_id=$(manifest_field "$source_release/ai/runtime.json" id)
 runtime_sha=$(manifest_field "$source_release/ai/runtime.json" sha256)
 runtime_python=$(manifest_field "$source_release/ai/runtime.json" python)
-if [[ ! "$model_sha" =~ ^[0-9a-f]{64}$ || ! "$model_size" =~ ^[0-9]+$ || ! "$model_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-  echo "invalid model manifest: $source_release/ai/model.json" >&2
-  exit 2
-fi
 if [[ ! "$runtime_id" =~ ^[0-9a-f]{16}$ || ! "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]; then
   echo "invalid AI runtime manifest: $source_release/ai/runtime.json" >&2
   exit 2
@@ -89,12 +103,15 @@ if [[ "$system_python" != "$runtime_python" ]]; then
 fi
 # Each model and runtime is kept once by content and linked from every release
 # that pins it, so an upgrade or rollback copies neither again.
-model_path=/opt/a-nas/models/$model_sha/$model_file
+for role in "${ai_roles[@]}"; do
+  name=${role%%:*}
+  model_path[$name]=/opt/a-nas/models/${model_sha[$name]}/${model_file[$name]}
+  if [[ ! -f "${model_path[$name]}" && ! -f "$source_release/ai/$name.${role#*:}" ]]; then
+    echo "missing $name: neither ${model_path[$name]} nor $source_release/ai/$name.${role#*:}" >&2
+    exit 2
+  fi
+done
 runtime_path=/opt/a-nas/ai-runtimes/$runtime_id
-if [[ ! -f "$model_path" && ! -f "$source_release/ai/model.litertlm" ]]; then
-  echo "missing model: neither $model_path nor $source_release/ai/model.litertlm" >&2
-  exit 2
-fi
 if [[ ! -d "$runtime_path" && ! -f "$source_release/ai/runtime.tar.gz" ]]; then
   echo "missing AI runtime: neither $runtime_path nor $source_release/ai/runtime.tar.gz" >&2
   exit 2
@@ -144,19 +161,22 @@ install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes
 # change it after the check.
 incoming=
 trap '[[ -z "$incoming" ]] || rm -rf -- "$incoming" "$incoming.tar.gz"' EXIT
-if [[ ! -f "$model_path" ]]; then
+for role in "${ai_roles[@]}"; do
+  name=${role%%:*}
+  [[ -f "${model_path[$name]}" ]] && continue
+  staged="$source_release/ai/$name.${role#*:}"
   incoming=$(mktemp -d /opt/a-nas/models/.incoming-XXXXXX)
-  cp -- "$source_release/ai/model.litertlm" "$incoming/$model_file"
-  if [[ "$(stat -c %s "$incoming/$model_file")" != "$model_size" ]] ||
-    ! printf '%s  %s\n' "$model_sha" "$incoming/$model_file" | sha256sum --check --quiet - >/dev/null 2>&1; then
-    echo "the staged model does not match its manifest: $source_release/ai/model.litertlm" >&2
+  cp -- "$staged" "$incoming/${model_file[$name]}"
+  if [[ "$(stat -c %s "$incoming/${model_file[$name]}")" != "${model_size[$name]}" ]] ||
+    ! printf '%s  %s\n' "${model_sha[$name]}" "$incoming/${model_file[$name]}" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged $name does not match its manifest: $staged" >&2
     exit 4
   fi
-  chmod 0644 "$incoming/$model_file"
+  chmod 0644 "$incoming/${model_file[$name]}"
   chmod 0755 "$incoming"
-  mv -T -- "$incoming" "/opt/a-nas/models/$model_sha"
+  mv -T -- "$incoming" "/opt/a-nas/models/${model_sha[$name]}"
   incoming=
-fi
+done
 if [[ ! -d "$runtime_path" ]]; then
   incoming=$(mktemp -d /opt/a-nas/ai-runtimes/.incoming-XXXXXX)
   cp -- "$source_release/ai/runtime.tar.gz" "$incoming.tar.gz"
@@ -185,8 +205,12 @@ install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/an
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
 install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
 install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
-install -o root -g root -m 0644 "$source_release/ai/model.json" "$source_release/ai/runtime.json" "$temporary/ai/"
-ln -s -- "$model_path" "$temporary/ai/model.litertlm"
+install -o root -g root -m 0644 "$source_release/ai/runtime.json" "$temporary/ai/"
+for role in "${ai_roles[@]}"; do
+  name=${role%%:*}
+  install -o root -g root -m 0644 "$source_release/ai/$name.json" "$temporary/ai/"
+  ln -s -- "${model_path[$name]}" "$temporary/ai/$name.${role#*:}"
+done
 ln -s -- "$runtime_path" "$temporary/ai/runtime"
 mv -- "$temporary" "$target"
 trap - EXIT
@@ -245,6 +269,13 @@ install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/s
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
 install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
 install -o root -g root -m 0644 "$source_release/anas-ai-system.service" /etc/systemd/system/anas-ai.service
+# The AI Worker may use every core but two, which stay free for the user's next
+# request (anas-ai.service); the cap follows this machine's cores.
+cores=$(nproc)
+install -d -o root -g root -m 0755 /etc/systemd/system/anas-ai.service.d
+printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\nCPUQuota=%s%%\n' \
+  "$cores" "$((cores > 2 ? (cores - 2) * 100 : 100))" > /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
+chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
 install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json

@@ -260,6 +260,25 @@
 .ph-scope button:hover:not(.active) { color: var(--ph-ink); }
 .ph-scope button.active { color: var(--ph-ink); background: var(--ph-surface); box-shadow: 0 1px 3px rgba(20, 26, 38, .16); }
 
+/* What the object detector found for a search */
+.ph-found { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding-left: 4px; animation: ph-fade-in .25s ease; }
+.ph-found-chip { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 9px; border-radius: 99px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.ph-found-chip strong { font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.ph-found-chip.detected { color: var(--ph-accent-ink); background: var(--ph-accent-soft); box-shadow: inset 0 0 0 1px rgba(47, 111, 237, .14); }
+.ph-found-chip.none { color: var(--ph-ink-2); background: rgba(20, 26, 38, .06); }
+.ph-found-chip.none svg { color: var(--ph-muted); }
+.ph-subbar .ph-found-chip svg { width: 15px; height: 15px; }
+.ph-found-note { display: inline-flex; align-items: center; gap: 5px; color: var(--ph-muted); font-size: 12px; white-space: nowrap; }
+.ph-found-note.pending svg { color: #b7791f; animation: ph-pulse 2.4s ease-in-out infinite; }
+
+/* The photo similar photos were asked for */
+.ph-similar-bar { padding-left: 46px; }
+.ph-similar-source { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 4px 12px 4px 4px; border-radius: 12px; background: rgba(20, 26, 38, .05); animation: ph-fade-in .25s ease; }
+.ph-similar-source img { height: 40px; width: auto; max-width: 72px; flex: none; display: block; border-radius: 8px; object-fit: cover; background: var(--ph-tile); box-shadow: 0 1px 3px rgba(16, 24, 40, .16); }
+.ph-similar-source div { min-width: 0; display: grid; gap: 1px; }
+.ph-similar-source strong { overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.ph-similar-source small { overflow: hidden; color: var(--ph-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Empty states */
 .ph-empty { max-width: 380px; display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0 auto; padding: 96px 20px 40px; text-align: center; }
 .ph-scroll .ph-empty { position: absolute; top: 0; left: 0; right: 0; }
