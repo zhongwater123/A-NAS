@@ -45,12 +45,18 @@ func (d *colorDetector) DetectObjects(_ context.Context, input *os.File) (string
 
 func (d *colorDetector) Release(context.Context, bool) error { return nil }
 
-// objectSearchService has phones and cats on the fusion list and phones on
-// the tier list, for a detector named model.
+// objectSearchService has phones and cats measured to be found from a score
+// of 0.6 and 花 measured to hurt, for a detector named calibrated.
 func objectSearchService(t *testing.T, calibrated string) (*photos.Service, *colorDetector) {
 	t.Helper()
-	calibration, err := objects.ParseCalibration([]byte(`{"model": "` + calibrated + `", "weight": 0.2,
-		"tierScore": 0.6, "tierCoverage": 0.6, "fusion": [62, 140], "tier": [62, 140], "disabledWords": ["花"]}`))
+	return objectSearchServiceWith(t, `{"model": "`+calibrated+`", "weight": 0.2,
+		"tierCoverage": 0.6, "fusion": [62, 140], "words": {"62": {"fusion": true, "tierScore": 0.6},
+		"140": {"fusion": true, "tierScore": 0.6}, "24": {"fusion": false}}}`)
+}
+
+func objectSearchServiceWith(t *testing.T, calibrationJSON string) (*photos.Service, *colorDetector) {
+	t.Helper()
+	calibration, err := objects.ParseCalibration([]byte(calibrationJSON))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +102,23 @@ func TestAQueryAboutAThingPutsThePhotosItIsFoundInFirst(t *testing.T) {
 	// A disabled word adds nothing and is no thing to look for.
 	if page := search(t, service, alice, "花"); page.Objects != nil {
 		t.Fatalf("objects %+v for a disabled word", page.Objects)
+	}
+}
+
+func TestEachThingIsFoundFromItsOwnScore(t *testing.T) {
+	// Phones score low with this detector: they were measured to be found
+	// reliably from 0.25, so the faint phone in the green photo counts too.
+	service, worker := objectSearchServiceWith(t, `{"model": "detector-1", "weight": 0.2, "tierCoverage": 0.6,
+		"fusion": [62], "words": {"62": {"fusion": true, "tierScore": 0.25}}}`)
+	private, _ := libraries(t, service, alice)
+	importPhoto(t, service, alice, private.ID, "", "blue.png", blue)
+	importPhoto(t, service, alice, private.ID, "", "green.png", green)
+	importPhoto(t, service, alice, private.ID, "", "red.png", red)
+	index(t, service, worker)
+	page := search(t, service, alice, "手机")
+	if got := names(page.Assets); page.Objects == nil || page.Objects.Detected != 2 || page.Closest != 2 ||
+		!slices.Equal(got, []string{"red.png", "green.png", "blue.png"}) {
+		t.Fatalf("results %v, closest %d, objects %+v; want both photos with a phone first", got, page.Closest, page.Objects)
 	}
 }
 

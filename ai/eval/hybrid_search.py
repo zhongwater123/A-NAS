@@ -147,13 +147,21 @@ def rrf_rank(vector, detector):
 SOFT_WEIGHTS = (0.02, 0.05, 0.1, 0.2)
 COVERAGE_WEIGHTS = (0.1, 0.2, 0.5)
 FUSION_WEIGHT = 0.2  # the coverage weight that ranked best on both COCO halves
-TIER_SCORE = 0.6  # the "detected" group: about 92% right on COCO in the study
 TIER_COVERAGE = 0.6  # a query is about a thing when its class words make up this much
+TIER_GRID = tuple(round(0.25 + 0.05 * step, 2) for step in range(14))  # tier scores tried, 0.25 to 0.9
+# Open Images classes whose verified labels mean something else than the
+# detector's class (docs/research/photo-ai-object-detection.md#coco-之外open-images98-类):
+# at 0.6 the detector is "right" on 13% of Person and 10% of Glasses photos.
+# They measure nothing for the calibration.
+OPENIMAGES_UNRELATED = {"Person", "Glasses"}
+STUDY_TIER_SCORE = 0.6  # the "detected" group: about 92% right on COCO in the study
 CALIBRATION = os.path.join(datasets.REPO, "internal", "photos", "objects", "v1.calibration.json")
 CALIBRATION_ABOUT = ("Written by ai/eval/hybrid_search.py --write-calibration; do not edit. Search adds weight x coverage x "
-                     "detector score for words whose classes are all on the fusion list, and puts the photos with a "
-                     "detector score of at least tierScore first when the query is at least tierCoverage words on the "
-                     "tier list (docs/architecture/photo-objects.md). Only boxes of this model count.")
+                     "detector score for the enabled words of a query: a word measured on its own, keyed in words by the "
+                     "classes it names, counts when its fusion is true; any other word when all its classes are on the "
+                     "fusion list. When enabled words make up at least tierCoverage of the query and each has a tierScore, "
+                     "the photos whose best class for every word reaches that word's tierScore come first "
+                     "(docs/architecture/photo-objects.md). Only boxes of this model count.")
 PUNCTUATION = set(" \t，。、！？；：,.!?;:\"'“”‘’（）()")
 
 
@@ -187,22 +195,35 @@ def mention_any_score(scores, mentions):
     return np.max(np.stack([scores[:, sorted(ids)].max(axis=1) for _word, ids in mentions]), axis=0)
 
 
+def word_verdict(calibration, ids):
+    """What the calibration measured for a word naming these classes, or None."""
+    return calibration["words"].get(frozenset(ids))
+
+
+def word_enabled(calibration, ids):
+    """A measured word counts when fusing it did not hurt; an unmeasured one when all its classes are on the fusion list."""
+    verdict = word_verdict(calibration, ids)
+    return verdict["fusion"] if verdict is not None else set(ids) <= calibration["fusion"]
+
+
 def product(text, mentions, scores, vector, calibration):
     """The photo service's rule (internal/photos/search.go): fused scores, and the
-    "detected" tier when the query is mostly words on the tier list, else None.
+    "detected" tier when the query is mostly words found reliably, else None.
 
-    Only enabled words count: their classes are all on the fusion list and the
-    word was not found harmful. They make up the coverage and the detector
-    score; other words are matched but add nothing.
+    Only enabled words count. They make up the coverage and the detector
+    score; other words are matched but add nothing. A word is found reliably
+    when it was measured and given its own tier score; a photo is in the tier
+    when each word's best class reaches that word's score.
     """
-    enabled = [(word, ids) for word, ids in mentions
-               if word not in calibration["disabledWords"] and set(ids) <= calibration["fusion"]]
+    enabled = [(word, ids) for word, ids in mentions if word_enabled(calibration, ids)]
     share = coverage(text, enabled)
     detector = mention_score(scores, enabled) if enabled else np.zeros(len(vector))
     fused = vector + calibration["weight"] * share * detector
-    tiered = (bool(mentions) and len(enabled) == len(mentions) and share >= calibration["tierCoverage"]
-              and all(set(ids) <= calibration["tier"] for _word, ids in mentions))
-    return fused, (detector >= calibration["tierScore"]) if tiered else None
+    limits = [(word_verdict(calibration, ids) or {}).get("tierScore") for _word, ids in mentions]
+    if not mentions or len(enabled) != len(mentions) or share < calibration["tierCoverage"] or None in limits:
+        return fused, None
+    found = [scores[:, sorted(ids)].max(axis=1) >= limit for (_word, ids), limit in zip(mentions, limits)]
+    return fused, np.logical_and.reduce(found)
 
 
 def product_order(fused, tier):
@@ -218,53 +239,85 @@ def product_first_group(fused, tier):
     return fused >= fused.max() - GAP
 
 
-def derive_lists(label_halves, oi_classes, table_path=TABLE, min_delta=-0.02, tier_precision=0.85, tier_recall=0.5):
-    """The fusion and tier lists from the per-query results.
+def tier_curve(detector, truth):
+    """{tier score: [precision, recall]} of the photos the detector scores at least that."""
+    curve = {}
+    for limit in TIER_GRID:
+        shown = detector >= limit
+        curve[f"{limit:.2f}"] = [round(float(truth[shown].mean()), 3) if shown.any() else None,
+                                 round(float(shown[truth == 1].mean()), 3)]
+    return curve
 
-    A word is fine for fusion when fusing does not cost more than min_delta of
-    average precision, on average over what measured it (COCO, Open Images);
-    fine for the tier when the "detected" group at the tier score is at least
-    tier_precision right and finds at least tier_recall of the true photos,
-    wherever it was measured. A
-    class is on a list when a word naming at most three classes, it among them,
-    is fine and none is not; classes whose meaning is a guess stay off. Words
-    found harmful are listed so that the matcher still consumes them.
+
+TIER_RULES = ("nearest", "lowest", "highest")
+
+
+def tier_score(curves, precision=0.85, recall=0.5, rule=None):
+    """A tier score at which every measurement is at least that precise and finds that much, or None.
+
+    The study's 0.6 is kept when it passes; otherwise the passing score
+    nearest to it, so a word moves only as far as its detector scores need
+    ("nearest"). "lowest" and "highest" are kept for comparison.
+    """
+    rule = rule or os.environ.get("ANAS_EVAL_TIER_RULE", "nearest")
+    passing = [limit for limit in TIER_GRID
+               if all(p is not None and p >= precision and r >= recall
+                      for p, r in (curve[f"{limit:.2f}"] for curve in curves))]
+    if not passing:
+        return None
+    if rule == "lowest":
+        return passing[0]
+    if rule == "highest":
+        return passing[-1]
+    return min(passing, key=lambda limit: (abs(limit - STUDY_TIER_SCORE), -limit))
+
+
+def derive_lists(label_halves, oi_classes, table_path=TABLE, min_delta=-0.02, tier_precision=0.85, tier_recall=0.5):
+    """The calibration from the per-query results, by the classes a word names.
+
+    Each word measured on its own (COCO, Open Images) gets a verdict for the
+    classes it names: fine for fusion when fusing does not cost more than
+    min_delta of average precision on average over what measured it, and its
+    own tier score, the lowest at which the "detected" group is at least
+    tier_precision right and finds at least tier_recall of the true photos
+    wherever it was measured. A word that names several classes, such as 汽车,
+    stands on its own measurement. For words never measured, a class is on the
+    fusion list when a measured word naming at most three classes, it among
+    them, is fine and none is not; classes whose meaning is a guess stay off.
     """
     with open(table_path, encoding="utf-8") as file:
         noted = {entry["id"] for entry in json.load(file)["classes"] if entry.get("note")}
-    words = collections.defaultdict(lambda: {"classes": set(), "deltas": [], "tier": []})
+    measured = collections.defaultdict(lambda: {"names": set(), "deltas": [], "curves": []})
     for per_query in label_halves:
         for entry in per_query:
-            if "coverage x 0.2" not in entry:
+            # Only a query that is one word measures that word.
+            if "coverage x 0.2" not in entry or len(entry["classes"]) != 1:
                 continue
-            word = words[entry["label"]]
-            word["classes"] = set(entry["classIds"])
+            word = measured[frozenset(entry["classIds"])]
+            word["names"].add(entry["label"])
             word["deltas"].append(entry["coverage x 0.2"]["AP"] - entry["vector"]["AP"])
-            tier = entry["tiers @0.6"]["tier"]
-            word["tier"].append(tier["precision"] is not None and tier["precision"] >= tier_precision
-                                and tier["recall"] >= tier_recall)
+            word["curves"].append(entry["curve"])
     for entry in oi_classes:
-        word = words[entry["zh"]]
-        word["classes"] = set(entry["classIds"])
+        if entry.get("mentions", 1) != 1 or entry["class"] in OPENIMAGES_UNRELATED:
+            continue
+        word = measured[frozenset(entry["classIds"])]
+        word["names"].add(entry["zh"])
         word["deltas"].append(entry["fusedAP"] - entry["vectorAP"])
-        at = entry["detector@0.6"]
-        word["tier"].append(at["precision"] is not None and at["precision"] >= tier_precision and at["recall"] >= tier_recall)
-    fine = {name: float(np.mean(word["deltas"])) >= min_delta for name, word in words.items()}
-    tier_fine = {name: fine[name] and all(word["tier"]) for name, word in words.items()}
-    fusion, tier = set(), set()
+        word["curves"].append(entry["curve"])
+    words = {}
+    for ids, word in measured.items():
+        fine = float(np.mean(word["deltas"])) >= min_delta
+        words[ids] = {"fusion": fine, "tierScore": tier_score(word["curves"], tier_precision, tier_recall) if fine else None}
+    fusion = set()
     for cls in range(1, 366):
         if cls in noted:
             continue
-        naming = [name for name, word in words.items() if cls in word["classes"]]
-        specific = [name for name in naming if len(words[name]["classes"]) <= 3]
-        if any(fine[name] for name in specific) and all(fine[name] for name in specific):
+        specific = [ids for ids in words if cls in ids and len(ids) <= 3]
+        if specific and all(words[ids]["fusion"] for ids in specific):
             fusion.add(cls)
-            if any(tier_fine[name] for name in specific) and all(tier_fine[name] for name in specific):
-                tier.add(cls)
-    disabled = sorted(name for name, ok in fine.items() if not ok)
-    return {"fusion": fusion, "tier": tier, "disabledWords": set(disabled)}, {
-        name: {"classes": sorted(word["classes"]), "deltaAP": round(float(np.mean(word["deltas"])), 3),
-               "fusion": fine[name], "tier": tier_fine[name]} for name, word in sorted(words.items())}
+    return {"fusion": fusion, "words": words}, {
+        "、".join(sorted(word["names"])): {"classes": sorted(ids), "deltaAP": round(float(np.mean(word["deltas"])), 3),
+                                          **words[ids]} for ids, word in sorted(measured.items(), key=lambda i: sorted(i[0]))}
 
 
 def calibrated_threshold(detector, truth, target=TARGET_PRECISION):
@@ -334,6 +387,7 @@ def label_report(vectors, detections, matcher, half="test", calibration=None):
             cal_truth = np.array([label["id"] in s.positive for s in cal_samples])
             calibrated = calibrated_threshold(mention_score(cal_classes, mentions), cal_truth)
             entry["calibratedThreshold"] = calibrated
+            entry["curve"] = tier_curve(detector, truth)
             if calibrated is not None:
                 rankings["tiers @calibrated"], tiers["tiers @calibrated"] = tier_rank(vector, detector, calibrated)
         # The vector rule search uses today to mark the closest group.
@@ -503,7 +557,8 @@ def openimages_report(vectors, detections, query_vectors, matcher, calibration=N
         detector = mention_score(classes[known], mentions)
         y = truth[known]
         result = {"class": entry["en"], "zh": entry["zh"], "positives": positives, "negatives": int((y == 0).sum()),
-                  "classIds": sorted(set().union(*[ids for _w, ids in mentions])),
+                  "classIds": sorted(set().union(*[ids for _w, ids in mentions])), "mentions": len(mentions),
+                  "curve": tier_curve(detector, y),
                   "inCoco": any(part.strip().lower() in coco_names for part in entry["en"].split("/")),
                   "vectorAP": round(float(average_precision_score(y, vector)), 3),
                   "detectorAP": round(float(average_precision_score(y, detector + 1e-6 * vector)), 3)}
@@ -569,9 +624,13 @@ def main():
     openimages = openimages_report(args.vectors, detections, query_vectors, matcher, half="calibration")
     _oi_summary, oi_calibration = openimages if isinstance(openimages, tuple) else (openimages, [])
     lists, words = derive_lists([calibration_queries], oi_calibration)
-    calibration = {"weight": FUSION_WEIGHT, "tierScore": TIER_SCORE, "tierCoverage": TIER_COVERAGE, **lists}
+    calibration = {"weight": FUSION_WEIGHT, "tierCoverage": TIER_COVERAGE, **lists}
 
-    report = {"model": model, "words": words, "lists": {name: sorted(value) for name, value in lists.items()}}
+    report = {"model": model, "words": words,
+              "lists": {"fusion": sorted(lists["fusion"]),
+                        "enabledWords": sum(1 for v in lists["words"].values() if v["fusion"]),
+                        "tieredWords": sum(1 for v in lists["words"].values() if v["tierScore"] is not None),
+                        "harmfulWords": sum(1 for v in lists["words"].values() if not v["fusion"])}}
     report["labels"], report["perQuery"] = label_report(args.vectors, detections, matcher, "test", calibration)
     report["captions"] = caption_report(args.vectors, detections, matcher, calibration=calibration)
     openimages = openimages_report(args.vectors, detections, query_vectors, matcher, calibration, half="test")
@@ -585,22 +644,35 @@ def main():
         write_calibration(model, calibration)
 
 
+def word_key(ids):
+    """A word's key in the calibration file: the classes it names, ascending."""
+    return ",".join(str(cls) for cls in sorted(ids))
+
+
 def write_calibration(model, calibration, path=CALIBRATION):
-    """The photo service's fusion and tier lists for one detector model."""
+    """The photo service's calibration for one detector model."""
+    words = sorted(calibration["words"].items(), key=lambda item: sorted(item[0]))
+    entries = []
+    for ids, verdict in words:
+        fields = {"fusion": verdict["fusion"]}
+        if verdict["tierScore"] is not None:
+            fields["tierScore"] = verdict["tierScore"]
+        entries.append(f'  {json.dumps(word_key(ids))}: {json.dumps(fields)}')
     lines = ["{",
              f' "about": {json.dumps(CALIBRATION_ABOUT, ensure_ascii=False)},',
              f' "model": {json.dumps(model)},',
              f' "weight": {calibration["weight"]},',
-             f' "tierScore": {calibration["tierScore"]},',
              f' "tierCoverage": {calibration["tierCoverage"]},',
              f' "fusion": {json.dumps(sorted(calibration["fusion"]))},',
-             f' "tier": {json.dumps(sorted(calibration["tier"]))},',
-             f' "disabledWords": {json.dumps(sorted(calibration["disabledWords"]), ensure_ascii=False)}',
+             ' "words": {',
+             ",\n".join(entries),
+             " }",
              "}"]
     with open(path, "w", encoding="utf-8", newline="\n") as file:
         file.write("\n".join(lines) + "\n")
-    print(f"wrote {path}: {len(calibration['fusion'])} fusion classes, {len(calibration['tier'])} tier classes")
-
+    tiered = sum(1 for verdict in calibration["words"].values() if verdict["tierScore"] is not None)
+    print(f"wrote {path}: {len(calibration['fusion'])} fusion classes, {len(words)} measured words, "
+          f"{tiered} with a tier score")
 
 if __name__ == "__main__":
     main()

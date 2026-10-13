@@ -208,14 +208,15 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 	mentions := s.matcher.Mentions(query)
 	enabled := calibration.Enabled(mentions)
 	share := objects.Coverage(query, enabled)
-	tiered := calibration.Tiered(query, mentions)
+	tierScores := calibration.TierScores(query, mentions)
+	tiered := tierScores != nil
 	var named, detected, similar []searchHit
 	var waiting []candidate
 	var vectorErr error
 	err := s.detected.read(ctx, s, calibration.Model, func(found map[string][]classScore) {
 		if len(found) == 0 {
 			// Nothing detected by the calibrated model yet: vectors alone.
-			enabled, share, tiered = nil, 0, false
+			enabled, share, tierScores, tiered = nil, 0, nil, false
 		}
 		vectorErr = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
 			for _, c := range candidates {
@@ -233,7 +234,7 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 				switch {
 				case strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded):
 					named = append(named, searchHit{c.id, nameBand + score})
-				case tiered && detector >= calibration.TierScore:
+				case tiered && showsAll(scores, mentions, tierScores):
 					detected = append(detected, searchHit{c.id, detectedBand + score})
 				case embedded && queryVector != nil:
 					similar = append(similar, searchHit{c.id, score})
@@ -280,15 +281,31 @@ func mentionScore(scores []classScore, mentions []objects.Mention) float64 {
 	}
 	lowest := 1.0
 	for _, mention := range mentions {
-		best := float32(0)
-		for _, class := range mention.Classes {
-			if i, ok := slices.BinarySearchFunc(scores, class, func(s classScore, c int) int { return s.class - c }); ok {
-				best = max(best, scores[i].score)
-			}
-		}
-		lowest = min(lowest, float64(best))
+		lowest = min(lowest, bestScore(scores, mention.Classes))
 	}
 	return lowest
+}
+
+// showsAll reports whether a photo with these best scores per class shows
+// every mentioned thing: each word's best class reaches that word's score.
+func showsAll(scores []classScore, mentions []objects.Mention, tierScores []float64) bool {
+	for i, mention := range mentions {
+		if bestScore(scores, mention.Classes) < tierScores[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// bestScore is the highest score of any of the classes.
+func bestScore(scores []classScore, classes []int) float64 {
+	best := float32(0)
+	for _, class := range classes {
+		if i, ok := slices.BinarySearchFunc(scores, class, func(s classScore, c int) int { return s.class - c }); ok {
+			best = max(best, scores[i].score)
+		}
+	}
+	return float64(best)
 }
 
 // awaitingDetection counts the candidates without a detection whose job has
