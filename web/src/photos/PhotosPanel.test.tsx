@@ -615,6 +615,8 @@ describe("PhotosPanel search and viewing", () => {
 
     await search("手机");
     expect(await screen.findByRole("separator", { name: "没有检测到手机的照片" })).toBeTruthy();
+    // Photos still waiting for the detector may show one too.
+    expect(screen.getByText("按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有手机")).toBeTruthy();
     expect(chip()).toBe("检测到手机的照片 2 张");
     expect(screen.getByText("还有 5 张尚未识别完")).toBeTruthy();
     expect(screen.getByText("共 3 张")).toBeTruthy();

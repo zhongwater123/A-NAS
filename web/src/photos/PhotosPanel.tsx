@@ -558,7 +558,11 @@ export function PhotosPanel({ userId, isAdmin }: Props) {
           onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); } }}
           onCount={setCount} onError={reportError}
           split={closest === undefined ? undefined : found && found.detected > 0
-            ? { at: closest, title: `没有检测到${things}的照片`, text: `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来` }
+            ? {
+              at: closest, title: `没有检测到${things}的照片`,
+              text: found.undetected > 0 ? `按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有${things}`
+                : `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来`,
+            }
             : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
           empty={found
             ? <Empty icon={<SearchX />} title={`没有检测到${things}`} text={found.undetected > 0 ? `还有 ${found.undetected} 张照片尚未识别完，稍后再搜一次试试。` : "图库里的照片都已识别过。换个说法试试，比如“海边的日落”。"} />
