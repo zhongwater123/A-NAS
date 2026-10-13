@@ -471,16 +471,69 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     expect(await screen.findByText("已从 1 张照片上去掉“小橘”")).toBeTruthy();
   });
 
-  it("suggests sentences until local AI has clusters, and never says AI is off", async () => {
+  it("shows clusters being prepared and lists them once local AI has settled", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // The label texts first, then the photos, then nothing waits.
+      let phase = 0;
+      const fetchMock = serve((url) => {
+        if (url === "/api/v1/photos/ai") return json({ state: phase === 2 ? "idle" : "working", ready: 3, pending: phase === 2 ? 0 : 2, failed: 0, clusters: phase ? "ready" : "preparing" });
+        if (url.startsWith("/api/v1/photos/labels")) return json(phase === 2 ? { items: [{ id: "cat", name: "猫", category: "animal", photos: 2, coverId: "photo:cat" }], ready: true } : { items: [], ready: phase === 1 });
+        return undefined;
+      });
+      const listed = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/v1/photos/labels")).length;
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+      await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+      const browse = await screen.findByRole("region", { name: "按内容聚合" });
+      const note = "本地 AI 正在整理，相册空闲几分钟后，有把握的照片会自动聚合在这里";
+      expect(within(browse).getByText(note)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "可以这样搜" })).toBeNull();
+
+      // Waiting polls only the AI status: any other request would hold the
+      // AI work back.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(listed()).toBe(1);
+      // Groups ready, photos still waiting: still coming, and not asked for
+      // yet, which would hold the photos back.
+      phase = 1;
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(listed()).toBe(1);
+      expect(screen.getByText(note)).toBeTruthy();
+      phase = 2;
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await screen.findByRole("button", { name: "打开 猫" })).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(listed()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says so when local AI is sure of no photos yet", async () => {
     serve((url) => {
-      if (url === "/api/v1/photos/ai") return json({ state: "unavailable", ready: 0, pending: 5, failed: 0 });
+      if (url === "/api/v1/photos/ai") return json({ state: "idle", ready: 3, pending: 0, failed: 0, clusters: "ready" });
+      if (url.startsWith("/api/v1/photos/labels")) return json({ items: [], ready: true });
       return undefined;
     });
     const user = userEvent.setup();
     render(<PhotosPanel userId="user:alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
-    expect(await screen.findByRole("heading", { name: "可以这样搜" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "场景与氛围" })).toBeTruthy();
+    expect(await within(await screen.findByRole("region", { name: "按内容聚合" })).findByText("还没有本地 AI 有把握的照片，宁可少放，不放错")).toBeTruthy();
+  });
+
+  it("leaves the clusters out while local AI is away, and never says AI is off", async () => {
+    const fetchMock = serve((url) => {
+      if (url === "/api/v1/photos/ai") return json({ state: "unavailable", ready: 0, pending: 5, failed: 0, clusters: "preparing" });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+    expect(await screen.findByRole("heading", { name: "用一句话找照片" })).toBeTruthy();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v1\/photos\/labels/), expect.anything()));
+    expect(screen.queryByRole("region", { name: "按内容聚合" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "可以这样搜" })).toBeNull();
     expect(screen.queryByRole("status", { name: "本地 AI 状态" })).toBeNull();
     expect(screen.queryByText(/未启用|不可用/)).toBeNull();
   });

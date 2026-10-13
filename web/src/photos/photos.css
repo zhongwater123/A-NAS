@@ -239,22 +239,18 @@
 .ph-tag-groups .ph-cards { padding-top: 12px; }
 .ph-tag-mark { position: absolute; left: 8px; top: 8px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; color: #fff; background: rgba(15, 18, 25, .5); backdrop-filter: blur(6px); }
 .ph-tag-mark svg { width: 13px; height: 13px; }
-.ph-ways { max-width: 1100px; margin: 0 auto; padding-top: 24px; border-top: 1px solid var(--ph-line); }
-.ph-ways > header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-.ph-ways > header h3 { margin: 0; font-size: 17px; font-weight: 700; }
-.ph-ways > header small { color: var(--ph-muted); }
-.ph-ways-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
-.ph-way { display: grid; align-content: start; gap: 4px; padding: 18px 18px 16px; border-radius: 16px; background: var(--ph-surface); box-shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 8px 24px rgba(16, 24, 40, .05); }
-.ph-way-icon { width: 38px; height: 38px; display: grid; place-items: center; margin-bottom: 8px; border-radius: 12px; color: #6d4ae8; background: rgba(139, 92, 246, .11); }
-.ph-way:nth-child(2) .ph-way-icon { color: #c2570c; background: rgba(249, 115, 22, .11); }
-.ph-way:nth-child(3) .ph-way-icon { color: #0f7a6e; background: rgba(20, 184, 166, .12); }
-.ph-way-icon svg { width: 19px; height: 19px; }
-.ph-way h4 { margin: 0; font-size: 14.5px; font-weight: 650; }
-.ph-way p { margin: 0 0 10px; color: var(--ph-muted); font-size: 12.5px; }
-.ph-way-examples { display: flex; flex-wrap: wrap; gap: 6px; }
-.ph-way-examples button { height: 30px; border: 0; border-radius: 99px; padding: 0 12px; color: var(--ph-ink-2); background: rgba(20, 26, 38, .05); font-size: 12.5px; font-weight: 550; transition: background .15s, color .15s, transform .1s; }
-.ph-way-examples button:hover { color: var(--ph-accent-ink); background: var(--ph-accent-soft); }
-.ph-way-examples button:active { transform: scale(.97); }
+/* Clusters still being prepared: quiet cards in the shape of the real ones. */
+.ph-ghost { pointer-events: none; }
+.ph-ghost .ph-card-cover { background: linear-gradient(100deg, #e6e9ee 35%, #f1f3f6 50%, #e6e9ee 65%) 0 0 / 300% 100%; box-shadow: none; animation: ph-sheen 1.8s ease-in-out infinite; }
+.ph-ghost strong, .ph-ghost small { display: block; height: 10px; border-radius: 5px; background: #eceef2; }
+.ph-ghost strong { width: 58%; margin-bottom: 3px; }
+.ph-ghost small { width: 34%; }
+.ph-ghost:nth-child(2) .ph-card-cover { animation-delay: .12s; }
+.ph-ghost:nth-child(3) .ph-card-cover { animation-delay: .24s; }
+.ph-ghost:nth-child(4) .ph-card-cover { animation-delay: .36s; }
+.ph-ghost:nth-child(5) .ph-card-cover { animation-delay: .48s; }
+.ph-ghost:nth-child(n+6) .ph-card-cover { animation-delay: .6s; }
+.ph-ghosts { padding-top: 14px; }
 .ph-search-bar { flex-wrap: wrap; padding-left: 0; }
 .ph-search.wide { width: min(460px, 100%); flex: none; }
 
@@ -443,6 +439,7 @@
 @keyframes ph-up { from { opacity: 0; transform: translateY(10px); } }
 @keyframes ph-pop { from { opacity: 0; transform: scale(.96); } }
 @keyframes ph-pulse { 50% { opacity: .55; } }
+@keyframes ph-sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @keyframes ph-slide { from { transform: translateX(-100%); } }
 
 @media (prefers-reduced-motion: reduce) {

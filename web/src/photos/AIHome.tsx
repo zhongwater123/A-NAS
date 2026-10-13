@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, FileText, Hash, History, ScanSearch, Search, ShieldCheck, Sunset, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Hash, History, Search, ShieldCheck, X } from "lucide-react";
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { categoryNames, messageOf } from "./model";
@@ -21,14 +21,6 @@ interface Props {
 const cardWidth = 124;
 const cardGap = 14;
 
-// Until local AI has grouped any photos, the kinds of sentence that search
-// well fill the page (docs/architecture/photo-ai.md#语义搜索).
-const ways = [
-  { icon: ScanSearch, title: "描述画面", text: "照片里有谁，在做什么", examples: ["草地上奔跑的孩子", "桌上的生日蛋糕", "抱着猫的人"] },
-  { icon: Sunset, title: "场景与氛围", text: "地点、天气、时间和光线", examples: ["傍晚的海边", "下雪的街道", "夜晚的城市灯光"] },
-  { icon: FileText, title: "截图与文档", text: "拍下的纸张和屏幕", examples: ["手机截图", "手写的笔记", "餐厅菜单"] },
-];
-
 // AIHome is AI 聚合: a sentence finds photos by meaning; below, the groups
 // people made with their own tags, then the photos local AI has grouped by
 // what they show. An AI group holds only the photos the model is sure of; it
@@ -39,14 +31,29 @@ export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, on
   const [tags, setTags] = useState<PhotoTagCount[]>([]);
   const [allTags, setAllTags] = useState(false);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  // Local AI has settled once the groups are ready and no photo waits for
+  // it; then the clusters load again if they changed since they were asked
+  // for. Only the status is polled before that: any other request would
+  // hold the remaining AI work back for another five minutes.
+  const settled = ai?.clusters === "ready" && ai.pending === 0;
+  const wasSettled = useRef<boolean | undefined>(undefined);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const was = wasSettled.current;
+    if (ai) wasSettled.current = settled;
+    if (settled && (was === false || (clusters && !clusters.ready))) setReload((value) => value + 1);
+  }, [settled, clusters]);
   const groups = useMemo(() => {
     const byCategory = new Map<string, PhotoLabelCount[]>();
     for (const label of clusters?.items ?? []) byCategory.set(label.category, [...byCategory.get(label.category) ?? [], label]);
     const order = Object.keys(categoryNames);
     return [...byCategory].sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   }, [clusters]);
+  // Until it settles, an empty page means the groups are still coming.
+  const waiting = !!clusters && !groups.length && !!ai?.clusters && ai.state !== "unavailable" && !(settled && clusters.ready);
   const browse = useRef<HTMLElement>(null);
   const [perRow, setPerRow] = useState(6);
+  const shown = clusters === undefined ? "" : groups.length ? "groups" : waiting ? "waiting" : clusters.ready ? "empty" : "";
   useLayoutEffect(() => {
     const element = browse.current;
     if (!element) return;
@@ -56,10 +63,14 @@ export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, on
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [groups.length > 0]);
+  }, [shown]);
   useEffect(() => {
     let live = true;
     listPhotoLabels(viewing).then((value) => { if (live) setClusters(value); }, (caught) => { if (live) { setClusters({ items: [], ready: false }); onError(messageOf(caught)); } });
+    return () => { live = false; };
+  }, [viewing, refreshKey, reload]);
+  useEffect(() => {
+    let live = true;
     listTagGroups(viewing).then((value) => { if (live) setTags(value); }, (caught) => { if (live) onError(messageOf(caught)); });
     return () => { live = false; };
   }, [viewing, refreshKey]);
@@ -134,23 +145,18 @@ export function AIHome({ viewing, refreshKey, topInset, ai, recent, onSearch, on
             );
           })}
         </section>
-      ) : (
-        <section className="ph-ways" aria-label="可以这样搜">
-          <header><h3>可以这样搜</h3><small>照片整理好后，本地 AI 有把握的照片会按动物、风景、物品等聚合在这里</small></header>
-          <div className="ph-ways-grid">
-            {ways.map(({ icon: Icon, title, text, examples }) => (
-              <article className="ph-way" key={title}>
-                <span className="ph-way-icon"><Icon /></span>
-                <h4>{title}</h4>
-                <p>{text}</p>
-                <div className="ph-way-examples">
-                  {examples.map((example) => <button type="button" key={example} aria-label={`搜索 ${example}`} onClick={() => onSearch(example)}>{example}</button>)}
-                </div>
-              </article>
-            ))}
+      ) : waiting ? (
+        <section ref={browse} className="ph-browse" aria-label="按内容聚合" aria-busy="true">
+          <header><h3>按内容聚合</h3><small>本地 AI 正在整理，相册空闲几分钟后，有把握的照片会自动聚合在这里</small></header>
+          <div className="ph-cards things ph-ghosts" aria-hidden="true">
+            {Array.from({ length: perRow }, (_, index) => <span className="ph-card ph-ghost" key={index}><span className="ph-card-cover" /><strong /><small /></span>)}
           </div>
         </section>
-      )}
+      ) : clusters.ready ? (
+        <section ref={browse} className="ph-browse" aria-label="按内容聚合">
+          <header><h3>按内容聚合</h3><small>还没有本地 AI 有把握的照片，宁可少放，不放错</small></header>
+        </section>
+      ) : null}
     </div>
   );
 }

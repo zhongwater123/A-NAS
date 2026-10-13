@@ -78,7 +78,16 @@ type AIStatus struct {
 	Ready   int `json:"ready"`
 	Pending int `json:"pending"`
 	Failed  int `json:"failed"`
+	// Clusters says whether AI 聚合 can list its groups: ClustersReady, or
+	// ClustersPreparing while label texts wait for the Worker. It is empty
+	// when the Worker's model has no calibrated clusters.
+	Clusters string `json:"clusters,omitempty"`
 }
+
+const (
+	ClustersReady     = "ready"
+	ClustersPreparing = "preparing"
+)
 
 // aiProgress is what the AI runner last observed.
 type aiProgress struct {
@@ -324,6 +333,9 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	}
 	state, reason, model := s.ai.get()
 	status := AIStatus{State: state, Reason: reason, Model: model}
+	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
+		return AIStatus{}, err
+	}
 	if len(libraries) == 0 {
 		return status, nil
 	}
