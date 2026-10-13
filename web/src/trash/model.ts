@@ -1,4 +1,5 @@
 import { APIError, type Space, type TrashItem } from "../api";
+import { formatDay } from "../backup/format";
 
 export type TrashSort = "deleted" | "expiry";
 
@@ -13,13 +14,19 @@ export function retentionDays(items: TrashItem[]): number {
   return Number.isFinite(days) && days > 0 ? days : 30;
 }
 
-// expiryOf words when an item is deleted for good and how urgent that is.
-export function expiryOf(item: Pick<TrashItem, "purgeAt">, now = Date.now()): { label: string; tone: "calm" | "soon" | "urgent" } {
-  const left = Date.parse(item.purgeAt) - now;
-  if (!(left > 0)) return { label: "即将清理", tone: "urgent" };
-  const days = Math.ceil(left / day);
-  if (days === 1) return { label: "1 天内清理", tone: "urgent" };
-  return { label: `${days} 天后清理`, tone: days <= 7 ? "soon" : "calm" };
+export type ExpiryTone = "calm" | "soon" | "urgent";
+
+// expiryOf words when an item is deleted for good, how urgent that is and
+// how much of its time in the bin is left (0 to 1).
+export function expiryOf(item: Pick<TrashItem, "deletedAt" | "purgeAt">, now = Date.now()): { label: string; short: string; tone: ExpiryTone; left: number } {
+  const purge = Date.parse(item.purgeAt);
+  const span = purge - Date.parse(item.deletedAt);
+  const remaining = purge - now;
+  const left = span > 0 ? Math.min(1, Math.max(0, remaining / span)) : 0;
+  if (!(remaining > 0)) return { label: "即将清理", short: "即将清理", tone: "urgent", left: 0 };
+  const days = Math.ceil(remaining / day);
+  if (days === 1) return { label: "1 天内清理", short: "1 天内", tone: "urgent", left };
+  return { label: `${days} 天后清理`, short: `${days} 天`, tone: days <= 7 ? "soon" : "calm", left };
 }
 
 export const spaceName = (space?: Pick<Space, "kind">) => (space?.kind === "shared" ? "共享空间" : "个人空间");
@@ -44,6 +51,45 @@ export function sortItems(items: TrashItem[], sort: TrashSort): TrashItem[] {
   return [...items].sort((left, right) => sort === "expiry"
     ? Date.parse(left.purgeAt) - Date.parse(right.purgeAt)
     : Date.parse(right.deletedAt) - Date.parse(left.deletedAt));
+}
+
+export interface TrashGroup { key: string; label: string; items: TrashItem[] }
+
+// groupItems groups sorted items by the day they were deleted, or, sorted
+// by expiry, into those that go within a week and the rest.
+export function groupItems(items: TrashItem[], sort: TrashSort, now = new Date()): TrashGroup[] {
+  const groups: TrashGroup[] = [];
+  for (const item of items) {
+    const key = sort === "expiry"
+      ? (expiryOf(item, now.getTime()).tone === "calm" ? "later" : "week")
+      : new Date(item.deletedAt).toDateString();
+    let group = groups.at(-1);
+    if (group?.key !== key) {
+      const label = sort === "expiry" ? (key === "week" ? "7 天内清理" : "更晚清理") : formatDay(item.deletedAt, now);
+      group = { key, label, items: [] };
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
+
+// matches filters by space and by a part of the name, ignoring case.
+export function matches(item: TrashItem, spaceId: string, query: string): boolean {
+  if (spaceId && item.spaceId !== spaceId) return false;
+  const needle = query.trim().toLocaleLowerCase("zh-CN");
+  return !needle || item.name.toLocaleLowerCase("zh-CN").includes(needle);
+}
+
+export interface BatchOutcome { done: TrashItem[]; conflicts: TrashItem[]; gone: TrashItem[]; failed: string[] }
+
+// restoreSummary words what restoring several items did.
+export function restoreSummary(outcome: BatchOutcome): { text: string; tone: "success" | "error" } {
+  const parts = [outcome.done.length ? `已恢复 ${outcome.done.length} 项` : "没有恢复任何项目"];
+  if (outcome.conflicts.length) parts.push(`${outcome.conflicts.length} 项的原位置已有同名项目，仍留在回收站并保持选中，可逐个改名恢复`);
+  if (outcome.gone.length) parts.push(`${outcome.gone.length} 项已不在回收站`);
+  if (outcome.failed.length) parts.push(`${outcome.failed.length} 项失败：${outcome.failed[0]}`);
+  return { text: parts.join("；"), tone: outcome.conflicts.length || outcome.failed.length ? "error" : "success" };
 }
 
 export function messageOf(error: unknown): string {

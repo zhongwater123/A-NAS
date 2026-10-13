@@ -119,7 +119,7 @@ const initialWindows: WindowModel[] = [
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
 	{ id: "media", title: "影视中心", open: false, minimized: false, maximized: false, x: 210, y: 46, width: 1120, height: 720, z: 2, opened: 0 },
 	{ id: "music", title: "音乐", open: false, minimized: false, maximized: false, x: 240, y: 56, width: 1080, height: 700, z: 2, opened: 0 },
-	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
+	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 260, y: 76, width: 920, height: 620, z: 2, opened: 0 },
 	{ id: "backup", title: "备份中心", open: false, minimized: false, maximized: false, x: 220, y: 52, width: 1080, height: 700, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
   { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
