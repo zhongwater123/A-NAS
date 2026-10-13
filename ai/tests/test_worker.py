@@ -49,13 +49,14 @@ class Failing:
 
 
 class WorkerTest(unittest.TestCase):
-    def start(self, provider, reason=None, idle_seconds=30):
+    def start(self, provider, reason=None, idle_seconds=30, detector=None):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
         path = os.path.join(directory, "ai.sock")
         listener = worker.listening_socket(path)
         self.addCleanup(listener.close)
-        thread = threading.Thread(target=worker.serve, args=(listener, provider, reason, idle_seconds), daemon=True)
+        thread = threading.Thread(target=worker.serve, args=(listener, provider, reason, idle_seconds, detector),
+                                  daemon=True)
         thread.start()
         return path, thread
 
@@ -103,6 +104,64 @@ class WorkerTest(unittest.TestCase):
         path, _ = self.start(None, reason="model file missing")
         for request in ({"op": "info"}, {"op": "embed_image"}, {"op": "embed_query", "text": "猫"}):
             self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_UNAVAILABLE)
+
+    def test_detects_objects_with_the_fake(self):
+        fake = providers.FakeDetector()
+        path, _ = self.start(providers.FakeProvider(dimensions=8), detector=worker.Detector(fake))
+        self.assertEqual(call(path, {"op": "info"})["detector"], fake.model)
+        seen = 0
+        for content in (b"photo %d" % i for i in range(20)):
+            first = call(path, {"op": "detect_objects"}, self.image(content))
+            self.assertTrue(first["ok"], first)
+            self.assertEqual(first["model"], fake.model)
+            self.assertEqual(first, call(path, {"op": "detect_objects"}, self.image(content)))
+            scores = [box[1] for box in first["boxes"]]
+            self.assertEqual(scores, sorted(scores, reverse=True))
+            for label, score, *corners in first["boxes"]:
+                self.assertTrue(1 <= label <= 365 and providers.MIN_BOX_SCORE <= score <= 1)
+                self.assertTrue(all(0 <= value <= 1 for value in corners))
+            seen += len(first["boxes"])
+        self.assertGreater(seen, 0)
+        self.assertEqual(call(path, {"op": "detect_objects"})["error"]["code"], protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "detect_objects"}, self.image(b""))["error"]["code"], protocol.CODE_INVALID_INPUT)
+
+    def test_vectors_go_on_without_the_detector(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8),
+                             detector=worker.Detector(reason="detector file missing"))
+        self.assertNotIn("detector", call(path, {"op": "info"}))
+        response = call(path, {"op": "detect_objects"}, self.image(b"photo"))
+        self.assertEqual(response["error"], {"code": protocol.CODE_UNAVAILABLE, "message": "detector file missing"})
+        self.assertTrue(call(path, {"op": "embed_image"}, self.image(b"photo"))["ok"])
+
+    def test_hanging_up_stops_the_detection(self):
+        fake = providers.FakeDetector(delay=30)
+        path, _ = self.start(providers.FakeProvider(), detector=worker.Detector(fake))
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps({"op": "detect_objects"}).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [self.image(b"photo").fileno()])
+            time.sleep(0.2)
+        started = time.monotonic()
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(fake.cancelled, 1)
+
+    def test_release_frees_the_detector_and_can_end_the_worker(self):
+        fake = providers.FakeDetector()
+        path, thread = self.start(providers.FakeProvider(), detector=worker.Detector(fake))
+        self.assertTrue(call(path, {"op": "detect_objects"}, self.image(b"photo"))["ok"])
+        self.assertTrue(fake.loaded)
+        self.assertEqual(call(path, {"op": "release", "what": "detector"}), {"ok": True})
+        self.assertFalse(fake.loaded)
+        self.assertTrue(call(path, {"op": "detect_objects"}, self.image(b"photo"))["ok"])
+        self.assertEqual(call(path, {"op": "release"})["error"]["code"], protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "release", "what": "all"}), {"ok": True})
+        thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(fake.loaded)
+
+    def test_leaves_cores_for_the_user(self):
+        self.assertEqual(providers.inference_threads(), max(1, len(os.sched_getaffinity(0)) - providers.RESERVED_CORES))
 
     def test_exits_when_idle_and_survives_bad_frames(self):
         path, thread = self.start(providers.FakeProvider(), idle_seconds=1)
