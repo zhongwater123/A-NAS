@@ -2,6 +2,7 @@ import { type DetailedError, Upload } from "tus-js-client";
 import { useSyncExternalStore } from "react";
 
 import { csrfHeaders, sessionEnded } from "../api";
+import { RateMeter } from "./meter";
 import {
   cancelTransfer, clearFinishedTransfers, createDownload, getTransfer, listTransfers, pauseTransfer, removeTransfer,
   type Transfer, type TransferFailure, type TransferLocation, uploadEndpoint, uploadURL,
@@ -67,14 +68,26 @@ export interface ExternalUpload {
   finishedAt?: number;
 }
 
+// TransferRates are the account's speeds right now, in bytes per second,
+// measured over all bytes moved rather than per file.
+export interface TransferRates {
+  upload: number;
+  download: number;
+  // batches holds the speed of each batch this browser uploads.
+  batches: Record<string, number>;
+}
+
 export interface TransferSnapshot {
   uploads: LocalUpload[];
   batches: UploadBatch[];
   external: ExternalUpload[];
   server: Transfer[];
   holds: Hold[];
+  rates: TransferRates;
   loaded: boolean;
 }
+
+const noRates: TransferRates = { upload: 0, download: 0, batches: {} };
 
 export const parallelUploads = 3;
 const chunkSize = 8 * 1024 * 1024;
@@ -126,11 +139,19 @@ const retryable = (failure: ClassifiedFailure) => failure.kind === "server" || f
 // transfer center or the file manager, and even an expired session: they
 // wait and continue after the same account signs in again.
 export class TransferStore {
-  private snapshot: TransferSnapshot = { uploads: [], batches: [], external: [], server: [], holds: [], loaded: false };
+  private snapshot: TransferSnapshot = { uploads: [], batches: [], external: [], server: [], holds: [], rates: noRates, loaded: false };
   private listeners = new Set<() => void>();
   private uploadedListeners = new Set<(target: UploadTarget) => void>();
   private running = new Map<string, Upload>();
-  private samples = new Map<string, { at: number; bytes: number }>();
+  // Speeds count the bytes every transfer moved: this browser's uploads as
+  // they are sent, and the NAS's other transfers by what each poll adds.
+  private moved = { upload: 0, download: 0, batches: new Map<string, number>() };
+  private meters = { upload: new RateMeter(), download: new RateMeter(), batches: new Map<string, RateMeter>(), items: new Map<string, RateMeter>() };
+  // sent is how far each upload of this browser had come; seen is what each
+  // NAS transfer had moved at the previous poll, once the first poll ran.
+  private sent = new Map<string, number>();
+  private seen?: Map<string, number>;
+  private rateTimer?: ReturnType<typeof setInterval>;
   private userID?: string;
   private counter = 0;
   private watchers = 0;
@@ -158,6 +179,7 @@ export class TransferStore {
     if (this.userID && this.userID !== userID) this.reset();
     this.userID = userID;
     this.listen();
+    this.meters.upload.add(Date.now(), this.moved.upload);
     this.release("session");
     void this.refresh();
   }
@@ -166,13 +188,18 @@ export class TransferStore {
   reset() {
     for (const upload of this.running.values()) void upload.abort(false);
     this.running.clear();
-    this.samples.clear();
+    this.moved = { upload: 0, download: 0, batches: new Map() };
+    this.meters = { upload: new RateMeter(), download: new RateMeter(), batches: new Map(), items: new Map() };
+    this.sent.clear();
+    this.seen = undefined;
+    clearInterval(this.rateTimer);
+    this.rateTimer = undefined;
     for (const timer of this.holdTimers.values()) clearInterval(timer);
     this.holdTimers.clear();
     clearTimeout(this.pollTimer);
     this.pollTimer = undefined;
     this.userID = undefined;
-    this.set({ uploads: [], batches: [], external: [], server: [], holds: [], loaded: false });
+    this.set({ uploads: [], batches: [], external: [], server: [], holds: [], rates: noRates, loaded: false });
   }
 
   // watch polls quickly while someone looks at the transfers.
@@ -342,8 +369,12 @@ export class TransferStore {
     const entry: ExternalUpload = { ...upload, progress: 0, phase: "running", createdAt: Date.now() };
     this.set({ external: [entry, ...this.snapshot.external.filter((item) => item.key !== upload.key)] });
     const change = (value: Partial<ExternalUpload>, immediate = true) => this.set({ external: this.snapshot.external.map((item) => item.key === upload.key ? { ...item, ...value } : item) }, immediate);
+    this.sent.set(upload.key, 0);
     return {
-      progress: (fraction: number) => change({ progress: fraction }, false),
+      progress: (fraction: number) => {
+        this.count(upload.key, undefined, Math.round(fraction * upload.size));
+        change({ progress: fraction }, false);
+      },
       done: () => change({ phase: "completed", progress: 1, finishedAt: Date.now() }),
       fail: (error: string) => change({ phase: "failed", error, finishedAt: Date.now() }),
       cancel: () => change({ phase: "canceled", finishedAt: Date.now() }),
@@ -354,7 +385,9 @@ export class TransferStore {
     if (!this.userID || this.snapshot.holds.includes("session")) return;
     try {
       const server = await listTransfers();
+      this.countServer(server);
       this.set({ server, loaded: true });
+      this.measure();
     } catch {
       // A failed poll keeps what is shown; the next one tries again.
       if (!this.snapshot.loaded) this.set({ loaded: true });
@@ -381,7 +414,9 @@ export class TransferStore {
 
   private start(task: LocalUpload) {
     this.update(task.key, { phase: "running", error: undefined, hold: undefined });
-    this.samples.set(task.key, { at: Date.now(), bytes: task.transferred });
+    // A resumed upload counts only the bytes it sends from now on.
+    this.sent.set(task.key, task.transferred);
+    this.meters.items.set(task.key, new RateMeter());
     // A known upload resumes without an endpoint, so that tus-js-client
     // reports a lost upload instead of quietly starting a second one.
     const resuming = Boolean(task.transferId);
@@ -411,23 +446,100 @@ export class TransferStore {
   }
 
   private progress(key: string, sent: number) {
-    const now = Date.now();
-    const sample = this.samples.get(key);
     const current = this.find(key);
     if (!current || current.phase !== "running") return;
-    let speed = current.speed;
-    if (sample && now - sample.at >= 500) {
-      const instant = Math.max(0, (sent - sample.bytes) / ((now - sample.at) / 1000));
-      speed = speed ? speed * 0.6 + instant * 0.4 : instant;
-      this.samples.set(key, { at: now, bytes: sent });
+    this.count(key, current.batch, sent);
+    const meter = this.meters.items.get(key);
+    meter?.add(Date.now(), sent);
+    this.update(key, { transferred: sent, speed: meter?.rate(Date.now()) ?? 0 }, false);
+  }
+
+  // count adds what an upload of this browser sent since it last reported.
+  private count(key: string, batch: string | undefined, sent: number) {
+    const delta = sent - (this.sent.get(key) ?? sent);
+    this.sent.set(key, sent);
+    if (delta <= 0) return;
+    const now = Date.now();
+    this.moved.upload += delta;
+    this.meters.upload.add(now, this.moved.upload);
+    if (batch) {
+      const meter = this.batchMeter(batch, now - 1);
+      const total = (this.moved.batches.get(batch) ?? 0) + delta;
+      this.moved.batches.set(batch, total);
+      meter.add(now, total);
     }
-    this.update(key, { transferred: sent, speed }, false);
+    this.measure(false);
+  }
+
+  // batchMeter returns a batch's meter, starting it from what the batch has
+  // moved so far, so its first bytes count too.
+  private batchMeter(batch: string, now: number) {
+    let meter = this.meters.batches.get(batch);
+    if (!meter) {
+      meter = new RateMeter();
+      meter.add(now, this.moved.batches.get(batch) ?? 0);
+      this.meters.batches.set(batch, meter);
+    }
+    return meter;
+  }
+
+  // countServer adds what the NAS's other transfers moved since the previous
+  // poll: downloads, and uploads another browser sends. The first poll only
+  // notes where each transfer stood.
+  private countServer(server: Transfer[]) {
+    const owned = new Set(this.snapshot.uploads.flatMap((upload) => [upload.transferId, ...(upload.superseded ?? [])]));
+    const now = Date.now();
+    const first = !this.seen;
+    const seen = new Map<string, number>();
+    for (const transfer of server) {
+      seen.set(transfer.id, transfer.transferredBytes);
+      if (first || owned.has(transfer.id)) continue;
+      const before = this.seen!.get(transfer.id);
+      // A transfer that started again counts from its new beginning.
+      const delta = before === undefined || transfer.transferredBytes < before ? transfer.transferredBytes : transfer.transferredBytes - before;
+      if (delta > 0) this.moved[transfer.direction] += delta;
+    }
+    this.seen = seen;
+    this.meters.upload.add(now, this.moved.upload);
+    this.meters.download.add(now, this.moved.download);
+  }
+
+  // measure publishes the speeds and keeps them fresh while bytes move, so a
+  // stall shows as a falling speed rather than the last value.
+  private measure(immediate = true) {
+    const now = Date.now();
+    const batches: Record<string, number> = {};
+    for (const [batch, meter] of this.meters.batches) {
+      const rate = meter.rate(now);
+      if (rate > 0) batches[batch] = rate;
+      else if (!this.snapshot.uploads.some((upload) => upload.batch === batch && upload.phase === "running")) this.meters.batches.delete(batch);
+    }
+    const rates: TransferRates = { upload: this.meters.upload.rate(now), download: this.meters.download.rate(now), batches };
+    const uploads = this.snapshot.uploads.map((upload) => {
+      if (upload.phase !== "running") return upload;
+      const speed = this.meters.items.get(upload.key)?.rate(now) ?? 0;
+      return speed === upload.speed ? upload : { ...upload, speed };
+    });
+    const moving = rates.upload > 0 || rates.download > 0 || this.running.size > 0;
+    const previous = this.snapshot.rates;
+    const changed = Math.round(previous.upload) !== Math.round(rates.upload) || Math.round(previous.download) !== Math.round(rates.download)
+      || Object.keys(previous.batches).length !== Object.keys(batches).length || Object.entries(batches).some(([batch, rate]) => Math.round(previous.batches[batch] ?? 0) !== Math.round(rate))
+      || uploads.some((upload, index) => upload !== this.snapshot.uploads[index]);
+    if (changed) this.set({ rates, uploads }, immediate);
+    if (moving && !this.rateTimer) this.rateTimer = setInterval(() => this.measure(), 1000);
+    if (!moving && this.rateTimer) {
+      clearInterval(this.rateTimer);
+      this.rateTimer = undefined;
+    }
   }
 
   private succeeded(key: string) {
     this.running.delete(key);
     const upload = this.find(key);
     if (!upload) return;
+    // The last part may finish without a progress report.
+    this.count(key, upload.batch, upload.size);
+    this.meters.items.delete(key);
     this.update(key, { phase: "completed", transferred: upload.size, speed: 0, finishedAt: Date.now() });
     for (const listener of this.uploadedListeners) listener(upload.target);
     if (upload.transferId) {

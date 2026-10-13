@@ -189,6 +189,43 @@ describe("the upload queue", () => {
     expect(store.getSnapshot().uploads[0]).toMatchObject({ transferred: 4, target: { parentId: "file:photos" } });
   });
 
+  it("shows the upload speed of a batch of files too short to have their own", async () => {
+    store.enqueue(Array.from({ length: 9 }, (_, index) => ({ file: file(`photo-${index}.jpg`, 4_000_000) })), target);
+    for (let index = 0; index < 9; index += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+      const upload = tus.uploads[index];
+      upload.options.onProgress(2_000_000, 4_000_000);
+      upload.options.onSuccess();
+    }
+    const batch = store.getSnapshot().batches[0].id;
+    const { rates } = store.getSnapshot();
+    // 36 MB in 0.9 s, measured over at least a second.
+    expect(rates.upload).toBeGreaterThan(30_000_000);
+    expect(rates.batches[batch]).toBe(rates.upload);
+    expect(store.getSnapshot().uploads.every((upload) => upload.phase === "completed")).toBe(true);
+    // Once nothing moves the speed falls to zero by itself.
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(store.getSnapshot().rates.upload).toBe(0);
+  });
+
+  it("measures downloads by what the NAS sent between polls", async () => {
+    const download = (sent: number, state: Transfer["state"]): Transfer => ({
+      id: "download-1", direction: "download", kind: "file", name: "film.mkv", location: target, totalBytes: 100_000_000, transferredBytes: sent,
+      bytesPerSecond: 0, state, createdAt: "2026-10-13T08:00:00Z", updatedAt: "2026-10-13T08:00:00Z",
+    });
+    server = [download(0, "pending")];
+    await store.refresh();
+    server = [download(30_000_000, "running")];
+    await vi.advanceTimersByTimeAsync(1500);
+    await store.refresh();
+    expect(store.getSnapshot().rates.download).toBe(20_000_000);
+    // A download finishing between two polls still counts.
+    server = [download(100_000_000, "completed")];
+    await vi.advanceTimersByTimeAsync(1500);
+    await store.refresh();
+    expect(store.getSnapshot().rates.download).toBeGreaterThan(30_000_000);
+  });
+
   it("asks before the page closes while uploads are unfinished", () => {
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);

@@ -25,7 +25,7 @@ export function TransferCenter({ onOpenFiles, onOpenLocation }: { onOpenFiles: (
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [notice, setNotice] = useState("");
   const items = useMemo(() => transferItems(snapshot), [snapshot]);
-  const totals = useMemo(() => transferTotals(items), [items]);
+  const totals = useMemo(() => transferTotals(items, snapshot.rates), [items, snapshot.rates]);
   const current = items.filter(isCurrent);
   const history = items.filter((item) => !isCurrent(item));
   // A batch stays in progress, finished files included, until its last file
@@ -35,8 +35,8 @@ export function TransferCenter({ onOpenFiles, onOpenLocation }: { onOpenFiles: (
       : view === "downloads" ? items.filter((item) => item.direction === "download")
       : view === "history" ? items.filter((item) => filter === "all" || (filter === "unfinished" ? item.status !== "completed" : item.direction === filter))
       : items;
-    return groupItems(scoped).filter((group) => group.items.some(isCurrent) !== (view === "history"));
-  }, [items, view, filter]);
+    return groupItems(scoped, snapshot.rates.batches).filter((group) => group.items.some(isCurrent) !== (view === "history"));
+  }, [items, view, filter, snapshot.rates.batches]);
   const leftBehind = snapshot.server.filter((transfer) => transfer.direction === "upload" && (transfer.state === "interrupted" || transfer.state === "paused") && !snapshot.uploads.some((upload) => upload.transferId === transfer.id));
   const running = snapshot.uploads.some((upload) => ["queued", "running", "waiting"].includes(upload.phase));
   const paused = snapshot.uploads.some((upload) => upload.phase === "paused");

@@ -398,6 +398,10 @@ button { font: inherit; }
 .gauge-caption small { font-size: 9px; opacity: .62; font-variant-numeric: tabular-nums; }
 
 .net-rates { min-width: 100px; display: grid; gap: 9px; }
+button.net-rates { margin: -6px -8px; padding: 6px 8px; border: 0; border-radius: 14px; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background .2s; }
+button.net-rates:hover { background: rgba(255,255,255,.1); }
+button.net-rates:active { background: rgba(255,255,255,.16); }
+button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .net-row { display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
 .net-row svg { width: 20px; height: 20px; padding: 3px; border-radius: 7px; }
 .net-row.down svg { color: #7dd3fc; background: rgba(56,189,248,.2); }

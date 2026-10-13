@@ -10,7 +10,7 @@ import "./notices.css";
 export function TransferIndicator({ onOpen }: { onOpen: () => void }) {
   const snapshot = useTransfers();
   const items = useMemo(() => transferItems(snapshot), [snapshot]);
-  const totals = useMemo(() => transferTotals(items), [items]);
+  const totals = useMemo(() => transferTotals(items, snapshot.rates), [items, snapshot.rates]);
   const active = items.filter(isCurrent).length;
   if (!active) return null;
   const percent = Math.round(totals.progress * 100);
