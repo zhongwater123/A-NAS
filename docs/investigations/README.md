@@ -18,6 +18,7 @@
 - [2026-10-09：本地控制台过夜后显示“连接中断”，需重启恢复](2026-10-09-local-console-disconnected-after-session-expiry.md)（fixed locally；Experimental NAS verification pending）
 - [2026-10-09：安装 Immich 后内网 WiFi 客户端全部无法访问 NAS](2026-10-09-app-network-cut-off-wifi-clients.md)（resolved）
 - [2026-10-09：Debian 的 Compose 2.26.1 把应用的整个卷挂进容器](2026-10-09-old-compose-mounted-whole-app-volumes.md)（resolved）
+- [2026-10-13：AI Worker 留着被取消的检测会话，内存涨到上限](2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)（resolved；未部署）
 
 ## 使用方式
 

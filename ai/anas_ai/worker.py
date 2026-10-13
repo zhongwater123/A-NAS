@@ -177,7 +177,12 @@ def detected(detector, fd, conn):
         thread.join(CANCEL_POLL_SECONDS)
         if thread.is_alive() and conn is not None and not run.terminate and hung_up(conn):
             run.terminate = True
-    error = outcome.get("error")
+    error = outcome.pop("error", None)
+    if error is not None:
+        # Its traceback holds the detection's frames through outcome, a cycle
+        # that would keep the image and session alive until the cyclic
+        # collector runs.
+        error.__traceback__ = None
     if isinstance(error, providers.Cancelled) or run.terminate:
         log.info("detection cancelled")
         return None
@@ -260,8 +265,11 @@ def main(argv=None):
         log.info("detecting with %s (%s threads)", detector.provider.model, getattr(detector.provider, "threads", "-"))
     with listening_socket(args.socket) as listener:
         serve(listener, provider, reason, args.idle_seconds, detector)
-    if provider is not None:
-        provider.close()
+    # Hand the memory back at once. Tearing the models down object by object
+    # took 40 seconds under memory pressure on the local stack, and until the
+    # process ends systemd cannot start the Worker the next search needs.
+    logging.shutdown()
+    os._exit(0)
 
 
 if __name__ == "__main__":

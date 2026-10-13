@@ -6,6 +6,7 @@ Worker and its tests run with the Python standard library alone when the
 fakes are used.
 """
 
+import gc
 import hashlib
 import importlib.metadata
 import io
@@ -213,20 +214,28 @@ class OnnxDetector:
         import numpy
 
         pixels = detector_pixels(data)
-        session = self._load()
         size = numpy.array([[DETECTOR_INPUT, DETECTOR_INPUT]], dtype=numpy.int64)
         try:
-            labels, boxes, scores = session.run(["labels", "boxes", "scores"],
-                                                {"images": pixels, "orig_target_sizes": size}, run)
-        except Exception as error:  # pylint: disable=broad-except
+            labels, boxes, scores = self._load().run(["labels", "boxes", "scores"],
+                                                     {"images": pixels, "orig_target_sizes": size}, run)
+        except Exception:  # pylint: disable=broad-except
             # A terminated run fails with ONNX Runtime's generic error.
-            if run.terminate:
-                raise Cancelled() from error
-            raise
+            if not run.terminate:
+                raise
+            labels = None
+        # Raised outside the handler, so no traceback keeps this frame, or the
+        # session it ran, alive after a release.
+        if labels is None:
+            raise Cancelled()
         return kept_boxes(labels[0].tolist(), (boxes[0] / DETECTOR_INPUT).tolist(), scores[0].tolist())
 
     def release(self):
+        """Drops the session and its threads. A session still referenced from
+        a reference cycle, such as a stored exception, would otherwise linger
+        until the cyclic collector happens to run, and each reload would add
+        another (seen on the local stack: about 11 threads and 150 MB a time)."""
         self._session = None
+        gc.collect()
 
     def _load(self):
         if self._session is None:

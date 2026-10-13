@@ -53,6 +53,8 @@
   - 搜一句话（如“海边的日落”），结果照常分为“最接近”与“相关度较低”两段。
   - 在查看器中点“找相似”，出现相似的照片；返回回到原来的位置。
 - **突发时释放**：整理进行中打开相册浏览或搜索，`journalctl -u anas-ai -b` 出现 `detection cancelled`，相册操作不明显变慢。
+- **不自己卡住自己**：整理期间没人使用设备时，侧栏 AI 卡片不应长时间显示暂停，`journalctl -u anas-ai -b` 中 `detection cancelled` 应只出现在有人操作时；同时记录 `cat /proc/pressure/cpu`。若 AI 因 `cpu_pressure` 反复暂停而设备并没有别的负载，说明 Worker 自己的线程把压力推过了门控上限（20%），停止部署并按[调查](../investigations/2026-10-13-ai-worker-kept-cancelled-detector-sessions.md#后续工作)调整门控。
+- **线程与内存不随取消上涨**：整理期间每隔几分钟记录 `grep -E 'Threads|RssAnon' /proc/$(systemctl show -p MainPID --value anas-ai.service)/status`，线程数与内存应保持平稳。
 - **资源记录**：整理完成后记录 `systemctl show anas-ai.service -p MemoryPeak -p CPUUsageNSec`、总耗时与张数，以及整理期间与空闲时打开相册、搜索的响应时间，补充到[实施方案](../architecture/photo-objects.md)。`MemoryPeak` 接近 2 GiB 时先调整单元再继续。
 - **空闲退出**：最后一次请求约 10 分钟后 `systemctl is-active anas-ai.service` 输出 `inactive`，`anas-ai.socket` 仍为 `active`。
 

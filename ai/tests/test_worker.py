@@ -1,6 +1,7 @@
 """Protocol tests of the AI Worker with the fake provider (standard library only)."""
 
 import base64
+import gc
 import hashlib
 import importlib.util
 import json
@@ -12,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+import weakref
 
 from anas_ai import protocol, providers, worker
 
@@ -145,6 +147,37 @@ class WorkerTest(unittest.TestCase):
         self.assertTrue(call(path, {"op": "info"})["ok"])
         self.assertLess(time.monotonic() - started, 5)
         self.assertEqual(fake.cancelled, 1)
+
+    def test_a_cancelled_detection_lets_go_of_what_it_held(self):
+        # Without the cyclic collector: the stored error's traceback must not
+        # keep the detection's frame, and the session in it, alive.
+        class Session:
+            pass
+
+        class Holding(providers.FakeDetector):
+            def __init__(self):
+                super().__init__()
+                self.sessions = []
+
+            def detect(self, data, run):
+                session = Session()
+                self.sessions.append(weakref.ref(session))
+                while not run.terminate:
+                    time.sleep(0.01)
+                raise providers.Cancelled()
+
+        gc.disable()
+        self.addCleanup(gc.enable)
+        holding = Holding()
+        path, _ = self.start(providers.FakeProvider(), detector=worker.Detector(holding))
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps({"op": "detect_objects"}).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [self.image(b"photo").fileno()])
+            time.sleep(0.2)
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertEqual(len(holding.sessions), 1)
+        self.assertIsNone(holding.sessions[0]())
 
     def test_release_frees_the_detector_and_can_end_the_worker(self):
         fake = providers.FakeDetector()

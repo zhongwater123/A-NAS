@@ -345,8 +345,12 @@ func watchGate(ctx context.Context, gate Gate, cancel context.CancelFunc) (stop 
 // nothing to detect or someone uses the device, and the whole Worker under
 // memory pressure. It only calls a Worker that detected since the last
 // release, so it never starts one just to stop it.
+//
+// CPU or I/O pressure only cancels the running detection: that hands the
+// processor back already, and unloading would cost a reload as soon as the
+// pressure passes, which under flapping pressure is most of the work.
 func (s *Service) releaseModels(ctx context.Context, detector Detector, reason string) {
-	if detector == nil {
+	if detector == nil || (reason != "" && reason != "foreground" && !strings.HasPrefix(reason, "memory")) {
 		return
 	}
 	s.aiModelMu.Lock()

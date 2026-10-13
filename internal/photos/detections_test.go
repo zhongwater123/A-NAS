@@ -235,6 +235,49 @@ func TestUsingTheDeviceStopsADetectionAndFreesTheDetector(t *testing.T) {
 	}
 }
 
+func TestProcessorPressureCancelsButKeepsTheDetector(t *testing.T) {
+	service, c, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &switchGate{open: true}
+	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	importPhoto(t, service, alice, private.ID, "", "b.png", encodePNG(2))
+	processAll(t, service)
+	for range 3 { // two vectors, one detection
+		if ok, err := service.ProcessAIJob(context.Background(), worker, gate); !ok || err != nil {
+			t.Fatalf("ProcessAIJob() = %v, %v", ok, err)
+		}
+	}
+	worker.wait = func(ctx context.Context, detection int) {
+		// Another service keeps the processor busy for a moment.
+		gate.set(false, "cpu_pressure")
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * time.Second):
+		}
+	}
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); ok || err != nil {
+		t.Fatalf("ProcessAIJob() under processor pressure = %v, %v", ok, err)
+	}
+	if state, attempts, _ := jobState(t, root, "objects/v1"); state != "pending" || attempts != 0 {
+		t.Fatalf("detection job = %s after %d attempts; want it back in the queue at no cost", state, attempts)
+	}
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); ok || err != nil {
+		t.Fatalf("ProcessAIJob() while the pressure lasts = %v, %v", ok, err)
+	}
+	if releases := worker.releases(); len(releases) != 0 {
+		t.Fatalf("releases = %v; processor pressure must not unload the detector", releases)
+	}
+	worker.wait = nil
+	gate.set(true, "")
+	c.Advance(10 * time.Minute)
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); !ok || err != nil {
+		t.Fatalf("ProcessAIJob() once the pressure passed = %v, %v", ok, err)
+	}
+	if releases := worker.releases(); len(releases) != 0 {
+		t.Fatalf("releases = %v; the detector stayed loaded for the next photo", releases)
+	}
+}
+
 func TestMemoryPressureEndsTheWholeWorker(t *testing.T) {
 	service, _, _ := newService(t)
 	private, _ := libraries(t, service, alice)

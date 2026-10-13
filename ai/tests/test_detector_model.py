@@ -5,11 +5,17 @@ Runtime, NumPy and Pillow are installed (docs/development/LOCAL_ENVIRONMENT.md);
 the manifest comes from deploy/models.
 """
 
+import gc
 import io
 import os
+import socket
+import tempfile
+import threading
+import time
 import unittest
+import weakref
 
-from anas_ai import providers
+from anas_ai import providers, worker
 
 DETECTOR = os.environ.get("ANAS_AI_DETECTOR", "")
 MANIFEST = os.path.join(os.path.dirname(__file__), "..", "..", "deploy", "models", "dfine-m-obj365.json")
@@ -64,6 +70,33 @@ class RealDetectorTest(unittest.TestCase):
         self.detector.detect(photo(), self.detector.run_options())
         self.detector.release()
         self.assertTrue(self.detector.detect(photo(), self.detector.run_options()) is not None)
+
+    def test_cancelled_runs_and_releases_leave_no_session_behind(self):
+        # On the local stack every cancel and reload left a session and its
+        # threads behind until the Worker ran out of memory. The Worker makes
+        # too few Python objects for the cyclic collector to run on its own,
+        # so here it does not run on its own either.
+        gc.disable()
+        self.addCleanup(gc.enable)
+        detector = providers.OnnxDetector(DETECTOR, MANIFEST, threads=4)
+        with tempfile.TemporaryFile() as image:
+            image.write(photo())
+            for _ in range(3):
+                # What the photo service does when someone starts using the
+                # device: it hangs up on a running detection, then releases.
+                image.seek(0)
+                detector.detect(image.read(), detector.run_options())
+                session = weakref.ref(detector._session)  # pylint: disable=protected-access
+                image.seek(0)
+                ours, theirs = socket.socketpair()
+                with ours, theirs:
+                    thread = threading.Thread(target=worker.detected, args=(detector, image.fileno(), theirs))
+                    thread.start()
+                    time.sleep(0.1)
+                    ours.close()
+                    thread.join()
+                detector.release()
+                self.assertIsNone(session())
 
     def test_rejects_what_is_not_an_image(self):
         with self.assertRaises(providers.InvalidInput):
