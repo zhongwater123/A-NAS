@@ -426,7 +426,7 @@ check "the kernel reclaims the Worker's memory before its hard limit" \
 check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \
-  test "$(systemctl show -p CPUWeight --value anas.slice):$(systemctl show -p ControlGroup --value anas-ai.service)" = 10:/anas.slice/anas-ai.slice/anas-ai.service
+  test "$(systemctl show -p CPUWeight --value anas.slice):$(systemctl show -p Slice --value anas-ai.slice)" = 10:anas.slice
 check "AI work yields to the pressure of the device's other work, not its own" \
   journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
 check "search starts the Worker through its socket" semantic_search 猫
