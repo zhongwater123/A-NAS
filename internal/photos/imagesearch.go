@@ -12,11 +12,12 @@ import (
 	"github.com/disintegration/imaging"
 )
 
-// Image search (docs/architecture/photo-objects.md#用图片搜索) finds the photos
-// like an image that is not in the library, such as one on the member's
-// computer or phone. The image is rendered as a photo's thumbnail and
-// detector input would be, the AI Worker encodes it and looks for objects in
-// it, and the photos in the search's scope are ranked as for similar photos.
+// Image search finds the photos like an image that is not in the library,
+// such as one on the member's computer or phone
+// (docs/architecture/photo-objects.md#用图库外的图片搜索). The image is
+// rendered as a photo's thumbnail and detector input would be, the AI Worker
+// encodes it and looks for objects in it, and the photos in the search's
+// scope are ranked as for similar photos.
 // The image itself is never stored, not even in staging: it stays in memory
 // for the request and reaches the Worker as a sealed in-memory file. What
 // search keeps is its vector and the objects found, until imageSearchIdle
@@ -206,11 +207,14 @@ func (s *Service) searchObjects(ctx context.Context, info EmbedderInfo, input []
 	}
 	defer file.Close()
 	model, boxes, err := detector.DetectObjects(ctx, file)
-	// The Worker keeps the detector loaded; the AI runner releases it on its
-	// next round, since this request kept the gate closed (releaseModels).
-	s.aiModelMu.Lock()
-	s.detectorLoaded = true
-	s.aiModelMu.Unlock()
+	// A Worker that took the request keeps the detector loaded; the AI
+	// runner releases it on its next round, since this request kept the gate
+	// closed (releaseModels). One that could not be reached holds nothing.
+	if !errors.Is(err, ErrAIUnavailable) {
+		s.aiModelMu.Lock()
+		s.detectorLoaded = true
+		s.aiModelMu.Unlock()
+	}
 	if err != nil || model != s.objectCalibration.Model || !validBoxes(boxes) {
 		return nil
 	}

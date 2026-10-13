@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photos/objects"
 )
 
 func searchByImage(t *testing.T, service *photos.Service, p photos.Principal, image []byte) string {
@@ -172,6 +173,45 @@ func TestSearchByImageRefusesWhatItCannotRead(t *testing.T) {
 	t.Cleanup(func() { _ = withoutAI.Close() })
 	if _, err := withoutAI.SearchByImage(ctx, alice, bytes.NewReader(red)); !errors.Is(err, photos.ErrAIUnavailable) {
 		t.Errorf("SearchByImage() without local AI error = %v, want AI unavailable", err)
+	}
+}
+
+// releaseCounter counts how often the detector is told to let go.
+type releaseCounter struct {
+	*colorDetector
+	released int
+}
+
+func (r *releaseCounter) Release(context.Context, bool) error {
+	r.released++
+	return nil
+}
+
+func TestTheDetectorAnImageSearchLoadedIsReleasedOnTheNextRound(t *testing.T) {
+	calibration, err := objects.ParseCalibration([]byte(`{"model": "detector-1", "weight": 0.2, "tierCoverage": 0.6,
+		"fusion": [62], "words": {"62": {"fusion": true, "tierScore": 0.6}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := &releaseCounter{colorDetector: &colorDetector{colorEmbedder: &colorEmbedder{}, model: "detector-1"}}
+	service, err := photos.Open(filepath.Join(t.TempDir(), "photos"), photos.Options{
+		Now: newClock().Now, DisableCapacityReserve: true, AI: worker, Objects: &calibration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+
+	searchByImage(t, service, alice, red)
+	// The search kept the gate closed; the runner's next round frees the
+	// detector it loaded, and only once.
+	foreground := &fakeGate{reason: "foreground"}
+	for range 2 {
+		if _, err := service.ProcessAIJob(context.Background(), worker, foreground); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if worker.released != 1 {
+		t.Fatalf("detector released %d times after an image search, want once", worker.released)
 	}
 }
 
