@@ -95,7 +95,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 复用 M1 的持久任务表：缩略图完成后，在同一事务中为该原图对象排入 `embedding/v1` 与 `objects/v1` 任务（`v1` 是处理流程版本，模型 ID 随结果保存）；后台先做向量、再做检测。向量只依赖原图字节，以对象为键，副本与重复照片共用。缩略图与 AI 任务由两个循环分别领取。
 - 缩略图任务照旧立即执行；AI 任务只在门控允许时领取：
   - 最近 5 分钟没有前台活动；
-  - 系统压力低：CPU、I/O、内存 PSI（`/proc/pressure/*` 的 `avg10`）都低于阈值；
+  - 设备上其他工作没被拖住：`system.slice` 与 `user.slice` 的 CPU、I/O、内存 PSI（`avg10`）都低于阈值；Worker 在自己的 `anas-ai.slice`，它自己的等待不算（[资源策略](photo-objects.md#资源策略)）；
   - CPU 温度低于上限。
 - 前台活动与温度由 Host Agent 提供：它已经知道 Web 文件操作（文件代理）、相册会话查询与磁盘、网卡吞吐（SMB 传输体现在这里），在相册会话套接字上增加只读的 `GET /v1/activity`。相册服务运行在 `PrivateNetwork` 中，看不到宿主机网卡，因此不自行采样。
 - 已实现部分（[`photoservice/gate.go`](../../internal/photoservice/gate.go)）：相册服务自己的请求计入前台活动，但读取 AI 状态不计入，窗口可以一直轮询；CPU、I/O、内存压力经 `prometheus/procfs` 读取，内核没有压力信息时只看活动。Host Agent 的活动信号与温度尚未实现，在此之前 Web 文件与 SMB 只通过系统压力影响门控。

@@ -57,7 +57,7 @@
 ## 后续工作
 
 - 部署后按[启用相册物体检测](../runbooks/enable-photo-objects.md)记录整理期间 Worker 的线程数、`MemoryPeak` 与 `memory.events`。
-- 复测时开发机的 CPU 压力在 20%（门控上限）上下徘徊，检测每约 8 秒被取消一次，整理仍在推进但很慢。门控没有回滞。部署后要看没人使用设备时 AI 是否因 `cpu_pressure` 暂停：Worker 现在用核数减 2 个线程，可能自己把压力推过上限。若是，就让门控排除 Worker 自己的压力或加上回滞。
+- 复测时开发机的 CPU 压力在 20%（当时门控的上限）上下徘徊，检测约每 8 秒被取消一次。同日已修订门控：Worker 进入自己的 `anas-ai.slice`，门控只看 `system.slice` 与 `user.slice` 的压力，上限 CPU 10%、降到一半以下才重新打开（[资源策略](../architecture/photo-objects.md#资源策略)）；上限部署后实测再定。
 
 ## 关联
 
