@@ -5,5 +5,5 @@
 ## 索引
 
 - [本地照片 AI 模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
-- [相册 AI 标签校准与中文检索评估](photo-ai-label-calibration.md)（完成；AI 标签 2026-10-10 暂停后作为历史证据）
+- [相册 AI 标签校准与中文检索评估](photo-ai-label-calibration.md)（完成；2026-10-10 起按 AI 聚合从严重新校准，2026-10-12 加入 COCO train 子集）
 - [应用目录扩充评审（2026-10）](app-catalog-review-2026-10.md)（完成；入选应用待实机安装验证）

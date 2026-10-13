@@ -3,12 +3,23 @@
 Reads the vectors cached by eval.embed. Each label's threshold is the lowest
 score whose false-positive rate on the calibration half's COCO negatives
 stays within a limit; a label without enough known negatives, positives or
-recall stays search-only. The limit is the loosest one in a sweep at which
-the labels shown on the calibration half's COCO photos are still right at
-least --min-precision of the time; --max-fpr fixes it instead. COCO negatives follow how photos occur; Open
+recall stays search-only. With --min-label-precision the labels serve as
+clusters (docs/architecture/photo-ai.md): a label is kept only when the
+calibration half's COCO photos it takes in are credibly right at least that
+often (the one-sided 95% Wilson lower bound), and it takes in enough of them
+to tell; a label too common to have enough negatives for the limit gets the
+strictest limit its negatives resolve, since that check guards it. Scene
+labels, whose truth comes from COCO-Stuff, are too common in photos for any
+false-positive limit to leave them much recall, so they take the widest
+threshold that still passes the check instead. The limit is the
+loosest one in a sweep at which the labels shown on the calibration half's
+COCO photos are still right at least --min-precision of the time (with
+pruning, the one that keeps the most labels); --max-fpr fixes it instead. COCO negatives follow how photos occur; Open
 Images negatives were picked because a model mistook them, so they are
 reported separately as hard negatives instead of setting thresholds. Recall
-counts positives from both. The test half is never used to choose anything.
+counts positives from both. The test half is never used to choose anything;
+--hold-back keeps labels out by hand after reading it, and the report keeps
+the test-half numbers from before that alongside.
 
     python -m eval.calibrate --cache /datasets/cache/<model>-e512 [--write]
 
@@ -22,6 +33,7 @@ import math
 import os
 
 import numpy as np
+from scipy.stats import binomtest
 from sklearn.metrics import average_precision_score
 
 from eval import datasets
@@ -29,9 +41,10 @@ from eval.embed import CAPTION_TEMPLATES, LABEL_PHRASES, LABEL_TEMPLATES, QUERY_
 
 MIN_POSITIVES = 20  # in the calibration half
 MIN_RECALL = 0.2  # a label that rarely fires is not worth showing
+MIN_JUDGED = 10  # showings a label needs before its own precision counts
 SHOWN = 5  # most labels shown per photo
 REFERENCE_PREVALENCE = 0.05  # precision is also quoted as if 5% of photos held the label
-CALIBRATION = os.path.join(datasets.HERE, "labels", "v1.calibration.json")
+CALIBRATION = os.path.join(datasets.REPO, "internal", "photos", "labels", "v1.calibration.json")
 
 
 def label_matrix(vocabulary, texts, template, synonyms):
@@ -64,7 +77,7 @@ def mean_ap(scores, truth, rows):
     return (float(np.mean(values)) if values else float("nan")), len(values)
 
 
-def thresholds_for(scores, truth, rows, natural, max_fpr, subclasses=frozenset()):
+def thresholds_for(scores, truth, rows, natural, max_fpr, subclasses=frozenset(), min_recall=MIN_RECALL, adaptive=False):
     """Returns {column: threshold} and {column: reason} for the skipped ones.
 
     Positives come from rows; negatives only from rows that are also natural.
@@ -83,13 +96,16 @@ def thresholds_for(scores, truth, rows, natural, max_fpr, subclasses=frozenset()
         if len(positive) < MIN_POSITIVES:
             skipped[column] = f"{len(positive)} positives"
             continue
+        limit = max_fpr
         if len(negative) < min_negatives:
-            skipped[column] = f"{len(negative)} negatives"
-            continue
-        allowed = math.floor(max_fpr * len(negative))
+            if not adaptive or len(negative) < MIN_POSITIVES:
+                skipped[column] = f"{len(negative)} negatives"
+                continue
+            limit = 2 / len(negative)
+        allowed = math.floor(limit * len(negative))
         threshold = float(negative[allowed]) + 1e-6
         recall = float(np.mean(positive >= threshold))
-        if recall < MIN_RECALL:
+        if recall < min_recall:
             skipped[column] = f"recall {recall:.2f}"
             continue
         chosen[column] = threshold
@@ -108,6 +124,67 @@ def shown(scores, thresholds):
         order = np.argsort(-row)[:SHOWN]
         result.append([int(columns[i]) for i in order if row[i] >= 0])
     return result
+
+
+def membership(scores, truth, rows, thresholds):
+    """{column: (right, judged)} over the photos in rows each label takes in."""
+    counts = {}
+    for column, threshold in thresholds.items():
+        member = rows & (scores[:, column] >= threshold) & (truth[:, column] >= 0)
+        counts[column] = (int((truth[member, column] == 1).sum()), int(member.sum()))
+    return counts
+
+
+def cluster_quality(scores, truth, rows, thresholds):
+    counts = membership(scores, truth, rows, thresholds)
+    right = sum(value[0] for value in counts.values())
+    judged = sum(value[1] for value in counts.values())
+    return {"precision": right / judged if judged else float("nan"), "judged": judged, "labels": len(thresholds)}
+
+
+def credible(right, judged, min_precision):
+    """Whether right of judged is credibly at least min_precision: the
+    one-sided 95% Wilson lower bound reaches it."""
+    return judged >= MIN_JUDGED and binomtest(right, judged).proportion_ci(0.9, "wilson").low >= min_precision
+
+
+def prune(scores, truth, rows, thresholds, skipped, min_label_precision):
+    """Drops the labels not credibly right min_label_precision of the time
+    among the photos in rows they take in, or taking in too few to tell; each
+    goes to skipped with its reason."""
+    if not min_label_precision:
+        return thresholds
+    kept = {}
+    for column, (right, judged) in membership(scores, truth, rows, thresholds).items():
+        if credible(right, judged, min_label_precision):
+            kept[column] = thresholds[column]
+        else:
+            skipped[column] = f"right for {right} of {judged} photos on the calibration half"
+    return kept
+
+
+def precision_thresholds(scores, truth, rows, columns, min_precision, min_recall):
+    """For each column, the lowest score whose cluster among the photos in rows
+    is still credibly right min_precision of the time; {column: threshold}
+    and {column: reason} for those without one."""
+    chosen, skipped = {}, {}
+    for column in columns:
+        known = rows & (truth[:, column] >= 0)
+        order = np.argsort(-scores[known, column])
+        ranked = scores[known, column][order]
+        right = np.cumsum(truth[known, column][order] == 1)
+        taken = [k for k in range(MIN_JUDGED, len(ranked) + 1) if credible(int(right[k - 1]), k, min_precision)]
+        if not taken:
+            skipped[column] = "never credibly right enough on the calibration half"
+            continue
+        threshold = float(ranked[taken[-1] - 1])
+        positive = scores[rows & (truth[:, column] == 1), column]
+        recall = float(np.mean(positive >= threshold)) if len(positive) else 0.0
+        if recall < min_recall:
+            skipped[column] = f"recall {recall:.2f}"
+            continue
+        chosen[column] = threshold
+    return chosen, skipped
 
 
 def display_quality(scores, truth, rows, thresholds):
@@ -154,7 +231,7 @@ def label_quality(scores, truth, rows, natural, thresholds, ids):
 
 def labelled(images, vocabulary, ground_truth):
     """The evaluation images present in images: samples, vectors, truth."""
-    samples = datasets.coco_samples(ground_truth) + datasets.openimages_samples(
+    samples = datasets.coco_samples(ground_truth) + datasets.coco_train_samples(ground_truth) + datasets.openimages_samples(
         ground_truth, datasets.select_openimages(ground_truth))
     samples = [sample for sample in samples if sample.key in images]
     vectors = np.stack([images[sample.key] for sample in samples])
@@ -208,12 +285,18 @@ def main():
     parser.add_argument("--min-precision", type=float, default=0.9,
                         help="share of shown labels that must be right on the calibration half's COCO photos")
     parser.add_argument("--max-fpr", type=float, help="fix the per-label false-positive limit instead")
+    parser.add_argument("--min-label-precision", type=float,
+                        help="use labels as clusters: keep only those credibly right this often among the photos they take in")
+    parser.add_argument("--min-recall", type=float, default=MIN_RECALL, help="drop labels that find fewer positives")
     parser.add_argument("--write", nargs="?", const=CALIBRATION, metavar="PATH",
                         help=f"write the thresholds (default {os.path.relpath(CALIBRATION, datasets.REPO)})")
     parser.add_argument("--calibration", default=CALIBRATION, help="thresholds whose template --compare-with uses")
     parser.add_argument("--report", help="write the full report as JSON to this file")
+    parser.add_argument("--hold-back", default="", metavar="ID,...",
+                        help="labels to keep out by hand after reading the test half; recorded in what is written")
     parser.add_argument("--compare-with", help="another cache to measure against this one")
     args = parser.parse_args()
+    held = sorted(label for label in args.hold_back.split(",") if label)
     if args.compare_with:
         compare(args.cache, args.compare_with, args.calibration)
         return
@@ -223,14 +306,18 @@ def main():
     model = os.path.basename(os.path.normpath(args.cache))
     vocabulary = datasets.load_vocabulary()
     ids = [label["id"] for label in vocabulary]
+    if unknown := sorted(set(held) - set(ids)):
+        raise SystemExit(f"unknown labels to hold back: {', '.join(unknown)}")
     ground_truth = datasets.load_ground_truth()
     samples, vectors, truth = labelled(images, vocabulary, ground_truth)
     calibration = np.array([sample.split == "calibration" for sample in samples])
     subclasses = frozenset(i for i, label in enumerate(ids) if ground_truth.get(label, {}).get("cocoAbsentUnless"))
     test = ~calibration
-    coco = np.array([sample.key.startswith("coco:") for sample in samples])
-    report = {"model": model, "images": {"coco": int(coco.sum()), "openimages": int((~coco).sum())}}
-    print(f"{model}: {coco.sum()} COCO and {(~coco).sum()} Open Images images")
+    coco = np.array([sample.natural for sample in samples])
+    train = np.array([sample.key.startswith("coco-train:") for sample in samples])
+    report = {"model": model, "images": {"coco": int((coco & ~train).sum()), "cocoTrain": int(train.sum()),
+                                         "openimages": int((~coco).sum())}}
+    print(f"{model}: {(coco & ~train).sum()} COCO val, {train.sum()} COCO train and {(~coco).sum()} Open Images images")
 
     # Prompt: mean AP on the calibration half picks the template.
     report["templates"] = {}
@@ -253,25 +340,70 @@ def main():
     # The false-positive limit: the loosest that keeps shown labels right.
     report["sweep"] = {}
     max_fpr_chosen = args.max_fpr
+    most = 0
+    # Scene thresholds do not depend on the false-positive limit.
+    scenes = [i for i, label in enumerate(ids) if "cocoStuff" in ground_truth.get(label, {})]
+    by_precision, unscened = ({}, {}) if not args.min_label_precision else precision_thresholds(
+        scores, truth, calibration & coco, scenes, args.min_label_precision, args.min_recall)
+
+    def select(max_fpr):
+        chosen, skipped = thresholds_for(scores, truth, calibration, coco, max_fpr, subclasses,
+                                         args.min_recall, adaptive=args.min_label_precision is not None)
+        if args.min_label_precision:
+            chosen = {column: value for column, value in chosen.items() if column not in scenes}
+            chosen = prune(scores, truth, calibration & coco, chosen, skipped, args.min_label_precision)
+            for column in scenes:
+                skipped.pop(column, None)
+            chosen.update(by_precision)
+            skipped.update(unscened)
+        return chosen, skipped
+
     for max_fpr in (0.0005, 0.001, 0.0015, 0.002, 0.003, 0.005, 0.01):
-        chosen, _skipped = thresholds_for(scores, truth, calibration, coco, max_fpr, subclasses)
-        quality = display_quality(scores, truth, calibration & coco, chosen)
+        chosen, _skipped = select(max_fpr)
+        quality = (cluster_quality if args.min_label_precision else display_quality)(scores, truth, calibration & coco, chosen)
         report["sweep"][str(max_fpr)] = {"labels": len(chosen), "cocoCalibration": quality}
-        if args.max_fpr is None and quality["judged"] and quality["precision"] >= args.min_precision:
-            max_fpr_chosen = max_fpr
+        # Without pruning the loosest passing limit shows the most labels; with
+        # it, a looser limit has to keep more labels to win.
+        passes = args.max_fpr is None and quality["judged"] and quality["precision"] >= args.min_precision
+        if passes and (len(chosen) > most or (len(chosen) == most and not args.min_label_precision)):
+            max_fpr_chosen, most = max_fpr, len(chosen)
         print(f"max FPR {max_fpr:<6} {len(chosen):3d} labels; COCO calibration: {quality['precision']:.3f} precision "
-              f"of {quality['judged']} judged, {quality['photosWithLabels']}/{quality['photos']} photos labelled")
+              f"of {quality['judged']} judged")
 
     if max_fpr_chosen is None:
         raise SystemExit(f"no false-positive limit keeps {args.min_precision:.0%} of shown labels right")
-    chosen, skipped = thresholds_for(scores, truth, calibration, coco, max_fpr_chosen, subclasses)
+    chosen, skipped = select(max_fpr_chosen)
     report["maxFalsePositiveRate"] = max_fpr_chosen
+    report["minLabelPrecision"] = args.min_label_precision
     print(f"chosen max FPR {max_fpr_chosen}")
+    if held:
+        # A decision made after reading the test half, so the numbers from
+        # before it stay in the report.
+        columns = {ids.index(label) for label in held}
+        report["beforeHoldBack"] = {
+            "labels": len(chosen),
+            "testClusters": cluster_quality(scores, truth, test & coco, chosen),
+            "heldBack": {ids[column]: f"{right}/{judged}" for column, (right, judged) in membership(
+                scores, truth, test & coco, {column: chosen[column] for column in columns if column in chosen}).items()},
+        }
+        for column in columns:
+            chosen.pop(column, None)
+            skipped[column] = "held back by hand"
+        before = report["beforeHoldBack"]
+        print(f"held back {', '.join(held)}: {before['labels']} labels before, test clusters "
+              f"{before['testClusters']['precision']:.3f} precision of {before['testClusters']['judged']} judged photos")
     report["test"] = {
         "coco": display_quality(scores, truth, test & coco, chosen),
         "openimages": display_quality(scores, truth, test & ~coco, chosen),
     }
     report["labels"] = label_quality(scores, truth, test, coco, chosen, ids)
+    if args.min_label_precision:
+        # As clusters: every test-half photo a label takes in, by label.
+        report["testClusters"] = cluster_quality(scores, truth, test & coco, chosen)
+        for column, (right, judged) in membership(scores, truth, test & coco, chosen).items():
+            report["labels"][ids[column]]["clusterRight"] = f"{right}/{judged}"
+        print(f"test clusters: {report['testClusters']['precision']:.3f} precision of "
+              f"{report['testClusters']['judged']} judged photos")
     report["searchOnly"] = {ids[column]: reason for column, reason in skipped.items()}
     report["searchOnly"].update({label: "no ground truth" for label in ids if label not in ground_truth})
     for name, quality in report["test"].items():
@@ -297,6 +429,8 @@ def main():
             "phrase": LABEL_PHRASES[template_name],
             "synonyms": synonyms,
             "maxFalsePositiveRate": max_fpr_chosen,
+            **({"minLabelPrecision": args.min_label_precision} if args.min_label_precision else {}),
+            **({"heldBack": held} if held else {}),
             "thresholds": {ids[column]: round(value, 4) for column, value in sorted(chosen.items())},
         }
         with open(args.write, "w", encoding="utf-8", newline="\n") as file:

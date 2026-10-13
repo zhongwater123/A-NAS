@@ -9,6 +9,14 @@ packaged. Each (image, label) pair is positive, negative or unknown:
   annotate when none of the listed categories is present (no bird, no duck).
   Images that hold the label anyway count against it, which only makes the
   threshold stricter.
+- COCO-Stuff annotates every pixel of the same COCO val images with 91
+  stuff classes (sky, sea, snow, grass, building...). A label mapped with
+  "cocoStuff" is positive where its classes cover at least STUFF_MIN_SHARE of
+  the photo and negative only where none of them covers a single pixel; a
+  thin strip of sky is left out rather than counted either way.
+- A fixed subset of COCO 2017 train (eval.coco_train) carries the same
+  instance and stuff truth and only ever calibrates: it gives rare labels and
+  scenes enough photos, while the val test half stays the untouched test.
 - Open Images V7 validation has human-verified labels: positive when any
   mapped class is verified present, negative when the first mapped class is
   verified absent. Everything else is unknown and left out.
@@ -23,11 +31,19 @@ import os
 ROOT = os.environ.get("ANAS_DATASETS", "/datasets")
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-VOCABULARY = os.path.join(HERE, "labels", "v1.json")
+VOCABULARY = os.path.join(REPO, "internal", "photos", "labels", "v1.json")
 GROUND_TRUTH = os.path.join(HERE, "ground_truth.json")
 
 COCO_ANNOTATIONS = os.path.join("coco", "annotations", "instances_val2017.json")
 COCO_IMAGES = os.path.join("coco", "val2017")
+# Only stuff_val2017.json of COCO-Stuff's stuff_annotations_trainval2017.zip
+# (CC BY 4.0), read out of the archive on cocodataset.org.
+COCO_STUFF = os.path.join("coco-stuff", "stuff_val2017.json")
+STUFF_MIN_SHARE = 0.05
+# The train subset, compacted by eval.coco_train.
+COCO_TRAIN = os.path.join("coco", "train-subset.json")
+COCO_TRAIN_IMAGES = os.path.join("coco", "train2017")
+COCO_STUFF_TRAIN = os.path.join("coco-stuff", "stuff_train-subset.json")
 COCO_CN = os.path.join("coco-cn", "coco-cn-version1805v1.1")
 COCO_CN_IMAGES = os.path.join("coco-cn", "images")
 OPENIMAGES = "openimages"
@@ -46,7 +62,15 @@ class Sample:
     @property
     def split(self):
         # A stable half of the images calibrates; the other half only tests.
+        # COCO train images only calibrate.
+        if self.key.startswith("coco-train:"):
+            return "calibration"
         return "calibration" if hashlib.sha256(self.key.encode()).digest()[0] % 2 == 0 else "test"
+
+    @property
+    def natural(self):
+        """Whether the image comes from COCO's natural mix of photos."""
+        return self.key.startswith(("coco:", "coco-train:"))
 
 
 def load_vocabulary(path=VOCABULARY):
@@ -71,17 +95,69 @@ def coco_samples(ground_truth, root=ROOT):
         for name in mapping.get("coco", []) + mapping.get("cocoAbsentUnless", []):
             if name not in names:
                 raise ValueError(f"{label}: COCO has no category {name!r}")
+    stuff = coco_stuff_shares(ground_truth, root) if any("cocoStuff" in m for m in ground_truth.values()) else {}
     samples = []
     for image in sorted(data["images"], key=lambda entry: entry["id"]):
         sample = Sample(f"coco:{image['id']}", os.path.join(root, COCO_IMAGES, image["file_name"]))
-        found = present[image["id"]]
-        for label, mapping in ground_truth.items():
-            if "coco" in mapping:
-                (sample.positive if found & set(mapping["coco"]) else sample.negative).add(label)
-            elif "cocoAbsentUnless" in mapping and not found & set(mapping["cocoAbsentUnless"]):
-                sample.negative.add(label)
+        add_coco_truth(sample, present[image["id"]], stuff.get(image["id"], {}), ground_truth)
         samples.append(sample)
     return samples
+
+
+def add_coco_truth(sample, found, shares, ground_truth):
+    """Marks the labels a COCO image holds or lacks, from the instance classes
+    found in it and the share of the photo each stuff class covers."""
+    for label, mapping in ground_truth.items():
+        if "coco" in mapping:
+            (sample.positive if found & set(mapping["coco"]) else sample.negative).add(label)
+        elif "cocoAbsentUnless" in mapping and not found & set(mapping["cocoAbsentUnless"]):
+            sample.negative.add(label)
+        elif "cocoStuff" in mapping:
+            share = max((shares.get(name, 0.0) for name in mapping["cocoStuff"]), default=0.0)
+            if share >= STUFF_MIN_SHARE:
+                sample.positive.add(label)
+            elif share == 0:
+                sample.negative.add(label)
+
+
+def coco_train_samples(ground_truth, root=ROOT):
+    """The COCO train subset eval.coco_train prepared, or none."""
+    if not os.path.exists(os.path.join(root, COCO_TRAIN)):
+        return []
+    with open(os.path.join(root, COCO_TRAIN), encoding="utf-8") as file:
+        data = json.load(file)
+    with open(os.path.join(root, COCO_STUFF_TRAIN), encoding="utf-8") as file:
+        stuff_annotations = json.load(file)["annotations"]
+    frame = {image["id"]: image["width"] * image["height"] for image in data["images"]}
+    present = collections.defaultdict(set)
+    for image, name, _area in data["annotations"]:
+        present[image].add(name)
+    shares = collections.defaultdict(lambda: collections.defaultdict(float))
+    for image, name, area in stuff_annotations:
+        shares[image][name] += area / frame[image]
+    samples = []
+    for image in sorted(data["images"], key=lambda entry: entry["id"]):
+        sample = Sample(f"coco-train:{image['id']}", os.path.join(root, COCO_TRAIN_IMAGES, image["file_name"]))
+        add_coco_truth(sample, present[image["id"]], shares.get(image["id"], {}), ground_truth)
+        samples.append(sample)
+    return samples
+
+
+def coco_stuff_shares(ground_truth, root=ROOT):
+    """{image ID: {stuff class: share of the photo it covers}}."""
+    with open(os.path.join(root, COCO_STUFF), encoding="utf-8") as file:
+        data = json.load(file)
+    category = {entry["id"]: entry["name"] for entry in data["categories"]}
+    for label, mapping in ground_truth.items():
+        for name in mapping.get("cocoStuff", []):
+            if name not in category.values():
+                raise ValueError(f"{label}: COCO-Stuff has no class {name!r}")
+    frame = {entry["id"]: entry["width"] * entry["height"] for entry in data["images"]}
+    shares = collections.defaultdict(lambda: collections.defaultdict(float))
+    for annotation in data["annotations"]:
+        image = annotation["image_id"]
+        shares[image][category[annotation["category_id"]]] += annotation["area"] / frame[image]
+    return shares
 
 
 def openimages_classes(root=ROOT):

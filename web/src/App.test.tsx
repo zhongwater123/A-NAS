@@ -4,8 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import type { SessionStatus } from "./terminal";
+import { transferStore } from "./transfers/store";
 
 const xterm = vi.hoisted(() => ({ mounts: 0, onStatus: undefined as ((status: SessionStatus) => void) | undefined }));
+
+// Uploads go through tus-js-client; tests answer its requests themselves.
+const tus = vi.hoisted(() => {
+  class FakeUpload {
+    url: string | null;
+    constructor(readonly file: File, readonly options: Record<string, any>) {
+      this.url = options.uploadUrl ?? null;
+      uploads.push(this);
+    }
+    start() {}
+    abort() { return Promise.resolve(); }
+  }
+  const uploads: FakeUpload[] = [];
+  return { FakeUpload, uploads };
+});
+vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 vi.mock("./XtermSession", async () => {
   const { useEffect } = await import("react");
@@ -101,7 +118,7 @@ const metricsState = {
   network: { receiveBytesPerSecond: 2516582, transmitBytesPerSecond: 327680 },
 };
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { transferStore.reset(); tus.uploads.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("A-NAS v1.0.1 desktop", () => {
   it("activates the local device with only an administrator account and password", async () => {
@@ -162,7 +179,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.getByText(/\d{2}:\d{2}/, { selector: ".status-time strong" }).textContent).not.toBe(before);
   });
 
-  it("enables file management and lists only the signed-in user's spaces", async () => {
+  // jsdom resolves the computed styles this test checks slowly.
+  it("enables file management and lists only the signed-in user's spaces", { timeout: 15_000 }, async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }, { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [
@@ -230,8 +248,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dialog).queryByText(/已剪切/)).toBeNull();
   });
 
-  it("downloads files only on double click and exposes the file edit context menu", async () => {
-    installAPI({
+  it("downloads files through the transfer center only on double click and exposes the file edit context menu", async () => {
+    const fetchMock = installAPI({
       spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [{ id: "file:note", spaceId: "space:owner", name: "notes.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" }],
       textPreview: "hello",
@@ -246,7 +264,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(click).not.toHaveBeenCalled();
     expect(await within(dialog).findByText("hello")).toBeTruthy();
     await user.dblClick(row);
-    expect(click).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    const created = fetchMock.mock.calls.find(([path]) => path === "/api/v1/transfers/downloads");
+    expect(JSON.parse(String(created?.[1]?.body))).toEqual({ entryIds: ["file:note"] });
+    expect(click.mock.contexts[0]).toHaveProperty("href", expect.stringContaining("/api/v1/transfers/download-1/content"));
     const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
     manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
     fireEvent.contextMenu(row, { clientX: 120, clientY: 160 });
@@ -256,6 +277,63 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(menu).getByRole("menuitem", { name: "下载" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: /重命名/ })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: /移到回收站/ })).toBeTruthy();
+  });
+
+  // Opening the transfer center loads its window code on first use.
+  it("uploads picked and dropped files through the transfer center without blocking the folder", { timeout: 15_000 }, async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [{ id: "file:old", spaceId: "space:shared", name: "old.txt", kind: "file", sizeBytes: 3, modifiedAt: "2026-10-08T10:00:00Z" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await within(dialog).findByText("old.txt");
+    await user.click(within(dialog).getByRole("button", { name: "上传到当前目录" }));
+    expect(within(dialog).getByRole("menuitem", { name: /上传文件夹/ })).toBeTruthy();
+    await user.upload(within(dialog).getByLabelText("选择要上传的文件"), [new File(["hello"], "a.txt"), new File(["world!"], "b.txt")]);
+    expect(tus.uploads).toHaveLength(2);
+    expect(tus.uploads[0].options.metadata).toMatchObject({ filename: "a.txt", spaceId: "space:shared", parentId: "", conflict: "ask" });
+    // Other commands stay available while files upload.
+    expect(within(dialog).getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(false);
+    tus.uploads[0].options.onProgress(5, 5);
+    expect(await within(dialog).findByRole("button", { name: /正在上传 2 个文件/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /传输中心：2 个任务/ })).toBeTruthy();
+
+    const browser = within(dialog).getByRole("region", { name: "文件浏览器" });
+    const dataTransfer = { types: ["Files"], items: [], files: [new File(["dropped"], "c.txt")], dropEffect: "none" };
+    fireEvent.dragEnter(browser, { dataTransfer });
+    expect(within(dialog).getByText("松开即可上传")).toBeTruthy();
+    fireEvent.drop(browser, { dataTransfer });
+    await waitFor(() => expect(tus.uploads).toHaveLength(3));
+    expect(within(dialog).queryByText("松开即可上传")).toBeNull();
+
+    const listed = () => fetchMock.mock.calls.filter(([path]) => String(path).startsWith("/api/v1/spaces/space%3Ashared/entries")).length;
+    const before = listed();
+    tus.uploads[0].options.onSuccess();
+    await waitFor(() => expect(listed()).toBeGreaterThan(before));
+    await user.click(screen.getByRole("button", { name: /传输中心：2 个任务/ }));
+    const center = await screen.findByRole("dialog", { name: "传输中心" });
+    expect(await within(center).findByRole("heading", { name: "正在传输" })).toBeTruthy();
+  });
+
+  it("downloads a folder as one archive from the context menu", async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [{ id: "file:album", spaceId: "space:owner", name: "相册", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-08T10:00:00Z" }],
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("相册") && item.textContent?.includes("文件夹"))!;
+    const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
+    manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 160 });
+    await user.click(within(await screen.findByRole("menu", { name: "文件操作" })).getByRole("menuitem", { name: /打包下载/ }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/transfers/downloads")).toBe(true));
+    const created = fetchMock.mock.calls.find(([path]) => path === "/api/v1/transfers/downloads");
+    expect(JSON.parse(String(created?.[1]?.body))).toEqual({ entryIds: ["file:album"] });
   });
 
   it("selects multiple files with a pointer selection box", async () => {
@@ -876,6 +954,14 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
 	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
     if (path === "/api/v1/users") return ok({ items: options.users ?? [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
+    if (path === "/api/v1/transfers/downloads" && init?.method === "POST") {
+      const { entryIds } = JSON.parse(String(init.body)) as { entryIds: string[] };
+      return ok({
+        id: "download-1", direction: "download", kind: entryIds.length > 1 ? "archive" : "file", name: entryIds.length > 1 ? "下载.zip" : "notes.txt",
+        location: { spaceId: "space:owner", spaceKind: "private", folders: [] }, totalBytes: 12, transferredBytes: 0, bytesPerSecond: 0,
+        state: "pending", contentUrl: "/api/v1/transfers/download-1/content", createdAt: "2026-10-12T10:00:00Z", updatedAt: "2026-10-12T10:00:00Z",
+      }, 201);
+    }
     return ok({ items: [] });
   });
   vi.stubGlobal("fetch", mock);

@@ -43,6 +43,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
+	"github.com/zhongwater123/A-NAS/internal/transfers"
+	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -226,6 +228,17 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer feedbackStore.Close()
+	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
+		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer transferService.Close()
+	transferAPI, err := transfersapi.New(transferService, logger)
+	if err != nil {
+		return err
+	}
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -259,6 +272,7 @@ func run(logger *slog.Logger) error {
 		Media:      mediaapi.New(mediaService, logger),
 		Music:      musicService,
 		Feedback:   feedbackapi.New(feedbackStore, logger),
+		Transfers:  transferAPI,
 		SystemLogs: systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -280,6 +294,7 @@ func run(logger *slog.Logger) error {
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	go mediaService.Run(ctx)
+	go transferService.Run(ctx)
 	if photoService != nil {
 		background := make(chan struct{})
 		go func() {

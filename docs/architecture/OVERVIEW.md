@@ -13,6 +13,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ▼                                                       ▼
 产品服务（非特权，只监听 127.0.0.1:8080）
   ├── Auth / Files / Storage / Share / Jobs / Policy
+  ├── Transfers（/api/v1/uploads 的 tus 分片写入文件代理以用户身份创建的临时文件；下载按发送字节跟踪；ADR 0019）
   ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► 媒体 Worker（按连接启动，无网络、无数据卷）
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一媒体 Worker 探测与解码；ADR 0018）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
@@ -88,6 +89,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
 | `internal/mediaworker` | 媒体 Worker：与应用无关的类型化协议（探测、截图、字幕、视频流、音频解码）、FFmpeg 命令、按连接服务端（`anas-api media-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
+| `internal/transfers` / `internal/transfersapi` | 传输中心：每名账号的上传与下载记录（`transfers.db`），tus 分片上传（tusd `pkg/handler` 与写入 `files.PendingUpload` 的数据存储，[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）、按发送字节跟踪的下载与 ZIP 打包，以及 `/api/v1/transfers`、`/api/v1/uploads` | 已实现，单元测试、真实 tus 请求的 API 测试与 OpenAPI 契约测试覆盖，见[传输中心规格](../specs/transfer-center.md)；尚未部署 |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
 | `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，由 `internal/httpapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
 | `internal/systemlog` / `internal/systemlog/journal` | A-NAS 服务日志：服务白名单、查询与 JSON 日志行解析、开发用 Fake，以及 Host Agent 中以固定参数运行 `journalctl` 的读取器（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)） | 已实现，Host Agent `/v1/system-logs` 与产品 API `/api/v1/system-logs` 仅管理员可用；系统测试覆盖真实单元 |
@@ -120,6 +122,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册与本地智能检索规格](../specs/photo-library.md)
 - [影视中心规格](../specs/media-center.md)、[影视中心技术设计](media-center.md)与 [ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)
 - [问题反馈规格](../specs/feedback.md)
+- [传输中心规格](../specs/transfer-center.md)与[可续传上传决策](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)
 - [日志规格](../specs/logs.md)与[服务日志读取决策](../adr/0020-read-service-logs-through-the-host-agent.md)
 - [容器运行时与容器代理决策](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - [应用清单与安装策略决策](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
