@@ -744,6 +744,26 @@ func (s *Service) CanAccessSpace(ctx context.Context, actor User, spaceID string
 	return err == nil && grant.ID != "", err
 }
 
+// ActiveSpaceIDs lists the shared space and the private spaces of active
+// accounts, for work that runs without a signed-in user.
+func (s *Service) ActiveSpaceIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.store.db.QueryContext(ctx, `SELECT s.id FROM spaces s LEFT JOIN users u ON u.id = s.owner_user_id
+WHERE s.kind = ? OR u.status = ? ORDER BY s.id`, SpaceKindShared, UserStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // Space returns one space for work that runs without a signed-in user, such
 // as scheduled snapshots; callers authorize the request themselves.
 func (s *Service) Space(ctx context.Context, spaceID string) (Space, error) {
