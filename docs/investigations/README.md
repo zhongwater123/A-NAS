@@ -19,6 +19,7 @@
 - [2026-10-09：安装 Immich 后内网 WiFi 客户端全部无法访问 NAS](2026-10-09-app-network-cut-off-wifi-clients.md)（resolved）
 - [2026-10-09：Debian 的 Compose 2.26.1 把应用的整个卷挂进容器](2026-10-09-old-compose-mounted-whole-app-volumes.md)（resolved）
 - [2026-10-13：AI Worker 留着被取消的检测会话，内存涨到上限](2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)（resolved；未部署）
+- [2026-10-13：评估把 Open Images 的大部分“有”读成了“没有”](2026-10-13-open-images-positives-read-as-absent.md)（resolved for 物体检测；AI 聚合的 Open Images 部分待重做）
 
 ## 使用方式
 
