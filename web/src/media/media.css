@@ -1,6 +1,7 @@
 /* 影视中心: a dark, artwork-first cinema. */
-/* The cinema has no light frame: the window edge is the picture's edge. */
-.app-window-media { background: #0b0e14; border-color: transparent; }
+/* The cinema has no light frame: the window edge is the picture's edge.
+   .app-window comes later in the bundle, so the window needs both classes. */
+.app-window.app-window-media { background: #0b0e14; border-color: transparent; }
 .app-window-media .window-titlebar { border-bottom-color: rgba(255, 255, 255, .06); color: #e9edf4; background: #0d1118; }
 .app-window-media .window-app-icon { background: linear-gradient(155deg, #34363d, #000); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
 .app-window-media .window-actions button { color: #c3cad6; }
