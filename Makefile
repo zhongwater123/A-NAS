@@ -99,6 +99,9 @@ ops-check:
 	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'Slice=anas-ai.slice' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'CPUWeight=10' deploy/systemd/system/anas.slice
+	grep -Fq 'anas-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq '/etc/systemd/system/anas.slice' scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
 	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/main.go
 	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-media.socket

@@ -1,0 +1,14 @@
+[Unit]
+Description=A-NAS background work
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Slice]
+# Background work, such as the local AI Worker in anas-ai.slice, gives way to
+# everything else on the device whenever both want a core. cgroups compare
+# weights only between siblings, so the weight belongs here, beside
+# system.slice and user.slice (100 each), not on the Worker's unit, which is
+# alone in its slice (docs/investigations/2026-10-13-idle-detection-used-one-core.md).
+CPUWeight=10
+# Takes effect only under the BFQ disk scheduler or io.cost; the Experimental
+# NAS's data disk uses mq-deadline.
+IOWeight=10

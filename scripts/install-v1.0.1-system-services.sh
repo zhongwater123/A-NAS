@@ -48,7 +48,7 @@ fi
 # has a role: its manifest is ai/ROLE.json and the release links its file as
 # ai/ROLE.EXTENSION, where the Worker's unit looks for it.
 ai_roles=(model:litertlm detector:onnx)
-for file in anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
+for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing local AI file: $source_release/$file" >&2
     exit 2
@@ -267,6 +267,8 @@ chmod 0600 /etc/a-nas/host-agent.env
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
+# Background work gives way to the device's other work (anas.slice).
+install -o root -g root -m 0644 "$source_release/anas-system.slice" /etc/systemd/system/anas.slice
 install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
 install -o root -g root -m 0644 "$source_release/anas-ai-system.service" /etc/systemd/system/anas-ai.service
 # The AI Worker may use every core but two, which stay free for the user's next

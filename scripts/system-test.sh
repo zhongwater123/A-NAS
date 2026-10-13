@@ -102,6 +102,7 @@ stage() {
   for unit in anas-api anas-host-agent anas-photos; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
+  install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
   install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
   install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
   install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
@@ -424,6 +425,8 @@ check "the kernel reclaims the Worker's memory before its hard limit" \
   test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 1879048192:2147483648
 check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
+check "background work gives way to the device's other work where weights compare" \
+  test "$(systemctl show -p CPUWeight --value anas.slice):$(systemctl show -p ControlGroup --value anas-ai.service)" = 10:/anas.slice/anas-ai.slice/anas-ai.service
 check "AI work yields to the pressure of the device's other work, not its own" \
   journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
 check "search starts the Worker through its socket" semantic_search 猫
