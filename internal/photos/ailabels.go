@@ -74,6 +74,23 @@ func (s *Service) embedLabelText(ctx context.Context, embedder Embedder, info Em
 	return false, err
 }
 
+// clusterState is AIStatus.Clusters for the Worker's model, which is empty
+// until the runner has reached the Worker. It reads only the Catalog, so a
+// window polling it neither starts the Worker nor holds AI work back.
+func (s *Service) clusterState(ctx context.Context, model string) (string, error) {
+	if len(s.labels.Shown()) == 0 || (model != "" && model != s.labels.Model) {
+		return "", nil
+	}
+	vectors, err := s.labelVectors(ctx)
+	switch {
+	case err != nil:
+		return "", err
+	case vectors == nil:
+		return ClustersPreparing, nil
+	}
+	return ClustersReady, nil
+}
+
 // labelVectors returns the shown labels' vectors, or nil while any text still
 // lacks one. It needs no Worker: the vectors come from the Catalog.
 func (s *Service) labelVectors(ctx context.Context) (map[string][]float32, error) {

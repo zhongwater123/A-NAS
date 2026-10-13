@@ -255,12 +255,34 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 			return err
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS snapshots_by_space ON snapshots(space_id, created_at);
 UPDATE snapshots SET
     file_count = (SELECT COUNT(*) FROM snapshot_entries e WHERE e.snapshot_id = snapshots.id AND e.kind = 'file'),
     size_bytes = (SELECT COALESCE(SUM(e.size_bytes), 0) FROM snapshot_entries e WHERE e.snapshot_id = snapshots.id AND e.kind = 'file')
-WHERE file_count < 0 OR size_bytes < 0;`)
+WHERE file_count < 0 OR size_bytes < 0;`); err != nil {
+		return err
+	}
+	return s.addAuditSpaces(ctx)
+}
+
+// addAuditSpaces records the space of each audit event. Events written before
+// the column existed get it from the entry, trash item or snapshot they name;
+// what no longer exists stays unknown.
+func (s *Store) addAuditSpaces(ctx context.Context) error {
+	var present int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('audit_events') WHERE name = 'space_id'").Scan(&present); err != nil {
+		return err
+	}
+	if present > 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `ALTER TABLE audit_events ADD COLUMN space_id TEXT NOT NULL DEFAULT '';
+UPDATE audit_events SET space_id = COALESCE(
+    (SELECT space_id FROM entries WHERE entries.id = audit_events.resource_id),
+    (SELECT space_id FROM trash WHERE trash.entry_id = audit_events.resource_id ORDER BY deleted_at DESC LIMIT 1),
+    (SELECT space_id FROM snapshots WHERE snapshots.id = audit_events.resource_id),
+    '');`)
 	return err
 }
 
@@ -494,7 +516,7 @@ VALUES(?,?,?,?,?,?,?,?)`, item.ID, item.EntryID, item.SpaceID, entry.ParentID, e
 		rollback()
 		return TrashItem{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "file.trashed", entry.ID, entry.Name)
+	_ = s.audit(ctx, actor.ID, "file.trashed", spaceID, entry.ID, entry.Name)
 	return item, nil
 }
 
@@ -630,7 +652,7 @@ FROM trash WHERE space_id = ? AND deleted_by = ? AND deleted_at <= ?`, spaceID, 
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		_ = s.audit(ctx, "system", "file.purged.retention", item.entryID, item.name)
+		_ = s.audit(ctx, "system", "file.purged.retention", spaceID, item.entryID, item.name)
 	}
 	return nil
 }
@@ -731,7 +753,7 @@ VALUES(?,?,?,?,?,?,?,?)`, trashID, entryID, spaceID, originalParentID, info.Name
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	_ = s.audit(ctx, deletedBy, "file.trashed.smb", entryID, info.Name)
+	_ = s.audit(ctx, deletedBy, "file.trashed.smb", spaceID, entryID, info.Name)
 	return nil
 }
 
@@ -829,7 +851,7 @@ WHERE trash_id = ?`, newRelative, trashRelative, trashID); err != nil {
 		return Entry{}, err
 	}
 	s.removeEmptyTrashParents(ctx, root, trashRelative)
-	_ = s.audit(ctx, actor.ID, "file.restored", item.EntryID, targetName)
+	_ = s.audit(ctx, actor.ID, "file.restored", item.SpaceID, item.EntryID, targetName)
 	entry, _, err := s.entryPath(ctx, root, item.SpaceID, item.EntryID)
 	return entry, err
 }
@@ -878,7 +900,7 @@ FROM trash WHERE id = ?`, trashID).Scan(
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return s.audit(ctx, actor.ID, "file.purged", item.EntryID, item.Name)
+	return s.audit(ctx, actor.ID, "file.purged", item.SpaceID, item.EntryID, item.Name)
 }
 
 // Move moves an entry to a folder of its own space or, given targetSpaceID,
@@ -954,7 +976,7 @@ WHERE space_id = ? AND trashed = 0 AND (relative_path = ? OR substr(relative_pat
 		rollback()
 		return Entry{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "file.moved", entryID, targetName)
+	_ = s.audit(ctx, actor.ID, "file.moved", spaceID, entryID, targetName)
 	moved, _, err := s.entryPath(ctx, root, spaceID, entryID)
 	return moved, err
 }
@@ -982,7 +1004,7 @@ WHERE space_id = ? AND trashed = 0 AND (relative_path = ? OR substr(relative_pat
 		spaceID, oldRelative, oldRelative, oldRelative); err != nil {
 		return Entry{}, err
 	}
-	_ = s.audit(cleanup, actor.ID, "file.moved", moved.ID, moved.Name)
+	_ = s.audit(cleanup, actor.ID, "file.moved", moved.SpaceID, moved.ID, moved.Name)
 	return moved, nil
 }
 
@@ -995,7 +1017,7 @@ func (s *Service) Copy(ctx context.Context, actor accounts.User, entryID, target
 	}
 	copied, _, err := s.copyEntry(ctx, actor, entryID, spaceID, targetSpaceID, targetParentID, targetName, false)
 	if err == nil {
-		_ = s.audit(ctx, actor.ID, "file.copied", copied.ID, copied.Name)
+		_ = s.audit(ctx, actor.ID, "file.copied", copied.SpaceID, copied.ID, copied.Name)
 	}
 	return copied, err
 }
@@ -1100,7 +1122,7 @@ func (s *Service) CreateDirectory(ctx context.Context, actor accounts.User, spac
 	if err != nil {
 		return Entry{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "file.directory_created", entry.ID, entry.Name)
+	_ = s.audit(ctx, actor.ID, "file.directory_created", space.ID, entry.ID, entry.Name)
 	return entry, nil
 }
 
@@ -1177,7 +1199,7 @@ func (s *Service) Upload(ctx context.Context, actor accounts.User, spaceID, pare
 	if err != nil {
 		return Entry{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "file.uploaded", entry.ID, entry.Name)
+	_ = s.audit(ctx, actor.ID, "file.uploaded", space.ID, entry.ID, entry.Name)
 	return entry, nil
 }
 
@@ -1453,10 +1475,12 @@ func (s *Service) ensureCapacity(incoming int64) error {
 	return nil
 }
 
-func (s *Service) audit(ctx context.Context, actorID, action, resourceID, detail string) error {
+// audit records an event in the space it happened in, which decides who may
+// see its names in the activity log.
+func (s *Service) audit(ctx context.Context, actorID, action, spaceID, resourceID, detail string) error {
 	_, err := s.store.db.ExecContext(ctx,
-		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?,?,?,?,?,?,?)",
-		s.randomID("audit"), actorID, action, "file", resourceID, formatTime(s.now().UTC()), detail)
+		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail, space_id) VALUES(?,?,?,?,?,?,?,?)",
+		s.randomID("audit"), actorID, action, "file", resourceID, formatTime(s.now().UTC()), detail, spaceID)
 	return err
 }
 

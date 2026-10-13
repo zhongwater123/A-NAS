@@ -215,3 +215,28 @@ func TestLabelsHoldOnlyForTheCalibratedModel(t *testing.T) {
 		t.Fatalf("Search(红色) with another model = %v", names(page.Assets))
 	}
 }
+
+// The AI status tells a window when AI 聚合 can list its groups, so the
+// window never has to ask for the groups again to find out.
+func TestAIStatusSaysWhenClustersAreReady(t *testing.T) {
+	embedder := &colorEmbedder{}
+	service := labelService(t, filepath.Join(t.TempDir(), "photos"), embedder, colourLabels(t, "colour-1"))
+	private, _ := libraries(t, service, namedAlice)
+	importPhoto(t, service, namedAlice, private.ID, "", "a.png", red)
+	if got := aiStatus(t, service, namedAlice).Clusters; got != photos.ClustersPreparing {
+		t.Fatalf("clusters before the label texts = %q, want preparing", got)
+	}
+	index(t, service, embedder)
+	if got := aiStatus(t, service, namedAlice).Clusters; got != photos.ClustersReady {
+		t.Fatalf("clusters after the label texts = %q, want ready", got)
+	}
+
+	// A Worker with another model has no clusters to prepare.
+	other := labelService(t, filepath.Join(t.TempDir(), "photos"), embedder, colourLabels(t, "another model"))
+	otherPrivate, _ := libraries(t, other, namedAlice)
+	importPhoto(t, other, namedAlice, otherPrivate.ID, "", "a.png", red)
+	index(t, other, embedder)
+	if got := aiStatus(t, other, namedAlice).Clusters; got != "" {
+		t.Fatalf("clusters for another model = %q, want none", got)
+	}
+}

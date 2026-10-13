@@ -2,7 +2,7 @@ import { Check, CheckCheck, CircleCheckBig, Inbox, MessageSquareText, Pencil, Ro
 import { PointerEvent as ReactPointerEvent, RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { APIError } from "../api";
-import { avatarTone } from "../SettingsPanel";
+import { avatarTone } from "../settings/parts";
 import { FEEDBACK_UI } from "./capture";
 import { FeedbackEditor, Draft, emptyDraft, releaseDraft } from "./FeedbackEditor";
 import {

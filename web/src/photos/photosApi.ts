@@ -53,6 +53,8 @@ export interface PhotoAIStatus {
   ready: number;
   pending: number;
   failed: number;
+  // Whether AI 聚合 can list its groups; absent when the model has none.
+  clusters?: "ready" | "preparing";
 }
 
 const base = "/api/v1/photos";
