@@ -1,5 +1,6 @@
 /* 影视中心: a dark, artwork-first cinema. */
-.app-window-media { background: #0b0e14; border-color: rgba(255, 255, 255, .08); }
+/* The cinema has no light frame: the window edge is the picture's edge. */
+.app-window-media { background: #0b0e14; border-color: transparent; }
 .app-window-media .window-titlebar { border-bottom-color: rgba(255, 255, 255, .06); color: #e9edf4; background: #0d1118; }
 .app-window-media .window-app-icon { background: linear-gradient(155deg, #34363d, #000); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
 .app-window-media .window-actions button { color: #c3cad6; }
@@ -83,11 +84,7 @@
 .mc-side.drawer { position: absolute; z-index: 30; inset: 0 auto 0 0; transform: translateX(-100%); transition: transform .25s var(--mc-ease); box-shadow: 24px 0 60px rgba(0, 0, 0, .5); }
 .mc-side.drawer.open { transform: none; }
 .mc-scrim { position: absolute; z-index: 29; inset: 0; background: rgba(0, 0, 0, .45); }
-.mc-sidebar { width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 2px; padding: 16px 12px 12px; overflow-y: auto; border-right: 1px solid var(--mc-line); background: linear-gradient(180deg, #10151e, var(--mc-side)); }
-.mc-brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 16px; }
-.mc-brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: linear-gradient(155deg, #34363d, #000); box-shadow: inset 0 1px 1px rgba(255, 255, 255, .22), inset 0 0 0 1px rgba(255, 255, 255, .08), 0 6px 16px rgba(0, 0, 0, .5); }
-.mc-brand-mark svg { width: 20px; height: 20px; }
-.mc-brand strong { font-size: 15px; letter-spacing: .5px; }
+.mc-sidebar { width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 2px; padding: 11px 12px 12px; overflow-y: auto; border-right: 1px solid var(--mc-line); background: linear-gradient(180deg, #10151e, var(--mc-side)); }
 .mc-nav { display: grid; gap: 2px; }
 .mc-nav button { position: relative; width: 100%; height: 37px; display: flex; align-items: center; gap: 11px; border: 0; border-radius: 10px; padding: 0 11px; color: var(--mc-ink-2); background: transparent; text-align: left; transition: background .15s, color .15s; }
 .mc-nav button svg { width: 18px; height: 18px; color: #7d889b; transition: color .15s; }
