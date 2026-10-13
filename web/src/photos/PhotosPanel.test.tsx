@@ -647,7 +647,7 @@ describe("PhotosPanel search and viewing", () => {
       timeline(privateLibrary.id, () => [asset("photo:home")]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await screen.findByRole("button", { name: "查看 photo:home.jpg" });
     const search = async (text: string) => {
       const box = screen.getByRole("searchbox", { name: "搜索照片" });
@@ -693,7 +693,7 @@ describe("PhotosPanel search and viewing", () => {
       timeline(privateLibrary.id, () => [asset("photo:a"), asset("photo:b", { takenAt: "2026-05-01T07:00:00Z" })]),
     );
     const user = userEvent.setup();
-    render(<PhotosPanel userId="user:alice" isAdmin={false} />);
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await openPhoto(user, "photo:a.jpg");
     await user.click(screen.getByRole("button", { name: "找相似" }));
 
