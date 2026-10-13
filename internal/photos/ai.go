@@ -148,6 +148,13 @@ func (p *aiProgress) get() (state, reason, model string) {
 // interval or as soon as a thumbnail adds work; work stopped by processor or
 // disk pressure looks again within seconds.
 func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle time.Duration, logError func(error)) {
+	defer func() {
+		// A detection rendered ahead goes back to the queue.
+		if err := s.returnDetection(context.WithoutCancel(ctx), s.nextDetection); err != nil && logError != nil {
+			logError(err)
+		}
+		s.nextDetection = nil
+	}()
 	for {
 		processed, err := s.ProcessAIJob(ctx, embedder, gate)
 		if err != nil && ctx.Err() == nil && logError != nil {
@@ -189,8 +196,13 @@ func pausedByPressure(reason string) bool {
 // detections, since search needs them. It does nothing while gate is closed or
 // the Worker is away, and frees the Worker's memory when its work stops; the
 // error returned is only for Catalog or storage faults.
-func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (bool, error) {
+func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (processed bool, err error) {
 	detector, _ := embedder.(Detector)
+	// The input the last detection rendered ahead is used only if a
+	// detection comes next; otherwise its job goes back to the queue.
+	next := s.nextDetection
+	s.nextDetection = nil
+	defer func() { err = errors.Join(err, s.returnDetection(context.WithoutCancel(ctx), next)) }()
 	if open, reason := gate.Open(ctx); !open {
 		s.ai.set(AIPaused, reason, "")
 		s.releaseModels(ctx, detector, reason)
@@ -200,7 +212,7 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	// exiting when idle, so once its model is known ask only when there is
 	// work for it. A new model comes with a release, whose install restarts
 	// this service, or shows up in a search (noticeModel).
-	if model := s.knownModel(); model != "" {
+	if model := s.knownModel(); model != "" && next == nil {
 		waiting, err := s.aiWorkWaiting(ctx, model)
 		if err != nil || !waiting {
 			if state, _, _ := s.ai.get(); err == nil && state != AIUnavailable {
@@ -239,7 +251,9 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 			s.ai.set(AIIdle, "", info.Model)
 			return false, nil
 		}
-		return s.processDetection(ctx, detector, gate, info)
+		input := next
+		next = nil
+		return s.processDetection(ctx, detector, gate, info, input)
 	}
 	if err != nil {
 		return false, err
@@ -275,25 +289,31 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 const gateWatchInterval = 200 * time.Millisecond
 
 // processDetection runs one ready detection job on the detector's enlarged
-// input. When gate closes meanwhile, the detection is cancelled and the job
-// given back without spending its attempt.
-func (s *Service) processDetection(ctx context.Context, detector Detector, gate Gate, info EmbedderInfo) (bool, error) {
-	job, err := s.claimJob(ctx, detectionDerivation)
-	if errors.Is(err, sql.ErrNoRows) {
-		s.ai.set(AIIdle, "", info.Model)
-		s.releaseModels(ctx, detector, "")
-		return false, nil
+// input, the given one or else the next due. While the Worker detects, the
+// next job's input is rendered, so the Worker's threads need not wait for it
+// (docs/architecture/photo-objects.md#资源策略). When gate closes meanwhile,
+// the detection is cancelled and both jobs go back to their places in the
+// queue without spending an attempt.
+func (s *Service) processDetection(ctx context.Context, detector Detector, gate Gate, info EmbedderInfo, input *detectionInput) (bool, error) {
+	if input == nil {
+		var err error
+		input, err = s.claimDetection(ctx)
+		if errors.Is(err, sql.ErrNoRows) {
+			s.ai.set(AIIdle, "", info.Model)
+			s.releaseModels(ctx, detector, "")
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
 	}
-	if err != nil {
-		return false, err
-	}
+	job := input.job
 	s.ai.set(AIWorking, "", info.Model)
-	input, class, err := s.openAIInput(job)
-	if err != nil {
-		return false, errors.Join(err, s.releaseJob(ctx, job))
+	if input.err != nil {
+		return false, errors.Join(input.err, s.releaseJob(ctx, job))
 	}
-	if class != "" {
-		return true, s.failJob(ctx, job, class)
+	if input.class != "" {
+		return true, s.failJob(ctx, job, input.class)
 	}
 	// The Worker loads its detector for the first detection and keeps it
 	// until released.
@@ -302,33 +322,47 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, gate 
 	s.aiModelMu.Unlock()
 	detectCtx, cancel := context.WithCancel(ctx)
 	stopWatching := watchGate(detectCtx, gate, cancel)
-	model, boxes, err := detector.DetectObjects(detectCtx, input)
+	ahead := make(chan *detectionInput, 1)
+	go func() {
+		// A fault shows again at the next claim.
+		next, _ := s.claimDetection(ctx)
+		ahead <- next
+	}()
+	model, boxes, err := detector.DetectObjects(detectCtx, input.file)
 	paused := stopWatching()
 	cancel()
-	_ = input.Close()
+	_ = input.file.Close()
+	next := <-ahead
+	carryOn := func(err error) (bool, error) {
+		s.nextDetection = next
+		return true, err
+	}
+	stop := func(err error) (bool, error) {
+		return false, errors.Join(err, s.returnDetection(context.WithoutCancel(ctx), next))
+	}
 	switch {
 	case ctx.Err() != nil:
-		return false, s.returnJob(context.WithoutCancel(ctx), job)
+		return stop(s.returnJob(context.WithoutCancel(ctx), job))
 	case paused != "":
 		s.ai.set(AIPaused, paused, "")
 		err := s.returnJob(ctx, job)
 		s.releaseModels(ctx, detector, paused)
-		return false, err
+		return stop(err)
 	case errors.Is(err, ErrAIUnavailable):
 		// Look again next round: the Worker may have lost its detector.
 		s.forgetDetector()
-		return false, s.releaseJob(ctx, job)
+		return stop(s.releaseJob(ctx, job))
 	case errors.Is(err, ErrAIRejected):
-		return true, s.failJob(ctx, job, jobErrorUndecodable)
+		return carryOn(s.failJob(ctx, job, jobErrorUndecodable))
 	case err != nil:
-		return true, s.failJob(ctx, job, jobErrorIO)
+		return carryOn(s.failJob(ctx, job, jobErrorIO))
 	case model != info.Detector:
 		s.forgetDetector()
-		return false, s.releaseJob(ctx, job)
+		return stop(s.releaseJob(ctx, job))
 	case !validBoxes(boxes):
-		return true, s.failJob(ctx, job, jobErrorInvalidResult)
+		return carryOn(s.failJob(ctx, job, jobErrorInvalidResult))
 	}
-	return true, s.completeDetection(ctx, job, model, boxes)
+	return carryOn(s.completeDetection(ctx, job, model, boxes))
 }
 
 // watchGate cancels a running detection when gate closes. stop ends the

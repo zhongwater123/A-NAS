@@ -321,6 +321,82 @@ func TestWorkResumesWithinSecondsOfThePressurePassing(t *testing.T) {
 	}
 }
 
+func TestTheNextInputIsRenderedWhileTheWorkerDetects(t *testing.T) {
+	service, _, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &switchGate{open: true}
+	for i, name := range []string{"a.png", "b.png", "c.png"} {
+		importPhoto(t, service, alice, private.ID, "", name, encodePNG(uint8(i+1)))
+	}
+	processAll(t, service)
+	db := catalogDB(t, root)
+	claimed := func() int {
+		var n int
+		if err := db.QueryRow("SELECT COUNT(*) FROM jobs WHERE derivation = 'objects/v1' AND state = 'running'").Scan(&n); err != nil {
+			t.Error(err)
+		}
+		return n
+	}
+	// waitForAhead waits until the job after the running one is claimed.
+	waitForAhead := func() bool {
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if claimed() == 2 {
+				return true
+			}
+		}
+		return false
+	}
+	var ahead bool
+	worker.wait = func(ctx context.Context, detection int) {
+		if detection == 1 {
+			ahead = waitForAhead()
+		}
+	}
+	for range 4 { // three vectors, the first detection
+		if ok, err := service.ProcessAIJob(context.Background(), worker, gate); !ok || err != nil {
+			t.Fatalf("ProcessAIJob() = %v, %v", ok, err)
+		}
+	}
+	if !ahead {
+		t.Fatal("the next photo was not claimed and rendered while the Worker detected")
+	}
+
+	// A new photo's vector comes first, and the detection rendered ahead
+	// goes back to the queue.
+	importPhoto(t, service, alice, private.ID, "", "new.png", encodePNG(9))
+	processAll(t, service)
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); !ok || err != nil {
+		t.Fatalf("ProcessAIJob() = %v, %v", ok, err)
+	}
+	if n := claimed(); n != 0 {
+		t.Fatalf("%d detections still claimed after a vector came first", n)
+	}
+
+	// A pause hands back both the running detection and the one ahead.
+	worker.wait = func(ctx context.Context, detection int) {
+		if detection == 2 && waitForAhead() {
+			gate.set(false, "cpu_pressure")
+			<-ctx.Done()
+		}
+	}
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); ok || err != nil {
+		t.Fatalf("ProcessAIJob() under pressure = %v, %v", ok, err)
+	}
+	var waiting int
+	if err := db.QueryRow("SELECT COUNT(*) FROM jobs WHERE derivation = 'objects/v1' AND state = 'pending' AND attempts = 0").Scan(&waiting); err != nil || waiting != 3 {
+		t.Fatalf("%d detections back in the queue at no cost (%v), want 3", waiting, err)
+	}
+	worker.wait = nil
+	gate.set(true, "")
+	if processed := processAI(t, service, worker, gate); processed != 3 {
+		t.Fatalf("processed %d detections after the pause, want 3", processed)
+	}
+	var detected int
+	if err := db.QueryRow("SELECT COUNT(*) FROM detections").Scan(&detected); err != nil || detected != 4 {
+		t.Fatalf("detections = %d, %v; want all 4 photos", detected, err)
+	}
+}
+
 func TestMemoryPressureEndsTheWholeWorker(t *testing.T) {
 	service, _, _ := newService(t)
 	private, _ := libraries(t, service, alice)
