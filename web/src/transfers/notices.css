@@ -1,0 +1,73 @@
+/* 传输中心 on the desktop: the status-bar pill, the toasts, and the tokens and
+   buttons the window shares with them. */
+.tc-shell, .tc-toasts {
+  --tc-bg: #f3f5f8;
+  --tc-card: #fff;
+  --tc-side: rgba(234, 238, 244, .9);
+  --tc-line: rgba(20, 30, 45, .08);
+  --tc-line-strong: rgba(20, 30, 45, .15);
+  --tc-text: #1b2430;
+  --tc-body: #39424e;
+  --tc-muted: #66717f;
+  --tc-faint: #98a1ad;
+  --tc-accent: #2f6fe4;
+  --tc-accent-soft: #e9f0fd;
+  --tc-up: #2f6fe4;
+  --tc-up-soft: #e6eefc;
+  --tc-down: #16956a;
+  --tc-down-soft: #e2f4ec;
+  --tc-success: #1b9459;
+  --tc-success-soft: #e5f5ec;
+  --tc-warning: #b06a10;
+  --tc-warning-soft: #fdf3e1;
+  --tc-danger: #d23b48;
+  --tc-danger-soft: #fdeeef;
+  --tc-ease: cubic-bezier(.22, 1, .36, 1);
+  color: var(--tc-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.tc-button { height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--tc-line-strong); border-radius: 8px; color: var(--tc-body); background: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
+.tc-button svg { width: 14px; height: 14px; }
+.tc-button:hover { border-color: rgba(20, 30, 45, .25); background: #f7f9fc; }
+.tc-button.primary { border-color: transparent; color: #fff; background: var(--tc-accent); box-shadow: 0 3px 10px rgba(47, 111, 228, .25); }
+.tc-button.primary:hover { background: #255fcf; }
+.tc-button.warning { color: var(--tc-warning); }
+.tc-button.warning:hover { border-color: rgba(176, 106, 16, .35); background: var(--tc-warning-soft); }
+
+
+/* Toasts over the desktop, clear of the feedback tab on the right edge */
+.tc-toasts { position: absolute; z-index: 78; right: 58px; bottom: 98px; width: min(340px, calc(100% - 140px)); display: grid; gap: 10px; pointer-events: none; }
+.tc-toast { position: relative; display: flex; gap: 11px; padding: 14px 34px 14px 14px; border: 1px solid rgba(255, 255, 255, .7); border-radius: 16px; background: rgba(250, 252, 255, .96); box-shadow: 0 18px 48px rgba(15, 22, 44, .28); backdrop-filter: blur(18px); pointer-events: auto; animation: tc-toast-in .38s var(--tc-ease); }
+.tc-toast-icon { width: 20px; height: 20px; margin-top: 1px; }
+.tc-toast.warning .tc-toast-icon { color: var(--tc-warning); }
+.tc-toast.danger .tc-toast-icon { color: var(--tc-danger); }
+.tc-toast.success .tc-toast-icon { color: var(--tc-success); }
+.tc-toast-copy { min-width: 0; display: grid; gap: 3px; }
+.tc-toast-copy strong { font-size: 13.5px; }
+.tc-toast-copy span { color: var(--tc-muted); font-size: 12px; }
+.tc-toast-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.tc-toast-close { position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--tc-faint); background: transparent; cursor: pointer; }
+.tc-toast-close:hover { color: var(--tc-text); background: rgba(20, 30, 45, .07); }
+.tc-toast-close svg { width: 14px; height: 14px; }
+@keyframes tc-toast-in { from { opacity: 0; transform: translateY(14px) scale(.97); } }
+
+/* The status-bar pill */
+.status-transfers { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 4px; border: 0; border-radius: 20px; color: #fff; background: rgba(255, 255, 255, .1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); cursor: pointer; transition: background .2s; }
+.status-transfers:hover { background: rgba(255, 255, 255, .18); }
+.status-transfers:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.status-transfers-ring { position: relative; width: 32px; height: 32px; display: grid; place-items: center; }
+.status-transfers-ring svg:first-child { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.status-transfers-ring circle { fill: none; stroke-width: 3.5; }
+.status-transfers-ring .track { stroke: rgba(255, 255, 255, .18); }
+.status-transfers-ring .value { stroke: #7fd8ff; stroke-linecap: round; transition: stroke-dasharray .4s cubic-bezier(.22, 1, .36, 1); }
+.status-transfers-ring > svg:last-child { position: relative; width: 14px; height: 14px; stroke-width: 2.6; }
+.status-transfers.attention .status-transfers-ring .value { stroke: #ffc35c; }
+.status-transfers-copy { display: grid; justify-items: start; line-height: 1.1; }
+.status-transfers-copy strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.status-transfers-copy small { color: rgba(255, 255, 255, .7); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.status-transfers.attention .status-transfers-copy small { color: #ffd88a; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-toast { animation: none; }
+}

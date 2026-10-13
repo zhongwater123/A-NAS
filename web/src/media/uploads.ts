@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APIError, createDirectory, listEntries, sendFile } from "../api";
+import { transferStore } from "../transfers/store";
 import { messageOf } from "./Browse";
 
 // The files a library scan reads: the scanner's video extensions plus the
@@ -128,16 +129,24 @@ export function useUploads({ onUploaded, onSettled }: { onUploaded: (item: Uploa
       state.controller = controller;
       state.current = item.id;
       patch(item.id, { state: "uploading", progress: 0, error: undefined });
+      // The transfer center lists media uploads beside file uploads.
+      const tracked = transferStore.trackExternal({
+        key: `media-${item.id}`, app: "media", name: item.file.name, size: item.file.size,
+        label: `影视中心 · ${item.to.libraryName}${item.folder ? ` · ${item.folder}` : ""}`,
+      });
       let result: Partial<UploadItem>;
       try {
         const parent = await folderFor(item.to, item.folder);
         if (controller.signal.aborted) throw new DOMException("upload aborted", "AbortError");
-        await sendFile(item.to.spaceId, parent, item.file, (fraction) => patch(item.id, { progress: fraction }), controller.signal);
+        await sendFile(item.to.spaceId, parent, item.file, (fraction) => { patch(item.id, { progress: fraction }); tracked.progress(fraction); }, controller.signal);
         result = { state: "done", progress: 1 };
+        tracked.done();
       } catch (caught) {
         if (controller.signal.aborted) result = { state: "canceled", progress: 0 };
         else if (caught instanceof APIError && caught.status === 409) result = { state: "exists", progress: 0 };
         else result = { state: "failed", progress: 0, error: caught instanceof APIError && caught.status === 403 ? "没有权限上传到这个文件夹" : messageOf(caught) };
+        if (result.state === "canceled") tracked.cancel();
+        else tracked.fail(result.state === "exists" ? "同名文件已存在，未覆盖" : result.error ?? "上传失败");
       }
       if (!state.live) break;
       patch(item.id, result);
