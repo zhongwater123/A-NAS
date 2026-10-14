@@ -446,6 +446,8 @@ func (s *Service) CreateMember(ctx context.Context, actor User, username, passwo
 	return s.createUser(ctx, username, password, RoleMember, actor.ID)
 }
 
+// createUser creates an account for the administrator actorID; an empty
+// actorID is the device's setup, which creates its first administrator.
 func (s *Service) createUser(ctx context.Context, username, password string, role Role, actorID string) (User, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	if err := checkUsername(username); err != nil {
@@ -466,13 +468,23 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 		return User{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO users(id, username, role, status, password_hash, created_at) VALUES(?,?,?,?,?,?)",
-		user.ID, user.Username, user.Role, user.Status, passwordHash, formatTime(now)); err != nil {
+	insert := "INSERT INTO users(id, username, role, status, password_hash, created_at) VALUES(?,?,?,?,?,?)"
+	if actorID == "" {
+		// Setup found no users before hashing, but so may a concurrent setup:
+		// only the insert that still finds none creates the administrator.
+		insert = "INSERT INTO users(id, username, role, status, password_hash, created_at) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM users)"
+	}
+	result, err := tx.ExecContext(ctx, insert, user.ID, user.Username, user.Role, user.Status, passwordHash, formatTime(now))
+	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return User{}, ErrUsernameUnavailable
 		}
 		return User{}, err
+	}
+	if inserted, err := result.RowsAffected(); err != nil {
+		return User{}, err
+	} else if inserted == 0 {
+		return User{}, ErrSetupComplete
 	}
 	if _, err := tx.ExecContext(ctx,
 		"INSERT INTO spaces(id, kind, name, owner_user_id, created_at) VALUES(?,?,?,?,?)",

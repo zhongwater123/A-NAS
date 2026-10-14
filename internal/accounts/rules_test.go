@@ -2,11 +2,14 @@ package accounts_test
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
@@ -133,5 +136,63 @@ func TestAdministratorsChangeTheirOwnPasswordOnlyWithTheCurrentOne(t *testing.T)
 	}
 	if err := service.ChangePassword(ctx, admin, "correct horse battery staple", "administrator new password"); err != nil {
 		t.Fatalf("ChangePassword() error = %v", err)
+	}
+}
+
+// setupBarrier holds the first two random reads, the password salts, until
+// both setups have read an empty user table.
+type setupBarrier struct {
+	reads atomic.Int32
+	ready chan struct{}
+}
+
+func (b *setupBarrier) Read(p []byte) (int, error) {
+	n := b.reads.Add(1)
+	if n == 2 {
+		close(b.ready)
+	}
+	if n <= 2 {
+		select {
+		case <-b.ready:
+		case <-time.After(5 * time.Second):
+			return 0, errors.New("the other setup never arrived")
+		}
+	}
+	return rand.Read(p)
+}
+
+func TestConcurrentSetupsCreateOneAdministrator(t *testing.T) {
+	ctx := context.Background()
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "product.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{Random: &setupBarrier{ready: make(chan struct{})}})
+	type result struct {
+		user accounts.User
+		err  error
+	}
+	results := make(chan result, 2)
+	for _, name := range []string{"first", "second"} {
+		go func() {
+			user, err := service.SetupAdministrator(ctx, name, "correct horse battery staple")
+			results <- result{user, err}
+		}()
+	}
+	a, b := <-results, <-results
+	if (a.err == nil) == (b.err == nil) {
+		t.Fatalf("setup results = %v, %v; want exactly one success", a.err, b.err)
+	}
+	winner, loser := a, b
+	if a.err != nil {
+		winner, loser = b, a
+	}
+	if !errors.Is(loser.err, accounts.ErrSetupComplete) {
+		t.Fatalf("losing setup error = %v, want ErrSetupComplete", loser.err)
+	}
+	users, err := service.ListUsers(ctx, winner.user)
+	if err != nil || len(users) != 1 || users[0].ID != winner.user.ID {
+		t.Fatalf("users = %#v, %v; want only the winning administrator", users, err)
 	}
 }
