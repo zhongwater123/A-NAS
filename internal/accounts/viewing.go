@@ -398,8 +398,8 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 	if err != nil || !verifyPassword(currentPassword, encodedHash) {
 		return ErrInvalidCredentials
 	}
-	if len([]rune(newPassword)) < 12 {
-		return ErrWeakPassword
+	if err := checkPassword(newPassword); err != nil {
+		return err
 	}
 	if newPassword == currentPassword {
 		return ErrPasswordUnchanged

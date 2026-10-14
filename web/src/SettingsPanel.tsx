@@ -8,6 +8,7 @@ import {
   Health, HostState, Session, StoragePlan, User, ViewingScope, Volume,
   changePassword, confirmStoragePlan, createMember, createStoragePlan, disableMember, executeStoragePlan, listUsers, listVolumes, resetMember, startViewing,
 } from "./api";
+import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { formatBytes, formatNominalCapacity } from "./bytes";
 import { isLocalConsole } from "./LocalConsoleScreenSaver";
 import { LogsSection, type LogsPreset } from "./logs/LogsSection";
@@ -158,6 +159,8 @@ function AccountSection({ session, editing, onEditingChange, onLogout, onShowSig
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const next = String(data.get("newPassword"));
+    const problem = passwordProblem(next);
+    if (problem) { setError(problem); return; }
     if (next !== String(data.get("confirmPassword"))) { setError("两次输入的新密码不一致"); return; }
     setSaving(true);
     try {
@@ -185,7 +188,7 @@ function AccountSection({ session, editing, onEditingChange, onLogout, onShowSig
         {editing && (
           <form className="acct-form" aria-label="修改密码" autoComplete="off" onSubmit={(event) => void submit(event)}>
             <Field label="当前密码"><input className="set-input" name="currentPassword" type="password" required autoComplete="current-password" autoFocus /></Field>
-            <Field label="新密码" hint="至少 12 位"><input className="set-input" name="newPassword" type="password" minLength={12} required autoComplete="new-password" /></Field>
+            <Field label="新密码" hint={passwordRuleText}><input className="set-input" name="newPassword" type="password" minLength={12} required autoComplete="new-password" /></Field>
             <Field label="确认新密码"><input className="set-input" name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" /></Field>
             {error && <Banner tone="error">{error}</Banner>}
             <div className="acct-form-actions">
@@ -529,8 +532,11 @@ function UserDialogView({ dialog, onClose, onDone }: { dialog: UserDialog; onClo
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const value = (name: string) => String(data.get(name));
+    const problem = dialog.kind === "create" ? usernameProblem(value("username")) ?? passwordProblem(value("password"))
+      : dialog.kind === "reset" ? passwordProblem(value("password")) : undefined;
+    if (problem) { setError(problem); return; }
     if (dialog.kind === "create") {
-      void run(async () => { await createMember(value("username"), value("password")); return `已添加成员 ${value("username")}。`; });
+      void run(async () => { const member = await createMember(value("username"), value("password")); return `已添加成员 ${member.username}。`; });
     } else if (dialog.kind === "reset") {
       void run(async () => {
         await resetMember(dialog.user.id, value("password"));
@@ -565,11 +571,11 @@ function UserDialogView({ dialog, onClose, onDone }: { dialog: UserDialog; onClo
         </header>
         {dialog.kind === "create" && (
           <>
-            <Field label="账号"><input className="set-input" name="username" required autoFocus /></Field>
-            <Field label="初始密码" hint="至少 12 位；成员可在“我的账号”中自行修改"><input className="set-input" name="password" type="password" minLength={12} autoComplete="new-password" required /></Field>
+            <Field label="账号" hint={usernameRuleText}><input className="set-input" name="username" required autoFocus autoCapitalize="none" spellCheck={false} /></Field>
+            <Field label="初始密码" hint={`${passwordRuleText}；成员可在“我的账号”中自行修改`}><input className="set-input" name="password" type="password" minLength={12} autoComplete="new-password" required /></Field>
           </>
         )}
-        {dialog.kind === "reset" && <Field label="新密码" hint="至少 12 位"><input className="set-input" name="password" type="password" minLength={12} autoComplete="new-password" required autoFocus /></Field>}
+        {dialog.kind === "reset" && <Field label="新密码" hint={passwordRuleText}><input className="set-input" name="password" type="password" minLength={12} autoComplete="new-password" required autoFocus /></Field>}
         {dialog.kind === "viewing" && (
           <>
             <Field label="查看原因"><input className="set-input" name="reason" maxLength={500} required autoFocus placeholder="例如：帮助找回误删的照片" /></Field>

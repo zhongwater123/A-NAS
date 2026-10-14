@@ -99,6 +99,25 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	}
 }
 
+func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
+	for name, password := range map[string]string{
+		"newline":  "short\nshort\nthen any text",
+		"NUL":      "short\x00then any text",
+		"too long": strings.Repeat("x", 255),
+		"empty":    "",
+	} {
+		runner := &recordingRunner{}
+		executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data")})
+		err := executor.SetCredential(context.Background(), accounts.CredentialRequest{
+			UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
+			Password: password, Role: accounts.RoleMember, UID: 20100, Enabled: true,
+		})
+		if err == nil || len(runner.commands) != 0 {
+			t.Errorf("%s password: error = %v, commands = %#v; want refusal before any command", name, err, runner.commands)
+		}
+	}
+}
+
 func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testing.T) {
 	executor := linux.NewExecutor(nil, accountFailureRunner{}, linux.Options{
 		SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data"), SMBInterface: "enp3s0",

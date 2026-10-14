@@ -1,7 +1,7 @@
 # 统一身份与文件授权
 
 状态：implemented（ADR 0008，[#11–#16](https://github.com/zhongwater123/A-NAS/issues?q=is%3Aissue+%5BADR+0008%5D)）；实机验收进度见[当前状态](../status/CURRENT.md)
-更新时间：2026-10-08
+更新时间：2026-10-14
 
 ## 目标
 
@@ -21,6 +21,13 @@
 - Given：管理员创建成员 `alice`。
 - When：Host Agent 同步账号。
 - Then：`alice` 获得 20100–29999 内新分配且从未使用过的 UID，同名私有组使用相同 GID，属于 `a-nas-users`（管理员另属 `a-nas-admins`）。若系统中已有同名账号或组（如 `root`、`anas-dev`、`a-nas`），或该 UID 已被其他账号占用，创建失败、不修改既有账号，并允许改用其他用户名重试；冲突占用的 UID 不再分配。
+
+### 账号名与密码规则
+
+- Given：管理员创建成员、设备启用时创建首个管理员，或任何人设置新密码。
+- When：服务端检查账号名与密码。
+- Then：账号名去掉首尾空白并转为小写后，须为 3–32 位、以英文字母开头的英文字母、数字、`-` 或 `_`，否则返回 `422 invalid_username`。`global`、`homes`、`printers`、`shared`、`a-nas` 以及以 `a-nas-`、`app-` 开头的名字保留，返回 `409 username_unavailable`，与已被占用、与系统账号冲突的名字相同；被拒绝的名字不占用 UID。密码按 Unicode 字符计为 12–64 个、UTF-8 不超过 254 字节，可含空格、中文与符号，但不能含换行、制表符、NUL 等控制字符，否则返回 `422 invalid_password`。登录不检查这些规则，旧规则下设置的密码继续可用。设置窗口与启用页在提交前按同一规则提示，不靠 `maxlength` 截断粘贴的密码。
+- 原因：账号名同时是 Linux 用户名、SMB 用户名、个人空间目录名和回收站目录名。Samba 的共享名不分大小写，名为 `shared` 的成员在 SMB 上只能连到 `Shared`；`a-nas*` 与 `app-<id>` 是 A-NAS 自己创建的服务、组与应用身份，被成员先占后该账号永远无法创建。`smbpasswd -s` 把密码作为两行 C 字符串读入 256 字节缓冲区，换行或 NUL 会让 SMB 得到比 Web 更短的密码，过长会让设置失败；Host Agent 也拒绝这样的密码。64 个字符内只有大量 emoji 才会超出字节上限。
 
 ### Web 与 SMB 一致读写个人空间
 
@@ -60,7 +67,7 @@
 
 - Given：管理员重置 `alice` 的密码。
 - When：任何人使用新密码首次登录。
-- Then：必须先设置新密码才能继续，期间除会话、改密与通知外的接口返回 `password_change_required`，SMB 凭据保持禁用；改密后以新密码重新启用 SMB。`alice` 收到“管理员重置过你的密码”的通知，审计记录该重置。管理员重置自己的密码不触发强制改密。
+- Then：必须先设置新密码才能继续，期间除会话、改密与通知外的接口返回 `password_change_required`，SMB 凭据保持禁用；改密后以新密码重新启用 SMB。`alice` 收到“管理员重置过你的密码”的通知，审计记录该重置。管理员不能重置自己的密码（`403`），只能在“我的账号”中输入当前密码修改，避免仅凭会话就能改掉管理员密码。
 
 ### 终端与应用
 
@@ -79,6 +86,7 @@
 - 只在空间与共享文件夹根目录设置 ACL；Web 只在同一空间内改名移动，跨空间剪切先复制再删除原条目。复制出的文件以 `0660`、目录以 `0770` 新建（与 Samba 的 `create mask`、`directory mask` 一致），继承目标根目录的默认 ACL，不受原条目更窄模式位的屏蔽；后台一致性任务修复漂移并记录修复事件。
 - 数据卷离线时文件代理拒绝所有文件操作，不在系统盘创建替代目录。
 - UID 永不复用；删除账号后其 UID 仍保留。
+- 账号名不能修改：个人空间目录、回收站目录、Samba 个人共享与身份注册表都以账号名为键。删除账号（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）需要同时决定账号名是否也像 UID 一样永不复用。
 - 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话；管理员重置已禁用账号的密码不会重新启用该账号。
 
 ## 验收证据
@@ -93,4 +101,5 @@
 
 - ADR：[0008 统一 Linux 身份与文件系统 ACL](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0007 类型化特权边界](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[Web 桌面终端](web-terminal.md)
-- 问题：[issue #9](https://github.com/zhongwater123/A-NAS/issues/9)
+- 问题：[issue #9](https://github.com/zhongwater123/A-NAS/issues/9)、[成员账户架构审查 #98](https://github.com/zhongwater123/A-NAS/issues/98)
+- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)

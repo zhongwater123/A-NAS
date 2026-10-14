@@ -13,9 +13,12 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/argon2"
@@ -24,10 +27,14 @@ import (
 var (
 	ErrSetupComplete       = errors.New("administrator setup is already complete")
 	ErrInvalidUsername     = errors.New("invalid username")
-	ErrWeakPassword        = errors.New("password must contain at least 12 characters")
+	ErrInvalidPassword     = errors.New("invalid password")
+	ErrWeakPassword        = fmt.Errorf("%w: it must contain at least %d characters", ErrInvalidPassword, MinPasswordLength)
+	ErrPasswordTooLong     = fmt.Errorf("%w: it must contain at most %d characters", ErrInvalidPassword, MaxPasswordLength)
+	ErrPasswordCharacters  = fmt.Errorf("%w: it must not contain control characters", ErrInvalidPassword)
 	ErrInvalidCredentials  = errors.New("invalid username or password")
 	ErrSessionNotFound     = errors.New("session is invalid or expired")
 	ErrUsernameUnavailable = errors.New("username is unavailable")
+	ErrUsernameReserved    = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
 	ErrCredentialProvision = errors.New("account credential provisioning failed")
 	ErrForbidden           = errors.New("operation is forbidden")
 	ErrUserNotFound        = errors.New("user not found")
@@ -53,6 +60,15 @@ const (
 	// same photos again.
 	PhotoServiceUser = "a-nas-photos"
 	PhotoServiceUID  = 31000
+)
+
+// Password rules for every password a user sets. MaxPasswordLength keeps the
+// password within what smbpasswd reads as one line (maxPasswordBytes) for any
+// text without emoji, and within what SMB clients let users type.
+const (
+	MinPasswordLength = 12
+	MaxPasswordLength = 64
+	maxPasswordBytes  = 254
 )
 
 type Role string
@@ -386,8 +402,8 @@ FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'`).Sc
 	if err != nil || user.Role != RoleAdmin || user.Username != username || (user.Status != UserStatusPending && user.Status != UserStatusError) {
 		return User{}, ErrSetupComplete
 	}
-	if len([]rune(password)) < 12 {
-		return User{}, ErrWeakPassword
+	if err := checkPassword(password); err != nil {
+		return User{}, err
 	}
 	passwordHash, err := hashPassword(password, s.random)
 	if err != nil {
@@ -432,11 +448,11 @@ func (s *Service) CreateMember(ctx context.Context, actor User, username, passwo
 
 func (s *Service) createUser(ctx context.Context, username, password string, role Role, actorID string) (User, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	if !validUsername(username) {
-		return User{}, ErrInvalidUsername
+	if err := checkUsername(username); err != nil {
+		return User{}, err
 	}
-	if len([]rune(password)) < 12 {
-		return User{}, ErrWeakPassword
+	if err := checkPassword(password); err != nil {
+		return User{}, err
 	}
 	passwordHash, err := hashPassword(password, s.random)
 	if err != nil {
@@ -816,12 +832,16 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	return s.appendAudit(ctx, actor.ID, "user.disabled", "user", userID, "")
 }
 
+// ResetCredential lets an administrator choose a temporary password for
+// another account. Administrators change their own password like everyone
+// else, with the current one: a session alone must not be enough to take an
+// account over.
 func (s *Service) ResetCredential(ctx context.Context, actor User, userID, password string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
 		return ErrForbidden
 	}
-	if len([]rune(password)) < 12 {
-		return ErrWeakPassword
+	if err := checkPassword(password); err != nil {
+		return err
 	}
 	var user User
 	var privateSpaceID string
@@ -848,11 +868,10 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	}
 	// Resetting a password never re-enables a disabled account. A member whose
 	// password an administrator chose keeps SMB disabled until choosing a new
-	// one, so the administrator never knows a usable password.
-	mustChange := userID != actor.ID
+	// one, so the administrator never knows a usable SMB password.
 	if err := s.credentials.SetCredential(ctx, CredentialRequest{
 		UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role,
-		UID: uid, Enabled: user.Status != UserStatusDisabled && !mustChange,
+		UID: uid, Enabled: false,
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
@@ -864,8 +883,8 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = ?,
-status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, mustChange, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = 1,
+status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, userID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
@@ -875,10 +894,8 @@ status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE i
 		return err
 	}
 	s.sessions.forgetUser(userID)
-	if mustChange {
-		if err := s.notify(ctx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
-			return err
-		}
+	if err := s.notify(ctx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
+		return err
 	}
 	return s.appendAudit(ctx, actor.ID, "user.credential_reset", "user", userID, "")
 }
@@ -922,8 +939,45 @@ func (s *Service) appendAudit(ctx context.Context, actorID, action, resourceType
 	return err
 }
 
-func validUsername(value string) bool {
-	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(value)
+// usernamePattern is a portable Linux account name; the Host Agent accepts the
+// same names.
+var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`)
+
+// reservedUsernames are Samba's special sections and the Shared share. Share
+// names ignore case, so a member named shared would reach Shared instead of
+// their private space over SMB.
+var reservedUsernames = []string{"global", "homes", "printers", "shared"}
+
+// checkUsername applies the account name rules to a lowercased name. Names
+// starting a-nas or app- belong to accounts A-NAS creates itself, such as
+// a-nas-photos and the app identity app-<id> (ADR 0008); a member holding one
+// would block that account for good.
+func checkUsername(username string) error {
+	switch {
+	case !usernamePattern.MatchString(username):
+		return ErrInvalidUsername
+	case slices.Contains(reservedUsernames, username), username == "a-nas",
+		strings.HasPrefix(username, "a-nas-"), strings.HasPrefix(username, "app-"):
+		return ErrUsernameReserved
+	}
+	return nil
+}
+
+// checkPassword applies the password rules to a password being set. Signing in
+// does not, so a password set under earlier rules keeps working. Control
+// characters are refused because smbpasswd reads the password as a line of C
+// text: a newline or NUL would give SMB a different, shorter password.
+func checkPassword(password string) error {
+	length := utf8.RuneCountInString(password)
+	switch {
+	case !utf8.ValidString(password) || strings.ContainsFunc(password, unicode.IsControl):
+		return ErrPasswordCharacters
+	case length < MinPasswordLength:
+		return ErrWeakPassword
+	case length > MaxPasswordLength || len(password) > maxPasswordBytes:
+		return ErrPasswordTooLong
+	}
+	return nil
 }
 
 func (s *Service) randomID(prefix string) string { return prefix + ":" + s.randomToken(16) }

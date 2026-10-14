@@ -1096,11 +1096,19 @@ func decodeJSON(r *http.Request, target any) error {
 
 func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrUsernameUnavailable),
-		errors.Is(err, accounts.ErrIdentityConflict), errors.Is(err, accounts.ErrViewingActive):
+	case errors.Is(err, accounts.ErrSetupComplete):
+		writeError(w, http.StatusConflict, "setup_complete", err.Error())
+	case errors.Is(err, accounts.ErrUsernameUnavailable), errors.Is(err, accounts.ErrIdentityConflict):
+		writeError(w, http.StatusConflict, "username_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrViewingActive):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
-	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword),
-		errors.Is(err, accounts.ErrReasonRequired), errors.Is(err, accounts.ErrPasswordUnchanged):
+	case errors.Is(err, accounts.ErrInvalidUsername):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_username", err.Error())
+	case errors.Is(err, accounts.ErrInvalidPassword):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_password", err.Error())
+	case errors.Is(err, accounts.ErrPasswordUnchanged):
+		writeError(w, http.StatusUnprocessableEntity, "password_unchanged", err.Error())
+	case errors.Is(err, accounts.ErrReasonRequired):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, accounts.ErrInvalidCredentials):
 		writeError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")

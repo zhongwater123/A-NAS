@@ -65,6 +65,7 @@ import { appProject } from "./docker/model";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { FileViewer } from "./files/FileViewer";
 import { nameErrorText, nameProblem } from "./fileNames";
+import { accountErrorText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { fileTypeLabel, isPreviewableImage, isVideoFile, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
@@ -203,6 +204,8 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
 		const next = String(data.get("newPassword"));
+		const problem = passwordProblem(next);
+		if (problem) { setError(problem); return; }
 		if (next !== String(data.get("confirmPassword"))) { setError("两次输入的新密码不一致"); return; }
 		setSubmitting(true);
 		try { await changePassword(String(data.get("currentPassword")), next); onChanged(); }
@@ -213,7 +216,7 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 		<span className="brand-mark large">A</span><p className="section-label">PASSWORD RESET</p><h1>设置新密码</h1>
 		<p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
 		<label>当前密码<input name="currentPassword" type="password" required autoComplete="current-password" /></label>
-		<label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
+		<label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" /><small>{passwordRuleText}</small></label>
 		<label>确认新密码<input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
 		{error && <p className="form-error">{error}</p>}
 		<button className="primary" disabled={submitting}>{submitting ? "处理中…" : "保存新密码"}</button>
@@ -253,21 +256,25 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 	const [submitting, setSubmitting] = useState(false);
 	if (mode === "loading") return <main className="auth-shell"><div className="auth-card"><span className="loader" /><h1>正在启动 A-NAS…</h1></div></main>;
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault(); setSubmitting(true); setError("");
+		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
+		// Signing in applies no rules, so passwords set under earlier ones keep working.
+		const problem = mode === "setup" ? usernameProblem(String(data.get("username"))) ?? passwordProblem(String(data.get("password"))) : undefined;
+		if (problem) { setError(problem); return; }
+		setSubmitting(true);
 		try {
 			const session = mode === "setup"
 				? await setupAdministrator(String(data.get("username")), String(data.get("password")), isLocalConsole())
 				: await login(String(data.get("username")), String(data.get("password")), isLocalConsole());
 			onAuthenticated(session);
-		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
+		} catch (caught) { setError(accountErrorText(caught) ?? (caught instanceof APIError ? caught.message : "请求失败，请稍后再试")); }
 		finally { setSubmitting(false); }
 	};
 	return <main className="auth-shell"><form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
 		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "启用 A-NAS" : "登录 A-NAS"}</h1>
 		{mode === "setup" && <p>创建本机管理员账号以启用设备。</p>}
-		<label>账号<input name="username" required autoComplete="username" /></label>
-		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} /></label>
+		<label>账号<input name="username" required autoComplete="username" autoCapitalize="none" spellCheck={false} />{mode === "setup" && <small>{usernameRuleText}</small>}</label>
+		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} />{mode === "setup" && <small>{passwordRuleText}</small>}</label>
 		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员并启用" : "登录"}</button>
 	</form></main>;
 }
@@ -1004,7 +1011,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 }
 
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
-function messageOf(error: unknown) { return nameErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
+function messageOf(error: unknown) { return nameErrorText(error) ?? accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
 
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);

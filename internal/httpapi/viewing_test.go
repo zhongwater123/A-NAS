@@ -148,3 +148,41 @@ func (s signedIn) call(t *testing.T, method, path, body string) *httptest.Respon
 	s.handler.ServeHTTP(response, request)
 	return response
 }
+
+func TestAccountErrorsNameTheRuleThatFailed(t *testing.T) {
+	ctx := context.Background()
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
+	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+		Accounts: accountService, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := signIn(t, handler, "owner", "correct horse battery staple")
+	for _, test := range []struct {
+		method, path, body string
+		status             int
+		code               string
+	}{
+		{http.MethodPost, "/api/v1/users", `{"username":"小明","password":"member password for testing"}`, http.StatusUnprocessableEntity, "invalid_username"},
+		{http.MethodPost, "/api/v1/users", `{"username":"shared","password":"member password for testing"}`, http.StatusConflict, "username_unavailable"},
+		{http.MethodPost, "/api/v1/users", `{"username":"alice","password":"too short"}`, http.StatusUnprocessableEntity, "invalid_password"},
+		{http.MethodPost, "/api/v1/users", `{"username":"alice","password":"short\nshort\nthen any text"}`, http.StatusUnprocessableEntity, "invalid_password"},
+		{http.MethodPost, "/api/v1/users", `{"username":"alice","password":"member password for testing"}`, http.StatusCreated, ""},
+		{http.MethodPost, "/api/v1/users", `{"username":"Alice","password":"member password for testing"}`, http.StatusConflict, "username_unavailable"},
+		{http.MethodPatch, "/api/v1/users/" + admin.ID + "/credential", `{"password":"administrator new password"}`, http.StatusForbidden, "forbidden"},
+		{http.MethodPost, "/api/v1/session/password", `{"currentPassword":"correct horse battery staple","newPassword":"correct horse battery staple"}`, http.StatusUnprocessableEntity, "password_unchanged"},
+		{http.MethodPost, "/api/v1/setup/admin", `{"username":"second","password":"correct horse battery staple"}`, http.StatusConflict, "setup_complete"},
+	} {
+		got := owner.call(t, test.method, test.path, test.body)
+		if got.Code != test.status || (test.code != "" && errorCode(t, got) != test.code) {
+			t.Errorf("%s %s %s = %d %s, want %d %s", test.method, test.path, test.body, got.Code, got.Body.String(), test.status, test.code)
+		}
+	}
+}
