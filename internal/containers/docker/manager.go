@@ -204,6 +204,7 @@ func mapContainer(summary container.Summary) (containers.Container, bool) {
 		ID:        summary.ID,
 		Name:      name,
 		Image:     summary.Image,
+		ImageID:   summary.ImageID,
 		State:     state,
 		Status:    summary.Status,
 		CreatedAt: time.Unix(summary.Created, 0).UTC(),

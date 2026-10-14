@@ -1,4 +1,4 @@
-import { Check, Clapperboard, Ellipsis, Film, Heart, ListPlus, Play, Tv, Video } from "lucide-react";
+import { Check, Clapperboard, Ellipsis, Film, Heart, ListPlus, PenLine, Play, Tv, Video } from "lucide-react";
 import { createContext, CSSProperties, KeyboardEvent, ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -15,6 +15,8 @@ export interface MediaActions {
   toggleFavorite: (title: Title) => void;
   setWatched: (title: Title, watched: boolean) => void;
   addToCollection: (title: Title) => void;
+  // rename renames a film's, episode's or other video's file.
+  rename: (title: Title) => void;
 }
 
 export const ActionsContext = createContext<MediaActions | undefined>(undefined);
@@ -79,6 +81,7 @@ export function cardActions(title: Title, actions: MediaActions, extra: CardActi
     { label: title.favorite ? "取消收藏" : "收藏", icon: <Heart />, run: () => actions.toggleFavorite(title) },
     { label: watched ? "标记为未看" : "标记为已看", icon: <Check />, run: () => actions.setWatched(title, !watched) },
     ...(title.type !== "episode" ? [{ label: "加入合集…", icon: <ListPlus />, run: () => actions.addToCollection(title) }] : []),
+    ...(title.type !== "show" ? [{ label: "重命名片源…", icon: <PenLine />, run: () => actions.rename(title) }] : []),
     ...extra,
   ];
 }

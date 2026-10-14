@@ -110,6 +110,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "media library", path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, wantStatus: http.StatusOK},
 		{name: "media library missing", path: "/api/v1/media/libraries/library:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
 		{name: "media library overlap", method: http.MethodPost, body: `{"name":"重复","kind":"movies","spaceId":"` + movies.shared.ID + `","folderIds":["` + movies.folder + `"]}`, path: "/api/v1/media/libraries", handler: mediaHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "media video file rename", method: http.MethodPatch, body: `{"fileName":"热天午后.txt"}`, path: "/api/v1/media/videos/" + movies.film, handler: mediaHandler, csrf: true, wantStatus: http.StatusBadRequest},
 		{name: "media library scan", method: http.MethodPost, path: "/api/v1/media/libraries/" + movies.library + "/scan", handler: mediaHandler, csrf: true, wantStatus: http.StatusAccepted},
 		{name: "media library rename", method: http.MethodPatch, body: `{"name":"家庭影院"}`, path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, csrf: true, wantStatus: http.StatusOK},
 		{name: "media home", path: "/api/v1/media/home", handler: mediaHandler, wantStatus: http.StatusOK},

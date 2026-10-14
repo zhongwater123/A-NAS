@@ -200,6 +200,9 @@ type Service struct {
 	aiModel        string
 	aiDetector     string
 	detectorLoaded bool
+	// nextDetection is the next detection job with its input, rendered
+	// while the Worker detected the one before. Only the AI runner uses it.
+	nextDetection *detectionInput
 	// embedder encodes search queries, index holds image vectors for search
 	// and AI clusters, and detected the detector's best score per class.
 	embedder   Embedder

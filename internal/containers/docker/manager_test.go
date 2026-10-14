@@ -96,6 +96,7 @@ func TestMapContainerNormalizesEngineSummary(t *testing.T) {
 		ID:      testID,
 		Names:   []string{"/jellyfin"},
 		Image:   "jellyfin/jellyfin:10.11",
+		ImageID: "sha256:" + testID,
 		Created: 1_790_000_000,
 		State:   container.StateRunning,
 		Status:  "Up 3 hours",
@@ -108,7 +109,7 @@ func TestMapContainerNormalizesEngineSummary(t *testing.T) {
 	}
 
 	item, ok := mapContainer(summary)
-	if !ok || item.Name != "jellyfin" || item.Project != "media" || item.State != containers.StateRunning {
+	if !ok || item.Name != "jellyfin" || item.Project != "media" || item.State != containers.StateRunning || item.ImageID != "sha256:"+testID {
 		t.Fatalf("item = %+v, ok = %v", item, ok)
 	}
 	if len(item.Ports) != 2 || item.Ports[0].ContainerPort != 1900 || item.Ports[1].HostPort != 8096 || item.Ports[1].HostIP != "0.0.0.0" {

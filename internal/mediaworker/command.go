@@ -75,7 +75,10 @@ func (t Tools) command(request Request) (string, []string) {
 		} else {
 			args = append(args, "-an")
 		}
-		return t.FFmpeg, append(args, "-max_muxing_queue_size", "1024",
+		// A fragment at least every second, not only at each keyframe:
+		// sources with long GOPs otherwise hold back the first picture,
+		// and the start after a seek, for a whole GOP.
+		return t.FFmpeg, append(args, "-max_muxing_queue_size", "1024", "-frag_duration", "1000000",
 			"-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
 	case OpAudio:
 		// FLAC keeps decoded audio exactly, so a lossy source is not

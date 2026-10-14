@@ -6,7 +6,7 @@ import { CategoryPage, FavoritesPage, HistoryPage, Loading, messageOf } from "./
 import { ActionsContext, type MediaActions } from "./Cards";
 import { CollectionPage, CollectionsPage } from "./Collections";
 import { ShowPage, VideoPage } from "./Detail";
-import { CollectionPicker, useDialogs, useToasts } from "./feedback";
+import { CollectionPicker, RenameDialog, useDialogs, useToasts } from "./feedback";
 import { FoldersPage, type FolderPlace } from "./Folders";
 import { HomePage } from "./Home";
 import { LibrariesPage, LibraryDialog } from "./Libraries";
@@ -64,6 +64,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
   const [query, setQuery] = useState("");
   const [play, setPlay] = useState<PlayRequest>();
   const [picker, setPicker] = useState<Title>();
+  const [renaming, setRenaming] = useState<Title>();
   const [editing, setEditing] = useState<{ library?: MediaLibrary; spaces: Space[] }>();
   const [width, setWidth] = useState(1100);
   const [docked, setDocked] = useState(true);
@@ -203,6 +204,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       }, (caught) => onError(messageOf(caught)));
     },
     addToCollection: (title) => setPicker(title),
+    rename: (title) => setRenaming(title),
   }), [navigate, playTitle, toast, refresh, onError]);
 
   const openLibraryDialog = async (library?: MediaLibrary) => {
@@ -355,6 +357,10 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
           )}
         </main>
         {play && <Player request={play} onClose={() => { setPlay(undefined); refresh(); }} onNavigate={(videoId) => setPlay({ videoId })} onSaved={() => undefined} />}
+        {renaming && (
+          <RenameDialog title={renaming} onClose={() => setRenaming(undefined)}
+            onDone={(detail) => { setRenaming(undefined); toast({ text: `已重命名为“${detail.file.name}”，正在重新识别片名` }); follow(); refresh(); }} />
+        )}
         {picker && <CollectionPicker title={picker} onClose={() => setPicker(undefined)} onDone={(text) => { setPicker(undefined); toast({ text }); refresh(); }} />}
         {editing && <LibraryDialog library={editing.library} spaces={editing.spaces} isAdmin={isAdmin} onClose={() => setEditing(undefined)}
           onSaved={(library) => {

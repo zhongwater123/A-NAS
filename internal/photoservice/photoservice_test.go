@@ -83,7 +83,14 @@ func start(t *testing.T, configure ...func(*photoservice.Config)) running {
 	}
 	go func() { r.done <- photoservice.Run(ctx, config) }()
 	t.Cleanup(func() { cancel(); <-r.done })
-	waitFor(t, func() bool { _, err := os.Stat(r.socket); return err == nil })
+	// The socket file appears on bind, a moment before it accepts.
+	waitFor(t, func() bool {
+		conn, err := net.Dial("unix", r.socket)
+		if err == nil {
+			_ = conn.Close()
+		}
+		return err == nil
+	})
 	return r
 }
 

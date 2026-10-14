@@ -29,7 +29,7 @@ func TestSnapshotIncludesDataSourceAndUsage(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, err = %v, body = %s", recorder.Code, err, recorder.Body)
 	}
-	if body.DataSource != "simulated" || body.Engine.Version != "29.1.3" || len(body.Containers) != 3 || body.Containers[0].Usage.CPUPercent != 12.4 {
+	if body.DataSource != "simulated" || body.Engine.Version != "29.1.3" || len(body.Containers) != 8 || body.Containers[0].Usage.CPUPercent != 12.4 {
 		t.Fatalf("body = %+v", body)
 	}
 	if recorder.Header().Get("Cache-Control") != "no-store" {

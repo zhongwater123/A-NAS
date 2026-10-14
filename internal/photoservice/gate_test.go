@@ -1,12 +1,15 @@
 package photoservice
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,5 +131,71 @@ func TestGateWaitsForQuietAndLowPressure(t *testing.T) {
 	free = MemoryReserve - 1
 	if ok, reason := open(); ok || reason != "memory_low" {
 		t.Fatalf("Open() below the memory reserve = %v, %q", ok, reason)
+	}
+}
+
+func TestGateRecordsWhatHeldAIWorkBack(t *testing.T) {
+	slice := filepath.Join(t.TempDir(), "system.slice")
+	write := func(member string, some float64) {
+		t.Helper()
+		path := filepath.Join(slice, member, "io.pressure")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "some avg10=" + formatFloat(some) + " avg60=0.00 avg300=0.00 total=1\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("", 12.3)
+	write("anas-host-agent.service", 8.1)
+	write("anas-photos.service", 4)
+	write("smartmontools.service", 0)
+	free := uint64(4 << 30)
+	var logged bytes.Buffer
+	gate := &Gate{
+		now:       func() time.Time { return time.Date(2026, 10, 13, 20, 0, 0, 0, time.UTC) },
+		watched:   []string{slice},
+		pressure:  othersPressure([]string{slice}),
+		available: func() (uint64, error) { return free, nil },
+		logger:    slog.New(slog.NewTextHandler(&logged, nil)),
+	}
+	open := func() (bool, string) { return gate.Open(context.Background()) }
+
+	// Each change is recorded once, however often the gate is asked.
+	for range 3 {
+		if ok, reason := open(); ok || reason != "io_pressure" {
+			t.Fatalf("Open() = %v, %q; want closed for I/O pressure", ok, reason)
+		}
+	}
+	write("", 3)
+	if ok, reason := open(); !ok {
+		t.Fatalf("Open() once the pressure halved = closed (%s)", reason)
+	}
+	free = MemoryReserve - 1<<20
+	for range 2 {
+		if ok, reason := open(); ok || reason != "memory_low" {
+			t.Fatalf("Open() = %v, %q; want closed for low memory", ok, reason)
+		}
+	}
+	free = 4 << 30
+	if ok, reason := open(); !ok {
+		t.Fatalf("Open() with memory again = closed (%s)", reason)
+	}
+
+	want := []string{
+		`msg="AI work yields to pressure" resource=io avg10=12.3 limit=10 system.slice="12.30: anas-host-agent.service 8.10, anas-photos.service 4.00"`,
+		`msg="AI work no longer yields to pressure" resource=io avg10=3 below=5`,
+		`msg="AI work yields to low memory" available_mib=1535 reserve_mib=1536`,
+		`msg="AI work no longer yields to low memory" available_mib=4096`,
+	}
+	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("log =\n%s\nwant %d lines", logged.String(), len(want))
+	}
+	for i, line := range lines {
+		if !strings.HasSuffix(line, want[i]) {
+			t.Fatalf("log line %d = %s\nwant it to end with %s", i+1, line, want[i])
+		}
 	}
 }
