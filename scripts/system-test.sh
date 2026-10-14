@@ -3,8 +3,8 @@
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
 # touches the data volume: Web files (File Broker workers), SMB, the photo API,
-# the FFmpeg media worker shared by the media center and music, and the LAN
-# Web entry that Caddy serves on
+# the FFmpeg media worker shared by the media center and music, the
+# administrator terminal, and the LAN Web entry that Caddy serves on
 # port 80. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
 # catches a unit that takes the Host Agent's CAP_SETUID (issue #38).
@@ -345,6 +345,84 @@ check "systemd's own lines about a unit are included" \
 check "members cannot read system logs" test "$(status_of -b /tmp/alice.jar "$api/api/v1/system-logs")" = 403
 check "a unit outside the allowlist is refused" test "$(status_of -b /tmp/owner.jar "$api/api/v1/system-logs?service=ssh")" = 400
 
+# --- Settings → 终端: off until the device's operator turns it on, then a
+# shell that the File Broker starts as the administrator inside the Host
+# Agent's sandbox, reached through the LAN entry.
+cat > /tmp/terminal-session.py <<'PY'
+# URL JAR INPUT: types INPUT into a terminal session, prints what the shell
+# wrote without escape sequences, then "close CODE REASON". A minimal RFC 6455
+# client: Debian's Python has none in its standard library.
+import base64, os, re, socket, struct, sys, urllib.parse
+url, jar, typed = sys.argv[1], sys.argv[2], sys.argv[3]
+target = urllib.parse.urlsplit(url)
+cookies = []
+for line in open(jar):
+    line = line.removeprefix("#HttpOnly_")
+    fields = line.rstrip("\n").split("\t")
+    if not line.startswith("#") and len(fields) == 7:
+        cookies.append(f"{fields[5]}={fields[6]}")
+conn = socket.create_connection((target.hostname, target.port or 80), timeout=30)
+conn.sendall((f"GET {target.path} HTTP/1.1\r\nHost: {target.netloc}\r\nOrigin: http://{target.netloc}\r\n"
+              "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
+              f"Sec-WebSocket-Key: {base64.b64encode(os.urandom(16)).decode()}\r\n"
+              f"Cookie: {'; '.join(cookies)}\r\n\r\n").encode())
+reader = conn.makefile("rb")
+status = reader.readline().decode().strip()
+if " 101 " not in f"{status} ":
+    sys.exit(f"handshake refused: {status}")
+while reader.readline() not in (b"\r\n", b""):
+    pass
+def send(opcode, payload):
+    mask = os.urandom(4)
+    size = len(payload)
+    length = bytes([0x80 | size]) if size < 126 else bytes([0x80 | 126]) + struct.pack(">H", size)
+    conn.sendall(bytes([0x80 | opcode]) + length + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+send(1, b'{"type":"resize","cols":120,"rows":30}')
+send(2, typed.encode())
+output = bytearray()
+while len(head := reader.read(2)) == 2:
+    opcode, size = head[0] & 0x0F, head[1] & 0x7F
+    if size == 126:
+        size = struct.unpack(">H", reader.read(2))[0]
+    elif size == 127:
+        size = struct.unpack(">Q", reader.read(8))[0]
+    payload = reader.read(size)
+    if opcode in (0, 2):
+        output += payload
+    elif opcode == 9:
+        send(10, payload)
+    elif opcode == 8:
+        code = struct.unpack(">H", payload[:2])[0] if len(payload) >= 2 else 1005
+        # Bash marks each command it runs with bracketed-paste switches.
+        text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07", "", output.decode(errors="replace"))
+        sys.stdout.write(text.replace("\r", ""))
+        print(f"\nclose {code} {payload[2:].decode()}")
+        sys.exit(0)
+sys.exit("connection ended without a close frame")
+PY
+# terminal URL JAR INPUT
+terminal() { timeout 60 python3 /tmp/terminal-session.py "$1/api/v1/terminal/session" "$2" "$3"; }
+check "the terminal is off on a new device" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = false
+check "a disabled terminal refuses sessions" denied terminal "$api" /tmp/owner.jar 'exit 0'
+# The runbook step that turns it on.
+printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
+systemctl restart anas-api
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "the operator turns the terminal on" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = true
+check "members cannot use the terminal" test "$(status_of -b /tmp/alice.jar "$api/api/v1/terminal")" = 403
+curl -fsS -o /dev/null -c /tmp/owner-lan.jar -H 'Content-Type: application/json' \
+  -d "{\"username\":\"owner\",\"password\":\"$owner_password\"}" "$lan/api/v1/session" || true
+shell_output=$(terminal "$lan" /tmp/owner-lan.jar $'echo "uid:$(id -u)"\necho "cwd:$PWD"\nls '"$data"$'/spaces/private/alice >/dev/null 2>&1; echo "other:$?"\nexit 7\n' || true)
+check "a LAN shell runs as the administrator's own UID" grep -qx "uid:$owner_id" <<<"$shell_output"
+check "the shell starts in the administrator's private space" grep -qx "cwd:$data/spaces/private/owner" <<<"$shell_output"
+check "the shell cannot list a member's private space" grep -qx 'other:[1-9][0-9]*' <<<"$shell_output"
+check "the shell's exit code reaches the browser" grep -qx 'close 1000 exit 7' <<<"$shell_output"
+check "the local console reaches the terminal too" \
+  grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
+check "a member's session gets no shell" denied terminal "$lan" /tmp/lan.jar 'exit 0'
+
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"
 check "Product Service account cannot list Shared" denied as a-nas ls "$data/spaces/shared"
@@ -654,6 +732,8 @@ check "a staged pool installs" quiet "$media" "$pool_a" "$staged"
 check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
 stage /tmp/upgrade
 check "a release installs" install_release upgrade
+check "the upgrade keeps the operator's terminal opt-in" \
+  test "$(grep -cx 'ANAS_TERMINAL=enabled' /etc/a-nas/anas-api.env):$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = 1:true
 check "the upgrade keeps the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
 check "the upgrade copies neither the models nor the runtime again" \
   test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = 3 \

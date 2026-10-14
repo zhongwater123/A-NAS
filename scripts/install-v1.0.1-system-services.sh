@@ -233,6 +233,13 @@ if [[ ! -e /var/lib/a-nas/screensavers/current && ! -L /var/lib/a-nas/screensave
   fi
 fi
 
+# The administrator terminal stays off until the device's operator turns it on
+# (docs/specs/web-terminal.md). This file is rewritten on every release, which
+# used to drop that choice, so carry it over.
+terminal_enabled=
+if grep -qx 'ANAS_TERMINAL=enabled' /etc/a-nas/anas-api.env 2>/dev/null; then
+  terminal_enabled=1
+fi
 printf '%s\n' \
   'ANAS_HTTP_ADDR=127.0.0.1:8080' \
   'ANAS_HOSTSTATE_MODE=agent' \
@@ -248,6 +255,9 @@ printf '%s\n' \
 # never grant the Product Service direct access to docker.sock.
 if [[ -S /run/a-nas-container/agent.sock ]]; then
   printf 'ANAS_CONTAINERS_MODE=agent\n' >> /etc/a-nas/anas-api.env
+fi
+if [[ -n "$terminal_enabled" ]]; then
+  printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 fi
 chown root:a-nas /etc/a-nas/anas-api.env
 chmod 0640 /etc/a-nas/anas-api.env
