@@ -58,6 +58,9 @@ type ScanEntry struct {
 type ScanSkip struct {
 	Names    []string `json:"names,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
+	// Shallow lists entries whose names start with these prefixes without
+	// what they contain.
+	Shallow []string `json:"shallow,omitempty"`
 }
 
 func (s ScanSkip) matches(name string) bool {
@@ -65,4 +68,8 @@ func (s ScanSkip) matches(name string) bool {
 		return true
 	}
 	return slices.ContainsFunc(s.Prefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
+}
+
+func (s ScanSkip) shallow(name string) bool {
+	return slices.ContainsFunc(s.Shallow, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
 }

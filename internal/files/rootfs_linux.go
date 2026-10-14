@@ -169,7 +169,7 @@ func scanDirectory(ctx context.Context, fd int, prefix string, skip ScanSkip, en
 		}
 		entry := ScanEntry{Path: prefix + child, Info: infoFromStat(child, &stat)}
 		*entries = append(*entries, entry)
-		if entry.Info.Kind != KindDirectory {
+		if entry.Info.Kind != KindDirectory || skip.shallow(child) {
 			continue
 		}
 		childFD, err := unix.Openat(fd, child, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)

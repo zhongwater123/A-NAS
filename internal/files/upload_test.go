@@ -278,6 +278,39 @@ func TestReconciliationRemovesOnlyUnheldUploadTemporaries(t *testing.T) {
 	}
 }
 
+func TestReconciliationRemovesCopiesARestartLeftBehind(t *testing.T) {
+	f := newUploadFixture(t)
+	// The service restarted in the middle of copying a folder.
+	leftover := filepath.Join(f.root, ".a-nas-copy-0123456789abcdef")
+	if err := os.MkdirAll(filepath.Join(leftover, "春节"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leftover, "春节", "a.jpg"), []byte("aaaa"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(leftover, f.now, f.now)
+	if got := f.names(t, ""); len(got) != 0 {
+		t.Fatalf("a copy in progress is listed: %v", got)
+	}
+	if _, err := os.Stat(leftover); err != nil {
+		t.Fatalf("a recent copy was removed: %v", err)
+	}
+	f.now = f.now.Add(2 * time.Hour)
+	f.names(t, "")
+	if _, err := os.Stat(leftover); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a copy left behind was kept: %v", err)
+	}
+	// A copy that runs is never removed, however long it takes.
+	source := f.send(t, files.UploadRequest{Name: "片段.mp4"}, "clip")
+	copied, err := f.service.Copy(f.ctx, f.alice, source.Entry.ID, f.space.ID, "", "片段 副本.mp4")
+	if err != nil || copied.Name != "片段 副本.mp4" {
+		t.Fatalf("Copy() = %#v, %v", copied, err)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(f.root, ".a-nas-copy-*")); len(leftovers) != 0 {
+		t.Fatalf("a finished copy left %v", leftovers)
+	}
+}
+
 func TestArchiveItemsListSelectionsOfOneSpace(t *testing.T) {
 	f := newUploadFixture(t)
 	a := f.send(t, files.UploadRequest{Directories: []string{"相册", "春节"}, Name: "a.jpg"}, "aaaa")

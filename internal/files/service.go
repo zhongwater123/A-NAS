@@ -1073,7 +1073,9 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	if err := s.ensureCapacity(size); err != nil {
 		return Entry{}, "", err
 	}
-	temporary := filepath.Join(parent, ".a-nas-copy-"+safeSegment(s.randomID("copy")))
+	temporary := filepath.Join(parent, copyTemporaryPrefix+safeSegment(s.randomID("copy")))
+	s.holdTemporary(filepath.Base(temporary), true)
+	defer s.holdTemporary(filepath.Base(temporary), false)
 	if err := s.fs.Copy(ctx, source, temporary); err != nil {
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
 		return Entry{}, "", err
@@ -1154,14 +1156,14 @@ func (s *Service) Upload(ctx context.Context, actor accounts.User, spaceID, pare
 	if err != nil {
 		return Entry{}, err
 	}
-	s.holdUpload(filepath.Base(temporaryPath), true)
+	s.holdTemporary(filepath.Base(temporaryPath), true)
 	committed := false
 	defer func() {
 		_ = temporary.Close()
 		if !committed {
 			_ = s.fs.Remove(context.WithoutCancel(ctx), temporaryPath)
 		}
-		s.holdUpload(filepath.Base(temporaryPath), false)
+		s.holdTemporary(filepath.Base(temporaryPath), false)
 	}()
 	buffer := make([]byte, 1024*1024)
 	for {
@@ -1398,11 +1400,12 @@ func scanEntry(row rowScanner) (Entry, error) {
 	return entry, nil
 }
 
-// reconcileSkip hides A-NAS bookkeeping and in-flight copies. Upload
-// temporaries are scanned but never catalogued, so that stale ones are found.
+// reconcileSkip hides A-NAS bookkeeping. Upload and copy temporaries are
+// scanned but never catalogued, so that stale ones are found; a copy is
+// listed without its contents.
 var reconcileSkip = ScanSkip{
-	Names:    []string{".a-nas-trash", ".a-nas-snapshots", ".a-nas-stale"},
-	Prefixes: []string{".a-nas-copy-"},
+	Names:   []string{".a-nas-trash", ".a-nas-snapshots", ".a-nas-stale"},
+	Shallow: []string{copyTemporaryPrefix},
 }
 
 func (s *Service) reconcile(ctx context.Context, space accounts.Space, root string) error {
@@ -1412,10 +1415,14 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 	}
 	parentIDs := map[string]string{".": ""}
 	seen := make(map[uint64]struct{})
-	var temporaries []ScanEntry
+	var temporaries, copies []ScanEntry
 	for _, item := range scanned {
 		if isUploadTemporary(item.Path) {
 			temporaries = append(temporaries, item)
+			continue
+		}
+		if isCopyTemporary(item.Path) {
+			copies = append(copies, item)
 			continue
 		}
 		if item.Info.Kind != KindFile && item.Info.Kind != KindDirectory {
@@ -1456,6 +1463,7 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 		}
 	}
 	s.removeStaleUploads(ctx, root, temporaries)
+	s.removeStaleCopies(ctx, root, copies)
 	return nil
 }
 

@@ -55,6 +55,13 @@ const (
 	// holds is left over from a restart or a crash. staleUploadAge only
 	// spares the moment between creating a temporary and holding it.
 	staleUploadAge = 10 * time.Minute
+	// copyTemporaryPrefix names a copy being made in its target folder.
+	// Copies hold their temporaries too; one nobody holds and unchanged for
+	// staleCopyAge is left over from a restart during a copy. The age is
+	// longer than for uploads because a deep copy changes only the folders
+	// it is writing into.
+	copyTemporaryPrefix = ".a-nas-copy-"
+	staleCopyAge        = time.Hour
 )
 
 // UploadRequest describes a file whose bytes arrive in parts.
@@ -155,7 +162,7 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 		SpaceID: space.ID, ParentID: parentID, Name: request.Name, Size: request.Size, Conflict: request.Conflict,
 		file: file, temporary: filepath.Base(temporaryPath), path: temporaryPath,
 	}
-	s.holdUpload(upload.temporary, true)
+	s.holdTemporary(upload.temporary, true)
 	return upload, nil
 }
 
@@ -252,7 +259,7 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 			return CommittedUpload{}, err
 		}
 	}
-	s.holdUpload(upload.temporary, false)
+	s.holdTemporary(upload.temporary, false)
 	entry, err := s.registerPath(ctx, space.ID, upload.ParentID, root, target)
 	if err != nil {
 		return CommittedUpload{}, err
@@ -274,7 +281,7 @@ func (s *Service) AbortUpload(ctx context.Context, actor accounts.User, upload *
 		_ = upload.file.Close()
 		upload.file = nil
 	}
-	defer s.holdUpload(upload.temporary, false)
+	defer s.holdTemporary(upload.temporary, false)
 	temporary := upload.path
 	if space, root, err := s.authorizedSpace(ctx, actor, upload.SpaceID, true); err == nil {
 		if parentPath, err := s.parentPath(ctx, root, space.ID, upload.ParentID); err == nil {
@@ -377,9 +384,9 @@ func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, 
 	return true, nil
 }
 
-// holdUpload marks a temporary as owned by a pending upload, so that
-// reconciliation never removes it however long the upload is paused.
-func (s *Service) holdUpload(temporary string, held bool) {
+// holdTemporary marks a temporary as owned by a pending upload or a running
+// copy, so that reconciliation never removes it however long that takes.
+func (s *Service) holdTemporary(temporary string, held bool) {
 	s.uploadsMu.Lock()
 	defer s.uploadsMu.Unlock()
 	if held {
@@ -389,7 +396,7 @@ func (s *Service) holdUpload(temporary string, held bool) {
 	}
 }
 
-func (s *Service) uploadHeld(temporary string) bool {
+func (s *Service) temporaryHeld(temporary string) bool {
 	s.uploadsMu.Lock()
 	defer s.uploadsMu.Unlock()
 	_, held := s.uploads[temporary]
@@ -402,7 +409,7 @@ func (s *Service) uploadHeld(temporary string) bool {
 func (s *Service) removeStaleUploads(ctx context.Context, root string, temporaries []ScanEntry) {
 	cutoff := s.now().Add(-staleUploadAge)
 	for _, item := range temporaries {
-		if item.Info.Kind != KindFile || item.Info.ModTime.After(cutoff) || s.uploadHeld(item.Info.Name) {
+		if item.Info.Kind != KindFile || item.Info.ModTime.After(cutoff) || s.temporaryHeld(item.Info.Name) {
 			continue
 		}
 		_ = s.fs.Remove(ctx, filepath.Join(root, filepath.FromSlash(item.Path)))
@@ -411,6 +418,22 @@ func (s *Service) removeStaleUploads(ctx context.Context, root string, temporari
 
 func isUploadTemporary(name string) bool {
 	return strings.HasPrefix(path.Base(name), uploadTemporaryPrefix)
+}
+
+// removeStaleCopies deletes copy temporaries that no copy holds, left over
+// when the service restarted during a copy.
+func (s *Service) removeStaleCopies(ctx context.Context, root string, temporaries []ScanEntry) {
+	cutoff := s.now().Add(-staleCopyAge)
+	for _, item := range temporaries {
+		if item.Info.ModTime.After(cutoff) || s.temporaryHeld(item.Info.Name) {
+			continue
+		}
+		_ = s.fs.RemoveAll(ctx, filepath.Join(root, filepath.FromSlash(item.Path)))
+	}
+}
+
+func isCopyTemporary(name string) bool {
+	return strings.HasPrefix(path.Base(name), copyTemporaryPrefix)
 }
 
 // numberedName is name itself for 0 and "name (n).ext" after that.
