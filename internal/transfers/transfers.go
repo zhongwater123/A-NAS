@@ -39,6 +39,8 @@ var (
 	ErrCanceled       = errors.New("transfer was canceled")
 	// ErrInterrupted reports a part whose connection dropped; what arrived is kept.
 	ErrInterrupted = errors.New("the connection dropped during the transfer")
+	// ErrLost reports an upload whose bytes could not be kept; it starts over.
+	ErrLost = errors.New("the upload's bytes were lost")
 )
 
 type Direction string
@@ -80,6 +82,11 @@ func (s State) finished() bool {
 
 const (
 	interruptedAfter = 30 * time.Second
+	// volumeRetryWindow is how long an upload keeps its bytes while the data
+	// volume refuses them. A volume back after that was likely mounted anew,
+	// which the upload's open file does not follow, so the upload ends and
+	// its browser starts it over.
+	volumeRetryWindow = 30 * time.Minute
 	// abandonedAfter ends an upload that received nothing for a day and
 	// removes its temporary.
 	abandonedAfter = 24 * time.Hour
@@ -191,6 +198,9 @@ type liveTransfer struct {
 	// cut is set when the browser's connection dropped in the middle of a
 	// part, until the next part begins.
 	cut bool
+	// volumeSince is when writing or saving the upload began failing because
+	// the data volume was unavailable; zero while it works.
+	volumeSince time.Time
 	// cancel stops the requests streaming a download.
 	cancel context.CancelFunc
 	// requests are the download's requests streaming now, by number. Several
@@ -694,6 +704,7 @@ var failures = []struct {
 	{"transfer_state", "the transfer state does not allow this", []error{ErrState, files.ErrUploadOffset, files.ErrUploadIncomplete}},
 	{"canceled", "the transfer was canceled", []error{ErrCanceled}},
 	{"interrupted", "the connection dropped during the transfer", []error{ErrInterrupted}},
+	{"upload_lost", "the upload's bytes were lost; it starts over", []error{ErrLost}},
 }
 
 // meter estimates a transfer's speed from its progress.

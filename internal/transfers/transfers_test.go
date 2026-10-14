@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,17 @@ type fixture struct {
 	mu       sync.Mutex
 	now      time.Time
 	changed  []string
+	volume   *volumeSwitch
+}
+
+// volumeSwitch stands in for the data volume's check; tests take it offline.
+type volumeSwitch struct{ offline atomic.Bool }
+
+func (v *volumeSwitch) Check(context.Context, string, bool) error {
+	if v.offline.Load() {
+		return files.ErrVolumeUnavailable
+	}
+	return nil
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -61,7 +73,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{ctx: ctx, accounts: accountService, alice: alice, bob: bob, now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
+	f := &fixture{ctx: ctx, accounts: accountService, alice: alice, bob: bob, now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC), volume: &volumeSwitch{}}
 	for _, space := range spaces {
 		if space.Kind == accounts.SpaceKindShared {
 			f.shared = space
@@ -74,7 +86,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
 	f.root = filepath.Join(volume, "spaces", "shared")
-	f.files = files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	f.files = files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, VolumeGuard: f.volume})
 	f.path = filepath.Join(t.TempDir(), "transfers.db")
 	f.open(t)
 	return f
@@ -210,6 +222,49 @@ func TestUploadCutMidPartIsInterruptedAtOnce(t *testing.T) {
 	if got := f.state(t, f.alice, upload.ID); got.State != StateRunning || got.TransferredBytes != 6 {
 		t.Fatalf("after resuming: %#v", got)
 	}
+}
+
+func TestUploadKeepsItsBytesWhileTheVolumeIsAway(t *testing.T) {
+	f := newFixture(t)
+	upload := f.beginUpload(t, f.alice, "整季.mkv", 10)
+	if _, err := f.service.WriteUpload(f.ctx, f.alice, upload.ID, 0, strings.NewReader("0123456789")); err != nil {
+		t.Fatal(err)
+	}
+	// The volume goes away just as the upload is saved: every byte stays.
+	f.volume.offline.Store(true)
+	if _, err := f.service.FinishUpload(f.ctx, f.alice, upload.ID); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("FinishUpload() with the volume away error = %v", err)
+	}
+	if status, err := f.service.UploadStatus(f.ctx, f.alice, upload.ID); err != nil || status.TransferredBytes != 10 || status.State != StateRunning {
+		t.Fatalf("UploadStatus() with the volume away = %#v, %v", status, err)
+	}
+	// Back again, saving it is tried again.
+	f.volume.offline.Store(false)
+	if done, err := f.service.FinishUpload(f.ctx, f.alice, upload.ID); err != nil || done.State != StateCompleted {
+		t.Fatalf("FinishUpload() with the volume back = %#v, %v", done, err)
+	}
+	if content, _ := os.ReadFile(filepath.Join(f.root, "整季.mkv")); string(content) != "0123456789" {
+		t.Fatalf("saved content = %q", content)
+	}
+
+	// A volume away for longer is likely mounted anew, which the upload's
+	// file does not follow: the upload ends, so its browser starts it over.
+	stale := f.beginUpload(t, f.alice, "第二集.mkv", 4)
+	if _, err := f.service.WriteUpload(f.ctx, f.alice, stale.ID, 0, strings.NewReader("abcd")); err != nil {
+		t.Fatal(err)
+	}
+	f.volume.offline.Store(true)
+	if _, err := f.service.FinishUpload(f.ctx, f.alice, stale.ID); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatal(err)
+	}
+	f.advance(volumeRetryWindow + time.Minute)
+	if _, err := f.service.FinishUpload(f.ctx, f.alice, stale.ID); err == nil {
+		t.Fatal("an upload refused past the retry window was saved")
+	}
+	if _, err := f.service.UploadStatus(f.ctx, f.alice, stale.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UploadStatus() after the retry window error = %v, want ErrNotFound", err)
+	}
+	// Its temporary is no longer held; reconciliation removes it.
 }
 
 func TestUploadKeepsBothAndReportsTheSavedName(t *testing.T) {

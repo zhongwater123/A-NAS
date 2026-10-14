@@ -1694,7 +1694,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/TransferID" }]
     head:
       operationId: getUploadOffset
-      summary: "tus offset: where to resume an upload. A completed upload reports its full length, so a browser that missed the final response does not send it again; a lost one answers 404 and starts over."
+      summary: "tus offset: where to resume an upload. A completed upload reports its full length, so a browser that missed the final response does not send it again; a lost one answers 404 and starts over. An upload whose bytes all arrived but could not be saved, the data volume being away, is saved now: 423 while the volume is still away."
       parameters: [{ $ref: "#/components/parameters/TusResumable" }]
       responses:
         "200":
@@ -1703,6 +1703,7 @@ paths:
             Upload-Offset: { required: true, schema: { type: integer, minimum: 0 } }
             Upload-Length: { required: true, schema: { type: integer, minimum: 0 } }
         "404": { description: "The upload is unknown, canceled, failed or lost in a restart" }
+        "423": { description: "volume_unavailable: the upload is complete but the data volume is still away", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
     patch:
       operationId: appendUpload
       summary: "tus append: write a part at Upload-Offset. The last part saves the file in its folder."

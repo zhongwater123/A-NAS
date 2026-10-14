@@ -92,8 +92,16 @@ func (u *upload) GetInfo(ctx context.Context) (tusd.FileInfo, error) {
 		return tusd.FileInfo{}, tusd.ErrNotFound
 	}
 	offset := t.TransferredBytes
-	if t.State == transfers.StateCompleted {
+	switch {
+	case t.State == transfers.StateCompleted:
 		offset = t.TotalBytes
+	case offset == t.TotalBytes:
+		// Every byte arrived but saving the file failed, the data volume
+		// being offline perhaps: save it now that the browser asks again,
+		// rather than tell it the upload is complete.
+		if _, err := u.store.service.FinishUpload(ctx, u.user, u.id); err != nil {
+			return tusd.FileInfo{}, u.store.failure(ctx, err)
+		}
 	}
 	return tusd.FileInfo{ID: u.id, Size: t.TotalBytes, Offset: offset}, nil
 }

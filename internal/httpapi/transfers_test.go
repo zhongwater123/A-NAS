@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -27,6 +28,17 @@ type transferFixture struct {
 	shared  accounts.Space
 	owner   signedIn
 	member  signedIn
+	volume  *apiVolume
+}
+
+// apiVolume stands in for the data volume's check; tests take it offline.
+type apiVolume struct{ offline atomic.Bool }
+
+func (v *apiVolume) Check(context.Context, string, bool) error {
+	if v.offline.Load() {
+		return files.ErrVolumeUnavailable
+	}
+	return nil
 }
 
 func newTransferFixture(t *testing.T) *transferFixture {
@@ -50,7 +62,8 @@ func newTransferFixture(t *testing.T) *transferFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	volume := &apiVolume{}
+	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, VolumeGuard: volume})
 	service, err := transfers.Open(filepath.Join(t.TempDir(), "transfers.db"), fileService, accountService, transfers.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +81,7 @@ func newTransferFixture(t *testing.T) *transferFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &transferFixture{handler: handler, files: fileService}
+	f := &transferFixture{handler: handler, files: fileService, volume: volume}
 	for _, space := range spaces {
 		if space.Kind == accounts.SpaceKindShared {
 			f.shared = space
@@ -114,6 +127,37 @@ func errorCode(t *testing.T, recorder *httptest.ResponseRecorder) string {
 		t.Fatalf("error body %q: %v", recorder.Body.String(), err)
 	}
 	return body.Error.Code
+}
+
+func TestAnUploadSavedWhileTheVolumeIsAwayIsSavedWhenAskedAgain(t *testing.T) {
+	f := newTransferFixture(t)
+	created := tus(f.member, http.MethodPost, "/api/v1/uploads", map[string]string{
+		"Upload-Length":   "6",
+		"Upload-Metadata": tusMetadata(map[string]string{"filename": "整季.mkv", "spaceId": f.shared.ID}),
+	}, "", true)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create upload = %d %s", created.Code, created.Body.String())
+	}
+	location := created.Header().Get("Location")
+	path := location[strings.Index(location, "/api/v1/uploads/"):]
+	// The last part arrives just as the volume goes away.
+	f.volume.offline.Store(true)
+	last := tus(f.member, http.MethodPatch, path, map[string]string{"Upload-Offset": "0", "Content-Type": "application/offset+octet-stream"}, "abcdef", true)
+	if last.Code != http.StatusLocked || errorCode(t, last) != "volume_unavailable" {
+		t.Fatalf("last part with the volume away = %d %s", last.Code, last.Body.String())
+	}
+	// Asking where to go on from does not take the upload for complete.
+	if head := tus(f.member, http.MethodHead, path, nil, "", false); head.Code != http.StatusLocked {
+		t.Fatalf("HEAD with the volume away = %d offset %s", head.Code, head.Header().Get("Upload-Offset"))
+	}
+	f.volume.offline.Store(false)
+	if head := tus(f.member, http.MethodHead, path, nil, "", false); head.Code != http.StatusOK || head.Header().Get("Upload-Offset") != "6" {
+		t.Fatalf("HEAD with the volume back = %d offset %s %s", head.Code, head.Header().Get("Upload-Offset"), head.Body.String())
+	}
+	list := f.member.call(t, http.MethodGet, "/api/v1/transfers", "")
+	if !strings.Contains(list.Body.String(), `"state":"completed"`) {
+		t.Fatalf("transfer list after saving = %s", list.Body.String())
+	}
 }
 
 func TestUploadsResumeOverTusAndShowInTheTransferList(t *testing.T) {

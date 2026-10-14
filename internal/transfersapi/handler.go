@@ -218,6 +218,8 @@ var statuses = map[string]int{
 	"transfer_state":       http.StatusConflict,
 	"canceled":             http.StatusGone,
 	"interrupted":          http.StatusBadRequest,
+	// Like tusd's own 404 for an upload it does not know: start over.
+	"upload_lost":          http.StatusNotFound,
 	"validation_failed":    http.StatusUnprocessableEntity,
 	"volume_unavailable":   http.StatusLocked,
 	"too_many_uploads":     http.StatusTooManyRequests,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -111,6 +112,11 @@ func (s *Service) WriteUpload(ctx context.Context, owner accounts.User, id strin
 		s.abort(context.WithoutCancel(ctx), live)
 		return written, ErrCanceled
 	}
+	if s.volumeRefused(live, err) {
+		s.abort(context.WithoutCancel(ctx), live)
+		s.settle(ctx, live, StateFailed, FailureOf(err))
+		return written, ErrLost
+	}
 	if err != nil && (counted.failed != nil && errors.Is(err, counted.failed) || ctx.Err() != nil) {
 		// The browser went away, perhaps with its page: show the upload
 		// interrupted now, so picking the file again soon resumes it.
@@ -143,6 +149,11 @@ func (s *Service) FinishUpload(ctx context.Context, owner accounts.User, id stri
 		return Transfer{}, ErrCanceled
 	}
 	committed, err := s.files.CommitUpload(ctx, owner, upload)
+	if errors.Is(err, files.ErrVolumeUnavailable) && !s.volumeRefused(live, err) {
+		// Every byte is here: keep them for when the volume is back. The
+		// browser asks for the upload again then, and saving it is retried.
+		return Transfer{}, err
+	}
 	if err != nil {
 		s.abort(context.WithoutCancel(ctx), live)
 		t := s.settle(ctx, live, StateFailed, FailureOf(err))
@@ -164,6 +175,24 @@ func (s *Service) FinishUpload(ctx context.Context, owner accounts.User, id stri
 	}
 	t.decorate()
 	return t, nil
+}
+
+// volumeRefused notes whether the data volume refused an upload's bytes and
+// reports when it has done so for longer than volumeRetryWindow.
+func (s *Service) volumeRefused(live *liveTransfer, err error) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !errors.Is(err, files.ErrVolumeUnavailable) {
+		if err == nil {
+			live.volumeSince = time.Time{}
+		}
+		return false
+	}
+	now := s.now()
+	if live.volumeSince.IsZero() {
+		live.volumeSince = now
+	}
+	return now.Sub(live.volumeSince) > volumeRetryWindow
 }
 
 func (s *Service) liveUpload(owner accounts.User, id string) *liveTransfer {
