@@ -776,6 +776,51 @@ func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
 	}
 }
 
+// A name another show holds is a conflict before anything else: right after
+// a rename the episodes name files the scan has not caught up with, which
+// made renaming onto another show report a missing file (CI, 2026-10-14).
+func TestRenamingAShowOntoAnotherIsAConflictEvenBeforeTheScanCatchesUp(t *testing.T) {
+	env := newTestEnv(t, nil)
+	shared := env.shared
+	// 繁花 lies loose next to the folder of another show, so its new name
+	// collides with no file.
+	env.write(t, shared, "剧集/繁花 第01集.mkv", "video")
+	env.write(t, shared, "剧集/漫长的季节 (2023)/Season 1/漫长的季节 S01E01.mp4", "video")
+	env.library(t, env.admin, shared, LibraryMixed, "剧集")
+	var blossoms Title
+	deadline := time.Now().Add(5 * time.Second)
+	for blossoms.ID == "" {
+		shows, _ := env.media.Titles(env.ctx, env.admin, TitleQuery{Category: "show"})
+		titles := map[string]Title{}
+		for _, show := range shows.Items {
+			titles[show.Title] = show
+		}
+		if titles["漫长的季节"].Episodes > 0 && titles["繁花"].Episodes > 0 {
+			blossoms = titles["繁花"]
+		} else if time.Now().After(deadline) {
+			t.Fatalf("shows = %+v", shows.Items)
+		} else {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	// The episode's file entry is gone, as it is for a moment after a rename
+	// gives the file a new entry, and no scan has seen it yet.
+	entries, err := env.files.List(env.ctx, env.admin, shared.ID, env.folder(t, env.admin, shared, "剧集"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name == "繁花 第01集.mkv" {
+			if _, err := env.files.DeleteByID(env.ctx, env.admin, entry.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "漫长的季节"); !errors.Is(err, files.ErrConflict) {
+		t.Fatalf("RenameShow() error = %v, want files.ErrConflict", err)
+	}
+}
+
 func TestRenamingAShowRenamesItsFolderAndEpisodesAndKeepsItsID(t *testing.T) {
 	env := newTestEnv(t, nil)
 	shared := env.shared

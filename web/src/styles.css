@@ -343,7 +343,19 @@ button { font: inherit; }
 .icon-video { background: linear-gradient(155deg, #34363d 0%, #131418 46%, #000 100%); }
 .icon-video::before { opacity: .55; }
 .icon-download { background: linear-gradient(155deg, #66eb83, #11b944); }
-.icon-docker { background: linear-gradient(155deg, #5ba2ff, #3152d4); }
+/* Docker's own whale and blue (#2496ed). */
+.icon-docker { background: linear-gradient(155deg, #3aa8f5, #1d7fd6); }
+.desktop-icon.icon-docker svg { width: 36px; height: 36px; }
+.launcher-icon.icon-docker svg { width: 31px; height: 31px; }
+/* Installed apps show their own catalog icon on a flat white tile, like 相册. */
+.icon-app { overflow: hidden; background: #fff; }
+.icon-app::before { display: none; }
+.icon-app img { width: 76%; height: 76%; object-fit: contain; pointer-events: none; }
+.icon-app b { color: #4f52dd; font-size: 24px; font-weight: 800; }
+.launcher-icon.icon-app b { font-size: 21px; }
+.desktop-shortcut.unavailable .desktop-icon, .launcher-tile.unavailable .launcher-icon { opacity: .55; filter: grayscale(.85); }
+.desktop-shortcut.unavailable[aria-disabled="true"] { cursor: default; }
+.launcher-note { margin-top: -5px; color: rgba(255,255,255,.62); font-size: 10.5px; }
 /* 相册 is a flat white tile: its coloured mark needs no gloss, shadow or gradient. */
 .icon-photos { background: #fff; }
 .icon-photos::before { display: none; }

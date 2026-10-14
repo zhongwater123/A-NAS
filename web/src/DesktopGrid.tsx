@@ -14,6 +14,10 @@ export interface DesktopApp {
   onClick?: () => void;
   active?: boolean;
   disabled?: boolean;
+  // unavailable apps exist but cannot be opened now, such as an installed
+  // app whose containers are stopped; note says why under the label.
+  unavailable?: boolean;
+  note?: string;
 }
 
 interface Position {
@@ -207,13 +211,14 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
               else slots.current.delete(id);
             }}
             className={`desktop-slot ${draggingID === id ? "dragging" : ""}`}
-            title={app.disabled ? `${app.label} · 规划中` : app.label}
+            title={app.disabled ? `${app.label} · 规划中` : app.note ? `${app.label} · ${app.note}` : app.label}
             onPointerDown={(event) => beginPointer(event, id)}
             onKeyDown={(event) => moveWithKeyboard(event, id)}
           >
             <button
-              className={`desktop-shortcut ${app.active ? "running" : ""}`}
+              className={`desktop-shortcut ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""}`}
               aria-label={app.ariaLabel}
+              aria-disabled={app.unavailable && !app.onClick ? true : undefined}
               disabled={app.disabled}
               onClick={app.onClick}
             >
@@ -245,7 +250,7 @@ function ShortcutContents({ app }: { app: DesktopApp }) {
   return <>
     <span className={`desktop-icon icon-${app.tone}`}>{app.icon}</span>
     <span>{app.label}</span>
-    {app.disabled && <small>规划中</small>}
+    {app.disabled ? <small>规划中</small> : app.note && <small>{app.note}</small>}
   </>;
 }
 

@@ -6,7 +6,6 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bot,
-  Box,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -55,11 +54,13 @@ import {
   setSession, setupAdministrator,
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
+import { shortcutApp, useAppShortcuts } from "./appShortcuts";
 import { BackupCenter } from "./backup/BackupCenter";
 import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import { formatBytes } from "./bytes";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
+import { DockerGlyph } from "./DockerGlyph";
 import { DockerFocus, DockerPanel } from "./docker/DockerPanel";
 import { appProject } from "./docker/model";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
@@ -140,7 +141,7 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   trash: Trash2,
   backup: BackupCenterGlyph,
   settings: Settings,
-  docker: Box,
+  docker: DockerGlyph,
   store: ShoppingBag,
 };
 // Apps on a white tile (相册) keep it in their window's title bar too.
@@ -316,6 +317,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   const [dockerFocus, setDockerFocus] = useState<DockerFocus>();
   const showInDocker = (appID: string) => { setDockerFocus({ project: appProject(appID), at: Date.now() }); openWindow("docker"); };
+  const shortcuts = useAppShortcuts();
   // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
@@ -329,11 +331,14 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     { id: "download", label: "传输中心", ariaLabel: "打开传输中心", keywords: "传输 上传 下载 进度 续传 transfer upload download", tone: "download", icon: <ArrowDownUp />, active: isOpen("transfers"), onClick: () => openWindow("transfers") },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
     { id: "backup", label: "备份中心", ariaLabel: "打开备份中心", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup", tone: "backup", icon: <BackupCenterGlyph />, active: isOpen("backup"), onClick: () => openWindow("backup") },
-    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
+    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <DockerGlyph />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
     { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+    // Installed apps open their own web interface; a stopped one shows its
+    // containers in Docker to administrators.
+    ...shortcuts.map((shortcut) => shortcutApp(shortcut, session.user.role === "admin" ? () => showInDocker(shortcut.id) : undefined)),
   ];
   const visible = windows.filter((window) => window.open && !window.minimized);
   const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;

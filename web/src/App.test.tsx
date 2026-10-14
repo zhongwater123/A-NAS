@@ -1117,9 +1117,10 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; shortcuts?: unknown[] } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
     if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
@@ -1371,6 +1372,51 @@ describe("ADR 0008 application access", () => {
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).queryByRole("button", { name: "打开 Docker" })).toBeNull();
     expect(within(desktop).queryByRole("button", { name: "打开应用中心" })).toBeNull();
+  });
+});
+
+describe("Installed apps on the desktop", () => {
+  const immich = { id: "immich", title: "Immich", webPort: 2283, scheme: "http", path: "/", running: 4, total: 4 };
+  const navidrome = { id: "navidrome", title: "Navidrome", webPort: 4533, scheme: "http", path: "/", running: 0, total: 1 };
+
+  it("opens an installed app's web page from its desktop icon and from the launcher", async () => {
+    installAPI({ shortcuts: [immich, navidrome] });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const icon = await within(desktop).findByRole("button", { name: "打开 Immich（新窗口）" });
+    expect(icon.querySelector("img")?.getAttribute("src")).toBe("/api/v1/app-shortcuts/immich/icon");
+    await user.click(icon);
+    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^http:\/\/[^/]+:2283\/$/), "_blank", "noopener,noreferrer");
+
+    await user.click(within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "全部应用" }));
+    const launcher = screen.getByRole("dialog", { name: "全部应用" });
+    await user.type(within(launcher).getByRole("searchbox", { name: "搜索应用" }), "immich");
+    await user.keyboard("{Enter}");
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks a stopped app and shows administrators its containers in Docker", async () => {
+    installAPI({ shortcuts: [navidrome] });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const stopped = await within(desktop).findByRole("button", { name: "Navidrome，没有在运行，在 Docker 中查看" });
+    expect(stopped.textContent).toContain("未运行");
+    await user.click(stopped);
+    expect(open).not.toHaveBeenCalled();
+    expect(await screen.findByRole("dialog", { name: "Docker" })).toBeTruthy();
+  });
+
+  it("shows installed apps to members, who cannot open Docker", async () => {
+    installAPI({ shortcuts: [immich, navidrome], session: { ...session, user: { ...session.user, username: "alice", role: "member" } } });
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(await within(desktop).findByRole("button", { name: "打开 Immich（新窗口）" })).toBeTruthy();
+    const stopped = within(desktop).getByRole("button", { name: "Navidrome，没有在运行" });
+    expect(stopped.getAttribute("aria-disabled")).toBe("true");
   });
 });
 

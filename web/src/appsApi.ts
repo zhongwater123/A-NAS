@@ -119,6 +119,28 @@ export function iconURL(id: string): string {
   return `/api/v1/apps/${id}/icon`;
 }
 
+// An installed app every signed-in user opens from the desktop.
+export interface AppShortcut {
+  id: string;
+  title: string;
+  webPort: number;
+  scheme: string;
+  path: string;
+  // Running and total containers; 0 running means the app is stopped.
+  running: number;
+  total: number;
+}
+
+export async function readShortcuts(signal?: AbortSignal): Promise<AppShortcut[]> {
+  const value = await request("/api/v1/app-shortcuts", { signal });
+  if (!isRecord(value) || !Array.isArray(value.items)) throw new AppsAPIError("malformed_response");
+  return value.items as AppShortcut[];
+}
+
+export function shortcutIconURL(id: string): string {
+  return `/api/v1/app-shortcuts/${id}/icon`;
+}
+
 function post(body: unknown): RequestInit {
   return { method: "POST", headers: { "Content-Type": "application/json", ...csrfHeaders() }, body: JSON.stringify(body) };
 }
