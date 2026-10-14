@@ -3,6 +3,7 @@ package appstore_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -57,6 +58,8 @@ x-casaos:
 		"TZ: Asia/Shanghai",
 		"name: a-nas-demo",
 		"user: 30005:30005",
+		"io.a-nas.runtime: \"1\"",
+		"no-new-privileges:true",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("rendered compose lacks %q:\n%s", want, compose)
@@ -80,6 +83,14 @@ x-casaos:
 	service := reloaded.Services["web"]
 	if service.User != "30005:30005" {
 		t.Errorf("rendered user = %q, want app identity", service.User)
+	}
+	// It reads Music, so it is in a-nas-users and has no capabilities.
+	if !slices.Equal(service.GroupAdd, []string{"20000"}) || !slices.Equal(service.CapDrop, []string{"ALL"}) || !slices.Equal(service.SecurityOpt, []string{"no-new-privileges:true"}) {
+		t.Errorf("rendered group_add %v cap_drop %v security_opt %v", service.GroupAdd, service.CapDrop, service.SecurityOpt)
+	}
+	want := appstore.ServiceRuntime{Service: "web", RunAs: appstore.RunAsApp, User: "30005:30005", Groups: []string{"20000"}, CapDrop: []string{"ALL"}, Shared: appstore.SharedRead}
+	if len(plan.Services) != 1 || !reflect.DeepEqual(plan.Services[0], want) {
+		t.Errorf("plan services = %+v, want %+v", plan.Services, want)
 	}
 	for name := range map[string]bool{"PUID": true, "PGID": true} {
 		value := service.Environment[name]
@@ -154,6 +165,7 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 		"env file":       `env_file: /etc/hostname`,
 		"build":          `build: .`,
 		"security opt":   `security_opt: ["seccomp:unconfined"]`,
+		"group add":      `group_add: ["20000"]`,
 	}
 	for name, option := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -171,6 +183,7 @@ func TestRenderRecordsTheVolumeAndSubpathOfEachFolder(t *testing.T) {
 services:
   web:
     image: example/web:1
+    user: "1000"
     volumes:
       - /DATA/AppData/$AppID/config:/config
       - /DATA/Media/Music:/music:ro
@@ -245,11 +258,107 @@ func TestRenderRequiresAnAppIdentity(t *testing.T) {
 }
 
 func TestRenderKeepsSharedMountsInsideTheSharedFolder(t *testing.T) {
-	plan, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    volumes: [\"/DATA:/data\"]\n"), testPolicy, testIdentity, nil)
+	plan, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    user: \"1000\"\n    volumes: [\"/DATA:/data\"]\n"), testPolicy, testIdentity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := plan.Mounts[0].HostPath; got != "/srv/a-nas/data/spaces/shared" {
 		t.Fatalf("/DATA maps to %s, want the Shared folder rather than the volume root", got)
+	}
+}
+
+// A Shared folder is read-only unless the app is listed as writing it; the
+// demo app is not, qBittorrent is.
+func TestRenderMountsSharedReadOnlyUnlessTheAppWritesIt(t *testing.T) {
+	plan, err := appstore.Render(context.Background(), entry(`
+services:
+  web:
+    image: example/web:1
+    user: "1000"
+    volumes: ["/DATA/Downloads:/downloads"]
+`), testPolicy, testIdentity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Mounts[0].ReadOnly || !strings.Contains(string(plan.Compose), "read_only: true") || plan.Services[0].Shared != appstore.SharedRead {
+		t.Fatalf("mount = %+v, service = %+v:\n%s", plan.Mounts[0], plan.Services[0], plan.Compose)
+	}
+
+	catalog, err := appstore.Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := slices.IndexFunc(catalog, func(entry appstore.Entry) bool { return entry.App.ID == "qbittorrent" })
+	plan, err = appstore.Render(context.Background(), catalog[index], testPolicy, testIdentity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mount := range plan.Mounts {
+		if mount.Kind == appstore.MountShared && mount.ReadOnly {
+			t.Errorf("qBittorrent gets %s read-only", mount.ContainerPath)
+		}
+	}
+	if plan.Services[0].Shared != appstore.SharedWrite {
+		t.Errorf("qBittorrent Shared access = %q", plan.Services[0].Shared)
+	}
+}
+
+// A service that keeps the image's user may run as root, which ignores the
+// Shared ACL; it may only mount its own app data.
+func TestRenderRefusesSharedForServicesThatKeepTheImageUser(t *testing.T) {
+	ctx := context.Background()
+	_, err := appstore.Render(ctx, entry(`
+services:
+  web:
+    image: example/web:1
+    volumes: ["/DATA/Media:/media"]
+`), testPolicy, testIdentity, nil)
+	var policyError *appstore.PolicyError
+	if !errors.As(err, &policyError) || !strings.Contains(err.Error(), "keeps its image's user") {
+		t.Fatalf("Render() error = %v, want the Shared mount refused", err)
+	}
+	plan, err := appstore.Render(ctx, entry(`
+services:
+  web:
+    image: example/web:1
+    volumes: ["/DATA/AppData/$AppID/data:/data"]
+`), testPolicy, testIdentity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := plan.Services[0]
+	if service.RunAs != appstore.RunAsImage || service.User != "" || len(service.Groups) > 0 || !strings.Contains(string(plan.Compose), "no-new-privileges:true") {
+		t.Fatalf("image-user service = %+v:\n%s", service, plan.Compose)
+	}
+}
+
+// Images that switch to PUID/PGID after starting as root drop the groups
+// Docker adds, so a-nas-users becomes the group they switch to; without
+// Shared they switch to the app group.
+func TestRenderSwitchesPUIDImagesToTheAppIdentity(t *testing.T) {
+	for _, test := range []struct {
+		volume, pgid string
+		shared       appstore.SharedAccess
+	}{
+		{"/DATA/Downloads:/downloads", "20000", appstore.SharedRead},
+		{"/DATA/AppData/$AppID/config:/config", "30005", appstore.SharedNone},
+	} {
+		plan, err := appstore.Render(context.Background(), entry(`
+services:
+  web:
+    image: example/web:1
+    environment:
+      PUID: "1000"
+    volumes: ["`+test.volume+`"]
+`), testPolicy, testIdentity, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compose := string(plan.Compose)
+		service := plan.Services[0]
+		if service.RunAs != appstore.RunAsAppAfterInit || service.Shared != test.shared || service.User != "" ||
+			!strings.Contains(compose, `PUID: "30005"`) || !strings.Contains(compose, `PGID: "`+test.pgid+`"`) || strings.Contains(compose, "group_add") {
+			t.Errorf("%s: service = %+v:\n%s", test.volume, service, compose)
+		}
 	}
 }

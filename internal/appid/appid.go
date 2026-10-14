@@ -22,6 +22,12 @@ const (
 	LastUID  = 30999
 )
 
+// SharedGID is the group a-nas-users, which the Shared folder's ACL grants.
+// An app container reaches Shared only through this group in its own
+// Compose service; Docker never applies the groups of host accounts
+// (ADR 0022).
+const SharedGID = 20000
+
 // Identity is the Linux account app-<id> an app's containers run as.
 type Identity struct {
 	Username string
@@ -35,7 +41,7 @@ func Username(id string) string {
 }
 
 // Host prepares the Linux side of an app: its identity, the folders it
-// mounts, and its access to the Shared folder. The Host Agent implements it.
+// mounts, and the release of an uninstalled app. The Host Agent implements it.
 type Host interface {
 	AppIdentity(ctx context.Context, id string) (Identity, error)
 	PrepareApp(ctx context.Context, id string, folders []string, shared bool) error
