@@ -24,6 +24,7 @@ type fakeDocker struct {
 	pools      []netip.Prefix
 	networks   []engine.NetworkInfo
 	mounts     []engine.MountInfo
+	runtimes   []engine.RuntimeInfo
 	// states overrides what ProjectContainers reports.
 	states []engine.ContainerState
 	// apiVersion defaults to an engine that supports volume subpaths.
@@ -53,6 +54,10 @@ func (f *fakeDocker) APIVersion(context.Context) (string, error) {
 
 func (f *fakeDocker) ProjectMounts(context.Context, string) ([]engine.MountInfo, error) {
 	return f.mounts, nil
+}
+
+func (f *fakeDocker) ProjectRuntimes(context.Context, string) ([]engine.RuntimeInfo, error) {
+	return f.runtimes, nil
 }
 
 // ProjectContainers reports the app's containers as running unless states
@@ -357,6 +362,108 @@ func TestInstallKeepsMountsOnTheirFolders(t *testing.T) {
 	apps, _ := store.Apps(ctx)
 	if job := find(apps, "memos").Job; len(runner.calls) != 1 || job.State != appstore.JobSucceeded {
 		t.Fatalf("calls = %v job = %+v, want one up and success", runner.calls, job)
+	}
+}
+
+// A Compose that drops the user, the Shared group, the dropped capabilities
+// or no-new-privileges would let the app reach data its plan does not show,
+// so the install is rolled back.
+func TestInstallRollsBackAContainerThatDoesNotRunAsPlanned(t *testing.T) {
+	ctx := context.Background()
+	planned := func(t *testing.T, store *engine.Store) (appstore.Plan, engine.RuntimeInfo) {
+		plan, err := store.Plan(ctx, "navidrome", identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		service := plan.Services[0]
+		if service.RunAs != appstore.RunAsApp || service.Shared != appstore.SharedRead {
+			t.Fatalf("navidrome service = %+v, want the app identity reading Shared", service)
+		}
+		return plan, engine.RuntimeInfo{
+			Container: "navidrome", Service: service.Service, User: service.User,
+			GroupAdd: service.Groups, CapDrop: []string{"CAP_ALL"}, SecurityOpt: []string{"no-new-privileges:true"},
+		}
+	}
+	for name, change := range map[string]func(*engine.RuntimeInfo){
+		"image user":          func(runtime *engine.RuntimeInfo) { runtime.User = "" },
+		"no Shared group":     func(runtime *engine.RuntimeInfo) { runtime.GroupAdd = nil },
+		"capabilities kept":   func(runtime *engine.RuntimeInfo) { runtime.CapDrop = nil },
+		"new privileges":      func(runtime *engine.RuntimeInfo) { runtime.SecurityOpt = nil },
+		"service not planned": func(runtime *engine.RuntimeInfo) { runtime.Service = "sidecar" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			docker := &fakeDocker{}
+			runner := &fakeRunner{}
+			store, _ := newStore(t, docker, runner)
+			plan, runtime := planned(t, store)
+			change(&runtime)
+			docker.runtimes = []engine.RuntimeInfo{runtime}
+			if _, err := store.Install(ctx, "navidrome", plan.Digest, identity); err != nil {
+				t.Fatal(err)
+			}
+			store.Wait()
+			apps, _ := store.Apps(ctx)
+			job := find(apps, "navidrome").Job
+			if job.State != appstore.JobFailed || !strings.Contains(job.Error, appstore.ErrRuntimeMismatch.Error()) || len(runner.calls) != 2 {
+				t.Fatalf("job = %+v calls = %v, want a rolled-back install", job, runner.calls)
+			}
+		})
+	}
+
+	docker := &fakeDocker{}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	plan, runtime := planned(t, store)
+	docker.runtimes = []engine.RuntimeInfo{runtime}
+	if _, err := store.Install(ctx, "navidrome", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	apps, _ := store.Apps(ctx)
+	if job := find(apps, "navidrome").Job; job.State != appstore.JobSucceeded || len(runner.calls) != 1 {
+		t.Fatalf("job = %+v calls = %v, want success", job, runner.calls)
+	}
+}
+
+func TestInstallRollsBackAWritableReadOnlyFolder(t *testing.T) {
+	docker := &fakeDocker{}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+	plan, err := store.Plan(ctx, "navidrome", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := slices.IndexFunc(plan.Mounts, func(mount appstore.Mount) bool { return mount.Kind == appstore.MountShared })
+	music := plan.Mounts[index]
+	if !music.ReadOnly {
+		t.Fatalf("Music mount = %+v, want read-only", music)
+	}
+	docker.mounts = []engine.MountInfo{{Container: "navidrome", Volume: music.Volume, Target: music.ContainerPath, Subpath: music.Subpath}}
+	if _, err := store.Install(ctx, "navidrome", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	apps, _ := store.Apps(ctx)
+	if job := find(apps, "navidrome").Job; job.State != appstore.JobFailed || !strings.Contains(job.Error, "plan mounts read-only") {
+		t.Fatalf("job = %+v, want a rolled-back install", job)
+	}
+}
+
+// Containers created under older runtime rules keep running as they were;
+// the app reports it so the owner can reinstall it.
+func TestAppsReportContainersFromOlderRuntimeRules(t *testing.T) {
+	docker := &fakeDocker{containers: []engine.ContainerInfo{
+		{Name: "memos", AppID: "memos", Running: true},
+		{Name: "navidrome", AppID: "navidrome", Running: true, Runtime: appstore.RuntimePolicy},
+	}}
+	store, _ := newStore(t, docker, &fakeRunner{})
+	apps, err := store.Apps(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !find(apps, "memos").RuntimeOutdated || find(apps, "navidrome").RuntimeOutdated || find(apps, "n8n").RuntimeOutdated {
+		t.Fatalf("outdated: memos %v navidrome %v n8n %v", find(apps, "memos").RuntimeOutdated, find(apps, "navidrome").RuntimeOutdated, find(apps, "n8n").RuntimeOutdated)
 	}
 }
 

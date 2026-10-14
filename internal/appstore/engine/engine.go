@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,9 @@ type ContainerInfo struct {
 	Service  string
 	State    string
 	ExitCode int
+	// Runtime is the container's io.a-nas.runtime label, empty on containers
+	// created before runtime rules were recorded.
+	Runtime string
 }
 
 // NetworkInfo is a Docker network and the subnets Docker gave it.
@@ -59,6 +63,17 @@ type MountInfo struct {
 	Volume    string
 	Target    string
 	Subpath   string
+	ReadOnly  bool
+}
+
+// RuntimeInfo is the identity and privilege limits Docker gave a container.
+type RuntimeInfo struct {
+	Container   string
+	Service     string
+	User        string
+	GroupAdd    []string
+	CapDrop     []string
+	SecurityOpt []string
 }
 
 type Inspector interface {
@@ -74,6 +89,9 @@ type Inspector interface {
 	ProjectMounts(ctx context.Context, project string) ([]MountInfo, error)
 	// ProjectContainers reads the state of the project's containers.
 	ProjectContainers(ctx context.Context, project string) ([]ContainerState, error)
+	// ProjectRuntimes reads the user, groups and privilege limits of the
+	// project's containers.
+	ProjectRuntimes(ctx context.Context, project string) ([]RuntimeInfo, error)
 }
 
 // Runner executes the Compose CLI and streams its combined output.
@@ -145,6 +163,9 @@ func (s *Store) Apps(ctx context.Context) ([]appstore.AppStatus, error) {
 				continue
 			}
 			status.Total++
+			if container.Runtime != appstore.RuntimePolicy {
+				status.RuntimeOutdated = true
+			}
 			if container.Running {
 				status.Running++
 			} else {
@@ -251,6 +272,9 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		}
 		failure := s.mountProblems(ctx, plan)
 		if failure == nil {
+			failure = s.runtimeProblems(ctx, plan)
+		}
+		if failure == nil {
 			failure = s.networkProblems(ctx, plan)
 		}
 		if failure == nil {
@@ -304,7 +328,8 @@ func atLeast(version, minimum string) bool {
 }
 
 // mountProblems reports an A-NAS volume that a container mounts beyond the
-// folder in the plan, or mounts that cannot be inspected.
+// folder in the plan or writable where the plan has it read-only, or mounts
+// that cannot be inspected.
 func (s *Store) mountProblems(ctx context.Context, plan appstore.Plan) error {
 	planned := map[string]appstore.Mount{}
 	volumes := map[string]bool{}
@@ -326,18 +351,80 @@ func (s *Store) mountProblems(ctx context.Context, plan appstore.Plan) error {
 		if !volumes[mount.Volume] {
 			continue
 		}
-		if want, ok := planned[mount.Target]; !ok || want.Volume != mount.Volume || want.Subpath != mount.Subpath {
+		want, ok := planned[mount.Target]
+		if !ok || want.Volume != mount.Volume || want.Subpath != mount.Subpath {
 			got := "the whole " + mount.Volume
 			if mount.Subpath != "" {
 				got = mount.Volume + "/" + mount.Subpath
 			}
 			problems = append(problems, fmt.Sprintf("%s mounts %s at %s", mount.Container, got, mount.Target))
+		} else if want.ReadOnly && !mount.ReadOnly {
+			problems = append(problems, fmt.Sprintf("%s can write %s, which its plan mounts read-only", mount.Container, mount.Target))
 		}
 	}
 	if len(problems) == 0 {
 		return nil
 	}
 	return fmt.Errorf("%w (%s)", appstore.ErrMountOutsideFolder, strings.Join(problems, ", "))
+}
+
+// runtimeProblems reports a container whose user, groups, capabilities or
+// no-new-privileges flag differ from its service in the plan, or containers
+// that cannot be inspected: a Compose that dropped one of them would let the
+// app reach data its plan does not show (ADR 0022).
+func (s *Store) runtimeProblems(ctx context.Context, plan appstore.Plan) error {
+	planned := map[string]appstore.ServiceRuntime{}
+	for _, service := range plan.Services {
+		planned[service.Service] = service
+	}
+	var problems []string
+	runtimes, err := s.docker.ProjectRuntimes(ctx, plan.Project)
+	if err != nil {
+		problems = append(problems, "cannot inspect app containers: "+err.Error())
+	}
+	for _, runtime := range runtimes {
+		want, ok := planned[runtime.Service]
+		switch {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("%s runs service %q, which is not in the plan", runtime.Container, runtime.Service))
+		case want.RunAs == appstore.RunAsApp && runtime.User != want.User:
+			problems = append(problems, fmt.Sprintf("%s runs as user %q, not %q", runtime.Container, runtime.User, want.User))
+		case !sameSet(runtime.GroupAdd, want.Groups):
+			problems = append(problems, fmt.Sprintf("%s has groups %v, not %v", runtime.Container, runtime.GroupAdd, want.Groups))
+		case !dropsAll(runtime.CapDrop, want.CapDrop):
+			problems = append(problems, fmt.Sprintf("%s drops capabilities %v, not %v", runtime.Container, runtime.CapDrop, want.CapDrop))
+		case !noNewPrivileges(runtime.SecurityOpt):
+			problems = append(problems, fmt.Sprintf("%s can gain privileges (security options %v)", runtime.Container, runtime.SecurityOpt))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w (%s)", appstore.ErrRuntimeMismatch, strings.Join(problems, ", "))
+}
+
+func sameSet(got, want []string) bool {
+	return len(got) == len(want) && !slices.ContainsFunc(want, func(item string) bool { return !slices.Contains(got, item) })
+}
+
+// dropsAll reports whether every capability in want is dropped; Docker may
+// report them with or without the CAP_ prefix.
+func dropsAll(got, want []string) bool {
+	normal := func(capability string) string {
+		return strings.TrimPrefix(strings.ToUpper(capability), "CAP_")
+	}
+	for _, capability := range want {
+		if !slices.ContainsFunc(got, func(item string) bool { return normal(item) == normal(capability) }) {
+			return false
+		}
+	}
+	return true
+}
+
+func noNewPrivileges(options []string) bool {
+	return slices.ContainsFunc(options, func(option string) bool {
+		return option == "no-new-privileges" || option == "no-new-privileges:true" || option == "no-new-privileges=true"
+	})
 }
 
 // networkProblems reports a network outside the address pools, or networks

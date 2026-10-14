@@ -335,6 +335,40 @@ describe("MediaCenter", () => {
     expect(tus.uploads[0].metadata.parentId).toBe("file:films");
   });
 
+  // Uploads that finish together refresh the libraries while a load is
+  // still running. A second poll left behind outlived the panel and fired
+  // after the tests had ended (CI, 2026-10-14).
+  it("stops polling libraries when it closes, even after overlapping refreshes", async () => {
+    const polls = new Set<number>();
+    const setTimer = window.setTimeout.bind(window);
+    const clearTimer = window.clearTimeout.bind(window);
+    vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, delay?: number, ...rest: unknown[]) => {
+      const id = setTimer(handler, delay, ...rest);
+      // The library poll waits 3 or 20 seconds; no other media timer does.
+      if (delay === 3000 || delay === 20_000) polls.add(id);
+      return id;
+    }) as typeof window.setTimeout);
+    vi.spyOn(window, "clearTimeout").mockImplementation(((id?: number) => {
+      polls.delete(id as number);
+      clearTimer(id);
+    }) as typeof window.clearTimeout);
+    serve([library]);
+    const user = userEvent.setup();
+    const { unmount } = render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /媒体库/ }));
+    await user.click(await screen.findByRole("button", { name: "家庭影院的操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "上传到此媒体库" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    fireEvent.change(within(dialog).getByLabelText("选择要上传的文件"), { target: { files: [new File(["a"], "Up (2009).mp4"), new File(["b"], "Coco (2017).mp4")] } });
+    await user.click(within(dialog).getByRole("button", { name: "上传 2 个文件" }));
+    await act(async () => { for (const upload of tus.uploads) upload.options.onSuccess(); });
+    await waitFor(() => expect(within(dialog).getAllByText("已上传")).toHaveLength(2));
+
+    unmount();
+    expect(polls.size).toBe(0);
+  });
+
   it("renames a film's file from its card, keeping the extension", async () => {
     let attempts = 0;
     const fetchMock = serve([library],
