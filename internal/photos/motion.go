@@ -58,19 +58,9 @@ func (s *Service) prepareMotion(ctx context.Context, photo stagedObject, request
 			s.discardStaging(clip.name)
 		}
 	}()
-	file, err := s.root.Open(clip.name)
+	probe, err := s.probeMotion(ctx, clip)
 	if err != nil {
 		return nil, err
-	}
-	defer file.Close()
-	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	probe, err := s.media.Probe(probeCtx, file)
-	if err != nil {
-		return nil, err
-	}
-	if !validMotionProbe(probe) {
-		return nil, ErrInvalidMotion
 	}
 	if kind == "live-photo" {
 		stillID := appleContentID(source)
@@ -84,6 +74,26 @@ func (s *Service) prepareMotion(ctx context.Context, photo stagedObject, request
 		clip.mediaType = "video/mp4"
 	}
 	return &motionImport{object: clip, name: name, kind: kind, duration: probe.Format.Duration}, nil
+}
+
+// probeMotion reads a staged clip's format through the Media Worker and
+// accepts only a short, complete video.
+func (s *Service) probeMotion(ctx context.Context, clip stagedObject) (mediaworker.Probe, error) {
+	file, err := s.root.Open(clip.name)
+	if err != nil {
+		return mediaworker.Probe{}, err
+	}
+	defer file.Close()
+	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	probe, err := s.media.Probe(probeCtx, file)
+	if err != nil {
+		return mediaworker.Probe{}, err
+	}
+	if !validMotionProbe(probe) {
+		return mediaworker.Probe{}, ErrInvalidMotion
+	}
+	return probe, nil
 }
 
 func validMotionProbe(p mediaworker.Probe) bool {

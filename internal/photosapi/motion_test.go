@@ -91,3 +91,33 @@ func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
 		t.Fatal("unpaired export names")
 	}
 }
+
+func TestLiveVideoAloneNeedsItsAppleIdentifier(t *testing.T) {
+	service, err := photos.Open(filepath.Join(t.TempDir(), "photos"), photos.Options{Media: motionMedia{}, DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	c := client{t: t, handler: photosapi.New(service, nil), as: alice}
+	private, _ := librariesOf(c)
+	send := func(name string) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if name != "" {
+			part, _ := writer.CreateFormFile("file", name)
+			movie := make([]byte, 64)
+			binary.BigEndian.PutUint32(movie, 24)
+			copy(movie[4:], "ftypqt  ")
+			part.Write(movie)
+		}
+		writer.Close()
+		return c.do(http.MethodPost, "/api/v1/photos/libraries/"+private.ID+"/live-videos", body.Bytes(), writer.FormDataContentType())
+	}
+	// The stand-in decoder reports no Apple identifier: nothing to match.
+	if result := send("IMG_1.MOV"); result.Code != http.StatusUnprocessableEntity || !bytes.Contains(result.Body.Bytes(), []byte(`"invalid_motion_photo"`)) {
+		t.Fatalf("MOV without identifier: %d %s", result.Code, result.Body.String())
+	}
+	if result := send(""); result.Code != http.StatusBadRequest || !bytes.Contains(result.Body.Bytes(), []byte(`"file_required"`)) {
+		t.Fatalf("no file: %d %s", result.Code, result.Body.String())
+	}
+}

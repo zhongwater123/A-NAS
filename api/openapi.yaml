@@ -1054,6 +1054,21 @@ paths:
         "415": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/live-videos:
+    post:
+      operationId: attachLivePhotoVideo
+      summary: Complete Live Photos whose still was imported without its MOV
+      description: "One file part, a MOV of at most 256 MiB and 30 seconds that carries Apple's content identifier. Every photo of the library the caller may change whose still carries the same identifier and has no video yet gets this video; nothing is matched by name. 422 live_photo_not_found when no photo of the library is waiting for it, 422 invalid_motion_photo when the MOV has no identifier or is not a short, complete video."
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } } } } }
+      responses:
+        "200": { description: The photos now complete, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/preview:
     get:
       operationId: previewPhoto
@@ -3056,6 +3071,7 @@ components:
           properties:
             kind: { type: string, enum: [live-photo, motion-photo] }
             duration: { type: number, exclusiveMinimum: 0, maximum: 30 }
+        liveVideoMissing: { type: boolean, description: "True for the still of an Apple Live Photo imported without its MOV; uploading that MOV to live-videos completes it." }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         uploadedBy: { type: string }
         importedAt: { type: string, format: date-time }

@@ -111,15 +111,18 @@ type Motion struct {
 }
 
 type Asset struct {
-	Motion      *Motion   `json:"motion,omitempty"`
-	ID          string    `json:"id"`
-	LibraryID   string    `json:"libraryId"`
-	DirectoryID string    `json:"directoryId,omitempty"`
-	Name        string    `json:"name"`
-	MediaType   string    `json:"mediaType"`
-	SizeBytes   int64     `json:"sizeBytes"`
-	UploadedBy  string    `json:"uploadedBy"`
-	ImportedAt  time.Time `json:"importedAt"`
+	Motion *Motion `json:"motion,omitempty"`
+	// LiveVideoMissing marks the still of an Apple Live Photo imported
+	// without its MOV; uploading that MOV later completes it.
+	LiveVideoMissing bool      `json:"liveVideoMissing,omitempty"`
+	ID               string    `json:"id"`
+	LibraryID        string    `json:"libraryId"`
+	DirectoryID      string    `json:"directoryId,omitempty"`
+	Name             string    `json:"name"`
+	MediaType        string    `json:"mediaType"`
+	SizeBytes        int64     `json:"sizeBytes"`
+	UploadedBy       string    `json:"uploadedBy"`
+	ImportedAt       time.Time `json:"importedAt"`
 	// TakenAt is the capture time from the original's EXIF, when recorded.
 	TakenAt *time.Time `json:"takenAt,omitempty"`
 	// Width and Height are the upright display size; zero when unknown.
