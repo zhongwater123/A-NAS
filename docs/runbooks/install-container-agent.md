@@ -221,6 +221,7 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 2. 打开“应用中心”，应显示内置目录并可生成安装计划；实际安装前仍须确认镜像、端口与文件夹摘要。
 3. 首次验收可用专用测试容器核对停止、启动和日志，再删除测试容器。应用中心验收按[应用中心规格](../specs/app-center.md)使用一个可丢弃应用，确认应用身份、数据目录和卸载保留数据。
 4. 升级到带 [ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md) 运行规则的容器代理后，已安装的应用照旧运行，详情页提示“按旧的运行规则安装”。逐个在应用中心卸载（应用数据保留）再安装，新容器才按新规则运行；按原样运行不会扩大权限，但挂载共享空间、以 root 运行的旧安装（例如 Immich）会继续绕过共享空间的 ACL，应优先重装。重装后以 root 执行 `docker inspect -f '{{.Config.User}} {{.HostConfig.GroupAdd}} {{.HostConfig.CapDrop}}' <容器>` 核对，并确认 `id app-<id>` 不再列出 `a-nas-users`。
+   旧规则下以 root 运行过的应用（Audiobookshelf、Kavita、Navidrome、PhotoPrism、Swing Music、Immich 的服务端）在自己的数据目录里留下的是 root 属主的文件，改为应用账号后可能写不了，安装会因容器不断重启而回滚。此时以 root 只把这个应用服务挂载的数据子目录归还给应用账号，例如 `chown -R --no-dereference app-navidrome:app-navidrome /srv/a-nas/data/apps/navidrome/data`，再重新安装；不要对仍以镜像身份运行的数据库目录（如 `apps/immich/pgdata`）这样做，也不要改共享空间里成员的文件。Immich 写在共享空间 `Gallery/immich` 中的文件经继承的 ACL 由 `a-nas-users` 读写，通常无需处理；上传失败时先用 `getfacl` 查看出错文件夹的 `mask`。
 
 本地屏保先从 `/local-console/screensavers` 读取匿名视频清单，再对清单中的 URL 发起 Range 请求；`/screensaver.mp4` 从来不是产品路由，`/local-console/screensaver.mp4` 只保留单视频兼容。切换脚本必须从清单取得媒体 URL 并单独打印每个 HTTP 状态，不能拼接或凭记忆写路径。
 

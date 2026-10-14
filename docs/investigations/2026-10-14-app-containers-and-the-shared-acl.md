@@ -92,6 +92,8 @@
 - Navidrome、Immich、PhotoPrism、Kavita 的镜像在 Docker Hub 上，本机无法拉取，因此没有实测。前三个依据上游的非 root 文档，Kavita 没有找到文档；在 NAS 上安装时，由启动检查兜底。
 - 其余 31 个应用的镜像身份逐个审查，用户决定暂缓。
 - 可以评估给 `app-after-init` 与 `image` 服务去掉 `NET_RAW` 等用不到的默认能力。
+- 从 root 改为应用账号的应用，旧安装留下的 root 属主数据文件需要手动归还（[手册](../runbooks/install-container-agent.md#验证)）；面向真实用户升级前，决定是否由 Host Agent 在准备应用时自动归还只由应用账号服务使用的数据子目录。
+- 2026-10-14 用真实 Docker 与 Compose 运行渲染出的计划（`TestRealDockerRunsAServiceAsItsPlan`，构建标签 `dockerintegration`）：安装检查读到的用户、组、能力、`no-new-privileges`、只读挂载与规则标签都与计划一致，不会误判回滚。
 
 ## 关联
 

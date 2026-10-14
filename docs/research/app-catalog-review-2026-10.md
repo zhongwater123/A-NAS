@@ -63,7 +63,7 @@
 
 | 应用 | 共享空间 | 以应用账号运行的依据 |
 |---|---|---|
-| Audiobookshelf | `Media/Audiobooks` 只读、`Media/Podcasts` 可写 | 2026-10-14 本机实测 2.35.0：持续运行，写入配置与元数据目录，播客目录可写 |
+| Audiobookshelf | `Media/Audiobooks`、`Media/Podcasts` 可写（上传、下载单集、写入元数据与合并 m4b） | 2026-10-14 本机实测 2.35.0：持续运行，写入配置与元数据目录，可写目录的新文件继承共享空间的 ACL |
 | Swing Music | `Media/Music` 只读 | 2026-10-14 本机实测 2.1.4：持续运行，载入音乐库，写入配置目录 |
 | Navidrome | `Media/Music` 只读 | [官方 Docker 文档](https://www.navidrome.org/docs/installation/docker/)的示例设置 `user: 1000:1000`，并要求音乐目录只读；去掉 `user` 即以 root 运行，文档说明“不要在生产中这样做” |
 | Immich（`immich-server`） | `Gallery/immich` 可写 | 官方 FAQ“How can I run Immich as a non-root user?”给出每个服务设置 `user`，另有 `docker-compose.non-root.yml`；数据库、Redis 与机器学习服务不挂载共享空间，保留镜像身份 |

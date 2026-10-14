@@ -93,20 +93,24 @@ var reviewedRunAs = map[string]map[string]RunAs{
 }
 
 // sharedWrites lists, by container path, the Shared folders an app writes
-// because writing is what it is for: downloads, sync, backups and uploads.
-// Every other Shared mount is read-only.
+// because writing is what it is for: downloads, sync, backups and restores,
+// uploads and library tools that edit the files. Every other Shared mount
+// is read-only.
 var sharedWrites = map[string][]string{
-	"audiobookshelf": {"/podcasts"},
+	// Uploads books, downloads podcast episodes, embeds metadata and merges
+	// files into m4b in the library.
+	"audiobookshelf": {"/audiobooks", "/podcasts"},
 	"calibre-web":    {"/books"},
 	"deluge":         {"/DATA"},
-	"duplicati":      {"/backups"},
-	"immich":         {"/usr/src/app/upload"},
-	"photoprism":     {"/photoprism/originals"},
-	"pyload":         {"/downloads"},
-	"qbittorrent":    {"/DATA"},
-	"resilio-sync":   {"/downloads"},
-	"syncthing":      {"/DATA"},
-	"transmission":   {"/downloads", "/watch"},
+	// Restores to the original location write the backed-up folder.
+	"duplicati":    {"/backups", "/source"},
+	"immich":       {"/usr/src/app/upload"},
+	"photoprism":   {"/photoprism/originals"},
+	"pyload":       {"/downloads"},
+	"qbittorrent":  {"/DATA"},
+	"resilio-sync": {"/downloads"},
+	"syncthing":    {"/DATA"},
+	"transmission": {"/downloads", "/watch"},
 }
 
 // runAsFor decides how a service of the manifest runs.
