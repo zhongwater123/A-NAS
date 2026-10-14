@@ -217,12 +217,13 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
           {available.map((app, index) => (
             <button
               key={app.id}
-              className={`launcher-tile ${app.active ? "running" : ""} ${terms.length && index === 0 ? "suggested" : ""}`}
+              className={`launcher-tile ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""} ${terms.length && index === 0 ? "suggested" : ""}`}
               aria-label={app.ariaLabel}
               onClick={() => onLaunch(app)}
             >
               <span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">{app.icon}</span>
               <span className="launcher-label">{app.label}</span>
+              {app.note && <small className="launcher-note">{app.note}</small>}
             </button>
           ))}
         </div>

@@ -63,6 +63,12 @@
 - When：打开它的详情页。
 - Then：运行状态中提示“它按旧的运行规则安装，容器仍以安装时的身份与权限运行。卸载（应用数据会保留）后重新安装，即按当前规则运行”。系统不自动重装；卸载与重装沿用现有流程，登录信息与应用数据保留。
 
+### 从桌面打开已安装的应用
+
+- Given：应用已安装，且清单声明了网页端口。
+- When：任何已登录的账号（管理员或成员）查看桌面或启动器。
+- Then：应用以自己的图标（应用目录中的图标，白色圆角底）和名称出现在桌面图标之后与启动器中，可以像其他图标一样拖动排序。点击后在新窗口打开 `<scheme>://<当前访问 A-NAS 的主机>:<网页端口><路径>`，与应用中心的“打开”相同，不需要经过应用中心或 Docker。应用的容器全部没有运行时，图标变灰并标注“未运行”：管理员点击后在 Docker 中查看这个应用的容器，成员的图标不可点击。安装中、卸载中、未安装或没有网页端口的应用不出现；卸载后图标消失。桌面在可见时每 15 秒重新读取一次已安装的应用，因此在别处安装、停止或卸载的应用不用刷新页面就会更新。
+
 ### 卸载
 
 - Given：应用已安装。
@@ -97,6 +103,7 @@
 - 局限：镜像自带身份的服务可能以 root 写入它自己的应用数据目录；初始化后降权的镜像，其入口程序与监管进程以 root 运行。rootful Docker 下，容器逃逸漏洞对以 root 运行的容器意味着宿主机 root。
 - 端口冲突检查基于 Docker 已发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
 - 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出，任务状态保存在容器代理内存中，重启后丢失但已安装状态由容器标签恢复。
+- **桌面快捷方式**：`GET /api/v1/app-shortcuts` 对所有已登录账号开放，只返回已安装且有网页端口的应用的 ID、名称、网页端口、协议、路径与运行中/全部容器数，不含安装计划、Compose、登录信息或镜像；`GET /api/v1/app-shortcuts/{id}/icon` 返回应用目录中的图标（与应用中心的图标相同的缓存与沙箱头）。应用中心未启用时列表为空，容器代理不可达时返回 `503`，桌面保留上一次的图标。
 - 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求 Host 为 `localhost` 或 IP 地址（[局域网 Web 访问](lan-web-access.md)）、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
 
 ## 验收证据
@@ -107,7 +114,8 @@
 - 2026-10-14 WSL2（Docker 29.1.3）：按新规则手动运行 Audiobookshelf 2.35.0、Swing Music 2.1.4（应用账号）与 hotio qBittorrent 5.0.4（`PGID=20000`），主进程有效能力为 0、`no-new-privileges` 生效、只读挂载拒绝写入、可写挂载的新文件继承 ACL；同时证明宿主机组与 `group_add` 在 s6 降权后都不进入进程，见[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)。`ANAS_DOCKER_INTEGRATION=1 ANAS_TEST_IMAGE=<带 sh 与 setfacl 的本地镜像> go test -tags dockerintegration ./internal/appstore/engine` 以真实 Compose 运行渲染出的计划，证明安装检查读到的用户、组、能力、`no-new-privileges`、只读挂载与规则标签都与计划一致。
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：以渲染结果运行一次性 Compose 项目，共享空间中被换成指向卷外目录的链接的文件夹使容器拒绝启动（`path concatenation escapes the base directory`），换回真实文件夹后正常挂载，写入文件属主为应用 UID；卷根不存在时挂载失败且 Docker 不创建它。
 - 2026-10-08 Experimental NAS（Debian 13 自带 Docker 26.1.5、Compose 2.26.1）：真实拉取并安装 OpenList 4.2.2，以 `app-openlist` 运行，见 [OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
-- 产品接口：[应用中心 API 测试](../../internal/appstoreapi/handler_test.go) 覆盖安装前预建文件夹、卸载撤销与数据卷离线拒绝；[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go)。
+- 产品接口：[应用中心 API 测试](../../internal/appstoreapi/handler_test.go) 覆盖安装前预建文件夹、卸载撤销与数据卷离线拒绝；[桌面快捷方式测试](../../internal/appstoreapi/shortcuts_test.go) 覆盖只列出已安装且有网页端口的应用、未启用时为空列表、图标的沙箱头与 404/405；[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go) 另覆盖成员可以读取快捷方式与图标、未登录返回 401，且响应中没有安装细节。
+- 桌面快捷方式：[桌面测试](../../web/src/App.test.tsx) 的 “Installed apps on the desktop” 覆盖点击图标与在启动器中回车都按当前主机和网页端口在新窗口打开、未运行的应用标注“未运行”且管理员点击后打开 Docker、成员也能看到已安装的应用而未运行的不可点击。
 - 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。`TestPlanRefusesADockerThatDropsVolumeSubpaths`、`TestInstallRollsBackAMountBeyondItsFolder` 与 `TestInstallKeepsMountsOnTheirFolders` 覆盖过旧的 Compose 或 Engine API 被拒绝、挂载超出计划文件夹时回滚与正确挂载时正常安装；`TestInstallRollsBackAContainerThatDoesNotRunAsPlanned`、`TestInstallRollsBackAWritableReadOnlyFolder` 与 `TestAppsReportContainersFromOlderRuntimeRules` 覆盖用户、组、能力、`no-new-privileges` 或服务与计划不符时回滚、只读挂载变成可写时回滚，以及按旧规则安装的应用被标出。
 - 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)（含分类、使用须知与链接往返，以及丢弃旧版代理的 CasaOS 分类）、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
 - 前端：[应用中心测试](../../web/src/appcenter/AppCenterPanel.test.tsx) 覆盖分类浏览、按命中位置排序的搜索与 Esc 清空、Markdown 与使用须知（表格、无图片、新窗口链接）、A-NAS 版须知与折叠的上游原始说明及其标题层级、计划 → 进度 → 完成并按当前主机打开应用、关闭计划后焦点回到“安装”、失败原因与重新安装、重新安装时不把上一次的失败当作结果、另一任务进行时禁止确认、已安装列表与从菜单卸载（取消时焦点回到菜单按钮）、未分类应用列在“其他”、登录信息默认隐藏并可显示与复制（复制后焦点留在按钮上）、旧安装显示清单默认密码的警示、计划逐个列出服务的运行方式并说明共享空间只读、按旧规则安装的应用提示重装，写请求都带 CSRF 令牌；[桌面测试](../../web/src/App.test.tsx) 覆盖从桌面打开后按摘要安装、端口冲突提示、未启用状态、Docker 网络与地址池显示、地址池缺失与数据卷不可用提示。

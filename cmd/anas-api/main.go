@@ -281,6 +281,7 @@ func run(logger *slog.Logger) error {
 		Terminal:     terminals,
 		Containers:   containersapi.New(containerManager, containerSource, logger),
 		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		AppShortcuts: appstoreapi.NewShortcuts(appStore),
 		Photos:       photoAPI,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,

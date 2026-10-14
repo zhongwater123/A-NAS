@@ -207,6 +207,22 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 	if newTitle == "" {
 		return ShowDetail{}, fmt.Errorf("%w: 名称无效", ErrInvalid)
 	}
+	// The scan finds shows by their normalized title. Another show holding
+	// it is a conflict whatever the files say, so it is checked before any
+	// file is looked up: right after a rename the episodes still name the
+	// old files until the scan catches up.
+	key := normalizeTitle(newTitle)
+	if key == "" {
+		key = newTitle
+	}
+	var holder string
+	err = s.store.db.QueryRowContext(ctx, "SELECT id FROM shows WHERE library_id = ? AND key = ? AND id <> ?", show.LibraryID, key, showID).Scan(&holder)
+	switch {
+	case err == nil:
+		return ShowDetail{}, fmt.Errorf("%w: 媒体库里已有同名的剧", files.ErrConflict)
+	case !errors.Is(err, sql.ErrNoRows):
+		return ShowDetail{}, err
+	}
 
 	var renames []rename
 	renamed := map[string]string{}
@@ -251,20 +267,8 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 		}
 		return s.Show(ctx, actor, showID)
 	}
-	// The scan finds shows by their normalized title; moving this one to the
-	// new title first lets the scan keep its ID.
-	key := normalizeTitle(newTitle)
-	if key == "" {
-		key = newTitle
-	}
-	var holder string
-	err = s.store.db.QueryRowContext(ctx, "SELECT id FROM shows WHERE library_id = ? AND key = ? AND id <> ?", show.LibraryID, key, showID).Scan(&holder)
-	switch {
-	case err == nil:
-		return ShowDetail{}, fmt.Errorf("%w: 媒体库里已有同名的剧", files.ErrConflict)
-	case !errors.Is(err, sql.ErrNoRows):
-		return ShowDetail{}, err
-	}
+	// Moving this show to the new title before the scan lets the scan keep
+	// its ID.
 	if err := s.applyRenames(ctx, actor, renames); err != nil {
 		return ShowDetail{}, err
 	}

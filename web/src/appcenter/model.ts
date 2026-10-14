@@ -84,7 +84,7 @@ export function stateText(app: CatalogApp): string {
 }
 
 // The app's web interface on the address this desktop was opened from.
-export function appURL(app: CatalogApp, location: Location = window.location): string | undefined {
+export function appURL(app: Pick<CatalogApp, "webPort" | "scheme" | "path">, location: Location = window.location): string | undefined {
   if (!app.webPort) return undefined;
   const url = new URL(location.href);
   url.protocol = `${app.scheme || "http"}:`;
@@ -95,7 +95,7 @@ export function appURL(app: CatalogApp, location: Location = window.location): s
   return url.toString();
 }
 
-export function openApp(app: CatalogApp) {
+export function openApp(app: Pick<CatalogApp, "webPort" | "scheme" | "path">) {
   const url = appURL(app);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
