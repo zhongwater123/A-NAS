@@ -1,0 +1,54 @@
+[Unit]
+Description=A-NAS assistant for %i (spike)
+# Started by anas-assistant-api@%i.service, stopped when that proxy exits idle.
+StopWhenUnneeded=yes
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+SupplementaryGroups=a-nas-users
+Environment=HOME=/nas/助手 HERMES_HOME=/nas/助手/.hermes HERMES_MANAGED_DIR=/etc/hermes
+Environment=HERMES_WRITE_SAFE_ROOT=/nas/助手 PYTHONDONTWRITEBYTECODE=1
+Environment=API_SERVER_ENABLED=true API_SERVER_HOST=127.0.0.1 API_SERVER_PORT=8642 API_SERVER_KEY=k7Qx9vT2mR4pL8wNz3Jd-%i
+WorkingDirectory=/nas/助手
+ExecStart=/usr/bin/tini -- /bin/bash /spike/assistant-start.sh
+ExecStartPost=/bin/bash /spike/wait-port.sh 8642
+TimeoutStartSec=120
+# The member's own data, read-only; the assistant directory is the only
+# writable place. Everything else under /srv disappears.
+BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i:/nas/个人空间
+BindReadOnlyPaths=/srv/a-nas/data/spaces/shared:/nas/共享空间
+BindReadOnlyPaths=/run/anas-assistant-gw
+BindPaths=/srv/a-nas/data/assistant/%i:/nas/助手
+TemporaryFileSystem=/srv:ro
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+PrivatePIDs=true
+PrivateIPC=true
+ProtectProc=invisible
+KeyringMode=private
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @privileged
+SystemCallErrorNumber=EPERM
+TasksMax=256
+MemoryMax=2G

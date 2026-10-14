@@ -1,0 +1,44 @@
+# 0022：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行
+
+状态：proposed（2026-10-14 与用户讨论后起草；同日在开发机完成 spike，实验 NAS 上尚未验证）；行为见 [AI 助手规格](../specs/ai-assistant.md)，外部事实见 [Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)。
+
+AI 助手需要记忆、技能、多模型与工具调用这些智能体能力，自己实现等于重写一个成熟框架；但 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 是为单一主人设计的，默认带终端与文件的全部权限，而 A-NAS 有多名成员，文件只由内核 ACL 授权。我们决定：以 Hermes Agent 为运行时，每个账号运行一个独立实例，由 systemd 沙箱只给它看本人能读的几处位置，只让它自由写自己的助手目录；对个人空间与 Agent空间的更改先写入暂存区，只有账号本人在自己的会话中确认后才由文件代理执行。权限由内核与 A-NAS 强制，不依赖 Hermes 的配置或模型的自觉。
+
+## 决定
+
+1. **运行时**：固定 Hermes Agent 的一个提交，在开发机构建运行环境，按内容存放在 `/opt/a-nas` 并由 release 引用，设备上不运行 pip、不联网、不自更新（与 [ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md) 相同）。与相册 AI 不同，运行环境自带 CPython 3.14（Hermes 的依赖只在 3.14 上安装，Debian 13 是 3.13），依赖按上游 `uv.lock` 以哈希固定，Hermes 本身以固定提交的源码可编辑安装（上游拒绝构建 wheel）。A-NAS 只经 API Server 与 MCP 对接 Hermes，不 import 它的内部代码；更换运行时不影响 A-NAS 侧的模型网关、MCP 工具与确认流程。
+2. **每个账号一个实例**：模板单元 `anas-assistant@<账号>.service` 以该账号本人的 Linux 身份运行，附加组只有 `a-nas-users`（不带 `a-nas-admins`），所以内核 ACL 决定它能读什么，与文件工作进程和终端一致（[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md)）。同一 UID 带来的风险由沙箱封住：独立 PID 命名空间（`PrivatePIDs`）、禁止 ptrace 一类系统调用、私有 IPC 与 keyring、没有任何能力。PID 命名空间中的 1 号进程是 `tini`，由它回收孤儿进程。实例由每个账号的 Unix 套接字按需启动：套接字触发的 `systemd-socket-proxyd` 以 `JoinsNamespaceOf=` 进入实例的网络命名空间，转发到它的 API Server，闲置后退出并带走实例（`StopWhenUnneeded`）；只有产品服务能连接这些套接字，每个实例另有至少 16 个字符的 API 密钥。
+3. **沙箱只挂三处**：本人的个人空间（只读）、共享空间（只读，含 Agent空间）与本人的助手目录（读写，唯一可写处）；两处空间里本人的回收站条目可读，他人的由 ACL 挡住；数据卷其余部分、快照、系统盘上的状态都不在沙箱中。实例没有网络（`PrivateNetwork`），唯一出口是经绑定进来的 Unix 套接字回到产品服务的模型网关与 MCP 端点（实例内由 `socat` 从回环地址转入）；产品服务按请求来自哪个实例的套接字认定账号，Hermes 不持有任何 A-NAS 令牌或模型密钥。
+4. **写入**：Hermes 自带的文件工具直接写助手目录。对个人空间或 `Agent空间/<本人>` 的新建、修改、移动、改名与删除，先写到助手目录内的暂存区，再经 MCP 工具“提交更改”成为一份[待确认更改](../../CONTEXT.md)。账号本人在自己的 Web 会话中确认后，文件代理以本人身份执行：请求携带暂存内容的 SHA-256，内容或目标在预览后变化即拒绝；确认一次有效并会过期；删除与被覆盖的旧版本进入本人的回收站。执行进程由 Landlock 限制为只能写这两处。共享空间的其他位置无论确认与否都不能写。
+5. **Agent空间**：`共享空间/Agent空间` 由 Host Agent 预建并修复，全体成员只读；每个账号在其中有一个只授本人 `rwx` 的子目录，与 `.a-nas-trash/<username>` 的 ACL 模式相同（[存储与文件架构](../architecture/storage-and-files.md)）。
+6. **相册**：照片不是普通文件，助手经 MCP 只读工具访问相册服务；`photos.Principal` 增加助手标记，相册服务据此只允许读取，去掉管理员身份与查看授权，范围为本人的私有图库与共享图库（[ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
+7. **模型**：产品服务提供 OpenAI 兼容的模型网关并持有密钥。开发期转发到云端 API，仅用于开发测试；之后换成设备上的本地多模态模型，Hermes 一侧的配置不变。
+8. **固定策略与关闭的能力**：模型地址、启用的工具与各项关闭写在 root 所有、沙箱内只读的 Hermes managed scope（`/etc/hermes`）中，Agent 自己的配置无法覆盖。只启用 `file`、`memory`、`session_search`、`skills`、`todo` 与 A-NAS 的 MCP 工具；关闭 `terminal`、`code_execution`、`browser`、`web`、`cronjob` 与消息平台，以及 Nous Tool Gateway、Honcho、`smart` 审批的辅助模型、更新检查、模型目录拉取、运行时装包与语言服务器。沙箱使这些能力即使被误开也越不出上述三处，以后重新启用某项另行决定。
+
+## 后果
+
+- **隐私（暂不处理，只在此注明）**：开发期的云端 API 会收到助手读取的文件内容与照片缩略图，这与相册界面“照片只在这台设备上分析，AI 不联网”的说明不一致（[ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。因此云端 API 只用于开发测试；本地多模态模型接入前，不在保存真实家庭数据的设备上为成员开启助手。
+- Hermes 对个人空间里的文件直接 `patch` 会得到只读错误；系统随 Hermes 附带一个技能说明暂存区与“提交更改”的用法。读取、搜索与编辑仍全部使用 Hermes 自带的工具。
+- 助手目录是数据卷上每个账号一个 Btrfs 子卷（`assistant/<账号>`），以 simple quota（内核 6.7 起）封顶；文件代理因此可以从暂存区读取内容。数据卷离线时助手不可用，不回退到系统盘。在已有数据与快照的数据卷上开启 simple quota 前，须先在实验 NAS 上验证它对快照与删除的影响。
+- 开发机上每个实例常驻约 200–270 MB、峰值不到 300 MB，冷启动 5.5–11 秒；闲置退出让不用助手的成员不占内存。运行环境解开约 425 MB（压缩包 132 MB），设备另需 Debian 包 `ripgrep`、`socat` 与 `tini`。本地多模态模型能否在 8 GB 设备上运行另行评估。
+- Hermes 每开始一个新对话会多请求一次模型生成标题，正式配置须写明模型的上下文长度，否则它会反复探测；系统提示约 13,000 字符。
+- 实例闲置退出后 Hermes 的定时任务不会触发，所以第一版关闭 `cronjob`；以后由 A-NAS 的调度唤醒实例。
+- Hermes 上游没有版本号，升级等同于一次依赖升级，需要重跑沙箱探针与契约测试。
+- 删除账号时须同时删除其助手目录与 `Agent空间/<账号>`，随账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）实现。
+- Host Agent 新增类型化操作：为账号建立与删除助手目录、Agent空间子目录与实例套接字。
+
+## 未选择
+
+- **装进应用中心现有的 Docker**：安装策略不允许挂载个人空间；即使允许，Docker 默认给容器 `CAP_DAC_OVERRIDE`，Hermes 官方容器加固也保留它，容器内的 root 会无视 ACL。
+- **每个账号一个独立 Docker 容器**：隔离强度与 systemd 沙箱相当，但依赖由管理员另装的 Docker、要扩展容器代理、镜像要另走离线交付，现有系统测试也不能直接证明它的边界。
+- **一个进程服务多个 profile**：官方明说 profile 不是沙箱，成员之间的隔离只能依赖 Hermes 的代码。
+- **以独立 UID 运行、所有读写都经 A-NAS 自写的 MCP 工具**：不需要成员 UID，但要重写读取、搜索与编辑工具，重复造轮子；读取范围已由挂载与 ACL 限定，同 UID 的风险已由沙箱封住。
+- **overlayfs 让 Hermes 原地修改个人空间**：对工具最透明，但成员同时在使用的个人空间就是下层，内核文档把下层在挂载期间变化定义为未定义行为；挂载与清理暂存层还需要特权与卸载。
+- **写个人空间或 Agent空间不需要确认**：共享空间任何成员都能写，可以放入诱导助手的文字；不确认就可能被诱导把私人文件写到全家可读的位置，或改坏本人的文件。
+
+## 关联
+
+- [AI 助手规格](../specs/ai-assistant.md)、[Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)
+- Spike：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元、managed scope 与探针）
+- [ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md)、[ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
+- [架构不变量](../architecture/OVERVIEW.md#不变量)、[存储与文件架构](../architecture/storage-and-files.md)

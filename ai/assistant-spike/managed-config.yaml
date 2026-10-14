@@ -1,0 +1,30 @@
+# A-NAS managed Hermes policy (spike). Root-owned and read-only inside the
+# sandbox, so the agent cannot re-enable what is switched off here.
+model:
+  provider: custom
+  default: spike-model
+  base_url: http://127.0.0.1:18001/v1
+  api_mode: chat_completions
+  api_key: spike-not-a-secret
+platform_toolsets:
+  api_server: [file, memory, session_search, skills, todo]
+agent:
+  disabled_toolsets: [terminal, code_execution, browser, web, cronjob, delegation, image_gen, tts, x_search, computer_use, kanban]
+approvals:
+  mode: manual
+security:
+  allow_lazy_installs: false
+  allow_private_urls: false
+auth:
+  adopt_external_logins: false
+updates:
+  check: false
+model_catalog:
+  enabled: false
+lsp:
+  enabled: false
+plugins:
+  auto_update_check_hours: 0
+gateway:
+  multiplex_profiles: false
+  auto_multiplex_migration: false
