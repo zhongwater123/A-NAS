@@ -78,7 +78,10 @@ import "./styles.css";
 
 // The transfer center loads when first opened; the desktop only needs its
 // status-bar pill and toasts.
-const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
+// The transfer center is fetched soon after sign-in, so that it opens even
+// when the NAS has just stopped answering, which is when it is looked for.
+const loadTransferCenter = () => import("./transfers/TransferCenter");
+const TransferCenter = lazy(() => loadTransferCenter().then((module) => ({ default: module.TransferCenter })));
 
 type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "terminal" | "docker" | "store";
 
@@ -279,6 +282,10 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
   useEffect(() => { transferStore.attach(session.user.id); }, [session.user.id]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadTransferCenter().catch(() => undefined); }, 3000);
+    return () => window.clearTimeout(timer);
+  }, []);
   // A folder the transfer center asks the file manager to show.
   const [fileNavigation, setFileNavigation] = useState<TransferLocation>();
   const showInFiles = (location: TransferLocation) => { setFileNavigation(location); openWindow("files"); };

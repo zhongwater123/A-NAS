@@ -257,8 +257,9 @@ function ConflictBar({ title, detail, onAnswer, children }: { title: string; det
 }
 
 function RowDetail({ item }: { item: TransferItem }) {
-  // Another app's upload waiting for the NAS says so instead of a speed.
-  if (item.status === "running" && item.external?.note) return <span className="warning">{item.external.note}</span>;
+  // Another app's upload has no speed of its own; one waiting for the NAS
+  // says so.
+  if (item.status === "running" && item.external) return item.external.note ? <span className="warning">{item.external.note}</span> : <span className="tc-speed">上传中</span>;
   if (item.status === "running") {
     return <>
       <span className="tc-speed">{item.speed > 0 ? speedText(item.speed, item.total - item.transferred) : "正在连接…"}</span>

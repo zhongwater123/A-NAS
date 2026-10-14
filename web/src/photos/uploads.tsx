@@ -105,7 +105,9 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
         for (let attempt = 0; ; attempt += 1) {
           try {
             if (!assetId) {
-              assetId = (await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress, note: undefined }); handle?.progress(progress); }, controller.signal, item.uploadKey)).id;
+              // A note stays until a try is answered: bytes handed to the network
+              // say nothing about whether the NAS is back.
+              assetId = (await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); handle?.progress(progress); }, controller.signal, item.uploadKey)).id;
               update(item.key, { assetId });
             }
             if (item.target.albumId) await addToAlbum(item.target.albumId, assetId);

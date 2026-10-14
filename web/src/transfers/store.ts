@@ -431,9 +431,10 @@ export class TransferStore {
       },
       progress: (fraction: number) => {
         this.count(upload.key, upload.batch, Math.round(fraction * upload.size));
-        change({ progress: fraction, note: undefined }, false);
+        change({ progress: fraction }, false);
       },
-      // note tells why the upload waits; it is sent again from the start.
+      // note tells why the upload waits, until it is done or fails; it is
+      // sent again from the start.
       note: (text: string) => {
         this.sent.set(upload.key, 0);
         change({ progress: 0, note: text });
