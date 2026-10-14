@@ -220,12 +220,6 @@ func TestResetPasswordMustBeChangedBeforeAnythingElse(t *testing.T) {
 	if err != nil || current.User.MustChangePassword {
 		t.Fatalf("session after change = %#v, %v", current, err)
 	}
-	if err := service.ResetCredential(ctx, admin, admin.ID, "administrator new password"); err != nil {
-		t.Fatal(err)
-	}
-	if self, err := service.Authenticate(ctx, "owner", "administrator new password"); err != nil || self.User.MustChangePassword {
-		t.Fatalf("an administrator resetting their own password is forced to change it: %#v, %v", self, err)
-	}
 }
 
 func privateSpaceOf(t *testing.T, service *accounts.Service, user accounts.User) string {

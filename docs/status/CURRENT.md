@@ -64,14 +64,15 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 14. 问题反馈处理：#86 已合并，随下一次部署（含容器代理）进入实验 NAS，在实机上核对回收站批量恢复与原文件夹已删除时的恢复、文件管理预览 20 MB 照片、相册按范围搜索、Immich 详情页与文件管理/设置的容量单位，然后在“问题反馈”中把 6 条标记为已处理。文件管理缩略图仍加载原图，是否改为服务端缩略图另行决定。
 15. Demo 测试报告处理：评审合并后随下一次部署（含容器代理）进入实验 NAS，在实机上安装 n8n 确认持续运行、安装 OpenList 并用应用中心显示的密码登录、在 Web 中验证超长、不兼容与只差大小写的名称被拒绝，并从 Windows SMB 打开 Web 新建的文件夹，并确认各空间出现凌晨 3 点的每日快照；Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用里修改。
 16. 应用容器权限（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)，2026-10-14，未合并、未部署）：应用账号的组改写进服务自身（宿主机组从不进入容器），以 root 运行的镜像不再能挂载共享空间，共享空间默认只读，安装后核对用户、组、能力与只读挂载（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。随下一次部署（含容器代理与 Host Agent）进入实验 NAS 后：重新安装 Immich（按旧规则以 root 运行，宿主机 `app-immich` 仍在 `a-nas-users`），确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent 核对只读与可写共享空间。其余应用的镜像身份逐个审查按用户决定暂缓。
+17. 成员账户审查（[#98](https://github.com/zhongwater123/A-NAS/issues/98)，[PR #101](https://github.com/zhongwater123/A-NAS/pull/101)，未合并、未部署）：收紧了[账号名与密码规则](../specs/unified-identity-and-file-acl.md#账号名与密码规则)（保留名、密码 12–64 个字符且不含控制字符、管理员不能重置自己的密码），并修复 E02–E06：成员一直看到谁重置过自己的密码、禁用先结束网页登录、改密与查看授权失败时撤回已生效的部分、文件代理拒绝必须改密的会话、并发启用只产生一个管理员、只有本机屏幕或 SSH 隧道能首次启用。E01（产品服务能为任何账号签发会话）只修正了规格中的承诺，把密码校验与会话签发移到 Host Agent 是后续工作。部署后在宿主机上按多角色验证登录、禁用、重置与改密。
 
 ## 外部条件与限制
 
-- Experimental NAS 当前在线并运行主干提交 `bb1ec71bff65`（#83，2026-10-13 晚只读核对 `/opt/a-nas/current`；此前为 15:30 安装的 `e1c1921d5fdb`），本地 AI 已启用；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、“设置”窗口、新相册界面、文件和共享用户闭环及相册用户功能验收仍未完成。
+- Experimental NAS 当前在线并运行主干提交 `7e463e482c46`（含 #96、#97，2026-10-14 只读核对 `/opt/a-nas/current`；此前为 `bb1ec71bff65`），尚不含 ADR 0022（#99），Immich 仍以 root 运行，本地 AI 已启用；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、“设置”窗口、新相册界面、文件和共享用户闭环及相册用户功能验收仍未完成。
 - v1.0.1 只使用可丢弃测试数据。单盘 Btrfs 不提供冗余、备份或家庭生产数据可靠性承诺。
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
-- 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB。当天部署后已重启 smbd 并确认监听 `172.18.45.48:445`，但下次重启仍会复现；根治前每次重启后需 root 执行 `systemctl restart smbd`。
+- 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB。当天部署后已重启 smbd 并确认监听 `172.18.45.48:445`（2026-10-14 只读核对仍在监听，此后未重启），但下次重启仍会复现；根治前每次重启后需 root 执行 `systemctl restart smbd`。原因已确认：`enp2s0` 在 ifupdown 中是 `allow-hotplug` + DHCP，`ifupdown-wait-online.service` 未启用，smbd 依赖的 `network-online.target` 可能在网卡拿到地址前就已达成。
 - Caddy 官方的 Cloudsmith 软件源自 2026-10-09 对软件包索引返回 `402 Payment Required`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），实验 NAS 暂留 Debian 的 Caddy 2.6.2，并删除该源以免 `apt-get update` 失败。
 - 2026-10-09 从公司 WiFi 上的开发机（`172.19.172.225`）到 NAS 与网关的 TCP 445 均不通，而 80 端口正常；连接期间 NAS 上没有任何来自该网段的 445 连接状态，说明拦截发生在公司网络或该电脑的安全策略，不在 NAS。跨网段访问目前使用局域网 Web；SMB 需从 `172.18.45.x` 有线网段复测，或请 IT 放行到 NAS 的 TCP 445。
 

@@ -139,6 +139,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	}
 	setup := httptest.NewRequest(http.MethodPost, "/api/v1/setup/admin", bytes.NewBufferString(`{"username":"owner","password":"correct horse battery staple"}`))
 	setup.Header.Set("Content-Type", "application/json")
+	fromLocalConsole(setup)
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, setup)
 	var session struct {

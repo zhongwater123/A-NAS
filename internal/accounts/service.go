@@ -13,9 +13,12 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/argon2"
@@ -24,10 +27,14 @@ import (
 var (
 	ErrSetupComplete       = errors.New("administrator setup is already complete")
 	ErrInvalidUsername     = errors.New("invalid username")
-	ErrWeakPassword        = errors.New("password must contain at least 12 characters")
+	ErrInvalidPassword     = errors.New("invalid password")
+	ErrWeakPassword        = fmt.Errorf("%w: it must contain at least %d characters", ErrInvalidPassword, MinPasswordLength)
+	ErrPasswordTooLong     = fmt.Errorf("%w: it must contain at most %d characters", ErrInvalidPassword, MaxPasswordLength)
+	ErrPasswordCharacters  = fmt.Errorf("%w: it must not contain control characters", ErrInvalidPassword)
 	ErrInvalidCredentials  = errors.New("invalid username or password")
 	ErrSessionNotFound     = errors.New("session is invalid or expired")
 	ErrUsernameUnavailable = errors.New("username is unavailable")
+	ErrUsernameReserved    = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
 	ErrCredentialProvision = errors.New("account credential provisioning failed")
 	ErrForbidden           = errors.New("operation is forbidden")
 	ErrUserNotFound        = errors.New("user not found")
@@ -36,6 +43,10 @@ var (
 	// group, or UID that A-NAS did not allocate for this user.
 	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
 	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
+	// ErrSMBDisablePending reports a disabled account whose Web sign-in has
+	// ended but whose SMB credential the Host Agent could not disable yet.
+	// Identity synchronization disables it when the Product Service starts.
+	ErrSMBDisablePending = errors.New("the account is disabled, but its SMB credential could not be disabled yet")
 )
 
 // Linux identity layout shared with the Host Agent (ADR 0008). Fixed group
@@ -53,6 +64,15 @@ const (
 	// same photos again.
 	PhotoServiceUser = "a-nas-photos"
 	PhotoServiceUID  = 31000
+)
+
+// Password rules for every password a user sets. MaxPasswordLength keeps the
+// password within what smbpasswd reads as one line (maxPasswordBytes) for any
+// text without emoji, and within what SMB clients let users type.
+const (
+	MinPasswordLength = 12
+	MaxPasswordLength = 64
+	maxPasswordBytes  = 254
 )
 
 type Role string
@@ -251,6 +271,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
+CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resource_id, occurred_at);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate SQLite: %w", err)
@@ -386,8 +407,8 @@ FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'`).Sc
 	if err != nil || user.Role != RoleAdmin || user.Username != username || (user.Status != UserStatusPending && user.Status != UserStatusError) {
 		return User{}, ErrSetupComplete
 	}
-	if len([]rune(password)) < 12 {
-		return User{}, ErrWeakPassword
+	if err := checkPassword(password); err != nil {
+		return User{}, err
 	}
 	passwordHash, err := hashPassword(password, s.random)
 	if err != nil {
@@ -430,13 +451,15 @@ func (s *Service) CreateMember(ctx context.Context, actor User, username, passwo
 	return s.createUser(ctx, username, password, RoleMember, actor.ID)
 }
 
+// createUser creates an account for the administrator actorID; an empty
+// actorID is the device's setup, which creates its first administrator.
 func (s *Service) createUser(ctx context.Context, username, password string, role Role, actorID string) (User, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	if !validUsername(username) {
-		return User{}, ErrInvalidUsername
+	if err := checkUsername(username); err != nil {
+		return User{}, err
 	}
-	if len([]rune(password)) < 12 {
-		return User{}, ErrWeakPassword
+	if err := checkPassword(password); err != nil {
+		return User{}, err
 	}
 	passwordHash, err := hashPassword(password, s.random)
 	if err != nil {
@@ -450,13 +473,23 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 		return User{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO users(id, username, role, status, password_hash, created_at) VALUES(?,?,?,?,?,?)",
-		user.ID, user.Username, user.Role, user.Status, passwordHash, formatTime(now)); err != nil {
+	insert := "INSERT INTO users(id, username, role, status, password_hash, created_at) VALUES(?,?,?,?,?,?)"
+	if actorID == "" {
+		// Setup found no users before hashing, but so may a concurrent setup:
+		// only the insert that still finds none creates the administrator.
+		insert = "INSERT INTO users(id, username, role, status, password_hash, created_at) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM users)"
+	}
+	result, err := tx.ExecContext(ctx, insert, user.ID, user.Username, user.Role, user.Status, passwordHash, formatTime(now))
+	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return User{}, ErrUsernameUnavailable
 		}
 		return User{}, err
+	}
+	if inserted, err := result.RowsAffected(); err != nil {
+		return User{}, err
+	} else if inserted == 0 {
+		return User{}, ErrSetupComplete
 	}
 	if _, err := tx.ExecContext(ctx,
 		"INSERT INTO spaces(id, kind, name, owner_user_id, created_at) VALUES(?,?,?,?,?)",
@@ -797,7 +830,8 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 		return ErrForbidden
 	}
 	var username string
-	if err := s.store.db.QueryRowContext(ctx, "SELECT username FROM users WHERE id = ?", userID).Scan(&username); errors.Is(err, sql.ErrNoRows) {
+	var status UserStatus
+	if err := s.store.db.QueryRowContext(ctx, "SELECT username, status FROM users WHERE id = ?", userID).Scan(&username, &status); errors.Is(err, sql.ErrNoRows) {
 		return ErrUserNotFound
 	} else if err != nil {
 		return err
@@ -805,23 +839,51 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if s.credentials == nil {
 		return errors.New("credential provisioner is unavailable")
 	}
-	if err := s.credentials.DisableCredential(ctx, username); err != nil {
+	if status == UserStatusDisabled {
+		// Disabling again only retries the SMB credential.
+		return s.disableHostCredential(ctx, username)
+	}
+	// Web access ends first and for good: a Host Agent failure must not leave
+	// the account signed in. The status is also what identity
+	// synchronization converges the SMB credential to.
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := s.store.db.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = ?", userID); err != nil {
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = ?", userID); err != nil {
 		return err
 	}
-	_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
+		return err
+	}
+	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.disabled", "user", userID, ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	s.sessions.forgetUser(userID)
-	return s.appendAudit(ctx, actor.ID, "user.disabled", "user", userID, "")
+	return s.disableHostCredential(ctx, username)
 }
 
+func (s *Service) disableHostCredential(ctx context.Context, username string) error {
+	if err := s.credentials.DisableCredential(ctx, username); err != nil {
+		return fmt.Errorf("%w: %v", ErrSMBDisablePending, err)
+	}
+	return nil
+}
+
+// ResetCredential lets an administrator choose a temporary password for
+// another account. Administrators change their own password like everyone
+// else, with the current one: a session alone must not be enough to take an
+// account over.
 func (s *Service) ResetCredential(ctx context.Context, actor User, userID, password string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
 		return ErrForbidden
 	}
-	if len([]rune(password)) < 12 {
-		return ErrWeakPassword
+	if err := checkPassword(password); err != nil {
+		return err
 	}
 	var user User
 	var privateSpaceID string
@@ -848,11 +910,10 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	}
 	// Resetting a password never re-enables a disabled account. A member whose
 	// password an administrator chose keeps SMB disabled until choosing a new
-	// one, so the administrator never knows a usable password.
-	mustChange := userID != actor.ID
+	// one, so the administrator never knows a usable SMB password.
 	if err := s.credentials.SetCredential(ctx, CredentialRequest{
 		UserID: user.ID, PrivateSpaceID: privateSpaceID, Username: user.Username, Password: password, Role: user.Role,
-		UID: uid, Enabled: user.Status != UserStatusDisabled && !mustChange,
+		UID: uid, Enabled: false,
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
@@ -864,23 +925,53 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = ?,
-status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, mustChange, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = 1,
+status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, userID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
+		return err
+	}
+	// The member learns of the reset, and LastCredentialReset shows it, only
+	// if both records exist; they commit with the password or not at all.
+	if err := s.notifyTo(ctx, tx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
+		return err
+	}
+	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.credential_reset", "user", userID, ""); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.sessions.forgetUser(userID)
-	if mustChange {
-		if err := s.notify(ctx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
-			return err
-		}
+	return nil
+}
+
+// CredentialReset is the latest time an administrator chose a user's
+// password.
+type CredentialReset struct {
+	ActorUsername string    `json:"actorUsername"`
+	At            time.Time `json:"at"`
+}
+
+// LastCredentialReset returns the latest reset of the actor's own password,
+// or nil. An administrator can take a member's account over by resetting its
+// password and choosing the next one; the member keeps seeing that it
+// happened, whoever acknowledged the notification.
+func (s *Service) LastCredentialReset(ctx context.Context, actor User) (*CredentialReset, error) {
+	var reset CredentialReset
+	var at string
+	err := s.store.db.QueryRowContext(ctx, `SELECT COALESCE(u.username, ''), a.occurred_at
+FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+WHERE a.action = 'user.credential_reset' AND a.resource_id = ? ORDER BY a.occurred_at DESC LIMIT 1`, actor.ID).Scan(&reset.ActorUsername, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	return s.appendAudit(ctx, actor.ID, "user.credential_reset", "user", userID, "")
+	if err != nil {
+		return nil, err
+	}
+	reset.At, _ = time.Parse(time.RFC3339Nano, at)
+	return &reset, nil
 }
 
 // SyncIdentities asks the Host Agent to converge Linux accounts and group
@@ -916,14 +1007,57 @@ WHERE u.status IN ('active', 'disabled') ORDER BY i.uid`)
 }
 
 func (s *Service) appendAudit(ctx context.Context, actorID, action, resourceType, resourceID, detail string) error {
-	_, err := s.store.db.ExecContext(ctx,
+	return s.appendAuditTo(ctx, s.store.db, actorID, action, resourceType, resourceID, detail)
+}
+
+// appendAuditTo records an audit event through db, which may be a
+// transaction the event must commit with.
+func (s *Service) appendAuditTo(ctx context.Context, db sqlExecutor, actorID, action, resourceType, resourceID, detail string) error {
+	_, err := db.ExecContext(ctx,
 		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?,?,?,?,?,?,?)",
 		s.randomID("audit"), nullableString(actorID), action, resourceType, resourceID, formatTime(s.now().UTC()), detail)
 	return err
 }
 
-func validUsername(value string) bool {
-	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(value)
+// usernamePattern is a portable Linux account name; the Host Agent accepts the
+// same names.
+var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`)
+
+// reservedUsernames are Samba's special sections and the Shared share. Share
+// names ignore case, so a member named shared would reach Shared instead of
+// their private space over SMB.
+var reservedUsernames = []string{"global", "homes", "printers", "shared"}
+
+// checkUsername applies the account name rules to a lowercased name. Names
+// starting a-nas or app- belong to accounts A-NAS creates itself, such as
+// a-nas-photos and the app identity app-<id> (ADR 0008); a member holding one
+// would block that account for good.
+func checkUsername(username string) error {
+	switch {
+	case !usernamePattern.MatchString(username):
+		return ErrInvalidUsername
+	case slices.Contains(reservedUsernames, username), username == "a-nas",
+		strings.HasPrefix(username, "a-nas-"), strings.HasPrefix(username, "app-"):
+		return ErrUsernameReserved
+	}
+	return nil
+}
+
+// checkPassword applies the password rules to a password being set. Signing in
+// does not, so a password set under earlier rules keeps working. Control
+// characters are refused because smbpasswd reads the password as a line of C
+// text: a newline or NUL would give SMB a different, shorter password.
+func checkPassword(password string) error {
+	length := utf8.RuneCountInString(password)
+	switch {
+	case !utf8.ValidString(password) || strings.ContainsFunc(password, unicode.IsControl):
+		return ErrPasswordCharacters
+	case length < MinPasswordLength:
+		return ErrWeakPassword
+	case length > MaxPasswordLength || len(password) > maxPasswordBytes:
+		return ErrPasswordTooLong
+	}
+	return nil
 }
 
 func (s *Service) randomID(prefix string) string { return prefix + ":" + s.randomToken(16) }

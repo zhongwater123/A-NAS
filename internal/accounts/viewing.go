@@ -139,11 +139,12 @@ func (s *Service) StartViewing(ctx context.Context, actor User, ownerUserID, pas
 		}
 		return ViewingGrant{}, fmt.Errorf("%w: %v", ErrCredentialProvision, err)
 	}
-	if err := s.notify(ctx, ownerID, NotificationAdminViewing, actor.Username, encodeDetail(reason, &grant.ExpiresAt)); err != nil {
-		return ViewingGrant{}, err
-	}
+	// A grant nobody was told about must not stay: without the owner's
+	// notification and the audit event, the access is withdrawn again.
 	detail := encodeDetail(reason, &grant.ExpiresAt)
-	if err := s.appendAudit(ctx, actor.ID, "space.viewing_started", "space", spaceID, detail); err != nil {
+	if err := s.recordViewingStarted(ctx, nil, actor, ownerID, NotificationAdminViewing, "space.viewing_started", "space", spaceID, detail); err != nil {
+		_, _ = s.store.db.ExecContext(ctx, "UPDATE viewing_grants SET ended_at = ? WHERE id = ?", formatTime(now), grant.ID)
+		_ = provisioner.RevokeViewing(context.WithoutCancel(ctx), grant.ID)
 		return ViewingGrant{}, err
 	}
 	return grant, nil
@@ -172,19 +173,49 @@ WHERE admin_user_id = ? AND owner_user_id = ? AND scope = ? AND ended_at IS NULL
 		ID: s.randomID("viewing"), Scope: ViewingScopeLibrary, SpaceID: spaceID, OwnerUserID: ownerUserID, Reason: reason,
 		GrantedAt: now, ExpiresAt: now.Add(ViewingDuration),
 	}
-	if _, err := s.store.db.ExecContext(ctx, `INSERT INTO viewing_grants
+	// The photo service honours the grant as soon as its row exists, so the
+	// owner's notification and the audit event commit with it.
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ViewingGrant{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO viewing_grants
 (id, admin_user_id, space_id, owner_user_id, reason, granted_at, expires_at, scope) VALUES(?,?,?,?,?,?,?,?)`,
 		grant.ID, actor.ID, spaceID, ownerUserID, reason, formatTime(now), formatTime(grant.ExpiresAt), ViewingScopeLibrary); err != nil {
 		return ViewingGrant{}, err
 	}
 	detail := encodeDetail(reason, &grant.ExpiresAt)
-	if err := s.notify(ctx, ownerUserID, NotificationAdminLibraryViewing, actor.Username, detail); err != nil {
+	if err := s.recordViewingStarted(ctx, tx, actor, ownerUserID, NotificationAdminLibraryViewing, "photos.viewing_started", "user", ownerUserID, detail); err != nil {
 		return ViewingGrant{}, err
 	}
-	if err := s.appendAudit(ctx, actor.ID, "photos.viewing_started", "user", ownerUserID, detail); err != nil {
+	if err := tx.Commit(); err != nil {
 		return ViewingGrant{}, err
 	}
 	return grant, nil
+}
+
+// recordViewingStarted notifies the owner and audits a viewing grant
+// together, inside tx or in a transaction of its own when tx is nil.
+func (s *Service) recordViewingStarted(ctx context.Context, tx *sql.Tx, actor User, ownerUserID string, kind NotificationKind, action, resourceType, resourceID, detail string) error {
+	own := tx == nil
+	if own {
+		var err error
+		if tx, err = s.store.db.BeginTx(ctx, nil); err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+	}
+	if err := s.notifyTo(ctx, tx, ownerUserID, kind, actor.Username, detail); err != nil {
+		return err
+	}
+	if err := s.appendAuditTo(ctx, tx, actor.ID, action, resourceType, resourceID, detail); err != nil {
+		return err
+	}
+	if own {
+		return tx.Commit()
+	}
+	return nil
 }
 
 // prepareViewing checks what every Administrative Viewing grant requires and
@@ -336,7 +367,13 @@ func encodeDetail(reason string, expiresAt *time.Time) string {
 }
 
 func (s *Service) notify(ctx context.Context, userID string, kind NotificationKind, actorUsername, detail string) error {
-	_, err := s.store.db.ExecContext(ctx, `INSERT INTO notifications(id, user_id, kind, actor_username, detail, created_at)
+	return s.notifyTo(ctx, s.store.db, userID, kind, actorUsername, detail)
+}
+
+// notifyTo records a notification through db, which may be a transaction the
+// notification must commit with.
+func (s *Service) notifyTo(ctx context.Context, db sqlExecutor, userID string, kind NotificationKind, actorUsername, detail string) error {
+	_, err := db.ExecContext(ctx, `INSERT INTO notifications(id, user_id, kind, actor_username, detail, created_at)
 VALUES(?,?,?,?,?,?)`, s.randomID("notification"), userID, kind, actorUsername, detail, formatTime(s.now().UTC()))
 	return err
 }
@@ -393,13 +430,14 @@ func (s *Service) ChangePassword(ctx context.Context, actor User, currentPasswor
 		return ErrForbidden
 	}
 	var encodedHash, privateSpaceID string
-	err := s.store.db.QueryRowContext(ctx, `SELECT u.password_hash, s.id FROM users u
-JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, actor.ID).Scan(&encodedHash, &privateSpaceID)
+	var mustChange bool
+	err := s.store.db.QueryRowContext(ctx, `SELECT u.password_hash, u.must_change_password, s.id FROM users u
+JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, actor.ID).Scan(&encodedHash, &mustChange, &privateSpaceID)
 	if err != nil || !verifyPassword(currentPassword, encodedHash) {
 		return ErrInvalidCredentials
 	}
-	if len([]rune(newPassword)) < 12 {
-		return ErrWeakPassword
+	if err := checkPassword(newPassword); err != nil {
+		return err
 	}
 	if newPassword == currentPassword {
 		return ErrPasswordUnchanged
@@ -415,14 +453,37 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 	if err != nil {
 		return err
 	}
-	if err := s.credentials.SetCredential(ctx, CredentialRequest{
+	request := CredentialRequest{
 		UserID: actor.ID, PrivateSpaceID: privateSpaceID, Username: actor.Username, Password: newPassword,
 		Role: actor.Role, UID: uid, Enabled: true,
-	}); err != nil {
+	}
+	if err := s.credentials.SetCredential(ctx, request); err != nil {
 		return fmt.Errorf("%w: %v", ErrCredentialProvision, err)
 	}
-	if _, err := s.store.db.ExecContext(ctx, "UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?", passwordHash, actor.ID); err != nil {
+	if err := s.commitPasswordChange(ctx, actor.ID, passwordHash); err != nil {
+		// The Web keeps the current password, so SMB goes back to it, disabled
+		// again while an administrator's reset still awaits a change.
+		request.Password, request.Enabled = currentPassword, !mustChange
+		if restoreErr := s.credentials.SetCredential(context.WithoutCancel(ctx), request); restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("restore SMB credential: %w", restoreErr))
+		}
 		return err
 	}
-	return s.appendAudit(ctx, actor.ID, "user.password_changed", "user", actor.ID, "")
+	return nil
+}
+
+// commitPasswordChange stores a new password hash with its audit event.
+func (s *Service) commitPasswordChange(ctx context.Context, userID, passwordHash string) error {
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?", passwordHash, userID); err != nil {
+		return err
+	}
+	if err := s.appendAuditTo(ctx, tx, userID, "user.password_changed", "user", userID, ""); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

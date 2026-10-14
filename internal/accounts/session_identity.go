@@ -73,13 +73,18 @@ func (m *sessionMemory) tokens() []string {
 // RememberedSessions returns, for each user, the newest session this process
 // has seen that is still valid. Background work that must act as a user
 // through the File Broker can only use these, so a compromised Product Service
-// gains no identity it was not already handed by a signed-in user.
+// gains no identity it was not already handed by a signed-in user. A session
+// that must change its password is kept but skipped until it has: the broker
+// refuses it.
 func (s *Service) RememberedSessions(ctx context.Context) []Session {
 	var sessions []Session
 	for _, token := range s.sessions.tokens() {
 		session, err := s.ResolveSession(ctx, token)
 		if err != nil {
 			s.sessions.forgetToken(token)
+			continue
+		}
+		if session.User.MustChangePassword {
 			continue
 		}
 		session.Token = token
@@ -103,6 +108,9 @@ func NewSessionDirectory(path string) *SessionDirectory {
 }
 
 // ResolveSessionIdentity returns the identity of an active, unexpired session.
+// A session whose user must first change the password an administrator chose
+// acts on no files: the Product Service refuses it too, but the broker does
+// not rely on that.
 func (d *SessionDirectory) ResolveSessionIdentity(ctx context.Context, token string) (Identity, error) {
 	if token == "" {
 		return Identity{}, ErrSessionNotFound
@@ -113,13 +121,14 @@ func (d *SessionDirectory) ResolveSessionIdentity(ctx context.Context, token str
 	}
 	var identity Identity
 	var status UserStatus
+	var mustChangePassword bool
 	var expiresAt string
 	err = db.QueryRowContext(ctx, `
-SELECT u.username, u.role, u.status, s.expires_at, i.uid
+SELECT u.username, u.role, u.status, u.must_change_password, s.expires_at, i.uid
 FROM sessions s
 JOIN users u ON u.id = s.user_id
 JOIN linux_identities i ON i.user_id = u.id
-WHERE s.token_hash = ?`, tokenHash(token)).Scan(&identity.Username, &identity.Role, &status, &expiresAt, &identity.UID)
+WHERE s.token_hash = ?`, tokenHash(token)).Scan(&identity.Username, &identity.Role, &status, &mustChangePassword, &expiresAt, &identity.UID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Identity{}, ErrSessionNotFound
 	}
@@ -128,7 +137,7 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&identity.Username, &identity.Ro
 		return Identity{}, fmt.Errorf("read session directory: %w", err)
 	}
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
-	if err != nil || status != UserStatusActive || !d.now().UTC().Before(expires) {
+	if err != nil || status != UserStatusActive || mustChangePassword || !d.now().UTC().Before(expires) {
 		return Identity{}, ErrSessionNotFound
 	}
 	identity.Enabled = true

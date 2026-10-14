@@ -46,6 +46,7 @@ func TestPhotoAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 
 	setupRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/admin", bytes.NewBufferString(`{"username":"owner","password":"correct horse battery staple"}`))
 	setupRequest.Header.Set("Content-Type", "application/json")
+	fromLocalConsole(setupRequest)
 	setup := httptest.NewRecorder()
 	handler.ServeHTTP(setup, setupRequest)
 	var session struct {
@@ -113,6 +114,9 @@ func (c *apiClient) call(method, path string, body any, wantStatus int, target a
 	request := httptest.NewRequest(method, path, bytes.NewReader(encoded))
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
+	}
+	if path == "/api/v1/setup/admin" {
+		fromLocalConsole(request)
 	}
 	if c.cookie != nil {
 		request.AddCookie(c.cookie)

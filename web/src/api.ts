@@ -161,7 +161,9 @@ function isNumberIn(value: unknown, min: number, max: number): value is number {
 }
 
 export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string; mustChangePassword?: boolean }
-export interface Session { csrfToken: string; expiresAt: string; user: User }
+// credentialReset is the latest time an administrator chose the user's
+// password; the user keeps seeing it.
+export interface Session { csrfToken: string; expiresAt: string; user: User; credentialReset?: { actorUsername: string; at: string } }
 export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
 export interface Notification { id: string; kind: "admin_viewing" | "admin_library_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
 export type ViewingScope = "space" | "library";
@@ -227,7 +229,9 @@ export function uploadForm<T>(path: string, body: FormData, onProgress: (fractio
 
 const json = (value: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
 
-export const getSetupStatus = () => request<{setupRequired: boolean}>("/api/v1/setup/status");
+// setupAllowed is false where this connection may not set the device up:
+// only its own screen or an SSH tunnel may.
+export const getSetupStatus = () => request<{setupRequired: boolean; setupAllowed?: boolean}>("/api/v1/setup/status");
 // localConsole asks for a session that lasts until sign-out; the server grants it only to the device's own screen.
 const credentials = (username: string, password: string, localConsole: boolean) => json({ username, password, ...(localConsole ? { localConsole } : {}) });
 export async function setupAdministrator(username: string, password: string, localConsole = false) { const value = await request<Session>("/api/v1/setup/admin", credentials(username, password, localConsole)); setSession(value); return value; }

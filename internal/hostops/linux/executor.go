@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/appid"
@@ -123,7 +125,7 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 }
 
 func (e *Executor) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
-	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || request.Password == "" {
+	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
 		return errors.New("invalid credential request")
 	}
 	identity := accounts.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
@@ -315,6 +317,14 @@ const sambaShareOptions = `    inherit acls = yes
 
 func validUsername(username string) bool {
 	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
+}
+
+// validSambaPassword reports whether smbpasswd -s receives password whole: it
+// reads each copy as one line of C text into a 256-byte buffer, so a newline,
+// NUL or longer password would set a different password than the Web one.
+func validSambaPassword(password string) bool {
+	return password != "" && len(password) <= 254 && utf8.ValidString(password) &&
+		!strings.ContainsFunc(password, unicode.IsControl)
 }
 
 func commandError(action string, err error, output []byte) error {
