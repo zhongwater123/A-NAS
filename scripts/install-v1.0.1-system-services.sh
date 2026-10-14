@@ -60,8 +60,8 @@ for role in "${ai_roles[@]}"; do
     exit 2
   fi
 done
-# The media center runs Debian's FFmpeg in its worker sandbox (ADR 0017).
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe; do
+# Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe heif-thumbnailer; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3

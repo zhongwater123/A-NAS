@@ -18,6 +18,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
+	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
@@ -37,6 +38,7 @@ type ProductDependencies struct {
 	ProductVersion string
 	Accounts       *accounts.Service
 	Files          *files.Service
+	FilePreviews   *filepreview.Service
 	Storage        *storage.Service
 	Terminal       http.Handler
 	// Containers and Apps serve /api/v1/containers and /api/v1/apps. They
@@ -76,6 +78,7 @@ type productHandler struct {
 	state      http.Handler
 	accounts   *accounts.Service
 	files      *files.Service
+	previews   *filepreview.Service
 	storage    *storage.Service
 	terminal   http.Handler
 	containers http.Handler
@@ -100,6 +103,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
+		previews: dependencies.FilePreviews,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
 		transfers: dependencies.Transfers, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
@@ -155,6 +159,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/directories", h.withMutation(h.handleCreateDirectory))
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/uploads", h.withMutation(h.handleUpload))
 	h.mux.HandleFunc("GET /api/v1/files/{fileID}/content", h.withSession(h.handleDownload))
+	h.mux.HandleFunc("GET /api/v1/files/{fileID}/preview", h.withSession(h.handleFilePreview))
 	h.mux.HandleFunc("PATCH /api/v1/files/{fileID}", h.withMutation(h.handleMoveFile))
 	h.mux.HandleFunc("POST /api/v1/files/{fileID}/copies", h.withMutation(h.handleCopyFile))
 	h.mux.HandleFunc("DELETE /api/v1/files/{fileID}", h.withMutation(h.handleDeleteFile))

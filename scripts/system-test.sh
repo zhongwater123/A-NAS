@@ -587,6 +587,22 @@ ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25:du
   -c:v libx264 -pix_fmt yuv420p -c:a ac3 /tmp/heat.mkv
 curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=$movies_dir" \
   -F "file=@/tmp/heat.mkv;filename=Heat (1995).mkv" "$api/api/v1/spaces/$shared/uploads" || true
+# Ordinary file previews use the same sandbox without creating a media library.
+video_file=$(curl -fsS -b /tmp/owner.jar "$api/api/v1/spaces/$shared/entries?parentId=$movies_dir" | jq -r '.items[0].id')
+check "file management renders a video thumbnail" test "$(status_of -b /tmp/alice.jar "$api/api/v1/files/$video_file/preview?size=thumbnail")" = 200
+ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=orange:s=640x480 -frames:v 1 /tmp/preview.png
+heif-enc -o /tmp/preview.heic /tmp/preview.png >/tmp/heif-encode.log 2>&1
+heif_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
+  -F 'file=@/tmp/preview.heic;filename=preview.HEIC' "$api/api/v1/spaces/$shared/uploads" | jq -r .id)
+for preview_size in thumbnail preview; do
+  check "file management renders HEIC $preview_size under DynamicUser" \
+    curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$heif_file/preview?size=$preview_size" -o /tmp/heif-preview.png
+  check "the HEIC $preview_size is a PNG" test "$(od -An -tx1 -N8 /tmp/heif-preview.png | tr -d ' \n')" = 89504e470d0a1a0a
+done
+curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$heif_file/content" -o /tmp/heif-original.heic
+check "HEIC download remains the original" cmp /tmp/preview.heic /tmp/heif-original.heic
+check "Product Service cannot open the HEIC source itself" denied as a-nas cat "$data/spaces/shared/preview.HEIC"
+
 media_library=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
   -d "{\"name\":\"Movies\",\"kind\":\"movies\",\"spaceId\":\"$shared\",\"folderIds\":[\"$movies_dir\"]}" \
   "$api/api/v1/media/libraries" | jq -r .id || true)

@@ -1,12 +1,12 @@
-// Package mediaworker is the one place A-NAS runs FFmpeg (ADR 0017,
-// ADR 0018). It knows nothing about the apps that use it: the media center
-// and the music library each adapt its typed operations to their own needs.
+// Package mediaworker is the one place A-NAS runs media decoders (ADR 0017,
+// ADR 0018). It knows nothing about the apps that use it: the media center,
+// music library and ordinary file previews adapt its typed operations.
 //
 // In production systemd starts one worker process per connection on
 // /run/a-nas-media/media.sock, under a dynamic identity with no network and
 // no view of the data volume or the Product Service's state. The Product
 // Service sends a typed request with the file's read-only descriptor
-// attached; the worker builds the FFmpeg command itself, so a request can
+// attached; the worker builds the decoder command itself, so a request can
 // never name a path or pass arbitrary arguments. A frame is a 4-byte
 // big-endian length and JSON; after the response header the body runs to
 // the end of the connection.
@@ -30,6 +30,7 @@ import (
 const (
 	OpProbe    = "probe"
 	OpFrame    = "frame"
+	OpImage    = "image"
 	OpSubtitle = "subtitle"
 	// OpStream converts a video to fragmented MP4.
 	OpStream = "stream"
@@ -49,9 +50,10 @@ var (
 // Error codes in a response.
 const (
 	// CodeUnreadable: FFmpeg cannot read this input; it would fail again.
-	CodeUnreadable = "unreadable"
-	CodeInvalid    = "invalid_request"
-	CodeFailed     = "failed"
+	CodeUnreadable  = "unreadable"
+	CodeInvalid     = "invalid_request"
+	CodeFailed      = "failed"
+	CodeUnavailable = "unavailable"
 )
 
 const maxFrame = 1 << 16
@@ -100,6 +102,10 @@ func (r Request) Validate() error {
 		if !finiteIn(r.At, 0, 1e6) || r.Width < 16 || r.Width > 3840 {
 			return errors.New("invalid frame request")
 		}
+	case OpImage:
+		if r.Width != 320 && r.Width != 1600 {
+			return errors.New("invalid image request")
+		}
 	case OpSubtitle:
 		if r.Stream < -1 || r.Stream > 4096 || !charsets[r.Charset] || (r.Stream == -1 && !subtitleFormats[r.Format]) {
 			return errors.New("invalid subtitle request")
@@ -145,7 +151,8 @@ func readFrame(conn *net.UnixConn, value any) (*os.File, error) {
 	header := make([]byte, 4)
 	rights := make([]byte, syscall.CmsgSpace(4*4))
 	count, rightsCount, _, _, err := conn.ReadMsgUnix(header, rights)
-	if count == 0 && err != nil {
+	// A cancelled recvmsg may report -1, not only zero.
+	if count <= 0 && err != nil {
 		return nil, err
 	}
 	file, rightsErr := receivedFile(rights[:rightsCount])

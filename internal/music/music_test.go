@@ -453,6 +453,9 @@ func (w *fakeWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error)
 func (w *fakeWorker) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
 	return w.cover, nil
 }
+func (w *fakeWorker) Image(context.Context, *os.File, int) ([]byte, error) {
+	return nil, errors.New("not used by music")
+}
 func (w *fakeWorker) Subtitle(context.Context, *os.File, mediaworker.SubtitleRequest) ([]byte, error) {
 	return nil, errors.New("not used by music")
 }

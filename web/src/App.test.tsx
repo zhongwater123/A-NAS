@@ -121,6 +121,32 @@ const metricsState = {
 afterEach(() => { transferStore.reset(); tus.uploads.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("A-NAS v1.0.1 desktop", () => {
+  it.each(["clip.mp4", "photo.HEIC", "photo.heif"])("shows a thumbnail for %s in file management", async (name) => {
+    installAPI({
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
+      entries: [{ id: "file:preview", spaceId: "space:shared", name, kind: "file", sizeBytes: 1024, modifiedAt: "2026-10-14T00:00:00Z" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await within(dialog).findByText(name);
+    const row = dialog.querySelector<HTMLElement>('[data-file-item="file:preview"]')!;
+    expect(row.querySelector("img")?.getAttribute("src")).toContain("/api/v1/files/file%3Apreview/preview?size=thumbnail");
+    fireEvent.error(row.querySelector("img")!);
+    expect(row.querySelector("img")?.hidden).toBe(true);
+    await user.click(row);
+    const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
+    expect(within(inspector).getByRole("img", { name: name + " 的预览" }).getAttribute("src")).toContain("/preview?size=preview");
+    if (name !== "clip.mp4") {
+      await user.dblClick(row);
+      const viewer = await within(dialog).findByRole("dialog", { name: "预览 " + name });
+      expect(within(viewer).getByRole("img", { name }).getAttribute("src")).toContain("/preview?size=preview");
+      fireEvent.error(within(viewer).getByRole("img", { name }));
+      expect(within(viewer).getByRole("alert").textContent).toContain("无法预览这张图片");
+      expect(within(viewer).getAllByRole("button", { name: "下载" }).length).toBeGreaterThan(0);
+    }
+  });
+
   it("pins folders and preserves manual ordering across views and reopening without moving files", async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
