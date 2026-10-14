@@ -354,7 +354,6 @@ button { font: inherit; }
 .icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
 .icon-music { background: linear-gradient(155deg, #ff506d, #d92471); }
 .icon-ai { background: linear-gradient(155deg, #8c7cff, #5544c4); }
-.icon-terminal { color: #5df2a0; background: linear-gradient(155deg, #33404f, #0b1017); }
 
 .status-bar {
   position: absolute;
@@ -552,6 +551,15 @@ button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
 .file-action-bar { min-width: 0; min-height: 43px; flex: none; display: flex; align-items: center; gap: 2px; overflow-x: clip; overflow-y: visible; padding: 5px 10px; border-bottom: 1px solid #dfe5eb; background: #f7f9fb; }
 .file-action-bar > i { width: 1px; height: 23px; flex: none; margin: 0 4px; background: #dce2e8; }
+.file-order-bar { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid #dfe5eb; background: #f7f9fb; color: #526579; font-size: 12px; }
+.file-order-bar label, .file-order-bar button { display: inline-flex; align-items: center; gap: 5px; }
+.file-order-bar select, .file-order-bar button { min-height: 28px; padding: 3px 6px; border: 1px solid #d6dfe8; border-radius: 5px; background: white; color: #35485b; font-size: 12px; }
+.file-order-bar button svg { width: 14px; height: 14px; }
+.file-order-bar > span { flex-basis: 100%; font-size: 11px; }
+.file-order-notice { padding: 6px 12px; color: #8d571b; font-size: 12px; }
+.file-pin-badge { display: inline-block; width: 12px; height: 12px; margin-right: 4px; color: #2675bb; vertical-align: middle; }
+[data-file-item][draggable="true"] { cursor: grab; }
+[data-file-item][data-drop-target="true"] { outline: 2px solid #2675bb; outline-offset: -2px; }
 .file-manager .file-command-button { min-width: 30px; height: 31px; border: 0; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; color: #42586e; background: transparent; font-size: var(--file-font-command); line-height: 16px; white-space: nowrap; }
 .file-command-button:hover:not(:disabled) { color: #205f9e; background: #e8f1fa; }
 .file-command-button.danger:hover:not(:disabled) { color: #a83a49; background: #fbecef; }
@@ -741,16 +749,7 @@ button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 
 .product-page .danger-button { color: white; border-color: #c73d4b; background: #c73d4b; }
-.window-content-terminal { overflow: hidden; background: #0d1117; }
 
-.terminal-panel { position: relative; height: 100%; padding: 8px 4px 4px 10px; }
-.xterm-host { width: 100%; height: 100%; }
-.terminal-state { height: 100%; min-height: 0; color: #9aa6b4; }
-.terminal-state h2 { color: #e6edf3; }
-.terminal-state p { font-size: 12px; }
-.terminal-state code { padding: 1px 5px; border-radius: 5px; color: #5df2a0; background: rgba(255,255,255,.08); }
-.terminal-ended { position: absolute; left: 50%; top: 14px; display: flex; align-items: center; gap: 14px; padding: 9px 10px 9px 16px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; color: #e6edf3; font-size: 12px; background: rgba(22,28,36,.94); box-shadow: 0 12px 30px rgba(0,0,0,.35); transform: translateX(-50%); white-space: nowrap; }
-.terminal-ended .primary { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .resize-handle { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; }
 .resize-handle::after { content: ""; position: absolute; right: 5px; bottom: 5px; width: 8px; height: 8px; border-right: 2px solid rgba(24,32,44,.28); border-bottom: 2px solid rgba(24,32,44,.28); }
 

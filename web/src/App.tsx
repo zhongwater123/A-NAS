@@ -1,6 +1,7 @@
 import {
   ArrowDownUp,
   ArrowLeft,
+  ArrowDown,
   ArrowRight,
   ArrowUp,
   ArrowUpDown,
@@ -31,6 +32,7 @@ import {
   Music2,
   PanelLeftClose,
   Pencil,
+  Pin,
   RefreshCw,
   Scissors,
   Search,
@@ -38,7 +40,6 @@ import {
   Share2,
   ShieldCheck,
   ShoppingBag,
-  SquareTerminal,
   Trash2,
   Upload,
   UsersRound,
@@ -74,20 +75,20 @@ import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
-import { TerminalPanel } from "./TerminalPanel";
 import { TrashPanel } from "./trash/TrashPanel";
 import { carriesFiles, PickedFile, pickedFromDrop, pickedFromInput } from "./transfers/picker";
 import { transferStore, useTransfers } from "./transfers/store";
 import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
 import type { TransferLocation } from "./transfers/transfersApi";
 import { useHostState } from "./useHostState";
+import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 import "./styles.css";
 
 // The transfer center loads when first opened; the desktop only needs its
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "terminal" | "docker" | "store";
+type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -124,7 +125,6 @@ const initialWindows: WindowModel[] = [
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 260, y: 76, width: 920, height: 620, z: 2, opened: 0 },
 	{ id: "backup", title: "备份中心", open: false, minimized: false, maximized: false, x: 220, y: 52, width: 1080, height: 700, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
-  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 960, height: 660, z: 0, opened: 0 },
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
 ];
@@ -138,7 +138,6 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   trash: Trash2,
   backup: BackupCenterGlyph,
   settings: Settings,
-  terminal: SquareTerminal,
   docker: Box,
   store: ShoppingBag,
 };
@@ -154,7 +153,6 @@ const windowTones: Record<WindowID, string> = {
   trash: "trash",
   backup: "backup",
   settings: "settings",
-  terminal: "terminal",
   docker: "docker",
   store: "store",
 };
@@ -296,8 +294,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
     { id: "trash", label: "回收站", ariaLabel: "打开回收站", keywords: "删除 恢复", tone: "trash", icon: <Trash2 />, active: isOpen("trash"), onClick: () => openWindow("trash") },
-    { id: "settings", label: "设置", ariaLabel: "打开设置", keywords: "账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openSettings() },
-    ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", keywords: "shell 命令行 bash", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
+    // The administrator terminal lives in Settings → 终端, so searching for it in the launcher finds 设置.
+    { id: "settings", label: "设置", ariaLabel: "打开设置", keywords: `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${session.user.role === "admin" ? " 终端 shell 命令行 bash" : ""}`, tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openSettings() },
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
     ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
     { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <MediaCenterGlyph />, active: isOpen("media"), onClick: () => openWindow("media") },
@@ -350,19 +348,18 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 
       <section className="window-layer" aria-label="A-NAS 桌面窗口">
         {windows.map((window) => {
-          // Minimized windows stay mounted so a running terminal session survives.
+          // Minimized windows stay mounted so a running terminal session in Settings survives.
           if (!window.open) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
-			  {window.id === "files" && <FilePanel navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
+			  {window.id === "files" && <FilePanel userID={session.user.id} navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
 			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
-			  {window.id === "terminal" && <TerminalPanel />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
             </AppWindow>
@@ -461,7 +458,6 @@ class PanelErrorBoundary extends Component<{ children: ReactNode }, { failed: bo
   }
 }
 
-type FileSort = "name" | "modifiedAt" | "type" | "sizeBytes";
 type FileView = "list" | "icons";
 type FileResource = "photos" | "music" | "movies";
 type FileSelectionRect = { left: number; top: number; width: number; height: number };
@@ -486,6 +482,7 @@ const personalFileResources: FileBrowserItem[] = [
 ];
 
 interface FilePanelProps {
+	userID: string;
 	navigation?: TransferLocation;
 	onNavigated: () => void;
 	onOpenTransfers: () => void;
@@ -494,15 +491,13 @@ interface FilePanelProps {
 	onOpenMusic: () => void;
 }
 
-function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onOpenMedia, onOpenMusic }: FilePanelProps) {
+function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPhotos, onOpenMedia, onOpenMusic }: FilePanelProps) {
 	const [spaces, setSpaces] = useState<Space[]>([]);
 	const [spaceID, setSpaceID] = useState("");
 	const [entries, setEntries] = useState<FileEntry[]>([]);
 	const [volume, setVolume] = useState<Volume>();
 	const [trail, setTrail] = useState<Array<{ id: string; name: string }>>([]);
 	const [query, setQuery] = useState("");
-	const [sortBy, setSortBy] = useState<FileSort>("name");
-	const [sortDirection, setSortDirection] = useState<"ascending" | "descending">("ascending");
 	const [view, setView] = useState<FileView>("list");
 	const [viewMenuOpen, setViewMenuOpen] = useState(false);
 	const [selectedItemID, setSelectedItemID] = useState("");
@@ -530,6 +525,10 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const dragDepth = useRef(0);
 	const parentID = trail.at(-1)?.id ?? "";
+	const { order, save: saveOrder, storageError, scope: orderScope } = useFileOrder(userID, spaceID, parentID);
+	const { sortBy, direction: sortDirection } = order;
+	const draggedItem = useRef<{ id: string; scope: string } | undefined>(undefined);
+	const [dropTarget, setDropTarget] = useState("");
 	const transfers = useTransfers();
 
 	const refresh = useCallback(async (selected: string, parent: string) => {
@@ -602,9 +601,8 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 		} as FileBrowserItem)),
 	];
 	const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-	const visibleItems = browserItems
-		.filter((item) => `${item.name} ${item.type}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery))
-		.sort((left, right) => compareFileBrowserItems(left, right, sortBy, sortDirection));
+	const orderedItems = sortFiles(browserItems, order);
+	const visibleItems = orderedItems.filter((item) => `${item.name} ${item.type}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery));
 	const selectedItems = browserItems.filter((item) => selectedItemIDs.includes(item.id));
 	const selectedItem = browserItems.find((item) => item.id === selectedItemID) ?? selectedItems.at(-1);
 	const selectedEntry = selectedItem?.entry;
@@ -623,6 +621,44 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
 	const canMutateSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
 	const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
+	const selectedFolders = selectedItems.filter((item) => item.kind === "directory");
+	const canPin = selectedFolders.length > 0 && selectedFolders.length === selectedItems.length && !loading && !activity;
+	const allPinned = selectedFolders.length > 0 && selectedFolders.every((item) => isPinned(item, order));
+	const canReorder = sortBy === "manual" && !normalizedQuery && !loading && !activity;
+	const reorderPeers = selectedItem ? orderedItems.filter((item) => isPinned(item, order) === isPinned(selectedItem, order)) : [];
+	const selectedPosition = reorderPeers.findIndex((item) => item.id === selectedItemID);
+	const canMove = (delta: number) => canReorder && selectedItems.length === 1 && selectedPosition >= 0 && Boolean(reorderPeers[selectedPosition + delta]);
+	const moveSelection = (delta: number) => {
+		if (canMove(delta)) saveOrder(reorderFiles(browserItems, order, selectedItemID, reorderPeers[selectedPosition + delta].id));
+	};
+	const togglePinned = () => {
+		if (!canPin) return;
+		const ids = selectedFolders.map((item) => item.id);
+		saveOrder({ ...order, pinned: allPinned ? order.pinned.filter((id) => !ids.includes(id)) : [...new Set([...order.pinned, ...ids])] });
+	};
+	const dragProps = (item: FileBrowserItem) => ({
+		draggable: canReorder,
+		onDragStart: (event: ReactDragEvent<HTMLElement>) => {
+			if (!canReorder) { event.preventDefault(); return; }
+			draggedItem.current = { id: item.id, scope: orderScope };
+			event.dataTransfer.effectAllowed = "move";
+			event.dataTransfer.setData("text/plain", item.id);
+		},
+		onDragOver: (event: ReactDragEvent<HTMLElement>) => {
+			const source = browserItems.find((candidate) => candidate.id === draggedItem.current?.id);
+			if (!canReorder || draggedItem.current?.scope !== orderScope || !source || source.id === item.id || isPinned(source, order) !== isPinned(item, order)) return;
+			event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTarget(item.id);
+		},
+		onDrop: (event: ReactDragEvent<HTMLElement>) => {
+			if (carriesFiles(event.dataTransfer)) return;
+			event.preventDefault();
+			if (canReorder && draggedItem.current?.scope === orderScope) saveOrder(reorderFiles(browserItems, order, draggedItem.current.id, item.id));
+			draggedItem.current = undefined; setDropTarget("");
+		},
+		onDragEnd: () => { draggedItem.current = undefined; setDropTarget(""); },
+		onDragLeave: () => setDropTarget(""),
+		"data-drop-target": dropTarget === item.id || undefined,
+	});
 	const canPaste = Boolean(clipboard?.entries.length && !viewing && !activity && !(clipboard.mode === "move" && clipboard.entries.every((entry) => entry.spaceId === spaceID && (entry.parentId ?? "") === parentID)));
 	const canDownload = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length);
 	const archiveDownload = selectedEntries.length > 1 || selectedEntries[0]?.kind === "directory";
@@ -674,8 +710,10 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 		else if (item.resource === "music") onOpenMusic();
 	};
 	const changeSort = (nextSort: FileSort) => {
-		if (sortBy === nextSort) setSortDirection((value) => value === "ascending" ? "descending" : "ascending");
-		else { setSortBy(nextSort); setSortDirection(nextSort === "modifiedAt" || nextSort === "sizeBytes" ? "descending" : "ascending"); }
+		saveOrder({ ...order, sortBy: nextSort,
+			direction: sortBy === nextSort ? (sortDirection === "ascending" ? "descending" : "ascending") : nextSort === "modifiedAt" || nextSort === "sizeBytes" ? "descending" : "ascending",
+			manual: nextSort === "manual" && !order.manual.length ? orderedItems.map((item) => item.id) : order.manual,
+		});
 	};
 	const selectItem = (item: FileBrowserItem, event?: Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
 		if (event?.shiftKey && selectedItemID) {
@@ -696,7 +734,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 		event.preventDefault(); event.stopPropagation();
 		if (item && !selectedItemIDs.includes(item.id)) selectItem(item);
 		const bounds = managerRef.current?.getBoundingClientRect(); if (!bounds) return;
-		const width = 178; const height = item ? 276 : 170; const edge = 8;
+		const width = 178; const height = item ? 320 : 170; const edge = 8;
 		setContextMenu({
 			x: Math.max(edge, Math.min(event.clientX - bounds.left, bounds.width - width - edge)),
 			y: Math.max(edge, Math.min(event.clientY - bounds.top, bounds.height - height - edge)),
@@ -874,12 +912,18 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 				<button className="file-command-button file-command-optional" aria-label="共享" title="共享功能规划中" disabled><Share2 /><span>共享</span></button>
 				<button className="file-command-button danger" aria-label="删除" title="移到回收站" disabled={!canMutateSelection} onClick={() => setPendingDelete(selectedEntries)}><Trash2 /><span>删除</span></button>
 				<i />
-				<button className="file-command-button" aria-label="切换排序方向" title={`按${fileSortLabel(sortBy)}${sortDirection === "ascending" ? "升序" : "降序"}`} onClick={() => setSortDirection((value) => value === "ascending" ? "descending" : "ascending")}><ArrowUpDown /><span>排序</span></button>
+				<button className="file-command-button" aria-label="切换排序方向" title={`按${fileSortLabel(sortBy)}${sortDirection === "ascending" ? "升序" : "降序"}`} disabled={sortBy === "manual"} onClick={() => saveOrder({ ...order, direction: sortDirection === "ascending" ? "descending" : "ascending" })}><ArrowUpDown /><span>排序</span></button>
 				<div className="file-view-control"><button className="file-command-button" aria-expanded={viewMenuOpen} onClick={() => setViewMenuOpen((value) => !value)}>{view === "list" ? <List /> : <Grid2X2 />}<span>查看</span><ChevronDown /></button>{viewMenuOpen && <div className="file-view-menu"><button className={view === "list" ? "active" : ""} onClick={() => { setView("list"); setViewMenuOpen(false); }}><List />列表视图</button><button className={view === "icons" ? "active" : ""} onClick={() => { setView("icons"); setViewMenuOpen(false); }}><Grid2X2 />图标视图</button></div>}</div>
 				<button className="file-command-button file-command-optional" aria-label="更多操作" title="更多操作" disabled><Ellipsis /></button>
 				{activity && <span className="file-activity" role="status"><span className="loader" />{activity}</span>}
 			</div>
 
+			<div className="file-order-bar" aria-label="文件排列">
+				<label>排序方式<select aria-label="排序方式" value={sortBy} disabled={loading || !spaceID} onChange={(event) => changeSort(event.target.value as FileSort)}><option value="name">名称</option><option value="modifiedAt">修改时间</option><option value="type">类型</option><option value="sizeBytes">大小</option><option value="manual">手动排序</option></select></label>
+				<button disabled={!canPin} onClick={togglePinned}><Pin />{allPinned ? "取消置顶" : "置顶文件夹"}</button>
+				{sortBy === "manual" && <><button aria-label="上移所选项目" disabled={!canMove(-1)} onClick={() => moveSelection(-1)}><ArrowUp />上移</button><button aria-label="下移所选项目" disabled={!canMove(1)} onClick={() => moveSelection(1)}><ArrowDown />下移</button><span>{normalizedQuery ? "清除搜索后可调整顺序" : "拖动项目或选择后上移、下移；置顶项目保持在前"}</span></>}
+			</div>
+			{storageError && <div className="file-order-notice" role="status">{storageError}</div>}
 			{error && <PanelNotice error={error} />}
 			{viewing && <div className="status-banner viewing-banner" role="status"><ShieldCheck /><span>正在只读查看他人个人空间；访问已审计，将于 {formatFileDate(viewing.expiresAt)} 自动结束。</span><button disabled={Boolean(activity)} onClick={() => void stopViewing()}>结束查看</button></div>}
 			{clipboard && <div className="file-clipboard-state" role="status">{clipboard.mode === "copy" ? "已复制" : "已剪切"}{clipboard.entries.length === 1 ? `“${clipboard.entries[0].name}”` : ` ${clipboard.entries.length} 个项目`}</div>}
@@ -894,14 +938,14 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 						<div className="file-type-column" role="columnheader" aria-sort={sortBy === "type" ? sortDirection : "none"}><button onClick={() => changeSort("type")}>类型{sortBy === "type" && <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />}</button></div>
 						<div role="columnheader" aria-sort={sortBy === "sizeBytes" ? sortDirection : "none"}><button onClick={() => changeSort("sizeBytes")}>大小{sortBy === "sizeBytes" && <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />}</button></div>
 					</div>
-					{!loading && visibleItems.map((item) => <div className={`file-list-row ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="row" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}>
-						<div className="file-name-cell" role="cell"><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><span className="file-name-copy"><span><strong>{item.name}{item.kind === "resource" && <em>{item.planned ? "规划中" : "应用资源"}</em>}</strong><small>{item.detail}</small></span></span></div>
+					{!loading && visibleItems.map((item) => <div className={`file-list-row ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="row" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} {...dragProps(item)} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}>
+						<div className="file-name-cell" role="cell"><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><span className="file-name-copy"><span><strong>{isPinned(item, order) && <Pin className="file-pin-badge" aria-label="已置顶" />}{item.name}{item.kind === "resource" && <em>{item.planned ? "规划中" : "应用资源"}</em>}</strong><small>{item.detail}</small></span></span></div>
 						<div className="file-date-cell file-date-column" role="cell">{item.modifiedAt ? <><Clock3 />{formatFileDate(item.modifiedAt)}</> : "—"}</div>
 						<div className="file-type-cell file-type-column" role="cell"><span className={item.kind === "directory" ? "directory" : item.kind === "resource" ? "resource" : ""}>{item.type}</span></div>
 						<div className="file-size-cell" role="cell">{item.kind === "file" ? formatBytes(item.sizeBytes) : "—"}</div>
 					</div>)}
 				</div> : <div className="file-icon-view" role="listbox" aria-label="文件图标">
-					{!loading && visibleItems.map((item) => <button className={`file-icon-card ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="option" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><strong>{item.name}</strong><small>{item.detail}</small></button>)}
+					{!loading && visibleItems.map((item) => <button className={`file-icon-card ${selectedItemIDs.includes(item.id) ? "selected" : ""}`} role="option" aria-selected={selectedItemIDs.includes(item.id)} data-file-item={item.id} {...dragProps(item)} key={item.id} onClick={(event) => selectItem(item, event)} onDoubleClick={() => openItem(item)} onContextMenu={(event) => showContextMenu(event, item)}><span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span><strong>{isPinned(item, order) && <Pin className="file-pin-badge" aria-label="已置顶" />}{item.name}</strong><small>{item.detail}</small></button>)}
 				</div>}
 				{selectionRect && <div className="file-selection-box" aria-hidden="true" style={selectionRect} />}
 				{loading ? <div className="file-empty-state" role="status"><span className="loader" /><strong>正在读取文件…</strong><span>正在加载这个目录的内容</span></div>
@@ -939,6 +983,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "move" }); setContextMenu(undefined); }}><Scissors /><span>剪切</span><kbd>Ctrl+X</kbd></button>
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "copy" }); setContextMenu(undefined); }}><Copy /><span>复制</span><kbd>Ctrl+C</kbd></button>
 				<button role="menuitem" disabled={!canRenameSelection} onClick={() => { setRenaming(selectedEntry); setContextMenu(undefined); }}><Pencil /><span>重命名</span></button>
+				{selectedFolders.length > 0 && <button role="menuitem" disabled={!canPin} onClick={() => { togglePinned(); setContextMenu(undefined); }}><Pin /><span>{allPinned ? "取消置顶" : "置顶文件夹"}</span></button>}
 				<i />
 				<button className="danger" role="menuitem" disabled={!canMutateSelection} onClick={() => { setPendingDelete(selectedEntries); setContextMenu(undefined); }}><Trash2 /><span>移到回收站</span></button>
 			</> : <>
@@ -992,26 +1037,13 @@ function formatFileDate(value: string): string {
     : { year: date.getFullYear() === today.getFullYear() ? undefined : "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-function compareFileBrowserItems(left: FileBrowserItem, right: FileBrowserItem, sortBy: FileSort, direction: "ascending" | "descending"): number {
-	const group = { directory: 0, resource: 1, file: 2 };
-	const groupResult = group[left.kind] - group[right.kind];
-	if (groupResult) return groupResult;
-	let result: number;
-	if (sortBy === "modifiedAt") result = (Date.parse(left.modifiedAt) || 0) - (Date.parse(right.modifiedAt) || 0);
-	else if (sortBy === "sizeBytes") result = left.sizeBytes - right.sizeBytes;
-	else if (sortBy === "type") result = left.type.localeCompare(right.type, "zh-CN", { numeric: true, sensitivity: "base" });
-	else result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
-	if (!result) result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
-	return direction === "ascending" ? result : -result;
-}
-
 // isViewable says whether the file manager's viewer can show a file.
 function isViewable(name: string): boolean {
 	return isBrowserPreviewableImage(name) || isPDFPreviewable(name);
 }
 
 function fileSortLabel(sort: FileSort): string {
-	return { name: "名称", modifiedAt: "修改时间", type: "类型", sizeBytes: "大小" }[sort];
+	return { manual: "手动排序", name: "名称", modifiedAt: "修改时间", type: "类型", sizeBytes: "大小" }[sort];
 }
 
 function duplicateFileName(name: string): string {

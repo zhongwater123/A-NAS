@@ -121,6 +121,59 @@ const metricsState = {
 afterEach(() => { transferStore.reset(); tus.uploads.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("A-NAS v1.0.1 desktop", () => {
+  it("pins folders and preserves manual ordering across views and reopening without moving files", async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
+      entries: [
+        { id: "a", spaceId: "space:shared", name: "A", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-01" },
+        { id: "b", spaceId: "space:shared", name: "B", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-02" },
+        { id: "c", spaceId: "space:shared", name: "C.bin", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-03" },
+      ],
+    });
+    const user = userEvent.setup(); const mounted = render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    let dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const item = (id: string) => dialog.querySelector<HTMLElement>(`[data-file-item="${id}"]`)!;
+    const order = () => Array.from(dialog.querySelectorAll<HTMLElement>("[data-file-item]")).map((row) => row.dataset.fileItem);
+    await waitFor(() => expect(order()).toEqual(["a", "b", "c"]));
+    fireEvent.contextMenu(item("b"));
+    await user.click(screen.getByRole("menuitem", { name: "置顶文件夹" }));
+    expect(order()).toEqual(["b", "a", "c"]);
+    expect(item("b").querySelector('[aria-label="已置顶"]')).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "切换排序方向" }));
+    expect(order()[0]).toBe("b");
+    await user.selectOptions(within(dialog).getByLabelText("排序方式"), "manual");
+    await user.click(item("c"));
+    await user.click(within(dialog).getByRole("button", { name: "上移所选项目" }));
+    expect(order()).toEqual(["b", "c", "a"]);
+    expect(within(dialog).getByRole("button", { name: "上移所选项目" }).hasAttribute("disabled")).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "查看" }));
+    await user.click(within(dialog).getByRole("button", { name: "图标视图" }));
+    expect(order()).toEqual(["b", "c", "a"]);
+    const dataTransfer = { types: ["text/plain"], setData: vi.fn(), effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(item("a"), { dataTransfer });
+    fireEvent.dragOver(item("c"), { dataTransfer });
+    fireEvent.drop(item("c"), { dataTransfer });
+    expect(order()).toEqual(["b", "a", "c"]);
+    expect(transferStore.getSnapshot().uploads).toHaveLength(0);
+    await user.type(within(dialog).getByLabelText("搜索当前目录"), "A");
+    expect(item("a").draggable).toBe(false);
+    expect(within(dialog).getByRole("button", { name: "下移所选项目" }).hasAttribute("disabled")).toBe(true);
+    await user.clear(within(dialog).getByLabelText("搜索当前目录"));
+    await user.selectOptions(within(dialog).getByLabelText("排序方式"), "name");
+    await user.selectOptions(within(dialog).getByLabelText("排序方式"), "manual");
+    expect(order()).toEqual(["b", "a", "c"]);
+    mounted.unmount(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await waitFor(() => expect(order()).toEqual(["b", "a", "c"]));
+    expect((within(dialog).getByLabelText("排序方式") as HTMLSelectElement).value).toBe("manual");
+    await user.click(item("b"));
+    await user.click(within(dialog).getByRole("button", { name: "取消置顶" }));
+    expect(item("b").querySelector('[aria-label="已置顶"]')).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  }, 15000);
+
   it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
     const user = userEvent.setup();
@@ -453,7 +506,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
     // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
-    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "打开文件快照", "备份，规划中", "日志，规划中"]) {
+    // The terminal moved into 设置 → 终端.
+    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "打开文件快照", "备份，规划中", "日志，规划中", "打开终端"]) {
       expect(within(desktop).queryByRole("button", { name: retired })).toBeNull();
     }
     await user.click(within(desktop).getByRole("button", { name: "打开相册" }));
@@ -582,10 +636,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     layOutGrid(desktop);
-    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["文件管理", "回收站", "设置", "终端", "应用中心"]);
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["文件管理", "回收站", "设置", "应用中心", "影视中心"]);
 
-    const terminal = within(desktop).getByRole("button", { name: "打开终端" }).parentElement!;
-    fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 50, clientY: 160 });
+    const store = within(desktop).getByRole("button", { name: "打开应用中心" }).parentElement!;
+    fireEvent.pointerDown(store, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 50, clientY: 160 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 140 });
     const dragPreview = document.querySelector(".desktop-drag-preview");
     expect(dragPreview).toBeTruthy();
@@ -593,12 +647,12 @@ describe("A-NAS v1.0.1 desktop", () => {
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 50 });
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 50 });
     expect(document.querySelector(".desktop-drag-preview")).toBeNull();
-    fireEvent.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    fireEvent.click(within(desktop).getByRole("button", { name: "打开应用中心" }));
 
-    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["终端", "文件管理", "回收站", "设置", "应用中心"]);
-    expect(JSON.parse(localStorage.getItem("a-nas.desktop-order.v1")!).slice(0, 2)).toEqual(["terminal", "files"]);
-    expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
-    expect(screen.getByText("已将终端移动到第 1 位")).toBeTruthy();
+    expect(desktopOrder(desktop).slice(0, 5)).toEqual(["应用中心", "文件管理", "回收站", "设置", "影视中心"]);
+    expect(JSON.parse(localStorage.getItem("a-nas.desktop-order.v1")!).slice(0, 2)).toEqual(["store", "files"]);
+    expect(screen.queryByRole("dialog", { name: "应用中心" })).toBeNull();
+    expect(screen.getByText("已将应用中心移动到第 1 位")).toBeTruthy();
   });
 
   it("restores the original order when a drag is cancelled with Escape", async () => {
@@ -623,14 +677,14 @@ describe("A-NAS v1.0.1 desktop", () => {
     const { unmount } = render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
 
-    within(desktop).getByRole("button", { name: "打开终端" }).focus();
+    within(desktop).getByRole("button", { name: "打开应用中心" }).focus();
     await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
-    expect(desktopOrder(desktop).slice(0, 4)).toEqual(["文件管理", "回收站", "终端", "设置"]);
-    expect(document.activeElement).toBe(within(desktop).getByRole("button", { name: "打开终端" }));
+    expect(desktopOrder(desktop).slice(0, 4)).toEqual(["文件管理", "回收站", "应用中心", "设置"]);
+    expect(document.activeElement).toBe(within(desktop).getByRole("button", { name: "打开应用中心" }));
     unmount();
 
     render(<App />);
-    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "终端", "设置"]);
+    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "应用中心", "设置"]);
   });
 
   it("switches focus between open apps from an icon-only dock", async () => {
@@ -639,19 +693,19 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
-    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
 
     const dock = screen.getByRole("navigation", { name: "已打开窗口" });
     expect(dock.textContent).toBe("");
-    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
 
     await user.click(within(dock).getByRole("button", { name: "切换到设置" }));
     expect(within(dock).getByRole("button", { name: "最小化设置" }).getAttribute("aria-current")).toBe("true");
-    expect(within(dock).getByRole("button", { name: "切换到终端" })).toBeTruthy();
+    expect(within(dock).getByRole("button", { name: "切换到回收站" })).toBeTruthy();
 
     await user.click(within(dock).getByRole("button", { name: "最小化设置" }));
     expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull();
-    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+    expect(within(dock).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
     expect(within(dock).getByRole("button", { name: "恢复设置" })).toBeTruthy();
   });
 
@@ -660,14 +714,14 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
 
     const dock = screen.getByRole("navigation", { name: "已打开窗口" });
-    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到终端", "最小化设置"]);
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到回收站", "最小化设置"]);
 
     await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
-    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化终端"]);
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化回收站"]);
   });
 
   it("keeps the system rail to working shortcuts", async () => {
@@ -687,7 +741,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
-    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
     const dock = screen.getByRole("navigation", { name: "已打开窗口" });
     await user.click(within(dock).getByRole("button", { name: "切换到文件管理" }));
     await user.click(within(dock).getByRole("button", { name: "最小化文件管理" }));
@@ -699,8 +753,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(showDesktop.getAttribute("aria-pressed")).toBe("true");
 
     await user.click(showDesktop);
-    expect(screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"))).toEqual(["设置", "终端"]);
-    expect(within(dock).getByRole("button", { name: "最小化终端" }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"))).toEqual(["回收站", "设置"]);
+    expect(within(dock).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
     expect(within(dock).getByRole("button", { name: "恢复文件管理" })).toBeTruthy();
     expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
   });
@@ -722,10 +776,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开设置"]);
     await user.clear(search);
     await user.type(search, "命令行");
-    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开终端"]);
+    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开设置"]);
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("dialog", { name: "全部应用" })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "终端" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
   });
 
   it("closes the launcher with Escape and returns focus to the rail", async () => {
@@ -939,57 +993,92 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect((await within(store).findByRole("alert")).textContent).toContain("数据卷当前不可用");
   });
 
-  it("opens a terminal session from the desktop icon", async () => {
+  it("opens the administrator terminal in Settings rather than on the desktop", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();
     render(<App />);
-
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开终端" }));
+    expect(within(desktop).queryByRole("button", { name: "打开终端" })).toBeNull();
 
-    const terminal = screen.getByRole("dialog", { name: "终端" });
-    expect(await within(terminal).findByTestId("xterm-session")).toBeTruthy();
+    await openSettingsSection(user, desktop, "终端");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByTestId("xterm-session")).toBeTruthy();
+    expect(within(settings).getByRole("heading", { name: "终端" })).toBeTruthy();
+    expect(within(settings).getByText("以 owner 的 Linux 账号在 anas-fake 上运行的 Shell")).toBeTruthy();
+    expect(await within(settings).findByText("已连接")).toBeTruthy();
     expect(xterm.mounts).toBe(1);
   });
 
-  it("keeps the terminal session alive while minimized", async () => {
+  it("keeps the shell running while another settings section is shown", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开终端" }));
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "终端");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await within(settings).findByTestId("xterm-session");
+    const sections = within(settings).getByRole("navigation", { name: "设置分区" });
+
+    await user.click(within(sections).getByRole("button", { name: "日志" }));
+    expect(within(settings).getByRole("heading", { name: "日志" })).toBeTruthy();
+    expect(within(settings).getByTestId("xterm-session").closest("[hidden]")).toBeTruthy();
+    expect(within(sections).getByRole("button", { name: "终端" }).querySelector(".set-nav-live")).toBeTruthy();
+
+    await user.click(within(sections).getByRole("button", { name: "终端" }));
+    expect(within(settings).getByTestId("xterm-session").closest("[hidden]")).toBeNull();
+    expect(within(sections).getByRole("button", { name: "终端" }).querySelector(".set-nav-live")).toBeNull();
+    expect(xterm.mounts).toBe(1);
+  });
+
+  it("keeps the shell while Settings is minimized and ends it when Settings closes", async () => {
+    installAPI({ terminalEnabled: true });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "终端");
     await screen.findByTestId("xterm-session");
 
-    await user.click(within(screen.getByRole("dialog", { name: "终端" })).getByRole("button", { name: "最小化终端" }));
-    expect(screen.queryByRole("dialog", { name: "终端" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "恢复终端" }));
-
-    expect(screen.getByRole("dialog", { name: "终端" })).toBeTruthy();
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "最小化设置" }));
+    expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "恢复设置" }));
+    expect(screen.getByTestId("xterm-session")).toBeTruthy();
     expect(xterm.mounts).toBe(1);
+
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
+    expect(screen.queryByTestId("xterm-session")).toBeNull();
+    // Settings reopens on the terminal with a new shell.
+    await user.click(within(screen.getByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }));
+    expect(await screen.findByTestId("xterm-session")).toBeTruthy();
+    expect(xterm.mounts).toBe(2);
   });
 
   it("offers a new session after the shell exits", async () => {
     installAPI({ terminalEnabled: true });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开终端" }));
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "终端");
     await screen.findByTestId("xterm-session");
 
     act(() => xterm.onStatus?.({ state: "ended", exitCode: 0 }));
-    expect(await screen.findByText("Shell 已退出（代码 0）")).toBeTruthy();
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    const notice = within(settings).getByRole("status");
+    expect(notice.textContent).toContain("Shell 已退出（代码 0）");
+    expect(within(settings).getByText("已结束")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "新建会话" }));
+    await user.click(within(notice).getByRole("button", { name: "新建会话" }));
     expect(screen.queryByText("Shell 已退出（代码 0）")).toBeNull();
     expect(xterm.mounts).toBe(2);
   });
 
-  it("explains when the terminal is disabled", async () => {
-    installAPI({ terminalEnabled: false });
+  it("explains how the device's root turns the terminal on", async () => {
+    const fetchMock = installAPI({ terminalEnabled: false });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开终端" }));
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "终端");
 
-    expect(await screen.findByText("终端未启用")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "终端尚未开启" })).toBeTruthy();
+    expect(screen.getByLabelText("开启终端的命令").textContent).toContain("ANAS_TERMINAL=enabled");
     expect(screen.queryByTestId("xterm-session")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "重新检查" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => path === "/api/v1/terminal")).toHaveLength(2));
   });
 });
 
