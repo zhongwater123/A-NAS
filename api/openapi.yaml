@@ -1349,6 +1349,18 @@ paths:
       responses:
         "200": { description: The show, content: { application/json: { schema: { $ref: "#/components/schemas/MediaShowDetail" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: renameMediaShow
+      summary: Rename a show as the caller, its own folder and the episode files that carry its title
+      description: A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name.
+      parameters: [{ name: showId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 255 } } } } } }
+      responses:
+        "200": { description: The renamed show, content: { application/json: { schema: { $ref: "#/components/schemas/MediaShowDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/media/videos/{videoId}:
     get:
       operationId: getMediaVideo
@@ -3319,6 +3331,7 @@ components:
         addedAt: { type: string, format: date-time }
         artwork: { $ref: "#/components/schemas/MediaArtwork" }
         progress: { $ref: "#/components/schemas/MediaProgress" }
+        file: { type: string, description: The episode's file name. }
     MediaShowDetail:
       allOf:
         - { $ref: "#/components/schemas/MediaTitle" }
@@ -3337,6 +3350,8 @@ components:
                   number: { type: integer }
                   episodes: { type: array, items: { $ref: "#/components/schemas/MediaEpisode" } }
             collections: { type: array, items: { $ref: "#/components/schemas/MediaCollectionRef" } }
+            folder: { type: string, description: Name of the folder the show has to itself; absent when it has none. }
+            namedByNfo: { type: boolean, description: "tvshow.nfo gives the title, so renaming the show's files leaves it." }
     MediaVideoDetail:
       allOf:
         - { $ref: "#/components/schemas/MediaTitle" }
@@ -3366,6 +3381,7 @@ components:
                 height: { type: integer }
                 frameRate: { type: number }
                 bitrate: { type: integer }
+            namedByNfo: { type: boolean, description: "An NFO document gives the title, so renaming the file leaves it." }
             probeState: { type: string, enum: [pending, ready, failed] }
             audio:
               type: array

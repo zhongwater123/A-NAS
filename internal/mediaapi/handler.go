@@ -53,6 +53,7 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 		"GET /home":                             h.home,
 		"GET /titles":                           h.titles,
 		"GET /shows/{id}":                       h.show,
+		"PATCH /shows/{id}":                     h.renameShow,
 		"GET /videos/{id}":                      h.video,
 		"PATCH /videos/{id}":                    h.renameVideo,
 		"GET /videos/{id}/playback":             h.playback,
@@ -469,6 +470,24 @@ func (h *handler) createCollection(w http.ResponseWriter, r *http.Request, user 
 
 func (h *handler) collection(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	detail, err := h.service.CollectionDetail(r.Context(), user, r.PathValue("id"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// renameShow renames a show's folder and the episode files that carry its
+// title, as the user.
+func (h *handler) renameShow(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var input struct {
+		Name string `json:"name"`
+	}
+	if err := decode(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	detail, err := h.service.RenameShow(r.Context(), user, r.PathValue("id"), input.Name)
 	if err != nil {
 		h.fail(w, r, err)
 		return

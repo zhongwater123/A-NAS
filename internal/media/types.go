@@ -171,6 +171,8 @@ type Episode struct {
 	AddedAt  time.Time `json:"addedAt"`
 	Artwork  Artwork   `json:"artwork"`
 	Progress *Progress `json:"progress,omitempty"`
+	// File is the episode's file name, which renaming edits.
+	File string `json:"file,omitempty"`
 }
 
 type Season struct {
@@ -185,6 +187,12 @@ type ShowDetail struct {
 	Next        *Episode        `json:"next,omitempty"`
 	SeasonList  []Season        `json:"seasonList"`
 	Collections []CollectionRef `json:"collections"`
+	// Folder is the name of the folder the show has to itself, which
+	// renaming the show renames; it is empty when the show has none.
+	Folder string `json:"folder,omitempty"`
+	// NamedByNFO tells that tvshow.nfo gives the title, so renaming the
+	// show's files does not change it.
+	NamedByNFO bool `json:"namedByNfo,omitempty"`
 }
 
 type CollectionRef struct {
@@ -229,6 +237,9 @@ type VideoDetail struct {
 	Next        string          `json:"nextId,omitempty"`
 	Collections []CollectionRef `json:"collections"`
 	Collection  string          `json:"collection,omitempty"`
+	// NamedByNFO tells that an NFO document gives the title, so renaming
+	// the file does not change it.
+	NamedByNFO bool `json:"namedByNfo,omitempty"`
 }
 
 type MediaSummary struct {
