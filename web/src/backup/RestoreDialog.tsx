@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { APIError, listEntries, type FileEntry, type Space } from "../api";
 
-import { messageOf, restoreEntry } from "./backupApi";
+import { messageOf, restoreEntry, restoreSnapshot } from "./backupApi";
 import { formatDateTime, restoredName, spaceLabel } from "./format";
 import { Dialog, EntryIcon, Spinner } from "./parts";
 
@@ -13,6 +13,11 @@ export interface RestoreRequest {
   entry: { id: string; name: string; kind: "file" | "directory" };
   // Folder names from the snapshot's root down to the entry's own folder.
   folders: string[];
+  // whole restores everything the snapshot holds into a new folder named
+  // entry.name; entry.id is then empty.
+  whole?: boolean;
+  // name is the name the dialog starts with, when not the entry's own.
+  name?: string;
 }
 
 interface Crumb { id: string; name: string }
@@ -32,7 +37,7 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
   const [missing, setMissing] = useState("");
   const [original, setOriginal] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [name, setName] = useState(entry.name);
+  const [name, setName] = useState(request.name ?? entry.name);
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -75,7 +80,8 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
     setBusy(true); setError(""); setConflict(false);
     const timer = window.setTimeout(() => setSlow(true), backgroundAfter);
     try {
-      const restored = await restoreEntry(snapshot.id, entry.id, target.at(-1)?.id ?? "", finalName);
+      const parentId = target.at(-1)?.id ?? "";
+      const restored = request.whole ? await restoreSnapshot(snapshot.id, parentId, finalName) : await restoreEntry(snapshot.id, entry.id, parentId, finalName);
       onRestored(restored, location);
     } catch (caught) {
       const message = messageOf(caught);
@@ -101,7 +107,7 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
   if (hidden) return null;
   return (
     <Dialog
-      title={`恢复${entry.kind === "directory" ? "文件夹" : "文件"}`}
+      title={request.whole ? "恢复整份快照" : `恢复${entry.kind === "directory" ? "文件夹" : "文件"}`}
       icon={<ArchiveRestore />}
       busy={busy}
       onClose={onClose}
@@ -118,8 +124,8 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
         <div className="bk-restore-source">
           <EntryIcon kind={entry.kind} />
           <div>
-            <strong>{entry.name}</strong>
-            <small>来自快照“{snapshot.name}” · {formatDateTime(snapshot.createdAt)}</small>
+            <strong>{request.whole ? `快照“${snapshot.name}”的全部文件` : entry.name}</strong>
+            <small>{request.whole ? formatDateTime(snapshot.createdAt) : <>来自快照“{snapshot.name}” · {formatDateTime(snapshot.createdAt)}</>}</small>
           </div>
         </div>
 
@@ -128,7 +134,7 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
           <div className={`bk-location${picking ? " open" : ""}`}>
             <MapPin />
             <span className="bk-location-path" title={location}>{target ? location : "正在查找原位置…"}</span>
-            {original && target && <span className="bk-badge neutral">原位置</span>}
+            {original && target && !request.whole && <span className="bk-badge neutral">原位置</span>}
             <button type="button" className="bk-link" disabled={!target || busy} onClick={() => setPicking((value) => !value)}>{picking ? "收起" : "更改"}</button>
           </div>
           {missing && !picking && <small className="bk-field-hint">原文件夹“{missing}”已不在空间中，将恢复到它还在的上一级。</small>}
@@ -138,7 +144,7 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
         </div>
 
         <label className="bk-field">
-          <span className="bk-field-label">名称</span>
+          <span className="bk-field-label">{request.whole ? "新文件夹名称" : "名称"}</span>
           <input data-autofocus value={name} disabled={busy} onChange={(event) => { setName(event.target.value); setConflict(false); setError(""); }} aria-label="恢复后的名称" />
         </label>
 
@@ -149,7 +155,7 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
           </div>
         )}
         <p className="bk-fine">
-          {entry.kind === "directory" ? "文件夹里的全部内容会一起恢复。" : ""}恢复会复制出新的项目，不会覆盖或改动空间中现有的文件。
+          {request.whole ? "快照里的全部文件会复制到这个新文件夹中。" : entry.kind === "directory" ? "文件夹里的全部内容会一起恢复。" : ""}恢复会复制出新的项目，不会覆盖或改动空间中现有的文件。
         </p>
       </form>
     </Dialog>
