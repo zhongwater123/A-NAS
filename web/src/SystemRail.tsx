@@ -1,9 +1,10 @@
 import { Clock3, Grid2X2, Home, LogOut, Monitor, Search, Settings, UserRound } from "lucide-react";
 import { KeyboardEvent, ReactNode, RefObject, useEffect, useId, useRef, useState } from "react";
 
-import type { Session } from "./api";
+import type { Session, User } from "./api";
 import type { DesktopApp } from "./DesktopGrid";
-import { avatarTone } from "./settings/parts";
+import { displayName } from "./people";
+import { PersonAvatar } from "./PersonAvatar";
 import { useDesktopOrder } from "./useDesktopOrder";
 
 // "windows": some app window is visible; "revealed": the rail hid them and can
@@ -28,8 +29,9 @@ export function SystemRail({ apps, session, desktopView, settingsFocused, onTogg
   const accountButton = useRef<HTMLButtonElement>(null);
   const launcherID = useId();
   const accountID = useId();
-  const { username, role } = session.user;
-  const roleLabel = role === "admin" ? "管理员" : "成员";
+  const { user } = session;
+  const name = displayName(user);
+  const roleLabel = user.role === "admin" ? "管理员" : "成员";
   const toggle = (next: Popover) => setPopover((current) => current === next ? undefined : next);
   const close = (returnFocus: boolean) => {
     const trigger = popover === "launcher" ? launcherButton : accountButton;
@@ -60,11 +62,11 @@ export function SystemRail({ apps, session, desktopView, settingsFocused, onTogg
         <RailButton
           ref={accountButton}
           className="rail-account"
-          label={`账号（${username}）`}
-          tip={`${username} · ${roleLabel}`}
+          label={`账号（${name}）`}
+          tip={`${name} · ${roleLabel}`}
           popup={{ kind: "menu", id: accountID, expanded: popover === "account" }}
           onClick={() => toggle("account")}
-        ><span className={`rail-face ${avatarTone(username)}`} aria-hidden="true">{initial(username)}</span></RailButton>
+        ><PersonAvatar who={user} className="rail-face" /></RailButton>
       </div>
     </aside>
 
@@ -76,7 +78,7 @@ export function SystemRail({ apps, session, desktopView, settingsFocused, onTogg
     {popover === "account" && (
       <DismissableLayer id={accountID} className="account-popover" label="账号" trigger={accountButton} onDismiss={close}>
         <AccountMenu
-          username={username}
+          user={user}
           roleLabel={roleLabel}
           session={describeSession(session.expiresAt)}
           onAccount={() => { setPopover(undefined); onOpenSettings("account"); }}
@@ -243,8 +245,8 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
   </>;
 }
 
-function AccountMenu({ username, roleLabel, session, onAccount, onLogout }: {
-  username: string;
+function AccountMenu({ user, roleLabel, session, onAccount, onLogout }: {
+  user: User;
   roleLabel: string;
   session: SessionDescription;
   onAccount: () => void;
@@ -263,23 +265,22 @@ function AccountMenu({ username, roleLabel, session, onAccount, onLogout }: {
 
   return <>
     <div className="account-card">
-      <span className={`account-face ${avatarTone(username)}`} aria-hidden="true">{initial(username)}</span>
+      <PersonAvatar who={user} className="account-face" />
       <div className="account-who">
-        <strong>{username}</strong>
-        <span className="account-role">{roleLabel}</span>
+        <strong>{displayName(user)}</strong>
+        <span className="account-meta">
+          <span className="account-role">{roleLabel}</span>
+          {user.nickname && <span className="account-username">{user.username}</span>}
+        </span>
       </div>
     </div>
     <p className="account-session">{session.localConsole ? <Monitor aria-hidden="true" /> : <Clock3 aria-hidden="true" />}{session.text}</p>
     <div ref={menu} className="account-menu" role="menu" aria-label="账号操作" onKeyDown={moveFocus}>
-      <button role="menuitem" className="account-item" onClick={onAccount}><UserRound aria-hidden="true" />我的账号<small>密码与 SMB</small></button>
+      <button role="menuitem" className="account-item" onClick={onAccount}><UserRound aria-hidden="true" />我的账号<small>头像、昵称与密码</small></button>
       <div className="account-separator" role="separator" />
       <button role="menuitem" className="account-item danger" onClick={onLogout}><LogOut aria-hidden="true" />退出登录</button>
     </div>
   </>;
-}
-
-function initial(username: string): string {
-  return [...username][0]?.toUpperCase() ?? "?";
 }
 
 interface SessionDescription { localConsole: boolean; text: string }

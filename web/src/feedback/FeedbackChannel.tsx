@@ -2,7 +2,8 @@ import { Check, CheckCheck, CircleCheckBig, Inbox, MessageCircle, MessageSquareT
 import { PointerEvent as ReactPointerEvent, RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { APIError } from "../api";
-import { avatarTone } from "../settings/parts";
+import { nameOf, person, usePeople } from "../people";
+import { PersonAvatar } from "../PersonAvatar";
 import { FEEDBACK_UI } from "./capture";
 import { FeedbackEditor, Draft, emptyDraft, releaseDraft } from "./FeedbackEditor";
 import {
@@ -266,6 +267,7 @@ interface FeedbackCardProps {
 }
 
 function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPreview, onCaptured }: FeedbackCardProps) {
+  const people = usePeople();
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -327,7 +329,7 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
       if (caught instanceof APIError && caught.code === "feedback_changed") {
         // Keep the draft; show what changed and save over it on the next try.
         const latest = (await onRefresh())?.find((candidate) => candidate.id === item.id);
-        if (latest) { setBaseVersion(latest.version); setChangedBy(latest.updatedBy ?? latest.createdBy); } else onRemove(item.id);
+        if (latest) { setBaseVersion(latest.version); setChangedBy(nameOf(people, latest.updatedBy ?? latest.createdBy)); } else onRemove(item.id);
       } else fail(caught);
     } finally {
       setBusy(false);
@@ -400,13 +402,13 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
           </ul>
         )}
         <div className="fb-meta">
-          <span className={`fb-avatar ${avatarTone(item.createdBy)}`} aria-hidden="true">{[...item.createdBy][0]?.toUpperCase()}</span>
-          <span className="fb-author">{item.createdBy}</span>
+          <PersonAvatar who={person(people, { username: item.createdBy })} className="fb-avatar" />
+          <span className="fb-author">{nameOf(people, item.createdBy)}</span>
           <time dateTime={item.createdAt} title={fullTime(item.createdAt)}>{describeTime(item.createdAt)}</time>
-          {item.updatedBy && item.updatedAt && <span className="fb-edited" title={`${item.updatedBy} 于 ${fullTime(item.updatedAt)} 编辑`}>已编辑</span>}
+          {item.updatedBy && item.updatedAt && <span className="fb-edited" title={`${nameOf(people, item.updatedBy)} 于 ${fullTime(item.updatedAt)} 编辑`}>已编辑</span>}
           <span className="fb-meta-end">
             {resolved && item.resolvedBy && item.resolvedAt && (
-              <span className="fb-resolved" title={fullTime(item.resolvedAt)}><CheckCheck />{item.resolvedBy} 已处理</span>
+              <span className="fb-resolved" title={fullTime(item.resolvedAt)}><CheckCheck />{nameOf(people, item.resolvedBy)} 已处理</span>
             )}
             <button
               className={`fb-comment-toggle ${commentCount ? "has" : ""}`}
