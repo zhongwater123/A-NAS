@@ -90,6 +90,7 @@ install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
+install -m 0644 anas-system.slice.incoming anas-system.slice
 install -m 0644 anas-ai-system.socket.incoming anas-ai-system.socket
 install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
 install -m 0644 anas-media-system.socket.incoming anas-media-system.socket
@@ -120,6 +121,7 @@ staged_runtime="$HOME/apps/a-nas/ai-runtimes/$runtime_file"
 printf '%s  %s\n' "$runtime_sha" "$staged_runtime" | sha256sum --check --quiet -
 ln -s "$staged_runtime" ai/runtime.tar.gz
 rm -f \
+  anas-system.slice.incoming \
   anas-ai-system.socket.incoming \
   anas-ai-system.service.incoming \
   anas-media-system.socket.incoming \

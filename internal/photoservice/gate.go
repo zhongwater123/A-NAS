@@ -1,10 +1,13 @@
 package photoservice
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,10 +36,15 @@ type Gate struct {
 	// watched lists the cgroups whose pressure counts; none means the whole
 	// system's.
 	watched []string
+	// logger, when set, records each time pressure or short memory starts
+	// and stops holding AI work back, as evidence for tuning the limits.
+	logger *slog.Logger
 
 	mu sync.Mutex
-	// pressed holds the resources over their limit at the last look.
+	// pressed holds the resources over their limit at the last look, and
+	// short whether memory was below the reserve.
 	pressed map[string]bool
+	short   bool
 }
 
 // MemoryReserve is the memory AI work leaves for the user: below it the gate
@@ -60,10 +68,10 @@ var pressureLimits = []struct {
 const QuietPeriod = 5 * time.Minute
 
 // NewGate returns a gate that stays closed for quiet after any use, starting
-// now.
-func NewGate(quiet time.Duration) *Gate {
+// now. A nil logger records nothing.
+func NewGate(quiet time.Duration, logger *slog.Logger) *Gate {
 	watched := systemSlices("/proc/self/cgroup", "/sys/fs/cgroup")
-	gate := &Gate{quiet: quiet, now: time.Now, pressure: othersPressure(watched), available: memAvailable, watched: watched}
+	gate := &Gate{quiet: quiet, now: time.Now, pressure: othersPressure(watched), available: memAvailable, watched: watched, logger: logger}
 	gate.Touch()
 	return gate
 }
@@ -87,11 +95,27 @@ func (g *Gate) Open(context.Context) (bool, string) {
 		}
 	}
 	if g.available != nil {
-		if free, err := g.available(); err == nil && free < MemoryReserve {
+		if free, err := g.available(); err == nil && g.memoryShort(free) {
 			return false, "memory_low"
 		}
 	}
 	return true, ""
+}
+
+// memoryShort reports whether free memory is below the reserve.
+func (g *Gate) memoryShort(free uint64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	short := free < MemoryReserve
+	if short != g.short && g.logger != nil {
+		if short {
+			g.logger.Info("AI work yields to low memory", "available_mib", free>>20, "reserve_mib", MemoryReserve>>20)
+		} else {
+			g.logger.Info("AI work no longer yields to low memory", "available_mib", free>>20)
+		}
+	}
+	g.short = short
+	return short
 }
 
 // over reports whether a resource is under pressure. Once over its limit it
@@ -103,11 +127,59 @@ func (g *Gate) over(resource string, value, limit float64) bool {
 	if g.pressed == nil {
 		g.pressed = map[string]bool{}
 	}
-	if g.pressed[resource] {
+	was := g.pressed[resource]
+	if was {
 		limit /= 2
 	}
-	g.pressed[resource] = value > limit
-	return g.pressed[resource]
+	over := value > limit
+	g.pressed[resource] = over
+	if over != was && g.logger != nil {
+		if over {
+			attrs := []any{"resource", resource, "avg10", value, "limit", limit}
+			for _, slice := range g.watched {
+				attrs = append(attrs, filepath.Base(slice), waiting(slice, resource))
+			}
+			g.logger.Info("AI work yields to pressure", attrs...)
+		} else {
+			g.logger.Info("AI work no longer yields to pressure", "resource", resource, "avg10", value, "below", limit)
+		}
+	}
+	return over
+}
+
+// waiting describes the pressure of a slice and of the three of its members
+// that waited most, such as "12.30: anas-host-agent.service 8.10,
+// anas-photos.service 4.00", to tell which work held AI back.
+func waiting(slice, resource string) string {
+	own, err := cgroupSomeAvg10(filepath.Join(slice, resource+".pressure"))
+	if err != nil {
+		return "unknown"
+	}
+	type member struct {
+		name  string
+		avg10 float64
+	}
+	var members []member
+	entries, _ := os.ReadDir(slice)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		value, err := cgroupSomeAvg10(filepath.Join(slice, entry.Name(), resource+".pressure"))
+		if err == nil && value > 0 {
+			members = append(members, member{entry.Name(), value})
+		}
+	}
+	slices.SortFunc(members, func(a, b member) int { return cmp.Compare(b.avg10, a.avg10) })
+	text := strconv.FormatFloat(own, 'f', 2, 64)
+	for i, m := range members[:min(3, len(members))] {
+		separator := ", "
+		if i == 0 {
+			separator = ": "
+		}
+		text += separator + m.name + " " + strconv.FormatFloat(m.avg10, 'f', 2, 64)
+	}
+	return text
 }
 
 // systemSlices returns the cgroups that hold the device's work other than

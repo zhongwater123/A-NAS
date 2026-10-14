@@ -48,11 +48,9 @@ MemoryMax=2G
 # AI works while the photo library is idle with every core but two, which stay
 # free for what the user does next: the Worker runs that many threads, and the
 # installer caps it at that many cores in anas-ai.service.d/cpu-reserve.conf.
-# It still yields to anything else on the machine.
-CPUWeight=10
-IOWeight=10
-# A slice of its own, beside system.slice and user.slice: the photo service
-# stops AI work when the pressure of those, the device's other work, rises,
-# and the Worker's threads waiting on each other must not count
+# A slice of its own under anas.slice, beside system.slice and user.slice:
+# anas.slice gives way to those, the device's other work, whenever they want
+# a core, and the photo service stops AI work when their pressure rises; the
+# Worker's threads waiting on each other must not count
 # (internal/photoservice/gate.go).
 Slice=anas-ai.slice

@@ -50,7 +50,7 @@
 
 屏保视频不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)），安装器保留当前视频池。首次升级时，安装器会导入旧安装器留下的池。更换视频的步骤见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
 
-本地 AI 随每个 release 安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：安装器把 release 引用的模型与运行环境按内容各存一份，已有时直接复用，并启用 `anas-ai.socket`。第一次安装带 AI 的 release 时按[启用相册本地 AI](enable-photo-ai.md)核对，第一次安装带物体检测器的 release 时按[启用相册物体检测](enable-photo-objects.md)核对。安装器还按本机逻辑核数写入 `/etc/systemd/system/anas-ai.service.d/cpu-reserve.conf`，让 AI 至多用到核数减 2。
+本地 AI 随每个 release 安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：安装器把 release 引用的模型与运行环境按内容各存一份，已有时直接复用，并启用 `anas-ai.socket`。第一次安装带 AI 的 release 时按[启用相册本地 AI](enable-photo-ai.md)核对，第一次安装带物体检测器的 release 时按[启用相册物体检测](enable-photo-objects.md)核对。安装器还按本机逻辑核数写入 `/etc/systemd/system/anas-ai.service.d/cpu-reserve.conf`，让 AI 至多用到核数减 2，并安装 `/etc/systemd/system/anas.slice`，让后台 AI 在争用时把 CPU 让给设备上的其他工作。
 
 安装器最后核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时以退出码 5 结束，此时新版本已切换但 Web 文件与终端不可用，按[回滚](#回滚)恢复上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 

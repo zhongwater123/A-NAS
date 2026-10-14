@@ -312,7 +312,7 @@ func run(logger *slog.Logger) error {
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod))
+			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
 		}()
 		// Runs before the deferred photoService.Close.
 		defer func() {
