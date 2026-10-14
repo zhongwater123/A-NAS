@@ -205,6 +205,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
     },
     addToCollection: (title) => setPicker(title),
     rename: (title) => setRenaming(title),
+    renamed: (message) => { toast({ text: message }); follow(); refresh(); },
   }), [navigate, playTitle, toast, refresh, onError]);
 
   const openLibraryDialog = async (library?: MediaLibrary) => {
@@ -359,7 +360,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
         {play && <Player request={play} onClose={() => { setPlay(undefined); refresh(); }} onNavigate={(videoId) => setPlay({ videoId })} onSaved={() => undefined} />}
         {renaming && (
           <RenameDialog title={renaming} onClose={() => setRenaming(undefined)}
-            onDone={(detail) => { setRenaming(undefined); toast({ text: `已重命名为“${detail.file.name}”，正在重新识别片名` }); follow(); refresh(); }} />
+            onDone={(message) => { setRenaming(undefined); toast({ text: message }); follow(); refresh(); }} />
         )}
         {picker && <CollectionPicker title={picker} onClose={() => setPicker(undefined)} onDone={(text) => { setPicker(undefined); toast({ text }); refresh(); }} />}
         {editing && <LibraryDialog library={editing.library} spaces={editing.spaces} isAdmin={isAdmin} onClose={() => setEditing(undefined)}
