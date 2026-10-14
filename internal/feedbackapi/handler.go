@@ -1,7 +1,7 @@
 // Package feedbackapi exposes 问题反馈 under /api/v1/feedback. It does not
 // authenticate: the Product Service wraps it so that every request carries
 // the signed-in user (WithUser) and writes have passed CSRF checks. Every
-// signed-in account may read and change every item.
+// signed-in account may read and change every item and every comment.
 package feedbackapi
 
 import (
@@ -44,12 +44,15 @@ func New(store *feedback.Store, logger *slog.Logger) http.Handler {
 	}
 	h := &handler{store: store, logger: logger, mux: http.NewServeMux()}
 	routes := map[string]func(http.ResponseWriter, *http.Request, feedback.Actor){
-		"GET ":                       h.list,
-		"POST ":                      h.create,
-		"PUT /{id}":                  h.edit,
-		"PATCH /{id}":                h.resolve,
-		"DELETE /{id}":               h.delete,
-		"GET /{id}/images/{imageID}": h.image,
+		"GET ":                              h.list,
+		"POST ":                             h.create,
+		"PUT /{id}":                         h.edit,
+		"PATCH /{id}":                       h.resolve,
+		"DELETE /{id}":                      h.delete,
+		"GET /{id}/images/{imageID}":        h.image,
+		"POST /{id}/comments":               h.addComment,
+		"PUT /{id}/comments/{commentID}":    h.editComment,
+		"DELETE /{id}/comments/{commentID}": h.deleteComment,
 	}
 	for pattern, route := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -134,6 +137,52 @@ func (h *handler) resolve(w http.ResponseWriter, r *http.Request, actor feedback
 		return
 	}
 	item, err := h.store.SetResolved(r.Context(), actor, r.PathValue("id"), *request.Resolved)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+// Comment writes answer with the whole item, so the list replaces it in place.
+func (h *handler) addComment(w http.ResponseWriter, r *http.Request, actor feedback.Actor) {
+	form, err := readForm(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if form.versioned || len(form.content.Keep) > 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "a new comment has no version or kept images")
+		return
+	}
+	item, err := h.store.AddComment(r.Context(), actor, r.PathValue("id"), form.content)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *handler) editComment(w http.ResponseWriter, r *http.Request, actor feedback.Actor) {
+	form, err := readForm(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if !form.versioned {
+		writeError(w, http.StatusBadRequest, "invalid_request", "an edit names the version it was made from")
+		return
+	}
+	item, err := h.store.EditComment(r.Context(), actor, r.PathValue("id"), r.PathValue("commentID"), form.version, form.content)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *handler) deleteComment(w http.ResponseWriter, r *http.Request, _ feedback.Actor) {
+	item, err := h.store.DeleteComment(r.Context(), r.PathValue("id"), r.PathValue("commentID"))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -264,8 +313,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, feedback.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "feedback not found")
+	case errors.Is(err, feedback.ErrCommentNotFound):
+		writeError(w, http.StatusNotFound, "comment_not_found", "comment not found")
 	case errors.Is(err, feedback.ErrChanged):
 		writeError(w, http.StatusConflict, "feedback_changed", err.Error())
+	case errors.Is(err, feedback.ErrCommentChanged):
+		writeError(w, http.StatusConflict, "comment_changed", err.Error())
 	case errors.Is(err, feedback.ErrEmpty):
 		writeError(w, http.StatusBadRequest, "feedback_empty", err.Error())
 	case errors.Is(err, feedback.ErrTextTooLong):

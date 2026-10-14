@@ -1735,10 +1735,62 @@ paths:
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback/{feedbackId}/comments:
+    post:
+      operationId: addFeedbackComment
+      summary: "Reply under an item with text, images or both; answers with the item and all its comments"
+      parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 2000 }
+                image: { type: array, maxItems: 3, description: "PNG, JPEG, GIF or WebP; at most 10 MiB each.", items: { type: string, format: binary } }
+      responses:
+        "201": { description: The item with the new comment, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback/{feedbackId}/comments/{commentId}:
+    parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { name: commentId, in: path, required: true, schema: { type: string } }]
+    put:
+      operationId: editFeedbackComment
+      summary: "Replace a comment's text and images; any account may, and comment_changed refuses an edit made from a stale version"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The comment version the edit was made from. }
+                text: { type: string, maxLength: 2000 }
+                keep: { type: array, description: "IDs of the attached images that stay; the others are removed.", items: { type: string } }
+                image: { type: array, description: Images to add., items: { type: string, format: binary } }
+      responses:
+        "200": { description: The item with the edited comment, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteFeedbackComment
+      summary: Delete a comment and its images; any account may
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The item without the comment, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/feedback/{feedbackId}/images/{imageId}:
     get:
       operationId: getFeedbackImage
-      summary: "One attached image; its content never changes, so it may be cached"
+      summary: "One image attached to the item or to a comment under it; its content never changes, so it may be cached"
       parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { name: imageId, in: path, required: true, schema: { type: string } }]
       responses:
         "200":
@@ -3570,7 +3622,7 @@ components:
     FeedbackItem:
       type: object
       additionalProperties: false
-      required: [id, text, images, version, createdBy, createdAt, resolved]
+      required: [id, text, images, version, createdBy, createdAt, resolved, comments]
       properties:
         id: { type: string }
         text: { type: string, maxLength: 5000 }
@@ -3583,6 +3635,20 @@ components:
         resolved: { type: boolean }
         resolvedBy: { type: string }
         resolvedAt: { type: string, format: date-time }
+        comments: { type: array, description: "Replies under the item, oldest first.", items: { $ref: "#/components/schemas/FeedbackComment" } }
+    FeedbackComment:
+      type: object
+      additionalProperties: false
+      required: [id, text, images, version, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        text: { type: string, maxLength: 2000 }
+        images: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/FeedbackImage" } }
+        version: { type: integer, minimum: 1, description: Counts edits to the comment. }
+        createdBy: { type: string, description: Username of the account that wrote the comment. }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, description: Username of the latest editor. }
+        updatedAt: { type: string, format: date-time }
     FeedbackImage:
       type: object
       additionalProperties: false

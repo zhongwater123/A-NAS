@@ -68,6 +68,11 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	edit, editType := feedbackForm{text: "改为：MKV 无法播放", version: feedbackItem.Version, keep: []string{feedbackItem.Images[0].ID}}.encode(t)
 	stale, staleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	svg, svgType := feedbackForm{images: [][]byte{[]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)}}.encode(t)
+	reply := feedbackItem.Comments[0]
+	replyPath := feedbackPath + "/comments/" + reply.ID
+	comment, commentType := feedbackForm{text: "我这边也能复现"}.encode(t)
+	commentEdit, commentEditType := feedbackForm{text: "已在 1.0.2 修复", version: reply.Version, keep: []string{reply.Images[0].ID}}.encode(t)
+	commentStale, commentStaleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	searchImage, searchImageType := imageSearchForm(t)
 	tests := []struct {
 		name        string
@@ -148,6 +153,13 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "feedback image", path: feedbackPath + "/images/" + feedbackItem.Images[0].ID, handler: feedbackHandler, wantStatus: http.StatusOK},
 		{name: "feedback image missing", path: feedbackPath + "/images/feedback-image:missing", handler: feedbackHandler, wantStatus: http.StatusNotFound},
 		{name: "feedback missing", method: http.MethodDelete, path: "/api/v1/feedback/feedback:missing", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback comment", method: http.MethodPost, body: comment, contentType: commentType, path: feedbackPath + "/comments", handler: feedbackHandler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "feedback comment on a missing item", method: http.MethodPost, body: comment, contentType: commentType, path: "/api/v1/feedback/feedback:missing/comments", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback comment edit", method: http.MethodPut, body: commentEdit, contentType: commentEditType, path: replyPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "feedback comment stale edit", method: http.MethodPut, body: commentStale, contentType: commentStaleType, path: replyPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "feedback comment image", path: feedbackPath + "/images/" + reply.Images[0].ID, handler: feedbackHandler, wantStatus: http.StatusOK},
+		{name: "feedback comment missing", method: http.MethodDelete, path: feedbackPath + "/comments/feedback-comment:missing", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback comment delete", method: http.MethodDelete, path: replyPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusOK},
 		{name: "feedback unavailable", path: "/api/v1/feedback", handler: feedbackapi.New(nil, nil), wantStatus: http.StatusServiceUnavailable},
 		{name: "transfers", path: "/api/v1/transfers", handler: transfer.handler, wantStatus: http.StatusOK},
 		{name: "transfer", path: "/api/v1/transfers/" + transfer.upload, handler: transfer.handler, wantStatus: http.StatusOK},
@@ -253,13 +265,18 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 }
 
 // feedbackAPI returns the feedback API acting for one member, and an item
-// with one screenshot.
+// with one screenshot and a comment that has one too.
 func feedbackAPI(t *testing.T) (http.Handler, feedback.Item) {
 	t.Helper()
 	store := openFeedback(t)
-	item, err := store.Create(context.Background(), feedback.Actor{ID: "user:contract", Username: "contract"}, feedback.Content{Text: "截图里的按钮错位", New: [][]byte{feedbackPNG(t)}})
+	actor := feedback.Actor{ID: "user:contract", Username: "contract"}
+	item, err := store.Create(context.Background(), actor, feedback.Content{Text: "截图里的按钮错位", New: [][]byte{feedbackPNG(t)}})
 	if err != nil {
 		t.Fatalf("create feedback: %v", err)
+	}
+	item, err = store.AddComment(context.Background(), actor, item.ID, feedback.Content{Text: "附上我这边的截图", New: [][]byte{feedbackPNG(t)}})
+	if err != nil {
+		t.Fatalf("comment on feedback: %v", err)
 	}
 	api := feedbackapi.New(store, nil)
 	member := accounts.User{ID: "user:contract", Username: "contract", Role: accounts.RoleMember}
