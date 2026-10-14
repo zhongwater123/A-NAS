@@ -54,7 +54,7 @@ export function Sidebar({ caller, library, place, albumsKey, count, ai, onPlace,
   const at = (kind: Place["kind"]) => place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
   const viewing = readOnly ? libraryId : "";
   // Searches, AI clusters and tag groups all belong to AI 聚合.
-  const onAIPage = place.kind === "search" || place.kind === "cluster" || place.kind === "tag";
+  const onAIPage = place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image";
 
   return (
     <nav className="ph-sidebar" aria-label="相册导航">

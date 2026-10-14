@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Hash, History, Search, ShieldCheck, X } from "lucide-react";
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
 import { categoryNames, messageOf } from "./model";
 import { listPhotoLabels, listTagGroups, thumbnailURL, type PhotoAIStatus, type PhotoLabelCount, type PhotoTagCount } from "./photosApi";
 
@@ -26,6 +27,8 @@ interface Props {
   ai?: PhotoAIStatus;
   recent: string[];
   onSearch: (query: string) => void;
+  // The search box also takes an image to find photos like it.
+  image: { pick: () => void; over: boolean; dragging: boolean; drop: ImageDropProps };
   onForget: () => void;
   onOpenCluster: (label: PhotoLabelCount, snapshot: AIHomeSnapshot) => void;
   onOpenTag: (tag: PhotoTagCount, snapshot: AIHomeSnapshot) => void;
@@ -40,7 +43,7 @@ const cardGap = 14;
 // local AI has grouped by what they show, then the groups people made with
 // their own tags. An AI group holds only the photos the model is sure of; it
 // opens on its own and never filters a search.
-export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, recent, onSearch, onForget, onOpenCluster, onOpenTag, onError }: Props) {
+export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, recent, onSearch, image, onForget, onOpenCluster, onOpenTag, onError }: Props) {
   const back = snapshot?.viewing === viewing ? snapshot : undefined;
   const [query, setQuery] = useState("");
   const [clusters, setClusters] = useState(back?.clusters);
@@ -112,9 +115,10 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
     <div ref={scroller} className="ph-cards-scroll ph-discover" style={{ paddingTop: topInset }}>
       <section className="ph-hero" aria-label="用一句话找照片">
         <h2>{userName}，您可以用一句话来找照片</h2>
-        <form className="ph-hero-search" role="search" onSubmit={submit}>
+        <form className={`ph-hero-search${image.over ? " image-drop" : ""}`} role="search" onSubmit={submit} {...image.drop}>
           <Search />
-          <input autoFocus={!back} type="search" aria-label="用一句话搜索照片" placeholder="例如：傍晚海边散步的一家人" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
+          <input autoFocus={!back} type="search" aria-label="用一句话搜索照片" placeholder={image.dragging ? "拖到这里，找出和这张图片相似的照片" : "例如：傍晚海边散步的一家人"} maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
+          <ImageSearchButton onPick={image.pick} className="ph-hero-image" />
           <button type="submit" className="ph-button primary" disabled={!query.trim()}>搜索</button>
         </form>
         {recent.length > 0 && (

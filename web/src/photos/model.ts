@@ -1,11 +1,13 @@
 import { APIError } from "../api";
+import type { ImageQuery } from "./imageSearch";
 import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoTagCount } from "./photosApi";
 
 // A place is what the main area shows. AI 聚合 (a search with an empty query
 // is its start page), its clusters and the user tag groups cover the caller's and the shared
 // library; viewing adds the member library it was started from, so ordinary
-// searches never mix it in. Similar photos cover what a search would and go
-// back to where they were asked for.
+// searches never mix it in. Similar photos, and the photos like an image
+// from outside the library, cover what a search would and go back to where
+// they were asked for.
 export type Place =
   | { kind: "timeline"; libraryId: string }
   | { kind: "albums"; libraryId: string }
@@ -14,7 +16,8 @@ export type Place =
   | { kind: "search"; viewing: string; query: string }
   | { kind: "cluster"; viewing: string; label: PhotoLabelCount }
   | { kind: "tag"; viewing: string; tag: PhotoTagCount }
-  | { kind: "similar"; viewing: string; asset: PhotoAsset; from: Place };
+  | { kind: "similar"; viewing: string; asset: PhotoAsset; from: Place }
+  | { kind: "image"; viewing: string; query: ImageQuery; from: Place };
 
 export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
 
@@ -104,6 +107,7 @@ const photoErrors: Record<string, string> = {
   validation_failed: "名称无效",
   not_found: "照片或相册已不存在",
   photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册",
+  ai_unavailable: "暂时无法识别图片，请稍后再试",
   network_error: "网络连接中断",
 };
 

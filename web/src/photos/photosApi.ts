@@ -76,6 +76,17 @@ export const searchPhotos = (query: string, viewing = "", cursor = "", library =
 // Photos that look like this one, in the same scope as a search.
 export const listSimilarPhotos = (assetId: string, viewing = "", cursor = "", limit = 120) =>
   request<PhotoSimilarPage>(`${base}/assets/${id(assetId)}/similar?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+// Photos that look like an image from outside the library. The photo
+// service encodes the image at once, never stores it, and lists the results
+// under the returned ID for a while; once it answers search_expired, the
+// image is sent again.
+export function createImageSearch(image: Blob) {
+  const body = new FormData();
+  body.set("file", image, "image.jpg");
+  return request<{ id: string }>(`${base}/image-searches`, { method: "POST", body }, true);
+}
+export const listImageSearchResults = (searchId: string, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoPage>(`${base}/image-searches/${id(searchId)}/assets?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
 export const listPhotoLabels = (viewing = "") =>
   request<{ items: PhotoLabelCount[]; ready: boolean }>(`${base}/labels${viewing ? `?viewing=${id(viewing)}` : ""}`);
 export const listLabelPhotos = (labelId: string, viewing = "", cursor = "", limit = 120) =>

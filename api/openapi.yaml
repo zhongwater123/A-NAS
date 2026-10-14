@@ -722,6 +722,32 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/image-searches:
+    post:
+      operationId: searchPhotosByImage
+      summary: Search by an image that is not in the library; local AI encodes it and looks for objects in it at once, the image itself is never stored, and its results stay listed under the returned ID until 30 minutes after their last use
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { file: { type: string, format: binary, description: "A JPEG or PNG of at most 32 MiB and 2^26 (about 67 million) pixels. The Web client sends it upright, scaled to at most 1600 px." } } } } } }
+      responses:
+        "201": { description: The image was encoded, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoImageSearch" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "503": { description: "Local AI cannot read the image now (ai_unavailable), or the photo library is not available on this device (photos_unavailable)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/image-searches/{searchId}/assets:
+    get:
+      operationId: listImageSearchResults
+      summary: The untrashed photos in the caller's search scope most like an image search's image, closest first, by image vectors and the objects found in both, as for similar photos
+      parameters:
+        - { name: searchId, in: path, required: true, schema: { type: string } }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to look in it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of results, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { description: "search_expired when the search is no longer kept or was started by someone else, so the image is to be sent again; not_found for a viewed library the caller cannot see", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/labels:
     get:
       operationId: listPhotoLabels
@@ -2967,6 +2993,12 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
         next: { type: string }
         ready: { type: boolean, description: "False while local AI has not organised the photo yet; there are no results then." }
+    PhotoImageSearch:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string, description: "Lists the results under image-searches/{id}/assets." }
     PhotoAIStatus:
       type: object
       additionalProperties: false

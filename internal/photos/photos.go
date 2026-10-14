@@ -214,6 +214,8 @@ type Service struct {
 	// the detector classes a query names.
 	objectCalibration objects.Calibration
 	matcher           *objects.Matcher
+	// searches keeps what image searches need for their later pages.
+	searches imageSearches
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -261,6 +263,7 @@ func Open(root string, options Options) (*Service, error) {
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
+		searches: imageSearches{encoding: make(chan struct{}, 1)},
 	}
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
