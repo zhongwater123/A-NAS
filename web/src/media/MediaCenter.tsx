@@ -115,10 +115,14 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
   useEffect(() => {
     let live = true;
     const state = poll.current;
+    // A refresh can start while another load is still running; whichever
+    // finishes last clears the other's timer, so one poll stays scheduled.
     const tick = async () => {
       window.clearTimeout(state.timer);
       const busy = await loadLibraries();
-      if (live) state.timer = window.setTimeout(() => void tick(), busy || Date.now() < state.until ? busyPoll : idlePoll);
+      if (!live) return;
+      window.clearTimeout(state.timer);
+      state.timer = window.setTimeout(() => void tick(), busy || Date.now() < state.until ? busyPoll : idlePoll);
     };
     state.tick = () => void tick();
     void tick();
