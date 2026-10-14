@@ -111,6 +111,10 @@ const photoErrors: Record<string, string> = {
   network_error: "网络连接中断",
 };
 
+// How to send the MOV a Live Photo still came without: Photos on a Mac
+// hands a browser only the still when dragged or chosen directly.
+export const liveVideoHint = "在 Mac 的“照片”App 中选中这张照片，用“文件 → 导出 → 导出未修改的原件”得到同名 MOV，上传后就会补上动态效果。";
+
 export function messageOf(error: unknown) {
   if (error instanceof APIError) return photoErrors[error.code] ?? error.message;
   return error instanceof Error ? error.message : "请求失败";

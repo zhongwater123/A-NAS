@@ -57,7 +57,9 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
   );
 }
 
-export interface Toast { text: string; tone?: "done" | "error"; action?: { label: string; run: () => void }; details?: string[] }
+// details unfold under the text, behind a button named detailsLabel ("原因"
+// unless given).
+export interface Toast { text: string; tone?: "done" | "error"; action?: { label: string; run: () => void }; details?: string[]; detailsLabel?: string }
 
 // useToasts shows short outcomes at the bottom of the window; an action such
 // as undo stays a little longer.
@@ -68,7 +70,7 @@ export function useToasts() {
   const toast = useCallback((value: Toast) => {
     const id = ++next.current;
     setToasts((current) => [...current.slice(-2), { ...value, id }]);
-    window.setTimeout(() => dismiss(id), value.action || value.tone === "error" ? 9000 : 4500);
+    window.setTimeout(() => dismiss(id), value.action || value.details?.length || value.tone === "error" ? 9000 : 4500);
   }, [dismiss]);
   const element = (
     <div className="ph-toasts" role="status" aria-live="polite">
@@ -84,7 +86,7 @@ function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
     <div className={`ph-toast ${toast.tone ?? ""}`}>
       {toast.tone === "error" ? <CircleAlert /> : <CircleCheck />}
       <span>{toast.text}</span>
-      {toast.details?.length ? <button type="button" onClick={() => setExpanded(!expanded)}>{expanded ? "收起" : "原因"}</button> : null}
+      {toast.details?.length ? <button type="button" onClick={() => setExpanded(!expanded)}>{expanded ? "收起" : toast.detailsLabel ?? "原因"}</button> : null}
       {toast.action && <button type="button" className="ph-toast-action" onClick={() => { toast.action?.run(); onClose(); }}>{toast.action.label}</button>}
       <button type="button" className="ph-toast-close" aria-label="关闭提示" onClick={onClose}><X /></button>
       {expanded && <ul>{toast.details?.map((detail, index) => <li key={index}>{detail}</li>)}</ul>}

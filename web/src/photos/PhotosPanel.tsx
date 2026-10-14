@@ -16,13 +16,13 @@ import {
 } from "./imageSearch";
 import { clampRowHeight, defaultRowHeight, maxRowHeight, minRowHeight } from "./layout";
 import {
-  type Caller, canChange, canEditAlbum, daysLeft, isUnavailable, libraryName, libraryOf, messageOf, ownLibrary, type Place, placeLibrary, placeViewing,
+  type Caller, canChange, canEditAlbum, daysLeft, isUnavailable, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, type Place, placeLibrary, placeViewing,
   runEach, sharedLibrary,
 } from "./model";
 import { PhotoPicker } from "./PhotoPicker";
 import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
-  addPhotoTag, addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
+  addPhotoTag, addToAlbum, attachLiveVideo, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
   listPhotoTrash, listSimilarPhotos, downloadURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
   type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoSearchPage, type PhotoSimilarPage,
 } from "./photosApi";
@@ -30,8 +30,9 @@ import type { ScrollerHandle } from "./PhotoScroller";
 import { joinWords, ObjectsStatus, SimilarSource } from "./results";
 import { useSelection } from "./selection";
 import { Sidebar } from "./Sidebar";
+import { Slideshow } from "./Slideshow";
 import { Timeline } from "./Timeline";
-import { DropOverlay, type UploadTarget, UploadTray, useUploads } from "./uploads";
+import { DropOverlay, type UploadSummary, type UploadTarget, UploadTray, useUploads } from "./uploads";
 import { Viewer, type ViewerActions } from "./Viewer";
 import "./photos.css";
 
@@ -82,6 +83,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const selection = useSelection(viewAssets);
   const [count, setCount] = useState<number>();
   const [viewer, setViewer] = useState<{ id: string; origin?: DOMRect }>();
+  // The photo a full-screen slideshow started from.
+  const [slideshow, setSlideshow] = useState<string>();
   const [refreshKey, setRefreshKey] = useState(0);
   const [albumsKey, setAlbumsKey] = useState(0);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
@@ -218,12 +221,21 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     return { libraryId: library.id, label: libraryName(caller, library) };
   }, [place, caller, mine, viewingLibrary]);
 
-  const uploads = useUploads(useCallback((targets: UploadTarget[]) => {
+  const uploads = useUploads(useCallback(({ targets, photos, completed, liveStills }: UploadSummary) => {
     setRefreshKey((value) => value + 1);
     setAlbumsKey((value) => value + 1);
-    toast({ text: `照片已保存到${targets.map((target) => target.label).join("、")}` });
+    const done = [
+      photos ? `照片已保存到${targets.map((target) => target.label).join("、")}` : "",
+      completed ? `已为 ${completed} 张照片补上实况视频` : "",
+    ].filter(Boolean).join("；");
+    // A Mac often hands over a Live Photo's still alone; say so, and how to
+    // send the rest.
+    if (liveStills) toast({ text: `${done}；其中 ${liveStills} 张实况照片只收到了静态画面`, details: [liveVideoHint], detailsLabel: "怎么补上" });
+    else if (done) toast({ text: done });
   }, [toast]));
-  const pending = useMemo(() => place?.kind === "timeline" ? uploads.items.filter((item) => item.target.libraryId === place.libraryId && !item.target.albumId && !item.rejected) : [], [uploads.items, place]);
+  // Uploading photos show in the timeline at once; a Live Photo video only
+  // completes photos already there.
+  const pending = useMemo(() => place?.kind === "timeline" ? uploads.items.filter((item) => item.target.libraryId === place.libraryId && !item.target.albumId && !item.rejected && !item.video) : [], [uploads.items, place]);
   // Previews of finished uploads stay until the timeline shows the photos.
   useEffect(() => { if (place?.kind !== "timeline" && uploads.items.some((item) => item.state === "done")) uploads.prune(); }, [uploads.items, place]);
   const pickFiles = () => {
@@ -426,6 +438,14 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     openAlbum: (album) => void openAlbumById(album),
     openTag: (tag) => { setViewer(undefined); if (place) setPlace({ kind: "tag", viewing: placeViewing(caller, place), tag: { name: tag, photos: 0, coverId: "" } }); },
     findSimilar: (asset) => { setViewer(undefined); if (place) setPlace({ kind: "similar", viewing: placeViewing(caller, place), asset, from: place }); },
+    slideshow: (asset) => setSlideshow(asset.id),
+    attachLiveVideo: async (asset, file) => {
+      try {
+        const completed = await attachLiveVideo(asset.libraryId, file);
+        setRefreshKey((value) => value + 1);
+        toast({ text: completed.length > 1 ? `已为 ${completed.length} 张照片补上实况视频` : "已补上实况视频" });
+      } catch (caught) { reportError(messageOf(caught)); }
+    },
     error: reportError,
   };
   const closeViewer = useCallback(() => {
@@ -759,7 +779,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
       </main>
 
       {dragging && <DropOverlay target={uploadTarget} search={Boolean(imageOver)} />}
-      {viewer && viewerIndex >= 0 && (
+      {viewer && viewerIndex >= 0 && !slideshow && (
         <Viewer
           assets={viewAssets}
           index={viewerIndex}
@@ -772,6 +792,16 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
           onInfo={setInfo}
           onChanged={() => undefined}
           actions={viewerActions}
+        />
+      )}
+      {slideshow && (
+        <Slideshow
+          assets={viewAssets}
+          startId={slideshow}
+          total={count}
+          more={count === undefined || viewAssets.length < count}
+          onReveal={(id) => void scroller.current?.revealAsset(id)}
+          onExit={(id) => { setSlideshow(undefined); setViewer({ id }); }}
         />
       )}
       {picker && <AlbumPicker caller={caller} assets={picker} onPick={(album) => void addTo(album, picker)} onCreate={(library, name) => void createAndAdd(library, name, picker)} onClose={() => setPicker(undefined)} />}
