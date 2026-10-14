@@ -37,7 +37,6 @@ import {
   Share2,
   ShieldCheck,
   ShoppingBag,
-  SquareTerminal,
   Trash2,
   Upload,
   UsersRound,
@@ -68,7 +67,6 @@ import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
-import { TerminalPanel } from "./TerminalPanel";
 import { carriesFiles, PickedFile, pickedFromDrop, pickedFromInput } from "./transfers/picker";
 import { transferStore, useTransfers } from "./transfers/store";
 import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
@@ -80,7 +78,7 @@ import "./styles.css";
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "terminal" | "docker" | "store";
+type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -117,7 +115,6 @@ const initialWindows: WindowModel[] = [
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 280, y: 90, width: 760, height: 540, z: 2, opened: 0 },
 	{ id: "backup", title: "备份中心", open: false, minimized: false, maximized: false, x: 220, y: 52, width: 1080, height: 700, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
-  { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 320, y: 82, width: 900, height: 620, z: 0, opened: 0 },
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
 ];
@@ -131,7 +128,6 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   trash: Trash2,
   backup: BackupCenterGlyph,
   settings: Settings,
-  terminal: SquareTerminal,
   docker: Box,
   store: ShoppingBag,
 };
@@ -147,7 +143,6 @@ const windowTones: Record<WindowID, string> = {
   trash: "trash",
   backup: "backup",
   settings: "settings",
-  terminal: "terminal",
   docker: "docker",
   store: "store",
 };
@@ -286,8 +281,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
     { id: "trash", label: "回收站", ariaLabel: "打开回收站", keywords: "删除 恢复", tone: "trash", icon: <Trash2 />, active: isOpen("trash"), onClick: () => openWindow("trash") },
-    { id: "settings", label: "设置", ariaLabel: "打开设置", keywords: "账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log", tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openSettings() },
-    ...(session.user.role === "admin" ? [{ id: "terminal", label: "终端", ariaLabel: "打开终端", keywords: "shell 命令行 bash", tone: "terminal", icon: <SquareTerminal />, active: isOpen("terminal"), onClick: () => openWindow("terminal") }] : []),
+    // The administrator terminal lives in Settings → 终端, so searching for it in the launcher finds 设置.
+    { id: "settings", label: "设置", ariaLabel: "打开设置", keywords: `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${session.user.role === "admin" ? " 终端 shell 命令行 bash" : ""}`, tone: "settings", icon: <Settings />, active: isOpen("settings"), onClick: () => openSettings() },
     // Docker and the App Center run containers with root-equivalent engine access: administrators only.
     ...(session.user.role === "admin" ? [{ id: "store", label: "应用中心", ariaLabel: "打开应用中心", keywords: "应用 安装 商店 app", tone: "store", icon: <ShoppingBag />, active: isOpen("store"), onClick: () => openWindow("store") }] : []),
     { id: "video", label: "影视中心", ariaLabel: "打开影视中心", keywords: "影视 电影 电视剧 视频 播放 movie video", tone: "video", icon: <MediaCenterGlyph />, active: isOpen("media"), onClick: () => openWindow("media") },
@@ -340,7 +335,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 
       <section className="window-layer" aria-label="A-NAS 桌面窗口">
         {windows.map((window) => {
-          // Minimized windows stay mounted so a running terminal session survives.
+          // Minimized windows stay mounted so a running terminal session in Settings survives.
           if (!window.open) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
@@ -352,7 +347,6 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
-			  {window.id === "terminal" && <TerminalPanel />}
 			  {window.id === "docker" && <DockerPanel />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={() => openWindow("docker")} />}
             </AppWindow>

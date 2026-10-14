@@ -1,6 +1,6 @@
 import {
   ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
-  LayoutDashboard, LogOut, Monitor, Network, ScrollText, ShieldCheck, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
+  LayoutDashboard, LogOut, Monitor, Network, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 
@@ -11,9 +11,11 @@ import {
 import { isLocalConsole } from "./LocalConsoleScreenSaver";
 import { LogsSection, type LogsPreset } from "./logs/LogsSection";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
+import { TerminalSection } from "./settings/TerminalSection";
+import type { SessionStatus } from "./terminal";
 import type { HostStateView } from "./useHostState";
 
-export type SettingsSection = "account" | "overview" | "storage" | "users" | "logs";
+export type SettingsSection = "account" | "overview" | "storage" | "users" | "logs" | "terminal";
 
 type PlanStep = "plan" | "confirm" | "execute";
 
@@ -34,6 +36,7 @@ const systemSections: Array<{ id: SettingsSection; label: string; icon: LucideIc
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
   { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
+  { id: "terminal", label: "终端", icon: SquareTerminal, tone: "terminal", adminOnly: true },
 ];
 
 const plannedSections: Array<{ label: string; icon: LucideIcon; tone: string }> = [
@@ -75,11 +78,16 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
 }) {
   const { user } = session;
   const isAdmin = user.role === "admin";
-  const current = section === "users" && !isAdmin ? "overview" : section;
+  const current = (section === "users" || section === "terminal") && !isAdmin ? "overview" : section;
   const [editingPassword, setEditingPassword] = useState(false);
   // "登录记录" in My account opens the logs on sign-ins.
   const [logsPreset, setLogsPreset] = useState<LogsPreset>();
   const volumes = useVolumes(storagePlan.plan?.state);
+  // Once opened, the terminal stays mounted while other sections are shown,
+  // so its shell runs until the settings window closes.
+  const [terminalOpened, setTerminalOpened] = useState(current === "terminal");
+  const [terminalStatus, setTerminalStatus] = useState<SessionStatus>();
+  useEffect(() => { if (current === "terminal") setTerminalOpened(true); }, [current]);
   const navigate = (next: SettingsSection) => { setEditingPassword(false); onSectionChange(next); };
   return (
     <div className="set-shell">
@@ -91,20 +99,26 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
         {systemSections.filter((link) => isAdmin || !link.adminOnly).map(({ id, label, icon, tone }) => (
           <button key={id} className={current === id ? "active" : ""} aria-current={current === id ? "page" : undefined} onClick={() => navigate(id)}>
             <IconTile tone={tone} icon={icon} />{label}
+            {id === "terminal" && current !== "terminal" && terminalStatus?.state === "connected" && <span className="set-nav-live" title="Shell 正在运行" aria-hidden="true" />}
           </button>
         ))}
         <p className="set-nav-label">规划中</p>
         {plannedSections.map(({ label, icon, tone }) => <button key={label} aria-label={`${label}，规划中`} disabled><IconTile tone={tone} icon={icon} />{label}</button>)}
       </nav>
-      <div className="set-main">
-        <div className={`set-page ${current === "logs" ? "wide" : ""}`}>
-          {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onLogout={onLogout}
-            onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
-          {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
-          {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
-          {current === "users" && <UsersSection currentUser={user} onChangeOwnPassword={() => { onSectionChange("account"); setEditingPassword(true); }} />}
-          {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
-        </div>
+      <div className={`set-main ${current === "terminal" ? "fill" : ""}`}>
+        {current !== "terminal" && (
+          <div className={`set-page ${current === "logs" ? "wide" : ""}`}>
+            {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onLogout={onLogout}
+              onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
+            {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
+            {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
+            {current === "users" && <UsersSection currentUser={user} onChangeOwnPassword={() => { onSectionChange("account"); setEditingPassword(true); }} />}
+            {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
+          </div>
+        )}
+        {isAdmin && terminalOpened && (
+          <TerminalSection username={user.username} hostname={host.snapshot?.system.hostname} active={current === "terminal"} onStatus={setTerminalStatus} />
+        )}
       </div>
     </div>
   );
