@@ -609,6 +609,50 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "503":
           $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/app-shortcuts:
+    get:
+      operationId: listAppShortcuts
+      summary: List the installed apps every signed-in user opens from the desktop
+      description: >-
+        Installed App Center apps that have a web interface, for every signed-in user. Each opens in a new window
+        at <scheme>://<the host the desktop was opened from>:<webPort><path>. Installing, uninstalling and
+        available apps have none; the list is empty while the App Center is disabled.
+      responses:
+        "200":
+          description: Desktop shortcuts, in catalog order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppShortcutListResponse"
+        "401":
+          $ref: "#/components/responses/ProductError"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          $ref: "#/components/responses/AppsUnavailable"
+  /api/v1/app-shortcuts/{appId}/icon:
+    get:
+      operationId: getAppShortcutIcon
+      summary: Read an app icon for the desktop
+      parameters:
+        - $ref: "#/components/parameters/AppId"
+      responses:
+        "200":
+          description: PNG or SVG icon, served with a sandboxing Content-Security-Policy.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/ProductError"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
   /api/v1/apps/{appId}/plan:
     get:
       operationId: getAppInstallPlan
@@ -2877,6 +2921,40 @@ components:
           description: >-
             The app's containers were created under older runtime rules (ADR 0022) and keep running as they
             were; uninstalling (which keeps app data) and installing again applies the current rules.
+    AppShortcutListResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppShortcut"
+    AppShortcut:
+      type: object
+      additionalProperties: false
+      required: [id, title, webPort, scheme, path, running, total]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        webPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        scheme:
+          type: string
+          description: http or https; empty means http.
+        path:
+          type: string
+        running:
+          type: integer
+          minimum: 0
+          description: Running containers; 0 means the app is not running.
+        total:
+          type: integer
+          minimum: 0
     AppCredential:
       type: object
       additionalProperties: false

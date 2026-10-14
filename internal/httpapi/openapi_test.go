@@ -198,6 +198,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "app install stale", method: http.MethodPost, body: `{"digest":"` + strings.Repeat("a", 64) + `"}`, path: "/api/v1/apps/memos/install", handler: appAPI(t), wantStatus: http.StatusConflict},
 		{name: "app uninstall missing", method: http.MethodPost, body: `{}`, path: "/api/v1/apps/memos/uninstall", handler: appAPI(t), wantStatus: http.StatusConflict},
 		{name: "apps disabled", path: "/api/v1/apps", handler: appstoreapi.New(nil, appstoreapi.DataSourceLive, appstoreapi.Options{}), wantStatus: http.StatusServiceUnavailable},
+		{name: "app shortcuts", path: "/api/v1/app-shortcuts", handler: installedShortcuts(t), wantStatus: http.StatusOK},
+		{name: "app shortcuts disabled", path: "/api/v1/app-shortcuts", handler: appstoreapi.NewShortcuts(nil), wantStatus: http.StatusOK},
+		{name: "app shortcut icon missing", path: "/api/v1/app-shortcuts/no-such-app/icon", handler: installedShortcuts(t), wantStatus: http.StatusNotFound},
 		{name: "terminal status", path: terminal.StatusPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusOK},
 		{name: "terminal disabled", path: terminal.SessionPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusForbidden},
 	}
@@ -421,6 +424,25 @@ func withPhotoPrincipal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), photos.Principal{UserID: "user:contract"})))
 	})
+}
+
+// installedShortcuts lists Navidrome, installed in the simulated store.
+func installedShortcuts(t *testing.T) http.Handler {
+	store, err := fakeappstore.New(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	identity, _ := appstoreapi.DevelopmentHost{}.AppIdentity(ctx, "navidrome")
+	plan, err := store.Plan(ctx, "navidrome", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(ctx, "navidrome", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	return appstoreapi.NewShortcuts(store)
 }
 
 func appAPI(t *testing.T) http.Handler {

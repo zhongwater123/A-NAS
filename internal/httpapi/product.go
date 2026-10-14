@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -45,6 +46,9 @@ type ProductDependencies struct {
 	// manage Docker, so only administrators reach them (ADR 0008).
 	Containers http.Handler
 	Apps       http.Handler
+	// AppShortcuts serves /api/v1/app-shortcuts, the installed apps every
+	// signed-in user opens from the desktop.
+	AppShortcuts http.Handler
 	// Photos serves /api/v1/photos to every signed-in user and enforces the
 	// photo Policy itself. A *photosapi.Proxy confirms the session in the
 	// photo service; any other handler receives the caller as a
@@ -83,6 +87,7 @@ type productHandler struct {
 	terminal   http.Handler
 	containers http.Handler
 	apps       http.Handler
+	shortcuts  http.Handler
 	photos     http.Handler
 	media      http.Handler
 	music      *music.Service
@@ -104,7 +109,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		previews: dependencies.FilePreviews,
-		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
+		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
 		transfers: dependencies.Transfers, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
@@ -120,6 +125,11 @@ func (h *productHandler) routes() {
 			h.mux.Handle(prefix, h.withAdministrator(handler))
 			h.mux.Handle(prefix+"/", h.withAdministrator(handler))
 		}
+	}
+	if h.shortcuts != nil {
+		serve := h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { h.shortcuts.ServeHTTP(w, r) })
+		h.mux.Handle(appstoreapi.ShortcutsPrefix, serve)
+		h.mux.Handle(appstoreapi.ShortcutsPrefix+"/", serve)
 	}
 	if h.photos != nil {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
