@@ -45,7 +45,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 
 import {
   APIError, FileEntry, Notification, Session, Space, Volume,
@@ -200,6 +200,7 @@ export default function App() {
 function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogout: () => void }) {
 	const [error, setError] = useState("");
 	const [submitting, setSubmitting] = useState(false);
+	const hint = useId();
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
@@ -216,7 +217,7 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 		<span className="brand-mark large">A</span><p className="section-label">PASSWORD RESET</p><h1>设置新密码</h1>
 		<p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
 		<label>当前密码<input name="currentPassword" type="password" required autoComplete="current-password" /></label>
-		<label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" /><small>{passwordRuleText}</small></label>
+		<div className="auth-field"><label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" aria-describedby={hint} /></label><small id={hint}>{passwordRuleText}</small></div>
 		<label>确认新密码<input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
 		{error && <p className="form-error">{error}</p>}
 		<button className="primary" disabled={submitting}>{submitting ? "处理中…" : "保存新密码"}</button>
@@ -254,6 +255,8 @@ function describeNotification(item: Notification): string {
 function Authentication({ mode, error: initialError, onAuthenticated }: { mode: "loading" | "setup" | "login"; error: string; onAuthenticated: (session: Session) => void }) {
 	const [error, setError] = useState(initialError);
 	const [submitting, setSubmitting] = useState(false);
+	const usernameHint = useId();
+	const passwordHint = useId();
 	if (mode === "loading") return <main className="auth-shell"><div className="auth-card"><span className="loader" /><h1>正在启动 A-NAS…</h1></div></main>;
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); setError("");
@@ -273,8 +276,14 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 	return <main className="auth-shell"><form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
 		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "启用 A-NAS" : "登录 A-NAS"}</h1>
 		{mode === "setup" && <p>创建本机管理员账号以启用设备。</p>}
-		<label>账号<input name="username" required autoComplete="username" autoCapitalize="none" spellCheck={false} />{mode === "setup" && <small>{usernameRuleText}</small>}</label>
-		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} />{mode === "setup" && <small>{passwordRuleText}</small>}</label>
+		<div className="auth-field">
+			<label>账号<input name="username" required autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={mode === "setup" ? usernameHint : undefined} /></label>
+			{mode === "setup" && <small id={usernameHint}>{usernameRuleText}</small>}
+		</div>
+		<div className="auth-field">
+			<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} aria-describedby={mode === "setup" ? passwordHint : undefined} /></label>
+			{mode === "setup" && <small id={passwordHint}>{passwordRuleText}</small>}
+		</div>
 		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员并启用" : "登录"}</button>
 	</form></main>;
 }
