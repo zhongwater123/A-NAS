@@ -16,7 +16,7 @@ from pathlib import Path
 USER = "alice"
 SOCK = f"/run/a-nas-assistant/{USER}.sock"
 KEY = f"k7Qx9vT2mR4pL8wNz3Jd-{USER}"
-HOME = Path(f"/srv/a-nas/data/assistant/{USER}")
+HOME = Path(f"/srv/a-nas/data/assistant/{USER}/files")
 LOG = Path("/var/log/gateway.jsonl")
 PROPOSALS = HOME / ".spike-proposals.jsonl"
 

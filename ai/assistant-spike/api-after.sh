@@ -5,10 +5,10 @@ set -uo pipefail
 mem() { systemctl show "anas-assistant@$1.service" -p ActiveState -p MemoryCurrent -p MemoryPeak | tr '\n' ' '; echo; }
 echo "alice after conversation: $(mem alice)"
 echo "--- config the agent wrote into its own Hermes home:"
-cat /srv/a-nas/data/assistant/alice/.hermes/config.yaml 2>/dev/null | head -5 || echo "(none)"
+cat /srv/a-nas/data/assistant/alice/hermes/config.yaml 2>/dev/null | head -5 || echo "(none)"
 systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service
 curl -sS --max-time 150 --unix-socket /run/a-nas-assistant/alice.sock -H "Authorization: Bearer k7Qx9vT2mR4pL8wNz3Jd-alice" http://a/v1/toolsets |
-  python3 -c 'import json,sys; d=json.load(sys.stdin); items=d.get("data", d.get("toolsets", d)) if isinstance(d,dict) else d; print("tools after restart:", sorted({t for ts in items for t in ts.get("tools",[])}))'
+  python3 -c 'import json,sys; d=json.load(sys.stdin); print("enabled toolsets after restart:", [ts["name"] for ts in d["data"] if ts.get("enabled")])'
 echo "--- idle exit (proxy --exit-idle-time=45s, assistant StopWhenUnneeded)"
 for i in $(seq 1 30); do
   sleep 5

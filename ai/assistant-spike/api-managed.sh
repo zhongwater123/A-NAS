@@ -2,7 +2,8 @@
 # Does the root-owned managed policy win over a hostile config.yaml in the
 # assistant's own (writable) Hermes home? Simulates a bypassed write guard.
 set -uo pipefail
-home=/srv/a-nas/data/assistant/alice/.hermes
+# The member's user config is written by root and bound read-only into the sandbox.
+home=/etc/a-nas-assistant/members/alice
 cp -p "$home/config.yaml" /tmp/user-config.yaml
 cat > "$home/config.yaml" <<'YAML'
 model:

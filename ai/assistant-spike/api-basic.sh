@@ -13,12 +13,10 @@ api http://a/v1/toolsets > /tmp/toolsets-$user.json
 python3 - "$user" <<'PY'
 import json, sys
 data = json.load(open(f"/tmp/toolsets-{sys.argv[1]}.json"))
-items = data.get("data", data.get("toolsets", data)) if isinstance(data, dict) else data
-tools = set()
-for ts in items if isinstance(items, list) else []:
-    print("toolset", ts.get("name"), "->", ", ".join(ts.get("tools", [])))
-    tools.update(ts.get("tools", []))
-print("all tools:", sorted(tools))
+# /v1/toolsets lists every toolset Hermes knows; only the enabled ones reach the model.
+for ts in data["data"]:
+    if ts.get("enabled"):
+        print("enabled toolset", ts["name"], "->", ", ".join(ts.get("tools", [])))
 PY
 api -H 'Content-Type: application/json' http://a/v1/chat/completions \
   -d '{"model":"hermes-agent","messages":[{"role":"user","content":"hello"}]}' | python3 -c 'import json,sys; d=json.load(sys.stdin); print("hello ->", d["choices"][0]["message"]["content"] if "choices" in d else d)'

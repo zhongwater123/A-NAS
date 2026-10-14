@@ -10,11 +10,12 @@
 #   ai/assistant-spike/run.sh clean        remove the container
 #
 # The suggested order is build, sandbox, then: api-basic.sh, "api-tools.sh alice calls.txt",
-# api-after.sh, api-managed.sh, crash.sh, quota.sh. Those use a scripted fake model.
+# api-after.sh, api-managed.sh, boundary.sh, crash.sh, quota.sh. Those use a scripted fake model.
 #
 # With a real OpenAI-compatible model (the key stays in gateway.py outside the sandbox):
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
-#   ai/assistant-spike/run.sh scenarios [scenarios.txt|scenarios-publish.txt]
+#   ai/assistant-spike/run.sh scenarios [scenarios.txt|scenarios-publish.txt|scenarios-boundary.txt]
+#   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=${HERMES_SPIKE_DIR:-$HOME/hermes-spike}
@@ -64,7 +65,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,17p' "$0"
+    sed -n '2,18p' "$0"
     exit 2
     ;;
 esac

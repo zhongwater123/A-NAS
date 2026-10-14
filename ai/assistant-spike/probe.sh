@@ -29,6 +29,12 @@ expect_fail "write into shared space"            sh -c 'echo x > /nas/共享空�
 expect_fail "write into own Agent space directly" sh -c 'echo x > /nas/共享空间/Agent空间/alice/x.txt'
 expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待确认 && echo x > /nas/助手/待确认/x.txt'
 expect_fail "read the gateway's model key"       cat /etc/anas-spike/model.key
+expect_fail "change the Hermes user config"      sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
+expect_fail "write the Hermes .env"              sh -c 'echo x >> /var/lib/hermes-home/.env'
+expect_fail "rewrite SOUL.md"                    sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'
+expect_fail "add a Hermes hook"                  mkdir /var/lib/hermes-home/hooks/x
+expect_fail "add a Hermes plugin"                mkdir /var/lib/hermes-home/plugins/x
+expect_ok   "write Hermes state"                 sh -c 'echo x > /var/lib/hermes-home/probe-state'
 expect_fail "write into /etc/hermes policy"     sh -c 'echo x >> /etc/hermes/config.yaml'
 expect_fail "write into /opt runtime"            sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
 expect_fail "outbound TCP to 1.1.1.1:443"        python3 -c 'import socket; socket.create_connection(("1.1.1.1", 443), timeout=3)'
