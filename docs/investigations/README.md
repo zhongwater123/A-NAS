@@ -22,6 +22,8 @@
 - [2026-10-13：评估把 Open Images 的大部分“有”读成了“没有”](2026-10-13-open-images-positives-read-as-absent.md)（resolved for 物体检测；AI 聚合的 Open Images 部分待重做）
 - [2026-10-13：闲时检测只用了约 1 个核](2026-10-13-idle-detection-used-one-core.md)（fixed locally；Experimental NAS verification pending）
 
+- [2026-10-14：文件管理没有视频缩略图，HEIC 照片不能预览](2026-10-14-file-media-previews.md)（fixed locally；Experimental NAS verification pending）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

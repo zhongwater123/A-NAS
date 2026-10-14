@@ -240,7 +240,7 @@ warn "This installs Btrfs, partitioning, SMART, Samba, SQLite, local AI runtime 
 confirm "Install the required Debian packages now?" || exit 1
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends \
-  acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg
+  acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg heif-thumbnailer libheif-plugin-libde265
 
 stage "Install root-owned A-NAS system services"
 anas_uid=$(id -u anas-dev)

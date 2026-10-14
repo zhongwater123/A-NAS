@@ -3,8 +3,8 @@
 
 export function fileTypeLabel(name: string): string {
   const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-  if (["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(extension ?? "")) return "图片";
-  if (["mp4", "mkv", "mov", "avi", "webm"].includes(extension ?? "")) return "视频";
+  if (isPreviewableImage(name)) return "图片";
+  if (isVideoFile(name)) return "视频";
   if (["mp3", "flac", "wav", "m4a", "aac"].includes(extension ?? "")) return "音频";
   if (extension === "pdf") return "PDF 文档";
   if (["xls", "xlsx", "csv"].includes(extension ?? "")) return "电子表格";
@@ -29,4 +29,16 @@ export function isTextPreviewable(name: string): boolean {
 export function isOfficeDocument(name: string): boolean {
   const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
   return ["doc", "docx", "ppt", "pptx"].includes(extension ?? "");
+}
+
+export function isHEIFImage(name: string): boolean {
+  return /\.(heic|heif)$/i.test(name);
+}
+
+export function isPreviewableImage(name: string): boolean {
+  return isBrowserPreviewableImage(name) || isHEIFImage(name);
+}
+
+export function isVideoFile(name: string): boolean {
+  return /\.(mp4|mov|mkv|webm|avi|m4v|mpg|mpeg|mts|m2ts|flv|f4v|wmv|3gp)$/i.test(name);
 }

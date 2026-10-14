@@ -27,6 +27,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
@@ -87,7 +88,7 @@ func runMediaWorker() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"})
+	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", HEIFThumbnailer: "/usr/bin/heif-thumbnailer"})
 }
 
 func runPhotoService(logger *slog.Logger) error {
@@ -276,15 +277,16 @@ func run(logger *slog.Logger) error {
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
-		Terminal:   terminals,
-		Containers: containersapi.New(containerManager, containerSource, logger),
-		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
-		Photos:     photoAPI,
-		Media:      mediaapi.New(mediaService, logger),
-		Music:      musicService,
-		Feedback:   feedbackapi.New(feedbackStore, logger),
-		Transfers:  transferAPI,
-		SystemLogs: systemLogs,
+		Terminal:     terminals,
+		Containers:   containersapi.New(containerManager, containerSource, logger),
+		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		Photos:       photoAPI,
+		Media:        mediaapi.New(mediaService, logger),
+		Music:        musicService,
+		FilePreviews: filepreview.New(fileService, mediaWorker),
+		Feedback:     feedbackapi.New(feedbackStore, logger),
+		Transfers:    transferAPI,
+		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,

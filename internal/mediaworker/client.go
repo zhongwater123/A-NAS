@@ -11,12 +11,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Worker runs the typed FFmpeg operations on files that are already open.
+// Worker runs typed media operations on files that are already open.
 // The caller keeps ownership of file and may close it once a call returns;
 // a stream keeps its own descriptor.
 type Worker interface {
 	Probe(ctx context.Context, file *os.File) (Probe, error)
 	Frame(ctx context.Context, file *os.File, at float64, width int) ([]byte, error)
+	Image(ctx context.Context, file *os.File, size int) ([]byte, error)
 	Subtitle(ctx context.Context, file *os.File, request SubtitleRequest) ([]byte, error)
 	Stream(ctx context.Context, file *os.File, request StreamRequest) (io.ReadCloser, error)
 	Audio(ctx context.Context, file *os.File, request AudioRequest) (io.ReadCloser, error)
@@ -142,6 +143,8 @@ func call(ctx context.Context, dial dialer, request Request, file *os.File) (io.
 		switch response.Code {
 		case CodeUnreadable:
 			return nil, fmt.Errorf("%w: %s", ErrUnreadable, response.Message)
+		case CodeUnavailable:
+			return nil, fmt.Errorf("%w: %s", ErrUnavailable, response.Message)
 		case CodeInvalid:
 			return nil, fmt.Errorf("%w: %s", ErrInvalid, response.Message)
 		}
@@ -205,6 +208,9 @@ func (c Client) Probe(ctx context.Context, file *os.File) (Probe, error) {
 func (c Client) Frame(ctx context.Context, file *os.File, at float64, width int) ([]byte, error) {
 	return frame(ctx, c.dial, file, at, width)
 }
+func (c Client) Image(ctx context.Context, file *os.File, size int) ([]byte, error) {
+	return readAll(ctx, c.dial, Request{Op: OpImage, Width: size}, file)
+}
 func (c Client) Subtitle(ctx context.Context, file *os.File, source SubtitleRequest) ([]byte, error) {
 	return subtitle(ctx, c.dial, file, source)
 }
@@ -220,6 +226,9 @@ func (l Local) Probe(ctx context.Context, file *os.File) (Probe, error) {
 }
 func (l Local) Frame(ctx context.Context, file *os.File, at float64, width int) ([]byte, error) {
 	return frame(ctx, l.dial, file, at, width)
+}
+func (l Local) Image(ctx context.Context, file *os.File, size int) ([]byte, error) {
+	return readAll(ctx, l.dial, Request{Op: OpImage, Width: size}, file)
 }
 func (l Local) Subtitle(ctx context.Context, file *os.File, source SubtitleRequest) ([]byte, error) {
 	return subtitle(ctx, l.dial, file, source)
@@ -241,5 +250,6 @@ func LocalTools() (Tools, bool) {
 	if err != nil {
 		return Tools{}, false
 	}
-	return Tools{FFmpeg: ffmpeg, FFprobe: ffprobe}, true
+	heif, _ := exec.LookPath("heif-thumbnailer")
+	return Tools{FFmpeg: ffmpeg, FFprobe: ffprobe, HEIFThumbnailer: heif}, true
 }

@@ -293,6 +293,33 @@ paths:
       responses:
         "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+  /api/v1/files/{fileId}/preview:
+    get:
+      operationId: renderFilePreview
+      summary: Render a video frame or a HEIC/HEIF image after checking source-file access
+      description: Returns JPEG for videos and PNG for HEIC/HEIF. Each request reopens the source as the signed-in user, including cache hits. Browser caching is disabled. Originals are unchanged.
+      parameters:
+        - { $ref: "#/components/parameters/FileID" }
+        - { name: size, in: query, schema: { type: string, enum: [thumbnail, preview], default: thumbnail } }
+      responses:
+        "200":
+          description: A bounded image; thumbnail is 320 pixels and preview is 1600 pixels (HEIF longest edge, video width).
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "206":
+          description: Partial rendered image
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+
   /api/v1/files/{fileId}:
     patch:
       operationId: moveFile

@@ -10,13 +10,15 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Output limits for buffered operations.
-var maxOutput = map[string]int64{OpProbe: 4 << 20, OpFrame: 8 << 20, OpSubtitle: 32 << 20}
+var maxOutput = map[string]int64{OpProbe: 4 << 20, OpFrame: 8 << 20, OpImage: 12 << 20, OpSubtitle: 32 << 20}
 
 // timeouts bound one operation; a stream ends when either side closes.
-var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minute, OpSubtitle: 15 * time.Minute, OpStream: 8 * time.Hour, OpAudio: 8 * time.Hour}
+var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minute, OpImage: 30 * time.Second, OpSubtitle: 15 * time.Minute, OpStream: 8 * time.Hour, OpAudio: 8 * time.Hour}
 
 // Serve answers one request on conn and returns when it is done.
 func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
@@ -43,6 +45,20 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	ctx, cancel := context.WithTimeout(ctx, timeouts[request.Op])
 	defer cancel()
 	program, args := tools.command(request)
+	if program == "" {
+		return writeFrame(conn, Response{Code: CodeUnavailable, Message: "decoder is unavailable"}, nil)
+	}
+	if request.Op == OpImage {
+		// libheif opens a filename instead of consuming an existing descriptor.
+		// Reopening the caller's /proc/self/fd/0 would fail under DynamicUser.
+		// Copy into a bounded, worker-owned anonymous file, never onto disk.
+		input, err := imageInput(file)
+		if err != nil {
+			return writeFrame(conn, Response{Code: CodeUnreadable, Message: "image input is unreadable or too large"}, nil)
+		}
+		defer input.Close()
+		file = input
+	}
 	command := exec.CommandContext(ctx, program, args...)
 	command.Stdin = file
 	command.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8"}
@@ -52,6 +68,8 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	if request.Op == OpStream || request.Op == OpAudio {
 		return serveStream(ctx, conn, command, &stderr)
 	}
+	// Buffered previews also stop decoding when the caller goes away.
+	go func() { _, _ = conn.Read(make([]byte, 1)); cancel() }()
 	var stdout limitedBuffer
 	stdout.limit = maxOutput[request.Op]
 	command.Stdout = &stdout
@@ -65,9 +83,39 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	return err
 }
 
+func imageInput(source *os.File) (*os.File, error) {
+	const limit = 256 << 20
+	info, err := source.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, ErrUnreadable
+	}
+	fd, err := unix.MemfdCreate("anas-image", unix.MFD_CLOEXEC)
+	if err != nil {
+		return nil, err
+	}
+	input := os.NewFile(uintptr(fd), "anas-image")
+	n, err := io.Copy(input, io.LimitReader(source, limit+1))
+	if err == nil && n > limit {
+		err = ErrUnreadable
+	}
+	if err == nil {
+		_, err = input.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		_ = input.Close()
+		return nil, err
+	}
+	return input, nil
+}
+
 func failure(err error, stderr *limitedBuffer, overflow bool) Response {
 	message := strings.TrimSpace(stderr.String())
 	switch {
+	case errors.Is(err, os.ErrNotExist), errors.Is(err, exec.ErrNotFound):
+		return Response{Code: CodeUnavailable, Message: "decoder is unavailable"}
 	case overflow:
 		message = "output is too large"
 	case errors.Is(err, context.DeadlineExceeded):
