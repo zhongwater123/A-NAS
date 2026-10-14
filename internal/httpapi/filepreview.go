@@ -13,8 +13,8 @@ import (
 )
 
 func (h *productHandler) handleFilePreview(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-	// Revalidate authorization on every request, never serve a browser cache
-	// after access was revoked or the source file was deleted.
+	// Errors remain non-cacheable. Successful previews can be stored privately,
+	// but must revalidate source access before every reuse (including 304).
 	w.Header().Set("Cache-Control", "private, no-store")
 	if h.previews == nil {
 		writeError(w, 503, "preview_unavailable", "file preview is unavailable")
@@ -41,6 +41,9 @@ func (h *productHandler) handleFilePreview(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Add("Vary", "Cookie")
+	w.Header().Set("ETag", result.ETag)
 	w.Header().Set("Content-Type", result.ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", "inline")

@@ -71,8 +71,11 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	ownerLogin := signIn(t, handler, "owner", "correct horse battery staple")
 	memberLogin := signIn(t, handler, "member", "member horse battery staple")
 	path := "/api/v1/files/" + entry.ID + "/preview"
-	request := func(path string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	request := func(path string, cookie *http.Cookie, etag ...string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("GET", path, nil)
+		if len(etag) > 0 {
+			r.Header.Set("If-None-Match", etag[0])
+		}
 		if cookie != nil {
 			r.AddCookie(cookie)
 		}
@@ -85,11 +88,24 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	}
 	for _, size := range []string{"thumbnail", "preview"} {
 		w := request(path+"?size="+size, ownerLogin.cookie)
-		if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || w.Header().Get("Cache-Control") != "private, no-store" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || w.Header().Get("Cache-Control") != "private, no-cache" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Fatalf("preview = %d %v %s", w.Code, w.Header(), w.Body)
 		}
 	}
-	if w := request(path, memberLogin.cookie); w.Code != 403 {
+	etag := request(path, ownerLogin.cookie).Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("missing validator")
+	}
+	if w := request(path, ownerLogin.cookie, etag); w.Code != 304 || w.Body.Len() != 0 || w.Header().Get("Cache-Control") != "private, no-cache" || w.Header().Get("Vary") != "Cookie" {
+		t.Fatalf("unchanged preview = %d %v %s", w.Code, w.Header(), w.Body)
+	}
+	if w := request(path, ownerLogin.cookie, "\"old-version\""); w.Code != 200 {
+		t.Fatalf("changed validator = %d", w.Code)
+	}
+	if w := request(path, nil, etag); w.Code != 401 {
+		t.Fatalf("anonymous conditional = %d", w.Code)
+	}
+	if w := request(path, memberLogin.cookie, etag); w.Code != 403 {
 		t.Fatalf("other account after cache = %d %s", w.Code, w.Body)
 	}
 	if w := request(path+"?size=99999", ownerLogin.cookie); w.Code != 400 {
@@ -101,7 +117,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if _, err := fileService.DeleteByID(ctx, owner, entry.ID); err != nil {
 		t.Fatal(err)
 	}
-	if w := request(path, ownerLogin.cookie); w.Code != 404 {
+	if w := request(path, ownerLogin.cookie, etag); w.Code != 404 {
 		t.Fatalf("trashed after cache = %d %s", w.Code, w.Body)
 	}
 }

@@ -228,6 +228,11 @@ func run(logger *slog.Logger) error {
 	if mediaWorker != nil {
 		processor = media.WorkerProcessor{Worker: mediaWorker}
 	}
+	previewService, err := filepreview.NewWithCache(fileService, mediaWorker, filepath.Join(stateDirectory, "file-previews"))
+	if err != nil {
+		logger.Warn("file preview disk cache unavailable; using memory cache", "error", err)
+		previewService = filepreview.New(fileService, mediaWorker)
+	}
 	mediaService, err := media.NewService(mediaStore, media.Options{
 		Files: fileService, Spaces: accountService, Sessions: accountService.RememberedSessions,
 		Processor: processor, CacheDir: filepath.Join(stateDirectory, "media-cache"), Logger: logger,
@@ -285,7 +290,7 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
-		FilePreviews: filepreview.New(fileService, mediaWorker),
+		FilePreviews: previewService,
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
 		SystemLogs:   systemLogs,

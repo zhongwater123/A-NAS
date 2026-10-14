@@ -10,7 +10,9 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -18,13 +20,23 @@ import (
 )
 
 type sourceStub struct {
+	mu         sync.Mutex
 	path, name string
 	denied     bool
 	opens      int
+	opened     chan struct{}
 }
 
 func (s *sourceStub) OpenContent(_ context.Context, _ accounts.User, _ string) (files.Content, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.opens++
+	if s.opened != nil {
+		select {
+		case s.opened <- struct{}{}:
+		default:
+		}
+	}
 	if s.denied {
 		return files.Content{}, files.ErrForbidden
 	}
@@ -80,7 +92,7 @@ func TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit(t *testing.T) {
 			t.Fatalf("render = %v, %v", result, err)
 		}
 	}
-	if worker.calls != 1 || source.opens != 2 {
+	if worker.calls != 1 || source.opens != 3 {
 		t.Fatalf("decode/open calls = %d/%d", worker.calls, source.opens)
 	}
 	source.denied = true
@@ -193,5 +205,168 @@ func TestPreviewCacheIsBounded(t *testing.T) {
 	}
 	if worker.calls != calls+1 {
 		t.Fatal("oldest preview remained in cache")
+	}
+}
+
+func TestDirectoryRevisitDoesNotDecodeAgain(t *testing.T) {
+	_, source, worker := fixture(t, "movie.mp4")
+	service, err := NewWithCache(source, worker, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for visit := 0; visit < 2; visit++ {
+		for i := 0; i < 70; i++ {
+			if _, err := service.Render(context.Background(), accounts.User{}, fmt.Sprint(i), 320); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if worker.calls != 70 {
+		t.Fatalf("two visits decoded %d videos; want 70", worker.calls)
+	}
+}
+
+func TestCachedPreviewDoesNotWaitForDecoder(t *testing.T) {
+	service, _, _ := fixture(t, "movie.mp4")
+	if _, err := service.Render(context.Background(), accounts.User{}, "warm", 320); err != nil {
+		t.Fatal(err)
+	}
+	service.gate <- struct{}{}
+	defer func() { <-service.gate }()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := service.Render(ctx, accounts.User{}, "warm", 320); err != nil {
+		t.Fatalf("cached preview waited behind decode: %v", err)
+	}
+}
+
+func TestPersistentPreviewSurvivesRestartAndRevalidatesSource(t *testing.T) {
+	_, source, worker := fixture(t, "movie.mp4")
+	dir := t.TempDir()
+	actor := accounts.User{ID: "alice"}
+	open := func() *Service {
+		s, err := NewWithCache(source, worker, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	original, err := open().Render(context.Background(), actor, "movie", 320)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := open()
+	result, err := restarted.Render(context.Background(), actor, "movie", 320)
+	if err != nil || worker.calls != 1 || !bytes.Equal(original.Data, result.Data) || original.ETag != result.ETag {
+		t.Fatalf("restart: calls=%d err=%v", worker.calls, err)
+	}
+	source.denied = true
+	if _, err := open().Render(context.Background(), actor, "movie", 320); !errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("disk cache bypassed access: %v", err)
+	}
+	source.denied = false
+	if _, err := open().Render(context.Background(), accounts.User{ID: "bob"}, "movie", 320); err != nil {
+		t.Fatal(err)
+	}
+	if worker.calls != 2 {
+		t.Fatal("disk cache shared across users")
+	}
+	info, _ := os.Stat(source.path)
+	if err := os.WriteFile(source.path, []byte("SMB edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(source.path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	result, err = open().Render(context.Background(), actor, "movie", 320)
+	if err != nil || worker.calls != 3 || result.ETag == original.ETag {
+		t.Fatalf("SMB revision: calls=%d err=%v", worker.calls, err)
+	}
+	if err := os.Remove(source.path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open().Render(context.Background(), actor, "movie", 320); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("disk cache bypassed deletion: %v", err)
+	}
+}
+
+func TestPersistentPreviewCorruptionAndUnavailableDiskAreMisses(t *testing.T) {
+	_, source, worker := fixture(t, "movie.mp4")
+	dir := filepath.Join(t.TempDir(), "previews")
+	service, err := NewWithCache(source, worker, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Render(context.Background(), accounts.User{}, "movie", 320); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("cache entries=%d", len(entries))
+	}
+	path := filepath.Join(dir, entries[0].Name())
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("cache mode=%v", info.Mode())
+	}
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), int(info.Size())), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewWithCache(source, worker, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Render(context.Background(), accounts.User{}, "movie", 320); err != nil || worker.calls != 2 {
+		t.Fatalf("corrupt cache: calls=%d err=%v", worker.calls, err)
+	}
+	// A cache directory removed while the service is running only loses caching.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Render(context.Background(), accounts.User{}, "other", 320); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentPreviewMissesDecodeOnce(t *testing.T) {
+	service, _, worker := fixture(t, "movie.mp4")
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := service.Render(context.Background(), accounts.User{}, "movie", 320); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if worker.calls != 1 {
+		t.Fatalf("concurrent requests decoded %d times", worker.calls)
+	}
+}
+
+func TestQueuedPreviewRechecksRevokedAccess(t *testing.T) {
+	service, source, worker := fixture(t, "movie.mp4")
+	source.opened = make(chan struct{}, 1)
+	service.gate <- struct{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := service.Render(ctx, accounts.User{}, "movie", 320); done <- err }()
+	select {
+	case <-source.opened:
+	case <-ctx.Done():
+		t.Fatal("request never opened source")
+	}
+	source.mu.Lock()
+	source.denied = true
+	source.mu.Unlock()
+	<-service.gate
+	if err := <-done; !errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("queued access revocation: %v", err)
+	}
+	if worker.calls != 0 {
+		t.Fatal("revoked source was decoded")
 	}
 }

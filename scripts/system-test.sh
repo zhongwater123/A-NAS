@@ -599,6 +599,21 @@ curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "pare
 # Ordinary file previews use the same sandbox without creating a media library.
 video_file=$(curl -fsS -b /tmp/owner.jar "$api/api/v1/spaces/$shared/entries?parentId=$movies_dir" | jq -r '.items[0].id')
 check "file management renders a video thumbnail" test "$(status_of -b /tmp/alice.jar "$api/api/v1/files/$video_file/preview?size=thumbnail")" = 200
+# The preview must survive a Product Service restart even when decoding is
+# unavailable. This also exercises the production state-directory permissions.
+curl -fsS -b /tmp/alice.jar -D /tmp/video-preview.headers "$api/api/v1/files/$video_file/preview?size=thumbnail" -o /tmp/video-preview.jpg
+preview_etag=$(sed -n 's/^[Ee][Tt][Aa][Gg]: //p' /tmp/video-preview.headers | tr -d '\r')
+check "file previews return an ETag" test -n "$preview_etag"
+check "file preview cache is private to Product Service" test "$(stat -c '%a %U' /var/lib/a-nas/file-previews)" = "700 a-nas"
+systemctl stop anas-media.socket
+systemctl restart anas-api
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "video preview survives restart without the decoder" \
+  curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$video_file/preview?size=thumbnail" -o /tmp/video-preview-restarted.jpg
+check "persisted video preview is unchanged" cmp /tmp/video-preview.jpg /tmp/video-preview-restarted.jpg
+check "unchanged video preview revalidates with 304" \
+  test "$(status_of -b /tmp/alice.jar -H "If-None-Match: $preview_etag" "$api/api/v1/files/$video_file/preview?size=thumbnail")" = 304
+systemctl start anas-media.socket
 ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=orange:s=640x480 -frames:v 1 /tmp/preview.png
 heif-enc -o /tmp/preview.heic /tmp/preview.png >/tmp/heif-encode.log 2>&1
 heif_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
