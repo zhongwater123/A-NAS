@@ -59,9 +59,12 @@ export function downloadText(filename: string, text: string, type: string) {
 }
 
 // toCSV quotes every cell and starts with a byte order mark so that Excel
-// reads the Chinese text as UTF-8.
+// reads the Chinese text as UTF-8. Nicknames and file names are chosen by
+// members, so a cell that a spreadsheet would run as a formula gets a leading
+// apostrophe and stays text.
 export function toCSV(rows: string[][]): string {
-  return "﻿" + rows.map((row) => row.map((cell) => `"${cell.replaceAll("\"", "\"\"")}"`).join(",")).join("\r\n") + "\r\n";
+  const text = (cell: string) => (/^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell);
+  return "﻿" + rows.map((row) => row.map((cell) => `"${text(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\r\n") + "\r\n";
 }
 
 export function fileStamp(now = new Date()): string {
