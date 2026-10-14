@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, ImageUp, RotateCcw, ScanSearch, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { groupPhotoUploads } from "./uploadGroups";
 import { transferStore } from "../transfers/store";
 import type { PendingPhoto } from "./layout";
 import { messageOf } from "./model";
@@ -8,9 +9,9 @@ import { addToAlbum, uploadPhoto } from "./photosApi";
 
 export interface UploadTarget { libraryId: string; albumId?: string; label: string }
 // rejected marks files refused before sending, which retrying cannot help.
-export interface UploadItem extends PendingPhoto { file: File; target: UploadTarget; rejected?: boolean }
+export interface UploadItem extends PendingPhoto { file: File; motion?: File; target: UploadTarget; rejected?: boolean }
 
-const accepted = new Set(["image/jpeg", "image/png"]);
+const accepted = new Set(["image/jpeg", "image/png", "image/heic", "image/heif"]);
 // Web uploads of JPEG and PNG originals stop at 256 MiB (photo-library spec).
 const maxBytes = 256 * 1024 ** 2;
 const parallel = 2;
@@ -30,13 +31,14 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
 
   const add = useCallback((files: File[], target: UploadTarget) => {
     const batch = `photos-${Date.now().toString(36)}-${counter.current + 1}`;
-    const added = files.map((file): UploadItem => {
+    const added = groupPhotoUploads(files).map(({ file, motion, error: pairError }): UploadItem => {
       const key = `upload-${++counter.current}`;
-      const error = !accepted.has(file.type) ? "只支持 JPEG 和 PNG 照片" : file.size > maxBytes ? "照片超过 256 MiB" : undefined;
-      const handle = transferStore.trackExternal({ key: `photos-${key}`, app: "photos", name: file.name, size: file.size, label: `相册 · ${target.label}`, batch }, { queued: !error });
+      const supported = accepted.has(file.type) || /\.(jpe?g|png|heic|heif)$/i.test(file.name);
+      const error = pairError ?? (!supported ? "支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV" : file.size > maxBytes || (motion?.size ?? 0) > maxBytes ? "每个文件不能超过 256 MiB" : undefined);
+      const handle = transferStore.trackExternal({ key: `photos-${key}`, app: "photos", name: file.name, size: file.size + (motion?.size ?? 0), label: `相册 · ${target.label}`, batch }, { queued: !error });
       if (error) handle.fail(error);
       tracked.current.set(key, handle);
-      return { key, name: file.name, file, target, url: URL.createObjectURL(file), aspect: 4 / 3, progress: 0, state: error ? "failed" : "waiting", error, rejected: Boolean(error) };
+      return { key, name: file.name, file, motion, target, url: URL.createObjectURL(file), aspect: 4 / 3, progress: 0, state: error ? "failed" : "waiting", error, rejected: Boolean(error) };
     });
     setItems((current) => [...added, ...current]);
     for (const item of added) {
@@ -58,7 +60,7 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
       handle?.start();
       void (async () => {
         try {
-          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); handle?.progress(progress); });
+          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); handle?.progress(progress); }, undefined, item.motion);
           if (item.target.albumId) await addToAlbum(item.target.albumId, asset.id);
           update(item.key, { state: "done", progress: 1 });
           handle?.done();

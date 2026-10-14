@@ -182,9 +182,9 @@ describe("PhotosPanel timeline", () => {
     // The text file never left the browser; the queue says why.
     expect(screen.getByText("1 张未能上传")).toBeTruthy();
     // It never appears in the grid either.
-    expect(screen.queryByText("只支持 JPEG 和 PNG 照片")).toBeNull();
+    expect(screen.queryByText("支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV")).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "展开上传队列" }));
-    expect(screen.getByText("只支持 JPEG 和 PNG 照片")).toBeTruthy();
+    expect(screen.getByText("支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV")).toBeTruthy();
   });
 });
 
@@ -891,5 +891,39 @@ describe("PhotosPanel search and viewing", () => {
     available = true;
     await act(async () => { await user.click(screen.getByRole("button", { name: "重试" })); });
     expect(await screen.findByRole("tab", { name: "我的" })).toBeTruthy();
+  });
+});
+
+
+describe("PhotosPanel motion photos", () => {
+  it("uploads a Live Photo pair once and preserves both form parts", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    let uploaded = false;
+    FakeUpload.respond = () => { uploaded = true; return { status: 201, body: asset("photo:live", { name: "live.heic", motion: { kind: "live-photo", duration: 2 } }) }; };
+    serve(timeline(privateLibrary.id, () => uploaded ? [asset("photo:live", { name: "live.heic", motion: { kind: "live-photo", duration: 2 } })] : []));
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByText("把照片拖到这里");
+    fireEvent.drop(document.querySelector(".ph-app")!, { dataTransfer: { types: ["Files"], files: [new File(["mov"], "live.MOV"), new File(["heic"], "live.heic")] } });
+    await screen.findByRole("button", { name: "查看 live.heic" });
+    expect(FakeUpload.sent).toHaveLength(1);
+    expect(FakeUpload.sent[0].url).toContain("/live-photos");
+    expect((FakeUpload.sent[0].body?.get("motion") as File).name).toBe("live.MOV");
+  });
+  it("loads video only on request and removes it on navigation or failure", async () => {
+    const first = asset("photo:live", { mediaType: "image/heic", motion: { kind: "live-photo", duration: 2 } });
+    serve(timeline(privateLibrary.id, () => [first, asset("photo:next")]));
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    const user = userEvent.setup();
+    await openPhoto(user, first.name);
+    expect(document.querySelector("video")).toBeNull();
+    expect(document.querySelector<HTMLImageElement>(".ph-viewer-full")?.getAttribute("src")).toContain("/preview");
+    await user.click(screen.getByRole("button", { name: "播放动态照片" }));
+    expect(document.querySelector("video")?.getAttribute("src")).toContain("/motion/play");
+    fireEvent.error(document.querySelector("video")!);
+    expect(document.querySelector("video")).toBeNull();
+    expect(screen.getByText("动态片段暂时无法播放，仍可查看照片或下载原件。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "播放动态照片" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
+    expect(document.querySelector("video")).toBeNull();
   });
 });

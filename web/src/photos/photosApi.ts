@@ -7,7 +7,8 @@ export interface PhotoAsset {
   libraryId: string;
   directoryId?: string;
   name: string;
-  mediaType: "image/jpeg" | "image/png";
+  mediaType: "image/jpeg" | "image/png" | "image/heic";
+  motion?: { kind: "live-photo" | "motion-photo"; duration: number };
   sizeBytes: number;
   uploadedBy: string;
   importedAt: string;
@@ -98,10 +99,11 @@ export const listTagPhotos = (name: string, viewing = "", cursor = "", limit = 1
 // Takes a photo out of an AI cluster, for that photo only.
 export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
 export const getAIStatus = () => request<PhotoAIStatus>(`${base}/ai`);
-export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal) {
+export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal, motion?: File) {
   const body = new FormData();
   body.set("file", file);
-  return uploadForm<PhotoAsset>(`${base}/libraries/${id(libraryId)}/uploads`, body, onProgress, signal);
+  if (motion) body.set("motion", motion);
+  return uploadForm<PhotoAsset>(`${base}/libraries/${id(libraryId)}/${motion ? "live-photos" : "uploads"}`, body, onProgress, signal);
 }
 export const getPhoto = (assetId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`);
 export const renamePhoto = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`, json("PATCH", { name }), true);
@@ -129,4 +131,7 @@ export const thumbnailURL = (assetId: string) => `${base}/assets/${id(assetId)}/
 export const originalURL = (assetId: string, download = false) => `${base}/assets/${id(assetId)}/original${download ? "?download=1" : ""}`;
 // The grid shows the original until its thumbnail is ready; JPEG and PNG
 // originals display directly.
-export const previewURL = (asset: PhotoAsset) => asset.thumbnail === "ready" ? thumbnailURL(asset.id) : originalURL(asset.id);
+export const displayURL = (asset: PhotoAsset) => asset.mediaType === "image/heic" ? `${base}/assets/${id(asset.id)}/preview` : originalURL(asset.id);
+export const motionURL = (assetId: string) => `${base}/assets/${id(assetId)}/motion/play`;
+export const downloadURL = (assetId: string) => `${base}/assets/${id(assetId)}/download`;
+export const previewURL = (asset: PhotoAsset) => asset.thumbnail === "ready" ? thumbnailURL(asset.id) : displayURL(asset);

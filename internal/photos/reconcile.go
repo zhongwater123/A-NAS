@@ -62,7 +62,7 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileReport, error) {
 
 	// Rows without assets cannot normally exist, because purge deletes the
 	// row together with its last reference; treat any as orphans as well.
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM objects WHERE NOT EXISTS (SELECT 1 FROM assets WHERE assets.object_id = objects.id)"); err != nil {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM objects WHERE NOT EXISTS (SELECT 1 FROM assets WHERE assets.object_id = objects.id OR assets.motion_object_id = objects.id)"); err != nil {
 		return report, err
 	}
 	referenced := make(map[string]bool)

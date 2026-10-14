@@ -13,7 +13,7 @@
 - 账号、会话、角色和管理员查看授权由 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 提供，相册服务经 Host Agent 的会话查询接口（`internal/sessionlookup`）确认身份，照片资产权限由 Catalog Policy（`internal/photos/policy.go`）判定。
 - 本地目录 Adapter、临时卷与系统测试只验证契约，不能替代 Experimental NAS 真实数据卷上的断盘和恢复验收（切片 7）。
 - AI 模型已有基线候选，但质量、处理速度、峰值内存、温度和前台影响必须通过代表性图库基准后才能成为发布默认值。
-- RAW、Live Photo 和视频的完整格式矩阵仍需样本验证；不影响 JPEG/PNG 核心切片。
+- RAW、动态照片和视频的完整设备样本矩阵仍需扩充；动态照片已实现边界见[规格](../specs/photo-motion.md)。
 
 ## 组件与数据流
 
@@ -52,6 +52,8 @@ anas-photos（a-nas-photos）◄──────┘
 - M2 计划：`Search`、相册与加入相册，以及保存用户标签、AI 纠错和手工位置的用户元数据接口（切片 11），不与派生结果混写；人物名称随 M3 的人物库实现。
 
 首版不为目录表、对象路径、SQLite、OpenVINO 或某个向量扩展建立公共 Interface。真正需要 Adapter 的边界只有外部环境或昂贵依赖：受管存储目录、媒体解码、AI Provider、时钟和 Policy。
+
+HEIC 和动态照片经 `photos.Options.Media` 使用隔离 Media Worker，双原件引用、原子提交、提取视频的存储取舍以及模型输入边界统一记录在[动态照片规格](../specs/photo-motion.md)。
 
 ## 持久化与崩溃一致性
 
@@ -170,7 +172,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 **M3 人物、格式、导入与发布**
 
 13. 人脸 occurrence 与分图库人物库。
-14. HEIC、GIF、RAW、Live Photo 与视频；视频播放兼容与是否转码需先决定。
+14. HEIC 与动态照片的导入、预览、短片播放和静态 AI 输入已实现，见[规格](../specs/photo-motion.md)；GIF、RAW 与普通视频仍待实现。
 15. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
 16. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。
 17. 账号删除时的图库转移、导出与待删除，私有图库 AI 开关与派生数据清除，备份恢复，以及 4 名成员、20,000 张照片、2,000 个视频的完整验收。
@@ -200,6 +202,8 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 目标 NAS 的部署门禁按 EmbeddingGemma 2、Qwen3-VL-Embedding-2B、SigLIP2 Base、Chinese-CLIP RN50 的顺序验证；开发机资源允许时另跑 WeMM-Embedding-2B BF16，定义中文质量上限但不把它当作 8 GB 部署候选。任何候选只要许可证不能确认、峰值 RSS 超过 3 GB、导致前台明显卡顿或中文质量不达标，就不成为默认模型；功能可以显示为等待兼容模型，而不是降低基础相册可靠性。
 
 ## 关联
+
+- [动态照片规格与实现](../specs/photo-motion.md)
 
 - [架构总览](OVERVIEW.md)
 - [相册规格](../specs/photo-library.md)

@@ -105,7 +105,13 @@ const (
 	DuplicateRepeated DuplicateRole = "duplicate"
 )
 
+type Motion struct {
+	Kind     string  `json:"kind"`
+	Duration float64 `json:"duration"`
+}
+
 type Asset struct {
+	Motion      *Motion   `json:"motion,omitempty"`
 	ID          string    `json:"id"`
 	LibraryID   string    `json:"libraryId"`
 	DirectoryID string    `json:"directoryId,omitempty"`
@@ -151,6 +157,7 @@ type Content struct {
 }
 
 type Options struct {
+	Media  MediaDecoder
 	Now    func() time.Time
 	Random io.Reader
 	// TrashRetention defaults to DefaultTrashRetention.
@@ -176,6 +183,8 @@ type Options struct {
 // owned by the photo service identity; the caller proves the volume is
 // mounted before calling Open.
 type Service struct {
+	media          MediaDecoder
+	decodeSlots    chan struct{}
 	db             *sql.DB
 	root           *os.Root
 	rootPath       string
@@ -258,7 +267,7 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root,
+		db: db, root: opened, rootPath: root, media: options.Media, decodeSlots: make(chan struct{}, 2),
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
