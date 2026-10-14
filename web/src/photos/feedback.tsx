@@ -66,11 +66,15 @@ export interface Toast { text: string; tone?: "done" | "error"; action?: { label
 export function useToasts() {
   const [toasts, setToasts] = useState<Array<Toast & { id: number }>>([]);
   const next = useRef(0);
+  // Pending dismissals end with the window that showed them.
+  const timers = useRef(new Set<number>());
+  useEffect(() => () => { for (const timer of timers.current) window.clearTimeout(timer); }, []);
   const dismiss = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
   const toast = useCallback((value: Toast) => {
     const id = ++next.current;
     setToasts((current) => [...current.slice(-2), { ...value, id }]);
-    window.setTimeout(() => dismiss(id), value.action || value.details?.length || value.tone === "error" ? 9000 : 4500);
+    const timer = window.setTimeout(() => { timers.current.delete(timer); dismiss(id); }, value.action || value.details?.length || value.tone === "error" ? 9000 : 4500);
+    timers.current.add(timer);
   }, [dismiss]);
   const element = (
     <div className="ph-toasts" role="status" aria-live="polite">
