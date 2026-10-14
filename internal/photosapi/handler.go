@@ -289,8 +289,10 @@ func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listing)
 }
 
-// upload accepts one multipart "file" part, optionally preceded by a
-// "directoryId" part, and streams it straight into the library.
+// upload accepts one multipart "file" part, optionally preceded by
+// "directoryId" and "uploadKey" parts, and streams it straight into the
+// library. A retry with the same upload key gets the photo the first try
+// made without its file being read again.
 func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	reader, err := r.MultipartReader()
@@ -298,7 +300,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
-	var directoryID string
+	var directoryID, uploadKey string
 	for {
 		part, err := reader.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -317,9 +319,17 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			directoryID = string(value)
+		case "uploadKey":
+			value, readErr := io.ReadAll(io.LimitReader(part, photos.MaxUploadKeyBytes+1))
+			_ = part.Close()
+			if readErr != nil || len(value) > photos.MaxUploadKeyBytes {
+				WriteError(w, http.StatusBadRequest, "invalid_request", "upload key is invalid")
+				return
+			}
+			uploadKey = string(value)
 		case "file":
 			asset, err := h.service.Import(r.Context(), principal, photos.ImportRequest{
-				LibraryID: r.PathValue("libraryID"), DirectoryID: directoryID, Name: part.FileName(), Content: part,
+				LibraryID: r.PathValue("libraryID"), DirectoryID: directoryID, Name: part.FileName(), Content: part, UploadKey: uploadKey,
 			})
 			_ = part.Close()
 			if err != nil {

@@ -75,8 +75,11 @@ export const listTagPhotos = (name: string, viewing = "", cursor = "", limit = 1
 // Takes a photo out of an AI cluster, for that photo only.
 export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
 export const getAIStatus = () => request<PhotoAIStatus>(`${base}/ai`);
-export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal) {
+// uploadKey names this photo's upload: sending it again with the same key
+// returns the photo the first try made rather than a second copy.
+export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal, uploadKey?: string) {
   const body = new FormData();
+  if (uploadKey) body.set("uploadKey", uploadKey);
   body.set("file", file);
   return uploadForm<PhotoAsset>(`${base}/libraries/${id(libraryId)}/uploads`, body, onProgress, signal);
 }

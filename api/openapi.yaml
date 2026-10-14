@@ -906,7 +906,7 @@ paths:
       operationId: uploadPhoto
       summary: Import one JPEG or PNG original; returns once the original is durable
       parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string, description: "Must precede the file part, which is streamed as it arrives; parts after the file are not read." }, file: { type: string, format: binary } } } } } }
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string, description: "Must precede the file part, which is streamed as it arrives; parts after the file are not read." }, uploadKey: { type: string, maxLength: 64, description: "The browser's name for this upload, before the file part. Sending the same key again within a day returns the photo the first try made instead of a copy, waiting while that try still runs." }, file: { type: string, format: binary } } } } } }
       responses:
         "201": { description: Photo asset created, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
         "404": { $ref: "#/components/responses/ProductError" }

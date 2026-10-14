@@ -196,23 +196,42 @@ export async function request<T>(path: string, init: RequestInit = {}, mutation 
 }
 
 // uploadForm posts a multipart form like request does, reporting upload
-// progress as a fraction; fetch cannot report it.
-export function uploadForm<T>(path: string, body: FormData, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<T> {
+// progress as a fraction; fetch cannot report it. A connection that hangs
+// never fails by itself, so one that moves nothing for stallAfter, or whose
+// answer does not come within answerWithin once all was sent, is given up
+// as a lost connection.
+export function uploadForm<T>(path: string, body: FormData, onProgress: (fraction: number) => void, signal?: AbortSignal,
+  { stallAfter = 30_000, answerWithin = 120_000 }: { stallAfter?: number; answerWithin?: number } = {}): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let movedAt = Date.now();
+    let sentAt = 0;
+    let stalled = false;
+    const watch = setInterval(() => {
+      const now = Date.now();
+      if (sentAt ? now - sentAt > answerWithin : now - movedAt > stallAfter) {
+        stalled = true;
+        xhr.abort();
+      }
+    }, 1000);
     xhr.open("POST", path);
     xhr.setRequestHeader("Accept", "application/json");
     if (csrfToken) xhr.setRequestHeader("X-CSRF-Token", csrfToken);
-    xhr.upload.onprogress = (event) => { if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total); };
+    xhr.upload.onprogress = (event) => {
+      movedAt = Date.now();
+      if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+    };
+    xhr.upload.onload = () => { sentAt = Date.now(); };
     xhr.onload = () => {
+      clearInterval(watch);
       if (xhr.status === 401) sessionEndedListener?.();
       let body: { error?: { code?: string; message?: string } } | undefined;
       try { body = xhr.responseText ? JSON.parse(xhr.responseText) : undefined; } catch { body = undefined; }
       if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
       else reject(new APIError(xhr.status, body?.error?.code ?? "request_failed", body?.error?.message ?? `请求失败 (${xhr.status})`));
     };
-    xhr.onerror = () => reject(new APIError(0, "network_error", "网络连接中断"));
-    xhr.onabort = () => reject(new DOMException("upload aborted", "AbortError"));
+    xhr.onerror = () => { clearInterval(watch); reject(new APIError(0, "network_error", "网络连接中断")); };
+    xhr.onabort = () => { clearInterval(watch); reject(stalled ? new APIError(0, "network_error", "NAS 长时间没有响应") : new DOMException("upload aborted", "AbortError")); };
     signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(body);
   });

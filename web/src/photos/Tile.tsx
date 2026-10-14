@@ -95,7 +95,7 @@ export function PendingTile({ box, onRetry }: { box: Box<PendingPhoto>; onRetry:
   const item = box.item;
   const circumference = 2 * Math.PI * 15;
   return (
-    <div className={`ph-tile ph-pending ${item.state}`} style={{ left: box.left, width: box.width, height: box.height }} title={item.error ?? item.name}>
+    <div className={`ph-tile ph-pending ${item.state}`} style={{ left: box.left, width: box.width, height: box.height }} title={item.error ?? item.note ?? item.name}>
       <img src={item.url} alt={item.name} className="loaded" draggable={false} />
       {item.state === "failed" ? (
         <button type="button" className="ph-pending-failed" aria-label={`重试上传 ${item.name}`} onClick={() => onRetry(item.key)}>

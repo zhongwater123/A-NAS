@@ -69,6 +69,10 @@ export interface ExternalUpload {
   progress: number;
   phase: "queued" | "running" | "completed" | "failed" | "canceled";
   error?: string;
+  // note says why a running upload does not move; controls are what the app
+  // lets the transfer center do with it.
+  note?: string;
+  controls?: { cancel?: () => void; retry?: () => void };
   createdAt: number;
   finishedAt?: number;
 }
@@ -415,7 +419,7 @@ export class TransferStore {
   // trackExternal shows another app's upload here and returns how to report it.
   // An app that keeps its own queue reports each file as soon as it is
   // added (queued), so the transfer center lists the whole queue at once.
-  trackExternal(upload: Pick<ExternalUpload, "key" | "app" | "name" | "size" | "label" | "batch">, options: { queued?: boolean } = {}) {
+  trackExternal(upload: Pick<ExternalUpload, "key" | "app" | "name" | "size" | "label" | "batch" | "controls">, options: { queued?: boolean } = {}) {
     const entry: ExternalUpload = { ...upload, progress: 0, phase: options.queued ? "queued" : "running", createdAt: Date.now() };
     this.set({ external: [...this.snapshot.external.filter((item) => item.key !== upload.key), entry] });
     const change = (value: Partial<ExternalUpload>, immediate = true) => this.set({ external: this.snapshot.external.map((item) => item.key === upload.key ? { ...item, ...value } : item) }, immediate);
@@ -423,18 +427,23 @@ export class TransferStore {
     return {
       start: () => {
         this.sent.set(upload.key, 0);
-        change({ phase: "running", progress: 0, error: undefined, finishedAt: undefined });
+        change({ phase: "running", progress: 0, error: undefined, note: undefined, finishedAt: undefined });
       },
       progress: (fraction: number) => {
         this.count(upload.key, upload.batch, Math.round(fraction * upload.size));
-        change({ progress: fraction }, false);
+        change({ progress: fraction, note: undefined }, false);
+      },
+      // note tells why the upload waits; it is sent again from the start.
+      note: (text: string) => {
+        this.sent.set(upload.key, 0);
+        change({ progress: 0, note: text });
       },
       done: () => {
         this.count(upload.key, upload.batch, upload.size);
-        change({ phase: "completed", progress: 1, finishedAt: Date.now() });
+        change({ phase: "completed", progress: 1, note: undefined, finishedAt: Date.now() });
       },
-      fail: (error: string) => change({ phase: "failed", error, finishedAt: Date.now() }),
-      cancel: (reason?: string) => change({ phase: "canceled", error: reason, finishedAt: Date.now() }),
+      fail: (error: string) => change({ phase: "failed", error, note: undefined, finishedAt: Date.now() }),
+      cancel: (reason?: string) => change({ phase: "canceled", error: reason, note: undefined, finishedAt: Date.now() }),
     };
   }
 

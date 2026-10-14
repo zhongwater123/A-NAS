@@ -628,7 +628,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
         </header>
         {main}
         {toastElement}
-        <UploadTray items={uploads.items} onRetry={uploads.retry} onClear={uploads.clear} />
+        <UploadTray items={uploads.items} onRetry={uploads.retry} onCancel={uploads.cancel} onClear={uploads.clear} />
       </main>
 
       {dragging && <DropOverlay target={uploadTarget} />}

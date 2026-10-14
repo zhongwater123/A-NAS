@@ -16,7 +16,8 @@ export const sizes = { month: 64, day: 44, heading: 52, divider: 92, more: 72, e
 export interface Box<T> { item: T; left: number; width: number; height: number }
 
 // A pending upload shows in the grid before the photo service has it.
-export interface PendingPhoto { key: string; name: string; url: string; aspect: number; progress: number; state: "waiting" | "uploading" | "done" | "failed"; error?: string }
+// note says why an uploading photo does not move, such as a lost connection.
+export interface PendingPhoto { key: string; name: string; url: string; aspect: number; progress: number; state: "waiting" | "uploading" | "done" | "failed"; error?: string; note?: string }
 
 export type Entry =
   | { kind: "month"; key: string; size: number; label: string; month: string; photos: number }

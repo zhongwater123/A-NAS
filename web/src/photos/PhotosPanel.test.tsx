@@ -62,7 +62,8 @@ function serve(...routes: Route[]) {
 // FakeUpload stands in for XMLHttpRequest, which uploads use for progress.
 class FakeUpload {
   static sent: FakeUpload[] = [];
-  static respond: (upload: FakeUpload) => { status: number; body: unknown } = () => ({ status: 201, body: asset("photo:new") });
+  // respond answers an upload; null drops its connection instead.
+  static respond: (upload: FakeUpload) => { status: number; body: unknown } | null = () => ({ status: 201, body: asset("photo:new") });
   upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
   status = 0;
   responseText = "";
@@ -79,7 +80,12 @@ class FakeUpload {
     this.body = body;
     FakeUpload.sent.push(this);
     queueMicrotask(() => {
-      const { status, body: response } = FakeUpload.respond(this);
+      const answer = FakeUpload.respond(this);
+      if (!answer) {
+        this.onerror?.();
+        return;
+      }
+      const { status, body: response } = answer;
       this.status = status;
       this.responseText = JSON.stringify(response);
       this.onload?.();
@@ -178,6 +184,33 @@ describe("PhotosPanel timeline", () => {
     expect(screen.queryByText("只支持 JPEG 和 PNG 照片")).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "展开上传队列" }));
     expect(screen.getByText("只支持 JPEG 和 PNG 照片")).toBeTruthy();
+  });
+});
+
+describe("PhotosPanel upload recovery", () => {
+  it("sends a photo again under the same key when the connection drops", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:preview", revokeObjectURL: () => undefined }));
+    FakeUpload.sent = [];
+    let uploaded = false;
+    FakeUpload.respond = (upload) => {
+      if (FakeUpload.sent.indexOf(upload) === 0) return null;
+      uploaded = true;
+      return { status: 201, body: asset("photo:new", { name: "cat.jpg" }) };
+    };
+    serve(timeline(privateLibrary.id, () => uploaded ? [asset("photo:new", { name: "cat.jpg" })] : []));
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    expect(await screen.findByText("把照片拖到这里")).toBeTruthy();
+    const app = document.querySelector(".ph-app") as HTMLElement;
+    const files = [new File(["jpeg"], "cat.jpg", { type: "image/jpeg" })];
+    fireEvent.drop(app, { dataTransfer: { types: ["Files"], files } });
+    // The connection drops; the queue says so and tries again by itself.
+    expect(await screen.findByText(/与 NAS 的连接中断，恢复后自动继续/)).toBeTruthy();
+    expect(await screen.findByText("照片已保存到我的图库", undefined, { timeout: 3000 })).toBeTruthy();
+    expect(FakeUpload.sent).toHaveLength(2);
+    const keys = FakeUpload.sent.map((upload) => upload.body?.get("uploadKey"));
+    expect(keys[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(keys[1]).toBe(keys[0]);
   });
 });
 

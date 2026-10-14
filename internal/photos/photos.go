@@ -208,6 +208,8 @@ type Service struct {
 	// staging holds the names of staging files that imports are still writing.
 	stagingMu sync.Mutex
 	staging   map[string]struct{}
+	// keys answers a browser retrying an upload with the photo it made.
+	keys uploadKeys
 }
 
 const (

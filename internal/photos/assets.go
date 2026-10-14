@@ -20,12 +20,22 @@ type ImportRequest struct {
 	DirectoryID string
 	Name        string
 	Content     io.Reader
+	// UploadKey, when set, is the browser's name for this upload: sending
+	// the same key again returns the photo the first try made.
+	UploadKey string
 }
 
 // Import persists one original and creates its photo asset. It returns only
 // after the original and the Catalog row are durable; nothing here waits for
 // thumbnails or AI.
 func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest) (Asset, error) {
+	if request.UploadKey == "" {
+		return s.importOriginal(ctx, p, request)
+	}
+	return s.importOnce(ctx, p, request, func() (Asset, error) { return s.importOriginal(ctx, p, request) })
+}
+
+func (s *Service) importOriginal(ctx context.Context, p Principal, request ImportRequest) (Asset, error) {
 	name, ok := cleanName(request.Name)
 	if !ok {
 		return Asset{}, ErrInvalidName

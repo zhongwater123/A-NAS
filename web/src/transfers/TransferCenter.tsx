@@ -257,6 +257,8 @@ function ConflictBar({ title, detail, onAnswer, children }: { title: string; det
 }
 
 function RowDetail({ item }: { item: TransferItem }) {
+  // Another app's upload waiting for the NAS says so instead of a speed.
+  if (item.status === "running" && item.external?.note) return <span className="warning">{item.external.note}</span>;
   if (item.status === "running") {
     return <>
       <span className="tc-speed">{item.speed > 0 ? speedText(item.speed, item.total - item.transferred) : "正在连接…"}</span>
@@ -275,7 +277,14 @@ function RowDetail({ item }: { item: TransferItem }) {
 
 function RowActions({ item }: { item: TransferItem }) {
   const local = item.local;
-  if (item.external) return item.status !== "running" ? <IconButton label="从列表移除" onClick={() => transferStore.dismiss(item.id)}><X /></IconButton> : null;
+  if (item.external) {
+    const controls = item.external.controls;
+    return <>
+      {item.status === "failed" && controls?.retry && <IconButton label="重试" onClick={controls.retry}><RotateCcw /></IconButton>}
+      {(item.status === "running" || item.status === "queued") && controls?.cancel && <IconButton label="取消" danger onClick={controls.cancel}><X /></IconButton>}
+      {item.status !== "running" && item.status !== "queued" && <IconButton label="从列表移除" onClick={() => transferStore.dismiss(item.id)}><X /></IconButton>}
+    </>;
+  }
   if (local) {
     return <>
       {(item.status === "running" || item.status === "queued" || item.status === "waiting") && <IconButton label="暂停" onClick={() => transferStore.pause(local.key)}><Pause /></IconButton>}
