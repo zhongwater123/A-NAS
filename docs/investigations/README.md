@@ -24,6 +24,8 @@
 
 - [2026-10-14：文件管理没有视频缩略图，HEIC 照片不能预览](2026-10-14-file-media-previews.md)（fixed locally；Experimental NAS verification pending）
 
+- [2026-10-14：Apple Live Photo 配对标识被 EXIF 库遗漏](2026-10-14-live-photo-identifiers.md)（fixed locally）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

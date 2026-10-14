@@ -39,6 +39,8 @@ func sniffMediaType(header []byte) string {
 		return "image/jpeg"
 	case bytes.HasPrefix(header, pngSignature):
 		return "image/png"
+	case len(header) >= 12 && string(header[4:8]) == "ftyp" && (string(header[8:12]) == "heic" || string(header[8:12]) == "heix" || string(header[8:12]) == "mif1"):
+		return "image/heic"
 	default:
 		return ""
 	}
@@ -48,7 +50,11 @@ func objectPath(id string) string { return filepath.Join(objectsDir, id[0:2], id
 
 // stage streams content into a new staging file, hashing it and enforcing the
 // size limit, capacity reserve and supported formats on the way.
-func (s *Service) stage(content io.Reader) (staged stagedObject, err error) {
+func (s *Service) stage(content io.Reader) (stagedObject, error) {
+	return s.stageContent(content, false)
+}
+
+func (s *Service) stageContent(content io.Reader, video bool) (staged stagedObject, err error) {
 	name := filepath.Join(stagingDir, s.randomHex()+".part")
 	s.stagingMu.Lock()
 	s.staging[name] = struct{}{}
@@ -66,7 +72,7 @@ func (s *Service) stage(content io.Reader) (staged stagedObject, err error) {
 	}()
 	staged.name = name
 	hash := sha256.New()
-	header := make([]byte, 0, len(pngSignature))
+	header := make([]byte, 0, 32)
 	buffer := make([]byte, 1<<20)
 	for {
 		n, readErr := content.Read(buffer)
@@ -78,7 +84,14 @@ func (s *Service) stage(content io.Reader) (staged stagedObject, err error) {
 			if staged.mediaType == "" {
 				header = append(header, chunk[:min(n, cap(header)-len(header))]...)
 				if len(header) == cap(header) {
-					if staged.mediaType = sniffMediaType(header); staged.mediaType == "" {
+					staged.mediaType = sniffMediaType(header)
+					if video && (len(header) < 12 || string(header[4:8]) != "ftyp") {
+						return stagedObject{}, ErrInvalidMotion
+					}
+					if video && len(header) >= 12 && string(header[4:8]) == "ftyp" {
+						staged.mediaType = "video/quicktime"
+					}
+					if staged.mediaType == "" || (!video && staged.mediaType == "video/quicktime") {
 						return stagedObject{}, ErrUnsupportedType
 					}
 				}
@@ -107,7 +120,10 @@ func (s *Service) stage(content io.Reader) (staged stagedObject, err error) {
 	if err := file.Close(); err != nil {
 		return stagedObject{}, err
 	}
-	if staged.metadata, err = s.readMetadata(staged); err != nil {
+	if !video {
+		staged.metadata, err = s.readMetadata(staged)
+	}
+	if err != nil {
 		return stagedObject{}, err
 	}
 	staged.id = hex.EncodeToString(hash.Sum(nil))
@@ -123,6 +139,9 @@ func (s *Service) readMetadata(staged stagedObject) (photoMetadata, error) {
 		return photoMetadata{}, err
 	}
 	defer file.Close()
+	if staged.mediaType == "image/heic" {
+		return readHEICMetadata(file, s.location)
+	}
 	config, format, err := image.DecodeConfig(file)
 	if err != nil || "image/"+format != staged.mediaType || config.Width <= 0 || config.Height <= 0 {
 		return photoMetadata{}, ErrUnsupportedType

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // Derived data is rebuilt from originals and may be deleted at any time. A
@@ -138,7 +140,7 @@ func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	thumbnail, width, height, class := s.renderJob(job)
+	thumbnail, width, height, class := s.renderJob(ctx, job)
 	if class != "" {
 		return true, s.failJob(ctx, job, class)
 	}
@@ -178,7 +180,7 @@ LIMIT 1`, derivation, now, now).Scan(&job.objectID, &job.derivation, &job.attemp
 
 // renderJob treats a decoder panic like an undecodable original: the same
 // bytes would panic again, and the service must keep serving.
-func (s *Service) renderJob(job claimedJob) (thumbnail []byte, width, height int, class string) {
+func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []byte, width, height int, class string) {
 	defer func() {
 		if recover() != nil {
 			thumbnail, width, height, class = nil, 0, 0, jobErrorUndecodable
@@ -192,8 +194,11 @@ func (s *Service) renderJob(job claimedJob) (thumbnail []byte, width, height int
 		return nil, 0, 0, jobErrorIO
 	}
 	defer original.Close()
-	thumbnail, width, height, err = renderThumbnail(original, job.orientation)
+	thumbnail, width, height, err = s.renderPhoto(ctx, original, job.orientation, thumbnailEdge, thumbnailQuality)
 	if err != nil {
+		if errors.Is(err, mediaworker.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, 0, 0, jobErrorIO
+		}
 		return nil, 0, 0, jobErrorUndecodable
 	}
 	return thumbnail, width, height, ""

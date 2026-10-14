@@ -579,8 +579,17 @@ check "the refused detector changes nothing" \
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
 # or Product Service state.
 check "the installer enables the media worker socket" systemctl is-enabled --quiet anas-media.socket
-check "only the Product Service reaches the media worker socket" \
-  test "$(stat -c '%a %U %G' /run/a-nas-media/media.sock)" = "660 root a-nas"
+check "the Product and Photo Services reach the media worker socket" \
+  test "$(stat -c '%a %U %G' /run/a-nas-media/media.sock)" = "660 root a-nas-photos"
+# Photo Service also uses the same descriptor-only worker socket.
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=160x120:rate=12:duration=1 -c:v libx264 /tmp/photo.mov
+live_photo=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -F file=@/tmp/photo.png -F motion=@/tmp/photo.mov "$api/api/v1/photos/libraries/$alice_library/live-photos" | jq -r '.id' || true)
+check "photo service imports both Live Photo originals through the isolated worker" test -n "$live_photo"
+check "photo service streams browser-compatible motion" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/assets/$live_photo/motion/play")" = 200
+check "administrator cannot read private motion without a viewing grant" \
+  test "$(status_of -b /tmp/owner.jar "$api/api/v1/photos/assets/$live_photo/motion")" = 404
 movies_dir=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
   -d '{"parentId":"","name":"Movies"}' "$api/api/v1/spaces/$shared/directories" | jq -r .id || true)
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25:duration=6 -f lavfi -i sine=duration=6 \
