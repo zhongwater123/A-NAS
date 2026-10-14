@@ -200,6 +200,11 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, 'objects/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
 ON CONFLICT(object_id, derivation) DO NOTHING;
 `,
+	`ALTER TABLE assets ADD COLUMN motion_object_id TEXT REFERENCES objects(id);
+ALTER TABLE assets ADD COLUMN motion_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE assets ADD COLUMN motion_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE assets ADD COLUMN motion_duration REAL NOT NULL DEFAULT 0;
+CREATE INDEX assets_by_motion ON assets(motion_object_id);`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
@@ -366,22 +371,24 @@ SELECT a.id, a.library_id, IFNULL(a.directory_id, ''), a.name, o.media_type, o.s
        END,
        CASE
          WHEN a.trashed_at IS NOT NULL THEN ''
-         WHEN NOT EXISTS (SELECT 1 FROM assets d WHERE d.object_id = a.object_id AND d.library_id = a.library_id
+         WHEN NOT EXISTS (SELECT 1 FROM assets d WHERE d.object_id = a.object_id AND IFNULL(d.motion_object_id, '') = IFNULL(a.motion_object_id, '') AND d.library_id = a.library_id
                           AND d.id <> a.id AND d.trashed_at IS NULL) THEN ''
-         WHEN EXISTS (SELECT 1 FROM assets d WHERE d.object_id = a.object_id AND d.library_id = a.library_id
+         WHEN EXISTS (SELECT 1 FROM assets d WHERE d.object_id = a.object_id AND IFNULL(d.motion_object_id, '') = IFNULL(a.motion_object_id, '') AND d.library_id = a.library_id
                       AND d.trashed_at IS NULL
                       AND (d.imported_at < a.imported_at OR (d.imported_at = a.imported_at AND d.id < a.id))) THEN 'duplicate'
          ELSE 'first'
        END,
-       a.object_id, l.kind, IFNULL(l.owner_user_id, ''), l.created_at
+       a.object_id, IFNULL(a.motion_object_id, ''), a.motion_name, a.motion_kind, a.motion_duration, l.kind, IFNULL(l.owner_user_id, ''), l.created_at
 FROM assets a
 JOIN objects o ON o.id = a.object_id
 JOIN libraries l ON l.id = a.library_id`
 
 type assetRecord struct {
 	Asset
-	objectID string
-	library  library
+	objectID       string
+	motionObjectID string
+	motionName     string
+	library        library
 }
 
 func scanAsset(row rowScanner) (assetRecord, error) {
@@ -389,14 +396,18 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	var importedAt, trashedAt, trashedBy, purgeAfter, takenAt, libraryCreatedAt string
 	var duplicate, thumbnail string
 	var metadata photoMetadata
+	var motion Motion
 	if err := row.Scan(&record.ID, &record.LibraryID, &record.DirectoryID, &record.Name, &record.MediaType,
 		&record.SizeBytes, &record.UploadedBy, &importedAt, &trashedAt, &trashedBy, &purgeAfter,
 		&takenAt, &metadata.width, &metadata.height, &metadata.orientation, &thumbnail, &duplicate,
-		&record.objectID, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
+		&record.objectID, &record.motionObjectID, &record.motionName, &motion.Kind, &motion.Duration, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return assetRecord{}, ErrNotFound
 		}
 		return assetRecord{}, err
+	}
+	if record.motionObjectID != "" {
+		record.Motion = &motion
 	}
 	record.Duplicate = DuplicateRole(duplicate)
 	record.Thumbnail = ThumbnailState(thumbnail)

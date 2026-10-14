@@ -1028,13 +1028,77 @@ paths:
       responses:
         "200": { description: Photo asset moved to trash, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/live-photos:
+    post:
+      operationId: uploadLivePhoto
+      summary: Atomically import a same-name still and MOV as one asset
+      description: Stream directoryId (optional), file, then motion in that order. Each original is at most 256 MiB. Available Apple content identifiers must match. No other parts are accepted after motion.
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, motion]
+              properties:
+                directoryId: { type: string }
+                file: { type: string, format: binary }
+                motion: { type: string, format: binary }
+      responses:
+        "201": { description: One complete photo asset, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/preview:
+    get:
+      operationId: previewPhoto
+      summary: Display a compatible JPEG for HEIC or the original for JPEG and PNG
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Compatible still image, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+        "304": { description: ETag still matches after authorization }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/motion:
+    get:
+      operationId: openPhotoMotion
+      summary: Read the untouched motion component under the asset's Policy
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Original video, content: { video/quicktime: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } } } }
+        "206": { description: Range of the original video }
+        "304": { description: ETag still matches after authorization }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/motion/play:
+    get:
+      operationId: playPhotoMotion
+      summary: Stream an on-demand H.264/AAC preview; disconnect cancels decoding
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Fragmented MP4, content: { video/mp4: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/download:
+    get:
+      operationId: downloadPhotoAsset
+      summary: Download an original or a ZIP containing both Live Photo originals
+      description: Android Motion Photo downloads retain the embedded video in the unchanged original.
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Complete original asset, content: { application/zip: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } }, image/heic: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/original:
     get:
       operationId: getPhotoOriginal
       parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { name: download, in: query, schema: { type: string, enum: ["1"] } }, { name: Range, in: header, schema: { type: string } }]
       responses:
-        "200": { description: "The original, inline unless download=1", content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
-        "206": { description: Part of the original, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+        "200": { description: "The primary original, inline unless download=1; use /download for both Live Photo originals", content: { image/heic: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+        "206": { description: Part of the original, content: { image/heic: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
         "304": { description: The client's copy still matches the ETag }
         "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/thumbnail:
@@ -2932,7 +2996,14 @@ components:
         libraryId: { type: string }
         directoryId: { type: string }
         name: { type: string }
-        mediaType: { type: string, enum: [image/jpeg, image/png] }
+        mediaType: { type: string, enum: [image/jpeg, image/png, image/heic] }
+        motion:
+          type: object
+          additionalProperties: false
+          required: [kind, duration]
+          properties:
+            kind: { type: string, enum: [live-photo, motion-photo] }
+            duration: { type: number, exclusiveMinimum: 0, maximum: 30 }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         uploadedBy: { type: string }
         importedAt: { type: string, format: date-time }

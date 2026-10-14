@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // The object detector reads a larger image than the 512 px thumbnail that
@@ -34,7 +36,7 @@ func (s *Service) claimDetection(ctx context.Context) (*detectionInput, error) {
 		return nil, err
 	}
 	input := &detectionInput{job: job}
-	input.file, input.class, input.err = s.openAIInput(job)
+	input.file, input.class, input.err = s.openAIInput(ctx, job)
 	return input, nil
 }
 
@@ -52,7 +54,7 @@ func (s *Service) returnDetection(ctx context.Context, input *detectionInput) er
 
 // openAIInput renders the detector's input for a claimed job. A decoder
 // panic counts as an undecodable original, as for thumbnails.
-func (s *Service) openAIInput(job claimedJob) (file *os.File, class string, err error) {
+func (s *Service) openAIInput(ctx context.Context, job claimedJob) (file *os.File, class string, err error) {
 	defer func() {
 		if recover() != nil {
 			file, class, err = nil, jobErrorUndecodable, nil
@@ -66,8 +68,11 @@ func (s *Service) openAIInput(job claimedJob) (file *os.File, class string, err 
 		return nil, "", err
 	}
 	defer original.Close()
-	content, _, _, err := renderUpright(original, job.orientation, aiInputEdge, aiInputQuality)
+	content, _, _, err := s.renderPhoto(ctx, original, job.orientation, aiInputEdge, aiInputQuality)
 	if err != nil {
+		if errors.Is(err, mediaworker.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, jobErrorIO, nil
+		}
 		return nil, jobErrorUndecodable, nil
 	}
 	file, err = memoryFile(content)

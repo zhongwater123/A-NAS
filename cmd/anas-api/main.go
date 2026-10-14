@@ -115,6 +115,7 @@ func runPhotoService(logger *slog.Logger) error {
 		// Without the AI component the socket is absent and photos wait for it.
 		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
 		AIQuietPeriod: quiet,
+		Photos:        photos.Options{Media: mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}},
 	})
 }
 
@@ -211,7 +212,7 @@ func run(logger *slog.Logger) error {
 	var photoAPI http.Handler = photosapi.NewProxy(environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"), logger)
 	if !live {
 		photoAI = developmentAI()
-		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{AI: photoAI})
+		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{AI: photoAI, Media: mediaWorker})
 		if err != nil {
 			return err
 		}

@@ -5,12 +5,12 @@ Documentation=https://github.com/zhongwater123/A-NAS
 [Socket]
 # Every connection starts its own anas-media@.service with the connection as
 # standard input, so each video or song is handled by a fresh, isolated
-# FFmpeg (ADR 0017, ADR 0018). Only the Product Service's group reaches it.
+# FFmpeg (ADR 0017, ADR 0018). The Product and Photo Services reach it via a-nas-photos.
 ListenStream=/run/a-nas-media/media.sock
 Accept=yes
 MaxConnections=8
 SocketUser=root
-SocketGroup=a-nas
+SocketGroup=a-nas-photos
 SocketMode=0660
 DirectoryMode=0755
 
