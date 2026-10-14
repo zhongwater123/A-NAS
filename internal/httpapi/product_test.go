@@ -66,6 +66,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	setupBody := bytes.NewBufferString(`{"username":"owner","password":"correct horse battery staple"}`)
 	setupRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/admin", setupBody)
 	setupRequest.Header.Set("Content-Type", "application/json")
+	fromLocalConsole(setupRequest)
 	setup := httptest.NewRecorder()
 	handler.ServeHTTP(setup, setupRequest)
 	if got, want := setup.Code, http.StatusCreated; got != want {
@@ -331,6 +332,7 @@ func TestProductAPIReportsCredentialProvisioningFailure(t *testing.T) {
 		`{"username":"owner","password":"correct horse battery staple"}`,
 	))
 	request.Header.Set("Content-Type", "application/json")
+	fromLocalConsole(request)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if got, want := response.Code, http.StatusServiceUnavailable; got != want || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"credential_provision_failed"`)) {
@@ -420,6 +422,12 @@ func TestProductAPIKeepsLocalConsoleSessionsUntilSignOut(t *testing.T) {
 	if got := metricsStatus(console); got != http.StatusUnauthorized {
 		t.Fatalf("local console session after sign out = %d, want 401", got)
 	}
+}
+
+// fromLocalConsole makes request a direct loopback connection, the only kind
+// that may set up the device.
+func fromLocalConsole(request *http.Request) {
+	request.RemoteAddr, request.Host = "127.0.0.1:41234", "127.0.0.1:8080"
 }
 
 type apiCredentials struct{}

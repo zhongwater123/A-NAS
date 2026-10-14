@@ -81,6 +81,7 @@ paths:
     post:
       security: []
       operationId: setupAdministrator
+      description: Create the first administrator. Only a direct loopback connection may (403 setup_local_only otherwise); a concurrent or later setup answers 409 setup_complete.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SetupRequest" } } } }
       responses:
         "201": { description: Administrator created, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
@@ -165,9 +166,11 @@ paths:
     delete:
       operationId: disableUser
       parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      description: Disable an account. Web sign-in ends first; when the Host Agent then fails to disable the SMB credential the answer is 503 smb_disable_pending, and disabling again retries only that step.
       responses:
         "204": { description: User disabled }
         "403": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/users/{userId}/credential:
     patch:
       operationId: resetUserCredential
@@ -2196,9 +2199,12 @@ components:
     SetupStatus:
       type: object
       additionalProperties: false
-      required: [setupRequired]
+      required: [setupRequired, setupAllowed]
       properties:
         setupRequired: { type: boolean }
+        setupAllowed:
+          type: boolean
+          description: Whether this connection may set the device up. Only a direct loopback connection without forwarding headers may (the local console or an SSH tunnel); LAN browsers reach the API through Caddy.
     SetupRequest:
       type: object
       additionalProperties: false
@@ -2297,6 +2303,14 @@ components:
         csrfToken: { type: string }
         expiresAt: { type: string, format: date-time, description: "9999-12-31T23:59:59Z marks a local console session, which lasts until sign-out." }
         user: { $ref: "#/components/schemas/User" }
+        credentialReset:
+          type: object
+          additionalProperties: false
+          required: [actorUsername, at]
+          description: The latest time an administrator chose this user's password. It stays after the notification is acknowledged.
+          properties:
+            actorUsername: { type: string }
+            at: { type: string, format: date-time }
     Space:
       type: object
       additionalProperties: false

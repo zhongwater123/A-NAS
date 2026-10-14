@@ -161,13 +161,13 @@ const windowTones: Record<WindowID, string> = {
 
 export default function App() {
 	const [session, setSessionState] = useState<Session>();
-	const [mode, setMode] = useState<"loading" | "setup" | "login">("loading");
+	const [mode, setMode] = useState<AuthMode>("loading");
 	const [error, setError] = useState("");
 	useEffect(() => {
 		let active = true;
-		void getSetupStatus().then(async ({ setupRequired }) => {
+		void getSetupStatus().then(async ({ setupRequired, setupAllowed }) => {
 			if (!active) return;
-			if (setupRequired) setMode("setup");
+			if (setupRequired) setMode(setupAllowed === false ? "setup-elsewhere" : "setup");
 			else {
 				try { const value = await currentSession(); if (active) setSessionState(value); }
 				catch { if (active) setMode("login"); }
@@ -252,12 +252,21 @@ function describeNotification(item: Notification): string {
 	return `管理员 ${item.actorUsername} 于 ${when} 重置了你的密码。`;
 }
 
-function Authentication({ mode, error: initialError, onAuthenticated }: { mode: "loading" | "setup" | "login"; error: string; onAuthenticated: (session: Session) => void }) {
+type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
+
+function Authentication({ mode, error: initialError, onAuthenticated }: { mode: AuthMode; error: string; onAuthenticated: (session: Session) => void }) {
 	const [error, setError] = useState(initialError);
 	const [submitting, setSubmitting] = useState(false);
 	const usernameHint = useId();
 	const passwordHint = useId();
 	if (mode === "loading") return <main className="auth-shell"><div className="auth-card"><span className="loader" /><h1>正在启动 A-NAS…</h1></div></main>;
+	// A LAN browser may not claim a device that is not set up yet.
+	if (mode === "setup-elsewhere") return <main className="auth-shell"><section className="auth-card" aria-label="在本机启用 A-NAS">
+		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>请在 NAS 本机启用</h1>
+		<p>这台 A-NAS 还没有管理员。为防止局域网中的其他人抢先认领，首个管理员只能在 NAS 自己的屏幕上创建。</p>
+		<p>没有接屏幕时，用 SSH 隧道把 NAS 的 127.0.0.1:8080 转到这台电脑，再打开 http://127.0.0.1:8080 完成启用。</p>
+		<button className="primary" onClick={() => window.location.reload()}>已启用，刷新页面</button>
+	</section></main>;
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);

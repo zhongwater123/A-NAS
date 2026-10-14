@@ -185,6 +185,13 @@ function AccountSection({ session, editing, onEditingChange, onLogout, onShowSig
         <Row icon={<IconTile tone="key" icon={KeyRound} />} label="密码" detail="网页登录和 SMB 共享使用同一个密码">
           {!editing && <button className="set-btn" onClick={open}>修改密码…</button>}
         </Row>
+        {session.credentialReset && (
+          <Row
+            icon={<IconTile tone="warning" icon={TriangleAlert} />}
+            label="管理员重置过密码"
+            detail={`${session.credentialReset.actorUsername || "管理员"} 于 ${new Date(session.credentialReset.at).toLocaleString("zh-CN")} 重置了这个账号的密码。此后的密码若不是你自己设置的，请当面确认。`}
+          />
+        )}
         {editing && (
           <form className="acct-form" aria-label="修改密码" autoComplete="off" onSubmit={(event) => void submit(event)}>
             <Field label="当前密码"><input className="set-input" name="currentPassword" type="password" required autoComplete="current-password" autoFocus /></Field>
@@ -557,7 +564,7 @@ function UserDialogView({ dialog, onClose, onDone }: { dialog: UserDialog; onClo
   const what = dialog.kind === "viewing" && dialog.scope === "library" ? "私有图库" : "个人空间";
   const content = {
     create: { title: "添加成员", label: "添加成员", icon: UserPlus, tone: "accent", description: "成员拥有自己的个人空间和私有图库，并可使用 Shared 共享空间。", submit: "创建成员", danger: false },
-    reset: dialog.kind === "reset" && { title: `重置 ${dialog.user.username} 的密码`, label: `重置 ${dialog.user.username} 的密码`, icon: KeyRound, tone: "warning", description: `重置后 ${dialog.user.username} 下次登录必须先设置只有自己知道的新密码，在此之前 SMB 共享保持停用。`, submit: "确认重置", danger: false },
+    reset: dialog.kind === "reset" && { title: `重置 ${dialog.user.username} 的密码`, label: `重置 ${dialog.user.username} 的密码`, icon: KeyRound, tone: "warning", description: `重置后 ${dialog.user.username} 下次登录必须先设置新密码，在此之前 SMB 共享保持停用。重置会写入审计，并一直显示在对方的“我的账号”中。`, submit: "确认重置", danger: false },
     viewing: dialog.kind === "viewing" && { title: `只读查看 ${dialog.user.username} 的${what}`, label: `查看 ${dialog.user.username} 的${what}`, icon: what === "私有图库" ? Images : FolderLock, tone: "warning", description: `查看他人${what}会写入审计，并在 ${dialog.user.username} 下次登录时通知对方。访问为只读，24 小时后自动结束。`, submit: "开始只读查看", danger: false },
     disable: dialog.kind === "disable" && { title: `禁用 ${dialog.user.username}？`, label: `禁用 ${dialog.user.username}`, icon: UserX, tone: "danger", description: `${dialog.user.username} 将无法登录网页和 SMB 共享，已建立的 SMB 连接会立即断开；个人空间中的文件不会被删除。账号禁用后暂时无法重新启用。`, submit: "禁用账号", danger: true },
   }[dialog.kind] as { title: string; label: string; icon: LucideIcon; tone: string; description: string; submit: string; danger: boolean };

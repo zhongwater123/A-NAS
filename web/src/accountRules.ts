@@ -41,6 +41,8 @@ export function accountErrorText(error: unknown): string | undefined {
     case "password_unchanged": return "新密码不能与当前密码相同";
     case "reauthentication_failed": return "密码不正确";
     case "setup_complete": return "设备已经启用，请刷新页面后登录";
+    case "setup_local_only": return "只能在 NAS 本机屏幕上（或经 SSH 隧道）启用设备";
+    case "smb_disable_pending": return "账号已禁用，网页登录已失效；SMB 凭据暂未停用。可以再点一次“禁用账号”重试，产品服务重启时也会自动停用";
     case "credential_provision_failed": return "SMB 凭据没有设置成功，请稍后重试";
   }
   return undefined;

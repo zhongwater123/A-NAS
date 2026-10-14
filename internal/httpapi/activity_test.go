@@ -113,7 +113,11 @@ func (f *activityFixture) signIn(path, username, password, address string, want 
 	f.t.Helper()
 	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Forwarded-For", address)
+	if path == "/api/v1/setup/admin" {
+		fromLocalConsole(request)
+	} else {
+		request.Header.Set("X-Forwarded-For", address)
+	}
 	recorder := httptest.NewRecorder()
 	f.handler.ServeHTTP(recorder, request)
 	if recorder.Code != want {

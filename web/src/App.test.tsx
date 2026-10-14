@@ -200,6 +200,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   }, 15000);
 
+  it("sends a LAN browser to the device's own screen to set it up", async () => {
+    const fetchMock = installAPI({ setupRequired: true, setupAllowed: false });
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "请在 NAS 本机启用" })).toBeTruthy();
+    expect(screen.getByText(/SSH 隧道/)).toBeTruthy();
+    expect(screen.queryByLabelText("账号")).toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/setup/admin")).toBe(false);
+  });
+
   it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
     const user = userEvent.setup();
@@ -1108,10 +1117,10 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
+    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
@@ -1397,6 +1406,15 @@ describe("Settings", () => {
     expect(within(settings).getByRole("radio", { name: "登录" }).getAttribute("aria-checked")).toBe("true");
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith("/api/v1/activity?") && String(path).includes("category=session"))).toBe(true));
     expect(within(settings).queryByRole("tab", { name: "系统日志" })).toBeNull();
+  });
+
+  it("keeps showing a member who reset their password", async () => {
+    installAPI({ session: { ...session, user: alice, credentialReset: { actorUsername: "owner", at: "2026-10-14T09:10:00Z" } } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    expect(screen.getByText("管理员重置过密码")).toBeTruthy();
+    expect(screen.getByText(/owner 于 .* 重置了这个账号的密码/)).toBeTruthy();
   });
 
   it("lets a member change their own password", async () => {

@@ -43,6 +43,10 @@ var (
 	// group, or UID that A-NAS did not allocate for this user.
 	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
 	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
+	// ErrSMBDisablePending reports a disabled account whose Web sign-in has
+	// ended but whose SMB credential the Host Agent could not disable yet.
+	// Identity synchronization disables it when the Product Service starts.
+	ErrSMBDisablePending = errors.New("the account is disabled, but its SMB credential could not be disabled yet")
 )
 
 // Linux identity layout shared with the Host Agent (ADR 0008). Fixed group
@@ -267,6 +271,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
+CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resource_id, occurred_at);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate SQLite: %w", err)
@@ -825,7 +830,8 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 		return ErrForbidden
 	}
 	var username string
-	if err := s.store.db.QueryRowContext(ctx, "SELECT username FROM users WHERE id = ?", userID).Scan(&username); errors.Is(err, sql.ErrNoRows) {
+	var status UserStatus
+	if err := s.store.db.QueryRowContext(ctx, "SELECT username, status FROM users WHERE id = ?", userID).Scan(&username, &status); errors.Is(err, sql.ErrNoRows) {
 		return ErrUserNotFound
 	} else if err != nil {
 		return err
@@ -833,15 +839,39 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if s.credentials == nil {
 		return errors.New("credential provisioner is unavailable")
 	}
-	if err := s.credentials.DisableCredential(ctx, username); err != nil {
+	if status == UserStatusDisabled {
+		// Disabling again only retries the SMB credential.
+		return s.disableHostCredential(ctx, username)
+	}
+	// Web access ends first and for good: a Host Agent failure must not leave
+	// the account signed in. The status is also what identity
+	// synchronization converges the SMB credential to.
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := s.store.db.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = ?", userID); err != nil {
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = ?", userID); err != nil {
 		return err
 	}
-	_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
+		return err
+	}
+	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.disabled", "user", userID, ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	s.sessions.forgetUser(userID)
-	return s.appendAudit(ctx, actor.ID, "user.disabled", "user", userID, "")
+	return s.disableHostCredential(ctx, username)
+}
+
+func (s *Service) disableHostCredential(ctx context.Context, username string) error {
+	if err := s.credentials.DisableCredential(ctx, username); err != nil {
+		return fmt.Errorf("%w: %v", ErrSMBDisablePending, err)
+	}
+	return nil
 }
 
 // ResetCredential lets an administrator choose a temporary password for
@@ -902,14 +932,46 @@ status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE i
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
 		return err
 	}
+	// The member learns of the reset, and LastCredentialReset shows it, only
+	// if both records exist; they commit with the password or not at all.
+	if err := s.notifyTo(ctx, tx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
+		return err
+	}
+	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.credential_reset", "user", userID, ""); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.sessions.forgetUser(userID)
-	if err := s.notify(ctx, userID, NotificationCredentialReset, actor.Username, ""); err != nil {
-		return err
+	return nil
+}
+
+// CredentialReset is the latest time an administrator chose a user's
+// password.
+type CredentialReset struct {
+	ActorUsername string    `json:"actorUsername"`
+	At            time.Time `json:"at"`
+}
+
+// LastCredentialReset returns the latest reset of the actor's own password,
+// or nil. An administrator can take a member's account over by resetting its
+// password and choosing the next one; the member keeps seeing that it
+// happened, whoever acknowledged the notification.
+func (s *Service) LastCredentialReset(ctx context.Context, actor User) (*CredentialReset, error) {
+	var reset CredentialReset
+	var at string
+	err := s.store.db.QueryRowContext(ctx, `SELECT COALESCE(u.username, ''), a.occurred_at
+FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+WHERE a.action = 'user.credential_reset' AND a.resource_id = ? ORDER BY a.occurred_at DESC LIMIT 1`, actor.ID).Scan(&reset.ActorUsername, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	return s.appendAudit(ctx, actor.ID, "user.credential_reset", "user", userID, "")
+	if err != nil {
+		return nil, err
+	}
+	reset.At, _ = time.Parse(time.RFC3339Nano, at)
+	return &reset, nil
 }
 
 // SyncIdentities asks the Host Agent to converge Linux accounts and group
@@ -945,7 +1007,13 @@ WHERE u.status IN ('active', 'disabled') ORDER BY i.uid`)
 }
 
 func (s *Service) appendAudit(ctx context.Context, actorID, action, resourceType, resourceID, detail string) error {
-	_, err := s.store.db.ExecContext(ctx,
+	return s.appendAuditTo(ctx, s.store.db, actorID, action, resourceType, resourceID, detail)
+}
+
+// appendAuditTo records an audit event through db, which may be a
+// transaction the event must commit with.
+func (s *Service) appendAuditTo(ctx context.Context, db sqlExecutor, actorID, action, resourceType, resourceID, detail string) error {
+	_, err := db.ExecContext(ctx,
 		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?,?,?,?,?,?,?)",
 		s.randomID("audit"), nullableString(actorID), action, resourceType, resourceID, formatTime(s.now().UTC()), detail)
 	return err
