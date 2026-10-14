@@ -54,11 +54,14 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	if err := syscall.Stat(appData, &stat); err != nil || stat.Uid != 30000 || stat.Gid != 30000 {
 		t.Fatalf("app data folder owner = %d:%d, %v; want app-memos", stat.Uid, stat.Gid, err)
 	}
-	if groups := run(t, "id", "--name", "--groups", "app-memos"); !strings.Contains(groups, "a-nas-users") {
-		t.Fatalf("app-memos groups = %q, want Shared access through a-nas-users", groups)
+	// Docker gives a container only the groups of its Compose service, so the
+	// host account's groups never matter; it keeps none.
+	if groups := run(t, "id", "--name", "--groups", "app-memos"); strings.Contains(groups, "a-nas-users") {
+		t.Fatalf("app-memos groups = %q, want none", groups)
 	}
-	expect("app writes its data", true, asContainer("app-memos", appData, "echo db > /mnt/db"))
-	expect("app writes the Shared folder it mounts", true, asContainer("app-memos", media, "echo song > /mnt/song.txt"))
+	expect("app writes its data", true, asContainer("app-memos", "", appData, "echo db > /mnt/db"))
+	expect("app without the plan's Shared group writes Shared", false, asContainer("app-memos", "", media, "echo song > /mnt/song.txt"))
+	expect("app with the plan's Shared group writes Shared", true, asContainer("app-memos", accounts.UsersGroup, media, "echo song > /mnt/song.txt"))
 	expect("alice edits the app's Shared file", true, asUser("alice", "sh", "-c", "echo more >> "+filepath.Join(media, "song.txt")))
 	expect("app reads alice's private space", false, asUser("app-memos", "cat", filepath.Join(private, "secret.txt")))
 	expect("alice reads the app's private data", false, asUser("alice", "cat", filepath.Join(appData, "db")))
@@ -84,11 +87,15 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 		t.Errorf("PrepareApp gave the link target to UID %d, %v", stat.Uid, err)
 	}
 
+	// An account that joined a-nas-users before ADR 0022 leaves it.
+	run(t, "usermod", "--append", "--groups", accounts.UsersGroup, "app-memos")
 	if err := executor.ReleaseApp(ctx, "memos"); err != nil {
 		t.Fatalf("ReleaseApp() error = %v", err)
 	}
-	expect("released app writes Shared", false, asContainer("app-memos", media, "echo more >> /mnt/song.txt"))
-	expect("released app keeps its own data", true, asContainer("app-memos", appData, "cat /mnt/db"))
+	if groups := run(t, "id", "--name", "--groups", "app-memos"); strings.Contains(groups, "a-nas-users") {
+		t.Fatalf("released app-memos groups = %q, want none", groups)
+	}
+	expect("released app keeps its own data", true, asContainer("app-memos", "", appData, "cat /mnt/db"))
 	if again, err := executor.AppIdentity(ctx, "memos"); err != nil || again != identity {
 		t.Fatalf("identity after release = %+v, %v; want the same UID", again, err)
 	}
@@ -96,9 +103,15 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 
 // asContainer runs command as user with hostDir bind-mounted at /mnt in a
 // private mount namespace, the way Docker gives a container a bind mount:
-// the host folders above hostDir are not traversed.
-func asContainer(user, hostDir, command string) outcome {
+// the host folders above hostDir are not traversed. Like Docker, it gives
+// the process only the groups its service lists (group_add), never the host
+// account's.
+func asContainer(user, groups, hostDir, command string) outcome {
+	groupFlag := "--clear-groups"
+	if groups != "" {
+		groupFlag = "--groups=" + groups
+	}
 	return asUser("root", "unshare", "--mount", "--propagation", "private", "sh", "-c",
-		`mount --bind "$1" /mnt && exec setpriv --reuid="$2" --regid="$2" --init-groups -- sh -c "$3"`,
-		"container", hostDir, user, command)
+		`mount --bind "$1" /mnt && exec setpriv --reuid="$2" --regid="$2" "$3" -- sh -c "$4"`,
+		"container", hostDir, user, groupFlag, command)
 }

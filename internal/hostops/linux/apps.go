@@ -9,14 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 )
 
 // Apps installed from the App Center run as their own Linux identity
 // app-<id> (ADR 0008). Their data lives on the data volume in apps/<id>,
 // which SMB does not publish; the only other folders they may mount are in
-// the Shared folder.
+// the Shared folder. A container reaches Shared through the a-nas-users
+// group its rendered Compose service carries, never through the groups of
+// the host account: Docker takes supplementary groups from the image's own
+// /etc/group (ADR 0022). The host account therefore belongs to no group.
 
 const appsDirectory = "apps"
 
@@ -59,8 +61,8 @@ func (e *Executor) AppIdentity(ctx context.Context, appID string) (appid.Identit
 }
 
 // PrepareApp creates the folders an app mounts before Docker starts it, so
-// Docker never creates a host folder, and gives the app access to the Shared
-// folder only when its plan mounts from there. App-data folders belong to the
+// Docker never creates a host folder; shared allows folders in the Shared
+// folder, which the plan mounts from there. App-data folders belong to the
 // app; Shared folders inherit the Shared ACL.
 func (e *Executor) PrepareApp(ctx context.Context, appID string, folders []string, shared bool) error {
 	if !appid.Valid(appID) {
@@ -114,11 +116,12 @@ func (e *Executor) PrepareApp(ctx context.Context, appID string, folders []strin
 			}
 		}
 	}
-	return e.setAppSharedAccess(ctx, identity.Username, shared)
+	return e.clearAppGroups(ctx, identity.Username)
 }
 
-// ReleaseApp withdraws an uninstalled app's Shared folder access. The
-// identity and its files stay so a reinstall finds its data.
+// ReleaseApp runs when an app is uninstalled. Its containers, which held the
+// Shared group, are gone; the identity and its files stay so a reinstall
+// finds its data.
 func (e *Executor) ReleaseApp(ctx context.Context, appID string) error {
 	if !appid.Valid(appID) {
 		return errors.New("invalid app ID")
@@ -129,21 +132,15 @@ func (e *Executor) ReleaseApp(ctx context.Context, appID string) error {
 	if !known {
 		return nil
 	}
-	return e.setAppSharedAccess(ctx, appid.Username(appID), false)
+	return e.clearAppGroups(ctx, appid.Username(appID))
 }
 
-// setAppSharedAccess grants or withdraws the Shared folder ACL, which
-// a-nas-users holds, by group membership.
-func (e *Executor) setAppSharedAccess(ctx context.Context, username string, shared bool) error {
-	groups := ""
-	if shared {
-		if err := e.ensureFixedGroups(ctx); err != nil {
-			return err
-		}
-		groups = accounts.UsersGroup
-	}
-	if output, err := e.runner.Run(ctx, "usermod", []string{"--groups", groups, username}, ""); err != nil {
-		return commandError("set app Shared access", err, output)
+// clearAppGroups removes the app account from every supplementary group.
+// Before ADR 0022 an app that mounted Shared joined a-nas-users here, which
+// never reached its containers but suggested it did.
+func (e *Executor) clearAppGroups(ctx context.Context, username string) error {
+	if output, err := e.runner.Run(ctx, "usermod", []string{"--groups", "", username}, ""); err != nil {
+		return commandError("clear app groups", err, output)
 	}
 	return nil
 }
