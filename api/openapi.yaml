@@ -116,6 +116,66 @@ paths:
         "204": { description: Password changed and SMB re-enabled }
         "403": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/session/profile:
+    patch:
+      operationId: updateProfile
+      description: >-
+        Change the name the signed-in user is shown by. Pages show the nickname instead of the username everywhere
+        except where the account name itself matters (sign-in, SMB, the terminal). An empty nickname shows the
+        username again.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProfileChange" } } } }
+      responses:
+        "200": { description: The updated account, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/session/avatar:
+    put:
+      operationId: setAvatar
+      description: >-
+        Replace the signed-in user's avatar with the picture in the body. The server turns it upright, crops the
+        centre square, scales it to at most 256 pixels and stores it as a JPEG of a few dozen kilobytes; the
+        original is not kept. Clients crop first and send the square they want.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/gif: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        "200": { description: The updated account with its new avatarVersion, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "413": { description: "image_too_large: more than 12 MiB or 50 million pixels", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "415": { description: "unsupported_image: not a JPEG, PNG, GIF or WebP picture", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+    delete:
+      operationId: removeAvatar
+      description: Go back to the initial on a coloured disc.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The updated account, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      description: >-
+        How every account appears, disabled ones included, for any signed-in user: the name to show and the avatar.
+        Role and status stay with listUsers, which only administrators may call.
+      responses:
+        "200": { description: Profiles, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Profile" } } } } } } }
+  /api/v1/users/{userId}/avatar:
+    get:
+      operationId: getAvatar
+      description: >-
+        An account's avatar for any signed-in user. Ask with v set to the account's avatarVersion: that URL never
+        changes content and is cached for a year; without it the answer must be revalidated (ETag).
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { name: v, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Square JPEG avatar, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "304": { description: The cached avatar is current }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -2324,6 +2384,29 @@ components:
         status: { type: string, enum: [pending, active, disabled, error] }
         createdAt: { type: string, format: date-time }
         mustChangePassword: { type: boolean }
+        nickname: { type: string, maxLength: 24, description: "The name pages show instead of username; absent when the user has not chosen one." }
+        avatarVersion: { type: string, description: "Names the current avatar; absent when the user has none. See getAvatar." }
+    Profile:
+      type: object
+      additionalProperties: false
+      required: [id, username]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        nickname: { type: string }
+        avatarVersion: { type: string }
+    ProfileChange:
+      type: object
+      additionalProperties: false
+      required: [nickname]
+      properties:
+        nickname:
+          type: string
+          description: >-
+            Trimmed, with runs of spaces folded into one; at most 24 Unicode code points without control or invisible
+            formatting characters (a zero-width joiner inside emoji is allowed), else 422 invalid_nickname. It must
+            not equal, ignoring case, another account's username or nickname (409 nickname_unavailable). Empty
+            clears it.
     PasswordChange:
       type: object
       additionalProperties: false
@@ -2591,6 +2674,7 @@ components:
       properties:
         id: { type: string }
         username: { type: string }
+        nickname: { type: string, description: "The account's current nickname, which pages show instead of username." }
     ActivityEvent:
       type: object
       additionalProperties: false
