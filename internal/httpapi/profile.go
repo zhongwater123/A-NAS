@@ -12,9 +12,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/avatar"
 )
 
-// avatarGate bounds how many uploaded pictures are decoded at once; a phone
-// photo takes a few hundred milliseconds of one core.
-var avatarGate = make(chan struct{}, 2)
+// avatarGate decodes one uploaded picture at a time; a full-size photo sent
+// straight to the API takes a few hundred milliseconds and about 100 MB.
+var avatarGate = make(chan struct{}, 1)
 
 func (h *productHandler) profileRoutes() {
 	h.mux.HandleFunc("GET /api/v1/profiles", h.withSession(h.handleProfiles))

@@ -26,8 +26,9 @@ const ContentType = "image/jpeg"
 // MaxUploadBytes bounds the picture a user may send.
 const MaxUploadBytes = 12 << 20
 
-// maxPixels bounds decoded dimensions before any allocation.
-const maxPixels = 50_000_000
+// maxPixels bounds decoded dimensions before any allocation: a 24-megapixel
+// photo decodes to about 100 MB. Pages send at most 512 px.
+const maxPixels = 25_000_000
 
 var (
 	ErrUnsupported = errors.New("the picture is not a JPEG, PNG, GIF or WebP image")

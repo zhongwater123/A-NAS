@@ -147,7 +147,7 @@ paths:
           image/webp: { schema: { type: string, format: binary } }
       responses:
         "200": { description: The updated account with its new avatarVersion, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
-        "413": { description: "image_too_large: more than 12 MiB or 50 million pixels", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "413": { description: "image_too_large: more than 12 MiB or 25 million pixels", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
         "415": { description: "unsupported_image: not a JPEG, PNG, GIF or WebP picture", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
     delete:
       operationId: removeAvatar
