@@ -555,6 +555,10 @@
 .mc-upload-row.done .mc-upload-status { color: #5bd19a; }
 .mc-upload-row.exists .mc-upload-status { color: var(--mc-gold); }
 .mc-upload-row.failed .mc-upload-status { color: var(--mc-danger); }
+.mc-upload-row.held .mc-upload-status { color: var(--mc-gold); }
+.mc-upload-row.paused .mc-upload-status { color: var(--mc-ink-2); }
+.mc-upload-held { display: inline-flex; align-items: center; gap: 5px; color: var(--mc-gold); }
+.mc-upload-held svg { width: 14px; height: 14px; flex: none; }
 .mc-upload-row.skipped, .mc-upload-row.canceled { opacity: .62; }
 .mc-upload-bar { height: 3px; overflow: hidden; border-radius: 3px; background: rgba(255, 255, 255, .1); }
 .mc-upload-bar span { display: block; height: 100%; border-radius: 3px; background: var(--mc-gradient); box-shadow: 0 0 8px rgba(76, 157, 255, .6); transition: width .2s linear; }
@@ -565,6 +569,8 @@
 .mc-upload-pill:hover { background: rgba(32, 38, 52, .92); }
 .mc-upload-pill.failed { padding-left: 11px; color: #ffc2c8; border-color: rgba(255, 95, 109, .35); }
 .mc-upload-pill > svg { width: 16px; height: 16px; color: var(--mc-danger); }
+.mc-upload-pill.held { padding-left: 11px; color: #ffe2a8; border-color: rgba(255, 196, 92, .35); }
+.mc-upload-pill.held > svg { color: var(--mc-gold); }
 .mc-upload-ring { position: relative; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: var(--mc-accent); background: conic-gradient(var(--mc-accent) var(--mc-share, 0deg), rgba(255, 255, 255, .12) 0); }
 .mc-upload-ring::before { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: #141a25; }
 .mc-upload-ring svg { position: relative; width: 12px; height: 12px; }

@@ -255,9 +255,11 @@ export const statusText: Record<ItemStatus, string> = {
   interrupted: "已中断", completed: "已完成", failed: "失败", canceled: "已取消", skipped: "已跳过",
 };
 
-export const holdText: Record<Hold, { title: string; detail: string }> = {
-  offline: { title: "与 NAS 的连接中断", detail: "上传已暂停，网络恢复后会从中断处自动继续。" },
-  session: { title: "登录已过期", detail: "重新登录同一账号后，上传会从中断处继续。" },
-  volume: { title: "数据卷离线或只读", detail: "上传已暂停，每 30 秒自动重试一次。" },
-  space: { title: "数据卷空间不足", detail: "上传已暂停。清理空间后继续，已上传的部分会保留。" },
+// holdText says why the upload queue waits; next is the short form of what
+// brings it back, for places with room for one line.
+export const holdText: Record<Hold, { title: string; detail: string; next: string }> = {
+  offline: { title: "与 NAS 的连接中断", detail: "上传已暂停，网络恢复后会从中断处自动继续。", next: "恢复后自动继续" },
+  session: { title: "登录已过期", detail: "重新登录同一账号后，上传会从中断处继续。", next: "重新登录后继续" },
+  volume: { title: "数据卷离线或只读", detail: "上传已暂停，每 30 秒自动重试一次。", next: "每 30 秒自动重试" },
+  space: { title: "数据卷空间不足", detail: "上传已暂停。清理空间后继续，已上传的部分会保留。", next: "清理空间后在传输中心继续" },
 };

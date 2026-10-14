@@ -1,10 +1,11 @@
 import {
-  Captions, Check, ChevronDown, ChevronRight, CircleAlert, CloudUpload, FileText, Film, FolderOpen, FolderPlus, HardDrive, Image, LibraryBig, Plus, RotateCcw, Users, X,
+  Captions, Check, ChevronDown, ChevronRight, CircleAlert, CloudUpload, FileText, Film, FolderOpen, FolderPlus, HardDrive, Image, LibraryBig, Play, Plus, RotateCcw, Users, X,
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { createDirectory, listEntries, type FileEntry } from "../api";
 import { messageOf } from "./Browse";
+import { holdText } from "../transfers/model";
 import { bytes } from "./format";
 import { kindInfo } from "./Libraries";
 import type { Category, LibraryKind, MediaLibrary } from "./mediaApi";
@@ -46,8 +47,9 @@ const roleIcons: Record<FileRole, ReactNode> = { video: <Film />, subtitle: <Cap
 function statusOf(item: UploadItem): ReactNode {
   switch (item.state) {
     case "ready": return "待上传";
-    case "waiting": return "排队中";
+    case "waiting": return item.hold ? holdText[item.hold].title : "排队中";
     case "uploading": return `${Math.floor(item.progress * 100)}%`;
+    case "paused": return "已暂停";
     case "done": return <><Check />已上传</>;
     case "exists": return "同名文件已存在，未覆盖";
     case "skipped": return "不是视频、字幕、NFO 或海报，已跳过";
@@ -68,7 +70,8 @@ function remember(libraryId: string) {
 export function progressOf(items: UploadItem[]) {
   const started = items.filter((item) => item.to && item.state !== "canceled" && item.state !== "ready");
   const total = started.reduce((sum, item) => sum + item.file.size, 0);
-  const sent = started.reduce((sum, item) => sum + item.file.size * (item.state === "uploading" ? item.progress : item.state === "waiting" ? 0 : 1), 0);
+  // A file waiting or paused keeps what it already sent.
+  const sent = started.reduce((sum, item) => sum + item.file.size * (item.state === "uploading" || item.state === "waiting" || item.state === "paused" ? item.progress : 1), 0);
   const finished = started.filter((item) => item.state !== "waiting" && item.state !== "uploading").length;
   return { count: started.length, finished, share: total ? sent / total : 0, failed: items.filter((item) => item.state === "failed").length };
 }
@@ -149,7 +152,14 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
   };
 
   let summary: ReactNode;
-  if (uploads.running) summary = <>正在上传 {Math.min(progress.finished + 1, progress.count)}/{progress.count} · {Math.floor(progress.share * 100)}%</>;
+  if (uploads.running) {
+    const position = `${Math.min(progress.finished + 1, progress.count)}/${progress.count} · ${Math.floor(progress.share * 100)}%`;
+    // A held queue says why it stopped and what brings it back.
+    const hold = items.find((item) => item.hold)?.hold;
+    const moving = items.some((item) => item.state === "uploading" || (item.state === "waiting" && !item.hold));
+    if (hold) summary = <><span className="mc-upload-held"><CircleAlert />{holdText[hold].title}，{holdText[hold].next}</span> · {position}</>;
+    else summary = <>{moving ? "正在上传" : "已暂停"} {position}</>;
+  }
   else if (ready.length) summary = <>{ready.length} 个文件 · {bytes(readyBytes)}</>;
   else if (progress.count) {
     const count = (state: UploadItem["state"]) => items.filter((item) => item.state === state).length;
@@ -247,7 +257,7 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
             {items.length > 0 && (
               <ul className="mc-upload-list" aria-label="上传列表">
                 {items.map((item) => (
-                  <li key={item.id} className={`mc-upload-row ${item.state}`}>
+                  <li key={item.id} className={`mc-upload-row ${item.state}${item.hold ? " held" : ""}`}>
                     <span className={`mc-upload-type ${item.role}`}>{roleIcons[item.role]}</span>
                     <div className="mc-upload-main">
                       <div className="mc-upload-line">
@@ -264,7 +274,10 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
                     {(item.state === "failed" || (item.state === "canceled" && item.to)) && (
                       <button type="button" className="mc-icon-button small" aria-label={`重试${item.file.name}`} title="重试" onClick={() => uploads.retry(item.id)}><RotateCcw /></button>
                     )}
-                    {(item.state === "waiting" || item.state === "uploading") && (
+                    {item.state === "paused" && (
+                      <button type="button" className="mc-icon-button small" aria-label={`继续上传${item.file.name}`} title="继续" onClick={() => uploads.retry(item.id)}><Play /></button>
+                    )}
+                    {(item.state === "waiting" || item.state === "uploading" || item.state === "paused") && (
                       <button type="button" className="mc-icon-button small" aria-label={`取消上传${item.file.name}`} title="取消" onClick={() => uploads.cancel(item.id)}><X /></button>
                     )}
                     {(item.state === "ready" || item.state === "skipped") && (
@@ -304,6 +317,14 @@ export function UploadPill({ uploads, onOpen }: { uploads: Uploads; onOpen: () =
   const progress = progressOf(uploads.items);
   if (!uploads.running && !progress.failed) return null;
   const share = Math.floor(progress.share * 100);
+  const hold = uploads.running ? uploads.items.find((item) => item.hold)?.hold : undefined;
+  if (hold) {
+    return (
+      <button type="button" className="mc-upload-pill held" onClick={onOpen} aria-label={`上传已暂停：${holdText[hold].title}，${holdText[hold].next}，查看上传列表`}>
+        <CircleAlert /><span>{holdText[hold].title}</span>
+      </button>
+    );
+  }
   return (
     <button type="button" className={`mc-upload-pill ${uploads.running ? "" : "failed"}`} onClick={onOpen}
       aria-label={uploads.running ? `正在上传，已完成 ${share}%，查看上传列表` : `${progress.failed} 个文件上传失败，查看上传列表`}>

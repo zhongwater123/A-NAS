@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { failureText } from "../transfers/model";
-import { type LocalUpload, transferStore, useTransfers } from "../transfers/store";
+import { type Hold, type LocalUpload, transferStore, useTransfers } from "../transfers/store";
 
 // The files a library scan reads: the scanner's video extensions plus the
 // subtitles, NFO documents and artwork it picks up beside them.
@@ -58,10 +58,13 @@ async function walk(entry: FileSystemEntry, folder: string): Promise<Picked[]> {
 // Where a batch goes: a folder of a library, by its file entry.
 export interface Destination { libraryId: string; libraryName: string; spaceId: string; spaceKind: "private" | "shared"; parentId: string; place: string }
 
-export type UploadState = "ready" | "waiting" | "uploading" | "done" | "exists" | "skipped" | "failed" | "canceled";
-export interface UploadItem { id: number; file: File; folder: string; role: FileRole; state: UploadState; progress: number; error?: string; to?: Destination }
+export type UploadState = "ready" | "waiting" | "uploading" | "paused" | "done" | "exists" | "skipped" | "failed" | "canceled";
+// hold says why a waiting file does not move: the whole queue waits for the
+// network, a new sign-in, the data volume or free space.
+export interface UploadItem { id: number; file: File; folder: string; role: FileRole; state: UploadState; progress: number; error?: string; hold?: Hold; to?: Destination }
 
-const active = (item: UploadItem) => item.state === "waiting" || item.state === "uploading";
+// A paused file is unfinished too: the batch has not settled.
+const active = (item: UploadItem) => item.state === "waiting" || item.state === "uploading" || item.state === "paused";
 const hidden = (picked: Picked) => [...picked.folder.split("/"), picked.file.name].some((part) => part.startsWith(".")) || /^(thumbs\.db|desktop\.ini)$/i.test(picked.file.name);
 
 export interface Uploads {
@@ -82,7 +85,7 @@ export interface Uploads {
 interface Staged { id: number; file: File; folder: string; role: FileRole; key?: string; to?: Destination }
 
 // stateOf tells a queued upload's state in the media center's words.
-function stateOf(upload: LocalUpload): Pick<UploadItem, "state" | "progress" | "error"> {
+function stateOf(upload: LocalUpload): Pick<UploadItem, "state" | "progress" | "error" | "hold"> {
   const progress = upload.size ? Math.min(1, upload.transferred / upload.size) : 0;
   switch (upload.phase) {
     case "running": return { state: "uploading", progress };
@@ -90,7 +93,8 @@ function stateOf(upload: LocalUpload): Pick<UploadItem, "state" | "progress" | "
     case "skipped": return { state: "exists", progress: 0 };
     case "failed": return { state: "failed", progress: 0, error: upload.error?.code === "forbidden" ? "没有权限上传到这个文件夹" : failureText(upload.error?.code ?? "") };
     case "canceled": return { state: "canceled", progress: 0 };
-    default: return { state: "waiting", progress };
+    case "paused": return { state: "paused", progress };
+    default: return { state: "waiting", progress, hold: upload.hold };
   }
 }
 

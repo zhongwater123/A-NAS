@@ -37,7 +37,8 @@ const post = (): RequestInit => ({ method: "POST" });
 
 export const uploadEndpoint = "/api/v1/uploads";
 export const uploadURL = (transferId: string) => `${uploadEndpoint}/${id(transferId)}`;
-export const listTransfers = async () => (await request<{ items: Transfer[] }>(base)).items;
+// A poll that gets no answer gives up, so a dead connection cannot stop polling.
+export const listTransfers = async () => (await request<{ items: Transfer[] }>(base, { signal: AbortSignal.timeout(10_000) })).items;
 export const getTransfer = (transferId: string) => request<Transfer>(`${base}/${id(transferId)}`);
 export const createDownload = (entryIds: string[]) => request<Transfer>(`${base}/downloads`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entryIds }) }, true);
 export const pauseTransfer = (transferId: string) => request<Transfer>(`${base}/${id(transferId)}/pause`, post(), true);

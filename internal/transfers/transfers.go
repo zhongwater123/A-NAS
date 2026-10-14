@@ -188,6 +188,9 @@ type liveTransfer struct {
 	lastActivity time.Time
 	dirty        bool
 	canceled     bool
+	// cut is set when the browser's connection dropped in the middle of a
+	// part, until the next part begins.
+	cut bool
 	// cancel stops the request streaming a download.
 	cancel context.CancelFunc
 }
@@ -443,6 +446,7 @@ func (s *Service) begin(live *liveTransfer) bool {
 	}
 	live.active++
 	live.lastActivity = s.now()
+	live.cut = false
 	if live.transfer.State != StateRunning {
 		live.transfer.State = StateRunning
 		live.dirty = true
@@ -588,7 +592,9 @@ func (s *Service) newID(direction Direction) string {
 func (l *liveTransfer) snapshot(now time.Time) Transfer {
 	t := l.transfer
 	t.BytesPerSecond = l.meter.rate(now)
-	if t.Direction == Upload && t.State == StateRunning && l.active == 0 && now.Sub(l.lastActivity) > interruptedAfter {
+	// An upload is interrupted once its connection dropped mid-part, or when
+	// nothing arrived for interruptedAfter.
+	if t.Direction == Upload && t.State == StateRunning && l.active == 0 && (l.cut || now.Sub(l.lastActivity) > interruptedAfter) {
 		t.State = StateInterrupted
 		t.BytesPerSecond = 0
 	}

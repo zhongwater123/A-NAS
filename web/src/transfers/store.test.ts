@@ -29,7 +29,7 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 const api = vi.hoisted(() => ({ sessionEnded: vi.fn() }));
 vi.mock("../api", async (original) => ({ ...(await original<typeof import("../api")>()), sessionEnded: api.sessionEnded }));
 
-import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
+import { classifyUploadError, stallAfter, TransferStore, type UploadTarget } from "./store";
 import type { Transfer } from "./transfersApi";
 
 const target: UploadTarget = { spaceId: "space:shared", spaceKind: "shared", parentId: "file:photos", folders: [{ id: "file:photos", name: "照片" }] };
@@ -187,6 +187,49 @@ describe("the upload queue", () => {
     expect(result).toEqual({ matched: 1, unmatched: 2 });
     expect(tus.uploads[0].options).toMatchObject({ uploadUrl: "/api/v1/uploads/upload-x", endpoint: null });
     expect(store.getSnapshot().uploads[0]).toMatchObject({ transferred: 4, target: { parentId: "file:photos" } });
+  });
+
+  it("drops an upload whose connection hangs and resumes it once the NAS answers", async () => {
+    store.enqueue([{ file: file("film.mkv") }], target);
+    tus.uploads[0].created("upload-a");
+    tus.uploads[0].options.onProgress(4, 10);
+    // The NAS lost power: nothing fails, nothing moves.
+    await vi.advanceTimersByTimeAsync(stallAfter + 1000);
+    expect(tus.uploads[0].aborted).toBe(1);
+    expect(store.getSnapshot()).toMatchObject({ holds: ["offline"], uploads: [{ phase: "waiting", hold: "offline" }] });
+    // Once the NAS answers again, the upload asks it where to go on from.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls).toContainEqual({ path: "/api/v1/session", method: "GET" });
+    expect(tus.uploads[1].options).toMatchObject({ uploadUrl: "/api/v1/uploads/upload-a", endpoint: null });
+    expect(phases()).toEqual(["running"]);
+  });
+
+  it("resumes a file a closed page left part-way when its folder is uploaded again", async () => {
+    // 人世间/Season 1 was made inside 影视 when the closed page began E01.
+    const films: UploadTarget = { spaceId: "space:shared", spaceKind: "shared", parentId: "file:films", folders: [] };
+    const season = [{ id: "file:films", name: "影视" }, { id: "file:show", name: "人世间" }, { id: "file:s1", name: "Season 1" }];
+    const left = (id: string, name: string, state: Transfer["state"]): Transfer => ({
+      id, direction: "upload", kind: "file", name, location: { spaceId: "space:shared", spaceKind: "shared", folders: season },
+      totalBytes: 10, transferredBytes: 6, bytesPerSecond: 0, state, batch: "b-old", lastModified: 1_760_000_000_000,
+      createdAt: "2026-10-13T08:00:00Z", updatedAt: "2026-10-13T08:00:00Z",
+    });
+    // E02's connection closed a moment ago; the NAS has not noticed yet.
+    server = [left("upload-e01", "人世间 S01E01.mkv", "interrupted"), left("upload-e02", "人世间 S01E02.mkv", "running")];
+    await store.refresh();
+    const directories = ["人世间", "Season 1"];
+    store.enqueue([
+      { file: file("人世间 S01E01.mkv"), directories: ["人世间", "Season 2"] },
+      { file: file("人世间 S01E01.mkv"), directories },
+      { file: file("人世间 S01E02.mkv"), directories },
+    ], films, { choice: "skip" });
+    // The same file bound for another folder is a new upload; the ones bound
+    // for Season 1 continue from byte 6.
+    expect(tus.uploads.map((upload) => [upload.options.endpoint, upload.options.uploadUrl])).toEqual([
+      ["/api/v1/uploads", null], [null, "/api/v1/uploads/upload-e01"], [null, "/api/v1/uploads/upload-e02"],
+    ]);
+    expect(store.getSnapshot().uploads[1]).toMatchObject({ transferId: "upload-e01", transferred: 6 });
+    // The left-behind upload is now this page's, no longer offered to pick again.
+    expect(store.reattach([file("人世间 S01E01.mkv")])).toEqual({ matched: 0, unmatched: 1 });
   });
 
   it("shows the upload speed of a batch of files too short to have their own", async () => {

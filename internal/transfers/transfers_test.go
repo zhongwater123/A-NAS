@@ -182,6 +182,36 @@ func TestUploadIsFollowedUntilSavedAndOnlyItsOwnerSeesIt(t *testing.T) {
 	}
 }
 
+// cutReader stands in for a connection that drops after some bytes.
+type cutReader struct{ data io.Reader }
+
+func (c cutReader) Read(buffer []byte) (int, error) {
+	count, err := c.data.Read(buffer)
+	if errors.Is(err, io.EOF) {
+		return count, errors.New("connection reset by peer")
+	}
+	return count, err
+}
+
+func TestUploadCutMidPartIsInterruptedAtOnce(t *testing.T) {
+	f := newFixture(t)
+	upload := f.beginUpload(t, f.alice, "第 1 集.mkv", 10)
+	if _, err := f.service.WriteUpload(f.ctx, f.alice, upload.ID, 0, cutReader{strings.NewReader("0123")}); !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("WriteUpload() over a dropped connection error = %v, want ErrInterrupted", err)
+	}
+	// A closed page is seen at once, not interruptedAfter later, so its
+	// files picked again right away resume rather than start over.
+	if got := f.state(t, f.alice, upload.ID); got.State != StateInterrupted || got.TransferredBytes != 4 {
+		t.Fatalf("after a dropped connection: %#v", got)
+	}
+	if _, err := f.service.WriteUpload(f.ctx, f.alice, upload.ID, 4, strings.NewReader("45")); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.state(t, f.alice, upload.ID); got.State != StateRunning || got.TransferredBytes != 6 {
+		t.Fatalf("after resuming: %#v", got)
+	}
+}
+
 func TestUploadKeepsBothAndReportsTheSavedName(t *testing.T) {
 	f := newFixture(t)
 	first := f.beginUpload(t, f.alice, "a.txt", 1)

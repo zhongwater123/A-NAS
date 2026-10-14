@@ -139,22 +139,27 @@ function HoldBanner({ hold }: { hold: Hold }) {
 // stopped: picking the same files again resumes them where they stopped.
 function LeftBehind({ count, ids, onResult }: { count: number; ids: string[]; onResult: (message: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement | null>(null);
+  const picked = (list: FileList | null) => {
+    const files = Array.from(list ?? []);
+    if (!files.length) return;
+    const { matched, unmatched } = transferStore.reattach(files);
+    onResult(matched ? `已继续 ${matched} 个上传${unmatched ? `；其余 ${unmatched} 个文件不在中断的上传中，未处理` : ""}。` : "选择的文件与中断的上传不一致：名称、大小和修改时间都需要相同。");
+  };
   return (
     <div className="tc-banner info" role="status">
       <span className="tc-banner-icon"><FolderUp /></span>
       <div>
         <strong>{count} 个上传在上次中断</strong>
-        <span>浏览器不能自动读取原来的文件。重新选择相同的文件，上传会从中断处继续，已上传的部分不必重传。</span>
+        <span>浏览器不能自动读取原来的文件。重新选择相同的文件或所在文件夹，上传会从中断处继续，已上传的部分不必重传。</span>
       </div>
       <button type="button" className="tc-button primary" onClick={() => input.current?.click()}><Play />选择文件继续</button>
+      <button type="button" className="tc-button" onClick={() => folderInput.current?.click()}><FolderOpen />选择文件夹</button>
       <button type="button" className="tc-button" onClick={() => transferStore.abandon(ids)}>全部放弃</button>
-      <input ref={input} type="file" multiple hidden onChange={(event) => {
-        const files = Array.from(event.target.files ?? []);
-        event.target.value = "";
-        if (!files.length) return;
-        const { matched, unmatched } = transferStore.reattach(files);
-        onResult(matched ? `已继续 ${matched} 个上传${unmatched ? `，${unmatched} 个文件与中断的上传不一致` : ""}。` : "选择的文件与中断的上传不一致：名称、大小和修改时间都需要相同。");
-      }} />
+      <input ref={input} type="file" multiple hidden aria-label="选择中断的文件" onChange={(event) => { picked(event.target.files); event.target.value = ""; }} />
+      {/* React has no prop for choosing a whole folder. */}
+      <input ref={(element) => { folderInput.current = element; element?.setAttribute("webkitdirectory", ""); }} type="file" multiple hidden aria-label="选择中断的文件所在的文件夹"
+        onChange={(event) => { picked(event.target.files); event.target.value = ""; }} />
     </div>
   );
 }

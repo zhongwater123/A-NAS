@@ -132,6 +132,22 @@ describe("传输中心", () => {
     expect(screen.getByText(/已继续 1 个上传/)).toBeTruthy();
   });
 
+  it("continues a season left behind from its folder picked again", async () => {
+    const left = (id: string, name: string) => transfer({
+      id, direction: "upload", name, totalBytes: 4, transferredBytes: 2, state: "interrupted", lastModified: 7, contentUrl: undefined, finishedAt: undefined,
+    });
+    server = [left("upload-e01", "S01E01.mkv"), left("upload-e02", "S01E02.mkv")];
+    transferStore.attach("user:alice");
+    render(<TransferCenter onOpenFiles={() => undefined} onOpenLocation={() => undefined} />);
+    const user = userEvent.setup();
+    expect(await screen.findByText("2 个上传在上次中断")).toBeTruthy();
+    // The folder also holds an episode that finished before the page closed.
+    await user.upload(screen.getByLabelText("选择中断的文件所在的文件夹"), ["S01E01.mkv", "S01E02.mkv", "S01E03.mkv"].map((name) => new File(["abcd"], name, { lastModified: 7 })));
+    await waitFor(() => expect(tus.uploads).toHaveLength(2));
+    expect(tus.uploads.map((upload) => upload.options.uploadUrl)).toEqual(["/api/v1/uploads/upload-e01", "/api/v1/uploads/upload-e02"]);
+    expect(screen.getByText("已继续 2 个上传；其余 1 个文件不在中断的上传中，未处理。")).toBeTruthy();
+  });
+
   it("shows where to start when nothing moves", async () => {
     transferStore.attach("user:alice");
     open();

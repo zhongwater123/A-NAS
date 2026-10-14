@@ -97,6 +97,11 @@ const noRates: TransferRates = { upload: 0, download: 0, batches: {} };
 export const parallelUploads = 3;
 const chunkSize = 8 * 1024 * 1024;
 const retryDelays = [0, 1000, 3000, 6000, 10000];
+// A connection to a NAS that lost power, or whose cable came out, can hang
+// without failing. An upload that moves nothing for stallAfter is taken as
+// cut off, and a check that the NAS answers gives up after answerWithin.
+export const stallAfter = 30_000;
+const answerWithin = 10_000;
 const unfinishedPhases: UploadPhase[] = ["queued", "running", "paused", "waiting", "conflict"];
 
 export type FailureKind = "network" | "file" | "session" | "denied" | "conflict" | "missing" | "lost" | "invalid" | "volume" | "space" | "toolarge" | "busy" | "canceled" | "server";
@@ -156,6 +161,8 @@ export class TransferStore {
   // NAS transfer had moved at the previous poll, once the first poll ran.
   private sent = new Map<string, number>();
   private seen?: Map<string, number>;
+  // movedAt is when each running upload last moved a byte, or started.
+  private movedAt = new Map<string, number>();
   private rateTimer?: ReturnType<typeof setInterval>;
   private userID?: string;
   private counter = 0;
@@ -196,6 +203,7 @@ export class TransferStore {
     this.moved = { upload: 0, download: 0, batches: new Map() };
     this.meters = { upload: new RateMeter(), download: new RateMeter(), batches: new Map(), items: new Map() };
     this.sent.clear();
+    this.movedAt.clear();
     this.seen = undefined;
     clearInterval(this.rateTimer);
     this.rateTimer = undefined;
@@ -221,14 +229,24 @@ export class TransferStore {
   }
 
   // enqueue queues files as one batch; choice answers its name conflicts in
-  // advance, for callers that never want to be asked.
+  // advance, for callers that never want to be asked. A file a closed page
+  // left part-way to the same folder resumes where it stopped instead of
+  // starting over, whichever app picked it again.
   enqueue(files: Array<{ file: File; directories?: string[] }>, target: UploadTarget, options: { choice?: ConflictChoice } = {}): string {
     const now = Date.now();
     const batch = `b-${now.toString(36)}-${(this.counter += 1).toString(36)}`;
-    const uploads = files.map(({ file, directories = [] }): LocalUpload => ({
-      key: `u${(this.counter += 1)}`, batch, file, name: file.name, directories, size: file.size, target,
-      conflict: "ask", phase: "queued", transferred: 0, speed: 0, createdAt: now,
-    }));
+    // The NAS may not yet have noticed that a page closed a moment ago, so an
+    // upload it still calls running counts too; once it notices, the resumed
+    // upload asks it again where to go on from.
+    const left = this.leftBehind(true);
+    const uploads = files.map(({ file, directories = [] }): LocalUpload => {
+      const index = left.findIndex((transfer) => sameFile(transfer, file) && leftIn(transfer, target, directories));
+      const [resumed] = index < 0 ? [] : left.splice(index, 1);
+      return {
+        key: `u${(this.counter += 1)}`, batch, file, name: file.name, directories, size: file.size, target,
+        conflict: "ask", phase: "queued", transferred: resumed?.transferredBytes ?? 0, transferId: resumed?.id, speed: 0, createdAt: now,
+      };
+    });
     this.set({ uploads: [...this.snapshot.uploads, ...uploads], batches: [...this.snapshot.batches, { id: batch, target, createdAt: now, choice: options.choice }] });
     this.schedule();
     return batch;
@@ -330,13 +348,12 @@ export class TransferStore {
   // browser may only read files the user picks again, so the picked files are
   // matched by name, size and modification time.
   reattach(files: File[]) {
-    const owned = new Set(this.snapshot.uploads.map((upload) => upload.transferId));
-    const candidates = this.snapshot.server.filter((transfer) => transfer.direction === "upload" && (transfer.state === "paused" || transfer.state === "interrupted") && !owned.has(transfer.id));
+    const candidates = this.leftBehind();
     const now = Date.now();
     const uploads: LocalUpload[] = [];
     const batches = new Map<string, UploadBatch>();
     for (const file of files) {
-      const index = candidates.findIndex((transfer) => transfer.name === file.name && transfer.totalBytes === file.size && (!transfer.lastModified || transfer.lastModified === file.lastModified));
+      const index = candidates.findIndex((transfer) => sameFile(transfer, file));
       if (index < 0) continue;
       const [transfer] = candidates.splice(index, 1);
       const target: UploadTarget = { ...transfer.location, parentId: transfer.location.folders.at(-1)?.id ?? "" };
@@ -352,6 +369,15 @@ export class TransferStore {
       this.schedule();
     }
     return { matched: uploads.length, unmatched: files.length - uploads.length };
+  }
+
+  // leftBehind lists the unfinished uploads no page of this browser sends:
+  // ones a closed or reloaded page stopped, or another browser paused, and
+  // with running those the NAS still thinks are being sent.
+  private leftBehind(running = false) {
+    const owned = new Set(this.snapshot.uploads.flatMap((upload) => [upload.transferId, ...(upload.superseded ?? [])]));
+    const states: Transfer["state"][] = running ? ["paused", "interrupted", "running"] : ["paused", "interrupted"];
+    return this.snapshot.server.filter((transfer) => transfer.direction === "upload" && states.includes(transfer.state) && !owned.has(transfer.id));
   }
 
   // abandon cancels uploads a closed page left behind.
@@ -442,6 +468,7 @@ export class TransferStore {
     this.update(task.key, { phase: "running", error: undefined, hold: undefined });
     // A resumed upload counts only the bytes it sends from now on.
     this.sent.set(task.key, task.transferred);
+    this.movedAt.set(task.key, Date.now());
     this.meters.items.set(task.key, new RateMeter());
     // A known upload resumes without an endpoint, so that tus-js-client
     // reports a lost upload instead of quietly starting a second one.
@@ -474,6 +501,7 @@ export class TransferStore {
   private progress(key: string, sent: number) {
     const current = this.find(key);
     if (!current || current.phase !== "running") return;
+    this.movedAt.set(key, Date.now());
     this.count(key, current.batch, sent);
     const meter = this.meters.items.get(key);
     meter?.add(Date.now(), sent);
@@ -535,6 +563,13 @@ export class TransferStore {
   // a pause after which its next part would show as a burst of speed.
   private tick() {
     const now = Date.now();
+    // A stalled connection would hold its browser connection slot forever;
+    // dropping it lets the queue wait for the NAS and resume from its offset.
+    const stalled = [...this.running.keys()].find((key) => now - (this.movedAt.get(key) ?? now) > stallAfter);
+    if (stalled) {
+      void this.running.get(stalled)?.abort(false);
+      this.failed(stalled, Object.assign(new Error("the upload moved nothing for a while"), { originalRequest: { getMethod: () => "PATCH" }, originalResponse: null }));
+    }
     const running = [...this.snapshot.uploads, ...this.snapshot.external].filter((upload) => upload.phase === "running");
     if (running.length) this.meters.upload.add(now, this.moved.upload);
     for (const upload of this.snapshot.uploads) if (upload.phase === "running") this.meters.items.get(upload.key)?.add(now, upload.transferred);
@@ -664,7 +699,7 @@ export class TransferStore {
   private async probe(hold: Hold) {
     if (hold !== "offline") { this.release(hold); return; }
     try {
-      const response = await fetch("/api/v1/session", { credentials: "same-origin", headers: { Accept: "application/json" } });
+      const response = await fetch("/api/v1/session", { credentials: "same-origin", headers: { Accept: "application/json" }, signal: AbortSignal.timeout(answerWithin) });
       if (response.status === 401) { this.release("offline"); this.hold("session", ""); sessionEnded(); return; }
       this.release("offline");
     } catch {
@@ -730,6 +765,24 @@ export class TransferStore {
 
 function sameTarget(left: UploadTarget, right: UploadTarget) {
   return left.spaceId === right.spaceId && left.parentId === right.parentId;
+}
+
+// sameFile tells whether a picked file is the one an upload began with; the
+// browser only gives its name, size and modification time.
+function sameFile(transfer: Transfer, file: File) {
+  return transfer.name === file.name && transfer.totalBytes === file.size && (!transfer.lastModified || transfer.lastModified === file.lastModified);
+}
+
+// leftIn tells whether an upload was bound for the folder a file picked now
+// goes to: the target folder, then the folders the file was picked within,
+// which the NAS made when the upload began.
+function leftIn(transfer: Transfer, target: UploadTarget, directories: string[]) {
+  if (transfer.location.spaceId !== target.spaceId) return false;
+  const folders = transfer.location.folders;
+  const below = target.parentId ? folders.findIndex((folder) => folder.id === target.parentId) + 1 : 0;
+  if (target.parentId && below === 0) return false;
+  const names = folders.slice(below).map((folder) => folder.name);
+  return names.length === directories.length && names.every((name, index) => name === directories[index]);
 }
 
 // fetchDownload lets the browser save a download as it saves any file.

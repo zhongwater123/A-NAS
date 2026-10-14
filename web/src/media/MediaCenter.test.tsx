@@ -63,6 +63,10 @@ const tus = vi.hoisted(() => {
         originalResponse: { getStatus: () => status, getBody: () => JSON.stringify({ error: { code, message: code } }) },
       }));
     }
+    // drop loses the connection mid-part.
+    drop() {
+      this.options.onError(Object.assign(new Error("network"), { originalRequest: { getMethod: () => "PATCH" }, originalResponse: null }));
+    }
   }
   const uploads: FakeUpload[] = [];
   return { FakeUpload, uploads };
@@ -310,6 +314,32 @@ describe("MediaCenter", () => {
     act(() => { tus.uploads[1].fail(409, "name_conflict"); tus.uploads[0].options.onSuccess(); });
     expect(await within(dialog).findByText("同名文件已存在，未覆盖")).toBeTruthy();
     expect(within(dialog).getByText("已上传 1 个，1 个已存在")).toBeTruthy();
+  });
+
+  it("says why uploads wait and continues the ones paused elsewhere", async () => {
+    serve([library]);
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /电视剧/ }));
+    await user.click(await screen.findByRole("button", { name: "上传" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    fireEvent.change(within(dialog).getByLabelText("选择要上传的文件夹"), {
+      target: { files: ["人世间 S01E01.mkv", "人世间 S01E02.mkv"].map((name) => withPath(new File(["clip"], name), `人世间/Season 1/${name}`)) },
+    });
+    await user.click(within(dialog).getByRole("button", { name: "上传 2 个文件" }));
+    // The network drops: every file waits for it, and the dialog says so.
+    act(() => { tus.uploads[0].drop(); });
+    expect(within(dialog).getAllByText("与 NAS 的连接中断")).toHaveLength(2);
+    expect(within(dialog).getByText(/恢复后自动继续/)).toBeTruthy();
+    act(() => { transferStore.release("offline"); });
+    expect(tus.uploads).toHaveLength(4);
+    expect(within(dialog).queryByText("与 NAS 的连接中断")).toBeNull();
+    // Paused from the transfer center, a file can continue from here.
+    act(() => { transferStore.pause(transferStore.getSnapshot().uploads[1].key); });
+    expect(within(dialog).getByText("已暂停")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "继续上传人世间 S01E02.mkv" }));
+    expect(transferStore.getSnapshot().uploads[1].phase).toBe("running");
   });
 
   it("keeps uploading to a library chosen from its card after the dialog closes", async () => {

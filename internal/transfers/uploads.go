@@ -112,6 +112,11 @@ func (s *Service) WriteUpload(ctx context.Context, owner accounts.User, id strin
 		return written, ErrCanceled
 	}
 	if err != nil && (counted.failed != nil && errors.Is(err, counted.failed) || ctx.Err() != nil) {
+		// The browser went away, perhaps with its page: show the upload
+		// interrupted now, so picking the file again soon resumes it.
+		s.mu.Lock()
+		live.cut = true
+		s.mu.Unlock()
 		return written, fmt.Errorf("%w: %v", ErrInterrupted, err)
 	}
 	return written, err
