@@ -250,6 +250,7 @@ export const moveFile = (fileId: string, parentId: string, name: string, spaceId
 export const copyFile = (fileId: string, parentId: string, name: string, spaceId?: string) => request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}/copies`, json({ spaceId, parentId, name }), true);
 export const deleteFile = (fileId: string) => request<TrashItem>(`/api/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
 export const fileDownloadURL = (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/content`;
+export const fileRenderedPreviewURL = (fileId: string, size: "thumbnail" | "preview") => `/api/v1/files/${encodeURIComponent(fileId)}/preview?size=${size}`;
 export const filePreviewURL = (fileId: string) => `${fileDownloadURL(fileId)}?disposition=inline`;
 export async function readFileTextPreview(fileId: string) {
   const response = await fetch(fileDownloadURL(fileId));

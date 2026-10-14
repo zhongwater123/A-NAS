@@ -4,21 +4,24 @@ import (
 	"strconv"
 )
 
-// Tools names the FFmpeg binaries.
+// Tools names the media decoder binaries.
 type Tools struct {
-	FFmpeg  string
-	FFprobe string
+	FFmpeg          string
+	FFprobe         string
+	HEIFThumbnailer string
 }
 
 func seconds(value float64) string { return strconv.FormatFloat(value, 'f', 3, 64) }
 
 // command builds the program and arguments for a validated request. The
 // input is always the descriptor on standard input, read through FFmpeg's
-// fd: protocol, which can seek in a regular file; the output is standard
+// fd: protocol or libheif reopening worker-owned memory; output is standard
 // output.
 func (t Tools) command(request Request) (string, []string) {
 	quiet := []string{"-hide_banner", "-v", "error"}
 	switch request.Op {
+	case OpImage:
+		return t.HEIFThumbnailer, []string{"-p", "-s", strconv.Itoa(request.Width), "/proc/self/fd/0", "/proc/self/fd/1"}
 	case OpProbe:
 		return t.FFprobe, append(quiet, "-print_format", "json", "-show_format", "-show_streams", "-i", "fd:")
 	case OpFrame:

@@ -1,9 +1,10 @@
 import { ChevronLeft, ChevronRight, Download, ExternalLink, ImageOff, X, ZoomIn, ZoomOut } from "lucide-react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 
-import { filePreviewURL, type FileEntry } from "../api";
+import { type FileEntry } from "../api";
 import { formatBytes } from "../bytes";
 import { isPDFPreviewable } from "../fileTypes";
+import { fileVisualURL } from "./preview";
 import "./viewer.css";
 
 // FileViewer shows the images and PDFs of the open folder over the file
@@ -53,7 +54,7 @@ export function FileViewer({ entries, index, onIndex, onClose, onDownload }: {
               {zoomed ? <ZoomOut /> : <ZoomIn />}
             </button>
           )}
-          <a className="fv-icon" href={filePreviewURL(entry.id)} target="_blank" rel="noopener noreferrer" aria-label="在新标签页打开" title="在新标签页打开"><ExternalLink /></a>
+          <a className="fv-icon" href={fileVisualURL(entry)} target="_blank" rel="noopener noreferrer" aria-label="在新标签页打开" title="在新标签页打开"><ExternalLink /></a>
           <button type="button" className="fv-download" onClick={() => onDownload(entry)}><Download />下载</button>
           <button type="button" className="fv-icon" aria-label="关闭预览" title="关闭 (Esc)" onClick={onClose}><X /></button>
         </div>
@@ -61,12 +62,12 @@ export function FileViewer({ entries, index, onIndex, onClose, onDownload }: {
 
       <div className={`fv-stage${zoomed ? " zoomed" : ""}`} onClick={(event) => { if (event.target === event.currentTarget && !zoomed) onClose(); }}>
         {pdf ? (
-          <iframe key={entry.id} className="fv-pdf" src={filePreviewURL(entry.id)} title={entry.name} />
+          <iframe key={entry.id} className="fv-pdf" src={fileVisualURL(entry)} title={entry.name} />
         ) : state === "failed" ? (
           <div className="fv-failed" role="alert">
             <ImageOff />
             <strong>无法预览这张图片</strong>
-            <span>浏览器无法显示它的内容，下载后用其他应用打开。</span>
+            <span>暂时无法生成或显示预览，下载后用其他应用打开。</span>
             <button type="button" className="fv-download" onClick={() => onDownload(entry)}><Download />下载</button>
           </div>
         ) : (
@@ -75,7 +76,7 @@ export function FileViewer({ entries, index, onIndex, onClose, onDownload }: {
             <img
               key={entry.id}
               className={state === "ready" ? "ready" : ""}
-              src={filePreviewURL(entry.id)}
+              src={fileVisualURL(entry)}
               alt={entry.name}
               draggable={false}
               title={zoomed ? "点击适合窗口" : "点击查看实际大小"}

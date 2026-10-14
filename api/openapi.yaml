@@ -293,6 +293,33 @@ paths:
       responses:
         "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+  /api/v1/files/{fileId}/preview:
+    get:
+      operationId: renderFilePreview
+      summary: Render a video frame or a HEIC/HEIF image after checking source-file access
+      description: Returns JPEG for videos and PNG for HEIC/HEIF. Each request reopens the source as the signed-in user, including cache hits. Browser caching is disabled. Originals are unchanged.
+      parameters:
+        - { $ref: "#/components/parameters/FileID" }
+        - { name: size, in: query, schema: { type: string, enum: [thumbnail, preview], default: thumbnail } }
+      responses:
+        "200":
+          description: A bounded image; thumbnail is 320 pixels and preview is 1600 pixels (HEIF longest edge, video width).
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "206":
+          description: Partial rendered image
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+
   /api/v1/files/{fileId}:
     patch:
       operationId: moveFile
@@ -1349,6 +1376,18 @@ paths:
       responses:
         "200": { description: The show, content: { application/json: { schema: { $ref: "#/components/schemas/MediaShowDetail" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: renameMediaShow
+      summary: Rename a show as the caller, its own folder and the episode files that carry its title
+      description: A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name.
+      parameters: [{ name: showId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 255 } } } } } }
+      responses:
+        "200": { description: The renamed show, content: { application/json: { schema: { $ref: "#/components/schemas/MediaShowDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/media/videos/{videoId}:
     get:
       operationId: getMediaVideo
@@ -3371,6 +3410,7 @@ components:
         addedAt: { type: string, format: date-time }
         artwork: { $ref: "#/components/schemas/MediaArtwork" }
         progress: { $ref: "#/components/schemas/MediaProgress" }
+        file: { type: string, description: The episode's file name. }
     MediaShowDetail:
       allOf:
         - { $ref: "#/components/schemas/MediaTitle" }
@@ -3389,6 +3429,8 @@ components:
                   number: { type: integer }
                   episodes: { type: array, items: { $ref: "#/components/schemas/MediaEpisode" } }
             collections: { type: array, items: { $ref: "#/components/schemas/MediaCollectionRef" } }
+            folder: { type: string, description: Name of the folder the show has to itself; absent when it has none. }
+            namedByNfo: { type: boolean, description: "tvshow.nfo gives the title, so renaming the show's files leaves it." }
     MediaVideoDetail:
       allOf:
         - { $ref: "#/components/schemas/MediaTitle" }
@@ -3418,6 +3460,7 @@ components:
                 height: { type: integer }
                 frameRate: { type: number }
                 bitrate: { type: integer }
+            namedByNfo: { type: boolean, description: "An NFO document gives the title, so renaming the file leaves it." }
             probeState: { type: string, enum: [pending, ready, failed] }
             audio:
               type: array

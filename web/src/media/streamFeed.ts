@@ -139,8 +139,8 @@ export class StreamFeed {
         this.appended = true;
         return;
       } catch (caught) {
-        // The browser's buffer is full, which a high-bitrate stream reaches
-        // before thirty seconds: like a full read-ahead, wait for playback
+        // The browser's buffer is full, which a long read-ahead or a high
+        // bitrate reaches first: like a full read-ahead, wait for playback
         // to use some, however long it is paused, dropping what has played.
         if (!(caught instanceof DOMException && caught.name === "QuotaExceededError") || this.closed) throw caught;
         await this.trim(buffer, 10);

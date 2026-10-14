@@ -6,6 +6,7 @@ import { CSSProperties, DragEvent, FormEvent, ReactNode, useEffect, useMemo, use
 import { createDirectory, listEntries, type FileEntry } from "../api";
 import { formatBytes } from "../bytes";
 import { messageOf } from "./Browse";
+import { Dropdown } from "./Dropdown";
 import { kindInfo } from "./Libraries";
 import type { Category, LibraryKind, MediaLibrary } from "./mediaApi";
 import { acceptedTypes, pickedFromDrop, pickedFromList, type Destination, type FileRole, type UploadItem, type Uploads } from "./uploads";
@@ -190,9 +191,8 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
                   <strong>{library.name}</strong>
                   {roots.length > 1 ? (
                     <span><ChevronRight />
-                      <select aria-label="媒体库文件夹" value={root?.entryId} onChange={(event) => { setRootId(event.target.value); setTrail([]); }}>
-                        {roots.map((folder) => <option key={folder.entryId} value={folder.entryId}>{folder.name}</option>)}
-                      </select>
+                      <Dropdown label="媒体库文件夹" value={root?.entryId ?? ""} onChange={(value) => { setRootId(value); setTrail([]); }}
+                        choices={roots.map((folder) => ({ value: folder.entryId, label: folder.name, hint: folder.path !== folder.name ? folder.path : undefined }))} />
                     </span>
                   ) : <span><ChevronRight /><button type="button" onClick={() => setTrail([])}>{root?.name}</button></span>}
                   {trail.map((crumb, index) => (
