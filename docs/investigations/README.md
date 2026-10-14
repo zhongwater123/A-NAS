@@ -23,6 +23,7 @@
 - [2026-10-13：闲时检测只用了约 1 个核](2026-10-13-idle-detection-used-one-core.md)（fixed locally；Experimental NAS verification pending）
 
 - [2026-10-14：文件管理没有视频缩略图，HEIC 照片不能预览](2026-10-14-file-media-previews.md)（fixed locally；Experimental NAS verification pending）
+- [2026-10-14：应用容器拿不到共享空间的组权限，root 镜像绕过 ACL](2026-10-14-app-containers-and-the-shared-acl.md)（fixed locally；Experimental NAS verification pending）
 
 ## 使用方式
 

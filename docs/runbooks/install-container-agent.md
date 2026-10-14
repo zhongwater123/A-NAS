@@ -220,6 +220,7 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 1. 打开“Docker”，应显示实时 Docker 版本和容器/镜像列表；空列表是有效状态，不应再显示“Docker 未启用”。
 2. 打开“应用中心”，应显示内置目录并可生成安装计划；实际安装前仍须确认镜像、端口与文件夹摘要。
 3. 首次验收可用专用测试容器核对停止、启动和日志，再删除测试容器。应用中心验收按[应用中心规格](../specs/app-center.md)使用一个可丢弃应用，确认应用身份、数据目录和卸载保留数据。
+4. 升级到带 [ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md) 运行规则的容器代理后，已安装的应用照旧运行，详情页提示“按旧的运行规则安装”。逐个在应用中心卸载（应用数据保留）再安装，新容器才按新规则运行；按原样运行不会扩大权限，但挂载共享空间、以 root 运行的旧安装（例如 Immich）会继续绕过共享空间的 ACL，应优先重装。重装后以 root 执行 `docker inspect -f '{{.Config.User}} {{.HostConfig.GroupAdd}} {{.HostConfig.CapDrop}}' <容器>` 核对，并确认 `id app-<id>` 不再列出 `a-nas-users`。
 
 本地屏保先从 `/local-console/screensavers` 读取匿名视频清单，再对清单中的 URL 发起 Range 请求；`/screensaver.mp4` 从来不是产品路由，`/local-console/screensaver.mp4` 只保留单视频兼容。切换脚本必须从清单取得媒体 URL 并单独打印每个 HTTP 状态，不能拼接或凭记忆写路径。
 

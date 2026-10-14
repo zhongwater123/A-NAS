@@ -64,6 +64,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 14. 受管图库存储只由相册服务身份访问，照片资产授权由相册 Policy 判定；个人空间与共享文件夹仍只由 ACL 授权，相册服务不获得其访问权（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
 15. 应用的 Docker 网络只从现场确认空闲的地址池分配，应用不能改变宿主机到局域网客户端的路由；地址池未配置时拒绝安装会新建网络的应用，安装后不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。应用挂载 A-NAS 卷时只得到计划中的子目录：容器代理在规划时检查 Compose 与 Engine 的最低版本，安装后核对挂载（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 16. 影视中心不持有存储：媒体文件只经文件代理以有效会话的用户身份读取，媒体库的可见性与所在空间的读权限一致；FFmpeg 只在没有网络、看不到数据卷与产品服务状态的按连接 Worker 中运行，只接收只读描述符（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）。
+17. 应用容器只以应用身份接触共享空间：服务以 `app-<id>` 启动，或由入口程序从 root 降到 `app-<id>`，并通过写在自身 Compose 中的 `a-nas-users` 组访问共享空间，挂载默认只读；保留镜像用户（可能是 root）的服务只能挂载自己的应用数据。宿主机账号的组成员关系不进入容器，容器代理安装后核对用户、组、能力与只读挂载（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）。
 
 ## 当前代码入口
 
@@ -73,7 +74,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
 | `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口与随机单视频循环屏保已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
-| `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
+| `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染（含每个服务的运行方式，[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）、Compose 执行任务与安装后核对、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
 | `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
 | `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
