@@ -280,7 +280,7 @@ function RowActions({ item }: { item: TransferItem }) {
     return <>
       {(item.status === "running" || item.status === "queued" || item.status === "waiting") && <IconButton label="暂停" onClick={() => transferStore.pause(local.key)}><Pause /></IconButton>}
       {item.status === "paused" && <IconButton label="继续" onClick={() => transferStore.resume(local.key)}><Play /></IconButton>}
-      {item.status === "failed" && <IconButton label="重试" onClick={() => transferStore.resume(local.key)}><RotateCcw /></IconButton>}
+      {item.status === "failed" && <IconButton label="重试" onClick={() => transferStore.retry(local.key)}><RotateCcw /></IconButton>}
       {["running", "queued", "waiting", "paused", "conflict", "failed"].includes(item.status) && <IconButton label="取消" danger onClick={() => transferStore.cancel(local.key)}><X /></IconButton>}
       {["completed", "canceled", "skipped"].includes(item.status) && <IconButton label="从列表移除" onClick={() => transferStore.dismiss(item.id)}><X /></IconButton>}
     </>;

@@ -191,8 +191,15 @@ type liveTransfer struct {
 	// cut is set when the browser's connection dropped in the middle of a
 	// part, until the next part begins.
 	cut bool
-	// cancel stops the request streaming a download.
+	// cancel stops the requests streaming a download.
 	cancel context.CancelFunc
+	// requests are the download's requests streaming now, by number. Several
+	// fetch one file at once when a browser resumes over a connection that
+	// has not died yet, or a download manager fetches ranges in parallel;
+	// base is the lowest offset they began at and sent what they sent since.
+	requests    map[uint64]context.CancelFunc
+	nextRequest uint64
+	base, sent  int64
 }
 
 // Open opens transfers.db and settles transfers a restart interrupted.
@@ -412,18 +419,66 @@ func (s *Service) track(owner accounts.User, t Transfer, upload *files.PendingUp
 	return live
 }
 
-// trackIdle follows a download unless another request already sends it; one
-// download goes over one connection at a time.
-func (s *Service) trackIdle(owner accounts.User, t Transfer, cancel context.CancelFunc) (*liveTransfer, bool) {
-	live := &liveTransfer{owner: owner, transfer: t, lastActivity: s.now(), cancel: cancel}
-	live.meter.reset(s.now(), t.TransferredBytes)
+// joinDownload follows one request for a download. Requests for a file share
+// its live transfer; a new request for an archive, which cannot be resumed,
+// stops the ones before it.
+func (s *Service) joinDownload(owner accounts.User, t Transfer, cancel context.CancelFunc) (*liveTransfer, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, busy := s.live[t.ID]; busy {
-		return nil, false
+	live, ok := s.live[t.ID]
+	if !ok {
+		live = &liveTransfer{owner: owner, transfer: t, requests: map[uint64]context.CancelFunc{}, base: -1}
+		live.meter.reset(s.now(), t.TransferredBytes)
+		live.cancel = func() {
+			for _, stop := range live.requests {
+				stop()
+			}
+		}
+		s.live[t.ID] = live
+	} else if t.Kind == KindArchive {
+		live.cancel()
 	}
-	s.live[t.ID] = live
-	return live, true
+	live.nextRequest++
+	live.requests[live.nextRequest] = cancel
+	live.active++
+	live.lastActivity = s.now()
+	live.transfer.State = StateRunning
+	live.transfer.Error, live.transfer.FinishedAt = nil, nil
+	live.dirty = true
+	return live, live.nextRequest
+}
+
+// leaveDownload ends a request for a download. last reports that no other
+// request streams it, so the caller settles it; it stops being followed then.
+func (s *Service) leaveDownload(live *liveTransfer, request uint64) (last, canceled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(live.requests, request)
+	live.active--
+	live.lastActivity = s.now()
+	if live.active > 0 {
+		return false, live.canceled
+	}
+	if current, ok := s.live[live.transfer.ID]; ok && current == live {
+		delete(s.live, live.transfer.ID)
+	}
+	return true, live.canceled
+}
+
+// downloadProgress records bytes a request for a file sent from start on.
+// Together the requests have moved the file from the lowest start onward.
+func (s *Service) downloadProgress(live *liveTransfer, start, bytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if live.base < 0 || start < live.base {
+		live.base = start
+	}
+	live.sent += bytes
+	now := s.now()
+	live.transfer.TransferredBytes = min(live.base+live.sent, live.transfer.TotalBytes)
+	live.lastActivity = now
+	live.dirty = true
+	live.meter.observe(now, live.transfer.TransferredBytes)
 }
 
 // progress records bytes moved by a live transfer.

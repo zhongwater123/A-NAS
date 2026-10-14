@@ -324,6 +324,17 @@ func TestDownloadOfAFileIsFollowedAndResumes(t *testing.T) {
 	if disposition := rest.Header().Get("Content-Disposition"); !strings.HasPrefix(disposition, "attachment") {
 		t.Fatalf("Content-Disposition = %q", disposition)
 	}
+	// A browser resuming a file that changed since gets it whole.
+	if etag := partial.Header().Get("ETag"); etag == "" || etag != rest.Header().Get("ETag") {
+		t.Fatalf("ETag = %q then %q", etag, rest.Header().Get("ETag"))
+	}
+	changed := httptest.NewRequest(http.MethodGet, download.ContentURL, nil)
+	changed.Header.Set("Range", "bytes=4-")
+	changed.Header.Set("If-Range", `"0-0"`)
+	whole := httptest.NewRecorder()
+	if _, err := f.service.ServeDownload(whole, changed, f.alice, download.ID); err != nil || whole.Code != http.StatusOK || whole.Body.String() != "0123456789" {
+		t.Fatalf("resume of a changed file = %d %q, %v", whole.Code, whole.Body.String(), err)
+	}
 	if got := f.state(t, f.alice, download.ID); got.State != StateCompleted || got.TransferredBytes != 10 || got.FinishedAt == nil {
 		t.Fatalf("after the rest: %#v", got)
 	}
@@ -432,6 +443,45 @@ func TestDownloadOfAFolderIsAZIPArchive(t *testing.T) {
 	}
 }
 
+func TestDownloadIsSentOverSeveralConnectionsAtOnce(t *testing.T) {
+	f := newFixture(t)
+	content := bytes.Repeat([]byte("0123456789abcdef"), 1<<16)
+	entry, err := f.files.Upload(f.ctx, f.alice, f.shared.ID, "", "电影.mkv", bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	download, err := f.service.CreateDownload(f.ctx, f.alice, []string{entry.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first connection stops taking data, as one whose network went away
+	// without closing it.
+	stale := &blockingWriter{ResponseRecorder: httptest.NewRecorder(), written: make(chan struct{}, 1), release: make(chan struct{})}
+	result := make(chan error, 1)
+	go func() {
+		_, err := f.service.ServeDownload(stale, httptest.NewRequest(http.MethodGet, download.ContentURL, nil), f.alice, download.ID)
+		result <- err
+	}()
+	<-stale.written
+	// The browser resumes, or a download manager fetches the second half, at
+	// the same time: neither is refused.
+	half := len(content) / 2
+	rest := f.serve(t, f.alice, download.ID, "bytes="+strconv.Itoa(half)+"-")
+	if rest.Code != http.StatusPartialContent || !bytes.Equal(rest.Body.Bytes(), content[half:]) {
+		t.Fatalf("parallel range = %d, %d bytes", rest.Code, rest.Body.Len())
+	}
+	if got := f.state(t, f.alice, download.ID); got.State != StateRunning {
+		t.Fatalf("while the first connection still sends: %#v", got)
+	}
+	close(stale.release)
+	if err := <-result; err != nil {
+		t.Fatalf("first connection: %v", err)
+	}
+	if got := f.state(t, f.alice, download.ID); got.State != StateCompleted || got.TransferredBytes != int64(len(content)) {
+		t.Fatalf("after both connections: %#v", got)
+	}
+}
+
 func TestCanceledDownloadStopsAndUnstartedOnesFail(t *testing.T) {
 	f := newFixture(t)
 	entry, err := f.files.Upload(f.ctx, f.alice, f.shared.ID, "", "slow.bin", bytes.NewReader(make([]byte, 1<<20)))
@@ -460,8 +510,12 @@ func TestCanceledDownloadStopsAndUnstartedOnesFail(t *testing.T) {
 	if got := f.state(t, f.alice, download.ID); got.State != StateCanceled {
 		t.Fatalf("canceled download = %#v", got)
 	}
-	if response := f.serve(t, f.alice, download.ID, ""); response.Code == http.StatusOK {
-		t.Fatal("a canceled download was sent again")
+	// Fetched again on purpose, a canceled download is sent anew.
+	if response := f.serve(t, f.alice, download.ID, ""); response.Code != http.StatusOK || response.Body.Len() != 1<<20 {
+		t.Fatalf("canceled download fetched again = %d, %d bytes", response.Code, response.Body.Len())
+	}
+	if got := f.state(t, f.alice, download.ID); got.State != StateCompleted {
+		t.Fatalf("canceled download fetched again = %#v", got)
 	}
 
 	unstarted, err := f.service.CreateDownload(f.ctx, f.alice, []string{entry.ID})

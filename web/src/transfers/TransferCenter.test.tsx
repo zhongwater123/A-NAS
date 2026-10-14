@@ -148,6 +148,15 @@ describe("传输中心", () => {
     expect(screen.getByText("已继续 2 个上传；其余 1 个文件不在中断的上传中，未处理。")).toBeTruthy();
   });
 
+  it("says a cut-off file download continues from the browser's download list", async () => {
+    server = [transfer({ state: "failed", transferredBytes: 512, error: { code: "interrupted", message: "" } })];
+    transferStore.attach("user:alice");
+    open();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /传输记录/ }));
+    expect(await screen.findByText("连接中断：在浏览器的下载列表中点“继续”可接着下载")).toBeTruthy();
+  });
+
   it("shows where to start when nothing moves", async () => {
     transferStore.attach("user:alice");
     open();

@@ -153,11 +153,38 @@ describe("the upload queue", () => {
     tus.uploads[1].created("upload-a2");
     tus.uploads[1].fail("HEAD", 404);
     expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "failed", error: { code: "upload_lost" } });
+    // Retrying it starts over rather than asking the NAS for it again.
+    store.retry(store.getSnapshot().uploads[0].key);
+    expect(tus.uploads[2].options).toMatchObject({ endpoint: "/api/v1/uploads", uploadUrl: null });
+    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", transferId: undefined, superseded: ["upload-a", "upload-a2"] });
+    tus.uploads[2].options.onSuccess();
 
     store.enqueue(["b", "c", "d", "e"].map((name) => ({ file: file(name) })), target);
     // The folder went away while b was being sent.
-    tus.uploads[2].fail("PATCH", 404, "not_found");
+    tus.uploads[3].fail("PATCH", 404, "not_found");
     expect(phases().slice(1)).toEqual(["failed", "running", "running", "failed"]);
+  });
+
+  it("waits while the NAS service restarts behind its web entry", async () => {
+    store.enqueue([{ file: file("film.mkv") }], target);
+    tus.uploads[0].created("upload-a");
+    // Caddy answers 502 until anas-api is back.
+    tus.uploads[0].fail("PATCH", 502);
+    expect(store.getSnapshot()).toMatchObject({ holds: ["offline"], uploads: [{ phase: "waiting", hold: "offline" }] });
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => (String(input) === "/api/v1/session" ? { ok: false, status: 502, json: async () => ({}) } as Response : answer(input, init)));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(store.getSnapshot().holds).toEqual(["offline"]);
+    vi.mocked(fetch).mockImplementation(answer);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(store.getSnapshot().holds).toEqual([]);
+    expect(tus.uploads[1].options.uploadUrl).toBe("/api/v1/uploads/upload-a");
+  });
+
+  it("says when too many uploads are unfinished instead of waiting forever", () => {
+    store.enqueue([{ file: file("a.jpg") }], target);
+    tus.uploads[0].fail("POST", 429, "too_many_uploads");
+    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "failed", error: { code: "too_many_uploads" } });
   });
 
   it("pauses, resumes and cancels on the NAS as well", async () => {

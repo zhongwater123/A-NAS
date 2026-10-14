@@ -82,7 +82,7 @@ export function transferItems(snapshot: TransferSnapshot): TransferItem[] {
     items.push({
       id: transfer.id, direction: transfer.direction, kind: transfer.kind, name: transfer.name, location: transfer.location,
       relativePath: transfer.relativePath, total: transfer.totalBytes, transferred: transfer.transferredBytes, speed: transfer.bytesPerSecond,
-      status: transfer.state, failure: transfer.error ? failureText(transfer.error.code) : undefined, savedName: transfer.savedName,
+      status: transfer.state, failure: transfer.error ? serverFailure(transfer) : undefined, savedName: transfer.savedName,
       replaced: transfer.replaced, skipped: transfer.skipped, createdAt: Date.parse(transfer.createdAt) || 0,
       finishedAt: transfer.finishedAt ? Date.parse(transfer.finishedAt) : undefined, batch: transfer.batch, server: transfer,
     });
@@ -171,6 +171,13 @@ export function transferTotals(items: TransferItem[], rates: TransferRates = { u
   return totals;
 }
 
+// serverFailure words a NAS transfer's failure. A file download cut off
+// continues from the browser's own download list, where it stopped.
+function serverFailure(transfer: Transfer): string {
+  if (transfer.direction === "download" && transfer.kind === "file" && transfer.error?.code === "interrupted") return "连接中断：在浏览器的下载列表中点“继续”可接着下载";
+  return failureText(transfer.error?.code ?? "");
+}
+
 export function locationParts(location?: TransferLocation): string[] {
   if (!location) return [];
   return [location.spaceKind === "shared" ? "共享空间" : "个人空间", ...location.folders.map((folder) => folder.name)];
@@ -235,7 +242,8 @@ const failures: Record<string, string> = {
   volume_unavailable: "数据卷离线或只读",
   insufficient_storage: "数据卷空间不足",
   file_too_large: "文件大于数据卷可用空间",
-  too_many_uploads: "未完成的上传过多",
+  too_many_uploads: "未完成的上传过多：先继续或放弃上次中断的上传",
+  service_unavailable: "NAS 服务暂时不可用",
   upload_lost: "NAS 上的上传进度已丢失",
   service_restarted: "NAS 服务重启，上传需要重新开始",
   expired: "超过一天没有继续，已自动清除",

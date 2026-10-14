@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -25,6 +26,10 @@ const skippedListName = "未能读取的文件.txt"
 // errPartial marks a range that was sent whole but stops before the end of
 // the file, so the download is not complete yet.
 var errPartial = errors.New("partial range")
+
+// writeIdleTimeout cuts a download whose browser took nothing for this long,
+// such as one whose network went away without closing the connection.
+const writeIdleTimeout = 60 * time.Second
 
 // CreateDownload prepares a download of entries the owner may read: one file
 // as itself, a folder or several entries as one ZIP archive. The browser then
@@ -62,7 +67,9 @@ func (s *Service) CreateDownload(ctx context.Context, owner accounts.User, entry
 // whether the response began: before that the caller answers err as an API
 // error, after it a failure must cut the connection, so that a truncated
 // response is never taken for a complete one. A single file honours range
-// requests, so a browser resumes it where the connection dropped.
+// requests, so a browser resumes it where the connection dropped, also while
+// the dropped connection lingers, and download managers may fetch parts of
+// it in parallel.
 func (s *Service) ServeDownload(w http.ResponseWriter, r *http.Request, owner accounts.User, id string) (started bool, err error) {
 	if r.Method != http.MethodGet {
 		return false, ErrInvalid
@@ -71,42 +78,46 @@ func (s *Service) ServeDownload(w http.ResponseWriter, r *http.Request, owner ac
 	if err != nil || t.Direction != Download {
 		return false, ErrNotFound
 	}
-	if t.State == StateCanceled {
-		return false, ErrState
-	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	// A failed or finished download starts again when its browser resumes
-	// it or fetches it anew.
-	t.State, t.Error, t.FinishedAt = StateRunning, nil, nil
-	live, ok := s.trackIdle(owner, t, cancel)
-	if !ok {
-		return false, ErrState
-	}
-	s.begin(live)
-	writer := &countingWriter{ResponseWriter: w, report: func(bytes int64) { s.progress(live, bytes) }}
+	// A failed, canceled or finished download starts again when its browser
+	// resumes it or fetches it anew.
+	live, request := s.joinDownload(owner, t, cancel)
+	writer := &countingWriter{ResponseWriter: w, idle: http.NewResponseController(w), report: func(start, bytes int64) { s.downloadProgress(live, start, bytes) }}
 	var failure error
 	if t.Kind == KindArchive {
 		failure = s.serveArchive(ctx, writer, owner, live, t)
 	} else {
 		failure = s.serveFile(ctx, writer, r.WithContext(ctx), owner, live, t)
 	}
-	canceled := s.end(live)
+	cut := writer.failed != nil || ctx.Err() != nil
+	last, canceled := s.leaveDownload(live, request)
 	switch {
 	case canceled:
 		// Cancel already saved the transfer.
 		return writer.started, ErrCanceled
-	case failure == nil:
-		s.mu.Lock()
+	case !last:
+		// Another request still sends the file; the last one settles it.
+		if failure != nil && !errors.Is(failure, errPartial) {
+			return writer.started, failure
+		}
+		return true, nil
+	}
+	s.mu.Lock()
+	if failure == nil && t.Kind == KindArchive {
 		live.transfer.TransferredBytes = live.transfer.TotalBytes
-		s.mu.Unlock()
+	}
+	whole := live.transfer.TransferredBytes >= live.transfer.TotalBytes
+	s.mu.Unlock()
+	switch {
+	case (failure == nil || errors.Is(failure, errPartial)) && whole:
 		s.settle(ctx, live, StateCompleted, nil)
 		return true, nil
-	case errors.Is(failure, errPartial):
+	case failure == nil || errors.Is(failure, errPartial):
 		// The browser asked for part of the file; it asks for the rest later.
 		s.settle(ctx, live, StateInterrupted, nil)
 		return true, nil
-	case writer.failed != nil || ctx.Err() != nil:
+	case cut:
 		// The browser went away. The download is over unless the browser
 		// resumes it, which starts it again.
 		s.settle(ctx, live, StateFailed, FailureOf(ErrInterrupted))
@@ -123,15 +134,21 @@ func (s *Service) serveFile(ctx context.Context, w *countingWriter, r *http.Requ
 		return err
 	}
 	defer content.Reader.Close()
+	modified := content.ModifiedAt
 	if info, err := content.Reader.Stat(); err == nil {
 		s.mu.Lock()
 		live.transfer.TotalBytes = info.Size()
 		s.mu.Unlock()
+		// The file as it is now, not as the catalog last saw it: a browser
+		// resuming a file changed since, over SMB perhaps, gets it whole
+		// rather than the old start joined to the new end.
+		modified = info.ModTime()
+		w.Header().Set("ETag", fmt.Sprintf(`"%x-%x"`, info.Size(), info.ModTime().UnixNano()))
 	}
 	// An attachment needs no sniffed type; the browser saves it as it is.
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": content.Name}))
-	http.ServeContent(w, r, content.Name, content.ModifiedAt, &cancelableFile{ReadSeeker: content.Reader, ctx: ctx})
+	http.ServeContent(w, r, content.Name, modified, &cancelableFile{ReadSeeker: content.Reader, ctx: ctx})
 	if w.status != http.StatusOK && w.status != http.StatusPartialContent {
 		return fmt.Errorf("%w: download answered %d", ErrState, w.status)
 	}
@@ -233,10 +250,12 @@ func archiveSize(items []files.ArchiveItem) int64 {
 
 // countingWriter follows a download response: its status, the range it
 // sends and how much of it was written. An archive counts the bytes of the
-// files it reads instead.
+// files it reads instead. Each write must be taken within writeIdleTimeout.
 type countingWriter struct {
 	http.ResponseWriter
-	report   func(int64)
+	idle *http.ResponseController
+	// report gives the start of the range and the bytes just written.
+	report   func(start, bytes int64)
 	status   int
 	started  bool
 	counting bool
@@ -260,8 +279,8 @@ func (w *countingWriter) WriteHeader(status int) {
 		}
 	}
 	w.ResponseWriter.WriteHeader(status)
-	if w.counting && w.start > 0 {
-		w.report(w.start)
+	if w.counting {
+		w.report(w.start, 0)
 	}
 }
 
@@ -269,10 +288,14 @@ func (w *countingWriter) Write(data []byte) (int, error) {
 	if !w.started {
 		w.WriteHeader(http.StatusOK)
 	}
+	if w.idle != nil {
+		// Unsupported only where tests write to a recorder.
+		_ = w.idle.SetWriteDeadline(time.Now().Add(writeIdleTimeout))
+	}
 	count, err := w.ResponseWriter.Write(data)
 	if w.counting {
 		w.written += int64(count)
-		w.report(w.start + w.written)
+		w.report(w.start, int64(count))
 	}
 	if err != nil && w.failed == nil {
 		w.failed = err

@@ -139,6 +139,9 @@ export function classifyUploadError(error: Error): ClassifiedFailure {
     case 507: return detailed.originalRequest.getMethod() === "POST" ? { kind: "toolarge", code: "file_too_large", message } : failure("space", "insufficient_storage");
   }
   if (status >= 400 && status < 500) return failure("invalid", "validation_failed");
+  // The NAS's web entry answers for its service while that restarts, as
+  // during an update: wait for it like for a lost connection.
+  if (status === 502 || status === 503 || status === 504) return failure("network", "service_unavailable");
   return failure("server", "internal_error");
 }
 
@@ -268,12 +271,14 @@ export class TransferStore {
     this.schedule();
   }
 
-  // retry sends a failed or canceled upload again; a canceled one starts
-  // over, since the NAS discarded what it had.
+  // retry sends a failed or canceled upload again. A canceled one, or one
+  // the NAS lost, starts over: the NAS no longer has its bytes.
   retry(key: string) {
     const upload = this.find(key);
-    if (upload?.phase === "canceled") {
-      this.update(key, { phase: "queued", transferId: undefined, transferred: 0, error: undefined, finishedAt: undefined });
+    if (upload?.phase === "canceled" || (upload?.phase === "failed" && upload.error?.code === "upload_lost")) {
+      const superseded = upload.transferId ? [...(upload.superseded ?? []), upload.transferId] : upload.superseded;
+      this.update(key, { phase: "queued", transferId: undefined, transferred: 0, error: undefined, finishedAt: undefined, superseded });
+      if (upload.phase === "failed" && upload.transferId) void removeTransfer(upload.transferId).catch(() => undefined);
       this.schedule();
     } else this.resume(key);
   }
@@ -669,6 +674,11 @@ export class TransferStore {
         this.update(key, { phase: "canceled", speed: 0, finishedAt: Date.now() });
         break;
       case "busy":
+        // Too many unfinished uploads will not clear by waiting: say so.
+        if (failure.code === "too_many_uploads") {
+          this.update(key, { phase: "failed", error: reason, speed: 0 });
+          break;
+        }
         this.update(key, { phase: "queued", speed: 0 });
         setTimeout(() => this.schedule(), 5000);
         return;
@@ -701,6 +711,8 @@ export class TransferStore {
     try {
       const response = await fetch("/api/v1/session", { credentials: "same-origin", headers: { Accept: "application/json" }, signal: AbortSignal.timeout(answerWithin) });
       if (response.status === 401) { this.release("offline"); this.hold("session", ""); sessionEnded(); return; }
+      // The web entry answers before the NAS service is back.
+      if (!response.ok) return;
       this.release("offline");
     } catch {
       // Still unreachable.
