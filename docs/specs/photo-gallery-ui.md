@@ -204,6 +204,8 @@
 
 ## 关联
 
+- [动态照片](photo-motion.md)：组合导入、静态网格、按需播放与完整原件下载。
+
 - 规格：[相册与本地智能检索](photo-library.md)
 - 架构：[相册技术设计](../architecture/photo-library.md)、[M2 实施方案](../architecture/photo-ai.md)
 - ADR：[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)

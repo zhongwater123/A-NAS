@@ -23,7 +23,7 @@ import { PhotoPicker } from "./PhotoPicker";
 import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
   addPhotoTag, addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
-  listPhotoTrash, listSimilarPhotos, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
+  listPhotoTrash, listSimilarPhotos, downloadURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
   type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoSearchPage, type PhotoSimilarPage,
 } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
@@ -229,7 +229,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const pickFiles = () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/jpeg,image/png";
+    input.accept = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,.mov";
     input.multiple = true;
     input.onchange = () => { if (uploadTarget && input.files?.length) uploads.add(Array.from(input.files), uploadTarget); };
     input.click();
@@ -329,8 +329,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     if (assets.length > 10 && !await dialogs.confirm({ title: `下载 ${assets.length} 张原图？`, message: "浏览器会逐张下载，并可能询问是否允许下载多个文件。", confirm: "下载" })) return;
     for (const [position, asset] of assets.entries()) {
       const link = document.createElement("a");
-      link.href = originalURL(asset.id, true);
-      link.download = asset.name;
+      link.href = downloadURL(asset.id);
+      link.download = asset.motion?.kind === "live-photo" ? asset.name.replace(/\.[^.]+$/, "") + ".zip" : asset.name;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -617,7 +617,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   // ---- Main area ----
   const emptyTimeline = readOnlyPlace
     ? <Empty icon={<Images />} title="还没有照片" text="这个图库里还没有照片。" />
-    : <Empty icon={<ImagePlus />} title="把照片拖到这里" text="支持 JPEG 和 PNG。照片保存在数据卷上的受管图库，本地 AI 会在设备空闲时整理它们。" action={uploadTarget && <button type="button" className="ph-button primary" onClick={pickFiles}><ImagePlus />选择照片</button>} />;
+    : <Empty icon={<ImagePlus />} title="把照片拖到这里" text="支持 JPEG、PNG、HEIC 和安卓动态照片。iPhone Live Photo 请选择未修改的照片与同名 MOV。本地 AI 在空闲时分析主照片。" action={uploadTarget && <button type="button" className="ph-button primary" onClick={pickFiles}><ImagePlus />选择照片</button>} />;
   const main = (() => {
     switch (place.kind) {
       case "timeline":

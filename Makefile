@@ -105,7 +105,7 @@ ops-check:
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
 	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/main.go
 	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-media.socket
-	grep -Fqx 'SocketGroup=a-nas' deploy/systemd/system/anas-media.socket
+	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-media.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-media.socket
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api media-worker' deploy/systemd/system/anas-media@.service
 	grep -Fqx 'StandardInput=socket' deploy/systemd/system/anas-media@.service
