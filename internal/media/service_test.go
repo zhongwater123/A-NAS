@@ -775,3 +775,105 @@ func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
 		}
 	}
 }
+
+func TestRenamingAShowRenamesItsFolderAndEpisodesAndKeepsItsID(t *testing.T) {
+	env := newTestEnv(t, nil)
+	shared := env.shared
+	season := "影视/剧集/漫长的季节 (2023)/Season 1/"
+	env.write(t, shared, season+"漫长的季节 S01E01.mp4", "video")
+	env.write(t, shared, season+"漫长的季节 S01E02.mp4", "video")
+	env.write(t, shared, season+"漫长的季节 S01E01.chs.srt", "1\n00:00:01,000 --> 00:00:02,000\n你好\n")
+	env.write(t, shared, "影视/剧集/漫长的季节 (2023)/poster.jpg", "poster")
+	// 繁花 lies loose in a folder it shares with another show.
+	env.write(t, shared, "影视/剧集/繁花 第01集.mkv", "video")
+	env.write(t, shared, "影视/剧集/繁花 第02集.mkv", "video")
+	// This show takes the library folder's name and has neither a folder
+	// nor its title in its file names.
+	env.write(t, shared, "影视/S01E03.mp4", "video")
+	env.library(t, env.admin, shared, LibraryMixed, "影视")
+	showNamed := func(title string) (Title, bool) {
+		shows, _ := env.media.Titles(env.ctx, env.admin, TitleQuery{Category: "show"})
+		for _, show := range shows.Items {
+			if show.Title == title {
+				return show, true
+			}
+		}
+		return Title{}, false
+	}
+	waitForShow := func(title string) Title {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if show, ok := showNamed(title); ok && show.Episodes > 0 {
+				return show
+			}
+			if time.Now().After(deadline) {
+				shows, _ := env.media.Titles(env.ctx, env.admin, TitleQuery{Category: "show"})
+				t.Fatalf("no show %q: %+v", title, shows.Items)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	season2023 := waitForShow("漫长的季节")
+	detail, err := env.media.Show(env.ctx, env.admin, season2023.ID)
+	if err != nil || detail.Folder != "漫长的季节 (2023)" || detail.SeasonList[0].Episodes[0].File != "漫长的季节 S01E01.mp4" {
+		t.Fatalf("Show() = folder %q, %+v, %v", detail.Folder, detail.SeasonList, err)
+	}
+	if err := env.media.SetFavorite(env.ctx, env.admin, season2023.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	first := detail.SeasonList[0].Episodes[0].ID
+	if _, err := env.media.SaveProgress(env.ctx, env.admin, first, 300, 2700); err != nil {
+		t.Fatal(err)
+	}
+
+	renamed, err := env.media.RenameShow(env.ctx, env.admin, season2023.ID, "The Long Season (2023)")
+	if err != nil || renamed.Title.Title != "The Long Season" || renamed.ID != season2023.ID {
+		t.Fatalf("RenameShow() = %+v, %v", renamed.Title, err)
+	}
+	root := env.spaceRoot(shared)
+	for name, want := range map[string]bool{
+		"影视/剧集/The Long Season (2023)/Season 1/The Long Season S01E01.mp4":     true,
+		"影视/剧集/The Long Season (2023)/Season 1/The Long Season S01E02.mp4":     true,
+		"影视/剧集/The Long Season (2023)/Season 1/The Long Season S01E01.chs.srt": true,
+		"影视/剧集/The Long Season (2023)/poster.jpg":                              true,
+		"影视/剧集/漫长的季节 (2023)":                                                   false,
+		"影视/剧集/繁花 第01集.mkv":                                                    true,
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(name))); (err == nil) != want {
+			t.Errorf("%s exists = %v, want %v", name, err == nil, want)
+		}
+	}
+	// After the scan the show keeps its ID, favorite and progress.
+	long := waitForShow("The Long Season")
+	if long.ID != season2023.ID || !long.Favorite || long.Year != 2023 {
+		t.Fatalf("renamed show = %+v", long)
+	}
+	if video, err := env.media.Video(env.ctx, env.admin, first); err != nil || video.Progress == nil || video.Progress.Position != 300 || len(video.Subtitles) != 1 {
+		t.Fatalf("first episode = %+v, %v", video, err)
+	}
+
+	// A show without a folder of its own keeps the folders it shares.
+	blossoms := waitForShow("繁花")
+	if detail, _ := env.media.Show(env.ctx, env.admin, blossoms.ID); detail.Folder != "" {
+		t.Fatalf("繁花 has its own folder %q", detail.Folder)
+	}
+	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "Blossoms"); err != nil {
+		t.Fatalf("RenameShow(繁花) error = %v", err)
+	}
+	for _, name := range []string{"影视/剧集/Blossoms 第01集.mkv", "影视/剧集/Blossoms 第02集.mkv"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(name))); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if waitForShow("Blossoms").ID != blossoms.ID {
+		t.Fatal("繁花 lost its ID")
+	}
+	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "The Long Season"); !errors.Is(err, files.ErrConflict) {
+		t.Fatalf("renaming onto another show: %v, want files.ErrConflict", err)
+	}
+	loose := waitForShow("影视")
+	if _, err := env.media.RenameShow(env.ctx, env.admin, loose.ID, "某部剧"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renaming a show with nothing to rename: %v, want ErrInvalid", err)
+	}
+}

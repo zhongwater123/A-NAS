@@ -329,6 +329,7 @@ func (s *Service) Video(ctx context.Context, actor accounts.User, id string) (Vi
 	var rootName string
 	_ = s.store.db.QueryRowContext(ctx, "SELECT name FROM library_folders WHERE library_id = ? AND entry_id = ?", video.LibraryID, video.RootEntry).Scan(&rootName)
 	detail.File = VideoFile{Name: video.FileName, Folder: path.Join(rootName, folder), SizeBytes: video.Size, ModifiedAt: video.Modified}
+	detail.NamedByNFO = video.Kind != TypeEpisode && s.namedByNFO(ctx, "videos", id)
 	info, err := s.mediaInfo(ctx, id)
 	if err != nil {
 		return VideoDetail{}, err
@@ -531,6 +532,10 @@ func (s *Service) Show(ctx context.Context, actor accounts.User, id string) (Sho
 		return ShowDetail{}, err
 	}
 	detail.Collections = refs
+	if folder, own, err := s.showFolder(ctx, actor, show); err == nil && own {
+		detail.Folder = folder.Name
+	}
+	detail.NamedByNFO = s.namedByNFO(ctx, "shows", id)
 	return detail, nil
 }
 
@@ -541,7 +546,7 @@ func (c *catalog) episode(video *videoRow) Episode {
 	}
 	return Episode{
 		ID: video.ID, Season: video.Season, Episode: video.Episode, Title: title, Plot: video.Plot, Duration: video.Duration,
-		AddedAt: video.Added, Artwork: video.artwork(), Progress: c.progressOf(video.ID),
+		AddedAt: video.Added, Artwork: video.artwork(), Progress: c.progressOf(video.ID), File: video.FileName,
 	}
 }
 
