@@ -83,6 +83,8 @@ type PendingUpload struct {
 	Conflict ConflictPolicy
 
 	file *os.File
+	// modTime, when set, is the modification time the file is saved with.
+	modTime time.Time
 	// temporary is the temporary's name in the parent folder; path is where
 	// it was when the upload began, which a moved folder makes stale.
 	temporary string
@@ -235,6 +237,7 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 		return CommittedUpload{}, err
 	}
 	temporary := filepath.Join(parentPath, upload.temporary)
+	s.keepModTime(ctx, temporary, upload.modTime)
 	replaced := false
 	if upload.Conflict == ConflictReplace {
 		existing := upload.Name

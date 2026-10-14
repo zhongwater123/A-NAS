@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 )
 
 // RootFileSystem needs openat2, so it only works on Linux; elsewhere every
@@ -40,6 +41,9 @@ func (*RootFileSystem) Copy(context.Context, string, string) error {
 }
 func (*RootFileSystem) Usage(context.Context, string) (int64, error) {
 	return 0, errRootFileSystemUnsupported
+}
+func (*RootFileSystem) SetModTime(context.Context, string, time.Time) error {
+	return errRootFileSystemUnsupported
 }
 
 var _ FileSystem = (*RootFileSystem)(nil)

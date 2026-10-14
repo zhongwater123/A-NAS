@@ -264,6 +264,11 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 		{"snapshots", "size_bytes", "INTEGER NOT NULL DEFAULT -1"},
 		{"snapshot_entries", "modified_at", "TEXT NOT NULL DEFAULT ''"},
 		{"trash", "original_path", "TEXT NOT NULL DEFAULT ''"},
+		{"snapshot_schedules", "retention", "TEXT NOT NULL DEFAULT 'count'"},
+		{"snapshot_schedules", "keep_hourly", "INTEGER NOT NULL DEFAULT 0"},
+		{"snapshot_schedules", "keep_daily", "INTEGER NOT NULL DEFAULT 0"},
+		{"snapshot_schedules", "keep_weekly", "INTEGER NOT NULL DEFAULT 0"},
+		{"snapshot_schedules", "keep_monthly", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.ensureColumn(ctx, column.table, column.name, column.definition); err != nil {
 			return err
@@ -1224,11 +1229,12 @@ func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spac
 }
 
 func (s *Service) Upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader) (Entry, error) {
-	return s.upload(ctx, actor, spaceID, parentID, name, contents, nameChosen)
+	return s.upload(ctx, actor, spaceID, parentID, name, contents, nameChosen, time.Time{})
 }
 
-// upload writes a file named as naming allows.
-func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader, naming naming) (Entry, error) {
+// upload writes a file named as naming allows. A modTime that is not zero
+// becomes the file's modification time, as far as the file system lets it.
+func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader, naming naming, modTime time.Time) (Entry, error) {
 	space, root, err := s.authorizedSpace(ctx, actor, spaceID, true)
 	if err != nil {
 		return Entry{}, err
@@ -1296,6 +1302,7 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 	if err := temporary.Close(); err != nil {
 		return Entry{}, err
 	}
+	s.keepModTime(ctx, temporaryPath, modTime)
 	if err := s.fs.Rename(ctx, temporaryPath, target); errors.Is(err, fs.ErrExist) {
 		return Entry{}, ErrConflict
 	} else if err != nil {
@@ -1308,6 +1315,14 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 	}
 	_ = s.audit(ctx, actor.ID, "file.uploaded", space.ID, entry.ID, entry.Name)
 	return entry, nil
+}
+
+// keepModTime gives a restored file the modification time it was saved
+// with. It is best effort: the content is what a restore must bring back.
+func (s *Service) keepModTime(ctx context.Context, path string, modTime time.Time) {
+	if !modTime.IsZero() {
+		_ = s.fs.SetModTime(ctx, path, modTime)
+	}
 }
 
 func (s *Service) authorizedSpace(ctx context.Context, actor accounts.User, spaceID string, write bool) (accounts.Space, string, error) {

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
@@ -25,11 +26,12 @@ const (
 	opCreateTemp = "create_temp"
 	opCopy       = "copy"
 	opUsage      = "usage"
+	opSetModTime = "set_mod_time"
 )
 
 var knownOps = map[string]bool{
 	opLstat: true, opScan: true, opMkdir: true, opMkdirAll: true, opRename: true, opRemove: true,
-	opRemoveAll: true, opOpen: true, opCreateTemp: true, opCopy: true, opUsage: true,
+	opRemoveAll: true, opOpen: true, opCreateTemp: true, opCopy: true, opUsage: true, opSetModTime: true,
 }
 
 type request struct {
@@ -41,8 +43,10 @@ type request struct {
 	Target string         `json:"target,omitempty"`
 	Prefix string         `json:"prefix,omitempty"`
 	Skip   files.ScanSkip `json:"skip,omitempty"`
-	Cols   uint16         `json:"cols,omitempty"`
-	Rows   uint16         `json:"rows,omitempty"`
+	// ModTime is the modification time set_mod_time gives a file.
+	ModTime time.Time `json:"modTime,omitzero"`
+	Cols    uint16    `json:"cols,omitempty"`
+	Rows    uint16    `json:"rows,omitempty"`
 }
 
 type response struct {
@@ -175,6 +179,12 @@ func execute(ctx context.Context, fsys files.FileSystem, req request) (response,
 		err = fsys.Copy(ctx, req.Path, req.Target)
 	case opUsage:
 		result.Size, err = fsys.Usage(ctx, req.Path)
+	case opSetModTime:
+		if req.ModTime.IsZero() {
+			result.Error = &wireError{Code: codeInvalidRequest, Message: "modification time is missing"}
+			return result, nil
+		}
+		err = fsys.SetModTime(ctx, req.Path, req.ModTime)
 	default:
 		err = errors.New("unknown file operation")
 		result.Error = &wireError{Code: codeInvalidRequest, Message: err.Error()}
