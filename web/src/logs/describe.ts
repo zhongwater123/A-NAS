@@ -87,6 +87,7 @@ const photoVerbs: Record<string, Verb> = {
   "photo.restored": { named: (item) => ["恢复了照片", item], counted: (n) => `恢复了 ${n} 张照片` },
   "photo.purged": { named: (item) => ["彻底删除了照片", item], counted: (n) => `彻底删除了 ${n} 张照片` },
   "photo.renamed": { named: (item) => ["把照片重命名为", item], counted: (n) => `重命名了 ${n} 张照片` },
+  "photo.motion_attached": { named: (item) => ["为照片补上了实况视频", item], counted: (n) => `为 ${n} 张照片补上了实况视频` },
   "photo.moved": { counted: (n) => `移动了 ${n} 张照片` },
   "photo.copied": { counted: (n) => `复制了 ${n} 张照片` },
   "photo.album_created": { named: (item) => ["新建了相册", item], counted: (n) => `新建了 ${n} 个相册` },

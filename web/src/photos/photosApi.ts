@@ -9,6 +9,9 @@ export interface PhotoAsset {
   name: string;
   mediaType: "image/jpeg" | "image/png" | "image/heic";
   motion?: { kind: "live-photo" | "motion-photo"; duration: number };
+  // The still of an Apple Live Photo that came without its MOV; uploading
+  // the MOV later completes it.
+  liveVideoMissing?: boolean;
   sizeBytes: number;
   uploadedBy: string;
   importedAt: string;
@@ -132,6 +135,14 @@ export const originalURL = (assetId: string, download = false) => `${base}/asset
 // The grid shows the original until its thumbnail is ready; JPEG and PNG
 // originals display directly.
 export const displayURL = (asset: PhotoAsset) => asset.mediaType === "image/heic" ? `${base}/assets/${id(asset.id)}/preview` : originalURL(asset.id);
+// A Live Photo's MOV uploaded on its own completes the photos of the library
+// whose still came without it, matched by Apple's identifier; the result
+// lists them.
+export async function attachLiveVideo(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined) {
+  const body = new FormData();
+  body.set("file", file);
+  return (await uploadForm<{ items: PhotoAsset[] }>(`${base}/libraries/${id(libraryId)}/live-videos`, body, onProgress)).items;
+}
 export const motionURL = (assetId: string) => `${base}/assets/${id(assetId)}/motion/play`;
 export const downloadURL = (assetId: string) => `${base}/assets/${id(assetId)}/download`;
 export const previewURL = (asset: PhotoAsset) => asset.thumbnail === "ready" ? thumbnailURL(asset.id) : displayURL(asset);

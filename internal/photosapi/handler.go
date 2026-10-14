@@ -98,6 +98,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("GET "+p+"/libraries/{libraryID}/entries", h.entries)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/uploads", h.upload)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/live-photos", h.uploadLive)
+	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/live-videos", h.uploadLiveVideo)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/preview", h.preview)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/motion", h.motion)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/motion/play", h.playMotion)
@@ -654,6 +655,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters")
 	case errors.Is(err, photos.ErrInvalidMotion):
 		WriteError(w, http.StatusUnprocessableEntity, "invalid_motion_photo", err.Error())
+	case errors.Is(err, photos.ErrNoLiveStill):
+		WriteError(w, http.StatusUnprocessableEntity, "live_photo_not_found", "这个图库里没有在等这段视频的实况照片：请拖到放着对应照片的图库，并使用未修改的原件")
 	case errors.Is(err, mediaworker.ErrUnavailable):
 		WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "媒体解码服务暂不可用，请稍后重试")
 	case errors.Is(err, mediaworker.ErrUnreadable):
