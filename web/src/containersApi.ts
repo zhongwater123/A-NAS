@@ -7,6 +7,8 @@ export interface ContainerSummary {
   id: string;
   name: string;
   image: string;
+  // Absent from container agents that predate it.
+  imageId?: string;
   state: ContainerState;
   status: string;
   createdAt: string;

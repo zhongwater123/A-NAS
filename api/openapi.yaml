@@ -2503,6 +2503,9 @@ components:
           minLength: 1
         image:
           type: string
+        imageId:
+          type: string
+          description: Engine ID of the image the container runs; omitted by container agents that predate it.
         state:
           type: string
           enum: [created, running, paused, restarting, removing, exited, dead]

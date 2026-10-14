@@ -252,7 +252,7 @@ describe("AppCenterPanel", () => {
     await user.click(within(list).getByRole("button", { name: "Memos，已安装" }));
     await user.click(screen.getByRole("button", { name: "更多操作" }));
     await user.click(screen.getByRole("menuitem", { name: "在 Docker 中查看" }));
-    expect(openDocker).toHaveBeenCalledOnce();
+    expect(openDocker).toHaveBeenCalledExactlyOnceWith("memos");
 
     const more = screen.getByRole("button", { name: "更多操作" });
     await user.click(more);

@@ -59,7 +59,8 @@ import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import { formatBytes } from "./bytes";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
-import { DockerPanel } from "./DockerPanel";
+import { DockerFocus, DockerPanel } from "./docker/DockerPanel";
+import { appProject } from "./docker/model";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { FileViewer } from "./files/FileViewer";
 import { fileTypeLabel, isBrowserPreviewableImage, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
@@ -123,7 +124,7 @@ const initialWindows: WindowModel[] = [
 	{ id: "backup", title: "备份中心", open: false, minimized: false, maximized: false, x: 220, y: 52, width: 1080, height: 700, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
   { id: "terminal", title: "终端", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 820, height: 520, z: 0, opened: 0 },
-  { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 320, y: 82, width: 900, height: 620, z: 0, opened: 0 },
+  { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 960, height: 660, z: 0, opened: 0 },
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
 ];
 
@@ -287,6 +288,9 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   // A folder the transfer center asks the file manager to show.
   const [fileNavigation, setFileNavigation] = useState<TransferLocation>();
   const showInFiles = (location: TransferLocation) => { setFileNavigation(location); openWindow("files"); };
+  // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
+  const [dockerFocus, setDockerFocus] = useState<DockerFocus>();
+  const showInDocker = (appID: string) => { setDockerFocus({ project: appProject(appID), at: Date.now() }); openWindow("docker"); };
   // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
@@ -358,8 +362,8 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "terminal" && <TerminalPanel />}
-			  {window.id === "docker" && <DockerPanel />}
-			  {window.id === "store" && <AppCenterPanel onOpenDocker={() => openWindow("docker")} />}
+			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
+			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
             </AppWindow>
           );
         })}
