@@ -73,6 +73,12 @@ func (m *memoryDocker) ProjectMounts(context.Context, string) ([]engine.MountInf
 	return nil, nil
 }
 
+// ProjectRuntimes reports nothing: the simulated install creates no
+// containers to inspect.
+func (m *memoryDocker) ProjectRuntimes(context.Context, string) ([]engine.RuntimeInfo, error) {
+	return nil, nil
+}
+
 // ProjectContainers reports the project's simulated containers as running.
 func (m *memoryDocker) ProjectContainers(_ context.Context, project string) ([]engine.ContainerState, error) {
 	m.mu.Lock()
@@ -135,7 +141,7 @@ func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error
 	r.docker.containers = kept
 	if action == "up" {
 		if compose, err := os.ReadFile(file); err == nil && len(compose) > 0 {
-			r.docker.containers = append(r.docker.containers, engine.ContainerInfo{Name: filepath.Base(filepath.Dir(file)), AppID: id, Running: true})
+			r.docker.containers = append(r.docker.containers, engine.ContainerInfo{Name: filepath.Base(filepath.Dir(file)), AppID: id, Running: true, Runtime: appstore.RuntimePolicy})
 		}
 	}
 	return nil

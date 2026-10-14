@@ -2756,6 +2756,11 @@ components:
           type: array
           description: The app's logins, shown to the owner.
           items: { $ref: "#/components/schemas/AppCredential" }
+        runtimeOutdated:
+          type: boolean
+          description: >-
+            The app's containers were created under older runtime rules (ADR 0022) and keep running as they
+            were; uninstalling (which keeps app data) and installing again applies the current rules.
     AppCredential:
       type: object
       additionalProperties: false
@@ -2808,10 +2813,7 @@ components:
           type: string
         identity:
           description: >-
-            The Linux account app-<appId> allocated for the app. It replaces the manifest's Compose user or
-            PUID/PGID when the manifest declares them; an image that uses neither keeps its own default user,
-            which may be root, and is then confined only by the folders mounted for it. A mount of kind shared
-            means the account joins a-nas-users and gains the Shared folder's access.
+            The Linux account app-<appId> allocated for the app. How each service uses it is in services.
           type: object
           additionalProperties: false
           required: [username, uid, gid]
@@ -2827,6 +2829,40 @@ components:
               type: integer
               minimum: 30000
               maximum: 30999
+        services:
+          description: >-
+            How each service runs (ADR 0022). app starts as the app identity with no capabilities; app-after-init
+            starts as root, prepares itself and switches to the app identity from PUID/PGID, while its init
+            processes stay root; image keeps the image's own user, which may be root, and may only mount its
+            app's data. Only app and app-after-init services mount Shared folders, through the a-nas-users group
+            (20000). Every service has no-new-privileges. Absent from a container agent that predates runtime rules.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [service, runAs]
+            properties:
+              service:
+                type: string
+              runAs:
+                type: string
+                enum: [app, app-after-init, image]
+              user:
+                type: string
+                description: The Compose user, uid:gid; set for app services.
+              groups:
+                type: array
+                description: Supplementary groups Docker adds.
+                items:
+                  type: string
+              capDrop:
+                type: array
+                items:
+                  type: string
+              shared:
+                type: string
+                description: Access to the Shared folder; absent when the service mounts none.
+                enum: [read, write]
         images:
           type: array
           items:
@@ -2870,6 +2906,7 @@ components:
                 enum: [appdata, shared, system]
               readOnly:
                 type: boolean
+                description: Shared folders are read-only unless the app exists to write them (downloads, sync, backups, uploads).
               purpose:
                 type: string
         networks:

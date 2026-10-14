@@ -48,6 +48,8 @@ type AppDocument struct {
 	Problems []ProblemDocument `json:"problems,omitempty"`
 	// Credentials are the logins generated for the app.
 	Credentials []CredentialDocument `json:"credentials,omitempty"`
+	// RuntimeOutdated marks an app installed under older runtime rules.
+	RuntimeOutdated bool `json:"runtimeOutdated,omitempty"`
 }
 
 type CredentialDocument struct {
@@ -90,16 +92,18 @@ type JobDocument struct {
 }
 
 type PlanDocument struct {
-	AppID      string         `json:"appId"`
-	Title      string         `json:"title"`
-	Version    string         `json:"version"`
-	Project    string         `json:"project"`
-	Identity   IdentityJSON   `json:"identity"`
-	Images     []string       `json:"images"`
-	Containers []string       `json:"containers"`
-	Ports      []PortDocument `json:"ports"`
-	Mounts     []MountJSON    `json:"mounts"`
-	Networks   []string       `json:"networks"`
+	AppID    string       `json:"appId"`
+	Title    string       `json:"title"`
+	Version  string       `json:"version"`
+	Project  string       `json:"project"`
+	Identity IdentityJSON `json:"identity"`
+	// Services is empty from an agent that predates runtime rules.
+	Services   []ServiceDocument `json:"services,omitempty"`
+	Images     []string          `json:"images"`
+	Containers []string          `json:"containers"`
+	Ports      []PortDocument    `json:"ports"`
+	Mounts     []MountJSON       `json:"mounts"`
+	Networks   []string          `json:"networks"`
 	// AddressPools are CIDR prefixes; set whenever Networks is not empty.
 	AddressPools []string `json:"addressPools"`
 	Digest       string   `json:"digest"`
@@ -113,6 +117,16 @@ type IdentityJSON struct {
 	Username string `json:"username"`
 	UID      int    `json:"uid"`
 	GID      int    `json:"gid"`
+}
+
+// ServiceDocument is how one service of a plan runs (appstore.ServiceRuntime).
+type ServiceDocument struct {
+	Service string                `json:"service"`
+	RunAs   appstore.RunAs        `json:"runAs"`
+	User    string                `json:"user,omitempty"`
+	Groups  []string              `json:"groups,omitempty"`
+	CapDrop []string              `json:"capDrop,omitempty"`
+	Shared  appstore.SharedAccess `json:"shared,omitempty"`
 }
 
 type PortDocument struct {
@@ -147,6 +161,7 @@ func AppsFromDomain(apps []appstore.AppStatus) AppsDocument {
 			item.Problems = append(item.Problems, ProblemDocument{Service: problem.Service, State: problem.State, ExitCode: problem.ExitCode})
 		}
 		item.Credentials = credentialsFromDomain(app.Credentials)
+		item.RuntimeOutdated = app.RuntimeOutdated
 		document.Apps[i] = item
 	}
 	return document
@@ -168,7 +183,7 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 				Category: item.Category, Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo,
 				Docs: item.Docs, Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
 			},
-			State: item.State, Running: item.Running, Total: item.Total,
+			State: item.State, Running: item.Running, Total: item.Total, RuntimeOutdated: item.RuntimeOutdated,
 		}
 		if item.Job != nil {
 			job, err := item.Job.ToDomain()
@@ -228,6 +243,12 @@ func PlanFromDomain(plan appstore.Plan) PlanDocument {
 	for i, mount := range plan.Mounts {
 		document.Mounts[i] = MountJSON{HostPath: mount.HostPath, ContainerPath: mount.ContainerPath, Kind: mount.Kind, ReadOnly: mount.ReadOnly, Purpose: mount.Purpose}
 	}
+	for _, service := range plan.Services {
+		document.Services = append(document.Services, ServiceDocument{
+			Service: service.Service, RunAs: service.RunAs, User: service.User,
+			Groups: append([]string(nil), service.Groups...), CapDrop: append([]string(nil), service.CapDrop...), Shared: service.Shared,
+		})
+	}
 	document.Credentials = credentialsFromDomain(plan.Credentials)
 	return document
 }
@@ -250,6 +271,11 @@ func (document PlanDocument) ToDomain() appstore.Plan {
 	}
 	for _, mount := range document.Mounts {
 		plan.Mounts = append(plan.Mounts, appstore.Mount{HostPath: mount.HostPath, ContainerPath: mount.ContainerPath, Kind: mount.Kind, ReadOnly: mount.ReadOnly, Purpose: mount.Purpose})
+	}
+	for _, service := range document.Services {
+		plan.Services = append(plan.Services, appstore.ServiceRuntime{
+			Service: service.Service, RunAs: service.RunAs, User: service.User, Groups: service.Groups, CapDrop: service.CapDrop, Shared: service.Shared,
+		})
 	}
 	plan.Credentials = credentialsToDomain(document.Credentials)
 	return plan

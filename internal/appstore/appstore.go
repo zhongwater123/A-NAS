@@ -2,8 +2,9 @@
 // validated install plans. Every manifest is checked against Policy before it
 // can run: no privileged or host-namespace options, no devices or Docker
 // socket, published ports at or above 1024, and bind mounts only below the
-// app's own data folder and the Shared folder. Each app runs as its own Linux
-// identity app-<id> (ADR 0008). Installing requires the digest of the plan
+// app's own data folder and the Shared folder. Each app has its own Linux
+// identity app-<id> (ADR 0008), and a service reaches the Shared folder only
+// while running as it (ADR 0022). Installing requires the digest of the plan
 // the user confirmed, so the executed Compose file is exactly the one shown.
 package appstore
 
@@ -41,6 +42,10 @@ var (
 	// ErrAppNotRunning reports an install whose containers did not keep
 	// running after Compose started them; the install is rolled back.
 	ErrAppNotRunning = errors.New("app containers did not keep running")
+	// ErrRuntimeMismatch fails an install whose container does not run with
+	// the user, groups, capabilities or read-only folders in its plan; the
+	// install is rolled back.
+	ErrRuntimeMismatch = errors.New("an app container does not run as its plan says")
 )
 
 // ValidID reports whether id can name a catalog app and its Compose project.
@@ -132,6 +137,10 @@ type AppStatus struct {
 	Problems []ContainerProblem
 	// Credentials are the logins generated for the app, shown to its owner.
 	Credentials []Credential
+	// RuntimeOutdated reports an installed app whose containers were created
+	// under older runtime rules (RuntimePolicy); they keep running as they
+	// were until the app is uninstalled and installed again.
+	RuntimeOutdated bool
 }
 
 // ContainerProblem is an app container that is not running: restarting,
