@@ -551,6 +551,15 @@ button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
 .file-action-bar { min-width: 0; min-height: 43px; flex: none; display: flex; align-items: center; gap: 2px; overflow-x: clip; overflow-y: visible; padding: 5px 10px; border-bottom: 1px solid #dfe5eb; background: #f7f9fb; }
 .file-action-bar > i { width: 1px; height: 23px; flex: none; margin: 0 4px; background: #dce2e8; }
+.file-order-bar { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid #dfe5eb; background: #f7f9fb; color: #526579; font-size: 12px; }
+.file-order-bar label, .file-order-bar button { display: inline-flex; align-items: center; gap: 5px; }
+.file-order-bar select, .file-order-bar button { min-height: 28px; padding: 3px 6px; border: 1px solid #d6dfe8; border-radius: 5px; background: white; color: #35485b; font-size: 12px; }
+.file-order-bar button svg { width: 14px; height: 14px; }
+.file-order-bar > span { flex-basis: 100%; font-size: 11px; }
+.file-order-notice { padding: 6px 12px; color: #8d571b; font-size: 12px; }
+.file-pin-badge { display: inline-block; width: 12px; height: 12px; margin-right: 4px; color: #2675bb; vertical-align: middle; }
+[data-file-item][draggable="true"] { cursor: grab; }
+[data-file-item][data-drop-target="true"] { outline: 2px solid #2675bb; outline-offset: -2px; }
 .file-manager .file-command-button { min-width: 30px; height: 31px; border: 0; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; color: #42586e; background: transparent; font-size: var(--file-font-command); line-height: 16px; white-space: nowrap; }
 .file-command-button:hover:not(:disabled) { color: #205f9e; background: #e8f1fa; }
 .file-command-button.danger:hover:not(:disabled) { color: #a83a49; background: #fbecef; }

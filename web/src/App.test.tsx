@@ -121,6 +121,59 @@ const metricsState = {
 afterEach(() => { transferStore.reset(); tus.uploads.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("A-NAS v1.0.1 desktop", () => {
+  it("pins folders and preserves manual ordering across views and reopening without moving files", async () => {
+    const fetchMock = installAPI({
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
+      entries: [
+        { id: "a", spaceId: "space:shared", name: "A", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-01" },
+        { id: "b", spaceId: "space:shared", name: "B", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-02" },
+        { id: "c", spaceId: "space:shared", name: "C.bin", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-03" },
+      ],
+    });
+    const user = userEvent.setup(); const mounted = render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    let dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    const item = (id: string) => dialog.querySelector<HTMLElement>(`[data-file-item="${id}"]`)!;
+    const order = () => Array.from(dialog.querySelectorAll<HTMLElement>("[data-file-item]")).map((row) => row.dataset.fileItem);
+    await waitFor(() => expect(order()).toEqual(["a", "b", "c"]));
+    fireEvent.contextMenu(item("b"));
+    await user.click(screen.getByRole("menuitem", { name: "置顶文件夹" }));
+    expect(order()).toEqual(["b", "a", "c"]);
+    expect(item("b").querySelector('[aria-label="已置顶"]')).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "切换排序方向" }));
+    expect(order()[0]).toBe("b");
+    await user.selectOptions(within(dialog).getByLabelText("排序方式"), "manual");
+    await user.click(item("c"));
+    await user.click(within(dialog).getByRole("button", { name: "上移所选项目" }));
+    expect(order()).toEqual(["b", "c", "a"]);
+    expect(within(dialog).getByRole("button", { name: "上移所选项目" }).hasAttribute("disabled")).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "查看" }));
+    await user.click(within(dialog).getByRole("button", { name: "图标视图" }));
+    expect(order()).toEqual(["b", "c", "a"]);
+    const dataTransfer = { types: ["text/plain"], setData: vi.fn(), effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(item("a"), { dataTransfer });
+    fireEvent.dragOver(item("c"), { dataTransfer });
+    fireEvent.drop(item("c"), { dataTransfer });
+    expect(order()).toEqual(["b", "a", "c"]);
+    expect(transferStore.getSnapshot().uploads).toHaveLength(0);
+    await user.type(within(dialog).getByLabelText("搜索当前目录"), "A");
+    expect(item("a").draggable).toBe(false);
+    expect(within(dialog).getByRole("button", { name: "下移所选项目" }).hasAttribute("disabled")).toBe(true);
+    await user.clear(within(dialog).getByLabelText("搜索当前目录"));
+    await user.selectOptions(within(dialog).getByLabelText("排序方式"), "name");
+    await user.selectOptions(within(dialog).getByLabelText("排序方式"), "manual");
+    expect(order()).toEqual(["b", "a", "c"]);
+    mounted.unmount(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await waitFor(() => expect(order()).toEqual(["b", "a", "c"]));
+    expect((within(dialog).getByLabelText("排序方式") as HTMLSelectElement).value).toBe("manual");
+    await user.click(item("b"));
+    await user.click(within(dialog).getByRole("button", { name: "取消置顶" }));
+    expect(item("b").querySelector('[aria-label="已置顶"]')).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  }, 15000);
+
   it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
     const user = userEvent.setup();
