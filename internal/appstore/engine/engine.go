@@ -39,6 +39,11 @@ type ContainerInfo struct {
 	AppID          string
 	Running        bool
 	PublishedPorts []uint16
+	// Service is the Compose service; State and ExitCode tell an installed
+	// app's status why a container is not running.
+	Service  string
+	State    string
+	ExitCode int
 }
 
 // NetworkInfo is a Docker network and the subnets Docker gave it.
@@ -67,6 +72,8 @@ type Inspector interface {
 	APIVersion(ctx context.Context) (string, error)
 	// ProjectMounts lists the volumes the project's containers mount.
 	ProjectMounts(ctx context.Context, project string) ([]MountInfo, error)
+	// ProjectContainers reads the state of the project's containers.
+	ProjectContainers(ctx context.Context, project string) ([]ContainerState, error)
 }
 
 // Runner executes the Compose CLI and streams its combined output.
@@ -84,6 +91,13 @@ type Store struct {
 	docker   Inspector
 	runner   Runner
 	now      func() time.Time
+	// startupWindow is how long an install watches its containers before it
+	// counts as a success, checking every startupPoll.
+	startupWindow time.Duration
+	startupPoll   time.Duration
+
+	// secretsMu serialises generating and storing app secrets.
+	secretsMu sync.Mutex
 
 	mu     sync.Mutex
 	active string
@@ -100,6 +114,9 @@ func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, dock
 		runner:   runner,
 		now:      time.Now,
 		jobs:     map[string]*appstore.Job{},
+
+		startupWindow: defaultStartupWindow,
+		startupPoll:   defaultStartupPoll,
 	}
 	for _, entry := range entries {
 		store.entries[entry.App.ID] = entry
@@ -130,10 +147,21 @@ func (s *Store) Apps(ctx context.Context) ([]appstore.AppStatus, error) {
 			status.Total++
 			if container.Running {
 				status.Running++
+			} else {
+				status.Problems = append(status.Problems, appstore.ContainerProblem{
+					Service: container.Service, State: container.State, ExitCode: container.ExitCode,
+				})
 			}
 		}
 		if status.Total > 0 {
 			status.State = appstore.StateInstalled
+			// Installed before secrets were generated: it still uses the
+			// manifest's own logins.
+			if secrets, err := s.readSecrets(id); err == nil && secrets == nil {
+				status.Credentials = appstore.UpstreamCredentials(id)
+			} else if err == nil {
+				status.Credentials = appstore.Credentials(id, secrets)
+			}
 		}
 		if job := s.jobs[id]; job != nil {
 			copied := copyJob(job)
@@ -162,7 +190,11 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 	if !ok {
 		return appstore.Plan{}, appstore.ErrNotFound
 	}
-	plan, err := appstore.Render(ctx, entry, s.policy, identity)
+	secrets, err := s.appSecrets(id)
+	if err != nil {
+		return appstore.Plan{}, fmt.Errorf("%w: app secrets: %v", appstore.ErrUnavailable, err)
+	}
+	plan, err := appstore.Render(ctx, entry, s.policy, identity, secrets)
 	if err != nil {
 		return plan, err
 	}
@@ -222,11 +254,22 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 			failure = s.networkProblems(ctx, plan)
 		}
 		if failure == nil {
+			failure = s.startupProblem(ctx, plan.Project)
+			if failure != nil {
+				// The app's own words on why it stopped go into the output.
+				_ = s.runner.Run(ctx, append(compose, "logs", "--no-color", "--tail", "20"), output)
+			}
+		}
+		if failure == nil {
 			return nil
 		}
-		// Docker did not keep the app inside its plan: roll it back.
+		// Docker did not keep the app inside its plan, or it did not keep
+		// running: roll it back.
 		if err := s.runner.Run(ctx, append(compose, "down", "--remove-orphans"), output); err != nil {
 			return fmt.Errorf("%w; the install could not be rolled back: %v", failure, err)
+		}
+		if errors.Is(failure, appstore.ErrAppNotRunning) {
+			return fmt.Errorf("%w，安装已回滚；最近的日志见下方输出", failure)
 		}
 		return fmt.Errorf("%w; the install was rolled back", failure)
 	})

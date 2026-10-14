@@ -24,7 +24,7 @@ Deluge 里看到的 ` + "`/DATA`" + ` 就是 A-NAS 的**共享空间**，下载�
 | ` + "`/DATA/Downloads`" + ` | 共享空间 › Downloads |
 | ` + "`/DATA/Media`" + ` | 共享空间 › Media |`,
 
-	"etherpad": `管理后台在 Etherpad 网址后加 ` + "`/admin`" + `，账号 ` + "`admin`" + `、密码 ` + "`admin`" + `。密码由安装清单固定，A-NAS 目前不能修改，局域网里的人都能用它登录管理后台，请只在信任的家庭网络中使用。
+	"etherpad": `管理后台在 Etherpad 网址后加 ` + "`/admin`" + `，账号 ` + "`admin`" + `，密码由 A-NAS 在安装时随机生成，见本页的**登录信息**。
 
 Pad 保存在应用数据中（内置的 dirty 数据库），卸载后保留，适合个人或小团队使用。`,
 
@@ -34,6 +34,14 @@ Pad 保存在应用数据中（内置的 dirty 数据库），卸载后保留，
 2. 在手机上安装 Immich App，服务器地址填 ` + "`http://<NAS 地址>:2283`" + `，即可备份手机相册。
 
 Immich 仍在快速开发，可能出现错误或不兼容的升级。不要把它当作照片和视频的唯一存放处，请另外备份。`,
+
+	"openlist": `账号 ` + "`admin`" + `，密码由 A-NAS 在安装时随机生成，见本页的**登录信息**。
+
+OpenList 的设置和添加的网盘保存在应用数据中，卸载后保留。它只能访问自己的应用数据，看不到 NAS 上的共享空间和个人空间，适合用来挂载网盘。`,
+
+	"photoprism": `账号 ` + "`admin`" + `，密码由 A-NAS 在安装时随机生成，见本页的**登录信息**。
+
+PhotoPrism 整理的原图在**共享空间 › Gallery**，所有成员都能在文件管理中看到；索引和缩略图保存在应用数据中，卸载后保留。`,
 
 	"pyload": `默认账号 ` + "`pyload`" + `、密码 ` + "`pyload`" + `，登录后请修改。
 
@@ -47,6 +55,14 @@ qBittorrent 里看到的 ` + "`/DATA`" + ` 就是 A-NAS 的**共享空间**，�
 | --- | --- |
 | ` + "`/DATA/Downloads`" + ` | 共享空间 › Downloads |
 | ` + "`/DATA/Media`" + ` | 共享空间 › Media |`,
+
+	"siyuan-note": `打开后输入访问授权码进入，授权码由 A-NAS 在安装时随机生成，见本页的**登录信息**。知道授权码的人都能读写全部笔记，请不要外传。
+
+笔记工作区保存在应用数据中，卸载后保留。`,
+
+	"transmission": `账号和密码见本页的**登录信息**，密码由 A-NAS 在安装时随机生成。
+
+Transmission 里看到的 ` + "`/downloads`" + ` 就是**共享空间 › Downloads**，下载的文件所有成员都能在文件管理中看到；把种子文件放进**共享空间 › Downloads › watch**会自动开始下载。`,
 }
 
 // withoutVendorPitch drops the paragraphs of a description, and whole

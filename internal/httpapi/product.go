@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -1140,6 +1141,10 @@ func (h *productHandler) writeFileError(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "not_found", "file resource was not found")
 	case errors.Is(err, files.ErrConflict):
 		writeError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
+	case errors.Is(err, files.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):
+		writeError(w, http.StatusUnprocessableEntity, "name_too_long", "names may hold at most 255 bytes")
+	case errors.Is(err, files.ErrNameNotPortable):
+		writeError(w, http.StatusUnprocessableEntity, "name_not_portable", "the name cannot be used on Windows or macOS")
 	case errors.Is(err, files.ErrInvalidName), errors.Is(err, files.ErrUnsupportedType),
 		errors.Is(err, files.ErrInvalidQuery), errors.Is(err, files.ErrInvalidSchedule):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())

@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -626,6 +627,8 @@ var failures = []struct {
 	{"not_found", "the file or folder was not found", []error{files.ErrNotFound, ErrNotFound}},
 	{"name_conflict", "a file with this name already exists", []error{files.ErrConflict}},
 	{"folder_blocked", "a file has the name of a folder to create", []error{files.ErrFolderBlocked}},
+	{"name_too_long", "names may hold at most 255 bytes", []error{files.ErrNameTooLong, syscall.ENAMETOOLONG}},
+	{"name_not_portable", "the name cannot be used on Windows or macOS", []error{files.ErrNameNotPortable}},
 	{"validation_failed", "the request is invalid", []error{files.ErrInvalidName, files.ErrInvalidUpload, files.ErrInvalidSelection, files.ErrUnsupportedType, ErrInvalid}},
 	{"volume_unavailable", "the data volume is unavailable", []error{files.ErrVolumeUnavailable}},
 	{"insufficient_storage", "the data volume reserve would be exhausted", []error{files.ErrInsufficientSpace}},

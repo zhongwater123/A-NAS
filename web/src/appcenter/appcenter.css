@@ -244,6 +244,10 @@ button.ac-get.open:hover { background: #2862cd; }
 .ac-output pre, .ac-compose pre { max-height: 240px; overflow: auto; margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; color: #d8dee9; background: #0f1520; font: 11px/1.6 var(--ac-mono); white-space: pre-wrap; word-break: break-word; text-align: left; }
 
 /* First-use notes */
+.ac-problems { display: grid; gap: 6px; margin: 4px 0 0; padding: 10px 12px; border-radius: 10px; list-style: none; background: rgba(214, 120, 18, .08); font-size: 12.5px; }
+.ac-problems li { display: flex; align-items: center; gap: 7px; color: #9a5208; font-weight: 600; }
+.ac-problems li svg { width: 14px; height: 14px; flex: none; }
+.ac-problems .ac-problems-hint { color: var(--ac-faint); font-weight: 400; }
 .ac-notes { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid rgba(236, 133, 16, .22); border-radius: 14px; background: linear-gradient(180deg, #fffaf0, #fff 85%); }
 .ac-notes h3 { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 650; }
 .ac-notes h3 svg { width: 16px; height: 16px; color: #ec8510; }
@@ -344,6 +348,7 @@ button.ac-get.open:hover { background: #2862cd; }
 .ac-plan-icon.network { color: #7350e0; background: #f1ecff; }
 .ac-plan-icon.images { color: var(--ac-warning); background: var(--ac-warning-soft); }
 .ac-plan-icon.containers { color: #586274; background: #eef1f5; }
+.ac-plan-icon.logins { color: #b8447a; background: #fdebf3; }
 .ac-plan-title { min-width: 0; display: grid; gap: 1px; }
 .ac-plan-title strong { font-size: 13px; font-weight: 650; }
 .ac-plan-title span { color: var(--ac-muted); font-size: 12px; }
@@ -372,6 +377,24 @@ button.ac-get.open:hover { background: #2862cd; }
 .ac-stage-icon b svg { width: 13px; height: 13px; stroke-width: 3; }
 .ac-stage-notes { justify-self: stretch; display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border: 1px solid rgba(236, 133, 16, .22); border-radius: 12px; background: #fffaf0; text-align: left; }
 .ac-stage-notes > strong { font-size: 13px; font-weight: 650; }
+.ac-stage-logins { justify-self: stretch; display: grid; gap: 6px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--ac-line-strong); border-radius: 12px; background: #fff; text-align: left; }
+.ac-stage-logins > strong, .ac-status-logins > strong { font-size: 13px; font-weight: 650; }
+
+/* Generated logins */
+.ac-status-logins { display: grid; gap: 6px; padding: 12px 14px 10px; border: 1px solid var(--ac-line); border-radius: 10px; background: rgba(255, 255, 255, .8); }
+.ac-logins { justify-self: stretch; display: grid; gap: 6px; }
+.ac-logins > small { color: var(--ac-faint); font-size: 11.5px; line-height: 1.5; }
+.ac-logins-warning { display: flex; align-items: flex-start; gap: 7px; margin: 2px 0 0 !important; padding: 8px 10px; border-radius: 8px; color: #8b5410; background: var(--ac-warning-soft); font-size: 12px; line-height: 1.55; }
+.ac-logins-warning svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.ac-login { display: grid; margin: 0; }
+.ac-login > div { min-height: 32px; display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px; }
+.ac-login dt { color: var(--ac-muted); font-size: 12px; }
+.ac-login dd { min-width: 0; display: flex; align-items: center; gap: 2px; margin: 0; }
+.ac-login code { min-width: 0; margin-right: 6px; padding: 2px 8px; border-radius: 6px; color: #273041; background: #eef1f5; font: 12px/1.6 var(--ac-mono); overflow-wrap: anywhere; user-select: all; }
+.ac-login code.hidden { color: var(--ac-muted); letter-spacing: 1px; user-select: none; }
+.ac-login .ac-icon-btn { width: 28px; height: 28px; }
+.ac-login .ac-icon-btn svg { width: 15px; height: 15px; }
+.ac-login .ac-icon-btn.done { color: var(--ac-success); }
 
 /* Uninstall confirmation */
 .ac-confirm { display: grid; justify-items: center; gap: 10px; padding: 26px 22px 18px; text-align: center; }

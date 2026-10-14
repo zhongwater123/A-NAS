@@ -5,7 +5,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { CatalogApp } from "../appsApi";
-import { AppIcon, Folded, JobOutput, Progress, RichText } from "./parts";
+import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
 import { appURL, categoryOf, installFailed, openApp, useElapsed } from "./model";
 
 interface DetailProps {
@@ -194,11 +194,24 @@ function StatusPanel({ app, onInstall, onOpenDocker }: { app: CatalogApp; onInst
               {url
                 ? <>在局域网中访问 <a href={url} target="_blank" rel="noopener noreferrer">{url}</a></>
                 : "该应用没有网页界面。"}
-              {!healthy && " 有容器没有运行，可在 Docker 中查看日志。"}
             </p>
           </div>
           {onOpenDocker && <button className="ac-btn" onClick={onOpenDocker}><Boxes />在 Docker 中查看</button>}
         </div>
+        {!healthy && (
+          <ul className="ac-problems" aria-label="没有运行的容器">
+            {(app.problems?.length ? app.problems : [{ service: "", state: "", exitCode: 0 }]).map((problem, index) => (
+              <li key={`${problem.service}-${index}`}><CircleAlert />{problemText(problem)}</li>
+            ))}
+            <li className="ac-problems-hint">原因通常在容器日志里，可在 Docker 中查看。</li>
+          </ul>
+        )}
+        {app.credentials?.length ? (
+          <div className="ac-status-logins" aria-label="登录信息">
+            <strong>登录信息</strong>
+            <Logins credentials={app.credentials} />
+          </div>
+        ) : null}
         {app.job && <JobOutput job={app.job} summary={app.job.action === "install" ? "上次安装的输出" : "上次操作的输出"} />}
       </section>
     );
@@ -220,4 +233,16 @@ function StatusPanel({ app, onInstall, onOpenDocker }: { app: CatalogApp; onInst
     );
   }
   return null;
+}
+
+// problemText words why a container of an installed app is not running.
+function problemText(problem: { service: string; state: string; exitCode: number }): string {
+  const name = problem.service ? `容器 ${problem.service} ` : "有容器";
+  switch (problem.state) {
+    case "restarting": return `${name}不断重启（退出码 ${problem.exitCode}）`;
+    case "exited": case "dead": return `${name}已退出（退出码 ${problem.exitCode}）`;
+    case "created": return `${name}没有启动`;
+    case "paused": return `${name}已暂停`;
+    default: return `${name}没有运行`;
+  }
 }

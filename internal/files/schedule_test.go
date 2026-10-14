@@ -489,3 +489,49 @@ func TestCatalogsFromEarlierVersionsGainSnapshotTotals(t *testing.T) {
 		t.Fatalf("migrated entries = %+v, %v", entries, err)
 	}
 }
+
+// A space nobody has set a schedule for is still protected: a daily snapshot
+// at 03:00, keeping 14, counted from when the scheduler first sees it.
+func TestSpacesWithoutAScheduleGetTheDailyDefault(t *testing.T) {
+	f := newSnapshotFixture(t)
+	f.clock.Set(at(0, 10, 0))
+	f.open()
+	// The development snapshot backend copies folders that must exist.
+	f.upload(f.admin, f.private, "", "notes.txt", "hello")
+	f.upload(f.admin, f.shared, "", "family.txt", "hello")
+	f.upload(f.member, f.memberPrivate, "", "mine.txt", "hello")
+
+	schedule := f.schedule(f.admin, f.private)
+	if !schedule.Enabled || schedule.Frequency != files.FrequencyDaily || schedule.Time != "03:00" || schedule.Keep != 14 {
+		t.Fatalf("default schedule = %+v", schedule)
+	}
+	if !schedule.NextRunAt.Equal(at(1, 3, 0)) {
+		t.Fatalf("default next run = %v, want tomorrow 03:00", schedule.NextRunAt.In(shanghai))
+	}
+	// 03:00 today has passed already; nothing is taken for it.
+	f.runDue()
+	if got := f.snapshots(f.private); len(got) != 0 {
+		t.Fatalf("snapshots on the first run = %v", got)
+	}
+	f.clock.Set(at(1, 3, 1))
+	f.runDue()
+	for _, space := range []accounts.Space{f.private, f.shared} {
+		if got := origins(f.snapshots(space))[files.SnapshotOriginScheduled]; len(got) != 1 {
+			t.Fatalf("scheduled snapshots of %s = %v, want one", space.Name, got)
+		}
+	}
+	if got, err := f.files.ListSnapshots(context.Background(), f.member, f.memberPrivate.ID); err != nil || len(got) != 1 {
+		t.Fatalf("the member's scheduled snapshots = %v, %v; want one", got, err)
+	}
+
+	// Turning it off sticks: the default does not come back.
+	f.setSchedule(f.admin, f.shared, files.SnapshotScheduleSettings{Frequency: files.FrequencyDaily, Time: "03:00", Keep: 14})
+	f.clock.Set(at(2, 3, 1))
+	f.runDue()
+	if got := origins(f.snapshots(f.shared))[files.SnapshotOriginScheduled]; len(got) != 1 {
+		t.Fatalf("scheduled snapshots of a disabled schedule = %v", got)
+	}
+	if f.schedule(f.admin, f.shared).Enabled {
+		t.Fatal("a disabled schedule came back on")
+	}
+}

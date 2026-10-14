@@ -43,6 +43,40 @@ type AppDocument struct {
 
 	// UpstreamNotes is empty from an agent that predates A-NAS notes.
 	UpstreamNotes string `json:"upstreamNotes,omitempty"`
+	// Problems lists the containers that are not running; an older agent
+	// reports none.
+	Problems []ProblemDocument `json:"problems,omitempty"`
+	// Credentials are the logins generated for the app.
+	Credentials []CredentialDocument `json:"credentials,omitempty"`
+}
+
+type CredentialDocument struct {
+	Label    string `json:"label"`
+	Username string `json:"username,omitempty"`
+	Secret   string `json:"secret"`
+	Upstream bool   `json:"upstream,omitempty"`
+}
+
+func credentialsFromDomain(credentials []appstore.Credential) []CredentialDocument {
+	var documents []CredentialDocument
+	for _, credential := range credentials {
+		documents = append(documents, CredentialDocument{Label: credential.Label, Username: credential.Username, Secret: credential.Secret, Upstream: credential.Upstream})
+	}
+	return documents
+}
+
+func credentialsToDomain(documents []CredentialDocument) []appstore.Credential {
+	var credentials []appstore.Credential
+	for _, document := range documents {
+		credentials = append(credentials, appstore.Credential{Label: document.Label, Username: document.Username, Secret: document.Secret, Upstream: document.Upstream})
+	}
+	return credentials
+}
+
+type ProblemDocument struct {
+	Service  string `json:"service"`
+	State    string `json:"state"`
+	ExitCode int    `json:"exitCode"`
 }
 
 type JobDocument struct {
@@ -70,6 +104,9 @@ type PlanDocument struct {
 	AddressPools []string `json:"addressPools"`
 	Digest       string   `json:"digest"`
 	Compose      string   `json:"compose"`
+
+	// Credentials are the logins generated for the app.
+	Credentials []CredentialDocument `json:"credentials,omitempty"`
 }
 
 type IdentityJSON struct {
@@ -106,6 +143,10 @@ func AppsFromDomain(apps []appstore.AppStatus) AppsDocument {
 			job := JobFromDomain(*app.Job)
 			item.Job = &job
 		}
+		for _, problem := range app.Problems {
+			item.Problems = append(item.Problems, ProblemDocument{Service: problem.Service, State: problem.State, ExitCode: problem.ExitCode})
+		}
+		item.Credentials = credentialsFromDomain(app.Credentials)
 		document.Apps[i] = item
 	}
 	return document
@@ -136,6 +177,10 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 			}
 			apps[i].Job = &job
 		}
+		for _, problem := range item.Problems {
+			apps[i].Problems = append(apps[i].Problems, appstore.ContainerProblem{Service: problem.Service, State: problem.State, ExitCode: problem.ExitCode})
+		}
+		apps[i].Credentials = credentialsToDomain(item.Credentials)
 	}
 	return apps, nil
 }
@@ -183,6 +228,7 @@ func PlanFromDomain(plan appstore.Plan) PlanDocument {
 	for i, mount := range plan.Mounts {
 		document.Mounts[i] = MountJSON{HostPath: mount.HostPath, ContainerPath: mount.ContainerPath, Kind: mount.Kind, ReadOnly: mount.ReadOnly, Purpose: mount.Purpose}
 	}
+	document.Credentials = credentialsFromDomain(plan.Credentials)
 	return document
 }
 
@@ -205,5 +251,6 @@ func (document PlanDocument) ToDomain() appstore.Plan {
 	for _, mount := range document.Mounts {
 		plan.Mounts = append(plan.Mounts, appstore.Mount{HostPath: mount.HostPath, ContainerPath: mount.ContainerPath, Kind: mount.Kind, ReadOnly: mount.ReadOnly, Purpose: mount.Purpose})
 	}
+	plan.Credentials = credentialsToDomain(document.Credentials)
 	return plan
 }

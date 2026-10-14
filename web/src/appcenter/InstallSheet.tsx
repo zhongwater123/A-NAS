@@ -1,10 +1,10 @@
 import {
-  ArrowUpRight, Boxes, Check, CircleAlert, Download, FileCode, FolderOpen, Network, RotateCcw, TriangleAlert, UserRound, Waypoints, X,
+  ArrowUpRight, Boxes, Check, CircleAlert, Download, FileCode, FolderOpen, KeyRound, Network, RotateCcw, TriangleAlert, UserRound, Waypoints, X,
 } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useState } from "react";
 
 import { AppJob, AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
-import { AppIcon, JobOutput, Layer, Progress, RichText } from "./parts";
+import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
 import { appURL, describeError, installFailed, mountLabels, openApp, useElapsed } from "./model";
 
 interface SheetProps {
@@ -134,6 +134,11 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
           <span className="ac-plan-row"><code>{plan.identity.username}</code>UID {plan.identity.uid}</span>
           {!shared && <small>只访问自己的应用数据，不能访问共享空间或个人空间。</small>}
         </PlanItem>
+        {plan.credentials?.length ? (
+          <PlanItem icon={<KeyRound />} tone="logins" title="登录信息" summary="随机生成，不用清单里人人可查的默认密码">
+            <Logins credentials={plan.credentials} />
+          </PlanItem>
+        ) : null}
         <PlanItem icon={<FolderOpen />} tone="folders" title="使用文件夹" summary={counts.length ? counts.join(" · ") : "不使用宿主机文件夹"}>
           {plan.mounts.map((mount) => (
             <span key={`${mount.hostPath}:${mount.containerPath}`} className="ac-plan-row">
@@ -221,6 +226,12 @@ function Finished({ app, onClose }: { app: CatalogApp; onClose: () => void }) {
         <span className="ac-stage-icon ok"><AppIcon app={app} size="lg" /><b><Check /></b></span>
         <h3>{app.title} 已安装</h3>
         <p>{app.running}/{app.total} 个容器运行中{app.webPort ? ` · 端口 ${app.webPort}` : ""}</p>
+        {app.credentials?.length ? (
+          <div className="ac-stage-logins">
+            <strong>登录信息</strong>
+            <Logins credentials={app.credentials} />
+          </div>
+        ) : null}
         {app.notes && (
           <div className="ac-stage-notes">
             <strong>使用须知</strong>

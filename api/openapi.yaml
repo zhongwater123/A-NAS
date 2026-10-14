@@ -2702,6 +2702,32 @@ components:
           minimum: 0
         job:
           $ref: "#/components/schemas/AppJob"
+        problems:
+          type: array
+          description: The app's containers that are not running, with their state and last exit code.
+          items:
+            type: object
+            additionalProperties: false
+            required: [service, state, exitCode]
+            properties:
+              service: { type: string }
+              state: { type: string }
+              exitCode: { type: integer }
+        credentials:
+          type: array
+          description: The app's logins, shown to the owner.
+          items: { $ref: "#/components/schemas/AppCredential" }
+    AppCredential:
+      type: object
+      additionalProperties: false
+      required: [label, secret]
+      properties:
+        label: { type: string }
+        username: { type: string }
+        secret: { type: string }
+        upstream:
+          type: boolean
+          description: The manifest's published value, still used by an app installed before A-NAS generated its logins.
     AppJob:
       type: object
       additionalProperties: false
@@ -2825,6 +2851,10 @@ components:
           pattern: "^[a-f0-9]{64}$"
         compose:
           type: string
+        credentials:
+          type: array
+          description: Logins generated for this app at its first plan and kept, shown to the owner.
+          items: { $ref: "#/components/schemas/AppCredential" }
     PhotoLibrary:
       type: object
       additionalProperties: false

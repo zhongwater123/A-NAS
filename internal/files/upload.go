@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
@@ -112,8 +113,8 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 	if request.Size < 0 || len(request.Directories) > maxUploadDirectories {
 		return nil, ErrInvalidUpload
 	}
-	if !validUploadName(request.Name) {
-		return nil, ErrInvalidName
+	if err := checkNewName(request.Name); err != nil {
+		return nil, err
 	}
 	space, root, err := s.authorizedSpace(ctx, actor, request.SpaceID, true)
 	if err != nil {
@@ -144,6 +145,9 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 		if _, err := s.fs.Lstat(ctx, target); err == nil {
 			return nil, ErrConflict
 		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		if err := s.refuseCaseTwin(ctx, space.ID, parentID, request.Name, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -233,7 +237,13 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	temporary := filepath.Join(parentPath, upload.temporary)
 	replaced := false
 	if upload.Conflict == ConflictReplace {
-		if replaced, err = s.trashForReplacement(ctx, actor, space.ID, root, upload.ParentID, filepath.Join(parentPath, upload.Name)); err != nil {
+		existing := upload.Name
+		if twin, found, err := s.caseTwin(ctx, space.ID, upload.ParentID, upload.Name, ""); err != nil {
+			return CommittedUpload{}, err
+		} else if found && twin.Kind == EntryKindFile {
+			existing = twin.Name
+		}
+		if replaced, err = s.trashForReplacement(ctx, actor, space.ID, root, upload.ParentID, filepath.Join(parentPath, existing)); err != nil {
 			return CommittedUpload{}, err
 		}
 	}
@@ -243,7 +253,13 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 		if number > maxNumberedCopies {
 			return CommittedUpload{}, ErrConflict
 		}
-		target = filepath.Join(parentPath, numberedName(upload.Name, number))
+		name := numberedName(upload.Name, number)
+		if _, taken, err := s.caseTwin(ctx, space.ID, upload.ParentID, name, ""); err != nil {
+			return CommittedUpload{}, err
+		} else if taken {
+			continue
+		}
+		target = filepath.Join(parentPath, name)
 		err = s.fs.Rename(ctx, temporary, target)
 		if err == nil {
 			break
@@ -315,8 +331,15 @@ func (s *Service) uploadParent(ctx context.Context, space accounts.Space, root s
 // ensureDirectory returns the folder name below parentPath, creating it when
 // it does not exist. A file with that name blocks it.
 func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spaceID, root, parentID, parentPath, name string) (Entry, string, error) {
-	if !validUploadName(name) {
-		return Entry{}, "", ErrInvalidName
+	if err := checkNewName(name); err != nil {
+		return Entry{}, "", err
+	}
+	// A folder already there in another letter case is the same folder to an
+	// SMB client, so the upload goes into it.
+	if twin, found, err := s.caseTwin(ctx, spaceID, parentID, name, ""); err != nil {
+		return Entry{}, "", err
+	} else if found && twin.Kind == EntryKindDirectory {
+		name = twin.Name
 	}
 	target := filepath.Join(parentPath, name)
 	if !withinRoot(root, target) {
@@ -413,22 +436,23 @@ func isUploadTemporary(name string) bool {
 	return strings.HasPrefix(path.Base(name), uploadTemporaryPrefix)
 }
 
-// numberedName is name itself for 0 and "name (n).ext" after that.
+// numberedName is name itself for 0 and "name (n).ext" after that. The stem
+// is shortened, at a character boundary, when the number would take the name
+// past the byte limit.
 func numberedName(name string, number int) string {
 	if number == 0 {
 		return name
 	}
-	dot := strings.LastIndex(name, ".")
-	if dot <= 0 {
-		return fmt.Sprintf("%s (%d)", name, number)
+	stem, extension := name, ""
+	if dot := strings.LastIndex(name, "."); dot > 0 {
+		stem, extension = name[:dot], name[dot:]
 	}
-	return fmt.Sprintf("%s (%d)%s", name[:dot], number, name[dot:])
-}
-
-// validUploadName also rejects names the file system cannot hold and names
-// reserved for A-NAS bookkeeping, which would be hidden after upload.
-func validUploadName(name string) bool {
-	return validName(name) && len(name) <= maxNameBytes && !strings.HasPrefix(name, ".a-nas-")
+	suffix := fmt.Sprintf(" (%d)", number)
+	for len(stem)+len(suffix)+len(extension) > maxNameBytes && stem != "" {
+		_, size := utf8.DecodeLastRuneInString(stem)
+		stem = stem[:len(stem)-size]
+	}
+	return stem + suffix + extension
 }
 
 // uploadWriteError names the volume conditions a client can act on.

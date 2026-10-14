@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 	}
 	if _, err := s.db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS snapshots_by_space ON snapshots(space_id, created_at);
+CREATE INDEX IF NOT EXISTS entries_by_parent ON entries(space_id, parent_id);
 UPDATE trash SET original_path = (SELECT relative_path FROM entries p WHERE p.id = trash.original_parent_id AND p.trashed = 0)
 WHERE original_path = '' AND original_parent_id <> ''
     AND EXISTS (SELECT 1 FROM entries p WHERE p.id = trash.original_parent_id AND p.trashed = 0);
@@ -876,8 +877,8 @@ FROM trash WHERE id = ?`, trashID).Scan(
 	if targetName == "" {
 		targetName = item.Name
 	}
-	if !validName(targetName) {
-		return Entry{}, ErrInvalidName
+	if err := checkName(targetName, item.Name); err != nil {
+		return Entry{}, err
 	}
 	parent, err := s.parentPath(ctx, root, item.SpaceID, targetParentID)
 	if errors.Is(err, ErrNotFound) && toOriginal {
@@ -886,6 +887,9 @@ FROM trash WHERE id = ?`, trashID).Scan(
 		targetParentID, parent, err = "", root, nil
 	}
 	if err != nil {
+		return Entry{}, err
+	}
+	if err := s.refuseCaseTwin(ctx, item.SpaceID, targetParentID, targetName, item.EntryID); err != nil {
 		return Entry{}, err
 	}
 	target := filepath.Join(parent, targetName)
@@ -1002,8 +1006,8 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 	if targetName == "" {
 		targetName = entry.Name
 	}
-	if !validName(targetName) {
-		return Entry{}, ErrInvalidName
+	if err := checkName(targetName, entry.Name); err != nil {
+		return Entry{}, err
 	}
 	parent, err := s.parentPath(ctx, root, spaceID, targetParentID)
 	if err != nil {
@@ -1018,6 +1022,9 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 	target := filepath.Join(parent, targetName)
 	if source == target {
 		return entry, nil
+	}
+	if err := s.refuseCaseTwin(ctx, spaceID, targetParentID, targetName, entryID); err != nil {
+		return Entry{}, err
 	}
 	var oldRelative string
 	if err := s.store.db.QueryRowContext(ctx, "SELECT relative_path FROM entries WHERE id = ?", entryID).Scan(&oldRelative); err != nil {
@@ -1122,11 +1129,15 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	if targetName == "" {
 		targetName = entry.Name
 	}
-	if !validName(targetName) {
-		return Entry{}, "", ErrInvalidName
+	if err := checkName(targetName, entry.Name); err != nil {
+		return Entry{}, "", err
 	}
 	parent, err := s.parentPath(ctx, root, targetSpaceID, targetParentID)
 	if err != nil {
+		return Entry{}, "", err
+	}
+	// The original counts too: a copy beside it may not differ only in case.
+	if err := s.refuseCaseTwin(ctx, targetSpaceID, targetParentID, targetName, ""); err != nil {
 		return Entry{}, "", err
 	}
 	if entry.Kind == EntryKindDirectory {
@@ -1170,16 +1181,26 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 }
 
 func (s *Service) CreateDirectory(ctx context.Context, actor accounts.User, spaceID, parentID, name string) (Entry, error) {
+	return s.createDirectory(ctx, actor, spaceID, parentID, name, nameChosen)
+}
+
+// createDirectory creates a folder named as naming allows.
+func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spaceID, parentID, name string, naming naming) (Entry, error) {
 	space, root, err := s.authorizedSpace(ctx, actor, spaceID, true)
 	if err != nil {
 		return Entry{}, err
 	}
-	if !validName(name) {
-		return Entry{}, ErrInvalidName
+	if err := naming.check(name); err != nil {
+		return Entry{}, err
 	}
 	parentPath, err := s.parentPath(ctx, root, spaceID, parentID)
 	if err != nil {
 		return Entry{}, err
+	}
+	if naming.twins {
+		if err := s.refuseCaseTwin(ctx, spaceID, parentID, name, ""); err != nil {
+			return Entry{}, err
+		}
 	}
 	if err := s.ensureCapacity(0); err != nil {
 		return Entry{}, err
@@ -1203,16 +1224,26 @@ func (s *Service) CreateDirectory(ctx context.Context, actor accounts.User, spac
 }
 
 func (s *Service) Upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader) (Entry, error) {
+	return s.upload(ctx, actor, spaceID, parentID, name, contents, nameChosen)
+}
+
+// upload writes a file named as naming allows.
+func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader, naming naming) (Entry, error) {
 	space, root, err := s.authorizedSpace(ctx, actor, spaceID, true)
 	if err != nil {
 		return Entry{}, err
 	}
-	if !validName(name) {
-		return Entry{}, ErrInvalidName
+	if err := naming.check(name); err != nil {
+		return Entry{}, err
 	}
 	parentPath, err := s.parentPath(ctx, root, spaceID, parentID)
 	if err != nil {
 		return Entry{}, err
+	}
+	if naming.twins {
+		if err := s.refuseCaseTwin(ctx, spaceID, parentID, name, ""); err != nil {
+			return Entry{}, err
+		}
 	}
 	if err := s.ensureCapacity(0); err != nil {
 		return Entry{}, err

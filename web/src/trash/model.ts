@@ -1,5 +1,6 @@
 import { APIError, type Space, type TrashItem } from "../api";
 import { formatDay } from "../backup/format";
+import { nameNotPortableText, nameTooLongText } from "../fileNames";
 
 export type TrashSort = "deleted" | "expiry";
 
@@ -91,6 +92,8 @@ export function messageOf(error: unknown): string {
       case "name_conflict": return "目标位置已有同名项目";
       case "volume_unavailable": return "数据卷当前不可用，请检查存储状态";
       case "validation_failed": return "名称不符合要求";
+      case "name_too_long": return nameTooLongText;
+      case "name_not_portable": return nameNotPortableText;
       case "network_error": return "网络连接中断";
     }
     return error.status >= 500 ? "服务暂时不可用，请稍后重试" : error.message;

@@ -63,6 +63,7 @@ import { DockerFocus, DockerPanel } from "./docker/DockerPanel";
 import { appProject } from "./docker/model";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { FileViewer } from "./files/FileViewer";
+import { nameErrorText, nameProblem } from "./fileNames";
 import { fileTypeLabel, isBrowserPreviewableImage, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
@@ -750,6 +751,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	};
 	const makeDirectory = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); const form = event.currentTarget; const name = String(new FormData(form).get("name"));
+		const problem = nameProblem(name); if (problem) { setError(problem); return; }
 		setActivity(`正在创建“${name}”…`);
 		try { await createDirectory(spaceID, parentID, name); form.reset(); setCreatingDirectory(false); await refresh(spaceID, parentID); }
 		catch (caught) { setError(messageOf(caught)); }
@@ -789,7 +791,9 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 	};
 	const renameEntry = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); if (!renaming) return;
-		const name = String(new FormData(event.currentTarget).get("name")); setActivity(`正在重命名“${renaming.name}”…`);
+		const name = String(new FormData(event.currentTarget).get("name"));
+		const problem = name === renaming.name ? undefined : nameProblem(name); if (problem) { setError(problem); return; }
+		setActivity(`正在重命名“${renaming.name}”…`);
 		try { await moveFile(renaming.id, parentID, name); setRenaming(undefined); setSelectedItemID(""); setSelectedItemIDs([]); await refresh(spaceID, parentID); setError(""); }
 		catch (caught) { setError(messageOf(caught)); }
 		finally { setActivity(""); }
@@ -952,7 +956,7 @@ function FilePanel({ navigation, onNavigated, onOpenTransfers, onOpenPhotos, onO
 }
 
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
-function messageOf(error: unknown) { return error instanceof Error ? error.message : "请求失败"; }
+function messageOf(error: unknown) { return nameErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
 
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);

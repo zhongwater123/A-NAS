@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/appstore/engine"
@@ -23,6 +24,8 @@ type fakeDocker struct {
 	pools      []netip.Prefix
 	networks   []engine.NetworkInfo
 	mounts     []engine.MountInfo
+	// states overrides what ProjectContainers reports.
+	states []engine.ContainerState
 	// apiVersion defaults to an engine that supports volume subpaths.
 	apiVersion string
 }
@@ -50,6 +53,27 @@ func (f *fakeDocker) APIVersion(context.Context) (string, error) {
 
 func (f *fakeDocker) ProjectMounts(context.Context, string) ([]engine.MountInfo, error) {
 	return f.mounts, nil
+}
+
+// ProjectContainers reports the app's containers as running unless states
+// says otherwise.
+func (f *fakeDocker) ProjectContainers(_ context.Context, project string) ([]engine.ContainerState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.states != nil {
+		return f.states, nil
+	}
+	var states []engine.ContainerState
+	for _, container := range f.containers {
+		if appstore.ProjectName(container.AppID) == project {
+			states = append(states, engine.ContainerState{Service: container.Name, State: "running"})
+		}
+	}
+	if len(states) == 0 {
+		// Tests that do not model the app's containers: one that runs.
+		states = []engine.ContainerState{{Service: project, State: "running"}}
+	}
+	return states, nil
 }
 
 type fakeRunner struct {
@@ -93,7 +117,9 @@ func newStore(t *testing.T, docker *fakeDocker, runner *fakeRunner) (*engine.Sto
 	}
 	state := t.TempDir()
 	policy := appstore.Policy{AppDataRoot: "/srv/a-nas/data/apps", DataRoot: "/srv/a-nas/data/spaces/shared", TZ: "UTC", ReservedPorts: []uint16{8080}}
-	return engine.New(entries, policy, state, docker, runner), state
+	store := engine.New(entries, policy, state, docker, runner)
+	store.SetStartupCheck(30*time.Millisecond, 10*time.Millisecond)
+	return store, state
 }
 
 func TestInstallRunsTheConfirmedComposeFile(t *testing.T) {
@@ -344,3 +370,92 @@ func find(apps []appstore.AppStatus, id string) appstore.AppStatus {
 }
 
 var identity = appstore.Identity{Username: "app-test", UID: 30001, GID: 30001}
+
+// Compose returns once containers start; an app that cannot keep running,
+// for example because it cannot write its folder, is a failed install that
+// is rolled back, with the reason and its last logs.
+func TestInstallFailsWhenAContainerKeepsRestarting(t *testing.T) {
+	docker := &fakeDocker{states: []engine.ContainerState{{Service: "n8n", State: "restarting", ExitCode: 1, RestartCount: 3}}}
+	runner := &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+	plan, err := store.Plan(ctx, "n8n", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(ctx, "n8n", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	apps, _ := store.Apps(ctx)
+	job := find(apps, "n8n").Job
+	if job.State != appstore.JobFailed || !strings.Contains(job.Error, "容器 n8n 启动后不断重启（退出码 1）") || !strings.Contains(job.Error, "安装已回滚") {
+		t.Fatalf("job = %+v", job)
+	}
+	var verbs []string
+	for _, call := range runner.calls {
+		for _, verb := range []string{"up", "logs", "down"} {
+			if slices.Contains(call, verb) {
+				verbs = append(verbs, verb)
+			}
+		}
+	}
+	if !slices.Equal(verbs, []string{"up", "logs", "down"}) {
+		t.Fatalf("compose ran %v, want up, logs, down", verbs)
+	}
+}
+
+func TestInstalledAppsSayWhyAContainerIsNotRunning(t *testing.T) {
+	docker := &fakeDocker{containers: []engine.ContainerInfo{
+		{Name: "a-nas-n8n-n8n-1", AppID: "n8n", Service: "n8n", State: "restarting", ExitCode: 1},
+	}}
+	store, _ := newStore(t, docker, &fakeRunner{})
+	apps, err := store.Apps(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := find(apps, "n8n")
+	if status.Running != 0 || len(status.Problems) != 1 || status.Problems[0] != (appstore.ContainerProblem{Service: "n8n", State: "restarting", ExitCode: 1}) {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+// An app's logins are drawn once, kept only for the agent, and shown for the
+// installed app; an app installed before they were drawn shows the
+// manifest's own, marked so.
+func TestInstalledAppsShowTheLoginsTheyUse(t *testing.T) {
+	docker := &fakeDocker{containers: []engine.ContainerInfo{
+		{Name: "a-nas-openlist-openlist-1", AppID: "openlist", Service: "openlist", Running: true},
+		{Name: "a-nas-photoprism-photoprism-1", AppID: "photoprism", Service: "photoprism", Running: true},
+	}}
+	store, state := newStore(t, docker, &fakeRunner{})
+	ctx := context.Background()
+
+	plan, err := store.Plan(ctx, "openlist", identity)
+	if err != nil || len(plan.Credentials) != 1 || plan.Credentials[0].Upstream {
+		t.Fatalf("Plan() credentials = %+v, %v", plan.Credentials, err)
+	}
+	again, err := store.Plan(ctx, "openlist", identity)
+	if err != nil || again.Digest != plan.Digest || again.Credentials[0].Secret != plan.Credentials[0].Secret {
+		t.Fatalf("a second plan drew new logins: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(state, "secrets", "openlist.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("stored secrets = %v, %v", info, err)
+	}
+
+	apps, err := store.Apps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(apps, "openlist").Credentials; len(got) != 1 || got[0] != plan.Credentials[0] {
+		t.Fatalf("openlist credentials = %+v", got)
+	}
+	legacy := find(apps, "photoprism").Credentials
+	if len(legacy) != 1 || !legacy[0].Upstream || legacy[0].Secret != "casaos" {
+		t.Fatalf("photoprism credentials = %+v", legacy)
+	}
+	if got := find(apps, "memos").Credentials; got != nil {
+		t.Fatalf("an app that is not installed shows %+v", got)
+	}
+}

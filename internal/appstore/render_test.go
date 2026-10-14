@@ -41,7 +41,7 @@ services:
 x-casaos:
   title:
     en_US: Demo
-`), testPolicy, testIdentity)
+`), testPolicy, testIdentity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,8 +128,8 @@ func TestRenderIsDeterministic(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range entries[:3] {
-		first, _ := appstore.Render(context.Background(), item, testPolicy, testIdentity)
-		second, _ := appstore.Render(context.Background(), item, testPolicy, testIdentity)
+		first, _ := appstore.Render(context.Background(), item, testPolicy, testIdentity, nil)
+		second, _ := appstore.Render(context.Background(), item, testPolicy, testIdentity, nil)
 		if first.Digest == "" || first.Digest != second.Digest {
 			t.Fatalf("%s digest is not stable: %s vs %s", item.App.ID, first.Digest, second.Digest)
 		}
@@ -157,7 +157,7 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 	}
 	for name, option := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    "+option+"\n"), testPolicy, testIdentity)
+			_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    "+option+"\n"), testPolicy, testIdentity, nil)
 			var policyError *appstore.PolicyError
 			if !errors.As(err, &policyError) {
 				t.Fatalf("Render() error = %v, want policy error", err)
@@ -175,7 +175,7 @@ services:
       - /DATA/AppData/$AppID/config:/config
       - /DATA/Media/Music:/music:ro
       - /etc/localtime:/etc/localtime
-`), testPolicy, testIdentity)
+`), testPolicy, testIdentity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,11 +193,11 @@ services:
 
 func TestRenderListsNetworksAndRefusesOwnAddressRanges(t *testing.T) {
 	ctx := context.Background()
-	plan, err := appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, testIdentity)
+	plan, err := appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, testIdentity, nil)
 	if err != nil || !slices.Equal(plan.Networks, []string{"default"}) {
 		t.Fatalf("implicit network = %v, %v; want the Compose default network", plan.Networks, err)
 	}
-	plan, err = appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n    network_mode: bridge\n"), testPolicy, testIdentity)
+	plan, err = appstore.Render(ctx, entry("services:\n  web:\n    image: example/web:1\n    network_mode: bridge\n"), testPolicy, testIdentity, nil)
 	if err != nil || len(plan.Networks) != 0 {
 		t.Fatalf("default bridge = %v, %v; want no networks", plan.Networks, err)
 	}
@@ -212,7 +212,7 @@ networks:
     ipam:
       config:
         - subnet: 172.19.0.0/16
-`), testPolicy, testIdentity)
+`), testPolicy, testIdentity, nil)
 	var policyError *appstore.PolicyError
 	if !errors.As(err, &policyError) || !strings.Contains(err.Error(), "network app sets its own address range") {
 		t.Fatalf("own subnet error = %v", err)
@@ -229,7 +229,7 @@ services:
     volumes: ["a-nas-shared:/data"]
 volumes:
   a-nas-shared: {}
-`), testPolicy, testIdentity)
+`), testPolicy, testIdentity, nil)
 	var policyError *appstore.PolicyError
 	if !errors.As(err, &policyError) {
 		t.Fatalf("Render() error = %v, want policy error", err)
@@ -237,7 +237,7 @@ volumes:
 }
 
 func TestRenderRequiresAnAppIdentity(t *testing.T) {
-	_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, appstore.Identity{})
+	_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, appstore.Identity{}, nil)
 	var policyError *appstore.PolicyError
 	if !errors.As(err, &policyError) {
 		t.Fatalf("Render() without identity error = %v, want policy error", err)
@@ -245,7 +245,7 @@ func TestRenderRequiresAnAppIdentity(t *testing.T) {
 }
 
 func TestRenderKeepsSharedMountsInsideTheSharedFolder(t *testing.T) {
-	plan, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    volumes: [\"/DATA:/data\"]\n"), testPolicy, testIdentity)
+	plan, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    volumes: [\"/DATA:/data\"]\n"), testPolicy, testIdentity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

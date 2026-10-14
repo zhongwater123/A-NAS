@@ -79,11 +79,16 @@ type ScheduleRun struct {
 // taken for the space rather than for a session, by the snapshot backend.
 type SpaceLookup interface {
 	Space(context.Context, string) (accounts.Space, error)
+	// ActiveSpaceIDs lists the shared space and the private spaces of
+	// active accounts, which get the default schedule until someone sets one.
+	ActiveSpaceIDs(context.Context) ([]string, error)
 }
 
+// defaultSchedule protects a space nobody has set a schedule for: a daily
+// snapshot at 03:00, keeping the latest 14.
 func defaultSchedule(spaceID string) SnapshotSchedule {
 	return SnapshotSchedule{SpaceID: spaceID, SnapshotScheduleSettings: SnapshotScheduleSettings{
-		Frequency: FrequencyDaily, Time: "03:00", Keep: 14,
+		Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14,
 	}, minuteOfDay: 3 * 60}
 }
 
@@ -99,6 +104,9 @@ func (s *Service) SnapshotSchedule(ctx context.Context, actor accounts.User, spa
 		return SnapshotSchedule{}, err
 	}
 	schedule := defaultSchedule(spaceID)
+	// The default counts from now, as the scheduler records it the first
+	// time it sees the space; it never snapshots a slot already past.
+	schedule.UpdatedAt = s.now().UTC()
 	if len(schedules) == 1 {
 		schedule = schedules[0]
 	}
@@ -298,6 +306,9 @@ func (s *Service) RunSnapshotSchedules(ctx context.Context, spaces SpaceLookup, 
 // RunDueSnapshots runs every schedule that is due once. A failed snapshot is
 // recorded on its schedule; only catalog failures are returned.
 func (s *Service) RunDueSnapshots(ctx context.Context, spaces SpaceLookup, logger *slog.Logger) error {
+	if err := s.recordDefaultSchedules(ctx, spaces); err != nil {
+		return err
+	}
 	schedules, err := s.loadSchedules(ctx, "WHERE enabled = 1")
 	if err != nil {
 		return err
@@ -316,6 +327,26 @@ func (s *Service) RunDueSnapshots(ctx context.Context, spaces SpaceLookup, logge
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// recordDefaultSchedules writes the default schedule for every active space
+// that has none, counting from now. A schedule someone saved, even a
+// disabled one, is left alone.
+func (s *Service) recordDefaultSchedules(ctx context.Context, spaces SpaceLookup) error {
+	ids, err := spaces.ActiveSpaceIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		schedule := defaultSchedule(id)
+		if _, err := s.store.db.ExecContext(ctx, `
+INSERT INTO snapshot_schedules(space_id, enabled, frequency, minute_of_day, weekday, keep, updated_by, updated_at)
+VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(space_id) DO NOTHING`,
+			id, schedule.Enabled, schedule.Frequency, schedule.minuteOfDay, schedule.Weekday, schedule.Keep, "system", formatTime(s.now())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) runSchedule(ctx context.Context, spaces SpaceLookup, schedule SnapshotSchedule, now time.Time, logger *slog.Logger) error {

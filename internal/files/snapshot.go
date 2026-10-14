@@ -323,12 +323,12 @@ func (s *Service) RestoreSnapshotEntry(ctx context.Context, actor accounts.User,
 	action := "snapshot.file_restored"
 	if entry.Kind == EntryKindDirectory {
 		action = "snapshot.folder_restored"
-		restored, err = s.CreateDirectory(ctx, actor, snapshot.SpaceID, targetParentID, targetName)
+		restored, err = s.createDirectory(ctx, actor, snapshot.SpaceID, targetParentID, targetName, keeping(entry.Name))
 		if err == nil {
 			err = s.restoreSnapshotChildren(ctx, actor, snapshot, entry.ID, restored.ID)
 		}
 	} else {
-		restored, err = s.restoreSnapshotFile(ctx, actor, snapshot, entry.backendKey, targetParentID, targetName)
+		restored, err = s.restoreSnapshotFile(ctx, actor, snapshot, entry.backendKey, targetParentID, targetName, keeping(entry.Name))
 	}
 	if err != nil {
 		return Entry{}, err
@@ -347,7 +347,8 @@ func (s *Service) restoreSnapshotChildren(ctx context.Context, actor accounts.Us
 			return err
 		}
 		if child.Kind == EntryKindDirectory {
-			created, err := s.CreateDirectory(ctx, actor, snapshot.SpaceID, targetParentID, child.Name)
+			// The folder was just created; its contents keep their names.
+			created, err := s.createDirectory(ctx, actor, snapshot.SpaceID, targetParentID, child.Name, nameKept)
 			if err != nil {
 				return err
 			}
@@ -356,14 +357,14 @@ func (s *Service) restoreSnapshotChildren(ctx context.Context, actor accounts.Us
 			}
 			continue
 		}
-		if _, err := s.restoreSnapshotFile(ctx, actor, snapshot, child.backendKey, targetParentID, child.Name); err != nil {
+		if _, err := s.restoreSnapshotFile(ctx, actor, snapshot, child.backendKey, targetParentID, child.Name, nameKept); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) restoreSnapshotFile(ctx context.Context, actor accounts.User, snapshot Snapshot, backendKey, targetParentID, targetName string) (Entry, error) {
+func (s *Service) restoreSnapshotFile(ctx context.Context, actor accounts.User, snapshot Snapshot, backendKey, targetParentID, targetName string, naming naming) (Entry, error) {
 	reader, object, err := s.snapshots.Open(ctx, snapshot.ID, backendKey)
 	if err != nil {
 		return Entry{}, err
@@ -372,7 +373,7 @@ func (s *Service) restoreSnapshotFile(ctx context.Context, actor accounts.User, 
 	if object.Kind != EntryKindFile {
 		return Entry{}, ErrUnsupportedType
 	}
-	return s.Upload(ctx, actor, snapshot.SpaceID, targetParentID, targetName, reader)
+	return s.upload(ctx, actor, snapshot.SpaceID, targetParentID, targetName, reader, naming)
 }
 
 // OpenSnapshotContent opens one file in a snapshot for download.
