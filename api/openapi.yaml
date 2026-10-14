@@ -81,11 +81,13 @@ paths:
     post:
       security: []
       operationId: setupAdministrator
+      description: Create the first administrator. Only a direct loopback connection may (403 setup_local_only otherwise); a concurrent or later setup answers 409 setup_complete.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SetupRequest" } } } }
       responses:
         "201": { description: Administrator created, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/session:
     post:
       security: []
@@ -159,20 +161,26 @@ paths:
       responses:
         "201": { description: Member created, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
         "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/users/{userId}:
     delete:
       operationId: disableUser
       parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      description: Disable an account. Web sign-in ends first; when the Host Agent then fails to disable the SMB credential the answer is 503 smb_disable_pending, and disabling again retries only that step.
       responses:
         "204": { description: User disabled }
         "403": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/users/{userId}/credential:
     patch:
       operationId: resetUserCredential
       parameters: [{ $ref: "#/components/parameters/UserID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [password], properties: { password: { type: string, minLength: 12 } } } } } }
+      description: Choose a temporary password for another account; administrators change their own with changePassword.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [password], properties: { password: { $ref: "#/components/schemas/NewPassword" } } } } } }
       responses:
         "204": { description: Credential reset }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/volumes:
     get:
       operationId: listVolumes
@@ -1096,6 +1104,21 @@ paths:
         "404": { $ref: "#/components/responses/ProductError" }
         "413": { $ref: "#/components/responses/ProductError" }
         "415": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}/live-videos:
+    post:
+      operationId: attachLivePhotoVideo
+      summary: Complete Live Photos whose still was imported without its MOV
+      description: "One file part, a MOV of at most 256 MiB and 30 seconds that carries Apple's content identifier. Every photo of the library the caller may change whose still carries the same identifier and has no video yet gets this video; nothing is matched by name. 422 live_photo_not_found when no photo of the library is waiting for it, 422 invalid_motion_photo when the MOV has no identifier or is not a short, complete video."
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } } } } }
+      responses:
+        "200": { description: The photos now complete, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/preview:
@@ -2287,16 +2310,19 @@ components:
     SetupStatus:
       type: object
       additionalProperties: false
-      required: [setupRequired]
+      required: [setupRequired, setupAllowed]
       properties:
         setupRequired: { type: boolean }
+        setupAllowed:
+          type: boolean
+          description: Whether this connection may set the device up. Only a direct loopback connection without forwarding headers may (the local console or an SSH tunnel); LAN browsers reach the API through Caddy.
     SetupRequest:
       type: object
       additionalProperties: false
       required: [username, password]
       properties:
-        username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
-        password: { type: string, minLength: 12 }
+        username: { $ref: "#/components/schemas/NewUsername" }
+        password: { $ref: "#/components/schemas/NewPassword" }
         localConsole:
           type: boolean
           description: Requests a local console session that lasts until sign-out. Honoured only for a direct loopback connection without forwarding headers; otherwise the session lasts 12 hours.
@@ -2315,8 +2341,22 @@ components:
       additionalProperties: false
       required: [username, password]
       properties:
-        username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
-        password: { type: string, minLength: 12 }
+        username: { $ref: "#/components/schemas/NewUsername" }
+        password: { $ref: "#/components/schemas/NewPassword" }
+    NewUsername:
+      type: string
+      pattern: "^[a-z][a-z0-9_-]{2,31}$"
+      description: >-
+        The account and Linux user name, after trimming and lowercasing. global, homes, printers, shared, a-nas,
+        and names starting a-nas- or app- are reserved (409 username_unavailable), as are names of existing host
+        accounts and groups; other malformed names answer 422 invalid_username.
+    NewPassword:
+      type: string
+      minLength: 12
+      maxLength: 64
+      description: >-
+        Counted in Unicode code points, at most 254 UTF-8 bytes, without control characters such as newlines
+        (422 invalid_password). Only passwords being set are checked; signing in is not.
     User:
       type: object
       additionalProperties: false
@@ -2334,7 +2374,7 @@ components:
       required: [currentPassword, newPassword]
       properties:
         currentPassword: { type: string }
-        newPassword: { type: string, minLength: 12 }
+        newPassword: { $ref: "#/components/schemas/NewPassword" }
     Notification:
       type: object
       additionalProperties: false
@@ -2374,6 +2414,14 @@ components:
         csrfToken: { type: string }
         expiresAt: { type: string, format: date-time, description: "9999-12-31T23:59:59Z marks a local console session, which lasts until sign-out." }
         user: { $ref: "#/components/schemas/User" }
+        credentialReset:
+          type: object
+          additionalProperties: false
+          required: [actorUsername, at]
+          description: The latest time an administrator chose this user's password. It stays after the notification is acknowledged.
+          properties:
+            actorUsername: { type: string }
+            at: { type: string, format: date-time }
     Space:
       type: object
       additionalProperties: false
@@ -3171,6 +3219,7 @@ components:
           properties:
             kind: { type: string, enum: [live-photo, motion-photo] }
             duration: { type: number, exclusiveMinimum: 0, maximum: 30 }
+        liveVideoMissing: { type: boolean, description: "True for the still of an Apple Live Photo imported without its MOV; uploading that MOV to live-videos completes it." }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         uploadedBy: { type: string }
         importedAt: { type: string, format: date-time }

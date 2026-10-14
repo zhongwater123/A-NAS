@@ -160,12 +160,14 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 type credentialRecorder struct {
 	username string
 	password string
+	uid      int
 	failure  error
 }
 
 func (r *credentialRecorder) SetCredential(_ context.Context, request accounts.CredentialRequest) error {
 	r.username = request.Username
 	r.password = request.Password
+	r.uid = request.UID
 	return r.failure
 }
 

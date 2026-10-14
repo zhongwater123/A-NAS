@@ -51,6 +51,10 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 	if err != nil {
 		return Asset{}, err
 	}
+	liveID, err := s.stillLiveID(staged.name)
+	if err != nil {
+		return Asset{}, err
+	}
 	if companion != nil {
 		defer s.discardStaging(companion.object.name)
 	}
@@ -81,9 +85,9 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		now := formatTime(s.now())
 		metadata := staged.metadata
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO objects(id, size_bytes, media_type, width, height, orientation, created_at)
-			 VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-			staged.id, staged.size, staged.mediaType, metadata.width, metadata.height, metadata.orientation, now); err != nil {
+			`INSERT INTO objects(id, size_bytes, media_type, width, height, orientation, created_at, live_id)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET live_id = IFNULL(objects.live_id, excluded.live_id)`,
+			staged.id, staged.size, staged.mediaType, metadata.width, metadata.height, metadata.orientation, now, liveID); err != nil {
 			return err
 		}
 		var takenAt any

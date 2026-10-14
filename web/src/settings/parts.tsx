@@ -1,5 +1,6 @@
 import { CircleAlert, CircleCheck, RefreshCw, X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { accountErrorText } from "../accountRules";
 
 // Building blocks shared by the settings sections: grouped cards in the style
 // of a system settings app.
@@ -51,4 +52,4 @@ export function RefreshButton({ label, busy, onClick }: { label: string; busy: b
   return <button className="set-icon-btn bordered" aria-label={label} disabled={busy} onClick={onClick}><RefreshCw className={busy ? "spinning" : ""} /></button>;
 }
 
-export function messageOf(error: unknown) { return error instanceof Error ? error.message : "请求失败"; }
+export function messageOf(error: unknown) { return accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }

@@ -58,6 +58,43 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// uploadLiveVideo takes a Live Photo's MOV uploaded without its still and
+// completes the photos of the library that were waiting for it.
+func (h *handler) uploadLiveVideo(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, photos.DefaultMaxImportBytes+(1<<20))
+	reader, err := r.MultipartReader()
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		return
+	}
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+		principal, _ := principalFrom(r)
+		assets, err := h.service.AttachLiveVideo(r.Context(), principal, photos.LiveVideoRequest{
+			LibraryID: r.PathValue("libraryID"), Name: part.FileName(), Content: part,
+		})
+		_ = part.Close()
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
+		return
+	}
+	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
+}
+
 type pairedPartReader struct {
 	reader *multipart.Reader
 	part   *multipart.Part

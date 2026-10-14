@@ -205,6 +205,11 @@ ALTER TABLE assets ADD COLUMN motion_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE assets ADD COLUMN motion_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE assets ADD COLUMN motion_duration REAL NOT NULL DEFAULT 0;
 CREATE INDEX assets_by_motion ON assets(motion_object_id);`,
+	// A still's Apple Live Photo identifier, so that its MOV can follow in a
+	// later upload: NULL while unread (objects imported before this
+	// migration), '' when the still has none.
+	`ALTER TABLE objects ADD COLUMN live_id TEXT;
+CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AND live_id <> '';`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
@@ -378,7 +383,8 @@ SELECT a.id, a.library_id, IFNULL(a.directory_id, ''), a.name, o.media_type, o.s
                       AND (d.imported_at < a.imported_at OR (d.imported_at = a.imported_at AND d.id < a.id))) THEN 'duplicate'
          ELSE 'first'
        END,
-       a.object_id, IFNULL(a.motion_object_id, ''), a.motion_name, a.motion_kind, a.motion_duration, l.kind, IFNULL(l.owner_user_id, ''), l.created_at
+       a.object_id, IFNULL(a.motion_object_id, ''), a.motion_name, a.motion_kind, a.motion_duration,
+       a.motion_object_id IS NULL AND IFNULL(o.live_id, '') <> '', l.kind, IFNULL(l.owner_user_id, ''), l.created_at
 FROM assets a
 JOIN objects o ON o.id = a.object_id
 JOIN libraries l ON l.id = a.library_id`
@@ -400,7 +406,8 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	if err := row.Scan(&record.ID, &record.LibraryID, &record.DirectoryID, &record.Name, &record.MediaType,
 		&record.SizeBytes, &record.UploadedBy, &importedAt, &trashedAt, &trashedBy, &purgeAfter,
 		&takenAt, &metadata.width, &metadata.height, &metadata.orientation, &thumbnail, &duplicate,
-		&record.objectID, &record.motionObjectID, &record.motionName, &motion.Kind, &motion.Duration, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
+		&record.objectID, &record.motionObjectID, &record.motionName, &motion.Kind, &motion.Duration,
+		&record.LiveVideoMissing, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return assetRecord{}, ErrNotFound
 		}

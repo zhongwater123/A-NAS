@@ -9,8 +9,11 @@ describe("Live Photo selection", () => {
   it("keeps Android single files and still photos independent", () => {
     expect(groupPhotoUploads([file("android.jpg"), file("still.png")])).toHaveLength(2);
   });
-  it("rejects missing companions and ambiguous basenames without losing a file", () => {
-    expect(groupPhotoUploads([file("a.mov")])[0].error).toBeTruthy();
+  it("sends a movie on its own to complete a still uploaded earlier", () => {
+    const movie = file("a.mov"), photo = file("b.jpg");
+    expect(groupPhotoUploads([movie, photo])).toEqual([{ file: photo }, { file: movie, video: true }]);
+  });
+  it("rejects ambiguous basenames without losing a file", () => {
     const groups = groupPhotoUploads([file("a.jpg"), file("a.heic"), file("a.mov")]);
     expect(groups).toHaveLength(3);
     expect(groups.every((group) => group.error)).toBe(true);

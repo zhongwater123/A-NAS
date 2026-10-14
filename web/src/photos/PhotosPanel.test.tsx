@@ -188,6 +188,96 @@ describe("PhotosPanel timeline", () => {
   });
 });
 
+describe("PhotosPanel Live Photos", () => {
+  it("says when a Live Photo arrived without its video and completes it with the MOV later", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:preview", revokeObjectURL: () => undefined }));
+    let stored: PhotoAsset[] = [];
+    FakeUpload.respond = (upload) => {
+      if (upload.url.endsWith("/live-videos")) {
+        stored = stored.map((photo) => ({ ...photo, liveVideoMissing: undefined, motion: { kind: "live-photo", duration: 2.5 } }));
+        return { status: 200, body: { items: stored } };
+      }
+      const still = asset("photo:live", { name: "IMG_1.HEIC", mediaType: "image/heic", liveVideoMissing: true });
+      stored = [still];
+      return { status: 201, body: still };
+    };
+    serve(
+      (url) => url === "/api/v1/photos/assets/photo%3Alive" ? json(stored[0]) : undefined,
+      timeline(privateLibrary.id, () => stored),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    expect(await screen.findByText("把照片拖到这里")).toBeTruthy();
+    const app = document.querySelector(".ph-app") as HTMLElement;
+    const drop = (file: File) => {
+      fireEvent.dragEnter(app, { dataTransfer: { types: ["Files"], files: [file] } });
+      fireEvent.drop(app, { dataTransfer: { types: ["Files"], files: [file] } });
+    };
+
+    // The still alone: it is kept, and the toast says what is missing.
+    drop(new File(["heic"], "IMG_1.HEIC", { type: "image/heic" }));
+    expect(await screen.findByText("照片已保存到我的图库；其中 1 张实况照片只收到了静态画面")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "怎么补上" }));
+    expect(screen.getByText(/导出未修改的原件/)).toBeTruthy();
+    await openPhoto(user, "IMG_1.HEIC");
+    expect(await screen.findByText("实况照片只上传了静态画面")).toBeTruthy();
+    expect(screen.getByText(/HEIC/, { selector: "dd" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    // The MOV on its own completes it instead of being refused.
+    drop(new File(["mov"], "IMG_1.MOV", { type: "video/quicktime" }));
+    expect(await screen.findByText("已为 1 张照片补上实况视频")).toBeTruthy();
+    expect(FakeUpload.sent.at(-1)?.url).toBe("/api/v1/photos/libraries/library%3Amine/live-videos");
+    expect(await screen.findByText("动态照片", { selector: ".ph-motion-badge" })).toBeTruthy();
+  });
+
+  it("uploads the missing video from the photo's details", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    let complete = false;
+    FakeUpload.respond = () => { complete = true; return { status: 200, body: { items: [asset("photo:live", { motion: { kind: "live-photo", duration: 2 } })] } }; };
+    const still = () => asset("photo:live", complete ? { motion: { kind: "live-photo", duration: 2 } } : { liveVideoMissing: true });
+    serve(
+      (url) => url === "/api/v1/photos/assets/photo%3Alive" ? json(still()) : undefined,
+      timeline(privateLibrary.id, () => [still()]),
+    );
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (this: HTMLInputElement) {
+      if (this.type !== "file") return;
+      Object.defineProperty(this, "files", { value: [new File(["mov"], "IMG_9.MOV", { type: "video/quicktime" })] });
+      this.dispatchEvent(new Event("change"));
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:live.jpg");
+    await user.click(await screen.findByRole("button", { name: "上传视频" }));
+    expect(await screen.findByText("已补上实况视频")).toBeTruthy();
+    expect(FakeUpload.sent[0].url).toBe("/api/v1/photos/libraries/library%3Amine/live-videos");
+    expect(await screen.findByRole("button", { name: "播放动态照片" })).toBeTruthy();
+    expect(screen.queryByText("实况照片只上传了静态画面")).toBeNull();
+  });
+});
+
+describe("PhotosPanel slideshow", () => {
+  it("plays full screen from the viewer and comes back to the photo it ended on", async () => {
+    Object.defineProperty(HTMLImageElement.prototype, "decode", { configurable: true, value: () => Promise.resolve() });
+    serve(timeline(privateLibrary.id, () => [asset("photo:a"), asset("photo:b", { takenAt: "2026-05-01T07:00:00Z" })]));
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:a.jpg");
+    await user.keyboard(" ");
+    const show = await screen.findByRole("dialog", { name: "幻灯片" });
+    // It covers the whole page, outside the photos window.
+    expect(show.parentElement).toBe(document.body);
+    expect(screen.getByText(/1 \/ 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "下一张" }));
+    expect(await screen.findByText(/2 \/ 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "退出幻灯片" }));
+    expect(screen.queryByRole("dialog", { name: "幻灯片" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "查看 photo:b.jpg" })).toBeTruthy();
+    delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+  });
+});
+
 describe("PhotosPanel viewer", () => {
   it("shows details, steps with the arrow keys and closes with Escape", async () => {
     serve(

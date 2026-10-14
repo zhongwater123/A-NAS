@@ -230,10 +230,17 @@ func (h *productHandler) handleSetupStatus(w http.ResponseWriter, r *http.Reques
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": required})
+	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": required, "setupAllowed": directLoopback(r)})
 }
 
 func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http.Request) {
+	// Only the device's own screen or an SSH tunnel may claim a device that
+	// is not set up yet, so nobody else on the LAN creates its administrator
+	// first. The LAN entry always adds forwarding headers (ADR 0012).
+	if !directLoopback(r) {
+		writeError(w, http.StatusForbidden, "setup_local_only", "the device can only be set up on its own screen or through an SSH tunnel")
+		return
+	}
 	var request struct {
 		Username     string `json:"username"`
 		Password     string `json:"password"`
@@ -253,7 +260,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 		return
 	}
 	h.setSessionCookie(w, session)
-	writeJSON(w, http.StatusCreated, publicSession(session))
+	writeJSON(w, http.StatusCreated, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +279,7 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.setSessionCookie(w, session)
-	writeJSON(w, http.StatusOK, publicSession(session))
+	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -282,7 +289,7 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 		session.Token = cookie.Value
 		h.setSessionCookie(w, session)
 	}
-	writeJSON(w, http.StatusOK, publicSession(session))
+	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 // authenticate grants a local console session, which never expires on its
@@ -1080,10 +1087,16 @@ type sessionResponse struct {
 	CSRFToken string        `json:"csrfToken"`
 	ExpiresAt string        `json:"expiresAt"`
 	User      accounts.User `json:"user"`
+	// CredentialReset is the latest time an administrator chose the user's
+	// password; the user keeps seeing it.
+	CredentialReset *accounts.CredentialReset `json:"credentialReset,omitempty"`
 }
 
-func publicSession(session accounts.Session) sessionResponse {
-	return sessionResponse{CSRFToken: session.CSRFToken, ExpiresAt: session.ExpiresAt.UTC().Format(timeFormat), User: session.User}
+func (h *productHandler) publicSession(ctx context.Context, session accounts.Session) sessionResponse {
+	response := sessionResponse{CSRFToken: session.CSRFToken, ExpiresAt: session.ExpiresAt.UTC().Format(timeFormat), User: session.User}
+	// A failed lookup only hides the notice; it never fails the sign-in.
+	response.CredentialReset, _ = h.accounts.LastCredentialReset(ctx, session.User)
+	return response
 }
 
 const timeFormat = "2006-01-02T15:04:05.999999999Z07:00"
@@ -1106,16 +1119,26 @@ func decodeJSON(r *http.Request, target any) error {
 
 func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrUsernameUnavailable),
-		errors.Is(err, accounts.ErrIdentityConflict), errors.Is(err, accounts.ErrViewingActive):
+	case errors.Is(err, accounts.ErrSetupComplete):
+		writeError(w, http.StatusConflict, "setup_complete", err.Error())
+	case errors.Is(err, accounts.ErrUsernameUnavailable), errors.Is(err, accounts.ErrIdentityConflict):
+		writeError(w, http.StatusConflict, "username_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrViewingActive):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
-	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword),
-		errors.Is(err, accounts.ErrReasonRequired), errors.Is(err, accounts.ErrPasswordUnchanged):
+	case errors.Is(err, accounts.ErrInvalidUsername):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_username", err.Error())
+	case errors.Is(err, accounts.ErrInvalidPassword):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_password", err.Error())
+	case errors.Is(err, accounts.ErrPasswordUnchanged):
+		writeError(w, http.StatusUnprocessableEntity, "password_unchanged", err.Error())
+	case errors.Is(err, accounts.ErrReasonRequired):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, accounts.ErrInvalidCredentials):
 		writeError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")
 	case errors.Is(err, accounts.ErrVolumeUnavailable):
 		writeError(w, http.StatusLocked, "volume_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrSMBDisablePending):
+		writeError(w, http.StatusServiceUnavailable, "smb_disable_pending", err.Error())
 	case errors.Is(err, accounts.ErrCredentialProvision):
 		writeError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):

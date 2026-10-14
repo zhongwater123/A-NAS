@@ -44,7 +44,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 
 import {
   APIError, FileEntry, Notification, Session, Space, Volume,
@@ -66,6 +66,7 @@ import { appProject } from "./docker/model";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { FileViewer } from "./files/FileViewer";
 import { nameErrorText, nameProblem } from "./fileNames";
+import { accountErrorText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { fileTypeLabel, isPreviewableImage, isVideoFile, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
@@ -161,13 +162,13 @@ const windowTones: Record<WindowID, string> = {
 
 export default function App() {
 	const [session, setSessionState] = useState<Session>();
-	const [mode, setMode] = useState<"loading" | "setup" | "login">("loading");
+	const [mode, setMode] = useState<AuthMode>("loading");
 	const [error, setError] = useState("");
 	useEffect(() => {
 		let active = true;
-		void getSetupStatus().then(async ({ setupRequired }) => {
+		void getSetupStatus().then(async ({ setupRequired, setupAllowed }) => {
 			if (!active) return;
-			if (setupRequired) setMode("setup");
+			if (setupRequired) setMode(setupAllowed === false ? "setup-elsewhere" : "setup");
 			else {
 				try { const value = await currentSession(); if (active) setSessionState(value); }
 				catch { if (active) setMode("login"); }
@@ -200,10 +201,13 @@ export default function App() {
 function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogout: () => void }) {
 	const [error, setError] = useState("");
 	const [submitting, setSubmitting] = useState(false);
+	const hint = useId();
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
 		const next = String(data.get("newPassword"));
+		const problem = passwordProblem(next);
+		if (problem) { setError(problem); return; }
 		if (next !== String(data.get("confirmPassword"))) { setError("两次输入的新密码不一致"); return; }
 		setSubmitting(true);
 		try { await changePassword(String(data.get("currentPassword")), next); onChanged(); }
@@ -214,7 +218,7 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 		<span className="brand-mark large">A</span><p className="section-label">PASSWORD RESET</p><h1>设置新密码</h1>
 		<p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
 		<label>当前密码<input name="currentPassword" type="password" required autoComplete="current-password" /></label>
-		<label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
+		<div className="auth-field"><label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" aria-describedby={hint} /></label><small id={hint}>{passwordRuleText}</small></div>
 		<label>确认新密码<input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
 		{error && <p className="form-error">{error}</p>}
 		<button className="primary" disabled={submitting}>{submitting ? "处理中…" : "保存新密码"}</button>
@@ -249,26 +253,47 @@ function describeNotification(item: Notification): string {
 	return `管理员 ${item.actorUsername} 于 ${when} 重置了你的密码。`;
 }
 
-function Authentication({ mode, error: initialError, onAuthenticated }: { mode: "loading" | "setup" | "login"; error: string; onAuthenticated: (session: Session) => void }) {
+type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
+
+function Authentication({ mode, error: initialError, onAuthenticated }: { mode: AuthMode; error: string; onAuthenticated: (session: Session) => void }) {
 	const [error, setError] = useState(initialError);
 	const [submitting, setSubmitting] = useState(false);
+	const usernameHint = useId();
+	const passwordHint = useId();
 	if (mode === "loading") return <main className="auth-shell"><div className="auth-card"><span className="loader" /><h1>正在启动 A-NAS…</h1></div></main>;
+	// A LAN browser may not claim a device that is not set up yet.
+	if (mode === "setup-elsewhere") return <main className="auth-shell"><section className="auth-card" aria-label="在本机启用 A-NAS">
+		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>请在 NAS 本机启用</h1>
+		<p>这台 A-NAS 还没有管理员。为防止局域网中的其他人抢先认领，首个管理员只能在 NAS 自己的屏幕上创建。</p>
+		<p>没有接屏幕时，用 SSH 隧道把 NAS 的 127.0.0.1:8080 转到这台电脑，再打开 http://127.0.0.1:8080 完成启用。</p>
+		<button className="primary" onClick={() => window.location.reload()}>已启用，刷新页面</button>
+	</section></main>;
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault(); setSubmitting(true); setError("");
+		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
+		// Signing in applies no rules, so passwords set under earlier ones keep working.
+		const problem = mode === "setup" ? usernameProblem(String(data.get("username"))) ?? passwordProblem(String(data.get("password"))) : undefined;
+		if (problem) { setError(problem); return; }
+		setSubmitting(true);
 		try {
 			const session = mode === "setup"
 				? await setupAdministrator(String(data.get("username")), String(data.get("password")), isLocalConsole())
 				: await login(String(data.get("username")), String(data.get("password")), isLocalConsole());
 			onAuthenticated(session);
-		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
+		} catch (caught) { setError(accountErrorText(caught) ?? (caught instanceof APIError ? caught.message : "请求失败，请稍后再试")); }
 		finally { setSubmitting(false); }
 	};
 	return <main className="auth-shell"><form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
 		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "启用 A-NAS" : "登录 A-NAS"}</h1>
 		{mode === "setup" && <p>创建本机管理员账号以启用设备。</p>}
-		<label>账号<input name="username" required autoComplete="username" /></label>
-		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} /></label>
+		<div className="auth-field">
+			<label>账号<input name="username" required autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={mode === "setup" ? usernameHint : undefined} /></label>
+			{mode === "setup" && <small id={usernameHint}>{usernameRuleText}</small>}
+		</div>
+		<div className="auth-field">
+			<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} aria-describedby={mode === "setup" ? passwordHint : undefined} /></label>
+			{mode === "setup" && <small id={passwordHint}>{passwordRuleText}</small>}
+		</div>
 		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员并启用" : "登录"}</button>
 	</form></main>;
 }
@@ -1009,7 +1034,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 }
 
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
-function messageOf(error: unknown) { return nameErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
+function messageOf(error: unknown) { return nameErrorText(error) ?? accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
 
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);

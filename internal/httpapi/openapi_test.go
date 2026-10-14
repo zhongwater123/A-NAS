@@ -74,6 +74,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	commentEdit, commentEditType := feedbackForm{text: "已在 1.0.2 修复", version: reply.Version, keep: []string{reply.Images[0].ID}}.encode(t)
 	commentStale, commentStaleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	searchImage, searchImageType := imageSearchForm(t)
+	liveVideo, liveVideoType := multipartFile(t, "IMG_1.MOV", []byte("\x00\x00\x00\x18ftypqt  "))
 	tests := []struct {
 		name        string
 		method      string
@@ -107,6 +108,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo similar", path: "/api/v1/photos/assets/" + photoAssetID + "/similar?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo similar missing", path: "/api/v1/photos/assets/photo:missing/similar", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo image search without local AI", method: http.MethodPost, body: searchImage, contentType: searchImageType, path: "/api/v1/photos/image-searches", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo live video without media", method: http.MethodPost, body: liveVideo, contentType: liveVideoType, path: "/api/v1/photos/libraries/" + photoLibraryID + "/live-videos", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "photo image search expired", path: "/api/v1/photos/image-searches/0123/assets?limit=2", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
@@ -400,6 +402,22 @@ func photoAPI(t *testing.T) (http.Handler, string, string) {
 		t.Fatalf("import photo: %v", err)
 	}
 	return withPhotoPrincipal(photosapi.New(service, nil)), private, asset.ID
+}
+
+// multipartFile is a multipart body with one file part.
+func multipartFile(t *testing.T, name string, content []byte) (string, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write(content)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.String(), writer.FormDataContentType()
 }
 
 // imageSearchForm is a multipart body with an image to search by.

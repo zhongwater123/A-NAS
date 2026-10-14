@@ -93,6 +93,53 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	}
 }
 
+func TestSessionThatMustChangeItsPasswordActsOnNoFiles(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := service.CreateMember(ctx, admin, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ResetCredential(ctx, admin, alice.ID, "temporary password 1"); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.Authenticate(ctx, "alice", "temporary password 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := accounts.NewSessionDirectory(path)
+	t.Cleanup(func() { _ = directory.Close() })
+	if _, err := directory.ResolveSessionIdentity(ctx, session.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
+		t.Fatalf("ResolveSessionIdentity(must change password) error = %v, want ErrSessionNotFound", err)
+	}
+	if user, err := directory.ResolveSessionUser(ctx, session.Token); err != nil || !user.MustChangePassword {
+		t.Fatalf("ResolveSessionUser(must change password) = %#v, %v; want the restriction for the photo service", user, err)
+	}
+	if remembered := service.RememberedSessions(ctx); len(remembered) != 0 {
+		t.Fatalf("background work may use a session that must change its password: %#v", remembered)
+	}
+
+	if err := service.ChangePassword(ctx, session.User, "temporary password 1", "alice chosen password"); err != nil {
+		t.Fatal(err)
+	}
+	if identity, err := directory.ResolveSessionIdentity(ctx, session.Token); err != nil || identity.Username != "alice" {
+		t.Fatalf("ResolveSessionIdentity(after change) = %#v, %v", identity, err)
+	}
+	if remembered := service.RememberedSessions(ctx); len(remembered) != 1 || remembered[0].Token != session.Token {
+		t.Fatalf("remembered sessions after change = %#v", remembered)
+	}
+}
+
 func TestSessionTokenTravelsInTheContext(t *testing.T) {
 	ctx := accounts.WithSessionToken(context.Background(), "token")
 	if got := accounts.SessionToken(ctx); got != "token" {

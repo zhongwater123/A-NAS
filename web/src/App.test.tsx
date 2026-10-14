@@ -200,6 +200,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   }, 15000);
 
+  it("sends a LAN browser to the device's own screen to set it up", async () => {
+    const fetchMock = installAPI({ setupRequired: true, setupAllowed: false });
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "请在 NAS 本机启用" })).toBeTruthy();
+    expect(screen.getByText(/SSH 隧道/)).toBeTruthy();
+    expect(screen.queryByLabelText("账号")).toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/setup/admin")).toBe(false);
+  });
+
   it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
     const user = userEvent.setup();
@@ -1108,11 +1117,11 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; shortcuts?: unknown[] } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; shortcuts?: unknown[] } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
-    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
+    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
@@ -1124,6 +1133,10 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
     if (path.startsWith("/api/v1/files/") && path.includes("/content")) return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
     if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
 	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
+    if (path === "/api/v1/users" && init?.method === "POST") {
+      const { username } = JSON.parse(String(init.body)) as { username: string };
+      return ok({ id: "user:new", username: username.trim().toLowerCase(), role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z", mustChangePassword: false }, 201);
+    }
     if (path === "/api/v1/users") return ok({ items: options.users ?? [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
     if (path === "/api/v1/transfers/downloads" && init?.method === "POST") {
@@ -1441,6 +1454,15 @@ describe("Settings", () => {
     expect(within(settings).queryByRole("tab", { name: "系统日志" })).toBeNull();
   });
 
+  it("keeps showing a member who reset their password", async () => {
+    installAPI({ session: { ...session, user: alice, credentialReset: { actorUsername: "owner", at: "2026-10-14T09:10:00Z" } } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    expect(screen.getByText("管理员重置过密码")).toBeTruthy();
+    expect(screen.getByText(/owner 于 .* 重置了这个账号的密码/)).toBeTruthy();
+  });
+
   it("lets a member change their own password", async () => {
     const fetchMock = installAPI({ session: { ...session, user: alice } });
     const user = userEvent.setup();
@@ -1530,6 +1552,38 @@ describe("Settings", () => {
     expect(within(settings).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
     expect(within(settings).getByRole("form", { name: "修改密码" })).toBeTruthy();
     prompt.mockRestore();
+  });
+
+  it("checks a new member's name and password against the NAS rules before creating it", async () => {
+    const fetchMock = installAPI({ users: [session.user] });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "用户与权限");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(await within(settings).findByRole("button", { name: "添加成员" }));
+    const form = within(settings).getByRole("form", { name: "添加成员" });
+    expect(within(form).getByText(/3–32 位英文字母/)).toBeTruthy();
+    const created = () => fetchMock.mock.calls.filter(([path, init]) => path === "/api/v1/users" && init?.method === "POST");
+
+    await user.type(within(form).getByLabelText("账号"), "Shared");
+    await user.type(within(form).getByLabelText("初始密码"), "carol password 1");
+    await user.click(within(form).getByRole("button", { name: "创建成员" }));
+    expect(await within(form).findByText("“shared”留给系统使用，请换一个账号名")).toBeTruthy();
+    expect(created()).toHaveLength(0);
+
+    await user.clear(within(form).getByLabelText("账号"));
+    await user.type(within(form).getByLabelText("账号"), "Carol");
+    await user.clear(within(form).getByLabelText("初始密码"));
+    await user.type(within(form).getByLabelText("初始密码"), "x".repeat(65));
+    await user.click(within(form).getByRole("button", { name: "创建成员" }));
+    expect(await within(form).findByText("密码最多 64 个字符")).toBeTruthy();
+    expect(created()).toHaveLength(0);
+
+    await user.clear(within(form).getByLabelText("初始密码"));
+    await user.type(within(form).getByLabelText("初始密码"), "carol password 1");
+    await user.click(within(form).getByRole("button", { name: "创建成员" }));
+    expect(await within(settings).findByText("已添加成员 carol。")).toBeTruthy();
+    expect(JSON.parse(String(created()[0]?.[1]?.body))).toEqual({ username: "Carol", password: "carol password 1" });
   });
 
   it("asks for confirmation before disabling a member", async () => {
