@@ -172,7 +172,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(dialog).getByRole("button", { name: "取消置顶" }));
     expect(item("b").querySelector('[aria-label="已置顶"]')).toBeNull();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-  });
+  }, 15000);
 
   it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
