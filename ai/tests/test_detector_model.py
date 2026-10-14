@@ -47,6 +47,11 @@ class RealDetectorTest(unittest.TestCase):
         self.assertTrue(self.detector.model.endswith(f"+{providers.DETECTOR_INPUT}+s0.05k100"))
         self.assertGreaterEqual(self.detector.threads, 1)
 
+    def test_idle_threads_give_their_cores_back(self):
+        options = self.detector._load().get_session_options()  # pylint: disable=protected-access
+        self.assertEqual(options.get_session_config_entry("session.intra_op.allow_spinning"), "0")
+        self.assertEqual(options.intra_op_num_threads, self.detector.threads)
+
     def test_boxes_are_well_formed_and_repeatable(self):
         data = photo()
         first = self.detector.detect(data, self.detector.run_options())

@@ -762,8 +762,6 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("manages containers from the Docker app", async () => {
-    const scrollIntoView = vi.fn(() => Promise.resolve());
-    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
     const actions: Array<{ id: string; body: unknown }> = [];
     routeFetch({
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
@@ -785,28 +783,30 @@ describe("A-NAS v1.0.1 desktop", () => {
     const docker = screen.getByRole("dialog", { name: "Docker" });
     const jellyfin = await within(docker).findByRole("article", { name: "容器 jellyfin" });
     expect(within(jellyfin).getByText("运行中")).toBeTruthy();
-    expect(within(jellyfin).getByText("8096→8096/tcp")).toBeTruthy();
+    expect(within(jellyfin).getByText("已运行 3 小时")).toBeTruthy();
+    expect(within(jellyfin).getByRole("link", { name: "打开 jellyfin 的端口 8096" }).getAttribute("href")).toMatch(/:8096\/$/);
     expect(within(jellyfin).getByText("12.4%")).toBeTruthy();
 
-    await user.click(within(jellyfin).getByRole("button", { name: "停止jellyfin" }));
+    await user.click(within(jellyfin).getByRole("button", { name: "停止 jellyfin" }));
     expect(actions).toHaveLength(0);
-    await user.click(within(jellyfin).getByRole("button", { name: "确认停止" }));
+    await user.click(within(within(docker).getByRole("dialog", { name: "确认停止 jellyfin" })).getByRole("button", { name: "确认停止" }));
     expect(actions).toEqual([{ id: containerSnapshot.containers[0].id, body: { action: "stop" } }]);
 
     const stopped = within(docker).getByRole("article", { name: "容器 homeassistant" });
-    await user.click(within(stopped).getByRole("button", { name: "启动homeassistant" }));
+    await user.click(within(stopped).getByRole("button", { name: "启动 homeassistant" }));
     expect(actions[1]).toEqual({ id: containerSnapshot.containers[1].id, body: { action: "start" } });
 
-    await user.click(within(jellyfin).getByRole("button", { name: "查看jellyfin日志" }));
+    await user.click(within(jellyfin).getByRole("button", { name: "查看 jellyfin 的日志" }));
     const log = await within(docker).findByRole("log", { name: "jellyfin 日志" });
     expect(within(log).getByText("server ready")).toBeTruthy();
     expect(within(log).getByText("warning: low disk").parentElement?.className).toContain("stderr");
+    await user.type(within(docker).getByRole("textbox", { name: "筛选日志" }), "disk");
+    expect(within(log).queryByText("server ready")).toBeNull();
 
-    // Chromium's scrollIntoView now returns a Promise; leaving the log view must not crash the desktop.
-    expect(scrollIntoView).toHaveBeenCalled();
-    await user.click(within(docker).getByRole("button", { name: "返回容器列表" }));
-    await user.click(within(docker).getByRole("tab", { name: /镜像/ }));
-    expect(within(docker).getByText("jellyfin/jellyfin:10.11")).toBeTruthy();
+    // Leaving the log view must not crash the desktop (it once did through scrollIntoView's Promise).
+    const nav = within(docker).getByRole("navigation", { name: "Docker 导航" });
+    await user.click(within(nav).getByRole("button", { name: /镜像/ }));
+    expect(within(within(docker).getByRole("table", { name: "镜像列表" })).getByText("jellyfin/jellyfin")).toBeTruthy();
   });
 
   it("explains when Docker management is disabled", async () => {

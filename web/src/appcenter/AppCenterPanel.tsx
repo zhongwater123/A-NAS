@@ -15,7 +15,8 @@ const idlePollInterval = 10_000;
 type View = { kind: "discover" } | { kind: "installed" } | { kind: "category"; id: string };
 type Modal = { kind: "install" | "uninstall"; appId: string };
 
-export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: () => void }) {
+// onOpenDocker shows an installed app's containers in the Docker window.
+export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string) => void }) {
   const { list, error, refresh } = useAppList();
   const [view, setView] = useState<View>({ kind: "discover" });
   const [query, setQuery] = useState("");
@@ -88,7 +89,7 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: () => void }) 
   } else if (current) {
     page = (
       <AppDetail app={current} backLabel={backLabel} onBack={() => setSelected(undefined)}
-        onInstall={() => install(current)} onUninstall={() => openModal({ kind: "uninstall", appId: current.id })} onOpenDocker={onOpenDocker} />
+        onInstall={() => install(current)} onUninstall={() => openModal({ kind: "uninstall", appId: current.id })} onOpenDocker={onOpenDocker && (() => onOpenDocker(current.id))} />
     );
   } else if (searching) {
     page = <SearchResults query={query} apps={search(apps, query)} onShow={show} onInstall={install} onBrowse={() => navigate({ kind: "discover" })} />;

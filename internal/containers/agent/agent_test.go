@@ -24,11 +24,11 @@ func TestClientRoundTripsSnapshotActionsAndLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if snapshot.Engine.Version != "29.1.3" || len(snapshot.Containers) != 3 || len(snapshot.Images) != 3 {
+	if snapshot.Engine.Version != "29.1.3" || len(snapshot.Containers) != 8 || len(snapshot.Images) != 10 {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 	jellyfin := snapshot.Containers[0]
-	if jellyfin.Name != "jellyfin" || jellyfin.Usage == nil || jellyfin.Ports[0].HostPort != 8096 {
+	if jellyfin.Name != "jellyfin" || jellyfin.Usage == nil || jellyfin.Ports[0].HostPort != 8096 || jellyfin.ImageID != snapshot.Images[0].ID {
 		t.Fatalf("first container = %+v", jellyfin)
 	}
 

@@ -240,6 +240,7 @@ type ContainerDocument struct {
 	ID        string           `json:"id"`
 	Name      string           `json:"name"`
 	Image     string           `json:"image"`
+	ImageID   string           `json:"imageId,omitempty"`
 	State     containers.State `json:"state"`
 	Status    string           `json:"status"`
 	CreatedAt string           `json:"createdAt"`
@@ -290,7 +291,7 @@ func SnapshotFromDomain(snapshot containers.Snapshot) SnapshotDocument {
 			usage = &UsageDocument{CPUPercent: item.Usage.CPUPercent, MemoryBytes: item.Usage.MemoryBytes, MemoryLimitBytes: item.Usage.MemoryLimitBytes}
 		}
 		items[i] = ContainerDocument{
-			ID: item.ID, Name: item.Name, Image: item.Image, State: item.State, Status: item.Status,
+			ID: item.ID, Name: item.Name, Image: item.Image, ImageID: item.ImageID, State: item.State, Status: item.Status,
 			CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339), Ports: ports, Project: item.Project, Usage: usage,
 		}
 	}
@@ -335,7 +336,7 @@ func (document SnapshotDocument) ToDomain() (containers.Snapshot, error) {
 			usage = &containers.Usage{CPUPercent: item.Usage.CPUPercent, MemoryBytes: item.Usage.MemoryBytes, MemoryLimitBytes: item.Usage.MemoryLimitBytes}
 		}
 		snapshot.Containers[i] = containers.Container{
-			ID: item.ID, Name: item.Name, Image: item.Image, State: item.State, Status: item.Status,
+			ID: item.ID, Name: item.Name, Image: item.Image, ImageID: item.ImageID, State: item.State, Status: item.Status,
 			CreatedAt: createdAt.UTC(), Ports: ports, Project: item.Project, Usage: usage,
 		}
 	}
