@@ -68,11 +68,11 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 ## 外部条件与限制
 
-- Experimental NAS 当前在线并运行主干提交 `bb1ec71bff65`（#83，2026-10-13 晚只读核对 `/opt/a-nas/current`；此前为 15:30 安装的 `e1c1921d5fdb`），本地 AI 已启用；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、“设置”窗口、新相册界面、文件和共享用户闭环及相册用户功能验收仍未完成。
+- Experimental NAS 当前在线并运行主干提交 `7e463e482c46`（含 #96、#97，2026-10-14 只读核对 `/opt/a-nas/current`；此前为 `bb1ec71bff65`），尚不含 ADR 0022（#99），Immich 仍以 root 运行，本地 AI 已启用；统一身份、权限链、Docker、容器代理与相册服务边界实机检查已通过，Samba 凭据尚未重建，新文件管理界面、“设置”窗口、新相册界面、文件和共享用户闭环及相册用户功能验收仍未完成。
 - v1.0.1 只使用可丢弃测试数据。单盘 Btrfs 不提供冗余、备份或家庭生产数据可靠性承诺。
 - SATA 实验盘为 `ST500DM002-1BD142`，容量 500,107,862,016 字节、序列号 `Z2AYDZPB`、WWN `0x5000c500518d4994`，位于 `ata7/host6`；现已创建 `/dev/sda1` Btrfs。其 `HOTPLUG=0`，运行中热插拔能力尚未实现和验收。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期和 VT 恢复仍未完成产品级验收。
-- 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB。当天部署后已重启 smbd 并确认监听 `172.18.45.48:445`，但下次重启仍会复现；根治前每次重启后需 root 执行 `systemctl restart smbd`。
+- 2026-10-09 重启后 smbd 早于 DHCP 获得地址启动，因 `bind interfaces only` 只监听回环，Windows 无法连接 SMB。当天部署后已重启 smbd 并确认监听 `172.18.45.48:445`（2026-10-14 只读核对仍在监听，此后未重启），但下次重启仍会复现；根治前每次重启后需 root 执行 `systemctl restart smbd`。原因已确认：`enp2s0` 在 ifupdown 中是 `allow-hotplug` + DHCP，`ifupdown-wait-online.service` 未启用，smbd 依赖的 `network-online.target` 可能在网卡拿到地址前就已达成。
 - Caddy 官方的 Cloudsmith 软件源自 2026-10-09 对软件包索引返回 `402 Payment Required`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），实验 NAS 暂留 Debian 的 Caddy 2.6.2，并删除该源以免 `apt-get update` 失败。
 - 2026-10-09 从公司 WiFi 上的开发机（`172.19.172.225`）到 NAS 与网关的 TCP 445 均不通，而 80 端口正常；连接期间 NAS 上没有任何来自该网段的 445 连接状态，说明拦截发生在公司网络或该电脑的安全策略，不在 NAS。跨网段访问目前使用局域网 Web；SMB 需从 `172.18.45.x` 有线网段复测，或请 IT 放行到 NAS 的 TCP 445。
 
