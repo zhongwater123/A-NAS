@@ -101,7 +101,7 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 	clock := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond,
+		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -637,5 +637,141 @@ func TestWebChangesRescanTheLibrariesOfTheirSpace(t *testing.T) {
 	}
 	if _, err := env.media.Rescan(env.ctx, env.bob, shared.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member rescanned a shared library: %v", err)
+	}
+}
+
+func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
+	env := newTestEnv(t, nil)
+	old := "超凡蜘蛛侠2.The.Amazing.Spider-Man.2.2014.1080p"
+	env.write(t, env.shared, "电影/"+old+".mkv", "video")
+	env.write(t, env.shared, "电影/"+old+".chs.srt", "1\n00:00:01,000 --> 00:00:02,000\n你好\n")
+	env.write(t, env.shared, "电影/"+old+"-poster.jpg", "poster")
+	env.write(t, env.shared, "电影/"+old+".part2.mkv", "another video")
+	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	movies, err := env.media.Titles(env.ctx, env.alice, TitleQuery{Category: "movie"})
+	if err != nil || movies.Total == 0 {
+		t.Fatalf("Titles() = %+v, %v", movies, err)
+	}
+	var id string
+	for _, title := range movies.Items {
+		video, _ := env.media.Video(env.ctx, env.alice, title.ID)
+		if video.File.Name == old+".mkv" {
+			id = title.ID
+		}
+	}
+	if id == "" {
+		t.Fatalf("the film is not listed: %+v", movies.Items)
+	}
+	if _, err := env.media.SaveProgress(env.ctx, env.alice, id, 600, 7000); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "Heat (1995).mkv"); !errors.Is(err, files.ErrConflict) {
+		t.Fatalf("renaming onto another film error = %v, want files.ErrConflict", err)
+	}
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2.txt"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renaming without a video extension error = %v, want ErrInvalid", err)
+	}
+	detail, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2 (2014).mkv")
+	if err != nil || detail.File.Name != "超凡蜘蛛侠2 (2014).mkv" {
+		t.Fatalf("RenameVideo() = %+v, %v", detail.File, err)
+	}
+	folder := filepath.Join(env.spaceRoot(env.shared), "电影")
+	for name, want := range map[string]bool{
+		"超凡蜘蛛侠2 (2014).mkv": true, "超凡蜘蛛侠2 (2014).chs.srt": true, "超凡蜘蛛侠2 (2014)-poster.jpg": true,
+		old + ".mkv": false, old + ".chs.srt": false, old + "-poster.jpg": false,
+		// Another video that starts with the old name is its own 片源.
+		old + ".part2.mkv": true, "Heat (1995).mkv": true,
+	} {
+		if _, err := os.Stat(filepath.Join(folder, name)); (err == nil) != want {
+			t.Errorf("%s exists = %v, want %v", name, err == nil, want)
+		}
+	}
+
+	// The scan reads the title from the new name; the video keeps its ID,
+	// progress and subtitle.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		video, err := env.media.Video(env.ctx, env.alice, id)
+		if err == nil && video.Title.Title == "超凡蜘蛛侠2" && video.Year == 2014 {
+			if video.Progress == nil || video.Progress.Position != 600 || len(video.Subtitles) != 1 {
+				t.Fatalf("renamed video = %+v", video)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the title did not follow the new name: %+v, %v", video, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	private := env.private[env.admin.ID]
+	env.write(t, private, "我的电影/Up (2009).mkv", "video")
+	env.library(t, env.admin, private, LibraryMovies, "我的电影")
+	mine, _ := env.media.Titles(env.ctx, env.admin, TitleQuery{Search: "Up"})
+	if mine.Total != 1 {
+		t.Fatalf("admin titles = %+v", mine)
+	}
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, mine.Items[0].ID, "Up.mkv"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Alice renamed the owner's private film: %v", err)
+	}
+}
+
+func TestASeekWaitsForTheStreamItReplaces(t *testing.T) {
+	env := newTestEnv(t, &fakeProcessor{})
+	env.write(t, env.shared, "电影/Heat (1995).mkv", video("matroska,webm", "h264", "ac3", 1080, 10200))
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	env.media.processPending(withSessions(t, env))
+	movies, _ := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+	if movies.Total != 1 {
+		t.Fatalf("movies = %+v", movies)
+	}
+	id := movies.Items[0].ID
+	open := func(start float64) (io.ReadCloser, error) {
+		return env.media.Stream(env.ctx, env.bob, id, StreamRequest{Mode: ModeTranscode, Start: start, Audio: -1})
+	}
+	first, err := open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both slots are taken; the seek's stream gets the first one as soon as
+	// the stream it replaces closes.
+	go func() { time.Sleep(50 * time.Millisecond); _ = first.Close() }()
+	third, err := open(300)
+	if err != nil {
+		t.Fatalf("a seek while the old stream closes: %v", err)
+	}
+	began := time.Now()
+	if _, err := open(600); !errors.Is(err, ErrBusy) {
+		t.Fatalf("a stream past every slot: %v, want ErrBusy", err)
+	}
+	if waited := time.Since(began); waited < 150*time.Millisecond {
+		t.Fatalf("a full device answered busy after %v, without waiting", waited)
+	}
+	_ = second.Close()
+	_ = third.Close()
+}
+
+func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
+	h264 := &VideoStream{Codec: "h264", Height: 1080}
+	hevc := &VideoStream{Codec: "hevc", Height: 2160}
+	cases := []struct {
+		info    MediaInfo
+		options StreamOptions
+		want    string
+	}{
+		{MediaInfo{Video: h264, Audio: []AudioStream{{Codec: "ac3"}}}, StreamOptions{CopyVideo: true, AudioTrack: 0}, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
+		{MediaInfo{Video: hevc, Audio: []AudioStream{{Codec: "mp3"}}}, StreamOptions{CopyVideo: true, HEVC: true, CopyAudio: true, AudioTrack: 0}, `video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.69"`},
+		{MediaInfo{Video: hevc}, StreamOptions{AudioTrack: -1}, `video/mp4; codecs="avc1.640033"`},
+	}
+	for _, test := range cases {
+		if got := streamMime(test.info, test.options); got != test.want {
+			t.Errorf("streamMime(%+v) = %s, want %s", test.options, got, test.want)
+		}
 	}
 }

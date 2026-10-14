@@ -35,6 +35,8 @@ anas-api（a-nas）
 - 同一空间内的媒体库文件夹不得互相包含，以免同一视频在首页出现两次。
 - 读取视频、NFO、图片和字幕都调用 `files.Service`，在生产中由文件代理以请求者身份打开，内核 ACL 是最终裁决。后台扫描与整理通过 `accounts.Service.RememberedSessions` 借用能读取该空间的会话：个人空间用所有者的，共享空间优先用创建者的、否则任一有效会话（[`service.go`](../../internal/media/service.go)）。
 - Web 上传、移动、复制、删除与恢复成功后，产品 API 调用 `ProductDependencies.FilesChanged`，影视中心以操作者身份在约 3 秒后重扫该空间的媒体库（`SpaceChanged`，同一库的连续变更合并为一次）。打开影视中心（`GET /libraries` 每 20 秒轮询一次、`GET /home`）时，距上次扫描超过 2 分钟的库以当前用户身份在后台重扫，SMB 放入的视频靠这一途径和每 15 分钟的后台循环出现；之后逐个探测、截图（[`process.go`](../../internal/media/process.go)）。扫描进行中又收到扫描请求时，当前扫描结束后再扫描一次。`POST /libraries/{id}/scan` 返回扫描中的媒体库。
+- 转换播放（转封装、转码）的流是无长度、不能按范围读取的分片 MP4。浏览器直接读取这种流时只预读约 2 MB（720p 转封装实测暂停时也只领先 2.4 秒），所以播放器用 Media Source Extensions 自己读取（[`streamFeed.ts`](../../web/src/media/streamFeed.ts)）：保持画面前方 30 秒、后方 90 秒，读够即停，连接与 FFmpeg 随之等待，回落到 15 秒再读。`GET /videos/{id}/playback` 为转换播放返回流的 `mime`（编码串只写编码，档次与级别由流的初始化段给出）；浏览器不支持时回到 `<video src>` 直接读取。FFmpeg 以 `-frag_duration 1000000` 每秒至少输出一个片段，开始或跳转后不必等满一个关键帧间隔。跳到缓冲之外时播放器以新的 `start` 重新请求流，连续跳转合并为一次；服务端为新流最多等 4 秒空出的转码位置（`StreamWait`），因为被换下的流此时往往还在关闭。
+- 重命名片源（`PATCH /videos/{id}`）经文件服务的 `Move` 以用户身份在原文件夹内改名，连同以原文件名开头的字幕、NFO 与图片；先检查所有目标名字都未被占用，任何一步失败就把已改的改回。随后更新 `videos.file_name` 并重新扫描该媒体库，片名按新名字重新识别；文件 ID 不变，所以进度、收藏与合集保留（[`rename.go`](../../internal/media/rename.go)）。
 - 影视中心的上传没有自己的接口：Web 客户端用文件服务的 `POST /spaces/{id}/uploads` 与 `POST /spaces/{id}/directories` 逐个写入媒体库文件夹（[`uploads.ts`](../../web/src/media/uploads.ts)），因此授权、容量检查和上传后的重扫都与文件管理相同。可上传的扩展名与扫描器读取的视频、字幕、NFO 和图片扩展名保持一致。
 
 ## 扫描与识别

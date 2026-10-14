@@ -22,6 +22,9 @@ type Files interface {
 	Tree(ctx context.Context, actor accounts.User, spaceID, directoryID string) ([]files.TreeEntry, error)
 	Lookup(ctx context.Context, actor accounts.User, entryID string) (files.Entry, string, error)
 	OpenContent(ctx context.Context, actor accounts.User, entryID string) (files.Content, error)
+	// List and Move let a user rename a video's file from the media center.
+	List(ctx context.Context, actor accounts.User, spaceID, parentID string) ([]files.Entry, error)
+	Move(ctx context.Context, actor accounts.User, entryID, targetSpaceID, targetParentID, targetName string) (files.Entry, error)
 }
 
 // Spaces lists the spaces an actor can see.
@@ -44,6 +47,9 @@ type Options struct {
 	ChangeDelay time.Duration
 	// MaxStreams bounds concurrent converted streams; it defaults to 2.
 	MaxStreams int
+	// StreamWait is how long a converted stream waits for a free slot
+	// before the device reports itself busy; it defaults to 4 seconds.
+	StreamWait time.Duration
 	Now        func() time.Time
 	Random     io.Reader
 	Logger     *slog.Logger
@@ -59,6 +65,8 @@ type Service struct {
 	random    io.Reader
 	logger    *slog.Logger
 	streams   chan struct{}
+	// streamWait is Options.StreamWait.
+	streamWait time.Duration
 	// kick wakes the background worker after a scan found new videos.
 	kick chan struct{}
 
@@ -97,6 +105,9 @@ func NewService(store *Store, options Options) (*Service, error) {
 	if options.ChangeDelay <= 0 {
 		options.ChangeDelay = 3 * time.Second
 	}
+	if options.StreamWait <= 0 {
+		options.StreamWait = 4 * time.Second
+	}
 	if options.CacheDir != "" {
 		for _, directory := range []string{"frames", "artwork", "subtitles"} {
 			if err := os.MkdirAll(filepath.Join(options.CacheDir, directory), 0o700); err != nil {
@@ -109,7 +120,7 @@ func NewService(store *Store, options Options) (*Service, error) {
 		closing: closing, close: closeService,
 		store: store, files: options.Files, spaces: options.Spaces, processor: options.Processor,
 		cacheDir: options.CacheDir, now: options.Now, random: options.Random, logger: options.Logger,
-		streams: make(chan struct{}, options.MaxStreams), kick: make(chan struct{}, 1),
+		streams: make(chan struct{}, options.MaxStreams), streamWait: options.StreamWait, kick: make(chan struct{}, 1),
 		scanning: map[string]bool{}, scanLocks: map[string]*sync.Mutex{}, sessions: options.Sessions,
 		queued: map[string]int{}, again: map[string]bool{}, pending: map[string]*time.Timer{}, changeDelay: options.ChangeDelay,
 	}, nil

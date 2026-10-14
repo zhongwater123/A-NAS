@@ -13,6 +13,7 @@ export function messageOf(error: unknown): string {
       case "media_unavailable": return "影视中心暂时不可用。";
       case "media_busy": return "设备正在为其他人转码，请稍后再试。";
       case "folders_overlap": return "所选文件夹已属于另一个媒体库。";
+      case "name_conflict": return "这个文件夹里已经有同名的文件。";
       case "forbidden": return "你没有权限执行这个操作。";
       case "not_found": return "内容不存在或已被移除。";
     }

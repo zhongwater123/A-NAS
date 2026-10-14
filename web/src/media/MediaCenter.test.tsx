@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import { transferStore } from "../transfers/store";
 import { MediaCenter } from "./MediaCenter";
-import type { Home, MediaLibrary, Title, VideoDetail } from "./mediaApi";
+import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./mediaApi";
+import { Player } from "./Player";
 
 const art = { poster: true, backdrop: true, thumb: true, version: "1" };
 const film: Title = { id: "video:heat", type: "movie", libraryId: "library:films", title: "盗火线", year: 1995, addedAt: "2026-10-09T00:00:00Z", duration: 10200, resolution: "1080p", artwork: art, favorite: false };
@@ -332,5 +333,104 @@ describe("MediaCenter", () => {
     expect(await screen.findByText("已上传 1 个文件，新视频稍后出现在影视中心")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /正在上传/ })).toBeNull();
     expect(tus.uploads[0].metadata.parentId).toBe("file:films");
+  });
+
+  it("renames a film's file from its card, keeping the extension", async () => {
+    let attempts = 0;
+    const fetchMock = serve([library],
+      (url, init) => {
+        if (url !== "/api/v1/media/videos/video%3Aheat") return undefined;
+        if (init?.method !== "PATCH") return json(detail(film));
+        attempts++;
+        if (attempts === 1) return json({ error: { code: "name_conflict", message: "a file with this name already exists" } }, 409);
+        return json(detail(film, { file: { name: "盗火线 (1995).mkv", folder: "影视/电影", sizeBytes: 8e9, modifiedAt: "2026-10-01T00:00:00Z" } }));
+      },
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const recent = await screen.findByRole("region", { name: "最近添加" });
+    await user.click(within(recent).getByRole("button", { name: "盗火线的更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名片源…" }));
+    const dialog = await screen.findByRole("dialog", { name: "重命名片源" });
+    const input = await within(dialog).findByRole("textbox", { name: "新文件名" });
+    expect((input as HTMLInputElement).value).toBe("Heat (1995)");
+    expect(within(dialog).getByText(".mkv")).toBeTruthy();
+    await user.clear(input);
+    await user.type(input, "盗火线 (1995)");
+    await user.click(within(dialog).getByRole("button", { name: "重命名" }));
+    expect(await within(dialog).findByText("这个文件夹里已经有同名的文件。")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "重命名" }));
+    expect(await screen.findByText("已重命名为“盗火线 (1995).mkv”，正在重新识别片名")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "重命名片源" })).toBeNull();
+    const renames = calls(fetchMock, "PATCH", "/api/v1/media/videos/video%3Aheat");
+    expect(renames.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ fileName: "盗火线 (1995).mkv" }, { fileName: "盗火线 (1995).mkv" }]);
+  });
+
+  it("picks another episode or another film without leaving the player", async () => {
+    const episode = (number: number): Episode => ({ id: `video:blossoms-${number}`, season: 1, episode: number, title: `第 ${number} 集`, addedAt: "2026-10-08T00:00:00Z", artwork: art, duration: 2700 });
+    const blossoms: ShowDetail = { ...show, collections: [], next: episode(2), seasonList: [{ number: 1, episodes: [episode(1), episode(2), episode(3)] }] };
+    const playing: VideoDetail = detail({ ...film, id: "video:blossoms-2", type: "episode", title: "第 2 集", showId: show.id, showTitle: "繁花", season: 1, episode: 2 });
+    const fetchMock = serve([library],
+      (url) => (url === "/api/v1/media/videos/video%3Ablossoms-2" ? json(playing) : undefined),
+      (url) => (url.startsWith("/api/v1/media/videos/video%3Ablossoms-2/playback?") ? json({ mode: "direct", url: "/api/v1/media/videos/video%3Ablossoms-2/file", audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+      (url) => (url === "/api/v1/media/shows/show%3Ablossoms" ? json(blossoms) : undefined),
+    );
+    const navigate = vi.fn();
+    const user = userEvent.setup();
+    render(<Player request={{ videoId: "video:blossoms-2" }} onClose={() => undefined} onNavigate={navigate} onSaved={() => undefined} />);
+    const player = await screen.findByRole("dialog", { name: "播放 繁花" });
+
+    await user.click(within(player).getByRole("button", { name: "选集" }));
+    const episodes = await within(player).findByRole("list", { name: "剧集" });
+    const rows = within(episodes).getAllByRole("button");
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining("S1 · E1"), expect.stringContaining("正在播放"), expect.stringContaining("S1 · E3")]);
+    await user.click(rows[2]);
+    expect(navigate).toHaveBeenLastCalledWith("video:blossoms-3");
+
+    // The library tab lists the library's titles; a film plays at once.
+    await user.click(within(player).getByRole("button", { name: "选集" }));
+    await user.click(await within(player).findByRole("tab", { name: "片库" }));
+    await user.click(within(player).getByRole("button", { name: "电影" }));
+    const films = await within(player).findByRole("list", { name: "影片" });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("category=movie") && String(url).includes("library=library%3Afilms"))).toBe(true));
+    await user.click(within(films).getByRole("button", { name: /盗火线/ }));
+    expect(navigate).toHaveBeenLastCalledWith("video:heat");
+    expect(within(player).queryByRole("complementary")).toBeNull();
+  });
+
+  it("plays what a converted stream already holds and restarts it once after quick skips", async () => {
+    const stream = "/api/v1/media/videos/video%3Adune/stream?mode=remux&audio=0&quality=original";
+    serve([library],
+      (url) => (url === "/api/v1/media/videos/video%3Adune" ? json(detail(resuming)) : undefined),
+      (url) => (url.startsWith("/api/v1/media/videos/video%3Adune/playback?") ? json({ mode: "remux", url: stream, duration: 9300, audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(within(await screen.findByRole("region", { name: "精选" })).getByRole("button", { name: /继续播放/ }));
+    const player = await screen.findByRole("dialog", { name: "播放 沙丘" });
+    const video = player.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBe(`${stream}&start=600.000`));
+    // The stream, started at 10:00, has sent its first 30 seconds.
+    let at = 0;
+    Object.defineProperty(video, "currentTime", { configurable: true, get: () => at, set: (value: number) => { at = value; } });
+    Object.defineProperty(video, "buffered", { configurable: true, get: () => ({ length: 1, start: () => 0, end: () => 30 }) });
+    const sources: string[] = [];
+    new MutationObserver(() => sources.push(video.getAttribute("src") ?? "")).observe(video, { attributes: true, attributeFilter: ["src"] });
+    fireEvent.progress(video);
+    expect(player.querySelectorAll(".mc-seek-buffer")).toHaveLength(1);
+
+    // Within what arrived, a skip plays from there at once.
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    expect(at).toBe(10);
+    expect(within(player).queryByText(/跳转到/)).toBeNull();
+
+    // Past it, three quick skips restart the stream once, where they end.
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    expect(at).toBe(20);
+    expect(within(player).getByText("跳转到 10:40")).toBeTruthy();
+    await waitFor(() => expect(video.getAttribute("src")).toBe(`${stream}&start=640.000`));
+    expect(sources).toEqual([`${stream}&start=640.000`]);
   });
 });
