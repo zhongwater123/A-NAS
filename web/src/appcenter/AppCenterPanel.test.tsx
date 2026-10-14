@@ -26,13 +26,29 @@ const memosPlan: InstallPlan = {
   networks: [], addressPools: [], digest: "d".repeat(64), compose: "name: a-nas-memos\n",
 };
 
+// Navidrome as the current container agent plans it: the app identity reads
+// Music through a-nas-users; a second service keeps its image's user.
+const navidromePlan: InstallPlan = {
+  ...memosPlan, appId: "navidrome", title: "Navidrome", project: "a-nas-navidrome",
+  identity: { username: "app-navidrome", uid: 30004, gid: 30004 },
+  services: [
+    { service: "navidrome", runAs: "app", user: "30004:30004", groups: ["20000"], capDrop: ["ALL"], shared: "read" },
+    { service: "cache", runAs: "image" },
+  ],
+  images: ["deluan/navidrome:0.61.2"], containers: ["navidrome"],
+  mounts: [
+    { hostPath: "/srv/a-nas/data/apps/navidrome/data", containerPath: "/data", kind: "appdata", readOnly: false },
+    { hostPath: "/srv/a-nas/data/spaces/shared/Media/Music", containerPath: "/music", kind: "shared", readOnly: true },
+  ],
+};
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 // serve answers the App Center API from a list the test changes as the server
 // would; every write must carry the session's CSRF token.
-function serve(apps: () => CatalogApp[], onPost: (url: string) => Response = () => json(job(), 202)) {
+function serve(apps: () => CatalogApp[], onPost: (url: string) => Response = () => json(job(), 202), plan: InstallPlan = memosPlan) {
   const posts: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -41,7 +57,7 @@ function serve(apps: () => CatalogApp[], onPost: (url: string) => Response = () 
       posts.push(url);
       return onPost(url);
     }
-    if (url.endsWith("/plan")) return json(memosPlan);
+    if (url.endsWith("/plan")) return json(plan);
     return json({ dataSource: "simulated", apps: apps() });
   }));
   return posts;
@@ -312,6 +328,31 @@ describe("AppCenterPanel", () => {
     expect(posts).toEqual(["/api/v1/apps/memos/uninstall"]);
     expect(await screen.findByRole("region", { name: "卸载进度" })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "确认卸载Memos" })).toBeNull();
+  });
+
+  it("shows how each service runs and that Shared is only read", async () => {
+    serve(() => [app("navidrome", { category: "media" })], undefined, navidromePlan);
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "安装 Navidrome" }));
+    const plan = await screen.findByRole("dialog", { name: "安装计划" });
+    expect(await within(plan).findByText("将能读取共享空间中的 1 个文件夹", { exact: false })).toBeTruthy();
+    expect(within(plan).queryByText("读写", { exact: false })).toBeNull();
+    expect(within(plan).getByText("部分服务以镜像自带的身份运行，其余以 app-navidrome 运行")).toBeTruthy();
+    expect(within(plan).getByText("UID 30004，没有特权能力，经 a-nas-users 只读访问共享空间")).toBeTruthy();
+    expect(within(plan).getByText("可能是 root，只能访问自己的应用数据")).toBeTruthy();
+    expect(within(plan).getByText("共享空间 · 只读")).toBeTruthy();
+  });
+
+  it("tells the owner an app runs under older runtime rules", async () => {
+    serve(() => [app("memos", { state: "installed", running: 1, total: 1, runtimeOutdated: true })]);
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "Memos，已安装" }));
+    const status = screen.getByRole("region", { name: "运行状态" });
+    expect(within(status).getByRole("note").textContent).toContain("卸载（应用数据会保留）后重新安装");
   });
 
   it("lists an app from an older agent without an A-NAS category under 其他", async () => {
