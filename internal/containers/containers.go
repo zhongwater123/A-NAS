@@ -72,9 +72,12 @@ type Usage struct {
 }
 
 type Container struct {
-	ID        string
-	Name      string
-	Image     string
+	ID    string
+	Name  string
+	Image string
+	// ImageID is the engine ID of the image the container runs, so the
+	// desktop can tell which images are in use without matching tag strings.
+	ImageID   string
 	State     State
 	Status    string
 	CreatedAt time.Time

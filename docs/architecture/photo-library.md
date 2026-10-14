@@ -82,7 +82,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 
 任务分为两类，共用同一张表和租约语义：
 
-- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
+- **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。`IOWeight` 只在 BFQ 或 `io.cost` 下生效，实验 NAS 数据盘的 `mq-deadline` 下不起作用（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
 - **AI 任务**：Embedding、标签、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
 
 默认执行策略：
@@ -115,7 +115,7 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 ## Runtime 与进程边界
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
-- Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级。
+- Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级；现行单元的内存与 CPU 限制见[相册本地 AI](photo-ai.md#ai-workeranas-ai)（切片 18 起 CPU 上限为逻辑核数减 2）。
 - AI 随系统内置安装、默认开启，设备不联网获取模型（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：Worker 的 Python 依赖以锁定哈希的离线 wheel、模型文件连同来源、许可证、SHA-256 与预处理版本清单随发行制品交付，按内容各存一份并由 release 引用。Worker 不可用时基础相册不受影响。
 - EmbeddingGemma 2 的全模态 740M 官方 LiteRT 包经 MediaPipe Universal Embedder 运行（LiteRT-LM 自身的 Python API 没有向量接口，见 [M2 实施方案](photo-ai.md)），并用 Transformers/Sentence Transformers 结果抽样核对量化正确性；人脸模型优先使用 OpenVINO CPU Provider。不做 OCR（2026-10-09 决定）。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
 - Debian 13 不在当前 OpenVINO 官方支持发行版列表中，因此必须在目标系统完成离线安装、模型加载、连续运行和服务重启测试；失败时回退 ONNX Runtime CPU，不能让 Runtime 兼容性阻塞基础相册。

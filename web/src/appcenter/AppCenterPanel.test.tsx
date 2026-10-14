@@ -114,6 +114,76 @@ describe("AppCenterPanel", () => {
     expect(container.querySelector(".ac-prose img")).toBeNull();
   });
 
+  it("shows notes written for A-NAS and keeps the manifest's own folded away", async () => {
+    serve(() => [app("immich", {
+      notes: "照片保存在**共享空间 › Gallery › immich**。\n\n## 手机备份\n\n服务器地址填 `http://<NAS 地址>:2283`。",
+      upstreamNotes: "## 授权的媒体文件和数据\n1. 点击应用右上角的设置图标。\n2. 在 Volumes 部分映射您的相册存储位置。",
+    }), app("memos", { notes: "默认账号 `admin`" })]);
+    const user = userEvent.setup();
+    const { container } = render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: "Immich，可安装" }));
+
+    const notes = screen.getByRole("region", { name: "使用须知" });
+    expect(await within(notes).findByText("共享空间 › Gallery › immich")).toHaveProperty("tagName", "STRONG");
+    // Note headings sit below the section's own h3.
+    expect(within(notes).getByRole("heading", { name: "手机备份" }).tagName).toBe("H4");
+    const upstream = notes.querySelector("details")!;
+    expect(upstream.open).toBe(false);
+    expect(within(upstream).getByText("上游原始说明")).toBeTruthy();
+    expect(within(upstream).getByText(/在 A-NAS 中不适用/)).toBeTruthy();
+    expect(within(upstream).getByText(/右上角的设置图标/)).toBeTruthy();
+    expect(within(notes).queryByText(/文件夹与端口以安装计划为准/)).toBeNull();
+
+    await user.click(container.querySelector<HTMLButtonElement>(".ac-back")!);
+    await user.click(await screen.findByRole("button", { name: "Memos，可安装" }));
+    const memosNotes = screen.getByRole("region", { name: "使用须知" });
+    expect(memosNotes.querySelector("details")).toBeNull();
+    expect(within(memosNotes).getByText("来自应用的上游清单；文件夹与端口以安装计划为准。")).toBeTruthy();
+  });
+
+  it("says why an installed app's container is not running", async () => {
+    serve(() => [app("n8n", { state: "installed", running: 0, total: 1, webPort: 5678, problems: [{ service: "n8n", state: "restarting", exitCode: 1 }] })]);
+    const user = userEvent.setup();
+    render(<AppCenterPanel onOpenDocker={() => undefined} />);
+    await user.click(await screen.findByRole("button", { name: /^N8n/ }));
+    const status = await screen.findByRole("region", { name: "运行状态" });
+    expect(within(status).getByText("已安装 · 0/1 个容器运行中")).toBeTruthy();
+    expect(within(status).getByRole("list", { name: "没有运行的容器" }).textContent).toContain("容器 n8n 不断重启（退出码 1）");
+  });
+
+  it("keeps a generated login hidden until asked, and copies it", async () => {
+    const secret = "generated-for-this-nas";
+    serve(() => [app("openlist", { state: "installed", running: 1, total: 1, credentials: [{ label: "管理员密码", username: "admin", secret }] })]);
+    const copy = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { value: copy, configurable: true });
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: /^Openlist/ }));
+    const logins = await screen.findByLabelText("登录信息");
+    expect(within(logins).getByText("admin")).toBeTruthy();
+    expect(logins.textContent).not.toContain(secret);
+
+    await user.click(within(logins).getByRole("button", { name: "显示管理员密码" }));
+    expect(within(logins).getByText(secret)).toBeTruthy();
+    const copyButton = within(logins).getByRole("button", { name: "复制管理员密码" });
+    await user.click(copyButton);
+    expect(copy).toHaveBeenCalledWith("copy");
+    expect(within(logins).getByRole("button", { name: "已复制" })).toBe(copyButton);
+    expect(document.activeElement).toBe(copyButton);
+    expect(logins.textContent).toContain("随机生成");
+    Reflect.deleteProperty(document, "execCommand");
+  });
+
+  it("warns that an app installed before generated logins still uses the published one", async () => {
+    serve(() => [app("photoprism", { state: "installed", running: 1, total: 1, credentials: [{ label: "管理员密码", username: "admin", secret: "published", upstream: true }] })]);
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: /^Photoprism/ }));
+    const logins = await screen.findByLabelText("登录信息");
+    expect(within(logins).getByText(/安装清单公开的默认密码/)).toBeTruthy();
+    expect(logins.textContent).not.toContain("随机生成");
+  });
+
   it("follows an install from its plan through progress to opening the app", async () => {
     let memos = app("memos", { webPort: 5230, notes: "默认账号 `admin`" });
     const posts = serve(() => [memos], () => {
@@ -225,7 +295,7 @@ describe("AppCenterPanel", () => {
     await user.click(within(list).getByRole("button", { name: "Memos，已安装" }));
     await user.click(screen.getByRole("button", { name: "更多操作" }));
     await user.click(screen.getByRole("menuitem", { name: "在 Docker 中查看" }));
-    expect(openDocker).toHaveBeenCalledOnce();
+    expect(openDocker).toHaveBeenCalledExactlyOnceWith("memos");
 
     const more = screen.getByRole("button", { name: "更多操作" });
     await user.click(more);

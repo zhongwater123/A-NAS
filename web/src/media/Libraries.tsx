@@ -4,9 +4,10 @@ import {
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 
 import { listEntries, type FileEntry, type Space } from "../api";
+import { formatBytes } from "../bytes";
 import { Empty, messageOf, PageHeader } from "./Browse";
 import { Menu } from "./Cards";
-import { ago, bytes } from "./format";
+import { ago } from "./format";
 import { artworkURL, createLibrary, updateLibrary, type LibraryKind, type MediaLibrary } from "./mediaApi";
 
 export const kindInfo: Record<LibraryKind, { label: string; icon: ReactNode; text: string }> = {
@@ -88,7 +89,7 @@ export function LibrariesPage({ libraries, processing, canCreate, onOpen, onCrea
                       ]} />
                     )}
                   </header>
-                  <p className="mc-library-counts">{counts(library)}{library.counts.sizeBytes ? <span> · {bytes(library.counts.sizeBytes)}</span> : null}</p>
+                  <p className="mc-library-counts">{counts(library)}{library.counts.sizeBytes ? <span> · {formatBytes(library.counts.sizeBytes)}</span> : null}</p>
                   <ul className="mc-library-folders">
                     {library.folders.map((folder) => (
                       <li key={folder.entryId} className={folder.missing ? "missing" : ""} title={folder.path}>

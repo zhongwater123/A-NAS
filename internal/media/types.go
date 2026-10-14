@@ -293,6 +293,9 @@ type Playback struct {
 	Quality string `json:"quality"`
 	// Qualities lists the choices for this video's height.
 	Qualities []string `json:"qualities"`
+	// Mime is a converted stream's type, which lets the player buffer it
+	// through Media Source Extensions.
+	Mime string `json:"mime,omitempty"`
 }
 
 // Capabilities are what the browser says it can decode.

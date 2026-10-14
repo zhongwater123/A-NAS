@@ -38,6 +38,9 @@ var (
 	// ErrMountOutsideFolder fails an install whose container mounts an A-NAS
 	// volume beyond the folder in its plan; the install is rolled back.
 	ErrMountOutsideFolder = errors.New("an app mount is not limited to its planned folder")
+	// ErrAppNotRunning reports an install whose containers did not keep
+	// running after Compose started them; the install is rolled back.
+	ErrAppNotRunning = errors.New("app containers did not keep running")
 )
 
 // ValidID reports whether id can name a catalog app and its Compose project.
@@ -59,9 +62,12 @@ type App struct {
 	Title   string
 	Tagline string
 	// Description and Notes are Markdown from the manifest; Notes is its
-	// advice before first use, such as a default account.
-	Description string
-	Notes       string
+	// advice before first use, such as a default account. Where upstream
+	// notes describe CasaOS, Notes is written for A-NAS (copy.go) and
+	// UpstreamNotes keeps the manifest's own.
+	Description   string
+	Notes         string
+	UpstreamNotes string
 	// Category is the A-NAS category the app is listed under (categories.go).
 	Category  string
 	Version   string
@@ -122,6 +128,18 @@ type AppStatus struct {
 	Running int
 	Total   int
 	Job     *Job
+	// Problems are the app's containers that are not running.
+	Problems []ContainerProblem
+	// Credentials are the logins generated for the app, shown to its owner.
+	Credentials []Credential
+}
+
+// ContainerProblem is an app container that is not running: restarting,
+// exited or never started, with its last exit code.
+type ContainerProblem struct {
+	Service  string
+	State    string
+	ExitCode int
 }
 
 // Identity is the Linux account app-<id> an app's containers run as; the

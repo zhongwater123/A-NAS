@@ -81,7 +81,8 @@ export interface VideoDetail extends Title {
   collections: CollectionRef[];
   collection?: string;
 }
-export interface Playback { mode: "direct" | "remux" | "transcode"; url: string; duration?: number; reason?: string; audio: number; quality: Quality; qualities: Quality[] }
+// mime names a converted stream's codecs, so the player can buffer it itself.
+export interface Playback { mode: "direct" | "remux" | "transcode"; url: string; duration?: number; reason?: string; audio: number; quality: Quality; qualities: Quality[]; mime?: string }
 export interface Collection { id: string; name: string; automatic: boolean; count: number; updatedAt: string; covers: string[] }
 export interface CollectionDetail extends Collection { items: Title[] }
 export interface FolderRoot { libraryId: string; libraryName: string; entryId: string; name: string; path: string; videos: number; cover?: string; missing?: boolean }
@@ -108,6 +109,9 @@ export function listTitles(query: TitleQuery) {
 }
 export const getShow = (showId: string) => request<ShowDetail>(`${base}/shows/${id(showId)}`);
 export const getVideo = (videoId: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`);
+// renameVideoFile renames the 片源, the video's file, with the subtitles, NFO
+// and artwork named after it.
+export const renameVideoFile = (videoId: string, fileName: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`, body("PATCH", { fileName }), true);
 export function getPlayback(videoId: string, options: { caps: string; audio?: number; quality?: Quality }) {
   const parameters = new URLSearchParams({ caps: options.caps, audio: String(options.audio ?? -1), quality: options.quality ?? "original" });
   return request<Playback>(`${base}/videos/${id(videoId)}/playback?${parameters}`);

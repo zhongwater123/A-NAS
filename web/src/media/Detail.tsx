@@ -1,9 +1,10 @@
-import { Check, FileVideo, Heart, Languages, ListPlus, Play, RotateCcw, Star, Subtitles } from "lucide-react";
+import { Check, FileVideo, Heart, Languages, ListPlus, PenLine, Play, RotateCcw, Star, Subtitles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { formatBytes } from "../bytes";
 import { Empty, Loading, messageOf } from "./Browse";
 import { Artwork, useMediaActions } from "./Cards";
-import { bytes, episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
+import { episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
 import { getShow, getVideo, type Episode, type ShowDetail, type Title, type VideoDetail } from "./mediaApi";
 
 function Meta({ title, extra = [] }: { title: Title; extra?: (string | undefined)[] }) {
@@ -78,9 +79,15 @@ export function VideoPage({ id, refreshKey, onBack, onError }: { id: string; ref
       </div>
       <section className={`mc-detail-more ${detail.type === "other" ? "wide" : ""}`} aria-label="文件信息">
           <dl className="mc-detail-facts">
-            <div><dt>文件</dt><dd title={`${detail.file.folder}/${detail.file.name}`}>{detail.file.name}</dd></div>
+            <div className="mc-detail-file">
+              <dt>片源</dt>
+              <dd title={`${detail.file.folder}/${detail.file.name}`}>
+                <span>{detail.file.name}</span>
+                <button type="button" className="mc-link" onClick={() => actions.rename(detail)} aria-label="重命名片源"><PenLine />重命名</button>
+              </dd>
+            </div>
             <div><dt>位置</dt><dd>{detail.file.folder}</dd></div>
-            <div><dt>大小</dt><dd>{bytes(detail.file.sizeBytes)}</dd></div>
+            <div><dt>大小</dt><dd>{formatBytes(detail.file.sizeBytes)}</dd></div>
             {detail.media && <div><dt>格式</dt><dd>{[detail.media.container, detail.media.videoCodec, detail.media.audioCodec, detail.media.width && detail.media.height ? `${detail.media.width}×${detail.media.height}` : ""].filter(Boolean).join(" · ")}</dd></div>}
             {detail.audio.length > 1 && <div><dt><Languages />音轨</dt><dd>{detail.audio.map((track) => track.label).join("、")}</dd></div>}
             {detail.subtitles.length > 0 && <div><dt><Subtitles />字幕</dt><dd>{detail.subtitles.map((track) => track.label).join("、")}</dd></div>}
@@ -114,6 +121,7 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
       </div>
       <button type="button" className={`mc-round small ${watched ? "on" : ""}`} aria-pressed={watched} aria-label={watched ? "标记为未看" : "标记为已看"} title={watched ? "标记为未看" : "标记为已看"}
         onClick={() => actions.setWatched(title, !watched)}><Check /></button>
+      <button type="button" className="mc-round small" aria-label={`重命名${episodeName(episode)}的片源`} title="重命名片源" onClick={() => actions.rename(title)}><PenLine /></button>
     </li>
   );
 }

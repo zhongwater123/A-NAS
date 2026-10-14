@@ -92,8 +92,10 @@ type Plan struct {
 	// AddressPools are the Docker address pools those networks come from. The
 	// engine fills them in; Render does not know the daemon.
 	AddressPools []netip.Prefix
-	Digest       string
-	Compose      []byte
+	// Credentials are the logins generated for this app (credentials.go).
+	Credentials []Credential
+	Digest      string
+	Compose     []byte
 }
 
 // PolicyError lists every reason a manifest cannot be installed.
@@ -106,9 +108,9 @@ func (e *PolicyError) Error() string {
 }
 
 // Render validates a manifest against policy and produces the Compose file
-// that will run as identity, rewritten to A-NAS paths and labelled with the
-// app ID.
-func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) (Plan, error) {
+// that will run as identity, rewritten to A-NAS paths, labelled with the app
+// ID and holding the app's generated secrets (NewSecrets).
+func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, secrets Secrets) (Plan, error) {
 	if identity.UID <= 0 || identity.GID <= 0 {
 		return Plan{}, &PolicyError{Reasons: []string{"app identity is missing"}}
 	}
@@ -179,7 +181,10 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 		service := project.Services[name]
 		descriptions := casaosDescriptions(service.Extensions)
 		checkService(name, service, reject)
-		applyAppIdentity(&service, identity)
+		applyAppIdentity(&service, identity, runAsAppIdentity[entry.App.ID])
+		if err := applySecrets(entry.App.ID, name, &service, secrets); err != nil {
+			return Plan{}, err
+		}
 
 		volumes := make([]types.ServiceVolumeConfig, 0, len(service.Volumes))
 		for _, volume := range service.Volumes {
@@ -293,19 +298,29 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity) 
 	sum := sha256.Sum256(rendered)
 	plan.Digest = hex.EncodeToString(sum[:])
 	plan.Compose = rendered
+	plan.Credentials = Credentials(entry.App.ID, secrets)
 	sort.Slice(plan.Ports, func(i, j int) bool { return plan.Ports[i].HostPort < plan.Ports[j].HostPort })
 	return plan, nil
 }
+
+// runAsAppIdentity lists apps whose images run as a fixed non-root user and
+// work under any UID. Their manifests set neither user nor PUID/PGID, so the
+// image user (n8n's node, UID 1000; Grafana's 472; PsiTransfer's node) could
+// not write the folders the Host Agent creates for app-<id>, and the
+// container kept restarting (Demo test report, n8n). They run as the app
+// identity instead.
+var runAsAppIdentity = map[string]bool{"n8n": true, "grafana": true, "psitransfer": true}
 
 // applyAppIdentity adapts the two runtime-identity conventions accepted by
 // the reviewed catalog to the stable Linux identity allocated by the Host
 // Agent. An explicit Compose user overrides the image user, while PUID/PGID
 // are image-specific environment conventions; literal upstream values must
-// not escape the A-NAS identity boundary in either form.
-func applyAppIdentity(service *types.ServiceConfig, identity Identity) {
+// not escape the A-NAS identity boundary in either form. force sets the
+// user for images listed in runAsAppIdentity.
+func applyAppIdentity(service *types.ServiceConfig, identity Identity, force bool) {
 	uid := strconv.Itoa(identity.UID)
 	gid := strconv.Itoa(identity.GID)
-	if strings.TrimSpace(service.User) != "" {
+	if force || strings.TrimSpace(service.User) != "" {
 		service.User = uid + ":" + gid
 	}
 	for name, value := range map[string]string{"PUID": uid, "PGID": gid} {

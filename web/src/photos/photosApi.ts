@@ -28,7 +28,14 @@ export interface PhotoPage { items: PhotoAsset[]; next?: string }
 // semantic is false when local AI could not encode the query and only names
 // and user tags were matched. closest counts the results, over all pages, in
 // the closest group; the results after them are less related.
-export interface PhotoSearchPage extends PhotoPage { semantic: boolean; closest: number }
+export interface PhotoSearchPage extends PhotoPage { semantic: boolean; closest: number; objects?: PhotoObjectsFound }
+// For a query about things the object detector finds reliably, such as 手机:
+// the closest group is the photos it found them in. undetected counts the
+// photos in scope it has not looked at yet.
+export interface PhotoObjectsFound { words: string[]; detected: number; undetected: number }
+// ready is false while local AI has not organised the photo; there are no
+// results then.
+export interface PhotoSimilarPage extends PhotoPage { ready: boolean }
 // A month of a library's timeline in the device's time zone (YYYY-MM).
 export interface PhotoMonth { month: string; photos: number }
 // An AI cluster: the photos local AI is sure show a label. Clusters are shown
@@ -42,6 +49,7 @@ export interface PhotoAIStatus {
   // Why work is paused: foreground, or a resource under pressure.
   reason?: string;
   model?: string;
+  objectModel?: string;
   ready: number;
   pending: number;
   failed: number;
@@ -61,9 +69,24 @@ export const listTimelineMonths = async (libraryId: string) =>
   (await request<{ items: PhotoMonth[] }>(`${base}/libraries/${id(libraryId)}/timeline/months`)).items;
 export const listTimelineMonth = (libraryId: string, month: string, cursor = "", limit = 500) =>
   request<PhotoPage>(`${base}/libraries/${id(libraryId)}/timeline?month=${id(month)}&${page(cursor, limit)}`);
-// viewing adds a member library the caller is viewing read-only.
-export const searchPhotos = (query: string, viewing = "", cursor = "", limit = 120) =>
-  request<PhotoSearchPage>(`${base}/search?q=${id(query)}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+// viewing adds a member library the caller is viewing read-only; library
+// narrows the search to one library of that scope.
+export const searchPhotos = (query: string, viewing = "", cursor = "", library = "", limit = 120) =>
+  request<PhotoSearchPage>(`${base}/search?q=${id(query)}&${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}${library ? `&library=${id(library)}` : ""}`);
+// Photos that look like this one, in the same scope as a search.
+export const listSimilarPhotos = (assetId: string, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoSimilarPage>(`${base}/assets/${id(assetId)}/similar?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
+// Photos that look like an image from outside the library. The photo
+// service encodes the image at once, never stores it, and lists the results
+// under the returned ID for a while; once it answers search_expired, the
+// image is sent again.
+export function createImageSearch(image: Blob) {
+  const body = new FormData();
+  body.set("file", image, "image.jpg");
+  return request<{ id: string }>(`${base}/image-searches`, { method: "POST", body }, true);
+}
+export const listImageSearchResults = (searchId: string, viewing = "", cursor = "", limit = 120) =>
+  request<PhotoPage>(`${base}/image-searches/${id(searchId)}/assets?${page(cursor, limit)}${viewing ? `&viewing=${id(viewing)}` : ""}`);
 export const listPhotoLabels = (viewing = "") =>
   request<{ items: PhotoLabelCount[]; ready: boolean }>(`${base}/labels${viewing ? `?viewing=${id(viewing)}` : ""}`);
 export const listLabelPhotos = (labelId: string, viewing = "", cursor = "", limit = 120) =>

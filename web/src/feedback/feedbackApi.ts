@@ -61,7 +61,7 @@ export function describeFeedbackError(error: unknown): string {
     case "feedback_empty": return "写几句描述，或添加一张图片";
     case "text_too_long": return `文字最多 ${MAX_TEXT} 字`;
     case "too_many_images": return `每条反馈最多 ${MAX_IMAGES} 张图片`;
-    case "image_too_large": return "单张图片不能超过 10 MB";
+    case "image_too_large": return "单张图片不能超过 10 MiB";
     case "unsupported_image": return "只支持 PNG、JPEG、GIF 或 WebP 图片";
     case "feedback_changed": return "其他人刚刚修改了这条反馈";
     case "not_found": return "这条反馈已被删除";

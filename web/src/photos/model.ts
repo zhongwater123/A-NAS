@@ -1,10 +1,13 @@
 import { APIError } from "../api";
+import type { ImageQuery } from "./imageSearch";
 import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoTagCount } from "./photosApi";
 
 // A place is what the main area shows. AI 聚合 (a search with an empty query
 // is its start page), its clusters and the user tag groups cover the caller's and the shared
 // library; viewing adds the member library it was started from, so ordinary
-// searches never mix it in.
+// searches never mix it in. Similar photos, and the photos like an image
+// from outside the library, cover what a search would and go back to where
+// they were asked for.
 export type Place =
   | { kind: "timeline"; libraryId: string }
   | { kind: "albums"; libraryId: string }
@@ -12,7 +15,9 @@ export type Place =
   | { kind: "trash"; libraryId: string }
   | { kind: "search"; viewing: string; query: string }
   | { kind: "cluster"; viewing: string; label: PhotoLabelCount }
-  | { kind: "tag"; viewing: string; tag: PhotoTagCount };
+  | { kind: "tag"; viewing: string; tag: PhotoTagCount }
+  | { kind: "similar"; viewing: string; asset: PhotoAsset; from: Place }
+  | { kind: "image"; viewing: string; query: ImageQuery; from: Place };
 
 export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
 
@@ -89,12 +94,6 @@ export function formatDateTime(value: string) {
   return new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatSize(bytes: number) {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
 export function daysLeft(until: string, now = Date.now()) {
   return Math.max(0, Math.ceil((new Date(until).getTime() - now) / 86_400_000));
 }
@@ -108,6 +107,7 @@ const photoErrors: Record<string, string> = {
   validation_failed: "名称无效",
   not_found: "照片或相册已不存在",
   photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册",
+  ai_unavailable: "暂时无法识别图片，请稍后再试",
   network_error: "网络连接中断",
 };
 

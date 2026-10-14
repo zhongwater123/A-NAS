@@ -4,9 +4,10 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+import { formatBytes, formatRate } from "../bytes";
 import { type ConflictChoice, type Hold, transferStore, useTransfers } from "./store";
 import {
-  dayLabel, formatBytes, formatClock, formatRemaining, formatSpeed, groupItems, groupStatus, holdText, isCurrent,
+  dayLabel, formatClock, formatRemaining, groupItems, groupStatus, holdText, isCurrent,
   type ItemStatus, locationParts, speedText, statusText, type TransferGroup, type TransferItem, transferItems, transferTotals,
 } from "./model";
 import type { TransferLocation } from "./transfersApi";
@@ -105,8 +106,8 @@ function Overview({ totals, active }: { totals: ReturnType<typeof transferTotals
       </div>
       <div className="tc-overview-copy">
         <strong>{active ? `${active} 个任务` : "全部完成"}</strong>
-        <span className="up"><ArrowUp />{formatSpeed(totals.uploadSpeed)}</span>
-        <span className="down"><ArrowDown />{formatSpeed(totals.downloadSpeed)}</span>
+        <span className="up"><ArrowUp />{formatRate(totals.uploadSpeed)}</span>
+        <span className="down"><ArrowDown />{formatRate(totals.downloadSpeed)}</span>
         {active > 0 && totals.remainingBytes > 0 && <small>剩余 {[formatBytes(totals.remainingBytes), formatRemaining(totals.remainingBytes, speed)].filter(Boolean).join(" · ")}</small>}
       </div>
     </section>

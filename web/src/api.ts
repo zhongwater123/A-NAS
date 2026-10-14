@@ -167,7 +167,14 @@ export interface Notification { id: string; kind: "admin_viewing" | "admin_libra
 export type ViewingScope = "space" | "library";
 export interface ViewingGrant { id: string; scope: ViewingScope; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }
 export interface FileEntry { id: string; spaceId: string; parentId?: string; name: string; kind: "file" | "directory"; sizeBytes: number; modifiedAt: string }
-export interface TrashItem { id: string; entryId: string; spaceId: string; name: string; deletedBy: string; deletedAt: string }
+// TrashItem mirrors internal/files.TrashItem: originalPath is the folder a
+// restore without a parentId puts the item back in, relative to the space
+// root; when originalGone is set that folder is gone and the item goes to
+// the root instead.
+export interface TrashItem {
+  id: string; entryId: string; spaceId: string; name: string; kind: "file" | "directory"; sizeBytes: number;
+  originalPath: string; originalGone: boolean; deletedBy: string; deletedAt: string; purgeAt: string;
+}
 export interface Volume { id: string; diskId: string; filesystemUuid?: string; capacityBytes?: number; availableBytes?: number; state: "creating" | "available" | "unavailable" | "read_only" }
 export interface StoragePlan { id: string; diskId: string; diskModel: string; capacityBytes: number; fingerprint: string; signatures: string[]; confirmationPhrase: string; actions: Array<{kind: string; description: string}>; state: string; expiresAt: string; failure?: string; volume?: Volume }
 

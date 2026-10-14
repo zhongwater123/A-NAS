@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"image"
 	"image/png"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -67,6 +68,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	edit, editType := feedbackForm{text: "改为：MKV 无法播放", version: feedbackItem.Version, keep: []string{feedbackItem.Images[0].ID}}.encode(t)
 	stale, staleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	svg, svgType := feedbackForm{images: [][]byte{[]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)}}.encode(t)
+	searchImage, searchImageType := imageSearchForm(t)
 	tests := []struct {
 		name        string
 		method      string
@@ -97,6 +99,10 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo trash", path: "/api/v1/photos/libraries/" + photoLibraryID + "/trash", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo AI status", path: "/api/v1/photos/ai", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo search", path: "/api/v1/photos/search?q=" + url.QueryEscape("海边的猫"), handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo similar", path: "/api/v1/photos/assets/" + photoAssetID + "/similar?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo similar missing", path: "/api/v1/photos/assets/photo:missing/similar", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo image search without local AI", method: http.MethodPost, body: searchImage, contentType: searchImageType, path: "/api/v1/photos/image-searches", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo image search expired", path: "/api/v1/photos/image-searches/0123/assets?limit=2", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photos unavailable", path: "/api/v1/photos/libraries", handler: withPhotoPrincipal(photosapi.New(nil, nil)), wantStatus: http.StatusServiceUnavailable},
@@ -104,6 +110,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "media library", path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, wantStatus: http.StatusOK},
 		{name: "media library missing", path: "/api/v1/media/libraries/library:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
 		{name: "media library overlap", method: http.MethodPost, body: `{"name":"重复","kind":"movies","spaceId":"` + movies.shared.ID + `","folderIds":["` + movies.folder + `"]}`, path: "/api/v1/media/libraries", handler: mediaHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "media video file rename", method: http.MethodPatch, body: `{"fileName":"热天午后.txt"}`, path: "/api/v1/media/videos/" + movies.film, handler: mediaHandler, csrf: true, wantStatus: http.StatusBadRequest},
 		{name: "media library scan", method: http.MethodPost, path: "/api/v1/media/libraries/" + movies.library + "/scan", handler: mediaHandler, csrf: true, wantStatus: http.StatusAccepted},
 		{name: "media library rename", method: http.MethodPatch, body: `{"name":"家庭影院"}`, path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, csrf: true, wantStatus: http.StatusOK},
 		{name: "media home", path: "/api/v1/media/home", handler: mediaHandler, wantStatus: http.StatusOK},
@@ -372,6 +379,24 @@ func photoAPI(t *testing.T) (http.Handler, string, string) {
 		t.Fatalf("import photo: %v", err)
 	}
 	return withPhotoPrincipal(photosapi.New(service, nil)), private, asset.ID
+}
+
+// imageSearchForm is a multipart body with an image to search by.
+func imageSearchForm(t *testing.T) (string, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "query.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(part, image.NewGray(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.String(), writer.FormDataContentType()
 }
 
 func withPhotoPrincipal(next http.Handler) http.Handler {

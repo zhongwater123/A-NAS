@@ -86,6 +86,8 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
 	h.mux.HandleFunc("GET "+ActivityPath, h.activity)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
+	h.mux.HandleFunc("POST "+p+"/image-searches", h.searchByImage)
+	h.mux.HandleFunc("GET "+p+"/image-searches/{searchID}/assets", h.imageSearchResults)
 	h.mux.HandleFunc("GET "+p+"/labels", h.labels)
 	h.mux.HandleFunc("GET "+p+"/labels/{labelID}/assets", h.labelPhotos)
 	h.mux.HandleFunc("GET "+p+"/tags", h.tags)
@@ -104,6 +106,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("DELETE "+p+"/assets/{assetID}", h.trashAsset)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/original", h.original)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/thumbnail", h.thumbnail)
+	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/similar", h.similar)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/copies", h.copyAsset)
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
@@ -131,6 +134,15 @@ type searchResponse struct {
 	// Closest counts the results, over all pages, in the closest group; the
 	// results after them are less related.
 	Closest int `json:"closest"`
+	// Objects is set when the query is about things the detector finds
+	// reliably: the closest group is then the photos it found them in.
+	Objects *objectsFound `json:"objects,omitempty"`
+}
+
+type objectsFound struct {
+	Words      []string `json:"words"`
+	Detected   int      `json:"detected"`
+	Undetected int      `json:"undetected"`
 }
 
 func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
@@ -265,13 +277,97 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	page, err := h.service.Search(r.Context(), principal, photos.SearchRequest{
-		Query: query.Get("q"), Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+		Query: query.Get("q"), Viewing: query.Get("viewing"), Library: query.Get("library"), Cursor: query.Get("cursor"), Limit: limit,
 	})
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest})
+	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest}
+	if page.Objects != nil {
+		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type similarResponse struct {
+	Items []photos.Asset `json:"items"`
+	Next  string         `json:"next,omitempty"`
+	// Ready is false while the photo has no vector yet.
+	Ready bool `json:"ready"`
+}
+
+func (h *handler) similar(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	page, err := h.service.Similar(r.Context(), principal, r.PathValue("assetID"), photos.SimilarRequest{
+		Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, similarResponse{Items: page.Assets, Next: page.Next, Ready: page.Ready})
+}
+
+type imageSearchResponse struct {
+	// ID lists the results under image-searches/{id}/assets for a while.
+	ID string `json:"id"`
+}
+
+// searchByImage accepts one multipart "file" part, the image to search the
+// library by. It is encoded at once and never stored.
+func (h *handler) searchByImage(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	reader, err := r.MultipartReader()
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		return
+	}
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+			return
+		}
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+		id, err := h.service.SearchByImage(r.Context(), principal, part)
+		_ = part.Close()
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, imageSearchResponse{ID: id})
+		return
+	}
+	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
+}
+
+func (h *handler) imageSearchResults(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	limit, ok := pageLimit(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	page, err := h.service.ImageSearchResults(r.Context(), principal, r.PathValue("searchID"), photos.SimilarRequest{
+		Viewing: query.Get("viewing"), Cursor: query.Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
@@ -553,6 +649,10 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusRequestEntityTooLarge, "too_large", err.Error())
 	case errors.Is(err, photos.ErrInsufficientSpace):
 		WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
+	case errors.Is(err, photos.ErrImageSearchExpired):
+		WriteError(w, http.StatusNotFound, "search_expired", "the image search is no longer kept; send the image again")
+	case errors.Is(err, photos.ErrAIUnavailable):
+		WriteError(w, http.StatusServiceUnavailable, "ai_unavailable", "local AI cannot read the image right now; try again later")
 	default:
 		h.logger.ErrorContext(r.Context(), "photo request failed", "path", r.URL.Path, "error", err)
 		WriteError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")

@@ -113,9 +113,13 @@ func Run(parent context.Context, config Config) error {
 	if config.AIQuietPeriod <= 0 {
 		config.AIQuietPeriod = QuietPeriod
 	}
-	gate := NewGate(config.AIQuietPeriod)
+	gate := NewGate(config.AIQuietPeriod, config.Logger)
 	if config.AIPressure != nil {
 		gate.pressure = config.AIPressure
+	} else if len(gate.watched) > 0 {
+		config.Logger.Info("AI work yields to the pressure of", "cgroups", gate.watched)
+	} else {
+		config.Logger.Info("AI work yields to the whole system's pressure")
 	}
 	server := &http.Server{
 		Handler: authenticate(config.Sessions, config.Logger, gate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

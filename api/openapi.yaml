@@ -320,6 +320,7 @@ paths:
   /api/v1/trash/{trashId}/restore:
     post:
       operationId: restoreTrash
+      summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. A taken name answers 409 name_conflict and never overwrites.
       parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
       responses:
@@ -713,12 +714,39 @@ paths:
       parameters:
         - { name: q, in: query, required: true, description: "1 to 200 characters, such as 海边的猫.", schema: { type: string, minLength: 1, maxLength: 200 } }
         - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to search it as well.", schema: { type: string } }
+        - { name: library, in: query, description: "One library of the search's scope (the caller's private library, the shared library or the viewed one) to search alone; any other answers 404.", schema: { type: string } }
         - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
       responses:
         "200": { description: One page of results, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoSearchResults" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/image-searches:
+    post:
+      operationId: searchPhotosByImage
+      summary: Search by an image that is not in the library; local AI encodes it and looks for objects in it at once, the image itself is never stored, and its results stay listed under the returned ID until 30 minutes after their last use
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { file: { type: string, format: binary, description: "A JPEG or PNG of at most 32 MiB and 2^26 (about 67 million) pixels. The Web client sends it upright, scaled to at most 1600 px." } } } } } }
+      responses:
+        "201": { description: The image was encoded, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoImageSearch" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "503": { description: "Local AI cannot read the image now (ai_unavailable), or the photo library is not available on this device (photos_unavailable)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/image-searches/{searchId}/assets:
+    get:
+      operationId: listImageSearchResults
+      summary: The untrashed photos in the caller's search scope most like an image search's image, closest first, by image vectors and the objects found in both, as for similar photos
+      parameters:
+        - { name: searchId, in: path, required: true, schema: { type: string } }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to look in it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of results, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { description: "search_expired when the search is no longer kept or was started by someone else, so the image is to be sent again; not_found for a viewed library the caller cannot see", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/labels:
     get:
@@ -990,6 +1018,20 @@ paths:
         "200": { description: Upright JPEG thumbnail at most 512 pixels on its longer side, content: { image/jpeg: { schema: { type: string, format: binary } } } }
         "304": { description: The client's copy still matches the ETag }
         "404": { description: "Not found, or thumbnail_unavailable while it is pending or failed (use the original)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/assets/{assetId}/similar:
+    get:
+      operationId: listSimilarPhotos
+      summary: The untrashed photos in the caller's search scope most like this one, closest first, by image vectors and the objects found in both; never its copies or duplicates
+      parameters:
+        - { $ref: "#/components/parameters/PhotoAssetID" }
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to look in it as well.", schema: { type: string } }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of similar photos, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoSimilarResults" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { description: "Not found: missing, trashed, or outside the caller's search scope", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/photos/assets/{assetId}/copies:
     post:
       operationId: copyPhotoAsset
@@ -1315,6 +1357,18 @@ paths:
       responses:
         "200": { description: The video, content: { application/json: { schema: { $ref: "#/components/schemas/MediaVideoDetail" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: renameMediaVideoFile
+      summary: Rename the video's file, with the subtitles, NFO and artwork named after it, as the caller
+      description: The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name.
+      parameters: [{ $ref: "#/components/parameters/MediaVideoID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [fileName], properties: { fileName: { type: string, minLength: 1, maxLength: 255 } } } } } }
+      responses:
+        "200": { description: The renamed video, content: { application/json: { schema: { $ref: "#/components/schemas/MediaVideoDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/media/videos/{videoId}/playback:
     get:
       operationId: getMediaPlayback
@@ -2169,14 +2223,30 @@ components:
     TrashItem:
       type: object
       additionalProperties: false
-      required: [id, entryId, spaceId, name, deletedBy, deletedAt]
+      required: [id, entryId, spaceId, name, kind, sizeBytes, originalPath, originalGone, deletedBy, deletedAt, purgeAt]
       properties:
         id: { type: string }
         entryId: { type: string }
         spaceId: { type: string }
         name: { type: string }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total size of the files the item holds, as last indexed.
+        originalPath:
+          type: string
+          description: >-
+            Folder the item was deleted from, relative to the space root and empty for the root;
+            restoring without a parentId puts it back there. When originalGone is true it is where
+            the folder was, or empty when that was not recorded.
+        originalGone:
+          type: boolean
+          description: The original folder no longer exists, so restoring without a parentId puts the item at the space root.
         deletedBy: { type: string }
         deletedAt: { type: string, format: date-time }
+        purgeAt: { type: string, format: date-time, description: When the recycle bin deletes the item for good. }
     Volume:
       type: object
       additionalProperties: false
@@ -2471,6 +2541,9 @@ components:
           minLength: 1
         image:
           type: string
+        imageId:
+          type: string
+          description: Engine ID of the image the container runs; omitted by container agents that predate it.
         state:
           type: string
           enum: [created, running, paused, restarting, removing, exited, dead]
@@ -2584,7 +2657,10 @@ components:
           description: Markdown from the vendored manifest.
         notes:
           type: string
-          description: Markdown advice from the manifest for first use, such as a default account; empty when it has none.
+          description: Markdown advice for first use, such as a default account; empty when there is none. Written for A-NAS where the manifest's own notes describe CasaOS.
+        upstreamNotes:
+          type: string
+          description: The manifest's own first-use notes, set only when notes replaces them.
         category:
           type: string
           description: A-NAS category; empty when the container agent predates A-NAS categories.
@@ -2626,6 +2702,32 @@ components:
           minimum: 0
         job:
           $ref: "#/components/schemas/AppJob"
+        problems:
+          type: array
+          description: The app's containers that are not running, with their state and last exit code.
+          items:
+            type: object
+            additionalProperties: false
+            required: [service, state, exitCode]
+            properties:
+              service: { type: string }
+              state: { type: string }
+              exitCode: { type: integer }
+        credentials:
+          type: array
+          description: The app's logins, shown to the owner.
+          items: { $ref: "#/components/schemas/AppCredential" }
+    AppCredential:
+      type: object
+      additionalProperties: false
+      required: [label, secret]
+      properties:
+        label: { type: string }
+        username: { type: string }
+        secret: { type: string }
+        upstream:
+          type: boolean
+          description: The manifest's published value, still used by an app installed before A-NAS generated its logins.
     AppJob:
       type: object
       additionalProperties: false
@@ -2749,6 +2851,10 @@ components:
           pattern: "^[a-f0-9]{64}$"
         compose:
           type: string
+        credentials:
+          type: array
+          description: Logins generated for this app at its first plan and kept, shown to the owner.
+          items: { $ref: "#/components/schemas/AppCredential" }
     PhotoLibrary:
       type: object
       additionalProperties: false
@@ -2899,7 +3005,30 @@ components:
         closest:
           type: integer
           minimum: 0
-          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches and the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+          description: "How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+        objects:
+          type: object
+          additionalProperties: false
+          required: [words, detected, undetected]
+          description: "Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found."
+          properties:
+            words: { type: array, items: { type: string }, description: The query's class words. }
+            detected: { type: integer, minimum: 0, description: Photos over all pages in which the detector found them. }
+            undetected: { type: integer, minimum: 0, description: Photos in the search's scope the detector has not processed yet. }
+    PhotoSimilarResults:
+      type: object
+      additionalProperties: false
+      required: [items, ready]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } }
+        next: { type: string }
+        ready: { type: boolean, description: "False while local AI has not organised the photo yet; there are no results then." }
+    PhotoImageSearch:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string, description: "Lists the results under image-searches/{id}/assets." }
     PhotoAIStatus:
       type: object
       additionalProperties: false
@@ -2908,7 +3037,8 @@ components:
         state: { type: string, enum: [unavailable, paused, working, idle], description: "unavailable: the AI Worker is not installed or not running; paused: waiting for the device to be idle" }
         reason: { type: string, description: "Why work is paused, such as foreground or cpu_pressure." }
         model: { type: string }
-        ready: { type: integer, minimum: 0, description: Originals with a vector of the current pipeline. }
+        objectModel: { type: string, description: The object detector's model while the AI Worker has one. }
+        ready: { type: integer, minimum: 0, description: "Originals with a vector of the current pipeline and, while the AI Worker has a detector, its detection." }
         pending: { type: integer, minimum: 0 }
         failed: { type: integer, minimum: 0 }
         clusters: { type: string, enum: [ready, preparing], description: "Whether AI 聚合 can list its groups; preparing while label texts wait for the Worker, which runs only once the photo library has been idle for a while. Absent when the Worker's model has no calibrated clusters." }
@@ -3278,6 +3408,7 @@ components:
         audio: { type: integer }
         quality: { type: string, enum: [original, 1080p, 720p, 480p] }
         qualities: { type: array, items: { type: string, enum: [original, 1080p, 720p, 480p] } }
+        mime: { type: string, description: "A converted stream's MIME type with codecs, for Media Source Extensions; absent for direct play." }
     Transfer:
       type: object
       additionalProperties: false

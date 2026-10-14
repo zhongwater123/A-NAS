@@ -94,6 +94,16 @@ func runPhotoService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {
 		return errors.New("the photo service must run as its own identity, never root")
 	}
+	// The system test shortens how long the library must go unused before AI
+	// work starts, so that it sees a photo organised; products keep the default.
+	var quiet time.Duration
+	if value := strings.TrimSpace(os.Getenv("ANAS_PHOTOS_AI_QUIET_PERIOD")); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return errors.New("ANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s")
+		}
+		quiet = parsed
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return photoservice.Run(ctx, photoservice.Config{
@@ -102,7 +112,8 @@ func runPhotoService(logger *slog.Logger) error {
 		Sessions:   sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")),
 		Logger:     logger,
 		// Without the AI component the socket is absent and photos wait for it.
-		AI: aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
+		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
+		AIQuietPeriod: quiet,
 	})
 }
 
@@ -301,7 +312,7 @@ func run(logger *slog.Logger) error {
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod))
+			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
 		}()
 		// Runs before the deferred photoService.Close.
 		defer func() {

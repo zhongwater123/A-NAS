@@ -1,6 +1,6 @@
 import {
-  ArrowLeft, CircleAlert, CircleMinus, Copy, Download, FolderMinus, FolderPlus, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck,
-  Hash, Shapes, Trash2, X, ZoomIn, ZoomOut,
+  ArrowLeft, Camera, CircleAlert, CircleMinus, Copy, Download, FolderMinus, FolderPlus, Hourglass, ImagePlus, Images, PanelLeft, Pencil, RefreshCw, RotateCcw, ScanSearch, Search,
+  SearchX, ShieldCheck, Hash, Shapes, Trash2, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -11,18 +11,23 @@ import { AIHome, type AIHomeSnapshot } from "./AIHome";
 import { AlbumsView, Empty } from "./Collections";
 import { useDialogs, useToasts } from "./feedback";
 import type { GridProps } from "./grid";
+import {
+  type ImageDropProps, imageFile, type ImageQuery, ImageReading, type ImageResult, ImageSearchButton, imageSearchPage, ImageSource, isEncoded, pickImage, prepareImageQuery,
+} from "./imageSearch";
 import { clampRowHeight, defaultRowHeight, maxRowHeight, minRowHeight } from "./layout";
 import {
   type Caller, canChange, canEditAlbum, daysLeft, isUnavailable, libraryName, libraryOf, messageOf, ownLibrary, type Place, placeLibrary, placeViewing,
   runEach, sharedLibrary,
 } from "./model";
 import { PhotoPicker } from "./PhotoPicker";
+import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
   addPhotoTag, addToAlbum, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
-  listPhotoTrash, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
-  type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoSearchPage,
+  listPhotoTrash, listSimilarPhotos, originalURL, purgePhoto, removeFromAlbum, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
+  type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoSearchPage, type PhotoSimilarPage,
 } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
+import { joinWords, ObjectsStatus, SimilarSource } from "./results";
 import { useSelection } from "./selection";
 import { Sidebar } from "./Sidebar";
 import { Timeline } from "./Timeline";
@@ -55,6 +60,8 @@ const placeKey = (place: Place) => {
     case "search": return `search:${place.viewing}:${place.query}`;
     case "cluster": return `cluster:${place.viewing}:${place.label.id}`;
     case "tag": return `tag:${place.viewing}:${place.tag.name}`;
+    case "similar": return `similar:${place.viewing}:${place.asset.id}`;
+    case "image": return `image:${place.viewing}:${place.query.key}`;
     default: return `${place.kind}:${place.libraryId}`;
   }
 };
@@ -82,6 +89,22 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   // How many of the current search's results are the closest, as the photo
   // service says; the less related follow.
   const [closest, setClosest] = useState<number>();
+  // The one library a search is narrowed to; empty searches them all.
+  const [searchLibrary, setSearchLibrary] = useState("");
+  // What the object detector found for it, when the query is about things.
+  const [found, setFound] = useState<PhotoObjectsFound>();
+  // Whether the photo similar ones are shown for has been organised.
+  const [similarReady, setSimilarReady] = useState<boolean>();
+  // How reading the image of a search by image went; trying again starts
+  // its results over.
+  const [imageResult, setImageResult] = useState<ImageResult>();
+  const [imageAttempt, setImageAttempt] = useState(0);
+  // Which search box a dragged file is over; dropping it there searches by
+  // it instead of uploading it.
+  const [imageOver, setImageOver] = useState("");
+  // The images searched by stay viewable while their places can come back.
+  const imageURLs = useRef<string[]>([]);
+  useEffect(() => () => imageURLs.current.forEach((url) => URL.revokeObjectURL(url)), []);
   const [recent, setRecent] = useStored<string[]>("a-nas.photos.recentSearches", []);
   const [query, setQuery] = useState("");
   const [picker, setPicker] = useState<PhotoAsset[]>();
@@ -99,6 +122,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const dialogs = useDialogs();
   const { toast, element: toastElement } = useToasts();
   const reportError = useCallback((message: string) => toast({ text: message, tone: "error" }), [toast]);
+  // Results that mix libraries mark the photos that are not the caller's own.
+  const sourceBadge = useCallback((asset: PhotoAsset) => <SourceBadge caller={caller} asset={asset} />, [caller]);
 
   const mine = ownLibrary(caller);
   const shared = sharedLibrary(caller);
@@ -165,7 +190,10 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     setHidden(new Set());
     setCount(undefined);
     setClosest(undefined);
-    if (next.kind !== "search") setQuery("");
+    setFound(undefined);
+    setSimilarReady(undefined);
+    setImageResult(next.kind === "image" && isEncoded(next.query) ? {} : undefined);
+    setQuery(next.kind === "search" ? next.query : "");
   }, [selection.clear]);
 
   const libraryId = place ? placeLibrary(place) : "";
@@ -397,6 +425,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     copy: (asset, library) => void copyTo(library, [asset]),
     openAlbum: (album) => void openAlbumById(album),
     openTag: (tag) => { setViewer(undefined); if (place) setPlace({ kind: "tag", viewing: placeViewing(caller, place), tag: { name: tag, photos: 0, coverId: "" } }); },
+    findSimilar: (asset) => { setViewer(undefined); if (place) setPlace({ kind: "similar", viewing: placeViewing(caller, place), asset, from: place }); },
     error: reportError,
   };
   const closeViewer = useCallback(() => {
@@ -431,18 +460,63 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     } else if (event.key === "/" && !typing) { event.preventDefault(); searchInput.current?.focus(); }
   };
   const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
+  const endDrag = () => { dragDepth.current = 0; setDragging(false); setImageOver(""); };
   const dropHandlers = {
     onDragEnter: (event: DragEvent) => { if (carriesFiles(event)) { dragDepth.current++; setDragging(true); } },
-    onDragLeave: (event: DragEvent) => { if (carriesFiles(event) && --dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); } },
-    onDragOver: (event: DragEvent) => { if (carriesFiles(event)) { event.preventDefault(); event.dataTransfer.dropEffect = uploadTarget ? "copy" : "none"; } },
+    onDragLeave: (event: DragEvent) => { if (carriesFiles(event) && --dragDepth.current <= 0) endDrag(); },
+    onDragOver: (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = uploadTarget ? "copy" : "none";
+      setImageOver("");
+    },
     onDrop: (event: DragEvent) => {
       if (!carriesFiles(event)) return;
       event.preventDefault();
-      dragDepth.current = 0;
-      setDragging(false);
+      endDrag();
       if (uploadTarget) uploads.add(Array.from(event.dataTransfer.files), uploadTarget);
     },
   };
+
+  // ---- Search by image ----
+  // The browser reads the image; local AI on the NAS encodes it once and the
+  // photos like it come back as similar photos do. Another image takes the
+  // place of the last one, so going back leaves the image search.
+  const searchByImage = async (file: File, pasted = false) => {
+    let query: ImageQuery;
+    try { query = await prepareImageQuery(file, pasted ? "粘贴的图片" : file.name || "图片"); }
+    catch { reportError("无法读取这张图片，换一张试试"); return; }
+    imageURLs.current.push(query.url);
+    const from = placeRef.current;
+    if (from) setPlace({ kind: "image", viewing: placeViewing(caller, from), query, from: from.kind === "image" ? from.from : from });
+  };
+  const pickSearchImage = () => pickImage((file) => void searchByImage(file));
+  // A search box takes an image dropped onto it or pasted into it.
+  const imageDrop = (name: string): ImageDropProps => ({
+    onDragOver: (event) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      setImageOver(name);
+    },
+    onDragLeave: (event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setImageOver(""); },
+    onDrop: (event) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      endDrag();
+      const file = imageFile(event.dataTransfer.files);
+      if (file) void searchByImage(file);
+      else reportError("以图搜图需要一张图片");
+    },
+    onPaste: (event) => {
+      const file = imageFile(event.clipboardData.files);
+      if (!file) return;
+      event.preventDefault();
+      void searchByImage(file, true);
+    },
+  });
 
   if (!libraries || !place) {
     return (
@@ -454,10 +528,16 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   }
 
   // ---- Toolbar ----
-  // Search results name their closest group while less related ones follow.
+  // Search results name their closest group while less related ones follow;
+  // when the detector found the query's things, the status under the search
+  // box names that group instead.
   const searchDetail = closest === undefined ? ""
-    : count !== undefined && closest >= count ? `找到 ${count} 张`
-      : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`;
+    : found && found.detected > 0 ? (count === undefined ? "" : `共 ${count} 张`)
+      : count !== undefined && closest >= count ? `找到 ${count} 张`
+        : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`;
+  const things = found ? joinWords(found.words) : "";
+  // A narrowed search keeps its library only while that library is in scope.
+  const scope = place.kind === "search" && searchLibraries(caller, place.viewing).some((library) => library.id === searchLibrary) ? searchLibrary : "";
   const title = (() => {
     switch (place.kind) {
       case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : `${count} 张照片` };
@@ -465,25 +545,40 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
       case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
       case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
       case "search": return place.query
-        ? { text: "AI 聚合", detail: searchDetail, back: { ...place, query: "" } as Place }
-        : { text: "AI 聚合", detail: viewingLibrary ? `我的图库、共享图库和${libraryName(caller, viewingLibrary)}` : "我的图库和共享图库" };
+        ? { text: "AI 聚合", detail: [searchDetail, scopeText(caller, place.viewing, scope)].filter(Boolean).join(" · "), back: { ...place, query: "" } as Place }
+        : { text: "AI 聚合", detail: scopeText(caller, place.viewing, "") };
       case "cluster": return { text: place.label.name, detail: `${count ?? place.label.photos} 张 · 本地 AI 聚合`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
       case "tag": {
         const photos = count ?? (place.tag.photos || undefined);
         return { text: place.tag.name, detail: photos === undefined ? "你的标签" : `${photos} 张 · 你的标签`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
       }
+      case "similar": return { text: "相似的照片", detail: count === undefined ? "" : `${count} 张`, back: place.from };
+      case "image": return { text: "以图搜图", detail: count === undefined || imageResult?.error ? "" : `${count} 张`, back: place.from };
     }
   })();
-  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "cluster" || place.kind === "tag" || (place.kind === "search" && Boolean(place.query));
+  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "cluster" || place.kind === "tag" || place.kind === "similar" || place.kind === "image"
+    || (place.kind === "search" && Boolean(place.query));
   // On AI search the search box sits under the toolbar.
   const subbar: ReactNode = place.kind === "search" && place.query ? (
     <div className="ph-subbar ph-search-bar">
-      <form className="ph-search wide" role="search" onSubmit={submitSearch}>
+      <form className={`ph-search wide${imageOver === "results" ? " image-drop" : ""}`} role="search" onSubmit={submitSearch} {...imageDrop("results")}>
         <Search />
-        <input ref={searchInput} type="search" aria-label="搜索照片" placeholder="例如：海边的猫" maxLength={200} value={query}
+        <input ref={searchInput} type="search" aria-label="搜索照片" placeholder={dragging ? "拖到这里，以图搜图" : "例如：海边的猫"} maxLength={200} value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setPlace({ ...place, query: "" }); } }} />
+        <ImageSearchButton onPick={pickSearchImage} />
       </form>
+      <SearchScope caller={caller} viewing={place.viewing} value={scope} onChange={setSearchLibrary} />
+      {found && <ObjectsStatus objects={found} results={viewAssets.length > 0} />}
+    </div>
+  ) : place.kind === "similar" ? (
+    <div className="ph-subbar ph-similar-bar"><SimilarSource asset={place.asset} /></div>
+  ) : place.kind === "image" ? (
+    <div className="ph-subbar ph-similar-bar">
+      <ImageSource query={place.query} result={imageResult} over={imageOver === "source"} drop={imageDrop("source")} onReplace={pickSearchImage} />
+      {ai && ai.pending > 0 && imageResult && !imageResult.error && (
+        <span className="ph-found-note pending" title="本地 AI 会在设备空闲时继续整理，结果可能还会增加"><Hourglass />还有 {ai.pending} 张照片尚未整理完</span>
+      )}
     </div>
   ) : null;
 
@@ -539,20 +634,51 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
         if (!place.query) {
           return <AIHome viewing={place.viewing} userName={userName} snapshot={aiHomeReturn.current} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent}
             onSearch={startSearch} onForget={() => setRecent([])}
+            image={{ pick: pickSearchImage, over: imageOver === "hero", dragging, drop: imageDrop("hero") }}
             onOpenCluster={(label, snapshot) => { setPlace({ kind: "cluster", viewing: place.viewing, label }); aiHomeReturn.current = snapshot; }}
             onOpenTag={(tag, snapshot) => { setPlace({ kind: "tag", viewing: place.viewing, tag }); aiHomeReturn.current = snapshot; }} onError={reportError} />;
         }
-        return <AssetGrid key={`search:${place.query}`} {...grid} listKey={`search:${place.viewing}:${place.query}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor)}
-          onPage={(page, first) => { if (first && "closest" in page) setClosest((page as PhotoSearchPage).closest); }} onCount={setCount} onError={reportError}
-          split={closest === undefined ? undefined : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
-          empty={<Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+        return <AssetGrid key={`search:${place.query}:${scope}`} {...grid} listKey={`search:${place.viewing}:${place.query}:${scope}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor, scope)}
+          onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); } }}
+          onCount={setCount} onError={reportError}
+          badge={scope ? undefined : sourceBadge}
+          split={closest === undefined ? undefined : found && found.detected > 0
+            ? {
+              at: closest, title: `没有检测到${things}的照片`,
+              text: found.undetected > 0 ? `按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有${things}`
+                : `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来`,
+            }
+            : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
+          empty={found
+            ? <Empty icon={<SearchX />} title={`没有检测到${things}`} text={found.undetected > 0 ? `还有 ${found.undetected} 张照片尚未识别完，稍后再搜一次试试。` : "图库里的照片都已识别过。换个说法试试，比如“海边的日落”。"} />
+            : <Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+      case "similar":
+        return <AssetGrid key={`similar:${place.asset.id}`} {...grid} listKey={`similar:${place.viewing}:${place.asset.id}`} load={(cursor) => listSimilarPhotos(place.asset.id, place.viewing, cursor)}
+          onPage={(page, first) => { if (first) setSimilarReady((page as PhotoSimilarPage).ready); }} onCount={setCount} onError={reportError} badge={sourceBadge}
+          empty={similarReady === false
+            ? <Empty icon={<Hourglass />} title="这张照片还在整理中" text="本地 AI 会在设备空闲时整理照片，整理好后就能找到和它相似的照片。" />
+            : <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和它画面相近的照片。" />} />;
+      case "image":
+        return <AssetGrid key={`image:${place.query.key}:${imageAttempt}`} {...grid} listKey={`image:${place.viewing}:${place.query.key}`} load={(cursor) => imageSearchPage(place.query, place.viewing, cursor)}
+          onPage={(_, first) => { if (first) setImageResult({}); }} onCount={setCount} badge={sourceBadge} loading={<ImageReading query={place.query} topInset={topInset} />}
+          onError={(message) => { if (imageResult === undefined) setImageResult({ error: message }); else reportError(message); }}
+          empty={imageResult?.error
+            ? <Empty icon={<CircleAlert />} title="没能识别这张图片" text={imageResult.error} action={(
+              <div className="ph-empty-actions">
+                <button type="button" className="ph-button" onClick={() => { setImageResult(undefined); setImageAttempt((value) => value + 1); }}><RefreshCw />重试</button>
+                <button type="button" className="ph-button primary" onClick={pickSearchImage}><Camera />换一张</button>
+              </div>
+            )} />
+            : ai && ai.ready === 0 && ai.pending > 0
+              ? <Empty icon={<Hourglass />} title="照片还在整理中" text="本地 AI 会在设备空闲时整理照片，整理好的照片才能用图片找到。" />
+              : <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和这张图片画面相近的照片。" />} />;
       case "cluster":
         return <AssetGrid key={`cluster:${place.label.id}`} {...grid} listKey={`cluster:${place.viewing}:${place.label.id}`} load={(cursor) => listLabelPhotos(place.label.id, place.viewing, cursor)}
-          onCount={setCount} onError={reportError}
+          onCount={setCount} onError={reportError} badge={sourceBadge}
           empty={<Empty icon={<Shapes />} title="这一类里没有照片了" text="被移出的照片仍在图库中，只是不再归在这一类。" />} />;
       case "tag":
         return <AssetGrid key={`tag:${place.tag.name}`} {...grid} listKey={`tag:${place.viewing}:${place.tag.name}`} load={(cursor) => listTagPhotos(place.tag.name, place.viewing, cursor)}
-          onCount={setCount} onError={reportError}
+          onCount={setCount} onError={reportError} badge={sourceBadge}
           empty={<Empty icon={<Hash />} title="没有带这个标签的照片了" text="在照片信息里给照片加上标签，就会出现在这里。" />} />;
       case "albums":
         return <AlbumsView libraryId={place.libraryId} readOnly={readOnlyPlace} refreshKey={albumsKey} topInset={topInset} onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })} onCreate={() => void newAlbum()} onError={reportError} />;
@@ -562,7 +688,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   return (
     <div
       ref={root}
-      className={`ph-app${sidebarOpen ? " nav-open" : ""}${narrow ? " narrow" : ""}${selection.selected.size ? " selecting" : ""}`}
+      className={`ph-app${sidebarOpen ? " nav-open" : ""}${narrow ? " narrow" : ""}${selection.selected.size ? " selecting" : ""}${dragging ? " dragging" : ""}`}
       tabIndex={-1}
       onKeyDown={keyDown}
       {...dropHandlers}
@@ -601,9 +727,10 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
               </div>
             )}
             {place.kind !== "search" && (
-              <form className="ph-search" role="search" onSubmit={submitSearch}>
+              <form className={`ph-search${imageOver === "toolbar" ? " image-drop" : ""}`} role="search" onSubmit={submitSearch} {...imageDrop("toolbar")}>
                 <Search />
-                <input ref={searchInput} type="search" aria-label="搜索照片" placeholder="用一句话找照片，如：海边的猫" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
+                <input ref={searchInput} type="search" aria-label="搜索照片" placeholder={dragging ? "拖到这里，以图搜图" : "用一句话找照片，如：海边的猫"} maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
+                <ImageSearchButton onPick={pickSearchImage} />
               </form>
             )}
             {photoGrid && (
@@ -631,7 +758,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
         <UploadTray items={uploads.items} onRetry={uploads.retry} onClear={uploads.clear} />
       </main>
 
-      {dragging && <DropOverlay target={uploadTarget} />}
+      {dragging && <DropOverlay target={uploadTarget} search={Boolean(imageOver)} />}
       {viewer && viewerIndex >= 0 && (
         <Viewer
           assets={viewAssets}

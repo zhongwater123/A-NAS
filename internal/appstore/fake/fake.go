@@ -37,6 +37,7 @@ func New(step time.Duration) (*engine.Store, error) {
 	}
 	docker := &memoryDocker{}
 	store := engine.New(entries, Policy, state, docker, &runner{docker: docker, step: step})
+	store.SetStartupCheck(step, step)
 	return store, nil
 }
 
@@ -70,6 +71,19 @@ func (m *memoryDocker) APIVersion(context.Context) (string, error) {
 // ProjectMounts reports no mounts: the simulated install mounts nothing.
 func (m *memoryDocker) ProjectMounts(context.Context, string) ([]engine.MountInfo, error) {
 	return nil, nil
+}
+
+// ProjectContainers reports the project's simulated containers as running.
+func (m *memoryDocker) ProjectContainers(_ context.Context, project string) ([]engine.ContainerState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var states []engine.ContainerState
+	for _, container := range m.containers {
+		if appstore.ProjectName(container.AppID) == project {
+			states = append(states, engine.ContainerState{Service: container.Name, State: "running"})
+		}
+	}
+	return states, nil
 }
 
 // runner pretends to pull and start (or stop) the project's services.

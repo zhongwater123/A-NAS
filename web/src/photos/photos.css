@@ -157,6 +157,9 @@
 .ph-tile.selected .ph-check { border-color: #fff; color: #fff; background: var(--ph-accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
 .ph-tile-badge, .ph-tile-days { position: absolute; z-index: 1; right: 6px; bottom: 6px; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 99px; color: #fff; background: rgba(15, 18, 25, .58); backdrop-filter: blur(6px); font-size: 10.5px; font-weight: 600; }
 .ph-tile-badge svg { width: 10px; height: 10px; }
+/* Where a result comes from, when results mix libraries. */
+.ph-tile-source { position: absolute; z-index: 1; left: 6px; bottom: 6px; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 99px; color: #fff; background: rgba(41, 98, 196, .78); backdrop-filter: blur(6px); font-size: 10.5px; font-weight: 600; pointer-events: none; }
+.ph-tile-source svg { width: 10px; height: 10px; }
 .ph-tile[draggable="true"] { cursor: default; }
 .ph-drag-ghost { position: fixed; top: -100px; left: 0; padding: 7px 12px; border-radius: 99px; color: #fff; background: var(--ph-accent); box-shadow: 0 6px 18px rgba(47, 111, 237, .35); font: 600 12px Inter, "PingFang SC", "Microsoft YaHei UI", sans-serif; }
 .ph-pending img { opacity: .55; filter: saturate(.7); }
@@ -252,10 +255,70 @@
 .ph-ghosts { padding-top: 14px; }
 .ph-search-bar { flex-wrap: wrap; padding-left: 0; }
 .ph-search.wide { width: min(460px, 100%); flex: none; }
+.ph-scope { display: inline-flex; flex: none; gap: 2px; padding: 3px; border-radius: 10px; background: rgba(20, 26, 38, .06); }
+.ph-scope button { height: 28px; padding: 0 12px; border: 0; border-radius: 8px; color: var(--ph-muted); background: transparent; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s, box-shadow .15s; }
+.ph-scope button:hover:not(.active) { color: var(--ph-ink); }
+.ph-scope button.active { color: var(--ph-ink); background: var(--ph-surface); box-shadow: 0 1px 3px rgba(20, 26, 38, .16); }
+
+/* What the object detector found for a search */
+.ph-found { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding-left: 4px; animation: ph-fade-in .25s ease; }
+.ph-found-chip { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 9px; border-radius: 99px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.ph-found-chip strong { font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.ph-found-chip.detected { color: var(--ph-accent-ink); background: var(--ph-accent-soft); box-shadow: inset 0 0 0 1px rgba(47, 111, 237, .14); }
+.ph-found-chip.none { color: var(--ph-ink-2); background: rgba(20, 26, 38, .06); }
+.ph-found-chip.none svg { color: var(--ph-muted); }
+.ph-subbar .ph-found-chip svg { width: 15px; height: 15px; }
+.ph-found-note { display: inline-flex; align-items: center; gap: 5px; color: var(--ph-muted); font-size: 12px; white-space: nowrap; }
+.ph-found-note.pending svg { color: #b7791f; animation: ph-pulse 2.4s ease-in-out infinite; }
+
+/* The photo similar photos were asked for */
+.ph-similar-bar { padding-left: 46px; }
+.ph-similar-source { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 4px 12px 4px 4px; border-radius: 12px; background: rgba(20, 26, 38, .05); animation: ph-fade-in .25s ease; }
+.ph-similar-source img { height: 40px; width: auto; max-width: 72px; flex: none; display: block; border-radius: 8px; object-fit: cover; background: var(--ph-tile); box-shadow: 0 1px 3px rgba(16, 24, 40, .16); }
+.ph-similar-source div { min-width: 0; display: grid; gap: 1px; }
+.ph-similar-source strong { overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.ph-similar-source small { overflow: hidden; color: var(--ph-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Search by image: a camera at the end of every search box. While a file is
+   dragged, the search boxes rise above the drop overlay and dash their edge:
+   an image dropped on one is searched by, not uploaded. */
+.ph-search-image { width: 26px; height: 26px; flex: none; display: grid; place-items: center; margin-right: -6px; border: 0; border-radius: 7px; padding: 0; color: var(--ph-muted); background: transparent; transition: background .15s, color .15s; }
+.ph-search-image:hover { color: var(--ph-accent-ink); background: var(--ph-accent-soft); }
+.ph-hero-image { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border: 0; border-radius: 12px; padding: 0; color: var(--ph-ink-2); background: transparent; transition: background .15s, color .15s; }
+.ph-hero-image:hover { color: var(--ph-accent-ink); background: var(--ph-accent-soft); }
+.ph-hero-image svg { width: 20px; height: 20px; }
+.ph-app.dragging .ph-toolbar { z-index: 31; }
+.ph-app.dragging .ph-hero-search { position: relative; z-index: 31; }
+.ph-app.dragging .ph-search, .ph-app.dragging .ph-hero-search, .ph-app.dragging .ph-image-source { outline: 1.5px dashed rgba(47, 111, 237, .55); outline-offset: -1.5px; }
+.ph-app.dragging .ph-search { color: var(--ph-accent); background: var(--ph-surface); }
+.ph-app.dragging .ph-search input::placeholder, .ph-app.dragging .ph-hero-search input::placeholder { color: var(--ph-accent-ink); }
+.ph-app.dragging .ph-search.image-drop, .ph-app.dragging .ph-image-source.image-drop { outline: 2px solid var(--ph-accent); outline-offset: -2px; background: #eef3fe; }
+.ph-app.dragging .ph-hero-search.image-drop { outline: 0; box-shadow: 0 0 0 3px var(--ph-accent), 0 0 0 9px var(--ph-accent-soft), 0 10px 30px rgba(16, 24, 40, .1); }
+.ph-drop.search div { animation: none; }
+
+/* The image photos are found for */
+.ph-image-source { padding-right: 5px; transition: background .15s; }
+.ph-image-thumb { position: relative; height: 40px; max-width: 72px; flex: none; overflow: hidden; border-radius: 8px; background: var(--ph-tile); box-shadow: 0 1px 3px rgba(16, 24, 40, .16); }
+.ph-image-source .ph-image-thumb img { width: 100%; height: 100%; max-width: none; border-radius: 0; box-shadow: none; }
+/* While local AI reads the image, a light sweeps down it. */
+.ph-image-reading { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0 20px; text-align: center; animation: ph-fade-in .3s ease; }
+.ph-image-reading .ph-image-thumb { height: 168px; max-width: 300px; margin: 64px 0 10px; border-radius: 16px; box-shadow: 0 2px 6px rgba(16, 24, 40, .08), 0 14px 36px rgba(16, 24, 40, .16); }
+.ph-image-reading .ph-image-thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.ph-image-reading strong { font-size: 16px; }
+.ph-image-reading p { max-width: 400px; margin: 0; color: var(--ph-muted); line-height: 1.6; text-wrap: balance; }
+.ph-image-reading .ph-image-thumb::after, .ph-image-source.reading .ph-image-thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .8) 50%, rgba(255, 255, 255, 0) 62%) 0 0 / 100% 300%; animation: ph-scan 1.5s ease-in-out infinite; }
+.ph-image-source.reading small { color: var(--ph-accent-ink); }
+.ph-image-source small.failed { color: var(--ph-danger); }
+.ph-image-replace { height: 30px; flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; border: 0; border-radius: 8px; padding: 0 10px; color: var(--ph-accent-ink); background: rgba(255, 255, 255, .8); font-size: 12.5px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 2px rgba(16, 24, 40, .08); transition: background .15s; }
+.ph-image-replace:hover { background: #fff; }
+.ph-subbar .ph-image-replace svg { width: 15px; height: 15px; }
+.ph-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
 /* Empty states */
 .ph-empty { max-width: 380px; display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0 auto; padding: 96px 20px 40px; text-align: center; }
 .ph-scroll .ph-empty { position: absolute; top: 0; left: 0; right: 0; }
+.ph-scroll .ph-empty-place { position: absolute; left: 0; right: 0; }
+.ph-scroll .ph-empty-place .ph-empty { position: static; }
 .ph-empty-icon { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 6px; border-radius: 20px; color: var(--ph-accent); background: var(--ph-accent-soft); }
 .ph-empty-icon svg { width: 28px; height: 28px; }
 .ph-empty strong { font-size: 16px; }
@@ -431,6 +494,7 @@
 .ph-app.narrow .ph-search { width: auto; flex: 1; }
 .ph-app.narrow .ph-title small { display: none; }
 .ph-app.narrow .ph-button.primary span, .ph-app.narrow .ph-selection-hint, .ph-app.narrow .ph-selection-row > button span { display: none; }
+.ph-app.narrow .ph-image-replace span { display: none; }
 
 @keyframes ph-spin { to { transform: rotate(360deg); } }
 @keyframes ph-fade-in { from { opacity: 0; } }
@@ -440,6 +504,7 @@
 @keyframes ph-pulse { 50% { opacity: .55; } }
 @keyframes ph-sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @keyframes ph-slide { from { transform: translateX(-100%); } }
+@keyframes ph-scan { from { background-position: 0 100%; } to { background-position: 0 0; } }
 
 @media (prefers-reduced-motion: reduce) {
   .ph-app *, .ph-app *::before, .ph-app *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

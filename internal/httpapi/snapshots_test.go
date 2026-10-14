@@ -178,7 +178,7 @@ func TestBackupCenterAPIManagesSchedulesSearchesAndRestoresFolders(t *testing.T)
 	schedulePath := "/api/v1/spaces/" + private.ID + "/snapshot-schedule"
 	var schedule files.SnapshotSchedule
 	admin.call(http.MethodGet, schedulePath, nil, http.StatusOK, &schedule)
-	if schedule.Enabled || !schedule.CanManage || schedule.Keep != 14 {
+	if !schedule.Enabled || !schedule.CanManage || schedule.Keep != 14 || schedule.Time != "03:00" {
 		t.Fatalf("default schedule = %+v", schedule)
 	}
 	hourly := map[string]any{"enabled": true, "frequency": "hourly", "time": "00:00", "weekday": 0, "keep": 24}

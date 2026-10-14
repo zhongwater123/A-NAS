@@ -106,6 +106,10 @@ func parseMetadata(id string, compose []byte) (App, error) {
 	if tips, ok := meta["tips"].(map[string]any); ok {
 		app.Notes = localized(tips["before_install"])
 	}
+	app.Description = withoutVendorPitch(app.Description)
+	if notes, ok := appNotes[id]; ok {
+		app.UpstreamNotes, app.Notes = app.Notes, notes
+	}
 	if app.Title == "" {
 		app.Title = id
 	}

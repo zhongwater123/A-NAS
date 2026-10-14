@@ -227,8 +227,12 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
 			return err
 		}
-		// The thumbnail is the AI input.
-		return s.enqueueEmbedding(ctx, tx, job.objectID)
+		// The thumbnail is the vector's input and proves the original
+		// decodes for the detector.
+		if err := s.enqueueEmbedding(ctx, tx, job.objectID); err != nil {
+			return err
+		}
+		return s.enqueueDetection(ctx, tx, job.objectID)
 	}); err != nil {
 		return err
 	}

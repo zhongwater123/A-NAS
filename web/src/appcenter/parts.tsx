@@ -1,7 +1,7 @@
-import { Check, Loader } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Loader, TriangleAlert } from "lucide-react";
 import { CSSProperties, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppJob, CatalogApp, iconURL } from "../appsApi";
+import { AppCredential, AppJob, CatalogApp, iconURL } from "../appsApi";
 import { appURL, openApp } from "./model";
 
 // The Markdown renderer is its own chunk. Once loaded it renders synchronously
@@ -36,14 +36,18 @@ export function AppAction({ app, onInstall }: { app: CatalogApp; onInstall: (app
   return <button className="ac-get" aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>安装</button>;
 }
 
-// Manifest Markdown; plain text shows until the renderer has loaded.
+// Manifest Markdown. Until the renderer has loaded, a few placeholder lines
+// stand in, so raw Markdown never reaches the screen or a screen reader.
 export function RichText({ text }: { text: string }) {
   const [, setLoaded] = useState(Boolean(markdown));
   useEffect(() => {
     if (!markdown) void preloadMarkdown().then(() => setLoaded(true));
   }, []);
   const Markdown = markdown?.default;
-  return <div className="ac-prose">{Markdown ? <Markdown>{text}</Markdown> : <p className="ac-prose-plain">{text}</p>}</div>;
+  if (!Markdown) {
+    return <div className="ac-prose ac-prose-loading" role="status" aria-label="正在载入说明"><span /><span /><span /></div>;
+  }
+  return <div className="ac-prose"><Markdown>{text}</Markdown></div>;
 }
 
 // Long text folds to a few lines with a control to show the rest.
@@ -77,6 +81,72 @@ export function JobOutput({ job, summary = "显示详细输出", open }: { job: 
       <pre>{job.output.join("\n")}</pre>
     </details>
   );
+}
+
+// The logins A-NAS generated for an app, hidden until asked for. An app
+// installed before they were generated still uses the manifest's published
+// ones, which the owner should change.
+export function Logins({ credentials }: { credentials: AppCredential[] }) {
+  const upstream = credentials.some((credential) => credential.upstream);
+  return (
+    <div className={`ac-logins ${upstream ? "upstream" : ""}`}>
+      {credentials.map((credential) => <Login key={credential.label} credential={credential} />)}
+      {upstream
+        ? <p className="ac-logins-warning"><TriangleAlert />这是安装清单公开的默认密码，任何人都查得到。应用安装于 A-NAS 生成独立密码之前，请在应用里改成自己的密码。</p>
+        : <small>由 A-NAS 为本机随机生成，只有管理员能看到。在应用里改过密码，或重新安装时沿用了更早的数据，以那时的密码为准。</small>}
+    </div>
+  );
+}
+
+function Login({ credential }: { credential: AppCredential }) {
+  const [shown, setShown] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  return (
+    <dl className="ac-login">
+      {credential.username && (
+        <div><dt>账号</dt><dd><code>{credential.username}</code></dd></div>
+      )}
+      <div>
+        <dt>{credential.label}</dt>
+        <dd>
+          <code className={shown ? "" : "hidden"} aria-label={shown ? undefined : `${credential.label}已隐藏`}>{shown ? credential.secret : "•".repeat(14)}</code>
+          <button className="ac-icon-btn" aria-label={shown ? `隐藏${credential.label}` : `显示${credential.label}`} title={shown ? "隐藏" : "显示"} onClick={() => setShown(!shown)}>
+            {shown ? <EyeOff /> : <Eye />}
+          </button>
+          <button className={`ac-icon-btn ${copied ? "done" : ""}`} aria-label={copied ? "已复制" : `复制${credential.label}`} title={copied ? "已复制" : "复制"} onClick={() => setCopied(copyText(credential.secret))}>
+            {copied ? <Check /> : <Copy />}
+          </button>
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+// copyText puts text on the clipboard. The Clipboard API needs a secure
+// context and the desktop is plain HTTP on the LAN, so this copies a
+// selected, unseen text field instead, then gives focus back.
+function copyText(text: string): boolean {
+  const focused = document.activeElement as HTMLElement | null;
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.readOnly = true;
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.append(field);
+  field.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+    focused?.focus();
+  }
 }
 
 export function Progress() {

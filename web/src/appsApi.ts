@@ -19,6 +19,8 @@ export interface CatalogApp {
   // Markdown from the vendored manifest; notes is its advice before first use, such as a default account.
   description: string;
   notes: string;
+  // The manifest's own notes, set only when notes is written for A-NAS because they describe CasaOS.
+  upstreamNotes?: string;
   // An A-NAS category, or "" from a container agent that predates them.
   category: string;
   version: string;
@@ -37,7 +39,15 @@ export interface CatalogApp {
   running: number;
   total: number;
   job?: AppJob;
+  // Containers that are not running: restarting, exited or never started.
+  problems?: Array<{ service: string; state: string; exitCode: number }>;
+  // Logins generated for the app, such as its admin password.
+  credentials?: AppCredential[];
 }
+
+// upstream marks the manifest's published value, still used by an app
+// installed before A-NAS generated its logins.
+export interface AppCredential { label: string; username?: string; secret: string; upstream?: boolean }
 
 export interface AppList {
   dataSource: DataSource;
@@ -60,6 +70,7 @@ export interface InstallPlan {
   addressPools: string[];
   digest: string;
   compose: string;
+  credentials?: AppCredential[];
 }
 
 export class AppsAPIError extends Error {
