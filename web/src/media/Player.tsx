@@ -50,6 +50,14 @@ export interface PlayRequest { videoId: string; restart?: boolean }
 // seek, so the player restarts it at the new position and adds that offset
 // to the stream's own clock; positions it has already received play from
 // where they are, and the last picture stays while a restart loads.
+// How far ahead a converted stream is read. Remuxing only repackages, about
+// eleven CPU-seconds on the device for five minutes of 1080p, so five
+// minutes are buffered and a skip within them plays at once; the browser's
+// buffer quota still bounds a high bitrate. Transcoding costs about five
+// CPU-seconds per second of video, which a skip past the buffer throws
+// away, so it stays half a minute ahead.
+const reach = { remux: { ahead: 300, resume: 240 }, transcode: { ahead: 30, resume: 15 } };
+
 export function Player({ request, onClose, onNavigate, onSaved }: {
   request: PlayRequest; onClose: () => void; onNavigate: (videoId: string) => void; onSaved: () => void;
 }) {
@@ -128,11 +136,12 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   // A converted stream plays through a feed that buffers it ahead, where
   // the browser allows; otherwise the element fetches it itself.
   const feed = useRef<StreamFeed | undefined>(undefined);
-  const attach = (url: string, mime: string | undefined, remaining: number | undefined) => {
+  const attach = (url: string, mime: string | undefined, remaining: number | undefined, mode: "remux" | "transcode") => {
     feed.current?.close();
     feed.current = undefined;
     if (!canFeed(mime)) { setSource(url); return; }
     const next: StreamFeed = new StreamFeed(url, mime, () => video.current, {
+      ...reach[mode],
       duration: remaining,
       onError: (message) => {
         if (feed.current !== next) return;
@@ -168,7 +177,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     } else {
       pendingStart.current = 0;
       setOffset(start);
-      attach(`${decision.url}${decision.url.includes("?") ? "&" : "?"}start=${start.toFixed(3)}`, decision.mime, decision.duration ? Math.max(1, decision.duration - start) : undefined);
+      attach(`${decision.url}${decision.url.includes("?") ? "&" : "?"}start=${start.toFixed(3)}`, decision.mime, decision.duration ? Math.max(1, decision.duration - start) : undefined, decision.mode);
     }
     setTime(start);
   };
