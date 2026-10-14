@@ -1743,10 +1743,62 @@ paths:
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback/{feedbackId}/comments:
+    post:
+      operationId: addFeedbackComment
+      summary: "Reply under an item with text, images or both; answers with the item and all its comments"
+      parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 2000 }
+                image: { type: array, maxItems: 3, description: "PNG, JPEG, GIF or WebP; at most 10 MiB each.", items: { type: string, format: binary } }
+      responses:
+        "201": { description: The item with the new comment, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+  /api/v1/feedback/{feedbackId}/comments/{commentId}:
+    parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { name: commentId, in: path, required: true, schema: { type: string } }]
+    put:
+      operationId: editFeedbackComment
+      summary: "Replace a comment's text and images; any account may, and comment_changed refuses an edit made from a stale version"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The comment version the edit was made from. }
+                text: { type: string, maxLength: 2000 }
+                keep: { type: array, description: "IDs of the attached images that stay; the others are removed.", items: { type: string } }
+                image: { type: array, description: Images to add., items: { type: string, format: binary } }
+      responses:
+        "200": { description: The item with the edited comment, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "413": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteFeedbackComment
+      summary: Delete a comment and its images; any account may
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The item without the comment, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackItem" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/feedback/{feedbackId}/images/{imageId}:
     get:
       operationId: getFeedbackImage
-      summary: "One attached image; its content never changes, so it may be cached"
+      summary: "One image attached to the item or to a comment under it; its content never changes, so it may be cached"
       parameters: [{ $ref: "#/components/parameters/FeedbackID" }, { name: imageId, in: path, required: true, schema: { type: string } }]
       responses:
         "200":
@@ -2853,6 +2905,11 @@ components:
           type: array
           description: The app's logins, shown to the owner.
           items: { $ref: "#/components/schemas/AppCredential" }
+        runtimeOutdated:
+          type: boolean
+          description: >-
+            The app's containers were created under older runtime rules (ADR 0022) and keep running as they
+            were; uninstalling (which keeps app data) and installing again applies the current rules.
     AppCredential:
       type: object
       additionalProperties: false
@@ -2905,10 +2962,7 @@ components:
           type: string
         identity:
           description: >-
-            The Linux account app-<appId> allocated for the app. It replaces the manifest's Compose user or
-            PUID/PGID when the manifest declares them; an image that uses neither keeps its own default user,
-            which may be root, and is then confined only by the folders mounted for it. A mount of kind shared
-            means the account joins a-nas-users and gains the Shared folder's access.
+            The Linux account app-<appId> allocated for the app. How each service uses it is in services.
           type: object
           additionalProperties: false
           required: [username, uid, gid]
@@ -2924,6 +2978,40 @@ components:
               type: integer
               minimum: 30000
               maximum: 30999
+        services:
+          description: >-
+            How each service runs (ADR 0022). app starts as the app identity with no capabilities; app-after-init
+            starts as root, prepares itself and switches to the app identity from PUID/PGID, while its init
+            processes stay root; image keeps the image's own user, which may be root, and may only mount its
+            app's data. Only app and app-after-init services mount Shared folders, through the a-nas-users group
+            (20000). Every service has no-new-privileges. Absent from a container agent that predates runtime rules.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [service, runAs]
+            properties:
+              service:
+                type: string
+              runAs:
+                type: string
+                enum: [app, app-after-init, image]
+              user:
+                type: string
+                description: The Compose user, uid:gid; set for app services.
+              groups:
+                type: array
+                description: Supplementary groups Docker adds.
+                items:
+                  type: string
+              capDrop:
+                type: array
+                items:
+                  type: string
+              shared:
+                type: string
+                description: Access to the Shared folder; absent when the service mounts none.
+                enum: [read, write]
         images:
           type: array
           items:
@@ -2967,6 +3055,7 @@ components:
                 enum: [appdata, shared, system]
               readOnly:
                 type: boolean
+                description: Shared folders are read-only unless the app exists to write them (downloads, sync, backups, uploads).
               purpose:
                 type: string
         networks:
@@ -3603,7 +3692,7 @@ components:
     FeedbackItem:
       type: object
       additionalProperties: false
-      required: [id, text, images, version, createdBy, createdAt, resolved]
+      required: [id, text, images, version, createdBy, createdAt, resolved, comments]
       properties:
         id: { type: string }
         text: { type: string, maxLength: 5000 }
@@ -3616,6 +3705,20 @@ components:
         resolved: { type: boolean }
         resolvedBy: { type: string }
         resolvedAt: { type: string, format: date-time }
+        comments: { type: array, description: "Replies under the item, oldest first.", items: { $ref: "#/components/schemas/FeedbackComment" } }
+    FeedbackComment:
+      type: object
+      additionalProperties: false
+      required: [id, text, images, version, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        text: { type: string, maxLength: 2000 }
+        images: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/FeedbackImage" } }
+        version: { type: integer, minimum: 1, description: Counts edits to the comment. }
+        createdBy: { type: string, description: Username of the account that wrote the comment. }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, description: Username of the latest editor. }
+        updatedAt: { type: string, format: date-time }
     FeedbackImage:
       type: object
       additionalProperties: false

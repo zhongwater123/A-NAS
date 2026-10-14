@@ -30,6 +30,7 @@ func (d DockerInspector) Containers(ctx context.Context) ([]ContainerInfo, error
 		info := ContainerInfo{
 			AppID: item.Labels[appstore.AppLabel], Running: item.State == container.StateRunning,
 			Service: item.Labels[composeServiceLabel], State: string(item.State), ExitCode: exitCode(item.Status),
+			Runtime: item.Labels[appstore.RuntimeLabel],
 		}
 		if len(item.Names) > 0 {
 			info.Name = strings.TrimPrefix(item.Names[0], "/")
@@ -111,7 +112,7 @@ func (d DockerInspector) ProjectMounts(ctx context.Context, project string) ([]M
 		name := strings.TrimPrefix(inspected.Container.Name, "/")
 		for _, point := range inspected.Container.Mounts {
 			if point.Type == mount.TypeVolume {
-				mounts = append(mounts, MountInfo{Container: name, Volume: point.Name, Target: point.Destination, Subpath: subpaths[point.Destination]})
+				mounts = append(mounts, MountInfo{Container: name, Volume: point.Name, Target: point.Destination, Subpath: subpaths[point.Destination], ReadOnly: !point.RW})
 			}
 		}
 	}
@@ -146,6 +147,35 @@ func (d DockerInspector) ProjectContainers(ctx context.Context, project string) 
 		states = append(states, state)
 	}
 	return states, nil
+}
+
+// ProjectRuntimes reads each project container's configured user, added
+// groups, dropped capabilities and security options.
+func (d DockerInspector) ProjectRuntimes(ctx context.Context, project string) ([]RuntimeInfo, error) {
+	list, err := d.Client.ContainerList(ctx, client.ContainerListOptions{
+		All: true, Filters: make(client.Filters).Add("label", composeProjectLabel+"="+project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	runtimes := make([]RuntimeInfo, 0, len(list.Items))
+	for _, item := range list.Items {
+		inspected, err := d.Client.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return nil, err
+		}
+		runtime := RuntimeInfo{Container: strings.TrimPrefix(inspected.Container.Name, "/"), Service: item.Labels[composeServiceLabel]}
+		if config := inspected.Container.Config; config != nil {
+			runtime.User = config.User
+		}
+		if host := inspected.Container.HostConfig; host != nil {
+			runtime.GroupAdd = append(runtime.GroupAdd, host.GroupAdd...)
+			runtime.CapDrop = append(runtime.CapDrop, host.CapDrop...)
+			runtime.SecurityOpt = append(runtime.SecurityOpt, host.SecurityOpt...)
+		}
+		runtimes = append(runtimes, runtime)
+	}
+	return runtimes, nil
 }
 
 // exitCode reads the code from a container status such as "Exited (1) 2

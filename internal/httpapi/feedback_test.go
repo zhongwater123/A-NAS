@@ -184,6 +184,39 @@ func TestFeedbackIsOneListEverySignedInAccountEdits(t *testing.T) {
 		t.Fatalf("svg = %d %s", svg.Code, svg.Body.String())
 	}
 
+	// Comments: a member replies with a screenshot, the administrator rewrites
+	// that reply and then deletes it; writes need the CSRF token.
+	commentBody, commentType := feedbackForm{text: "我这边也能复现", images: [][]byte{feedbackPNG(t)}}.encode(t)
+	if forged := feedbackRequest(member, http.MethodPost, "/api/v1/feedback/"+item.ID+"/comments", commentType, commentBody, false); forged.Code != http.StatusForbidden {
+		t.Fatalf("comment without CSRF = %d", forged.Code)
+	}
+	commented := sendFeedbackForm(t, member, http.MethodPost, "/api/v1/feedback/"+item.ID+"/comments", feedbackForm{text: "我这边也能复现", images: [][]byte{feedbackPNG(t)}})
+	if commented.Code != http.StatusCreated {
+		t.Fatalf("comment = %d %s", commented.Code, commented.Body.String())
+	}
+	reply := decodeItem(t, commented).Comments[0]
+	if reply.CreatedBy != "member" || len(reply.Images) != 1 {
+		t.Fatalf("reply = %+v", reply)
+	}
+	if picture := feedbackRequest(owner, http.MethodGet, "/api/v1/feedback/"+item.ID+"/images/"+reply.Images[0].ID, "", "", false); picture.Code != http.StatusOK || picture.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("comment image = %d %v", picture.Code, picture.Header())
+	}
+	rewritten := sendFeedbackForm(t, owner, http.MethodPut, "/api/v1/feedback/"+item.ID+"/comments/"+reply.ID, feedbackForm{text: "已在 1.0.2 修复", version: reply.Version})
+	if rewritten.Code != http.StatusOK || decodeItem(t, rewritten).Comments[0].UpdatedBy != "owner" {
+		t.Fatalf("edit comment = %d %s", rewritten.Code, rewritten.Body.String())
+	}
+	if stale := sendFeedbackForm(t, member, http.MethodPut, "/api/v1/feedback/"+item.ID+"/comments/"+reply.ID, feedbackForm{text: "旧", version: reply.Version}); stale.Code != http.StatusConflict ||
+		!strings.Contains(stale.Body.String(), "comment_changed") {
+		t.Fatalf("stale comment edit = %d %s", stale.Code, stale.Body.String())
+	}
+	if removed := feedbackRequest(owner, http.MethodDelete, "/api/v1/feedback/"+item.ID+"/comments/"+reply.ID, "", "", true); removed.Code != http.StatusOK || len(decodeItem(t, removed).Comments) != 0 {
+		t.Fatalf("delete comment = %d %s", removed.Code, removed.Body.String())
+	}
+	if missing := feedbackRequest(owner, http.MethodDelete, "/api/v1/feedback/"+item.ID+"/comments/"+reply.ID, "", "", true); missing.Code != http.StatusNotFound ||
+		!strings.Contains(missing.Body.String(), "comment_not_found") {
+		t.Fatalf("delete comment twice = %d %s", missing.Code, missing.Body.String())
+	}
+
 	if deleted := feedbackRequest(owner, http.MethodDelete, "/api/v1/feedback/"+item.ID, "", "", true); deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d %s", deleted.Code, deleted.Body.String())
 	}

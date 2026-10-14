@@ -145,7 +145,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			job, err = h.install(r.Context(), id, request.Digest)
 		} else {
 			if job, err = h.store.Uninstall(r.Context(), id); err == nil && h.host != nil {
-				// Withdraw Shared access at once; the identity and its data stay.
+				// The identity and its data stay for a reinstall.
 				if releaseErr := h.host.ReleaseApp(r.Context(), id); releaseErr != nil {
 					h.logger.ErrorContext(r.Context(), "releasing app access failed", "app", id, "error", releaseErr)
 				}
@@ -169,7 +169,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var errVolumeUnavailable = errors.New("data volume is unavailable")
 
 // install checks the confirmed plan against the app's identity, has the Host
-// Agent prepare its folders and Shared access, and only then starts Compose.
+// Agent prepare its folders, and only then starts Compose.
 func (h *handler) install(ctx context.Context, id, digest string) (appstore.Job, error) {
 	if h.volumeReady != nil {
 		if err := h.volumeReady(ctx); err != nil {

@@ -1,6 +1,6 @@
 import {
   ArrowUpRight, BookText, Boxes, Check, ChevronLeft, CircleAlert, CodeXml, Download, Ellipsis, Globe, KeyRound, Loader, LockKeyhole,
-  RotateCcw, ScanSearch, ShieldCheck, Trash2,
+  RotateCcw, ScanSearch, ShieldCheck, Trash2, TriangleAlert,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -81,7 +81,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
         <h3>A-NAS 如何运行它</h3>
         <ul className="ac-trust">
           <li><ScanSearch /><span><strong>安装前可审查</strong>列出将拉取的镜像、开放的端口、使用的文件夹和完整 Compose 文件，确认后才执行。</span></li>
-          <li><LockKeyhole /><span><strong>独立账号，最小权限</strong>以应用专属的系统账号运行，不获得特权、设备或宿主机网络，只能访问计划中的文件夹。</span></li>
+          <li><LockKeyhole /><span><strong>独立账号，最小权限</strong>不获得特权、设备或宿主机网络，只能访问计划中的文件夹；能读写共享空间的服务必须以应用专属账号运行，共享空间默认只读。</span></li>
           <li><RotateCcw /><span><strong>卸载保留数据</strong>卸载删除容器与网络，应用数据留在数据卷上，重新安装后可继续使用。</span></li>
         </ul>
       </section>
@@ -205,6 +205,12 @@ function StatusPanel({ app, onInstall, onOpenDocker }: { app: CatalogApp; onInst
             ))}
             <li className="ac-problems-hint">原因通常在容器日志里，可在 Docker 中查看。</li>
           </ul>
+        )}
+        {app.runtimeOutdated && (
+          <div className="ac-banner-note warning" role="note">
+            <TriangleAlert />
+            <span>它按旧的运行规则安装，容器仍以安装时的身份与权限运行。卸载（应用数据会保留）后重新安装，即按当前规则运行：以独立账号运行，共享空间默认只读。</span>
+          </div>
         )}
         {app.credentials?.length ? (
           <div className="ac-status-logins" aria-label="登录信息">

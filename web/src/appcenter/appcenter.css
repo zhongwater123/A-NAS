@@ -359,6 +359,9 @@ button.ac-get.open:hover { background: #2862cd; }
 .ac-mount { padding: 1px 7px; border-radius: 6px; color: #0f8a7f; background: #e2f7f4; font-size: 11px; font-style: normal; font-weight: 650; }
 .ac-mount.shared { color: var(--ac-warning); background: var(--ac-warning-soft); }
 .ac-mount.system { color: var(--ac-muted); background: #eef1f5; }
+.ac-runas { padding: 1px 7px; border-radius: 6px; color: #0f8a7f; background: #e2f7f4; font-size: 11px; font-style: normal; font-weight: 650; }
+.ac-runas.app-after-init { color: #3b5bdb; background: #e8edff; }
+.ac-runas.image { color: var(--ac-warning); background: var(--ac-warning-soft); }
 .ac-compose summary { width: fit-content; display: inline-flex; align-items: center; gap: 6px; color: var(--ac-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .ac-compose summary:hover { color: var(--ac-text); }
 .ac-compose summary svg { width: 14px; height: 14px; }

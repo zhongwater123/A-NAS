@@ -1,4 +1,4 @@
-import { Check, CheckCheck, CircleCheckBig, Inbox, MessageSquareText, Pencil, RotateCw, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, CircleCheckBig, Inbox, MessageCircle, MessageSquareText, Pencil, RotateCw, Trash2, X } from "lucide-react";
 import { PointerEvent as ReactPointerEvent, RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { APIError } from "../api";
@@ -8,6 +8,7 @@ import { FeedbackEditor, Draft, emptyDraft, releaseDraft } from "./FeedbackEdito
 import {
   FeedbackItem, createFeedback, deleteFeedback, describeFeedbackError, editFeedback, feedbackImageURL, listFeedback, resolveFeedback,
 } from "./feedbackApi";
+import { FeedbackThread } from "./FeedbackThread";
 import { Lightbox } from "./Lightbox";
 import { describeTime, fullTime } from "./time";
 import "./feedback.css";
@@ -21,7 +22,8 @@ const OPEN_REFRESH = 15_000;
 const CLOSED_REFRESH = 60_000;
 
 // FeedbackChannel is 问题反馈: a button on the right edge of the desktop that
-// opens one shared checklist every account can add to, edit and tick off.
+// opens one shared checklist every account can add to, edit, tick off and
+// discuss in comments.
 export function FeedbackChannel() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<FeedbackItem[]>();
@@ -274,6 +276,15 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
   const [detached, setDetached] = useState<string[]>([]);
   const [baseVersion, setBaseVersion] = useState(item.version);
   const [changedBy, setChangedBy] = useState("");
+  // Comments stay folded until asked for; the draft survives folding them.
+  const [threadOpen, setThreadOpen] = useState(false);
+  const [focusComposer, setFocusComposer] = useState(false);
+  const [commentDraft, setCommentDraft] = useState<Draft>(emptyDraft);
+  const commentDraftRef = useRef(commentDraft);
+  commentDraftRef.current = commentDraft;
+  useEffect(() => () => releaseDraft(commentDraftRef.current), []);
+  const threadID = useId();
+  const commentCount = item.comments.length;
 
   const resolved = optimistic ?? item.resolved;
   const imageURLs = item.images.map((image) => feedbackImageURL(item.id, image.id));
@@ -393,15 +404,25 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
           <span className="fb-author">{item.createdBy}</span>
           <time dateTime={item.createdAt} title={fullTime(item.createdAt)}>{describeTime(item.createdAt)}</time>
           {item.updatedBy && item.updatedAt && <span className="fb-edited" title={`${item.updatedBy} 于 ${fullTime(item.updatedAt)} 编辑`}>已编辑</span>}
-          {resolved && item.resolvedBy && item.resolvedAt && (
-            <span className="fb-resolved" title={fullTime(item.resolvedAt)}><CheckCheck />{item.resolvedBy} 已处理</span>
-          )}
-          {mode === "view" && (
-            <span className="fb-item-actions">
-              <button aria-label="编辑反馈" title="编辑" onClick={startEdit}><Pencil /></button>
-              <button aria-label="删除反馈" title="删除" onClick={() => { setError(""); setMode("delete"); }}><Trash2 /></button>
-            </span>
-          )}
+          <span className="fb-meta-end">
+            {resolved && item.resolvedBy && item.resolvedAt && (
+              <span className="fb-resolved" title={fullTime(item.resolvedAt)}><CheckCheck />{item.resolvedBy} 已处理</span>
+            )}
+            <button
+              className={`fb-comment-toggle ${commentCount ? "has" : ""}`}
+              aria-expanded={threadOpen}
+              aria-controls={threadOpen ? threadID : undefined}
+              aria-label={commentCount ? `${commentCount} 条评论` : "写评论"}
+              title={threadOpen ? "收起评论" : commentCount ? "查看评论" : "写评论"}
+              onClick={() => { setFocusComposer(!threadOpen && commentCount === 0); setThreadOpen((open) => !open); }}
+            ><MessageCircle />{commentCount > 0 && commentCount}{commentDraft.text.trim() || commentDraft.added.length ? <span className="fb-draft-dot" aria-hidden="true" /> : null}</button>
+            {mode === "view" && (
+              <span className="fb-item-actions">
+                <button aria-label="编辑反馈" title="编辑" onClick={startEdit}><Pencil /></button>
+                <button aria-label="删除反馈" title="删除" onClick={() => { setError(""); setMode("delete"); }}><Trash2 /></button>
+              </span>
+            )}
+          </span>
         </div>
         {error && <p className="fb-item-error" role="alert">{error}</p>}
         {mode === "delete" && (
@@ -410,6 +431,20 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
             <button className="fb-ghost" disabled={busy} onClick={() => setMode("view")}>取消</button>
             <button className="fb-danger" disabled={busy} onClick={() => void confirmDelete()}>删除</button>
           </div>
+        )}
+        {threadOpen && (
+          <FeedbackThread
+            id={threadID}
+            item={item}
+            focusComposer={focusComposer}
+            draft={commentDraft}
+            onDraft={setCommentDraft}
+            onChange={onChange}
+            onRemove={onRemove}
+            onRefresh={onRefresh}
+            onPreview={onPreview}
+            onCaptured={onCaptured}
+          />
         )}
       </div>
     </li>

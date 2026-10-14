@@ -43,11 +43,25 @@ export interface CatalogApp {
   problems?: Array<{ service: string; state: string; exitCode: number }>;
   // Logins generated for the app, such as its admin password.
   credentials?: AppCredential[];
+  // Installed under older runtime rules; reinstalling applies the current ones (ADR 0022).
+  runtimeOutdated?: boolean;
 }
 
 // upstream marks the manifest's published value, still used by an app
 // installed before A-NAS generated its logins.
 export interface AppCredential { label: string; username?: string; secret: string; upstream?: boolean }
+
+// How one service runs (ADR 0022): app starts as the app identity with no
+// capabilities; app-after-init starts as root and switches to it; image keeps
+// the image's own user, which may be root, and only reaches its app's data.
+export interface ServiceRuntime {
+  service: string;
+  runAs: "app" | "app-after-init" | "image";
+  user?: string;
+  groups?: string[];
+  capDrop?: string[];
+  shared?: "read" | "write";
+}
 
 export interface AppList {
   dataSource: DataSource;
@@ -59,8 +73,10 @@ export interface InstallPlan {
   title: string;
   version: string;
   project: string;
-  // The Linux account app-<id> the app's containers run as.
+  // The Linux account app-<id> allocated for the app; services says how each service uses it.
   identity: { username: string; uid: number; gid: number };
+  // Absent from a container agent that predates runtime rules.
+  services?: ServiceRuntime[];
   images: string[];
   containers: string[];
   ports: Array<{ hostPort: number; containerPort: number; protocol: string; purpose?: string }>;

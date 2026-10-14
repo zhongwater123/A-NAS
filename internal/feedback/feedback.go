@@ -1,7 +1,8 @@
 // Package feedback keeps 问题反馈: one checklist of problems and suggestions
-// that every signed-in account can file, read, edit, mark handled and delete.
-// Items and their images live in feedback.db on the system disk, beside the
-// Product Service's other state; nothing here touches the data volume.
+// that every signed-in account can file, read, edit, mark handled, delete and
+// comment on. Items, comments and their images live in feedback.db on the
+// system disk, beside the Product Service's other state; nothing here touches
+// the data volume.
 package feedback
 
 import (
@@ -62,6 +63,8 @@ type Item struct {
 	Resolved   bool       `json:"resolved"`
 	ResolvedBy string     `json:"resolvedBy,omitempty"`
 	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+	// Comments are the replies under the item, oldest first.
+	Comments []Comment `json:"comments"`
 }
 
 type Image struct {
@@ -138,12 +141,36 @@ CREATE TABLE IF NOT EXISTS images (
     data BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS images_item ON images(item_id, position);
+-- Comments came later in their own tables, so an older release ignores them
+-- rather than mistaking comment images for the item's own.
+CREATE TABLE IF NOT EXISTS comments (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_by_id TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS comments_item ON comments(item_id, created_at);
+CREATE TABLE IF NOT EXISTS comment_images (
+    id TEXT PRIMARY KEY,
+    comment_id TEXT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    data BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comment_images_comment ON comment_images(comment_id, position);
 `
 	_, err := s.db.ExecContext(ctx, schema)
 	return err
 }
 
-// List returns every item, newest first, without image content.
+// List returns every item, newest first, with its comments and without image
+// content.
 func (s *Store) List(ctx context.Context) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, text, version, created_by, created_at, updated_by, updated_at, resolved_by, resolved_at
 FROM items ORDER BY created_at DESC, id`)
@@ -179,7 +206,19 @@ FROM items ORDER BY created_at DESC, id`)
 			items[index].Images = append(items[index].Images, image)
 		}
 	}
-	return items, images.Err()
+	if err := errors.Join(images.Err(), images.Close()); err != nil {
+		return nil, err
+	}
+	comments, err := s.listComments(ctx, s.db, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, comment := range comments {
+		if index, ok := byID[comment.itemID]; ok {
+			items[index].Comments = append(items[index].Comments, comment.Comment)
+		}
+	}
+	return items, nil
 }
 
 func (s *Store) Get(ctx context.Context, id string) (Item, error) {
@@ -187,7 +226,7 @@ func (s *Store) Get(ctx context.Context, id string) (Item, error) {
 }
 
 func (s *Store) Create(ctx context.Context, actor Actor, content Content) (Item, error) {
-	text, types, err := validate(content.Text, 0, content.New)
+	text, types, err := validate(content.Text, 0, content.New, itemLimits)
 	if err != nil {
 		return Item{}, err
 	}
@@ -198,7 +237,7 @@ func (s *Store) Create(ctx context.Context, actor Actor, content Content) (Item,
 			id, text, actor.ID, actor.Username, now); err != nil {
 			return err
 		}
-		return s.addImages(ctx, tx, id, 0, content.New, types)
+		return s.addImages(ctx, tx, insertItemImage, id, 0, content.New, types)
 	})
 	if err != nil {
 		return Item{}, err
@@ -217,16 +256,8 @@ func (s *Store) Edit(ctx context.Context, actor Actor, id string, version int64,
 		if current.Version != version {
 			return ErrChanged
 		}
-		var removed []string
-		kept := 0
-		for _, image := range current.Images {
-			if slices.Contains(content.Keep, image.ID) {
-				kept++
-			} else {
-				removed = append(removed, image.ID)
-			}
-		}
-		text, types, err := validate(content.Text, kept, content.New)
+		kept, removed := keepImages(current.Images, content.Keep)
+		text, types, err := validate(content.Text, kept, content.New, itemLimits)
 		if err != nil {
 			return err
 		}
@@ -243,7 +274,7 @@ func (s *Store) Edit(ctx context.Context, actor Actor, id string, version int64,
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position), -1) + 1 FROM images WHERE item_id = ?`, id).Scan(&next); err != nil {
 			return err
 		}
-		return s.addImages(ctx, tx, id, next, content.New, types)
+		return s.addImages(ctx, tx, insertItemImage, id, next, content.New, types)
 	})
 	if err != nil {
 		return Item{}, err
@@ -278,11 +309,15 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// ImageContent returns one image of an item with its bytes.
+// ImageContent returns one image of an item or of a comment under it, with
+// its bytes.
 func (s *Store) ImageContent(ctx context.Context, itemID, imageID string) (Image, []byte, error) {
 	image := Image{ID: imageID}
 	var data []byte
-	err := s.db.QueryRowContext(ctx, `SELECT content_type, size_bytes, data FROM images WHERE id = ? AND item_id = ?`, imageID, itemID).
+	err := s.db.QueryRowContext(ctx, `SELECT content_type, size_bytes, data FROM images WHERE id = ? AND item_id = ?
+UNION ALL
+SELECT ci.content_type, ci.size_bytes, ci.data FROM comment_images ci JOIN comments c ON c.id = ci.comment_id WHERE ci.id = ? AND c.item_id = ?
+LIMIT 1`, imageID, itemID, imageID, itemID).
 		Scan(&image.ContentType, &image.SizeBytes, &data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Image{}, nil, ErrNotFound
@@ -308,19 +343,29 @@ FROM items WHERE id = ?`, id))
 	if err != nil {
 		return Item{}, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var image Image
 		if err := rows.Scan(&image.ID, &image.ContentType, &image.SizeBytes); err != nil {
+			_ = rows.Close()
 			return Item{}, err
 		}
 		item.Images = append(item.Images, image)
 	}
-	return item, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return Item{}, err
+	}
+	comments, err := s.listComments(ctx, q, id)
+	if err != nil {
+		return Item{}, err
+	}
+	for _, comment := range comments {
+		item.Comments = append(item.Comments, comment.Comment)
+	}
+	return item, nil
 }
 
 func scanItem(row interface{ Scan(...any) error }) (Item, error) {
-	item := Item{Images: []Image{}}
+	item := Item{Images: []Image{}, Comments: []Comment{}}
 	var createdAt, updatedAt, resolvedAt string
 	if err := row.Scan(&item.ID, &item.Text, &item.Version, &item.CreatedBy, &createdAt, &item.UpdatedBy, &updatedAt, &item.ResolvedBy, &resolvedAt); err != nil {
 		return Item{}, err
@@ -337,24 +382,51 @@ func scanItem(row interface{ Scan(...any) error }) (Item, error) {
 	return item, nil
 }
 
-func (s *Store) addImages(ctx context.Context, tx *sql.Tx, itemID string, position int, images [][]byte, types []string) error {
+const (
+	insertItemImage    = `INSERT INTO images (id, item_id, position, content_type, size_bytes, data) VALUES (?, ?, ?, ?, ?, ?)`
+	insertCommentImage = `INSERT INTO comment_images (id, comment_id, position, content_type, size_bytes, data) VALUES (?, ?, ?, ?, ?, ?)`
+)
+
+// addImages stores new images for an item or a comment; insert names the table.
+func (s *Store) addImages(ctx context.Context, tx *sql.Tx, insert, ownerID string, position int, images [][]byte, types []string) error {
 	for index, data := range images {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO images (id, item_id, position, content_type, size_bytes, data) VALUES (?, ?, ?, ?, ?, ?)`,
-			s.randomID("feedback-image"), itemID, position+index, types[index], len(data), data); err != nil {
+		if _, err := tx.ExecContext(ctx, insert, s.randomID("feedback-image"), ownerID, position+index, types[index], len(data), data); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// keepImages counts the attached images an edit keeps and lists the others.
+func keepImages(current []Image, keep []string) (int, []string) {
+	var removed []string
+	kept := 0
+	for _, image := range current {
+		if slices.Contains(keep, image.ID) {
+			kept++
+		} else {
+			removed = append(removed, image.ID)
+		}
+	}
+	return kept, removed
+}
+
+// limits bound what one item or one comment may hold.
+type limits struct{ text, images int }
+
+var (
+	itemLimits    = limits{text: MaxTextRunes, images: MaxImages}
+	commentLimits = limits{text: MaxCommentRunes, images: MaxCommentImages}
+)
+
 // validate normalizes the text and checks the images, returning each new
 // image's sniffed type.
-func validate(text string, kept int, images [][]byte) (string, []string, error) {
+func validate(text string, kept int, images [][]byte, limit limits) (string, []string, error) {
 	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
-	if !utf8.ValidString(text) || utf8.RuneCountInString(text) > MaxTextRunes {
+	if !utf8.ValidString(text) || utf8.RuneCountInString(text) > limit.text {
 		return "", nil, ErrTextTooLong
 	}
-	if kept+len(images) > MaxImages {
+	if kept+len(images) > limit.images {
 		return "", nil, ErrTooManyImages
 	}
 	if text == "" && kept+len(images) == 0 {
