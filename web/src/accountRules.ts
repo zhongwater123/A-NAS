@@ -7,7 +7,7 @@ import { APIError } from "./api";
 export const usernameRuleText = "3–32 位英文字母、数字、- 或 _，以字母开头，按小写保存";
 export const passwordRuleText = "12–64 个字符，可用空格、中文和符号";
 
-const usernameText = `账号名需为${usernameRuleText}`;
+const usernameText = `账号名需为 ${usernameRuleText}`;
 const reservedNames = new Set(["global", "homes", "printers", "shared", "a-nas"]);
 const encoder = new TextEncoder();
 
@@ -37,7 +37,7 @@ export function accountErrorText(error: unknown): string | undefined {
     case "invalid_credentials": return "账号或密码不正确";
     case "invalid_username": return usernameText;
     case "username_unavailable": return "这个账号名已被使用、留给系统，或与设备上已有的 Linux 账号重名，请换一个";
-    case "invalid_password": return `密码需为${passwordRuleText}，不能包含换行等控制字符`;
+    case "invalid_password": return `密码需为 ${passwordRuleText}，不能包含换行等控制字符`;
     case "password_unchanged": return "新密码不能与当前密码相同";
     case "reauthentication_failed": return "密码不正确";
     case "setup_complete": return "设备已经启用，请刷新页面后登录";
