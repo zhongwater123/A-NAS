@@ -21,7 +21,15 @@ BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i:/nas/个人空间
 BindReadOnlyPaths=/srv/a-nas/data/spaces/shared:/nas/共享空间
 BindReadOnlyPaths=/run/anas-assistant-gw
 BindPaths=/srv/a-nas/data/assistant/%i:/nas/助手
+# Recycle bins hold one folder per member and only the member's is readable. An
+# unreadable folder makes Hermes's ripgrep searches fail outright, so the agent sees
+# each bin as an empty tmpfs holding just its member's own folder.
+TemporaryFileSystem=/nas/个人空间/.a-nas-trash /nas/共享空间/.a-nas-trash
+BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i/.a-nas-trash/%i:/nas/个人空间/.a-nas-trash/%i
+BindReadOnlyPaths=/srv/a-nas/data/spaces/shared/.a-nas-trash/%i:/nas/共享空间/.a-nas-trash/%i
 TemporaryFileSystem=/srv:ro
+# The real model key stays with the gateway outside the sandbox.
+InaccessiblePaths=-/etc/anas-spike
 UMask=0077
 NoNewPrivileges=true
 CapabilityBoundingSet=

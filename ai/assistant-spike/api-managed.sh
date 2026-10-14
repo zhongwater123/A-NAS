@@ -3,6 +3,7 @@
 # assistant's own (writable) Hermes home? Simulates a bypassed write guard.
 set -uo pipefail
 home=/srv/a-nas/data/assistant/alice/.hermes
+cp -p "$home/config.yaml" /tmp/user-config.yaml
 cat > "$home/config.yaml" <<'YAML'
 model:
   provider: custom
@@ -25,7 +26,7 @@ bash /spike/api-tools.sh alice calls-managed.txt
 after=$(wc -l < /var/log/fake-model.jsonl)
 echo "fake model (pinned base_url) received $((after - before)) requests since the restart"
 tail -n $((after - before)) /var/log/fake-model.jsonl | python3 -c 'import json,sys; print("models offered:", {tuple(json.loads(l)["tools"]) for l in sys.stdin if json.loads(l)["tools"]})'
-rm -f "$home/config.yaml"
+cp -p /tmp/user-config.yaml "$home/config.yaml"
 echo "--- bob after a full conversation"
 bash /spike/api-tools.sh bob calls.txt > /tmp/bob-tools.txt 2>&1
 grep -c '^<' /tmp/bob-tools.txt | sed 's/^/bob turns answered: /'

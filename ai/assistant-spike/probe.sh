@@ -13,6 +13,10 @@ expect_ok   "read own trash entry"               cat /nas/个人空间/.a-nas-tr
 expect_ok   "read shared file"                   cat /nas/共享空间/family.md
 expect_ok   "read another member's Agent space"  cat /nas/共享空间/Agent空间/bob/report.md
 expect_fail "read another member's shared trash" cat /nas/共享空间/.a-nas-trash/bob/gone.txt
+expect_ok   "recursive file search over Shared"  sh -c 'rg --files -g "*" -- /nas/共享空间 >/dev/null; [ $? -le 1 ]'
+expect_ok   "recursive file search over personal" sh -c 'rg --files -g "*" -- /nas/个人空间 >/dev/null; [ $? -le 1 ]'
+echo "INFO shared bin as seen: $(ls -A /nas/共享空间/.a-nas-trash | tr '
+' ' ')"
 if [ -z "$(ls -A /srv 2>/dev/null)" ]; then ok "data volume hidden (/srv empty)"; else bad "data volume hidden" "$(ls -A /srv)"; fi
 found=$(find / -xdev \( -name bob-secret.txt -o -name 'snap-1' -o -name '.a-nas-snapshots' \) 2>/dev/null | head -3)
 if [ -z "$found" ]; then ok "no other member's space or snapshot anywhere"; else bad "other space visible" "$found"; fi
@@ -24,7 +28,8 @@ expect_fail "setfacl in personal space"          setfacl -m o::r /nas/个人空�
 expect_fail "write into shared space"            sh -c 'echo x > /nas/共享空间/x.txt'
 expect_fail "write into own Agent space directly" sh -c 'echo x > /nas/共享空间/Agent空间/alice/x.txt'
 expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待确认 && echo x > /nas/助手/待确认/x.txt'
-expect_fail "write into /etc/hermes policy"      sh -c 'echo x >> /etc/hermes/config.yaml'
+expect_fail "read the gateway's model key"       cat /etc/anas-spike/model.key
+expect_fail "write into /etc/hermes policy"     sh -c 'echo x >> /etc/hermes/config.yaml'
 expect_fail "write into /opt runtime"            sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
 expect_fail "outbound TCP to 1.1.1.1:443"        python3 -c 'import socket; socket.create_connection(("1.1.1.1", 443), timeout=3)'
 expect_fail "outbound TCP to docker host"        python3 -c 'import socket; socket.create_connection(("172.17.0.1", 22), timeout=3)'
