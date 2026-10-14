@@ -71,11 +71,11 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 |---|---|---|
 | `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、手动与定时快照、可选终端与容器管理已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
-| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、用户与权限、[日志](../specs/logs.md)）、终端、Docker 窗口与随机单视频循环屏保已实现 |
+| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口与随机单视频循环屏保已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
-| `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，`ANAS_TERMINAL=enabled` 启用，见[终端规格](../specs/web-terminal.md) |
+| `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
 | `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |

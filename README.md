@@ -55,7 +55,7 @@ go run ./cmd/anas-api
 
 浏览器访问 `http://127.0.0.1:8080/`。服务默认只监听回环地址，可通过 `ANAS_HTTP_ADDR` 覆盖；聚合状态接口为 `/api/v1/host-state`，完整契约见 [OpenAPI](api/openapi.yaml)。
 
-需要由设备管理员在桌面“终端”应用中打开设备 Shell 时，显式启用终端；生产中 Shell 经文件代理以该管理员本人的 Linux 账号运行（本地模拟模式下以开发进程用户运行），只接受已认证管理员的回环同源连接，边界见[终端规格](docs/specs/web-terminal.md)：
+需要由设备管理员在“设置 → 终端”中打开设备 Shell 时，显式启用终端（设备上按[运行手册](docs/runbooks/enable-admin-terminal.md)开启）；生产中 Shell 经文件代理以该管理员本人的 Linux 账号运行（本地模拟模式下以开发进程用户运行），只接受已认证管理员的回环同源连接，边界见[终端规格](docs/specs/web-terminal.md)：
 
 ```bash
 ANAS_TERMINAL=enabled go run ./cmd/anas-api
