@@ -40,13 +40,18 @@ interface FeedbackEditorProps {
   onCancel?: () => void;
   onPreview: (urls: string[], index: number) => void;
   onCaptured?: () => void;
+  // A comment holds less than an item and its editor is smaller.
+  maxImages?: number;
+  maxText?: number;
+  compact?: boolean;
 }
 
-// FeedbackEditor writes a new item or edits one: text, plus images from the
-// file picker, the clipboard, a drop or a capture of the desktop.
+// FeedbackEditor writes a new item or comment, or edits one: text, plus
+// images from the file picker, the clipboard, a drop or a capture of the
+// desktop.
 export function FeedbackEditor({
   label, draft, onChange, attached = [], onDetach, placeholder, submitLabel, busy, error, notice,
-  autoFocus, onSubmit, onCancel, onPreview, onCaptured,
+  autoFocus, onSubmit, onCancel, onPreview, onCaptured, maxImages = MAX_IMAGES, maxText = MAX_TEXT, compact = false,
 }: FeedbackEditorProps) {
   const [problem, setProblem] = useState("");
   const [capturing, setCapturing] = useState(false);
@@ -61,29 +66,31 @@ export function FeedbackEditor({
   attachedCount.current = attached.length;
 
   // Focus without scrolling: a window wider than the screen makes the
-  // desktop scrollable, and the panel slides in from past its edge. An edit
+  // desktop scrollable, and the panel slides in from past its edge. Only the
+  // list scrolls, to bring a comment box below the fold into view. An edit
   // continues where the text ends.
   useEffect(() => {
     const field = textArea.current;
     if (!autoFocus || !field) return;
     field.focus({ preventScroll: true });
+    field.scrollIntoView?.({ block: "nearest" });
     field.setSelectionRange(field.value.length, field.value.length);
   }, [autoFocus]);
 
   const count = attached.length + draft.added.length;
-  const full = count >= MAX_IMAGES;
+  const full = count >= maxImages;
   const empty = !draft.text.trim() && count === 0;
-  const tooLong = draft.text.length > MAX_TEXT;
+  const tooLong = draft.text.length > maxText;
 
   const add = (images: Array<{ blob: Blob; label: string }>) => {
     const current = latest.current;
-    const room = MAX_IMAGES - attachedCount.current - current.added.length;
+    const room = maxImages - attachedCount.current - current.added.length;
     const accepted: AddedImage[] = [];
     let rejected = "";
     for (const image of images) {
       if (!IMAGE_TYPES.includes(image.blob.type)) { rejected = "只支持 PNG、JPEG、GIF 或 WebP 图片"; continue; }
       if (image.blob.size > MAX_IMAGE_BYTES) { rejected = "单张图片不能超过 10 MiB"; continue; }
-      if (accepted.length >= room) { rejected = `每条反馈最多 ${MAX_IMAGES} 张图片`; break; }
+      if (accepted.length >= room) { rejected = `最多添加 ${maxImages} 张图片`; break; }
       accepted.push(addedImage(image.blob, image.label));
     }
     setProblem(rejected);
@@ -136,11 +143,11 @@ export function FeedbackEditor({
   };
 
   const previews = [...attached.map((image) => image.url), ...draft.added.map((image) => image.url)];
-  const shown = problem || error || (tooLong ? `文字最多 ${MAX_TEXT} 字，当前 ${draft.text.length} 字` : "");
+  const shown = problem || error || (tooLong ? `文字最多 ${maxText} 字，当前 ${draft.text.length} 字` : "");
 
   return (
     <form
-      className={`fb-editor ${dragging ? "dragging" : ""} ${onCancel ? "editing" : ""}`}
+      className={`fb-editor ${dragging ? "dragging" : ""} ${onCancel ? "editing" : ""} ${compact ? "compact" : ""}`}
       aria-label={label}
       onSubmit={submit}
       onPaste={paste}
@@ -157,7 +164,7 @@ export function FeedbackEditor({
         className="fb-text"
         value={draft.text}
         placeholder={placeholder}
-        rows={3}
+        rows={compact ? 2 : 3}
         onChange={(event) => onChange({ ...draft, text: event.target.value })}
         onKeyDown={keyDown}
       />
@@ -185,12 +192,12 @@ export function FeedbackEditor({
       <div className="fb-editor-foot">
         <div className="fb-tools">
           <button type="button" className="fb-tool" disabled={capturing || full} onClick={() => void capture()} title="截取当前桌面，不含反馈面板">
-            {capturing ? <LoaderCircle className="fb-spin" /> : <Scan />}<span>{capturing ? "截取中…" : "截取界面"}</span>
+            {capturing ? <LoaderCircle className="fb-spin" /> : <Scan />}<span className={compact ? "sr-only" : undefined}>{capturing ? "截取中…" : "截取界面"}</span>
           </button>
           <button type="button" className="fb-tool" disabled={full} onClick={() => picker.current?.click()} title="也可以直接粘贴或拖入图片">
-            <ImagePlus /><span>添加图片</span>
+            <ImagePlus /><span className={compact ? "sr-only" : undefined}>添加图片</span>
           </button>
-          {count > 0 && <span className="fb-tray-count">{count}/{MAX_IMAGES}</span>}
+          {count > 0 && <span className="fb-tray-count">{count}/{maxImages}</span>}
           <input
             ref={picker}
             type="file"
