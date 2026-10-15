@@ -157,6 +157,9 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 	if asset.Albums, err = s.albumsOf(ctx, asset.ID); err != nil {
 		return Asset{}, err
 	}
+	if asset.People, err = s.peopleOf(ctx, record); err != nil {
+		return Asset{}, err
+	}
 	return asset, nil
 }
 

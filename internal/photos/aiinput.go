@@ -2,6 +2,7 @@ package photos
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io/fs"
 	"os"
@@ -19,29 +20,58 @@ const (
 	aiInputQuality = 92
 )
 
-// detectionInput is a claimed detection job with the detector's input, or
-// why there is none: the job's failure class, or a storage fault.
+// detectionInput is a claimed object's enlarged input with the background
+// jobs it serves: a detection job, a face scan, or a detection job and the
+// same object's face scan, which then share one rendering of the original
+// (docs/architecture/photo-people.md#输入图). Without an input it says why:
+// the jobs' failure class, or a storage fault.
 type detectionInput struct {
 	job   claimedJob
+	faces *claimedJob
 	file  *os.File
 	class string
 	err   error
 }
 
-// claimDetection claims the next due detection job and renders its input;
-// with none due it returns sql.ErrNoRows.
-func (s *Service) claimDetection(ctx context.Context) (*detectionInput, error) {
-	job, err := s.claimJob(ctx, detectionDerivation)
+// jobs lists the input's claimed jobs.
+func (input *detectionInput) jobs() []claimedJob {
+	if input.faces == nil {
+		return []claimedJob{input.job}
+	}
+	return []claimedJob{input.job, *input.faces}
+}
+
+// claimDetection claims the next due detection job, with the same object's
+// due face scan when faces are wanted, or else the next due face scan, and
+// renders the input; with none due it returns sql.ErrNoRows.
+func (s *Service) claimDetection(ctx context.Context, detecting, facing bool) (*detectionInput, error) {
+	var job claimedJob
+	err := sql.ErrNoRows
+	if detecting {
+		job, err = s.claimJob(ctx, detectionDerivation)
+	}
+	if errors.Is(err, sql.ErrNoRows) && facing {
+		job, err = s.claimJob(ctx, facesDerivation)
+	}
 	if err != nil {
 		return nil, err
 	}
 	input := &detectionInput{job: job}
+	if job.derivation == detectionDerivation && facing {
+		faces, err := s.claimObjectJob(ctx, facesDerivation, job.objectID)
+		switch {
+		case err == nil:
+			input.faces = &faces
+		case !errors.Is(err, sql.ErrNoRows):
+			return nil, errors.Join(err, s.returnJob(ctx, job))
+		}
+	}
 	input.file, input.class, input.err = s.openAIInput(ctx, job)
 	return input, nil
 }
 
-// returnDetection gives back a claimed detection that will not run now; a
-// nil input is none.
+// returnDetection gives back claimed jobs that will not run now; a nil input
+// is none.
 func (s *Service) returnDetection(ctx context.Context, input *detectionInput) error {
 	if input == nil {
 		return nil
@@ -49,7 +79,11 @@ func (s *Service) returnDetection(ctx context.Context, input *detectionInput) er
 	if input.file != nil {
 		_ = input.file.Close()
 	}
-	return s.returnJob(ctx, input.job)
+	var err error
+	for _, job := range input.jobs() {
+		err = errors.Join(err, s.returnJob(ctx, job))
+	}
+	return err
 }
 
 // openAIInput renders the detector's input for a claimed job. A decoder

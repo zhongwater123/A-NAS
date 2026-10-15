@@ -139,6 +139,9 @@ type Asset struct {
 	// out. AI clusters are never part of a photo's details.
 	Tags   []string   `json:"tags,omitempty"`
 	Albums []AlbumRef `json:"albums,omitempty"`
+	// People lists the faces and pets in a single photo's details, with
+	// who each is in the photo's library.
+	People []AssetPerson `json:"people,omitempty"`
 }
 
 type TrashState struct {
@@ -179,6 +182,8 @@ type Options struct {
 	Labels *labels.Set
 	// Objects defaults to the built-in calibration of the object detector.
 	Objects *objects.Calibration
+	// People defaults to the built-in calibration of the face models.
+	People []PeopleCalibration
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -211,7 +216,10 @@ type Service struct {
 	aiModelMu      sync.Mutex
 	aiModel        string
 	aiDetector     string
+	aiFaces        string
 	detectorLoaded bool
+	// facesScanned counts face scans stored since people last clustered.
+	facesScanned int
 	// nextDetection is the next detection job with its input, rendered
 	// while the Worker detected the one before. Only the AI runner uses it.
 	nextDetection *detectionInput
@@ -228,6 +236,8 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
+	// peopleCalibrations say how each kind of occurrence clusters.
+	peopleCalibrations []PeopleCalibration
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -297,6 +307,10 @@ func Open(root string, options Options) (*Service, error) {
 	} else if service.objectCalibration, err = objects.V1Calibration(); err != nil {
 		_ = service.Close()
 		return nil, err
+	}
+	service.peopleCalibrations = defaultPeopleCalibrations
+	if options.People != nil {
+		service.peopleCalibrations = options.People
 	}
 	if service.now == nil {
 		service.now = time.Now
