@@ -8,6 +8,16 @@ expect_fail() { local n=$1; shift; if out=$("$@" 2>&1); then bad "$n" "succeeded
 
 echo "INFO id: $(id)"
 echo "INFO caps: $(grep CapEff /proc/self/status)"
+# ADR 0022 decision 2: the member's own group and a-nas-users. For an administrator systemd
+# also adds a-nas-admins (User= applies the account's groups from /etc/group, and
+# SupplementaryGroups= can only add), so what holds is that nothing the sandbox reaches
+# grants that group (PROBE_IDENTITY_ONLY, run by system-test.sh for its administrator).
+if [ -n "${PROBE_IDENTITY_ONLY:-}" ]; then
+  expect_fail "nothing in the sandbox grants a-nas-admins" sh -c \
+    'getfacl -R -p /nas /var/lib/hermes-home 2>/dev/null | grep -Eq "^(# group: |group:)a-nas-admins"'
+  exit 0
+fi
+expect_fail "no a-nas-admins in the sandbox"     sh -c 'id -G | tr " " "\n" | grep -qx 20001'
 expect_ok   "read own personal file"            cat /nas/个人空间/计划.md
 expect_ok   "read own trash entry"               cat /nas/个人空间/.a-nas-trash/alice/old.txt
 expect_ok   "read shared file"                   cat /nas/共享空间/family.md
@@ -63,7 +73,9 @@ expect_fail "unshare a user namespace"           unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
 # Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
 # Hermes upgrade that adds one fails here (toolsets-check.py).
-if out=$(/opt/a-nas/assistant-runtimes/spike/venv/bin/python /spike/toolsets-check.py 2>&1); then
+if [ ! -x /opt/a-nas/assistant-runtimes/spike/venv/bin/python ]; then
+  echo "INFO toolsets check skipped: no Hermes runtime"
+elif out=$(/opt/a-nas/assistant-runtimes/spike/venv/bin/python /spike/toolsets-check.py 2>&1); then
   ok "every Hermes toolset allowed or disabled ($(tail -n 1 <<<"$out"))"
 else
   bad "every Hermes toolset allowed or disabled" "$(tr '\n' ';' <<<"$out")"
