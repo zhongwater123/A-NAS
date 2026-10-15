@@ -27,6 +27,10 @@
 
 - [2026-10-14：Apple Live Photo 配对标识被 EXIF 库遗漏](2026-10-14-live-photo-identifiers.md)（fixed locally）
 
+- [2026-10-14：视频缩略图重访重复解码与队列阻塞](2026-10-14-file-preview-cache.md)（fixed locally；Experimental NAS verification pending）
+
+- [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

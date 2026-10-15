@@ -72,6 +72,14 @@ func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID,
 	if err != nil {
 		return VideoDetail{}, err
 	}
+	// A scan must not publish an old snapshot between file moves and the
+	// catalog update. Reload after waiting, because another rename may have run.
+	unlock := s.lockRename(ctx, actor, library.ID)
+	defer unlock()
+	video, library, err = s.visibleVideo(ctx, actor, videoID)
+	if err != nil {
+		return VideoDetail{}, err
+	}
 	name = strings.TrimSpace(name)
 	if !validName(name) {
 		return VideoDetail{}, fmt.Errorf("%w: 文件名无效", ErrInvalid)
@@ -101,7 +109,6 @@ func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID,
 	if _, err := s.store.db.ExecContext(ctx, "UPDATE videos SET file_name = ? WHERE entry_id = ?", name, video.EntryID); err != nil {
 		return VideoDetail{}, err
 	}
-	s.ScanInBackground(ctx, actor, library.ID)
 	return s.Video(ctx, actor, videoID)
 }
 
@@ -190,6 +197,16 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 	library, err := s.library(ctx, actor, show.LibraryID)
 	if err != nil {
 		return ShowDetail{}, err
+	}
+	unlock := s.lockRename(ctx, actor, library.ID)
+	defer unlock()
+	c, err = s.loadCatalog(ctx, actor)
+	if err != nil {
+		return ShowDetail{}, err
+	}
+	show, ok = c.shows[showID]
+	if !ok || len(show.episodes) == 0 {
+		return ShowDetail{}, ErrNotFound
 	}
 	name = strings.TrimSpace(name)
 	if !validName(name) {
@@ -280,7 +297,6 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 			return ShowDetail{}, err
 		}
 	}
-	s.ScanInBackground(ctx, actor, library.ID)
 	return s.Show(ctx, actor, showID)
 }
 
@@ -293,4 +309,17 @@ func (s *Service) namedByNFO(ctx context.Context, table, id string) bool {
 	}
 	var fields nfoFields
 	return json.Unmarshal([]byte(document), &fields) == nil && fields.Title != ""
+}
+
+// lockRename shares the scan's exclusion boundary for the entire file/catalog
+// mutation and response. Always request a fresh scan after unlocking: a scan
+// requested while we held the lock may have coalesced into the "again" flag,
+// even when this rename failed validation or rolled its file changes back.
+func (s *Service) lockRename(ctx context.Context, actor accounts.User, libraryID string) func() {
+	lock := s.scanLock(libraryID)
+	lock.Lock()
+	return func() {
+		lock.Unlock()
+		s.ScanInBackground(ctx, actor, libraryID)
+	}
 }

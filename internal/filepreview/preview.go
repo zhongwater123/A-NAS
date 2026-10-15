@@ -5,14 +5,17 @@ package filepreview
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,6 +33,7 @@ type Source interface {
 type Image struct {
 	Data        []byte
 	ContentType string
+	ETag        string
 }
 
 type cached struct {
@@ -40,6 +44,8 @@ type cached struct {
 type Service struct {
 	source Source
 	worker mediaworker.Worker
+	mu     sync.Mutex
+	disk   *diskCache
 	gate   chan struct{}
 	cache  map[string]cached
 	bytes  int
@@ -60,45 +66,51 @@ func kind(name string) string {
 	return ""
 }
 
-// Render keeps at most one decode in flight and 32 MiB / 64 previews in memory.
-// No filenames, image data or decoded output are written into users' folders.
+// NewWithCache adds a disposable, bounded cache in the product state directory.
+func NewWithCache(source Source, worker mediaworker.Worker, directory string) (*Service, error) {
+	disk, err := openDiskCache(directory)
+	if err != nil {
+		return nil, err
+	}
+	service := New(source, worker)
+	service.disk = disk
+	return service, nil
+}
+
+// Render rechecks source access even on cache hits. Only cache misses wait for
+// the decoder; the decode timeout starts after the cancellable queue wait.
 func (s *Service) Render(ctx context.Context, actor accounts.User, id string, size int) (Image, error) {
 	if size != 320 && size != 1600 {
 		return Image{}, mediaworker.ErrInvalid
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return Image{}, err
+	}
+	content, key, format, err := s.open(ctx, actor, id, size)
+	if err != nil {
+		return Image{}, err
+	}
+	content.Reader.Close()
+	if hit, ok := s.lookup(key); ok {
+		return hit, nil
+	}
 	select {
 	case s.gate <- struct{}{}:
 		defer func() { <-s.gate }()
 	case <-ctx.Done():
 		return Image{}, ctx.Err()
 	}
-	content, err := s.source.OpenContent(ctx, actor, id)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	// Reopen after waiting: permissions, source revision, or the file itself may
+	// have changed in the queue. Queued requests hold no source descriptors.
+	content, key, format, err = s.open(ctx, actor, id, size)
 	if err != nil {
 		return Image{}, err
 	}
 	defer content.Reader.Close()
-	format := kind(content.Name)
-	if format == "" {
-		return Image{}, ErrUnsupported
-	}
-	info, err := content.Reader.Stat()
-	if err != nil {
-		return Image{}, err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.Mode().IsRegular() {
-		return Image{}, ErrUnsupported
-	}
-	// fstat catches SMB edits even before the next directory listing. ctime
-	// also detects replacements or edits that preserve size and mtime.
-	key := fmt.Sprintf("%s/%s/%s/%d/%d/%d/%d/%d", actor.ID, id, format, size, stat.Dev, stat.Ino, stat.Ctim.Nano(), info.Size())
-	s.clock++
-	if hit, ok := s.cache[key]; ok {
-		hit.used = s.clock
-		s.cache[key] = hit
-		return hit.image, nil
+	if hit, ok := s.lookup(key); ok {
+		return hit, nil
 	}
 	if s.worker == nil {
 		return Image{}, mediaworker.ErrUnavailable
@@ -122,9 +134,100 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	if err != nil {
 		return Image{}, err
 	}
-	config, decodedFormat, decodeErr := image.DecodeConfig(bytes.NewReader(result.Data))
-	if decodeErr != nil || "image/"+decodedFormat != result.ContentType || len(result.Data) > 12<<20 || config.Width <= 0 || config.Height <= 0 || config.Width*config.Height > 16_000_000 {
+	if !validImage(result) {
 		return Image{}, mediaworker.ErrUnreadable
+	}
+	// A writer can edit an open source while the worker is decoding. Do not
+	// associate that result with either revision; the next request retries.
+	after, err := content.Reader.Stat()
+	if err != nil {
+		return Image{}, err
+	}
+	if revisionKey(actor.ID, id, format, size, after) != key {
+		return Image{}, mediaworker.ErrUnreadable
+	}
+	result.ETag = imageTag(key, result.Data)
+	s.remember(key, result)
+	if s.disk != nil {
+		s.disk.put(key, result.Data)
+	}
+	return result, nil
+}
+
+func (s *Service) open(ctx context.Context, actor accounts.User, id string, size int) (files.Content, string, string, error) {
+	content, err := s.source.OpenContent(ctx, actor, id)
+	if err != nil {
+		return files.Content{}, "", "", err
+	}
+	format := kind(content.Name)
+	info, err := content.Reader.Stat()
+	if err == nil && (format == "" || !info.Mode().IsRegular()) {
+		err = ErrUnsupported
+	}
+	key := ""
+	if err == nil {
+		key = revisionKey(actor.ID, id, format, size, info)
+		if key == "" {
+			err = ErrUnsupported
+		}
+	}
+	if err != nil {
+		content.Reader.Close()
+		return files.Content{}, "", "", err
+	}
+	return content, key, format, nil
+}
+
+func revisionKey(actor, id, format string, size int, info os.FileInfo) string {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	// Version the renderer as well as the source. ctime catches SMB writes that
+	// preserve size and mtime; account identity prevents cross-user cache reuse.
+	identity := fmt.Sprintf("preview-v1/%q/%q/%s/%d/%d/%d/%d/%d/%d", actor, id, format, size, stat.Dev, stat.Ino, stat.Ctim.Nano(), info.ModTime().UnixNano(), info.Size())
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+}
+
+func imageTag(key string, data []byte) string {
+	return fmt.Sprintf("\"%s-%x\"", key, sha256.Sum256(data))
+}
+
+func validImage(result Image) bool {
+	config, format, err := image.DecodeConfig(bytes.NewReader(result.Data))
+	return err == nil && "image/"+format == result.ContentType && len(result.Data) <= 12<<20 && config.Width > 0 && config.Height > 0 && int64(config.Width)*int64(config.Height) <= 16_000_000
+}
+
+func (s *Service) lookup(key string) (Image, bool) {
+	s.mu.Lock()
+	s.clock++
+	if hit, ok := s.cache[key]; ok {
+		hit.used = s.clock
+		s.cache[key] = hit
+		s.mu.Unlock()
+		return hit.image, true
+	}
+	s.mu.Unlock()
+	if s.disk != nil {
+		if data := s.disk.get(key); data != nil {
+			_, format, err := image.DecodeConfig(bytes.NewReader(data))
+			result := Image{Data: data, ContentType: "image/" + format, ETag: imageTag(key, data)}
+			if err == nil && validImage(result) {
+				s.remember(key, result)
+				return result, true
+			}
+		}
+	}
+	return Image{}, false
+}
+
+func (s *Service) remember(key string, result Image) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock++
+	if old, ok := s.cache[key]; ok {
+		s.bytes -= len(old.image.Data)
+		delete(s.cache, key)
 	}
 	for len(s.cache) >= 64 || s.bytes+len(result.Data) > 32<<20 {
 		oldestKey := ""
@@ -139,5 +242,4 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	}
 	s.cache[key] = cached{image: result, used: s.clock}
 	s.bytes += len(result.Data)
-	return result, nil
 }
