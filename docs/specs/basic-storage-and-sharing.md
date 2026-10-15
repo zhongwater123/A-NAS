@@ -73,6 +73,7 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - 产品服务只监听 `127.0.0.1`。本地 Kiosk 与受控 SSH 隧道直接访问；安装 Caddy 后，局域网浏览器经 80 端口以 HTTP 访问（[局域网 Web 访问](lan-web-access.md)）。
 - `401`、`403`、`409`、计划过期、卷离线、空间不足与需人工处理使用统一 JSON 错误结构。
 - SMART、温度、容量、占用、文件系统、数据卷角色与不可初始化原因可由磁盘接口读取。
+- SMART 与温度由 Host Agent 在后台读取，每块盘至多每 10 分钟一次，只读健康结论与温度；处于待机的硬盘不被唤醒，沿用上次的结果，超过 24 小时没有新结果时显示为未知。磁盘接口和文件请求都不等待 smartctl，文件请求前的数据卷确认也不读取主机状态（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。
 
 ## 验收
 
@@ -100,3 +101,4 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [`web/src/files/FileViewer.tsx`](../../web/src/files/FileViewer.tsx)：文件管理的图片与 PDF 预览
 - [`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut`](../../internal/httpapi/product_test.go)：本机会话只授予直接回环连接、跨越 12 小时、退出后失效
 - [本地控制台会话过期调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)
+- [`internal/hoststate/linux/smart_test.go`](../../internal/hoststate/linux/smart_test.go)：SMART 不阻塞状态读取、10 分钟间隔、待机硬盘沿用上次结果

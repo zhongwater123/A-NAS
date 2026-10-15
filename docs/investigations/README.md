@@ -30,6 +30,7 @@
 - [2026-10-14：视频缩略图重访重复解码与队列阻塞](2026-10-14-file-preview-cache.md)（fixed locally；Experimental NAS verification pending）
 
 - [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
+- [2026-10-15：Host Agent 每次请求都读 SMART，读盘超时被杀](2026-10-15-host-agent-smart-on-every-request.md)（fixed locally；Experimental NAS verification pending）
 
 - [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed locally；系统回归通过）
 
