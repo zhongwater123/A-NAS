@@ -365,7 +365,6 @@ button { font: inherit; }
 .desktop-icon.icon-photos svg { width: 42px; height: 42px; }
 .dock-icon.icon-photos svg { width: 32px; height: 32px; }
 .launcher-icon.icon-photos svg { width: 36px; height: 36px; }
-.icon-vm { background: linear-gradient(155deg, #7e9cff, #4e69de); }
 /* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
 .icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
 .icon-music { background: linear-gradient(155deg, #ff506d, #d92471); }
