@@ -32,9 +32,22 @@ def decide(messages):
         return {"text": "TOOL_RESULT: " + text_of(last.get("content"))[:600]}
     user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
     said = text_of(user.get("content")).strip()
+    if said.startswith("Review the conversation above"):
+        # Hermes's background review: replay a "REVIEW CALL <tool> <json>" the conversation planted.
+        planned = next((t for t in (text_of(m.get("content")).strip() for m in messages if m.get("role") == "user")
+                        if t.startswith("REVIEW CALL ")), "")
+        if planned:
+            return decide([{"role": "user", "content": planned[len("REVIEW "):]}])
     if said.startswith("CALL "):
         _, name, *rest = said.split(" ", 2)
-        return {"tool": name, "args": rest[0] if rest else "{}"}
+        args = rest[0] if rest else "{}"
+        # Hermes appends system notes to some user messages (a first turn, changed skills);
+        # the arguments are only the JSON object the line starts with.
+        try:
+            args = json.dumps(json.JSONDecoder().raw_decode(args)[0], ensure_ascii=False)
+        except ValueError:
+            pass
+        return {"tool": name, "args": args}
     if said.startswith("SLEEP "):
         return {"text": "ok", "sleep": float(said.split()[1])}
     return {"text": "ok"}
