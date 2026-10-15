@@ -596,9 +596,9 @@ Hermes 运行环境是可选的：
 
 系统测试镜像为此增加了 `tini`、`socat`、`ripgrep`（[`build-system-test-image.sh`](../../scripts/build-system-test-image.sh)）。
 
-Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh) 代替。它按 [`acl.go`](../../internal/hostops/linux/acl.go) 的写法建目录与 ACL：属主 `root:root`、不带 setgid、`setfacl --set` 写入完整 ACL，保留名上的非目录先挪开。spike 的 [`setup.sh`](../../ai/assistant-spike/setup.sh) 也改为用它的 `spaces` 子命令建空间，不再手写 ACL；装上助手的部分拆成 [`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)，成员写入的样本文件拆成 [`seed.sh`](../../ai/assistant-spike/seed.sh)，两种环境共用。
+Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh) 代替。它按 [`acl.go`](../../internal/hostops/linux/acl.go) 的写法建目录与 ACL：属主 `root:root`、不带 setgid、`setfacl --set` 写入完整 ACL，保留名上的非目录先挪开，Agent空间位置上不归 root 所有的目录也挪开。它与 `assistant-install.sh` **只能在一次性的 spike 与系统测试容器中运行，不能在实验 NAS 上跑**（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）：它们以 root 按路径 `chown`、`setfacl`，其中包括成员可写的共享空间，还往产品服务自己的目录里写令牌，这些操作都会跟随链接，控制这些目录的人就能借此拿到 root。spike 的 [`setup.sh`](../../ai/assistant-spike/setup.sh) 也改为用它的 `spaces` 子命令建空间，不再手写 ACL；装上助手的部分拆成 [`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)，成员写入的样本文件拆成 [`seed.sh`](../../ai/assistant-spike/seed.sh)，两种环境共用。
 
-结果（开发机，带运行环境）：系统测试 213 项全部通过，其中助手一节 84 项。alice 的沙箱探针 39 项（含 `toolsets-check.py`）全部通过；执行层测试 15 项全部通过；alice 的助手以她的真实 UID（20101）运行，经产品服务的套接字回答，读到自己的文件，第一次模型请求就带 A-NAS 的 MCP 工具。spike 自己的沙箱换成新布局后，探针与执行层测试也全部通过。
+结果（开发机，带运行环境）：系统测试 220 项全部通过，其中助手一节 91 项。alice 的沙箱探针 39 项（含 `toolsets-check.py`）全部通过；执行层测试 15 项全部通过；alice 的助手以她的真实 UID（20101）运行，经产品服务的套接字回答，读到自己的文件，第一次模型请求就带 A-NAS 的 MCP 工具。spike 自己的沙箱换成新布局后，探针与执行层测试也全部通过。
 
 ### 与手搭布局的差异
 
@@ -618,20 +618,18 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 - 文件放到 `.a-nas-trash/<账号>/<原文件夹>/<原名>`；
 - 已有同名文件时，按 `recycle:versions` 命名为 `Copy #1 of <原名>`。
 
-实测：`计划.md` 回到原名；`笔记/a.md` 连续替换两次后，Web 回收站有 `a.md` 与 `Copy #1 of a.md`，原文件夹都是“笔记”。
+实测：`计划.md` 回到原名。成员在 Web 上建的文件夹“笔记”中，`a.md` 连续替换两次后，Web 回收站有 `a.md` 与 `Copy #1 of a.md`，原文件夹都是“笔记”且仍在（`originalGone: false`）；在 Web 上恢复 `a.md`，它回到“笔记/”。
+
+但 Web 回收站只在导入时按路径在索引中查一次原文件夹（`files.Service.importSambaTrashFile`）：查不到就记为原文件夹已不在，恢复时落到空间根目录。broker 自己新建的文件夹没有经过 Web，被列出之前不在索引中。实测：broker 建的“草稿”中的文件被替换后，回收站记为 `originalPath: 草稿`、`originalGone: true`，恢复回到了根目录。这是 spike 的 broker 像 SMB 一样直接写盘造成的；A-NAS 中执行经文件服务进行，它新建的文件夹与回收站条目直接写进索引，不依赖导入。
 
 ### 管理员的助手
 
-管理员的助手沙箱带着 `a-nas-admins`：owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`。原因是 systemd 设了 `User=` 就按 `/etc/group` 加上该账号的全部附加组（`initgroups`），而 `SupplementaryGroups=` 只能再加、不能去掉。所以 ADR 0022 决定 2 中“附加组只有 `a-nas-users`（不带 `a-nas-admins`）”在 systemd 单元中做不到。
-
-目前没有影响：
+管理员的助手沙箱带着 `a-nas-admins`：owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`。原因是 systemd 设了 `User=` 就按 `/etc/group` 加上该账号的全部附加组（`initgroups`），而 `SupplementaryGroups=` 只能再加、不能去掉。目前它不授予任何东西：
 - 数据卷上没有任何 ACL 用到 `a-nas-admins`；
 - Samba 的共享按 `@a-nas-users` 授权；
 - 文件代理给管理员工作进程的附加组是它自己显式设定的（`internal/filebroker/server.go`），不读 `/etc/group`。
 
-实际成立的保证是：沙箱能触及的一切都不授予 `a-nas-admins`。探针对管理员的沙箱检查这一条（`getfacl -R` 覆盖 `/nas` 与 Hermes 主目录），成员的沙箱仍检查不带这个组。
-
-要么 ADR 改成这个说法，并约定数据卷上永远不用这个组授权；要么在身份层面不让管理员的 Linux 账号进入 `a-nas-admins`。后者要先确认 `/etc/group` 中这条成员关系没有别的用途，需要决定。
+用户决定照旧：ADR 0022 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查，以后有人给这个组开权限就会报警。探针对管理员的沙箱以 `getfacl -R` 扫描沙箱中的空间（`/nas`）、Hermes 主目录、`/run`、`/etc/hermes`、`/etc/a-nas-assistant` 与 `/opt/a-nas`，属组、ACL 条目或默认 ACL 条目是 `a-nas-admins` 都算失败；只读的系统目录（`/usr` 等）不在扫描范围内。成员的沙箱仍检查不带这个组。
 
 ### Agent空间
 
@@ -644,16 +642,11 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 - bob 在文件系统与 Web 上都读得到，写不进她的子目录；Web 上传返回非 201；
 - 任何成员都不能直接写 `Agent空间` 本身。
 
-**问题**：共享空间根目录对全体成员可写，所以其中的条目谁都能改名或删除（Web 的删除是移进自己的回收站），Agent空间也不例外。实测 bob 经 Web 把它改名为 `Agent空间-bob`，返回 HTTP 200。之后的后果是：
-- alice 的助手发布时找不到这个目录；
-- 如果 bob 再建一个同名目录（继承共享空间的 `rwx`），alice 的助手就会写进 bob 控制的目录。
+共享空间根目录对全体成员可写，所以其中的条目谁都能改名，Agent空间也不例外：实测 bob 经 Web 把它改名为 `Agent空间-bob`，返回 HTTP 200。删除则不行：Web 的删除是把它移进 bob 的回收站，跨目录移动目录需要对它本身有写权限，bob 只有 `r-x`，实测被拒绝，目录仍在。改名之后，bob 可以再建一个同名目录（继承共享空间的 `rwx`）并在其中建 `alice`，alice 的助手就会写进 bob 控制的目录。
 
-可选的做法：
-1. Host Agent 把 `Agent空间` 与成员子目录当作保留名纳入定时对账：缺失或被换掉时重建，把冒名的挪开，与回收站目录相同。同时 Product Service 拒绝在 Web 上改名、移动或删除它们。SMB 无法单独禁止改名，只能靠对账修复。
-2. 给共享空间根目录加 sticky 位：根目录下的条目只有属主能改名、删除，这会改变共享空间顶层的协作方式。
-3. 把 Agent空间做成单独的空间（子卷），不放在共享空间根目录下。
+用户决定（#115 评审中）：Agent空间与成员子目录是保留名。产品服务拒绝在 Web 上对它们改名、移动与删除；SMB 上的改名无法拒绝，由 Host Agent 的定时对账修复。修复时位置上的目录如果不归 root 所有，就是冒名的，要连同其中他人建的子文件夹一起挪开，再按原 ACL 重建；不能像现有的空间对账那样原地接管（`chown` 加顶层 ACL），否则 bob 事先建的子文件夹会保持他可写。
 
-需要决定；系统测试目前只把改名的结果记为 INFO。
+`assistant-layout.sh` 已按此修复（`ensure_dir` 的 `owned`）。实测：bob 在文件系统上改名（相当于 SMB）并建了 `Agent空间/alice`，修复后冒名目录被挪成 `Agent空间.displaced-<时间>`，新的 `Agent空间` 与 `Agent空间/alice` 归 root，bob 写不进 alice 的子目录。被改名的原目录 `Agent空间-bob` 仍归 root，已发布的文件都在其中；修复时可以凭只有 root 能写的扩展属性（`trusted.*`）认出它并改回原名，留给正式实现。产品服务对 Web 改名的拒绝还没有实现，系统测试把 Web 改名的结果记为 INFO。
 
 ### 助手目录与配额
 
@@ -669,15 +662,15 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 
 ### Host Agent 需要新增的类型化操作
 
-`assistant-layout.sh` 的每个子命令对应一项。正式实现与现有的空间对账一样：以 `openat2(RESOLVE_NO_SYMLINKS)` 打开目录，只对打开的文件操作；纳入启动时与每 15 分钟的漂移修复。
+`assistant-layout.sh` 的 4 个子命令覆盖其中 6 项：`quota` 对应开启卷配额与上限，`prepare` 对应建立助手目录、Agent空间、成员配置、令牌与启用实例，`remove` 对应删除；`spaces` 只是 spike 自己建空间用。令牌轮换没有实现。正式实现与现有的空间对账一样：以 `openat2(RESOLVE_NO_SYMLINKS)` 打开目录，只对打开的文件操作（文件用 `O_NOFOLLOW`）；纳入启动时与每 15 分钟的漂移修复。
 
 | 操作 | 参数 | 做什么 | 幂等与漂移 | 失败与回滚 |
 |---|---|---|---|---|
 | 开启卷配额 | 数据卷 | `btrfs quota enable --simple`，在卷初始化或升级时执行一次 | 已开启则跳过 | 不支持的内核拒绝并报告；关闭配额会丢掉全部限额，不做自动回滚 |
 | 建立助手目录 | 账号、容量上限 | 容器 `assistant`（`a-nas-users` 仅穿过）；子卷 `assistant/<账号>`（本人仅穿过）；`files/` 与 `hermes/`（本人 `rwx` 并继承）；`hermes/` 中的挂载点（`config.yaml`、`.env`、`SOUL.md`、`active_profile` 与 `hooks/`、`plugins/`、`profiles/`）；qgroup 上限 | 存在则只对齐属主与 ACL；挂载点位置上是别的东西就挪开重建 | 新建的子卷在后续步骤失败时删除 |
-| 建立 Agent空间 | 全部账号 | `共享空间/Agent空间` 与每个账号的子目录（见上文） | 保留名：缺失或被替换时重建（见上文的可选做法） | 只增不删 |
+| 建立 Agent空间 | 全部账号 | `共享空间/Agent空间` 与每个账号的子目录（见上文） | 保留名：缺失时重建；位置上是不归 root 所有的目录或非目录时，连同其中内容挪开再重建，不原地接管 | 只增不删；挪开的内容保留，不删除 |
 | 写成员配置 | 账号 | `/etc/a-nas-assistant/members/<账号>/config.yaml`（`skills.external_dirs` 与 `mcp_servers`）与 `anas-member` 技能 | 原子替换 | 写临时文件，成功后改名 |
-| 会话令牌 | 账号；轮换 | `/etc/a-nas-assistant/tokens/<账号>.env`（root `0600`），已存在则保留；轮换后重启实例 | 已存在不覆盖 | 产品服务的副本与之同步写入；spike 中直接写到产品服务的运行目录（`a-nas`、`0600`），正式实现可由类型化响应把令牌交给产品服务，由它写进自己的文件 |
+| 会话令牌 | 账号；轮换（spike 未实现） | `/etc/a-nas-assistant/tokens/<账号>.env`（root `0600`），已存在则保留；轮换时换新令牌并重启实例 | 已存在不覆盖 | 令牌经类型化响应交给产品服务，由产品服务写进自己的文件；Host Agent 不以 root 写进产品服务的目录（spike 这样做，只适合一次性容器） |
 | 启用或停用实例 | 账号 | 启用或停用 `anas-assistant-api@<账号>.socket`（`SocketUser=a-nas`、`0600`、`RemoveOnStop`） | `enable --now` 与 `disable --now` 本身幂等 | 停用同时停止实例 |
 | 删除账号的助手 | 账号 | 停止实例与套接字，删除令牌、成员配置与 `assistant/<账号>` 子卷 | 不存在即视为完成 | `Agent空间/<账号>` 与回收站随 [#26](https://github.com/zhongwater123/A-NAS/issues/26) 决定 |
 
