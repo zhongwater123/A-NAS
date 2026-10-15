@@ -1,12 +1,13 @@
 import { Check, ChevronDown, ChevronUp, EyeOff, PawPrint, Pencil, UserRound, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { messageOf } from "./model";
-import { assignFace, avatarURL, listPeople, type PhotoAsset, type PhotoAssetPerson, type PhotoPerson } from "./photosApi";
+import { type Caller, libraryName, messageOf } from "./model";
+import { assignFace, avatarURL, listPeople, thumbnailURL, type PhotoAsset, type PhotoAssetPerson, type PhotoLabelCount, type PhotoLibrary, type PhotoPerson } from "./photosApi";
 
 // People and pets (docs/architecture/photo-people.md): local AI finds the same
-// face, cat or dog again across a library's photos, and members name, merge
-// and correct who is who. Everything here is per library.
+// face or dog again across a library's photos, and members name, merge and
+// correct who is who. Everything here is per library. Cats are not told
+// apart; their AI group stands among the pets instead.
 
 const kindOfFace: Record<PhotoAssetPerson["kind"], PhotoPerson["kind"]> = { face: "person", cat: "cat", dog: "dog" };
 
@@ -38,22 +39,27 @@ interface RowProps {
   onExpand: (expanded: boolean) => void;
   onShowHidden: (shown: boolean) => void;
   onOpen: (person: PhotoPerson) => void;
+  // cats is AI 聚合's 猫 group, which ends the row when there is one.
+  cats?: PhotoLabelCount;
+  onOpenCats: (cats: PhotoLabelCount) => void;
 }
 
-// PeopleRow is AI 聚合's 人物与宠物: round faces, named people first. People
-// the members hid stay out of it until asked for.
-export function PeopleRow({ people, perRow, expanded, showHidden, onExpand, onShowHidden, onOpen }: RowProps) {
+// PeopleRow is AI 聚合's 人物与宠物: round faces, named people first, then the
+// cats as one group. People the members hid stay out of it until asked for.
+export function PeopleRow({ people, perRow, expanded, showHidden, onExpand, onShowHidden, onOpen, cats, onOpenCats }: RowProps) {
   const visible = people.filter((person) => !person.hidden);
   const hidden = people.filter((person) => person.hidden);
-  const shown = expanded ? visible : visible.slice(0, perRow);
+  const room = Math.max(1, perRow - (cats ? 1 : 0));
+  const shown = expanded ? visible : visible.slice(0, room);
   return (
     <section className="ph-browse ph-people" aria-label="人物与宠物">
       <header><h3>人物与宠物</h3></header>
       <div className="ph-people-grid">
         {shown.map((person) => <PersonCard key={person.id} person={person} onOpen={onOpen} />)}
+        {cats && <GroupCard group={cats} onOpen={() => onOpenCats(cats)} />}
       </div>
       <div className="ph-people-more">
-        {visible.length > perRow && (
+        {visible.length > room && (
           <button type="button" className="ph-browse-more" onClick={() => onExpand(!expanded)}>
             {expanded ? <><ChevronUp />收起</> : <><ChevronDown />展开全部 {visible.length} 位</>}
           </button>
@@ -80,6 +86,58 @@ function PersonCard({ person, onOpen }: { person: PhotoPerson; onOpen: (person: 
       <strong>{person.name || (person.canChange ? "添加名字" : personName(person))}</strong>
       <small>{person.photos} 张</small>
     </button>
+  );
+}
+
+// GroupCard is an AI group among the pets: the group's cover, marked with a
+// paw, since it holds every photo of that kind of animal rather than one.
+function GroupCard({ group, onOpen }: { group: PhotoLabelCount; onOpen: () => void }) {
+  return (
+    <button type="button" className="ph-person ph-pet-group" aria-label={`打开 ${group.name}`} onClick={onOpen}>
+      <span className="ph-group-cover">
+        <span className="ph-avatar" style={{ width: personWidth, height: personWidth }}>
+          <img src={thumbnailURL(group.coverId)} alt="" loading="lazy" draggable={false} />
+        </span>
+        <span className="ph-group-mark" aria-hidden="true"><PawPrint /></span>
+      </span>
+      <strong>{group.name}</strong>
+      <small>{group.photos} 张</small>
+    </button>
+  );
+}
+
+// PeopleSettings turns people and pets on or off for each library the
+// caller has: the owner of a private library decides, an administrator for
+// the shared one.
+export function PeopleSettings({ caller, onSet, onClose }: { caller: Caller; onSet: (library: PhotoLibrary, on: boolean) => void; onClose: () => void }) {
+  const libraries = caller.libraries.filter((library) => !library.viewing);
+  return (
+    <div className="ph-dialog-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="ph-dialog ph-people-settings" role="dialog" aria-modal="true" aria-label="人物与宠物设置" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+        <header>
+          <h3>人物与宠物</h3>
+          <small>本地 AI 在这台 NAS 上认出反复出现的人和狗，每个图库分别设置</small>
+          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}><X /></button>
+        </header>
+        <div className="ph-switch-list">
+          {libraries.map((library) => {
+            const on = library.people !== false;
+            const label = libraryName(caller, library);
+            return (
+              <div className="ph-switch-row" key={library.id}>
+                <span>
+                  <strong>{label}</strong>
+                  <small>{library.canSetPeople ? (on ? "已开启" : "已关闭，不识别新照片") : `${on ? "已开启" : "已关闭"} · 由管理员设置`}</small>
+                </span>
+                <button type="button" role="switch" aria-checked={on} aria-label={`${label}的人物与宠物`} disabled={!library.canSetPeople}
+                  className={`ph-switch${on ? " on" : ""}`} onClick={() => onSet(library, !on)}><span /></button>
+              </div>
+            );
+          })}
+        </div>
+        <p className="ph-people-settings-note">关闭会删除这个图库里识别出的人脸与宠物；起的名字和做过的更正都会保留，重新开启后随识别结果回来。</p>
+      </div>
+    </div>
   );
 }
 

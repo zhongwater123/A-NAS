@@ -40,9 +40,12 @@ const (
 	// OpDetectFaces finds the faces in an image and embeds each; hanging up
 	// cancels it too.
 	OpDetectFaces = "detect_faces"
+	// OpEmbedAnimals embeds the animals at Boxes in an image, to tell one
+	// pet from another; hanging up cancels it too.
+	OpEmbedAnimals = "embed_animals"
 	// OpRelease frees memory: What is "detector" to drop the background
-	// models (the detector and the face models), or "all" for the Worker to
-	// exit after answering.
+	// models (the detector, the face models and the animal model), or "all"
+	// for the Worker to exit after answering.
 	OpRelease = "release"
 )
 
@@ -60,6 +63,8 @@ type Request struct {
 	Op   string `json:"op"`
 	Text string `json:"text,omitempty"`
 	What string `json:"what,omitempty"`
+	// Boxes are the animals to embed, [x0, y0, x1, y1] as fractions.
+	Boxes [][4]float64 `json:"boxes,omitempty"`
 }
 
 type Response struct {
@@ -76,7 +81,11 @@ type Response struct {
 	FaceModel string `json:"faceModel,omitempty"`
 	// Faces answer detect_faces.
 	Faces []WireFace `json:"faces,omitempty"`
-	Error *WireError `json:"error,omitempty"`
+	// AnimalModel names the animal model, in answer to info.
+	AnimalModel string `json:"animalModel,omitempty"`
+	// Vectors answer embed_animals, one per box, each as Vector is.
+	Vectors [][]byte   `json:"vectors,omitempty"`
+	Error   *WireError `json:"error,omitempty"`
 }
 
 // WireFace is one face as detect_faces answers it: box and landmarks as
@@ -93,7 +102,8 @@ type WireError struct {
 	Message string `json:"message"`
 }
 
-// Client implements photos.Embedder, photos.Detector and photos.FaceDetector.
+// Client implements photos.Embedder, photos.Detector, photos.FaceDetector and
+// photos.AnimalEmbedder.
 type Client struct {
 	SocketPath string
 	// Timeout bounds one call, including loading the model after the Worker
@@ -102,9 +112,10 @@ type Client struct {
 }
 
 var (
-	_ photos.Embedder     = Client{}
-	_ photos.Detector     = Client{}
-	_ photos.FaceDetector = Client{}
+	_ photos.Embedder       = Client{}
+	_ photos.Detector       = Client{}
+	_ photos.FaceDetector   = Client{}
+	_ photos.AnimalEmbedder = Client{}
 )
 
 func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
@@ -116,7 +127,7 @@ func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 		return photos.EmbedderInfo{}, errors.New("AI worker described no model")
 	}
 	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector,
-		Faces: response.FaceModel}, nil
+		Faces: response.FaceModel, Animals: response.AnimalModel}, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {
@@ -181,6 +192,32 @@ func (c Client) DetectFaces(ctx context.Context, image *os.File) (string, []phot
 		faces = append(faces, face)
 	}
 	return response.Model, faces, nil
+}
+
+func (c Client) EmbedAnimals(ctx context.Context, image *os.File, boxes [][4]float32) (string, [][]float32, error) {
+	request := Request{Op: OpEmbedAnimals, Boxes: make([][4]float64, len(boxes))}
+	for i, box := range boxes {
+		for j, value := range box {
+			request.Boxes[i][j] = float64(value)
+		}
+	}
+	response, err := c.call(ctx, request, image)
+	if err != nil {
+		return "", nil, err
+	}
+	if response.Model == "" {
+		return "", nil, errors.New("AI worker named no animal model")
+	}
+	if len(response.Vectors) != len(boxes) {
+		return "", nil, errors.New("AI worker returned a vector per box it was not sent")
+	}
+	vectors := make([][]float32, len(response.Vectors))
+	for i, encoded := range response.Vectors {
+		if vectors[i], err = vectorOf(Response{Vector: encoded}); err != nil {
+			return "", nil, err
+		}
+	}
+	return response.Model, vectors, nil
 }
 
 func (c Client) Release(ctx context.Context, all bool) error {

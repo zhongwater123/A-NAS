@@ -41,6 +41,9 @@ type EmbedderInfo struct {
 	// Faces names the face models in the same way, or is empty when the
 	// Worker has none it can use.
 	Faces string
+	// Animals names the animal model in the same way, or is empty when the
+	// Worker has none it can use.
+	Animals string
 }
 
 // Detector is the AI Worker's object detector
@@ -125,9 +128,13 @@ type AIStatus struct {
 	ObjectModel string `json:"objectModel,omitempty"`
 	// FaceModel names the face models while the Worker has them.
 	FaceModel string `json:"faceModel,omitempty"`
+	// AnimalModel names the animal model while the Worker has it.
+	AnimalModel string `json:"animalModel,omitempty"`
 	// The counts cover the originals of the caller's visible photos. An
 	// original is ready once it has its vector and, while the Worker has a
-	// detector or face models, its detection and its face scan.
+	// detector or face models, its detection and, while a library with people
+	// on holds it, its face scan, and no pet scan waits while the Worker has
+	// an animal model.
 	Ready   int `json:"ready"`
 	Pending int `json:"pending"`
 	Failed  int `json:"failed"`
@@ -224,6 +231,7 @@ func pausedByPressure(reason string) bool {
 func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate) (processed bool, err error) {
 	detector, _ := embedder.(Detector)
 	faceDetector, _ := embedder.(FaceDetector)
+	animals, _ := embedder.(AnimalEmbedder)
 	// The input the last detection rendered ahead is used only if a
 	// detection comes next; otherwise its job goes back to the queue.
 	next := s.nextDetection
@@ -267,6 +275,9 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	if faceDetector == nil {
 		info.Faces = ""
 	}
+	if animals == nil {
+		info.Animals = ""
+	}
 	if err := s.requeueStale(ctx, info); err != nil {
 		return false, err
 	}
@@ -279,17 +290,17 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	}
 	job, err := s.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
-		if info.Detector == "" && info.Faces == "" {
+		if info.Detector == "" && info.Faces == "" && info.Animals == "" {
 			s.ai.set(AIIdle, "", info.Model)
 			return false, nil
 		}
 		// A long run of photos clusters as it goes, not only at its end.
-		if s.facesSinceClustering() >= clusterEvery {
+		if s.scansSinceClustering() >= clusterEvery {
 			return s.clusterPeople(ctx)
 		}
 		input := next
 		next = nil
-		return s.processDetection(ctx, detector, faceDetector, gate, info, input)
+		return s.processDetection(ctx, models{detector, faceDetector, animals}, gate, info, input)
 	}
 	if err != nil {
 		return false, err
@@ -324,17 +335,26 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 // that it stops soon after someone starts using the device.
 const gateWatchInterval = 200 * time.Millisecond
 
-// processDetection runs one ready detection job, face scan, or both for one
-// object on the enlarged input, the given one or else the next due. While the
-// Worker works, the next input is rendered, so the Worker's threads need not
-// wait for it (docs/architecture/photo-objects.md#资源策略). When gate closes
-// meanwhile, the work is cancelled and every job goes back to its place in
-// the queue without spending an attempt.
-func (s *Service) processDetection(ctx context.Context, detector Detector, faceDetector FaceDetector, gate Gate, info EmbedderInfo, input *detectionInput) (bool, error) {
-	detecting, facing := info.Detector != "", info.Faces != ""
+// models are the Worker's background models the runner may use.
+type models struct {
+	detector     Detector
+	faceDetector FaceDetector
+	animals      AnimalEmbedder
+}
+
+// processDetection runs one object's ready detection job, face scan and pet
+// scan, or those of them that are due, on the enlarged input, the given one
+// or else the next due. While the Worker works, the next input is rendered,
+// so the Worker's threads need not wait for it
+// (docs/architecture/photo-objects.md#资源策略). When gate closes meanwhile,
+// the work is cancelled and every job goes back to its place in the queue
+// without spending an attempt.
+func (s *Service) processDetection(ctx context.Context, m models, gate Gate, info EmbedderInfo, input *detectionInput) (bool, error) {
+	detector, faceDetector, animals := m.detector, m.faceDetector, m.animals
+	wanted := wantedScans{detecting: info.Detector != "", facing: info.Faces != "", petting: info.Animals != ""}
 	if input == nil {
 		var err error
-		input, err = s.claimDetection(ctx, detecting, facing)
+		input, err = s.claimDetection(ctx, wanted)
 		if errors.Is(err, sql.ErrNoRows) {
 			s.ai.set(AIIdle, "", info.Model)
 			s.releaseModels(ctx, detector, "")
@@ -362,13 +382,15 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 		return true, err
 	}
 	// A model the Worker lost since the input was claimed waits for it.
-	var objectsJob, facesJob *claimedJob
+	var objectsJob, facesJob, petsJob *claimedJob
 	for i := range jobs {
 		switch {
-		case jobs[i].derivation == detectionDerivation && detecting && detector != nil:
+		case jobs[i].derivation == detectionDerivation && wanted.detecting && detector != nil:
 			objectsJob = &jobs[i]
-		case jobs[i].derivation == facesDerivation && facing && faceDetector != nil:
+		case jobs[i].derivation == facesDerivation && wanted.facing && faceDetector != nil:
 			facesJob = &jobs[i]
+		case jobs[i].derivation == petsDerivation && wanted.petting && animals != nil:
+			petsJob = &jobs[i]
 		default:
 			if err := s.releaseJob(ctx, jobs[i]); err != nil {
 				return false, err
@@ -380,7 +402,7 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 	s.aiModelMu.Lock()
 	s.detectorLoaded = true
 	s.aiModelMu.Unlock()
-	if objectsJob == nil && facesJob == nil {
+	if objectsJob == nil && facesJob == nil && petsJob == nil {
 		_ = input.file.Close()
 		return false, nil
 	}
@@ -389,13 +411,14 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 	ahead := make(chan *detectionInput, 1)
 	go func() {
 		// A fault shows again at the next claim.
-		next, _ := s.claimDetection(ctx, detecting, facing)
+		next, _ := s.claimDetection(ctx, wanted)
 		ahead <- next
 	}()
-	var model, faceModel string
-	var boxes []Box
+	var model, faceModel, petModel string
+	var boxes, dogs []Box
 	var faces []Face
-	var detectErr, faceErr error
+	var petVectors [][]float32
+	var detectErr, faceErr, petErr error
 	if objectsJob != nil {
 		model, boxes, detectErr = detector.DetectObjects(detectCtx, input.file)
 	}
@@ -405,6 +428,29 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 			faceErr = err
 		} else {
 			faceModel, faces, faceErr = faceDetector.DetectFaces(detectCtx, input.file)
+		}
+	}
+	if petsJob != nil && detectCtx.Err() == nil {
+		// The dogs come from this round's detection, or else the stored one.
+		switch {
+		case objectsJob != nil && detectErr != nil:
+			petErr = detectErr
+		case objectsJob != nil:
+			dogs = s.dogsIn(model, boxes)
+		default:
+			dogs, petErr = s.storedDogs(ctx, petsJob.objectID)
+		}
+		petModel = info.Animals
+		if petErr == nil && len(dogs) > 0 {
+			corners := make([][4]float32, len(dogs))
+			for i, dog := range dogs {
+				corners[i] = [4]float32{dog.X0, dog.Y0, dog.X1, dog.Y1}
+			}
+			if _, err := input.file.Seek(0, io.SeekStart); err != nil {
+				petErr = err
+			} else {
+				petModel, petVectors, petErr = animals.EmbedAnimals(detectCtx, input.file, corners)
+			}
 		}
 	}
 	paused := stopWatching()
@@ -418,7 +464,7 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 	stop := func(err error) (bool, error) {
 		return false, errors.Join(err, s.returnDetection(context.WithoutCancel(ctx), next))
 	}
-	claimed := []*claimedJob{objectsJob, facesJob}
+	claimed := []*claimedJob{objectsJob, facesJob, petsJob}
 	every := func(do func(claimedJob) error) error {
 		var err error
 		for _, job := range claimed {
@@ -436,9 +482,10 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 		err := every(func(job claimedJob) error { return s.returnJob(ctx, job) })
 		s.releaseModels(ctx, detector, paused)
 		return stop(err)
-	case errors.Is(detectErr, ErrAIUnavailable) || errors.Is(faceErr, ErrAIUnavailable) ||
+	case errors.Is(detectErr, ErrAIUnavailable) || errors.Is(faceErr, ErrAIUnavailable) || errors.Is(petErr, ErrAIUnavailable) ||
 		(objectsJob != nil && detectErr == nil && model != info.Detector) ||
-		(facesJob != nil && faceErr == nil && faceModel != info.Faces):
+		(facesJob != nil && faceErr == nil && faceModel != info.Faces) ||
+		(petsJob != nil && petErr == nil && petModel != info.Animals):
 		// Look again next round: the Worker may have lost or changed a model.
 		s.forgetDetector()
 		return stop(every(func(job claimedJob) error { return s.releaseJob(ctx, job) }))
@@ -448,7 +495,21 @@ func (s *Service) processDetection(ctx context.Context, detector Detector, faceD
 		err = errors.Join(err, s.finishDetection(ctx, *objectsJob, model, boxes, detectErr))
 	}
 	if facesJob != nil {
-		err = errors.Join(err, s.finishFaces(ctx, *facesJob, faceModel, faces, faceErr, input.file))
+		// Faces are told from animals' by this round's detection, or else the
+		// stored one.
+		seen, seenErr := boxes, error(nil)
+		if objectsJob == nil || detectErr != nil {
+			_, seen, seenErr = s.storedDetection(ctx, facesJob.objectID)
+		}
+		if seenErr != nil {
+			// The scan waits for the catalog rather than keep an animal's face.
+			err = errors.Join(err, seenErr, s.releaseJob(ctx, *facesJob))
+		} else {
+			err = errors.Join(err, s.finishFaces(ctx, *facesJob, faceModel, withoutAnimalFaces(faces, seen), faceErr, input.file))
+		}
+	}
+	if petsJob != nil {
+		err = errors.Join(err, s.finishPets(ctx, *petsJob, petModel, dogs, petVectors, petErr, input.file))
 	}
 	return carryOn(err)
 }
@@ -561,12 +622,26 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, detectionDerivation, i
 	if info.Faces != "" && s.aiFaces != info.Faces {
 		if _, err := s.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
-SELECT object_id, derivation, 'pending', ?, ? FROM face_scans WHERE derivation = ? AND model <> ?
+SELECT sc.object_id, sc.derivation, 'pending', ?, ? FROM scans sc
+WHERE sc.derivation = ? AND sc.model <> ? AND `+inPeopleLibrary("sc.object_id")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, facesDerivation, info.Faces); err != nil {
 			return err
 		}
 	}
 	s.aiFaces = info.Faces
+	if info.Animals != "" && s.aiAnimals != info.Animals {
+		if _, err := s.db.ExecContext(ctx, `
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+SELECT sc.object_id, sc.derivation, 'pending', ?, ? FROM scans sc
+WHERE sc.derivation = ? AND sc.model <> ? AND `+inPeopleLibrary("sc.object_id")+`
+ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.Animals); err != nil {
+			return err
+		}
+		if err := s.enqueueMissingPets(ctx, s.objectCalibration.Model); err != nil {
+			return err
+		}
+	}
+	s.aiAnimals = info.Animals
 	return nil
 }
 
@@ -574,7 +649,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, facesDerivation, info.
 func (s *Service) forgetDetector() {
 	s.aiModelMu.Lock()
 	defer s.aiModelMu.Unlock()
-	s.aiModel, s.aiDetector, s.aiFaces = "", "", ""
+	s.aiModel, s.aiDetector, s.aiFaces, s.aiAnimals = "", "", "", ""
 }
 
 // knownModel is the Worker's model this service last worked for, or "" before
@@ -601,7 +676,8 @@ func (s *Service) noticeModel(model string) {
 
 // aiWorkWaiting reports whether the Worker has anything to do for model: a
 // label text still without its vector, an embedding job that is due, or a
-// detection job that is due while the Worker has a detector.
+// detection job, face or pet scan that is due while the Worker has its
+// models.
 func (s *Service) aiWorkWaiting(ctx context.Context, model string) (bool, error) {
 	if model == s.labels.Model {
 		s.labelIndex.mu.Lock()
@@ -612,14 +688,14 @@ func (s *Service) aiWorkWaiting(ctx context.Context, model string) (bool, error)
 		}
 	}
 	s.aiModelMu.Lock()
-	detecting, facing := s.aiDetector != "", s.aiFaces != ""
+	detecting, facing, petting := s.aiDetector != "", s.aiFaces != "", s.aiAnimals != ""
 	s.aiModelMu.Unlock()
 	now := formatTime(s.now())
 	var due bool
 	err := s.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?))
+SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?))
   AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
-		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, now, now).Scan(&due)
+		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, petting, petsDerivation, now, now).Scan(&due)
 	return due, err
 }
 
@@ -696,37 +772,41 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	}
 	state, reason, model := s.ai.get()
 	s.aiModelMu.Lock()
-	detector, faces := s.aiDetector, s.aiFaces
+	detector, faces, animals := s.aiDetector, s.aiFaces, s.aiAnimals
 	s.aiModelMu.Unlock()
-	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector, FaceModel: faces}
+	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector, FaceModel: faces,
+		AnimalModel: animals}
 	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
 		return AIStatus{}, err
 	}
 	if len(libraries) == 0 {
 		return status, nil
 	}
-	detecting, facing := detector != "", faces != ""
-	args := []any{detecting, facing, detecting, facing}
+	detecting, facing, petting := detector != "", faces != "", animals != ""
+	args := []any{detecting, facing, petting, detecting, facing, petting}
 	for _, lib := range libraries {
 		args = append(args, lib.ID)
 	}
 	args = append(args, embeddingDerivation, detectionDerivation, facesDerivation, embeddingDerivation, thumbnailDerivation,
-		detectionDerivation, facesDerivation)
+		detectionDerivation, facesDerivation, petsDerivation)
 	var total int
 	err = s.db.QueryRowContext(ctx, `
 SELECT COUNT(*), COUNT(CASE WHEN ready THEN 1 END), COUNT(CASE WHEN NOT ready AND failed THEN 1 END)
 FROM (
-  SELECT e.object_id IS NOT NULL AND (NOT ? OR d.object_id IS NOT NULL) AND (NOT ? OR f.object_id IS NOT NULL) AS ready,
-         IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed') OR (? AND g.state = 'failed'), 0) AS failed
-  FROM (SELECT DISTINCT object_id FROM assets
-        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)) a
+  SELECT e.object_id IS NOT NULL AND (NOT ? OR d.object_id IS NOT NULL) AND (NOT ? OR f.object_id IS NOT NULL OR NOT a.people)
+           AND (NOT ? OR p.object_id IS NULL) AS ready,
+         IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed') OR (? AND g.state = 'failed')
+           OR (? AND p.state = 'failed'), 0) AS failed
+  FROM (SELECT v.object_id, `+inPeopleLibrary("v.object_id")+` AS people FROM (SELECT DISTINCT object_id FROM assets
+        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)) v) a
   LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
   LEFT JOIN detections d ON d.object_id = a.object_id AND d.derivation = ?
-  LEFT JOIN face_scans f ON f.object_id = a.object_id AND f.derivation = ?
+  LEFT JOIN scans f ON f.object_id = a.object_id AND f.derivation = ?
   LEFT JOIN jobs j ON j.object_id = a.object_id AND j.derivation = ?
   LEFT JOIN jobs t ON t.object_id = a.object_id AND t.derivation = ?
   LEFT JOIN jobs k ON k.object_id = a.object_id AND k.derivation = ?
   LEFT JOIN jobs g ON g.object_id = a.object_id AND g.derivation = ?
+  LEFT JOIN jobs p ON p.object_id = a.object_id AND p.derivation = ?
 )`, args...).Scan(&total, &status.Ready, &status.Failed)
 	if err != nil {
 		return AIStatus{}, err

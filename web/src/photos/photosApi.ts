@@ -1,6 +1,17 @@
 import { request, uploadForm } from "../api";
 
-export interface PhotoLibrary { id: string; kind: "private" | "shared"; ownerUserId?: string; ownerName?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
+export interface PhotoLibrary {
+  id: string;
+  kind: "private" | "shared";
+  ownerUserId?: string;
+  ownerName?: string;
+  createdAt: string;
+  viewing?: { grantId: string; expiresAt: string };
+  // Whether the library recognises people and pets, and whether the caller
+  // may turn that on or off.
+  people?: boolean;
+  canSetPeople?: boolean;
+}
 export interface PhotoTrash { trashedAt: string; trashedBy: string; purgeAfter: string }
 export interface PhotoAsset {
   id: string;
@@ -74,6 +85,7 @@ export interface PhotoAIStatus {
   model?: string;
   objectModel?: string;
   faceModel?: string;
+  animalModel?: string;
   ready: number;
   pending: number;
   failed: number;
@@ -126,6 +138,10 @@ export const listPeople = async (viewing = "", hidden = false) =>
   (await request<{ items: PhotoPerson[] }>(`${base}/people${hidden || viewing ? "?" : ""}${[viewing && `viewing=${id(viewing)}`, hidden && "hidden=1"].filter(Boolean).join("&")}`)).items;
 export const listPersonPhotos = (personId: string, cursor = "", limit = 120) =>
   request<PhotoPage>(`${base}/people/${id(personId)}/assets?${page(cursor, limit)}`);
+// setLibraryPeople turns a library's people and pets on or off; off clears
+// what local AI recognised there and keeps names and corrections.
+export const setLibraryPeople = (libraryId: string, people: boolean) =>
+  request<PhotoLibrary>(`${base}/libraries/${id(libraryId)}`, json("PATCH", { people }), true);
 export const updatePerson = (personId: string, change: { name?: string; hidden?: boolean; coverId?: string }) =>
   request<PhotoPerson>(`${base}/people/${id(personId)}`, json("PATCH", change), true);
 // Every face of personId moves into the other person, which keeps its name

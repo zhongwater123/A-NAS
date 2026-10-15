@@ -78,6 +78,10 @@ type Library struct {
 	// Viewing is set when the caller sees another member's private library
 	// only through Administrative Viewing Mode; access is read-only.
 	Viewing *LibraryViewing `json:"viewing,omitempty"`
+	// People says whether the library recognises people and pets, and
+	// CanSetPeople whether the caller may turn that on or off.
+	People       bool `json:"people"`
+	CanSetPeople bool `json:"canSetPeople"`
 }
 
 type LibraryViewing struct {
@@ -217,9 +221,10 @@ type Service struct {
 	aiModel        string
 	aiDetector     string
 	aiFaces        string
+	aiAnimals      string
 	detectorLoaded bool
-	// facesScanned counts face scans stored since people last clustered.
-	facesScanned int
+	// scanned counts face and pet scans stored since people last clustered.
+	scanned int
 	// nextDetection is the next detection job with its input, rendered
 	// while the Worker detected the one before. Only the AI runner uses it.
 	nextDetection *detectionInput

@@ -320,7 +320,8 @@ func (s *Service) peopleInQuery(ctx context.Context, query string, scope []any) 
 SELECT pe.name, po.library_id || char(0) || o.object_id FROM people pe
 JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.library_id
 JOIN occurrences o ON o.id = po.occurrence_id
-WHERE pe.name <> '' AND pe.library_id IN (`+placeholders(len(scope))+`)`, scope...)
+WHERE pe.name <> '' AND pe.library_id IN (`+placeholders(len(scope))+`)
+  AND pe.library_id IN (SELECT id FROM libraries WHERE people = 1)`, scope...)
 	if err != nil {
 		return "", nil, nil, err
 	}

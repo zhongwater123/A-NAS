@@ -22,6 +22,10 @@ type mergeRequest struct {
 	Into string `json:"into"`
 }
 
+type librarySettingsRequest struct {
+	People *bool `json:"people"`
+}
+
 type assignRequest struct {
 	// PersonID names an existing person; with none, Name founds a new one.
 	PersonID string `json:"personId"`
@@ -37,6 +41,27 @@ func (h *handler) peopleRoutes() {
 	h.mux.HandleFunc("DELETE "+p+"/people/{personID}/assets/{assetID}", h.removeFromPerson)
 	h.mux.HandleFunc("PUT "+p+"/assets/{assetID}/people/{occurrenceID}", h.assignOccurrence)
 	h.mux.HandleFunc("GET "+p+"/occurrences/{occurrenceID}/avatar", h.occurrenceAvatar)
+	h.mux.HandleFunc("PATCH "+p+"/libraries/{libraryID}", h.changeLibrary)
+}
+
+// changeLibrary turns a library's people and pets on or off; off clears
+// what was recognised there and keeps the names.
+func (h *handler) changeLibrary(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	var request librarySettingsRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if request.People == nil {
+		WriteError(w, http.StatusBadRequest, "invalid_request", "say whether the library recognises people and pets")
+		return
+	}
+	library, err := h.service.SetPeople(r.Context(), principal, r.PathValue("libraryID"), *request.People)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, library)
 }
 
 func (h *handler) listPeople(w http.ResponseWriter, r *http.Request) {

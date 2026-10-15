@@ -1079,6 +1079,26 @@ paths:
       responses:
         "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
         "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}:
+    patch:
+      operationId: changePhotoLibrary
+      summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [people]
+              properties:
+                people: { type: boolean }
+      responses:
+        "200": { description: The library, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLibrary" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/albums:
     get:
       operationId: listPhotoAlbums
@@ -3464,6 +3484,8 @@ components:
         ownerUserId: { type: string }
         ownerName: { type: string }
         createdAt: { type: string, format: date-time }
+        people: { type: boolean, description: Whether the library recognises people and pets. }
+        canSetPeople: { type: boolean, description: "Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library." }
         viewing:
           description: Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only.
           type: object
@@ -3681,6 +3703,7 @@ components:
         model: { type: string }
         objectModel: { type: string, description: The object detector's model while the AI Worker has one. }
         faceModel: { type: string, description: "The face models while the AI Worker has them; a photo then also counts as ready once its faces are scanned." }
+        animalModel: { type: string, description: "The animal model while the AI Worker has it; a photo with a dog then also counts as ready once its dogs are scanned." }
         ready: { type: integer, minimum: 0, description: "Originals with a vector of the current pipeline and, while the AI Worker has a detector, its detection." }
         pending: { type: integer, minimum: 0 }
         failed: { type: integer, minimum: 0 }

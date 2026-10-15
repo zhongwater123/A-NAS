@@ -46,13 +46,17 @@ const (
 )
 
 // defaultPeopleCalibrations are the built-in calibrations. A Worker whose face
-// models have none scans faces, but nobody is clustered from them.
+// or animal model has none scans, but nobody is clustered from what it finds.
 var defaultPeopleCalibrations = []PeopleCalibration{
 	// AuraFace on YuNet's faces: held at least 99.6% pairwise precision on
 	// LFW, FG-NET (children growing up) and Gallagher's family album
 	// (docs/research/photo-people-evaluation.md).
 	{Kind: OccurrenceFace, Model: "yunet-2026may@ebafce4e3c11+auraface-v1@a7933ea53301+opencv-5.0.0+ort-1.31.0+s0.8k64",
 		Threshold: 0.48, MinCore: 2, Rule: RuleCentroid},
+	// DINOv2-small on the detector's dogs: no wrong merge in DogFaceNet or
+	// MPDD households with stranger dogs beside them, about 70% recall.
+	{Kind: OccurrenceDog, Model: "dinov2-small@f22797eabf81+ort-1.31.0+m1.1",
+		Threshold: 0.72, MinCore: 3, Rule: RuleCentroid},
 }
 
 // Person kinds.
@@ -135,14 +139,17 @@ type clusterMember struct {
 // library by library, and reports whether it changed anything.
 func (s *Service) clusterPeople(ctx context.Context) (bool, error) {
 	s.aiModelMu.Lock()
-	s.facesScanned = 0
+	s.scanned = 0
 	s.aiModelMu.Unlock()
 	rows, err := s.db.QueryContext(ctx, `
 SELECT DISTINCT a.library_id, o.kind, o.model FROM occurrences o
 JOIN assets a ON a.object_id = o.object_id
-WHERE NOT EXISTS (SELECT 1 FROM person_occurrences po WHERE po.library_id = a.library_id AND po.occurrence_id = o.id)
+JOIN libraries l ON l.id = a.library_id AND l.people = 1
+WHERE length(o.vector) > 0
+  AND NOT EXISTS (SELECT 1 FROM person_occurrences po WHERE po.library_id = a.library_id AND po.occurrence_id = o.id)
 UNION
 SELECT DISTINCT po.library_id, o.kind, o.model FROM person_occurrences po
+JOIN libraries l ON l.id = po.library_id AND l.people = 1
 JOIN occurrences o ON o.id = po.occurrence_id WHERE po.source = 'moved'`)
 	if err != nil {
 		return false, err
@@ -448,7 +455,7 @@ func (s *Service) clusterMembers(ctx context.Context, libraryID string, calibrat
 	query := `
 SELECT o.id, o.object_id, o.vector, IFNULL(po.person_id, ''), po.source FROM person_occurrences po
 JOIN occurrences o ON o.id = po.occurrence_id
-WHERE po.library_id = ? AND o.kind = ? AND o.model = ?
+WHERE po.library_id = ? AND o.kind = ? AND o.model = ? AND length(o.vector) > 0
 ORDER BY po.created_at, o.object_id, o.ordinal`
 	args := []any{libraryID, calibration.Kind, calibration.Model}
 	if !considered {
@@ -456,7 +463,7 @@ ORDER BY po.created_at, o.object_id, o.ordinal`
 SELECT o.id, o.object_id, o.vector, '', 'auto' FROM occurrences o
 JOIN (SELECT object_id, MIN(imported_at) AS arrived FROM assets WHERE library_id = ? GROUP BY object_id) a
   ON a.object_id = o.object_id
-WHERE o.kind = ? AND o.model = ?
+WHERE o.kind = ? AND o.model = ? AND length(o.vector) > 0
   AND NOT EXISTS (SELECT 1 FROM person_occurrences po WHERE po.library_id = ? AND po.occurrence_id = o.id)
 ORDER BY a.arrived, o.object_id, o.ordinal`
 		args = append(args, libraryID)
@@ -478,9 +485,11 @@ ORDER BY a.arrived, o.object_id, o.ordinal`
 		index[m.id] = len(members)
 		members = append(members, m)
 	}
-	if err := rows.Err(); err != nil || !considered {
-		return members, err
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
+	// A face not considered yet may be rejected too: one a member took out
+	// of a person before people were turned off, found again since.
 	rejections, err := s.db.QueryContext(ctx,
 		"SELECT occurrence_id, person_id FROM occurrence_rejections WHERE library_id = ?", libraryID)
 	if err != nil {
@@ -521,6 +530,7 @@ FROM people pe
 JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.library_id
 JOIN occurrences o ON o.id = po.occurrence_id
 JOIN assets a ON a.object_id = o.object_id AND a.library_id = pe.library_id AND a.trashed_at IS NULL
+JOIN libraries l ON l.id = pe.library_id AND l.people = 1
 WHERE pe.library_id IN (`+placeholders(len(scope))+`)
 GROUP BY pe.id`, scope...)
 	if err != nil {
@@ -604,6 +614,10 @@ func (s *Service) visiblePerson(ctx context.Context, q queryer, p Principal, per
 	lib, err := s.visibleLibrary(ctx, q, p, person.LibraryID)
 	if err != nil {
 		return Person{}, library{}, err
+	}
+	// A library with people off has none to show.
+	if on, err := peopleOn(ctx, q, lib.id); err != nil || !on {
+		return Person{}, library{}, cmp.Or(err, ErrNotFound)
 	}
 	person.CanChange = canChangePeople(p, lib)
 	return person, lib, nil
@@ -842,6 +856,9 @@ func (s *Service) AssignOccurrence(ctx context.Context, p Principal, assetID, oc
 		if !canChangePeople(p, record.library) {
 			return ErrForbidden
 		}
+		if on, err := peopleOn(ctx, tx, record.library.id); err != nil || !on {
+			return cmp.Or(err, ErrNotFound)
+		}
 		var kind string
 		if err := tx.QueryRowContext(ctx, "SELECT kind FROM occurrences WHERE id = ? AND object_id = ?",
 			occurrenceID, record.objectID).Scan(&kind); errors.Is(err, sql.ErrNoRows) {
@@ -902,6 +919,9 @@ ON CONFLICT(library_id, occurrence_id) DO UPDATE SET person_id = excluded.person
 // peopleOf lists the faces and pets in a photo with who each is in the
 // photo's library.
 func (s *Service) peopleOf(ctx context.Context, record assetRecord) ([]AssetPerson, error) {
+	if on, err := peopleOn(ctx, s.db, record.library.id); err != nil || !on {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT o.id, o.kind, IFNULL(pe.id, ''), IFNULL(pe.name, '') FROM occurrences o
 LEFT JOIN person_occurrences po ON po.occurrence_id = o.id AND po.library_id = ?
@@ -927,10 +947,10 @@ func (s *Service) OccurrenceAvatar(ctx context.Context, p Principal, occurrenceI
 	if !p.valid() {
 		return nil, ErrForbidden
 	}
-	var objectID string
+	var objectID, derivation string
 	var ordinal int
-	err := s.db.QueryRowContext(ctx, "SELECT object_id, ordinal FROM occurrences WHERE id = ? AND ordinal >= 0", occurrenceID).
-		Scan(&objectID, &ordinal)
+	err := s.db.QueryRowContext(ctx, "SELECT object_id, derivation, ordinal FROM occurrences WHERE id = ? AND ordinal >= 0",
+		occurrenceID).Scan(&objectID, &derivation, &ordinal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -951,7 +971,7 @@ func (s *Service) OccurrenceAvatar(ctx context.Context, p Principal, occurrenceI
 	if !visible {
 		return nil, ErrNotFound
 	}
-	avatar, err := s.avatarTile(objectID, ordinal)
+	avatar, err := s.avatarTile(derivation, objectID, ordinal)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNotFound
 	}

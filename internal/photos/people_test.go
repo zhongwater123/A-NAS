@@ -74,7 +74,10 @@ type facingEmbedder struct {
 }
 
 func newFacingEmbedder() *facingEmbedder {
-	return &facingEmbedder{detectingEmbedder: newDetectingEmbedder(), faceModel: "faces-1"}
+	detecting := newDetectingEmbedder()
+	// The people are people to the detector too.
+	detecting.boxes = []photos.Box{{Class: 1, Score: 0.9, X0: 0, Y0: 0, X1: 1, Y1: 1}}
+	return &facingEmbedder{detectingEmbedder: detecting, faceModel: "faces-1"}
 }
 
 func (f *facingEmbedder) Info(ctx context.Context) (photos.EmbedderInfo, error) {
@@ -106,26 +109,10 @@ func (f *facingEmbedder) DetectFaces(_ context.Context, input *os.File) (string,
 	f.faceInputs = append(f.faceInputs, content)
 	model := f.faceModel
 	f.mu.Unlock()
-	bounds := img.Bounds()
-	band := bounds.Dx() / 4
 	var faces []photos.Face
-	for i := range 4 {
-		var r, g, b, n float64
-		for x := bounds.Min.X + i*band; x < bounds.Min.X+(i+1)*band; x++ {
-			for y := bounds.Min.Y + bounds.Dy()/3; y < bounds.Min.Y+2*bounds.Dy()/3; y++ {
-				cr, cg, cb, _ := img.At(x, y).RGBA()
-				r, g, b, n = r+float64(cr>>8), g+float64(cg>>8), b+float64(cb>>8), n+1
-			}
-		}
-		r, g, b = r/n, g/n, b/n
-		if r > 180 && g > 180 && b > 180 {
+	for i, person := range paintedBands(img) {
+		if person < 0 {
 			continue
-		}
-		person, best := 0, math.Inf(1)
-		for k, c := range palette {
-			if d := math.Abs(r-float64(c.R)) + math.Abs(g-float64(c.G)) + math.Abs(b-float64(c.B)); d < best {
-				person, best = k, d
-			}
 		}
 		vector := make([]float32, 8)
 		if f.angles != nil {
@@ -146,6 +133,35 @@ func (f *facingEmbedder) DetectFaces(_ context.Context, input *os.File) (string,
 		})
 	}
 	return model, faces, nil
+}
+
+// paintedBands reads a people photo back: the palette index painted in each
+// band, or -1 where it is empty.
+func paintedBands(img image.Image) []int {
+	bounds := img.Bounds()
+	band := bounds.Dx() / 4
+	bands := make([]int, 4)
+	for i := range bands {
+		var r, g, b, n float64
+		for x := bounds.Min.X + i*band; x < bounds.Min.X+(i+1)*band; x++ {
+			for y := bounds.Min.Y + bounds.Dy()/3; y < bounds.Min.Y+2*bounds.Dy()/3; y++ {
+				cr, cg, cb, _ := img.At(x, y).RGBA()
+				r, g, b, n = r+float64(cr>>8), g+float64(cg>>8), b+float64(cb>>8), n+1
+			}
+		}
+		r, g, b = r/n, g/n, b/n
+		bands[i] = -1
+		if r > 180 && g > 180 && b > 180 {
+			continue
+		}
+		best := math.Inf(1)
+		for k, c := range palette {
+			if d := math.Abs(r-float64(c.R)) + math.Abs(g-float64(c.G)) + math.Abs(b-float64(c.B)); d < best {
+				bands[i], best = k, d
+			}
+		}
+	}
+	return bands
 }
 
 func normalize(vector []float32) {

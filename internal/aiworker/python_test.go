@@ -26,7 +26,8 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket := filepath.Join(dir, "ai.sock")
-	worker := exec.Command(python, "-m", "anas_ai.worker", "--fake", "--fake-detector", "--socket", socket, "--idle-seconds", "60")
+	worker := exec.Command(python, "-m", "anas_ai.worker", "--fake", "--fake-detector", "--fake-faces", "--fake-animals",
+		"--socket", socket, "--idle-seconds", "60")
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
 	worker.Stderr = os.Stderr
@@ -47,7 +48,8 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 
 	client := aiworker.Client{SocketPath: socket}
 	info, err := client.Info(context.Background())
-	if err != nil || info.Model != "fake-sha256-768" || info.Dimensions != 768 || info.Detector != "fake-detector-sha256" {
+	if err != nil || info.Model != "fake-sha256-768" || info.Dimensions != 768 || info.Detector != "fake-detector-sha256" ||
+		info.Faces != "fake-faces-sha256" || info.Animals != "fake-animals-sha256" {
 		t.Fatalf("Info() = %+v, %v", info, err)
 	}
 	open := func(content string) *os.File {
@@ -108,6 +110,35 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 			}
 		}
 	}
+	// Faces and animal vectors arrive whole: unit vectors, boxes in the image.
+	unit := func(vector []float32) bool {
+		var norm float64
+		for _, value := range vector {
+			norm += float64(value) * float64(value)
+		}
+		return math.Abs(norm-1) < 1e-3
+	}
+	faces := 0
+	for _, content := range []string{"photo 1", "photo 2", "photo 3", "photo 4", "photo 5", "photo 6"} {
+		model, found, err := client.DetectFaces(context.Background(), open(content))
+		if err != nil || model != "fake-faces-sha256" {
+			t.Fatalf("DetectFaces(%q) = %q, %v", content, model, err)
+		}
+		for _, face := range found {
+			if len(face.Vector) != 128 || !unit(face.Vector) || face.Box[2] <= face.Box[0] || face.Landmarks[9] == 0 {
+				t.Fatalf("DetectFaces(%q) face = %+v", content, face)
+			}
+		}
+		faces += len(found)
+	}
+	if faces == 0 {
+		t.Fatal("the fake found no faces in six photos")
+	}
+	model, vectors, err := client.EmbedAnimals(context.Background(), open("photo 1"), [][4]float32{{0.1, 0.2, 0.5, 0.9}, {0.5, 0, 1, 0.5}})
+	if err != nil || model != "fake-animals-sha256" || len(vectors) != 2 || len(vectors[1]) != 64 || !unit(vectors[1]) {
+		t.Fatalf("EmbedAnimals() = %q, %d vectors, %v", model, len(vectors), err)
+	}
+
 	if err := client.Release(context.Background(), false); err != nil {
 		t.Fatalf("Release(detector) error = %v", err)
 	}

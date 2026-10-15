@@ -1,6 +1,7 @@
 """AI providers: image vectors through MediaPipe, object detection through
 ONNX Runtime, faces through OpenCV (and ONNX Runtime for an ArcFace-style
-recognition model), and deterministic fakes of each.
+recognition model), animal identity vectors through ONNX Runtime, and
+deterministic fakes of each.
 
 Only the real providers import their runtimes (and NumPy and Pillow), so the
 Worker and its tests run with the Python standard library alone when the
@@ -536,6 +537,128 @@ class FakeFaces:
                 "vector": encode_unit(value / norm for value in vector),
             })
         return faces
+
+    def release(self):
+        self.loaded = False
+
+
+# Animals (docs/architecture/photo-people.md#宠物): a square around each box,
+# ANIMAL_MARGIN times its longer side, resized to DINOv2's input, as the
+# evaluation (ai/eval/pets.py) measured it.
+ANIMAL_MARGIN = 1.1
+ANIMAL_INPUT = 224
+MAX_ANIMALS = 16
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+ANIMAL_KINDS = ("dinov2",)
+
+
+def animal_crop(image, box):
+    """The square around a box of fractions, ANIMAL_MARGIN times its longer side, inside the image."""
+    height, width = image.shape[:2]
+    x0, y0, x1, y1 = box[0] * width, box[1] * height, box[2] * width, box[3] * height
+    side = max(1.0, min(max(x1 - x0, y1 - y0) * ANIMAL_MARGIN, width, height))
+    left = int(min(max(0, (x0 + x1) / 2 - side / 2), width - side))
+    top = int(min(max(0, (y0 + y1) / 2 - side / 2), height - side))
+    return image[top:top + int(side), left:left + int(side)]
+
+
+class AnimalProvider:
+    """DINOv2's CLS vector of each animal, loaded on the first photo and dropped by release()."""
+
+    def __init__(self, model_path, manifest_path, threads=None):
+        manifest = verify_model(model_path, manifest_path)
+        if manifest.get("kind") not in ANIMAL_KINDS:
+            raise Unavailable(f"animal model kind {manifest.get('kind')!r} is not one of {ANIMAL_KINDS}")
+        try:
+            import cv2  # noqa: F401
+            runtime = "ort-" + importlib.metadata.version("onnxruntime")
+        except ImportError as error:
+            raise Unavailable(f"the AI runtime cannot load OpenCV: {error}") from error
+        except importlib.metadata.PackageNotFoundError as error:
+            raise Unavailable("the AI runtime has no ONNX Runtime") from error
+        self._path = model_path
+        self._session = None
+        self.threads = threads or inference_threads()
+        self.model = f"{manifest['name']}@{manifest['sha256'][:12]}+{runtime}+m{ANIMAL_MARGIN:g}"
+
+    def run_options(self):
+        import onnxruntime
+
+        return onnxruntime.RunOptions()
+
+    def embed(self, data, boxes, run):
+        import cv2
+        import numpy
+
+        image = cv2.imdecode(numpy.frombuffer(data, numpy.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise InvalidInput("not an image")
+        if not boxes:
+            return []
+        mean, std = numpy.array(IMAGENET_MEAN, numpy.float32), numpy.array(IMAGENET_STD, numpy.float32)
+        batch = numpy.stack([
+            ((cv2.resize(animal_crop(image, box), (ANIMAL_INPUT, ANIMAL_INPUT), interpolation=cv2.INTER_AREA)
+              [:, :, ::-1].astype(numpy.float32) / 255 - mean) / std).transpose(2, 0, 1)
+            for box in boxes])
+        session = self._load()
+        try:
+            found = session.run(None, {session.get_inputs()[0].name: batch}, run)[0]
+        except Exception:  # pylint: disable=broad-except
+            # A terminated run fails with ONNX Runtime's generic error.
+            if not run.terminate:
+                raise
+            found = None
+        if found is None:
+            raise Cancelled()
+        # last_hidden_state: the CLS token after the final norm.
+        vectors = found[:, 0] if found.ndim == 3 else found
+        return [encode_unit(vector / numpy.linalg.norm(vector)) for vector in vectors]
+
+    def release(self):
+        self._session = None
+        gc.collect()
+
+    def _load(self):
+        if self._session is None:
+            import onnxruntime
+
+            options = onnxruntime.SessionOptions()
+            options.intra_op_num_threads = self.threads
+            options.inter_op_num_threads = 1
+            options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+            self._session = onnxruntime.InferenceSession(self._path, options, providers=["CPUExecutionProvider"])
+        return self._session
+
+
+class FakeAnimals:
+    """A deterministic stand-in: each box is one of FAKE_PETS pets chosen by the
+    image bytes and the box, with nearly the same vector in every photo."""
+
+    model = "fake-animals-sha256"
+    dimensions = 64
+    FAKE_PETS = 2
+
+    def __init__(self):
+        self.loaded = False
+
+    def run_options(self):
+        return RunHandle()
+
+    def embed(self, data, boxes, run):
+        if not data:
+            raise InvalidInput("empty image")
+        self.loaded = True
+        vectors = []
+        for box in boxes:
+            seed = data + struct.pack("<4f", *box)
+            pet = hashlib.sha256(seed).digest()[0] % self.FAKE_PETS
+            base = FakeProvider(self.dimensions)._vector(b"fake pet %d" % pet)
+            noise = FakeProvider(self.dimensions)._vector(seed)
+            vector = [b + 0.05 * n for b, n in zip(base, noise)]
+            norm = math.sqrt(sum(value * value for value in vector))
+            vectors.append(encode_unit(value / norm for value in vector))
+        return vectors
 
     def release(self):
         self.loaded = False

@@ -211,8 +211,9 @@ CREATE INDEX assets_by_motion ON assets(motion_object_id);`,
 	`ALTER TABLE objects ADD COLUMN live_id TEXT;
 CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AND live_id <> '';`,
 	// 10: people and pets (docs/architecture/photo-people.md). A scan
-	// records that the face models looked at a content object; each face
-	// they found is an occurrence, derived data keyed by the object. People
+	// records that the face models, or the animal model, looked at a content
+	// object; each face or pet they found is an occurrence, derived data
+	// keyed by the object. People
 	// belong to a library: who is who there, and what the user named,
 	// confirmed, merged or took out, is user data. An occurrence a library
 	// has considered has a row in person_occurrences, with no person while
@@ -221,7 +222,7 @@ CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AN
 	// waits to be checked against the new ones. Originals that already have
 	// thumbnails are queued.
 	`
-CREATE TABLE face_scans (
+CREATE TABLE scans (
     object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
     derivation TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -281,6 +282,9 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, 'faces/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
 ON CONFLICT(object_id, derivation) DO NOTHING;
 `,
+	// 11: whether a library recognises people and pets; on by default
+	// (docs/architecture/photo-people.md#关闭与清除).
+	`ALTER TABLE libraries ADD COLUMN people INTEGER NOT NULL DEFAULT 1;`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

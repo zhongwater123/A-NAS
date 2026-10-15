@@ -196,6 +196,36 @@ func TestFacesCrossTheSocket(t *testing.T) {
 	}
 }
 
+func TestAnimalsCrossTheSocket(t *testing.T) {
+	socket := aiworkertest.Serve(t, aiworkertest.WithAnimals(aiworkertest.Deterministic("fake-1", 2), "animals-1"))
+	client := aiworker.Client{SocketPath: socket}
+	info, err := client.Info(context.Background())
+	if err != nil || info.Animals != "animals-1" || info.Faces != "" {
+		t.Fatalf("Info() = %+v, %v; want the animal model named", info, err)
+	}
+	content := []byte("an upright photo")
+	path := filepath.Join(t.TempDir(), "input.jpg")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	boxes := [][4]float32{{0.25, 0.5, 0.75, 1}, {0, 0, 0.5, 0.5}}
+	model, vectors, err := client.EmbedAnimals(context.Background(), file, boxes)
+	if err != nil || model != "animals-1" || len(vectors) != len(boxes) {
+		t.Fatalf("EmbedAnimals() = %q, %v, %v; want a vector per box", model, vectors, err)
+	}
+	for i, box := range boxes {
+		want := aiworkertest.HashAnimal(content, [4]float64{float64(box[0]), float64(box[1]), float64(box[2]), float64(box[3])})
+		if vectors[i][0] != want[0] || vectors[i][aiworkertest.AnimalDimensions-1] != want[aiworkertest.AnimalDimensions-1] {
+			t.Fatalf("vector %d = %v, want %v", i, vectors[i], want)
+		}
+	}
+}
+
 func TestCancellingADetectionHangsUp(t *testing.T) {
 	dir, err := os.MkdirTemp("", "ai")
 	if err != nil {

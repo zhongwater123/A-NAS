@@ -227,6 +227,23 @@
 .ph-hero-recent .ph-hero-forget svg { width: 14px; height: 14px; }
 .ph-hero-note { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 0; color: var(--ph-muted); font-size: 12px; }
 .ph-hero-note svg { width: 14px; height: 14px; color: #1e9e5a; }
+.ph-hero-note .ph-hero-link { border: 0; padding: 0 0 0 4px; color: var(--ph-accent-ink); background: transparent; font-size: 12px; }
+.ph-hero-note .ph-hero-link::before { content: "·"; margin-right: 6px; color: var(--ph-muted); }
+.ph-hero-note .ph-hero-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ph-people-settings { width: min(420px, 100%); }
+.ph-switch-list { display: grid; border: 1px solid var(--ph-line); border-radius: 12px; }
+.ph-switch-row { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.ph-switch-row + .ph-switch-row { border-top: 1px solid var(--ph-line); }
+.ph-switch-row > span { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.ph-switch-row strong { overflow: hidden; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.ph-switch-row small { color: var(--ph-muted); font-size: 12px; }
+.ph-switch { position: relative; width: 44px; height: 26px; flex: none; border: 0; border-radius: 999px; padding: 0; background: #cdd5de; transition: background .2s; }
+.ph-switch span { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .2s var(--ph-ease); }
+.ph-switch.on { background: var(--ph-accent); }
+.ph-switch.on span { transform: translateX(18px); }
+.ph-switch:disabled { opacity: .5; }
+.ph-switch:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ph-accent-soft); }
+.ph-people-settings-note { margin: 0; color: var(--ph-muted); font-size: 12px; line-height: 1.6; }
 .ph-browse { max-width: 1100px; margin: 0 auto; padding-top: 22px; border-top: 1px solid var(--ph-line); }
 .ph-browse > header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .ph-browse > header h3 { margin: 0; font-size: 17px; font-weight: 700; }
@@ -254,6 +271,11 @@
 .ph-person strong { max-width: 100%; overflow: hidden; font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .ph-person.nameless strong { color: var(--ph-accent-ink); font-weight: 600; }
 .ph-person small { color: var(--ph-muted); font-size: 12px; }
+.ph-group-cover { position: relative; margin-bottom: 7px; }
+.ph-person .ph-group-cover .ph-avatar { margin-bottom: 0; }
+.ph-group-mark { position: absolute; right: 1px; bottom: 1px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--ph-accent-ink); background: var(--ph-surface); box-shadow: 0 1px 3px rgba(16, 24, 40, .2); transition: transform .25s var(--ph-ease); }
+.ph-group-mark svg { width: 15px; height: 15px; }
+.ph-pet-group:hover .ph-group-mark { transform: translateY(-2px); }
 .ph-people-more { display: flex; flex-wrap: wrap; gap: 4px; }
 .ph-browse-more.quiet { color: var(--ph-muted); }
 .ph-browse-more.quiet:hover { color: var(--ph-ink-2); background: rgba(20, 26, 38, .06); }

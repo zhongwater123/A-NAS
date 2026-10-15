@@ -20,13 +20,13 @@ import {
   type Caller, canChange, canEditAlbum, daysLeft, isUnavailable, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, type Place, placeLibrary, placeViewing,
   runEach, sharedLibrary,
 } from "./model";
-import { Avatar, PersonPicker, personName } from "./People";
+import { Avatar, PeopleSettings, PersonPicker, personName } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
 import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
   addPhotoTag, addToAlbum, attachLiveVideo, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
   listPeople, listPersonPhotos, listPhotoTrash, listSimilarPhotos, downloadURL, mergePeople, purgePhoto, removeFromAlbum, removeFromPerson, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
-  updatePerson, type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoPerson, type PhotoSearchPage, type PhotoSimilarPage,
+  setLibraryPeople, updatePerson, type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoPerson, type PhotoSearchPage, type PhotoSimilarPage,
 } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { joinWords, ObjectsStatus, SimilarSource } from "./results";
@@ -364,6 +364,22 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
       const merged = await mergePeople(from.id, into.id);
       setPlace({ kind: "person", viewing: place.viewing, person: merged });
       toast({ text: `已把${from.name ? `“${from.name}”` : "这些照片"}合并到“${personName(merged)}”` });
+    } catch (caught) { reportError(messageOf(caught)); }
+  };
+  const [peopleSettings, setPeopleSettings] = useState(false);
+  // Off clears what was recognised, so it asks first; on starts at once.
+  const setPeople = async (library: PhotoLibrary, on: boolean) => {
+    const name = libraryName(caller, library);
+    if (!on && !await dialogs.confirm({
+      title: `关闭${name}的人物与宠物？`,
+      message: "这个图库里识别出的人脸与宠物会被删除，本地 AI 也不再识别新照片。起的名字和做过的更正会保留，重新开启后随识别结果回来。",
+      confirm: "关闭并删除", danger: true,
+    })) return;
+    try {
+      const changed = await setLibraryPeople(library.id, on);
+      setLibraries((items) => items?.map((item) => item.id === changed.id ? { ...item, people: changed.people, canSetPeople: changed.canSetPeople } : item));
+      setRefreshKey((key) => key + 1);
+      toast({ text: on ? `已开启${name}的人物与宠物，本地 AI 会在空闲时重新识别` : `已关闭${name}的人物与宠物` });
     } catch (caught) { reportError(messageOf(caught)); }
   };
   const openPersonById = async (personId: string) => {
@@ -721,7 +737,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
             image={{ pick: pickSearchImage, over: imageOver === "hero", dragging, drop: imageDrop("hero") }}
             onOpenCluster={(label, snapshot) => { setPlace({ kind: "cluster", viewing: place.viewing, label }); aiHomeReturn.current = snapshot; }}
             onOpenTag={(tag, snapshot) => { setPlace({ kind: "tag", viewing: place.viewing, tag }); aiHomeReturn.current = snapshot; }}
-            onOpenPerson={(person, snapshot) => { setPlace({ kind: "person", viewing: place.viewing, person }); aiHomeReturn.current = snapshot; }} onError={reportError} />;
+            onOpenPerson={(person, snapshot) => { setPlace({ kind: "person", viewing: place.viewing, person }); aiHomeReturn.current = snapshot; }}
+            onPeopleSettings={() => setPeopleSettings(true)} onError={reportError} />;
         }
         return <AssetGrid key={`search:${place.query}:${scope}`} {...grid} listKey={`search:${place.viewing}:${place.query}:${scope}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor, scope)}
           onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); setSearchPeople((page as PhotoSearchPage).people); } }}
@@ -891,6 +908,7 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
       {merging && <PersonPicker person={merging} viewing={place.kind === "person" ? place.viewing : ""} onPick={(into) => void mergeInto(into)} onClose={() => setMerging(undefined)} />}
       {picker && <AlbumPicker caller={caller} assets={picker} onPick={(album) => void addTo(album, picker)} onCreate={(library, name) => void createAndAdd(library, name, picker)} onClose={() => setPicker(undefined)} />}
       {photoPicker && <PhotoPicker album={photoPicker} onAdd={(assets) => { setPhotoPicker(undefined); void addTo(photoPicker, assets); }} onClose={() => setPhotoPicker(undefined)} />}
+      {peopleSettings && <PeopleSettings caller={caller} onSet={(library, on) => void setPeople(library, on)} onClose={() => setPeopleSettings(false)} />}
       {dialogs.dialog}
       {busy && !selection.selected.size && <div className="ph-busy" role="status"><span className="ph-spinner" />{busy.label} {busy.done}/{busy.total}</div>}
     </div>

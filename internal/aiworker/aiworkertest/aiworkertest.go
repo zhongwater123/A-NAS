@@ -162,6 +162,65 @@ func WithFaces(handle Handler, model string) Handler {
 	}
 }
 
+// WithAnimals adds an animal model named model to a Worker: info names it, and
+// embed_animals answers HashAnimal of the image bytes and each box.
+func WithAnimals(handle Handler, model string) Handler {
+	return func(request aiworker.Request, file *os.File) *aiworker.Response {
+		switch request.Op {
+		case aiworker.OpInfo:
+			response := handle(request, file)
+			if response != nil && response.OK {
+				response.AnimalModel = model
+			}
+			return response
+		case aiworker.OpEmbedAnimals:
+			if file == nil || len(request.Boxes) == 0 {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image or boxes"}}
+			}
+			content, err := io.ReadAll(file)
+			if err != nil || len(content) == 0 {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
+			}
+			vectors := make([][]byte, len(request.Boxes))
+			for i, box := range request.Boxes {
+				vectors[i] = Encode(HashAnimal(content, box))
+			}
+			return &aiworker.Response{OK: true, Model: model, Vectors: vectors}
+		case aiworker.OpRelease:
+			return &aiworker.Response{OK: true}
+		}
+		return handle(request, file)
+	}
+}
+
+// AnimalDimensions is the length of HashAnimal's vectors.
+const AnimalDimensions = 8
+
+// HashAnimal is the vector of the animal at box: one of two pets chosen by
+// the image bytes and the box, nearly equal in every photo.
+func HashAnimal(content []byte, box [4]float64) []float32 {
+	seed := append([]byte{}, content...)
+	for _, value := range box {
+		seed = binary.LittleEndian.AppendUint64(seed, math.Float64bits(value))
+	}
+	sum := sha256.Sum256(seed)
+	return nearly(hashVector([]byte{'a', sum[0] % 2}, AnimalDimensions), hashVector(seed, AnimalDimensions))
+}
+
+// nearly is base, centred, with a little of noise, normalized.
+func nearly(base, noise []float32) []float32 {
+	vector := make([]float32, len(base))
+	var norm float64
+	for j := range vector {
+		vector[j] = base[j] - 0.5 + 0.02*(noise[j]-0.5)
+		norm += float64(vector[j]) * float64(vector[j])
+	}
+	for j := range vector {
+		vector[j] /= float32(math.Sqrt(norm))
+	}
+	return vector
+}
+
 // FaceDimensions is the length of HashFaces' vectors.
 const FaceDimensions = 8
 
@@ -174,15 +233,7 @@ func HashFaces(content []byte) []aiworker.WireFace {
 	for i := range int(sum[0] % 3) {
 		person := hashVector([]byte{'p', sum[1+i] % 3}, FaceDimensions)
 		noise := hashVector(append(append([]byte{}, content...), byte(i)), FaceDimensions)
-		vector := make([]float32, FaceDimensions)
-		var norm float64
-		for j := range vector {
-			vector[j] = person[j] - 0.5 + 0.02*(noise[j]-0.5)
-			norm += float64(vector[j]) * float64(vector[j])
-		}
-		for j := range vector {
-			vector[j] /= float32(math.Sqrt(norm))
-		}
+		vector := nearly(person, noise)
 		x0 := 0.05 + 0.3*float64(i)
 		faces = append(faces, aiworker.WireFace{
 			Box:       []float64{x0, 0.2, x0 + 0.2, 0.5},
