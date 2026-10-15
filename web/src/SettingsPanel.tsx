@@ -1,5 +1,5 @@
 import {
-  AtSign, Camera, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
+  Activity, AtSign, Camera, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
   LayoutDashboard, LogOut, Monitor, Network, PenLine, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
@@ -17,10 +17,11 @@ import { displayName, fullName, usePeople } from "./people";
 import { AvatarDialog } from "./settings/AvatarDialog";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
 import { TerminalSection } from "./settings/TerminalSection";
+import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
 import type { HostStateView } from "./useHostState";
 
-export type SettingsSection = "account" | "overview" | "storage" | "users" | "logs" | "terminal";
+export type SettingsSection = "account" | "overview" | "storage" | "users" | "logs" | "terminal" | "task-manager";
 
 type PlanStep = "plan" | "confirm" | "execute";
 
@@ -38,6 +39,7 @@ export interface StoragePlanFlow {
 
 const systemSections: Array<{ id: SettingsSection; label: string; icon: LucideIcon; tone: string; adminOnly?: boolean }> = [
   { id: "overview", label: "概览", icon: LayoutDashboard, tone: "overview" },
+  { id: "task-manager", label: "任务管理器", icon: Activity, tone: "security" },
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
   { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
@@ -114,12 +116,13 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
       </nav>
       <div className={`set-main ${current === "terminal" ? "fill" : ""}`}>
         {current !== "terminal" && (
-          <div className={`set-page ${current === "logs" ? "wide" : ""}`}>
+          <div className={`set-page ${current === "task-manager" ? "task-manager-page" : current === "logs" ? "wide" : ""}`}>
             {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onUserChange={onUserChange} onLogout={onLogout}
               onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
             {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
             {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
             {current === "users" && <UsersSection currentUser={user} onChangeOwnPassword={() => { onSectionChange("account"); setEditingPassword(true); }} />}
+            {current === "task-manager" && <TaskManagerSection />}
             {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
           </div>
         )}

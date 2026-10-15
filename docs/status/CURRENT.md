@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-14
+更新时间：2026-10-15
 
 ## 当前阶段
 
@@ -11,6 +11,8 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 提交 `4e98e86b77c5` 已重新冻结为 `v1.0.0`。相册（[issue #23](https://github.com/zhongwater123/A-NAS/issues/23)）已由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 确定专用服务身份、数据卷上的 Catalog 与按范围授权的管理员查看，并拆为 M1 基础相册、M2 本地 AI 检索与 M3 扩展三个里程碑；部署与实机验收排在基础存储闭环之后。
 
 ## 已就绪
+
+- [任务管理器](../specs/task-manager.md)已在本地实现，尚未合并、未部署：设置中新增设备运行状态的总览、CPU、GPU、NPU、内存、网络、硬盘分页，以及运行中服务和进程的 CPU、内存与磁盘读写速率排序、搜索。管理员和成员均可只读查看，GPU 使用率目前支持 AMD amdgpu sysfs；其他 GPU 驱动与 NPU 的未支持指标明确显示不可用。部署需同时更新 Host Agent 和产品服务，实机硬件验收待部署后进行。
 
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)、[存储架构](../architecture/storage-and-files.md)、[ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)和 [v1.0.1 发布记录](../releases/v1.0.1.md)已建立。
 - 磁盘状态包含稳定 ID、removable/in-use、文件系统、SMART、温度、数据卷资格及拒绝原因；公开接口不返回设备路径。

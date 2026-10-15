@@ -29,20 +29,24 @@ const (
 )
 
 type dependencies struct {
-	root                fs.FS
-	hostname            func() (string, error)
-	architecture        string
-	now                 func() time.Time
-	readBlockDevices    func(context.Context) ([]byte, error)
-	readSMART           func(context.Context, string) ([]byte, error)
-	readFilesystemUsage func(string) (uint64, uint64, error)
-	sleep               func(context.Context, time.Duration) error
+	root                 fs.FS
+	hostname             func() (string, error)
+	architecture         string
+	now                  func() time.Time
+	readBlockDevices     func(context.Context) ([]byte, error)
+	readSMART            func(context.Context, string) ([]byte, error)
+	readFilesystemUsage  func(string) (uint64, uint64, error)
+	sleep                func(context.Context, time.Duration) error
+	readTaskServices     func(context.Context) ([]byte, error)
+	readTaskBlockDevices func(context.Context) ([]byte, error)
 }
 
 // Reader observes a Debian host without changing its state.
 type Reader struct {
-	dependencies dependencies
-	metrics      metricsSampler
+	dependencies  dependencies
+	metrics       metricsSampler
+	deviceTasks   deviceTaskSampler
+	workloadTasks workloadTaskSampler
 }
 
 type ResolvedDevice struct {
@@ -54,11 +58,13 @@ type ResolvedDevice struct {
 // New returns a Reader backed by the local Linux filesystem and lsblk.
 func New() *Reader {
 	return newReader(dependencies{
-		root:         os.DirFS("/"),
-		hostname:     os.Hostname,
-		architecture: runtime.GOARCH,
-		now:          time.Now,
-		sleep:        sleepContext,
+		root:                 os.DirFS("/"),
+		hostname:             os.Hostname,
+		architecture:         runtime.GOARCH,
+		now:                  time.Now,
+		sleep:                sleepContext,
+		readTaskServices:     readRunningServiceProperties,
+		readTaskBlockDevices: readTaskBlockDevices,
 		readBlockDevices: func(ctx context.Context) ([]byte, error) {
 			return exec.CommandContext(
 				ctx,

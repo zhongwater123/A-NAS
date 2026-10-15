@@ -20,6 +20,7 @@
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [任务管理器](task-manager.md)（implemented）
 - [头像与昵称](account-profile.md)（implemented，尚未部署）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）

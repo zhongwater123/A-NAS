@@ -91,11 +91,15 @@ func (c *Client) ReadMetrics(ctx context.Context) (hoststate.Metrics, error) {
 }
 
 func (c *Client) get(ctx context.Context, path string, into any) error {
+	return c.getWithClient(ctx, path, into, c.httpClient, 1<<20)
+}
+
+func (c *Client) getWithClient(ctx context.Context, path string, into any, client *http.Client, limit int64) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent"+path, nil)
 	if err != nil {
 		return fmt.Errorf("create host agent request: %w", err)
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -105,7 +109,7 @@ func (c *Client) get(ctx context.Context, path string, into any) error {
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
 
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
+	decoder := json.NewDecoder(io.LimitReader(response.Body, limit))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(into); err != nil {
 		return fmt.Errorf("decode host agent response: %w", err)
@@ -153,6 +157,10 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == deviceStatusPath || r.URL.Path == tasksPath {
+		h.handleTaskManager(w, r)
+		return
+	}
 	if r.URL.Path == "/v1/storage/volumes" {
 		h.handleCreateVolume(w, r)
 		return
