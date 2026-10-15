@@ -445,3 +445,51 @@ func TestFacesWithoutACalibrationFindNobody(t *testing.T) {
 		t.Fatalf("People() = %+v; want nobody without a calibration", got)
 	}
 }
+
+func TestAPersonsNameKeepsSearchToTheirPhotos(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newPeopleService(t)
+	private, _ := libraries(t, service, alice)
+	worker := newFacingEmbedder()
+	for i := range 3 {
+		importPhoto(t, service, alice, private.ID, "", "red"+string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), 0))
+		importPhoto(t, service, alice, private.ID, "", "green"+string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), 1))
+	}
+	importPhoto(t, service, alice, private.ID, "", "together.png", peoplePhoto(t, 9, 0, 1))
+	organise(t, service, worker)
+	found := people(t, service, alice, false)
+	if len(found) != 2 {
+		t.Fatalf("People() = %+v", found)
+	}
+	for person, name := range map[string]string{found[0].ID: "小明", found[1].ID: "小红"} {
+		if _, err := service.UpdatePerson(ctx, alice, person, photos.PersonChange{Name: &name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names := func(page photos.SearchPage) []string {
+		var got []string
+		for _, asset := range page.Assets {
+			got = append(got, asset.Name)
+		}
+		slices.Sort(got)
+		return got
+	}
+	page, err := service.Search(ctx, alice, photos.SearchRequest{Query: "小明"})
+	if err != nil || !slices.Equal(page.People, []string{"小明"}) || len(page.Assets) != 4 || page.Closest != 4 {
+		t.Fatalf("Search(小明) = %v, people %v, closest %d, %v", names(page), page.People, page.Closest, err)
+	}
+	page, err = service.Search(ctx, alice, photos.SearchRequest{Query: "小明 小红"})
+	if err != nil || !slices.Equal(names(page), []string{"together.png"}) {
+		t.Fatalf("Search(小明 小红) = %v, %v; want their photo together", names(page), err)
+	}
+	// The rest of the query ranks the person's photos; here by name.
+	page, err = service.Search(ctx, alice, photos.SearchRequest{Query: "小红 together"})
+	if err != nil || len(page.Assets) == 0 || page.Assets[0].Name != "together.png" {
+		t.Fatalf("Search(小红 together) = %v, %v", names(page), err)
+	}
+	// Another member's search knows nothing of alice's people.
+	page, err = service.Search(ctx, bob, photos.SearchRequest{Query: "小明"})
+	if err != nil || len(page.People) != 0 || len(page.Assets) != 0 {
+		t.Fatalf("bob's Search(小明) = %v, people %v, %v", names(page), page.People, err)
+	}
+}

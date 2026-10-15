@@ -3653,6 +3653,10 @@ components:
             words: { type: array, items: { type: string }, description: The query's class words. }
             detected: { type: integer, minimum: 0, description: Photos over all pages in which the detector found them. }
             undetected: { type: integer, minimum: 0, description: Photos in the search's scope the detector has not processed yet. }
+        people:
+          type: array
+          items: { type: string }
+          description: "Full names of people in the search's scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first."
     PhotoSimilarResults:
       type: object
       additionalProperties: false
