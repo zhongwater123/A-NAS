@@ -794,6 +794,47 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("puts the windows away when the bare desktop is clicked", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const wallpaper = document.querySelector<HTMLElement>(".desktop-shell")!;
+    const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
+    const showDesktop = within(rail).getByRole("button", { name: "显示桌面" });
+    const openWindows = () => screen.queryAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+
+    // A press inside a window keeps the windows.
+    await user.click(screen.getByRole("dialog", { name: "设置" }));
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+    // So does a window drag released over the wallpaper, and a press on the wallpaper that moves away.
+    const titleBar = screen.getByRole("dialog", { name: "回收站" }).querySelector<HTMLElement>(".window-titlebar")!;
+    await user.pointer([{ keys: "[MouseLeft>]", target: titleBar, coords: { clientX: 400, clientY: 90 } }, { target: wallpaper, coords: { clientX: 40, clientY: 600 } }, { keys: "[/MouseLeft]" }]);
+    await user.pointer([{ keys: "[MouseLeft>]", target: wallpaper, coords: { clientX: 1200, clientY: 600 } }, { coords: { clientX: 1100, clientY: 500 } }, { keys: "[/MouseLeft]" }]);
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+    // The click that closes the launcher only closes it.
+    await user.click(within(rail).getByRole("button", { name: "全部应用" }));
+    await user.click(wallpaper);
+    expect(screen.queryByRole("dialog", { name: "全部应用" })).toBeNull();
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+
+    await user.click(wallpaper);
+    expect(openWindows()).toEqual([]);
+    expect(showDesktop.getAttribute("aria-pressed")).toBe("true");
+    // Clicking it again leaves them away; 显示桌面 brings them back with the focus where it was.
+    await user.click(desktop);
+    await user.click(showDesktop);
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+    expect(within(screen.getByRole("navigation", { name: "已打开窗口" })).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
+
+    // The gaps between desktop icons count as the desktop, and a single window goes away too.
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
+    await user.click(desktop);
+    expect(openWindows()).toEqual([]);
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();
