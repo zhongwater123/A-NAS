@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
+	"math"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -23,15 +24,26 @@ import (
 
 // PeopleCalibration is how one kind of occurrence from one model clusters:
 // two occurrences are neighbours at Threshold cosine similarity or more, and
-// a person needs MinCore of them from different photos to be founded. The
-// people evaluation chooses both at 99% pairwise precision
-// (docs/architecture/photo-people.md#评估与验收).
+// a person needs MinCore of them from different photos to be founded. With
+// Rule RuleCentroid an occurrence joins a neighbour's person only if it is
+// also within Threshold of that person's mean vector, which stops a chain of
+// look-alikes (one sibling to the next) from drifting into one person. The
+// people evaluation chooses all three at 99% pairwise precision
+// (docs/research/photo-people-evaluation.md).
 type PeopleCalibration struct {
 	Kind      string
 	Model     string
 	Threshold float64
 	MinCore   int
+	Rule      string
 }
+
+// Clustering rules: join the nearest placed neighbour's person, or only one
+// whose mean is near too.
+const (
+	RuleNearest  = "nearest"
+	RuleCentroid = "centroid"
+)
 
 // defaultPeopleCalibrations are the built-in calibrations. A Worker whose face
 // models have none scans faces, but nobody is clustered from them.
@@ -167,42 +179,71 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 		return false, err
 	}
 	photosOf := make(map[string]map[string]bool)
+	sums := make(map[string][]float64) // person -> sum of its members' vectors
+	add := func(person string, vector []float32) {
+		if sums[person] == nil {
+			sums[person] = make([]float64, len(vector))
+		}
+		for k, value := range vector {
+			sums[person][k] += float64(value)
+		}
+	}
+	nearMean := func(person string, vector []float32) bool {
+		sum := sums[person]
+		var norm, product float64
+		for k, value := range sum {
+			norm += value * value
+			product += value * float64(vector[k])
+		}
+		return norm > 0 && product/math.Sqrt(norm) >= calibration.Threshold
+	}
 	for _, m := range members {
 		if m.person != "" {
 			if photosOf[m.person] == nil {
 				photosOf[m.person] = make(map[string]bool)
 			}
 			photosOf[m.person][m.objectID] = true
+			add(m.person, m.vector)
 		}
 	}
 	var created []string
 	founded := make(map[string][]int) // person -> members that founded it
 	placedSet := make(map[int]bool)
 
-	place := func(i int) {
+	// place gives member i a person among the first seen members, if it
+	// earns one: in arrival order a face sees only those before it, as the
+	// evaluation measured, and the second chance sees everyone.
+	place := func(i, seen int) {
 		m := members[i]
-		var near []int
-		var nearest = -1
-		var best float64
-		for j, other := range members {
+		var near, placed []int
+		for j, other := range members[:seen] {
 			if j == i || other.objectID == m.objectID {
 				continue
 			}
-			similarity := dot(m.vector, other.vector)
-			if similarity < calibration.Threshold {
+			if dot(m.vector, other.vector) < calibration.Threshold {
 				continue
 			}
 			near = append(near, j)
-			if other.person != "" && !m.rejected[other.person] && !photosOf[other.person][m.objectID] &&
-				(nearest < 0 || similarity > best) {
-				nearest, best = j, similarity
+			if other.person != "" && !m.rejected[other.person] && !photosOf[other.person][m.objectID] {
+				placed = append(placed, j)
 			}
 		}
-		if nearest >= 0 {
-			person := members[nearest].person
+		slices.SortFunc(placed, func(a, b int) int {
+			return cmp.Compare(dot(m.vector, members[b].vector), dot(m.vector, members[a].vector))
+		})
+		for _, j := range placed {
+			person := members[j].person
+			if calibration.Rule == RuleCentroid && !nearMean(person, m.vector) {
+				continue
+			}
 			members[i].person = person
 			photosOf[person][m.objectID] = true
+			add(person, m.vector)
 			placedSet[i] = true
+			return
+		}
+		if len(placed) > 0 {
+			// Near people, but not near enough to any of them: nobody yet.
 			return
 		}
 		// Found a person with the nearest unplaced neighbours of other photos.
@@ -226,6 +267,7 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 		photosOf[person] = photos
 		for _, j := range group {
 			members[j].person = person
+			add(person, members[j].vector)
 			placedSet[j] = true
 		}
 	}
@@ -233,7 +275,9 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 	start := len(members)
 	members = append(members, pending...)
 	for i := start; i < len(members); i++ {
-		place(i)
+		if members[i].person == "" {
+			place(i, i)
+		}
 	}
 	// Second chances: an unplaced face can only have become placeable next
 	// to a face this pass placed or added, so only those neighbours are
@@ -253,7 +297,7 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 	}
 	for i := range members {
 		if retry[i] && members[i].person == "" {
-			place(i)
+			place(i, len(members))
 		}
 	}
 

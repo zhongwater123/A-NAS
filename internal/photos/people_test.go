@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
@@ -67,6 +68,9 @@ type facingEmbedder struct {
 	mu         sync.Mutex
 	faceModel  string
 	faceInputs [][]byte
+	// angles, when set, puts person k at angles[k] degrees in one plane
+	// instead, with no noise: look-alikes a few degrees apart.
+	angles []float64
 }
 
 func newFacingEmbedder() *facingEmbedder {
@@ -124,9 +128,14 @@ func (f *facingEmbedder) DetectFaces(_ context.Context, input *os.File) (string,
 			}
 		}
 		vector := make([]float32, 8)
-		vector[person] = 1
-		// A little noise from the photo, never the same twice.
-		vector[4+i%4] = float32(len(content)%7) * 0.01
+		if f.angles != nil {
+			radians := f.angles[person] * math.Pi / 180
+			vector[0], vector[1] = float32(math.Cos(radians)), float32(math.Sin(radians))
+		} else {
+			vector[person] = 1
+			// A little noise from the photo, never the same twice.
+			vector[4+i%4] = float32(len(content)%7) * 0.01
+		}
 		normalize(vector)
 		x0 := float32(i) / 4
 		faces = append(faces, photos.Face{
@@ -491,5 +500,41 @@ func TestAPersonsNameKeepsSearchToTheirPhotos(t *testing.T) {
 	page, err = service.Search(ctx, bob, photos.SearchRequest{Query: "小明"})
 	if err != nil || len(page.People) != 0 || len(page.Assets) != 0 {
 		t.Fatalf("bob's Search(小明) = %v, people %v, %v", names(page), page.People, err)
+	}
+}
+
+func TestTheCentroidRuleStopsAChainOfLookAlikes(t *testing.T) {
+	ctx := context.Background()
+	for _, rule := range []string{photos.RuleNearest, photos.RuleCentroid} {
+		root := filepath.Join(t.TempDir(), "photos")
+		c := newClock()
+		service, err := photos.Open(root, photos.Options{Now: c.Now, DisableCapacityReserve: true, People: []photos.PeopleCalibration{
+			{Kind: photos.OccurrenceFace, Model: "faces-1", Threshold: math.Cos(7 * math.Pi / 180), MinCore: 2, Rule: rule}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		private, _ := libraries(t, service, alice)
+		worker := newFacingEmbedder()
+		// Each look-alike is 6 degrees from the one before: neighbours one by
+		// one, but the last is 18 degrees from the first.
+		worker.angles = []float64{0, 6, 12, 18}
+		// They arrive in this order.
+		for i, person := range []int{0, 0, 1, 2, 3} {
+			importPhoto(t, service, alice, private.ID, "", string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), person))
+			c.Advance(time.Minute)
+		}
+		organise(t, service, worker)
+		found, err := service.People(ctx, alice, "", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]int{photos.RuleNearest: 1, photos.RuleCentroid: 2}[rule]
+		if len(found) != want {
+			for _, person := range found {
+				t.Logf("%s: a person with %v", rule, personPhotos(t, service, alice, person.ID))
+			}
+			t.Errorf("%s: People() = %d people; want %d", rule, len(found), want)
+		}
+		_ = service.Close()
 	}
 }
