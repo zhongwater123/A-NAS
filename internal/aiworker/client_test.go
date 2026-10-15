@@ -3,6 +3,7 @@ package aiworker_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -157,6 +158,44 @@ func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
 
 // The photo service stops a detection when someone starts using the device by
 // cancelling its context: the client hangs up, which the Worker watches for.
+func TestFacesCrossTheSocket(t *testing.T) {
+	socket := aiworkertest.Serve(t, aiworkertest.WithFaces(aiworkertest.Deterministic("fake-1", 2), "faces-1"))
+	client := aiworker.Client{SocketPath: socket}
+	info, err := client.Info(context.Background())
+	if err != nil || info.Faces != "faces-1" || info.Detector != "" {
+		t.Fatalf("Info() = %+v, %v; want the face models named", info, err)
+	}
+	dir := t.TempDir()
+	found := 0
+	for i := range 12 {
+		content := []byte(fmt.Sprintf("an upright photo %d", i))
+		path := filepath.Join(dir, fmt.Sprintf("input-%d.jpg", i))
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		model, faces, err := client.DetectFaces(context.Background(), file)
+		_ = file.Close()
+		want := aiworkertest.HashFaces(content)
+		if err != nil || model != "faces-1" || len(faces) != len(want) {
+			t.Fatalf("DetectFaces() = %q, %v, %v; want %d faces", model, faces, err, len(want))
+		}
+		for j, face := range faces {
+			if face.Box[2] != float32(want[j].Box[2]) || face.Landmarks[9] != float32(want[j].Landmarks[9]) ||
+				face.Score != float32(want[j].Score) || len(face.Vector) != aiworkertest.FaceDimensions {
+				t.Fatalf("face %d = %+v, want %+v", j, face, want[j])
+			}
+		}
+		found += len(faces)
+	}
+	if found == 0 {
+		t.Fatal("the fake found no faces in twelve photos")
+	}
+}
+
 func TestCancellingADetectionHangsUp(t *testing.T) {
 	dir, err := os.MkdirTemp("", "ai")
 	if err != nil {

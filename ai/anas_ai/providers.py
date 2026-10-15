@@ -1,11 +1,13 @@
 """AI providers: image vectors through MediaPipe, object detection through
-ONNX Runtime, and deterministic fakes of both.
+ONNX Runtime, faces through OpenCV (and ONNX Runtime for an ArcFace-style
+recognition model), and deterministic fakes of each.
 
 Only the real providers import their runtimes (and NumPy and Pillow), so the
 Worker and its tests run with the Python standard library alone when the
 fakes are used.
 """
 
+import base64
 import gc
 import hashlib
 import importlib.metadata
@@ -317,6 +319,220 @@ class FakeDetector:
             scores.append(0.3 + part[1] / 255 * 0.7)
             boxes.append([x0, y0, x0 + 0.5, y0 + 0.5])
         return kept_boxes(labels, boxes, scores)
+
+    def release(self):
+        self.loaded = False
+
+
+# Faces (docs/architecture/photo-people.md): YuNet finds each face and its
+# five landmarks in the photo service's 1600 px input, the landmarks align it
+# to ArcFace's 112 x 112 template, and the recognition model embeds it. The
+# score floor and the largest number of faces kept come from the people
+# evaluation.
+FACE_MIN_SCORE = 0.8
+FACE_NMS = 0.3
+MAX_FACES = 64
+ALIGNED_FACE = 112
+# The five points ArcFace-style models are trained on, in the aligned crop:
+# the eyes, the nose tip and the mouth corners; OpenCV's alignCrop uses them too.
+FACE_TEMPLATE = ((38.2946, 51.6963), (73.5318, 51.5014), (56.0252, 71.7366), (41.5493, 92.3655), (70.7299, 92.2041))
+# Recognition models the Worker knows how to feed, by the manifest's "kind":
+# SFace through OpenCV, or an ArcFace-style ONNX model through ONNX Runtime.
+FACE_KINDS = ("sface", "arcface")
+
+
+def similarity_transform(source, target):
+    """The 2 x 3 rotation, uniform scale and shift that best maps source onto target (Umeyama)."""
+    import numpy
+
+    source = numpy.asarray(source, dtype=numpy.float64)
+    target = numpy.asarray(target, dtype=numpy.float64)
+    source_mean, target_mean = source.mean(axis=0), target.mean(axis=0)
+    source_centred, target_centred = source - source_mean, target - target_mean
+    u, s, vt = numpy.linalg.svd(target_centred.T @ source_centred / len(source))
+    signs = numpy.ones(2)
+    if numpy.linalg.det(u) * numpy.linalg.det(vt) < 0:
+        signs[-1] = -1
+    rotation = u @ numpy.diag(signs) @ vt
+    scale = (s * signs).sum() / source_centred.var(axis=0).sum()
+    shift = target_mean - scale * rotation @ source_mean
+    return numpy.hstack([scale * rotation, shift[:, None]])
+
+
+def align_face(image, landmarks):
+    """The 112 x 112 crop of a face, its landmarks moved onto FACE_TEMPLATE."""
+    import cv2
+
+    matrix = similarity_transform(landmarks, FACE_TEMPLATE)
+    return cv2.warpAffine(image, matrix, (ALIGNED_FACE, ALIGNED_FACE), flags=cv2.INTER_LINEAR)
+
+
+class FaceProvider:
+    """YuNet and a recognition model, loaded on the first photo and dropped by release()."""
+
+    def __init__(self, detector_path, detector_manifest, embedder_path, embedder_manifest, threads=None):
+        detector = verify_model(detector_path, detector_manifest)
+        embedder = verify_model(embedder_path, embedder_manifest)
+        self.kind = embedder.get("kind")
+        if self.kind not in FACE_KINDS:
+            raise Unavailable(f"face model kind {self.kind!r} is not one of {FACE_KINDS}")
+        try:
+            import cv2
+        except ImportError as error:
+            raise Unavailable(f"the AI runtime cannot load OpenCV: {error}") from error
+        runtime = f"opencv-{cv2.__version__}"
+        if self.kind == "arcface":
+            try:
+                runtime += "+ort-" + importlib.metadata.version("onnxruntime")
+            except importlib.metadata.PackageNotFoundError as error:
+                raise Unavailable("the AI runtime has no ONNX Runtime") from error
+        self._detector_path, self._embedder_path = detector_path, embedder_path
+        self._detector = self._embedder = None
+        self.threads = threads or inference_threads()
+        self.model = (
+            f"{detector['name']}@{detector['sha256'][:12]}+{embedder['name']}@{embedder['sha256'][:12]}"
+            f"+{runtime}+s{FACE_MIN_SCORE:g}k{MAX_FACES}"
+        )
+
+    def run_options(self):
+        if self.kind == "arcface":
+            import onnxruntime
+
+            return onnxruntime.RunOptions()
+        return RunHandle()
+
+    def detect(self, data, run):
+        import cv2
+        import numpy
+
+        image = cv2.imdecode(numpy.frombuffer(data, numpy.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise InvalidInput("not an image")
+        height, width = image.shape[:2]
+        detector = self._load_detector()
+        detector.setInputSize((width, height))
+        _, found = detector.detect(image)
+        if run.terminate:
+            raise Cancelled()
+        rows = [] if found is None else [row for row in found.tolist() if row[14] >= FACE_MIN_SCORE]
+        rows.sort(key=lambda row: -row[14])
+        rows = rows[:MAX_FACES]
+        crops = [align_face(image, numpy.array(row[4:14]).reshape(5, 2)) for row in rows]
+        vectors = self._embed(crops, run) if crops else []
+        faces = []
+        for row, vector in zip(rows, vectors):
+            x, y, w, h = row[:4]
+            box = [x / width, y / height, (x + w) / width, (y + h) / height]
+            landmarks = [value / (width if i % 2 == 0 else height) for i, value in enumerate(row[4:14])]
+            faces.append({
+                "box": [round(min(1.0, max(0.0, value)), 5) for value in box],
+                "landmarks": [round(min(1.0, max(0.0, value)), 5) for value in landmarks],
+                "score": round(float(row[14]), 4),
+                "vector": encode_unit(vector),
+            })
+        return faces
+
+    def _embed(self, crops, run):
+        import cv2
+        import numpy
+
+        if self.kind == "sface":
+            recognizer = self._load_embedder()
+            vectors = []
+            for crop in crops:
+                if run.terminate:
+                    raise Cancelled()
+                vectors.append(recognizer.feature(crop).reshape(-1))
+            vectors = numpy.stack(vectors)
+        else:
+            session = self._load_embedder()
+            blob = cv2.dnn.blobFromImages(crops, 1 / 127.5, (ALIGNED_FACE, ALIGNED_FACE), (127.5, 127.5, 127.5),
+                                          swapRB=True)
+            try:
+                vectors = session.run(None, {session.get_inputs()[0].name: blob}, run)[0]
+            except Exception:  # pylint: disable=broad-except
+                # A terminated run fails with ONNX Runtime's generic error.
+                if not run.terminate:
+                    raise
+                vectors = None
+            if vectors is None:
+                raise Cancelled()
+        return vectors / numpy.linalg.norm(vectors, axis=1, keepdims=True)
+
+    def release(self):
+        self._detector = self._embedder = None
+        gc.collect()
+
+    def _load_detector(self):
+        if self._detector is None:
+            import cv2
+
+            cv2.setNumThreads(self.threads)
+            self._detector = cv2.FaceDetectorYN.create(self._detector_path, "", (320, 320), FACE_MIN_SCORE,
+                                                       FACE_NMS, 5000)
+        return self._detector
+
+    def _load_embedder(self):
+        if self._embedder is None:
+            if self.kind == "sface":
+                import cv2
+
+                self._embedder = cv2.FaceRecognizerSF.create(self._embedder_path, "")
+            else:
+                import onnxruntime
+
+                options = onnxruntime.SessionOptions()
+                options.intra_op_num_threads = self.threads
+                options.inter_op_num_threads = 1
+                options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+                self._embedder = onnxruntime.InferenceSession(self._embedder_path, options,
+                                                              providers=["CPUExecutionProvider"])
+        return self._embedder
+
+
+def encode_unit(vector):
+    """A vector as base64 little-endian float32, as detect_faces carries it."""
+    return base64.b64encode(encode_vector([float(value) for value in vector])).decode("ascii")
+
+
+class FakeFaces:
+    """A deterministic stand-in: equal images get equal faces.
+
+    Each face belongs to one of FAKE_PEOPLE people chosen by the image bytes,
+    and the same person gets nearly the same vector in every photo, so the
+    photo service's clustering has something to cluster in system tests.
+    """
+
+    model = "fake-faces-sha256"
+    dimensions = 128
+    FAKE_PEOPLE = 3
+
+    def __init__(self):
+        self.loaded = False
+
+    def run_options(self):
+        return RunHandle()
+
+    def detect(self, data, run):
+        if not data:
+            raise InvalidInput("empty image")
+        self.loaded = True
+        digest = hashlib.sha256(data).digest()
+        faces = []
+        for i in range(digest[0] % 3):
+            person = digest[1 + i] % self.FAKE_PEOPLE
+            base = FakeProvider(self.dimensions)._vector(b"fake person %d" % person)
+            noise = FakeProvider(self.dimensions)._vector(data + bytes([i]))
+            vector = [b + 0.05 * n for b, n in zip(base, noise)]
+            norm = math.sqrt(sum(value * value for value in vector))
+            x0 = 0.05 + 0.3 * i
+            faces.append({
+                "box": [x0, 0.2, x0 + 0.2, 0.5],
+                "landmarks": [x0 + 0.06, 0.3, x0 + 0.14, 0.3, x0 + 0.1, 0.36, x0 + 0.07, 0.42, x0 + 0.13, 0.42],
+                "score": round(0.9 - 0.01 * i, 4),
+                "vector": encode_unit(value / norm for value in vector),
+            })
+        return faces
 
     def release(self):
         self.loaded = False

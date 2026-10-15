@@ -37,6 +37,9 @@ type EmbedderInfo struct {
 	// Detector names the object detector in the same way, or is empty when
 	// the Worker has none it can use.
 	Detector string
+	// Faces names the face models in the same way, or is empty when the
+	// Worker has none it can use.
+	Faces string
 }
 
 // Detector is the AI Worker's object detector
@@ -48,6 +51,25 @@ type Detector interface {
 	DetectObjects(ctx context.Context, image *os.File) (string, []Box, error)
 	// Release frees the detector's memory, or with all, the Worker's.
 	Release(ctx context.Context, all bool) error
+}
+
+// FaceDetector is the AI Worker's face models
+// (docs/architecture/photo-people.md). An Embedder that is also a
+// FaceDetector gets face jobs while its Info names face models.
+type FaceDetector interface {
+	// DetectFaces returns the face models' name and the faces in an upright
+	// image. Cancelling ctx stops the work in the Worker.
+	DetectFaces(ctx context.Context, image *os.File) (string, []Face, error)
+}
+
+// Face is one face the Worker found: its box and five landmarks (eyes, nose
+// tip, mouth corners) as fractions of the image, how sure the detector is,
+// and the face's normalized identity vector.
+type Face struct {
+	Box       [4]float32
+	Landmarks [10]float32
+	Score     float32
+	Vector    []float32
 }
 
 // Box is one object a detector found: its class, how sure the detector is,

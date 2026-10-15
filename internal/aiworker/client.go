@@ -37,8 +37,12 @@ const (
 	// OpDetectObjects finds the objects in an image. Hanging up cancels it,
 	// and the Worker does not answer.
 	OpDetectObjects = "detect_objects"
-	// OpRelease frees memory: What is "detector" to drop the detector's
-	// session, or "all" for the Worker to exit after answering.
+	// OpDetectFaces finds the faces in an image and embeds each; hanging up
+	// cancels it too.
+	OpDetectFaces = "detect_faces"
+	// OpRelease frees memory: What is "detector" to drop the background
+	// models (the detector and the face models), or "all" for the Worker to
+	// exit after answering.
 	OpRelease = "release"
 )
 
@@ -68,7 +72,20 @@ type Response struct {
 	Vector []byte `json:"vector,omitempty"`
 	// Boxes are [class, score, x0, y0, x1, y1], corners as fractions.
 	Boxes [][]float64 `json:"boxes,omitempty"`
-	Error *WireError  `json:"error,omitempty"`
+	// FaceModel names the face models, in answer to info.
+	FaceModel string `json:"faceModel,omitempty"`
+	// Faces answer detect_faces.
+	Faces []WireFace `json:"faces,omitempty"`
+	Error *WireError `json:"error,omitempty"`
+}
+
+// WireFace is one face as detect_faces answers it: box and landmarks as
+// fractions of the image, and the vector as Vector is.
+type WireFace struct {
+	Box       []float64 `json:"box"`
+	Landmarks []float64 `json:"landmarks"`
+	Score     float64   `json:"score"`
+	Vector    []byte    `json:"vector"`
 }
 
 type WireError struct {
@@ -76,7 +93,7 @@ type WireError struct {
 	Message string `json:"message"`
 }
 
-// Client implements photos.Embedder and photos.Detector.
+// Client implements photos.Embedder, photos.Detector and photos.FaceDetector.
 type Client struct {
 	SocketPath string
 	// Timeout bounds one call, including loading the model after the Worker
@@ -85,8 +102,9 @@ type Client struct {
 }
 
 var (
-	_ photos.Embedder = Client{}
-	_ photos.Detector = Client{}
+	_ photos.Embedder     = Client{}
+	_ photos.Detector     = Client{}
+	_ photos.FaceDetector = Client{}
 )
 
 func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
@@ -97,7 +115,8 @@ func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 	if response.Model == "" || response.Dimensions <= 0 {
 		return photos.EmbedderInfo{}, errors.New("AI worker described no model")
 	}
-	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector}, nil
+	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector,
+		Faces: response.FaceModel}, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {
@@ -133,6 +152,35 @@ func (c Client) DetectObjects(ctx context.Context, image *os.File) (string, []ph
 			X0: float32(box[2]), Y0: float32(box[3]), X1: float32(box[4]), Y1: float32(box[5])})
 	}
 	return response.Model, boxes, nil
+}
+
+func (c Client) DetectFaces(ctx context.Context, image *os.File) (string, []photos.Face, error) {
+	response, err := c.call(ctx, Request{Op: OpDetectFaces}, image)
+	if err != nil {
+		return "", nil, err
+	}
+	if response.Model == "" {
+		return "", nil, errors.New("AI worker named no face models")
+	}
+	faces := make([]photos.Face, 0, len(response.Faces))
+	for _, wire := range response.Faces {
+		if len(wire.Box) != 4 || len(wire.Landmarks) != 10 {
+			return "", nil, errors.New("AI worker returned a malformed face")
+		}
+		vector, err := vectorOf(Response{Vector: wire.Vector})
+		if err != nil {
+			return "", nil, err
+		}
+		face := photos.Face{Score: float32(wire.Score), Vector: vector}
+		for i, value := range wire.Box {
+			face.Box[i] = float32(value)
+		}
+		for i, value := range wire.Landmarks {
+			face.Landmarks[i] = float32(value)
+		}
+		faces = append(faces, face)
+	}
+	return response.Model, faces, nil
 }
 
 func (c Client) Release(ctx context.Context, all bool) error {

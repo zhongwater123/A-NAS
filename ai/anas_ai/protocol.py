@@ -20,8 +20,14 @@ OP_EMBED_QUERY = "embed_query"
 # [class, score, x0, y0, x1, y1] with corners as fractions of the image. The
 # caller cancels by hanging up, and then gets no answer.
 OP_DETECT_OBJECTS = "detect_objects"
-# Frees memory: "what" is "detector" to drop the detector's session, or "all"
-# to exit after answering; systemd starts the Worker again when needed.
+# Finds the faces in the image (docs/architecture/photo-people.md); answers
+# "model" and "faces", each {"box": [x0, y0, x1, y1], "landmarks": [x, y] x 5,
+# "score", "vector"} with coordinates as fractions of the image and the vector
+# as base64 little-endian float32, L2-normalised. Hanging up cancels it too.
+OP_DETECT_FACES = "detect_faces"
+# Frees memory: "what" is "detector" to drop the background models (the
+# object detector and the face models), or "all" to exit after answering;
+# systemd starts the Worker again when needed.
 OP_RELEASE = "release"
 
 # The input cannot be processed; the same input would fail again.

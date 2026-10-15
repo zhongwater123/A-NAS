@@ -135,6 +135,65 @@ func WithDetector(handle Handler, model string) Handler {
 	}
 }
 
+// WithFaces adds face models named model to a Worker: info names them, and
+// detect_faces answers HashFaces of the image bytes.
+func WithFaces(handle Handler, model string) Handler {
+	return func(request aiworker.Request, file *os.File) *aiworker.Response {
+		switch request.Op {
+		case aiworker.OpInfo:
+			response := handle(request, file)
+			if response != nil && response.OK {
+				response.FaceModel = model
+			}
+			return response
+		case aiworker.OpDetectFaces:
+			if file == nil {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
+			}
+			content, err := io.ReadAll(file)
+			if err != nil || len(content) == 0 {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
+			}
+			return &aiworker.Response{OK: true, Model: model, Faces: HashFaces(content)}
+		case aiworker.OpRelease:
+			return &aiworker.Response{OK: true}
+		}
+		return handle(request, file)
+	}
+}
+
+// FaceDimensions is the length of HashFaces' vectors.
+const FaceDimensions = 8
+
+// HashFaces are up to two faces that come from the image bytes, as the
+// Python Worker's fake answers: each belongs to one of three people, whose
+// vectors are nearly equal in every photo.
+func HashFaces(content []byte) []aiworker.WireFace {
+	sum := sha256.Sum256(content)
+	faces := []aiworker.WireFace{}
+	for i := range int(sum[0] % 3) {
+		person := hashVector([]byte{'p', sum[1+i] % 3}, FaceDimensions)
+		noise := hashVector(append(append([]byte{}, content...), byte(i)), FaceDimensions)
+		vector := make([]float32, FaceDimensions)
+		var norm float64
+		for j := range vector {
+			vector[j] = person[j] - 0.5 + 0.02*(noise[j]-0.5)
+			norm += float64(vector[j]) * float64(vector[j])
+		}
+		for j := range vector {
+			vector[j] /= float32(math.Sqrt(norm))
+		}
+		x0 := 0.05 + 0.3*float64(i)
+		faces = append(faces, aiworker.WireFace{
+			Box:       []float64{x0, 0.2, x0 + 0.2, 0.5},
+			Landmarks: []float64{x0 + 0.06, 0.3, x0 + 0.14, 0.3, x0 + 0.1, 0.36, x0 + 0.07, 0.42, x0 + 0.13, 0.42},
+			Score:     0.9 - 0.01*float64(i),
+			Vector:    Encode(vector),
+		})
+	}
+	return faces
+}
+
 // HashBoxes are up to three boxes that come from the image bytes, best first.
 func HashBoxes(content []byte) [][]float64 {
 	sum := sha256.Sum256(content)

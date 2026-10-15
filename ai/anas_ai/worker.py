@@ -1,7 +1,9 @@
 """Runs the AI Worker.
 
-    python3 -m anas_ai.worker --model FILE --manifest FILE [--detector FILE --detector-manifest FILE] [--socket PATH]
-    python3 -m anas_ai.worker --fake [--fake-detector] [--socket PATH]
+    python3 -m anas_ai.worker --model FILE --manifest FILE [--detector FILE --detector-manifest FILE]
+        [--face-detector FILE --face-detector-manifest FILE --face-embedder FILE --face-embedder-manifest FILE]
+        [--socket PATH]
+    python3 -m anas_ai.worker --fake [--fake-detector] [--fake-faces] [--socket PATH]
 
 Under systemd socket activation the listener arrives as descriptor 3 and
 --socket is not needed. The Worker serves one connection at a time and exits
@@ -9,8 +11,9 @@ after IDLE_SECONDS without one, or when told to release everything, releasing
 the models' memory; systemd starts it again on the next connection.
 
 The image vector model is needed for search, so without it the Worker answers
-"unavailable" to everything. The object detector only serves background work:
-without it, only detect_objects is unavailable.
+"unavailable" to everything. The object detector and the face models only
+serve background work: without them, only detect_objects or detect_faces is
+unavailable.
 """
 
 import argparse
@@ -38,7 +41,7 @@ log = logging.getLogger("anas-ai")
 
 
 class Detector:
-    """The object detector, or why there is none."""
+    """A background model (the object detector or the face models), or why there is none."""
 
     def __init__(self, provider=None, reason=None):
         self.provider = provider
@@ -60,9 +63,10 @@ def listening_socket(path):
     return listener
 
 
-def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS, detector=None):
+def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS, detector=None, faces=None):
     """Answers connections until none arrives for idle_seconds or one asks it to release everything."""
     detector = detector or Detector(reason="no object detector")
+    faces = faces or Detector(reason="no face models")
     listener.settimeout(idle_seconds)
     while True:
         try:
@@ -72,12 +76,12 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
             return
         with conn:
             conn.settimeout(None)
-            if handle(conn, provider, unavailable_reason, detector):
+            if handle(conn, provider, unavailable_reason, detector, faces):
                 log.info("released everything; exiting")
                 return
 
 
-def handle(conn, provider, unavailable_reason, detector):
+def handle(conn, provider, unavailable_reason, detector, faces=None):
     """Answers one request; returns whether the Worker should exit."""
     try:
         request, fds = protocol.read_request(conn)
@@ -85,7 +89,7 @@ def handle(conn, provider, unavailable_reason, detector):
         log.warning("dropped a malformed request: %s", error)
         return False
     try:
-        response = respond(request, fds, provider, unavailable_reason, detector, conn)
+        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces)
     finally:
         for fd in fds:
             os.close(fd)
@@ -98,8 +102,9 @@ def handle(conn, provider, unavailable_reason, detector):
     return request.get("op") == protocol.OP_RELEASE and request.get("what") == "all" and response["ok"]
 
 
-def respond(request, fds, provider, unavailable_reason, detector, conn=None):
+def respond(request, fds, provider, unavailable_reason, detector, conn=None, faces=None):
     """The response to request, or None when the caller hung up before it was ready."""
+    faces = faces or Detector(reason="no face models")
     if unavailable_reason is not None:
         return protocol.failure(protocol.CODE_UNAVAILABLE, unavailable_reason)
     op = request.get("op")
@@ -107,6 +112,8 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None):
         fields = {"model": provider.model, "dimensions": provider.dimensions}
         if detector.provider is not None:
             fields["detector"] = detector.provider.model
+        if faces.provider is not None:
+            fields["faceModel"] = faces.provider.model
         return protocol.ok(**fields)
     if op == protocol.OP_EMBED_IMAGE:
         if len(fds) != 1:
@@ -122,13 +129,20 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None):
             return protocol.failure(protocol.CODE_UNAVAILABLE, detector.reason)
         if len(fds) != 1:
             return protocol.failure(protocol.CODE_INVALID_INPUT, "detect_objects needs exactly one image descriptor")
-        return detected(detector.provider, fds[0], conn)
+        return detected(detector.provider, fds[0], conn, "boxes")
+    if op == protocol.OP_DETECT_FACES:
+        if faces.provider is None:
+            return protocol.failure(protocol.CODE_UNAVAILABLE, faces.reason)
+        if len(fds) != 1:
+            return protocol.failure(protocol.CODE_INVALID_INPUT, "detect_faces needs exactly one image descriptor")
+        return detected(faces.provider, fds[0], conn, "faces")
     if op == protocol.OP_RELEASE:
         what = request.get("what")
         if what not in ("detector", "all"):
             return protocol.failure(protocol.CODE_INVALID_INPUT, 'release needs "what": "detector" or "all"')
-        if detector.provider is not None:
-            detector.provider.release()
+        for background in (detector, faces):
+            if background.provider is not None:
+                background.provider.release()
         return protocol.ok()
     return protocol.failure(protocol.CODE_INTERNAL, f"unknown operation {op!r}")
 
@@ -151,8 +165,9 @@ def embedded(op, provider, embed):
     )
 
 
-def detected(detector, fd, conn):
-    """Answers with the boxes in the image, or None when the caller hung up.
+def detected(detector, fd, conn, key):
+    """Answers with what detector finds in the image under key ("boxes" or
+    "faces"), or None when the caller hung up.
 
     The detection runs on its own thread while this one watches the
     connection: when the photo service hangs up because the user became
@@ -167,7 +182,7 @@ def detected(detector, fd, conn):
 
     def work():
         try:
-            outcome["boxes"] = detector.detect(data, run)
+            outcome["found"] = detector.detect(data, run)
         except BaseException as error:  # pylint: disable=broad-except
             outcome["error"] = error
 
@@ -191,9 +206,9 @@ def detected(detector, fd, conn):
     if isinstance(error, providers.Unavailable):
         return protocol.failure(protocol.CODE_UNAVAILABLE, str(error))
     if error is not None:
-        log.error("detect_objects failed: %r", error)
+        log.error("detecting %s failed: %r", key, error)
         return protocol.failure(protocol.CODE_INTERNAL, type(error).__name__)
-    return protocol.ok(model=detector.model, boxes=outcome["boxes"])
+    return protocol.ok(model=detector.model, **{key: outcome["found"]})
 
 
 def hung_up(conn):
@@ -230,9 +245,14 @@ def main(argv=None):
     parser.add_argument("--cache-dir", help="a writable directory for the runtime's weight cache")
     parser.add_argument("--detector", help="the object detector's .onnx file")
     parser.add_argument("--detector-manifest", help="the detector manifest that pins its size and SHA-256")
+    parser.add_argument("--face-detector", help="the face detector's .onnx file")
+    parser.add_argument("--face-detector-manifest", help="the face detector's manifest")
+    parser.add_argument("--face-embedder", help="the face recognition model's .onnx file")
+    parser.add_argument("--face-embedder-manifest", help="the face recognition model's manifest")
     parser.add_argument("--threads", type=int, help="detector threads (default: the cores less the reserve)")
     parser.add_argument("--fake", action="store_true", help="serve deterministic fake vectors")
     parser.add_argument("--fake-detector", action="store_true", help="serve deterministic fake boxes")
+    parser.add_argument("--fake-faces", action="store_true", help="serve deterministic fake faces")
     parser.add_argument("--idle-seconds", type=int, default=IDLE_SECONDS)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
@@ -259,12 +279,24 @@ def main(argv=None):
         except providers.Unavailable as error:
             detector = Detector(reason=str(error))
             log.error("object detector unavailable: %s", error)
+    faces = Detector(reason="no face models")
+    if args.fake_faces:
+        faces = Detector(providers.FakeFaces())
+    elif args.face_detector and args.face_detector_manifest and args.face_embedder and args.face_embedder_manifest:
+        try:
+            faces = Detector(providers.FaceProvider(args.face_detector, args.face_detector_manifest,
+                                                    args.face_embedder, args.face_embedder_manifest, args.threads))
+        except providers.Unavailable as error:
+            faces = Detector(reason=str(error))
+            log.error("face models unavailable: %s", error)
     if provider is not None:
         log.info("serving %s (%d dimensions)", provider.model, provider.dimensions)
     if detector.provider is not None:
         log.info("detecting with %s (%s threads)", detector.provider.model, getattr(detector.provider, "threads", "-"))
+    if faces.provider is not None:
+        log.info("finding faces with %s", faces.provider.model)
     with listening_socket(args.socket) as listener:
-        serve(listener, provider, reason, args.idle_seconds, detector)
+        serve(listener, provider, reason, args.idle_seconds, detector, faces)
     # Hand the memory back at once. Tearing the models down object by object
     # took 40 seconds under memory pressure on the local stack, and until the
     # process ends systemd cannot start the Worker the next search needs.
