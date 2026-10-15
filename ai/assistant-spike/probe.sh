@@ -59,3 +59,10 @@ sys.exit(0 if r == 0 else 1)'
 expect_fail "setuid to root"                     python3 -c 'import os; os.setuid(0)'
 expect_fail "unshare a user namespace"           unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
+# Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
+# Hermes upgrade that adds one fails here (toolsets-check.py).
+if out=$(/opt/a-nas/assistant-runtimes/spike/venv/bin/python /spike/toolsets-check.py 2>&1); then
+  ok "every Hermes toolset allowed or disabled ($(tail -n 1 <<<"$out"))"
+else
+  bad "every Hermes toolset allowed or disabled" "$(tr '\n' ';' <<<"$out")"
+fi

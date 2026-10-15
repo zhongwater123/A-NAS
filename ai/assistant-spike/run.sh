@@ -11,8 +11,9 @@
 #
 # The assistant runs `hermes serve` (Hermes Desktop's backend). The suggested order is build,
 # sandbox, then: serve-basic.sh, "serve-tools.sh alice calls.txt", serve-after.sh,
-# serve-managed.sh, serve-surface.sh, "serve-background.sh alice 30", measure.sh, crash.sh,
-# quota.sh. Those use a scripted fake model; serve_client.py is the JSON-RPC client.
+# serve-managed.sh, serve-surface.sh, "serve-background.sh alice 30", serve-environ.sh,
+# measure.sh, crash.sh, quota.sh. Those use a scripted fake model; serve_client.py is the
+# JSON-RPC client. The probe also runs toolsets-check.py against the managed policy.
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh, scenarios and the UI prototype.
@@ -83,7 +84,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,27p' "$0"
+    sed -n '2,28p' "$0"
     exit 2
     ;;
 esac

@@ -68,9 +68,7 @@ cp -r /spike/skills/. /opt/a-nas/assistant-skills/ && chown -R root:root /opt/a-
 # the managed mcp_servers block is repeated there; the managed layer still wins.
 for u in alice bob; do
   install -d -m 0755 "/etc/a-nas-assistant/members/$u"
-  { printf 'skills:
-  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]
-' "$u"
+  { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$u"
     sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' /spike/managed-config.yaml
   } > "/etc/a-nas-assistant/members/$u/config.yaml"
   # Mount points for the read-only files and folders the unit binds into the Hermes home.
@@ -89,9 +87,7 @@ install -m 0644 /spike/anas-assistant@.service /spike/anas-assistant-api@.servic
 # systemd passes it in through EnvironmentFile=.
 install -d -m 0700 /etc/a-nas-assistant/tokens
 for u in alice bob; do
-  printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s
-' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=
-')" > "/etc/a-nas-assistant/tokens/$u.env"
+  printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')" > "/etc/a-nas-assistant/tokens/$u.env"
   chmod 0600 "/etc/a-nas-assistant/tokens/$u.env"
 done
 if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
