@@ -74,6 +74,15 @@ sys.exit(0 if r == 0 else 1)'
 expect_fail "setuid to root"                     python3 -c 'import os; os.setuid(0)'
 expect_fail "unshare a user namespace"           unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
+# The photo service's assistant socket (#113), when the sandbox runs with SPIKE_PHOTOS.
+photos=/run/anas-assistant-photos/photos.sock
+if [ -S "$photos" ]; then
+  expect_ok   "read own and shared photo libraries" sh -c "python3 /spike/photos_peer.py $photos libraries | grep -q 'private:user:alice.*shared'"
+  expect_ok   "search photos without another member's" sh -c "out=\$(python3 /spike/photos_peer.py $photos search 海边) && echo \"\$out\" | grep -q IMG_3101 && ! echo \"\$out\" | grep -q IMG_900"
+  expect_fail "reach the photo service's session socket" python3 /spike/photos_peer.py /run/a-nas-photos/photos.sock --session seed-alice libraries
+else
+  echo "INFO photo socket not bound (sandbox without SPIKE_PHOTOS)"
+fi
 # Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
 # Hermes upgrade that adds one fails here (toolsets-check.py).
 if [ ! -x /opt/a-nas/assistant-runtimes/spike/venv/bin/python ]; then

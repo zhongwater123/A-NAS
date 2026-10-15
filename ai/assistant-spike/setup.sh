@@ -33,6 +33,19 @@ if [[ -n "${SPIKE_PRODUCT_UID:-}" ]]; then
   useradd -u "$SPIKE_PRODUCT_UID" -M -d /nonexistent -s /usr/sbin/nologin anas-product
   product=(PRODUCT_USER=anas-product)
 fi
+if [[ -x /spike-photos/photos-spike ]]; then
+  # The photo service as its own identity (ADR 0011) with its assistant socket (#113),
+  # seeded with photos for alice, bob and the shared library. Its socket directories are
+  # private to it; the assistant's unit binds the socket itself into the sandbox.
+  useradd -r -u 31000 -U -M -d /nonexistent -s /usr/sbin/nologin a-nas-photos
+  install -d -o a-nas-photos -g a-nas-photos -m 0700 /var/lib/photos-spike /run/a-nas-photos /run/a-nas-photos-assistant
+  systemd-run --unit photos-spike --quiet -p User=a-nas-photos -p Group=a-nas-photos /spike-photos/photos-spike     /var/lib/photos-spike /run/a-nas-photos/photos.sock /run/a-nas-photos-assistant/assistant.sock
+  for _ in $(seq 1 240); do
+    journalctl -u photos-spike -o cat --no-pager | grep -q photos-ready && break
+    systemctl is-active -q photos-spike || { journalctl -u photos-spike -o cat --no-pager | tail -5; exit 1; }
+    sleep 1
+  done
+fi
 env "${product[@]}" bash /spike/assistant-install.sh alice bob
 bash /spike/seed.sh "$d"
 echo setup-done

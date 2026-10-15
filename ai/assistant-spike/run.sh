@@ -17,6 +17,9 @@
 # In-turn approvals (#111), with SPIKE_APPROVAL_TIMEOUT=20 given to sandbox: approvals-broker.sh,
 # "scenarios calls-approval.txt", approvals-managed.sh. Memory, skills and the background review
 # (#114): memory-skills.sh, review-whitelist.sh, review-defaults.sh; review-scenarios.sh needs a real model.
+# Read-only photos (#113), with SPIKE_PHOTOS=1 given to sandbox: photos-socket.sh,
+# "scenarios calls-photos.txt", photos-vision.sh; with a real model, "scenarios
+# scenarios-photos.txt" and photos-vision.sh.
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh and the UI prototype; scenarios works on either channel.
@@ -70,6 +73,15 @@ case "${1:-}" in
       chmod 0700 "$run/tokens"
       key_mount+=(-v "$run/assistant:/run/a-nas-assistant" -v "$run/broker:/run/anas-spike-broker" -v "$run/tokens:/run/anas-spike-tokens")
     fi
+    # SPIKE_PHOTOS=1 also runs the photo service with its assistant socket and a seeded
+    # library (#113), from photos-spike/ in this checkout; it needs Go with cgo.
+    if [[ -n "${SPIKE_PHOTOS:-}" ]]; then
+      bin="$work/photos-spike/$name"
+      mkdir -p "$bin"
+      (cd "$here/../.." && CGO_ENABLED=1 go build -trimpath -tags osusergo,netgo,sqlite_omit_load_extension \
+        -ldflags '-linkmode external -extldflags -static' -o "$bin/photos-spike" ./ai/assistant-spike/photos-spike)
+      key_mount+=(-v "$bin:/spike-photos:ro")
+    fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
       --tmpfs /run --tmpfs /run/lock -v "$work/out:/spike-out:ro" -v "$here:/spike:ro" "${key_mount[@]}" \
@@ -96,7 +108,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,37p' "$0"
+    sed -n '2,40p' "$0"
     exit 2
     ;;
 esac
