@@ -70,6 +70,10 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	if _, err := directory.ResolveSessionUser(ctx, "not-a-session-token"); !errors.Is(err, accounts.ErrSessionNotFound) {
 		t.Fatalf("ResolveSessionUser(forged) error = %v, want ErrSessionNotFound", err)
 	}
+	profiles, err := directory.ActiveProfiles(ctx)
+	if err != nil || len(profiles) != 2 {
+		t.Fatalf("active profiles before disable = %v, %v", profiles, err)
+	}
 	if err := service.DisableUser(ctx, admin, alice); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +84,10 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 		t.Fatalf("disabled account's session user error = %v, want ErrSessionNotFound", err)
 	}
 
+	profiles, err = directory.ActiveProfiles(ctx)
+	if err != nil || len(profiles) != 1 || profiles[0].ID != admin.ID {
+		t.Fatalf("active profiles after disable = %v, %v", profiles, err)
+	}
 	remembered := service.RememberedSessions(ctx)
 	if len(remembered) != 1 || remembered[0].User.Username != "owner" || remembered[0].Token != ownerSession.Token {
 		t.Fatalf("remembered sessions = %#v, want only the owner's live session", remembered)

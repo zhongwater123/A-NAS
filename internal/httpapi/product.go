@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
@@ -54,6 +55,8 @@ type ProductDependencies struct {
 	// photo service; any other handler receives the caller as a
 	// photos.Principal.
 	Photos http.Handler
+	// Shares serves member shares; production independently confirms sessions.
+	Shares http.Handler
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
@@ -89,6 +92,7 @@ type productHandler struct {
 	apps       http.Handler
 	shortcuts  http.Handler
 	photos     http.Handler
+	shares     http.Handler
 	media      http.Handler
 	music      *music.Service
 	feedback   http.Handler
@@ -110,7 +114,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		previews: dependencies.FilePreviews,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,
-		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
+		shares: dependencies.Shares, photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
 		transfers: dependencies.Transfers, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
@@ -130,6 +134,10 @@ func (h *productHandler) routes() {
 		serve := h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { h.shortcuts.ServeHTTP(w, r) })
 		h.mux.Handle(appstoreapi.ShortcutsPrefix, serve)
 		h.mux.Handle(appstoreapi.ShortcutsPrefix+"/", serve)
+	}
+	if h.shares != nil {
+		h.mux.Handle(sharesapi.PathPrefix, h.withUser(h.shares, sharesapi.WithUser))
+		h.mux.Handle(sharesapi.PathPrefix+"/", h.withUser(h.shares, sharesapi.WithUser))
 	}
 	if h.photos != nil {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
@@ -332,12 +340,21 @@ func (h *productHandler) handleSpaces(w http.ResponseWriter, r *http.Request, se
 		h.writeAccountError(w, r, err)
 		return
 	}
-	if spaces == nil {
-		spaces = []accounts.Space{}
+	type visibleSpace struct {
+		accounts.Space
+		Writable bool `json:"writable"`
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": spaces})
+	items := []visibleSpace{}
+	for _, space := range spaces {
+		writable, err := h.accounts.CanAccessSpace(r.Context(), session.User, space.ID, true)
+		if err != nil {
+			h.writeAccountError(w, r, err)
+			return
+		}
+		items = append(items, visibleSpace{Space: space, Writable: writable && space.Viewing == nil})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
-
 func (h *productHandler) handleEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
 		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")

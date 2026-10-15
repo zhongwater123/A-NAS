@@ -51,7 +51,7 @@ func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
 	header := make([]byte, 4)
 	rights := make([]byte, syscall.CmsgSpace(4*4))
 	count, rightsCount, _, _, err := conn.ReadMsgUnix(header, rights)
-	if count == 0 && err != nil {
+	if count <= 0 && err != nil {
 		return nil, err
 	}
 	file, rightsErr := receivedFile(rights[:rightsCount])

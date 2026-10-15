@@ -26,6 +26,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0020：系统日志经 Host Agent 的白名单 journal 查询读取](0020-read-service-logs-through-the-host-agent.md)（proposed）
 - [0022：应用容器只以应用身份接触共享空间](0022-reach-shared-folders-only-as-the-app-identity.md)（修订 0008 的应用容器实现，取代 0010 的运行身份段落）
 
+- [0023：成员分享的固定副本由独立服务持有](0023-isolate-member-share-copies-in-a-dedicated-service.md)（proposed）
+
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。

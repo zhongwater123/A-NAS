@@ -41,6 +41,7 @@ var Services = []Service{
 	{Key: "api", Units: []string{"anas-api.service"}},
 	{Key: "host-agent", Units: []string{"anas-host-agent.service"}},
 	{Key: "photos", Units: []string{"anas-photos.service"}},
+	{Key: "shares", Units: []string{"anas-shares.service"}},
 	{Key: "containers", Units: []string{"anas-container-agent.service"}},
 	{Key: "ai", Units: []string{"anas-ai.service", "anas-ai.socket"}},
 	{Key: "media", Units: []string{"anas-media@*.service", "anas-media.socket"}},

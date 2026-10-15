@@ -225,3 +225,26 @@ func (d *SessionDirectory) Close() error {
 	d.reset()
 	return nil
 }
+
+// ActiveProfiles is the sharing service's recipient directory. The private
+// lookup socket exposes display identities only, never credentials or sessions.
+func (d *SessionDirectory) ActiveProfiles(ctx context.Context) ([]Profile, error) {
+	db, err := d.open()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT id, username, nickname, avatar_version FROM users WHERE status = ? ORDER BY username", UserStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	profiles := []Profile{}
+	for rows.Next() {
+		var profile Profile
+		if err := rows.Scan(&profile.ID, &profile.Username, &profile.Nickname, &profile.AvatarVersion); err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, rows.Err()
+}

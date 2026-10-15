@@ -52,3 +52,21 @@ func TestClientResolvesThroughTheSocket(t *testing.T) {
 		t.Fatalf("an absent Host Agent resolved a session")
 	}
 }
+
+func (s sessions) ActiveProfiles(context.Context) ([]accounts.Profile, error) {
+	return []accounts.Profile{{ID: "user:alice", Username: "alice", Nickname: "Alice"}}, nil
+}
+func TestClientListsRecipientProfilesThroughSocket(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "members.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: sessionlookup.NewHandler(sessions{}, nil)}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+	got, err := sessionlookup.NewClient(socket).ActiveProfiles(context.Background())
+	if err != nil || len(got) != 1 || got[0].ID != "user:alice" || got[0].Nickname != "Alice" {
+		t.Fatalf("profiles = %+v, %v", got, err)
+	}
+}

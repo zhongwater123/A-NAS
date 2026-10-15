@@ -10,7 +10,7 @@ User=a-nas
 Group=a-nas
 # Reaches the photo service's API socket; the photo store itself stays
 # private to a-nas-photos (ADR 0011).
-SupplementaryGroups=a-nas-photos
+SupplementaryGroups=a-nas-photos a-nas-shares
 EnvironmentFile=/etc/a-nas/anas-api.env
 ExecStart=/opt/a-nas/current/anas-api
 Restart=on-failure
@@ -24,7 +24,7 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 # File contents are read and written through the File Broker as the user.
-ReadWritePaths=/var/lib/a-nas
+ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 [Install]

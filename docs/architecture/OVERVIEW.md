@@ -29,7 +29,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                     ├── 类型化身份、ACL、卷、Samba 与 Btrfs 快照操作
                     ├── 白名单服务日志查询（固定参数的 journalctl，只读；ADR 0020）
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
-                    └── 会话查询（供相册服务确认身份）
+                    └── 会话查询（供相册和分享服务确认身份）
 
 Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内核 POSIX ACL → 个人空间或 Shared → Btrfs 数据卷
                          ├── 隐藏回收站
@@ -53,7 +53,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口；唯一例外是管理员的 Web 终端，Shell 在该管理员本人的 Linux 账号（UID 20100–29999）下运行，从不以 root 运行；容器代理同样只提供类型化容器操作，不透传 Docker Engine API，产品服务用户永不加入 `docker` 组。
 4. 磁盘和文件使用稳定资源 ID；临时路径和 `/dev/sdX` 不是身份。
 5. 修改宿主机状态的操作遵循“规划、确认、执行”三阶段。
-6. 文件数据只由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权，搜索与 AI 检索在返回前按同一 Policy 过滤。
+6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
 9. 本地控制台、隧道与局域网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。
@@ -84,7 +84,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性（含[昵称与头像](../specs/account-profile.md)，头像由 `internal/avatar` 压缩为 256 px JPEG 后存入账号数据库），文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
 | `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
-| `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
+| internal/shares / internal/sharesapi / internal/shareservice / internal/sharefiles | 成员分享：固定副本、逐人私聊、通知和可撤回保存；独立身份持有副本，文件桥仍按成员身份读取和写入 | 开发分支已实现，见[成员分享技术设计](member-sharing.md) |
+| internal/photos | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，由 `internal/httpapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md)；尚未部署 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
@@ -105,6 +106,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 新增模块时，应在其代码附近放置包级说明和测试；只有跨模块关系或系统不变量才更新本页。部署与实机验收进度只记录在[当前状态](../status/CURRENT.md)。
 
 ## 关联
+
+- [成员分享技术设计](member-sharing.md)（开发分支已实现，尚未部署）
 
 - [领域语言](../../CONTEXT.md)
 - [当前状态](../status/CURRENT.md)

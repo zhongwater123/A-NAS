@@ -59,6 +59,18 @@ func NewHandler(resolver Resolver, logger *slog.Logger) http.Handler {
 			writeJSON(w, http.StatusOK, user)
 		}
 	})
+	if directory, ok := resolver.(interface {
+		ActiveProfiles(context.Context) ([]accounts.Profile, error)
+	}); ok {
+		mux.HandleFunc("GET /v1/members", func(w http.ResponseWriter, r *http.Request) {
+			members, err := directory.ActiveProfiles(r.Context())
+			if err != nil {
+				writeJSON(w, 503, errorResponse{Error: "members_unavailable"})
+				return
+			}
+			writeJSON(w, 200, members)
+		})
+	}
 	return mux
 }
 
@@ -113,4 +125,25 @@ func (c *Client) ResolveSessionUser(ctx context.Context, token string) (accounts
 	default:
 		return accounts.SessionUser{}, fmt.Errorf("session lookup answered %s", response.Status)
 	}
+}
+
+// ActiveProfiles lists enabled recipients through the private lookup socket.
+func (c *Client) ActiveProfiles(ctx context.Context) ([]accounts.Profile, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent/v1/members", nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("member directory answered %s", response.Status)
+	}
+	var profiles []accounts.Profile
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&profiles); err != nil {
+		return nil, err
+	}
+	return profiles, nil
 }

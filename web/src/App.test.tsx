@@ -54,6 +54,31 @@ const session = {
   user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
 };
 
+describe("member sharing in the file manager", () => {
+  it("offers the desktop entry and shares ordinary files from a read-only shared space", async () => {
+    installAPI({ spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }], entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }] });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(within(desktop).getByRole("button", { name: "打开分享" }).hasAttribute("disabled")).toBe(false);
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /分享计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享给成员" })).toBeTruthy();
+  });
+
+  it("does not share administrative viewing files", async () => {
+    installAPI({ spaces: [{ id: "viewed", kind: "private", name: "Alice", ownerUserId: "alice", viewing: { grantId: "grant", expiresAt: "2099-01-01T00:00:00Z" } }], entries: [{ id: "viewed-file", spaceId: "viewed", name: "查看计划.txt", kind: "file", sizeBytes: 4 }] });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /查看计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
 const healthyState = {
   dataSource: "simulated", productVersion: "v1.0.1-rc.1", observedAt: "2026-10-07T10:00:00Z",
   system: { id: "host:fake-01", hostname: "anas-fake", operatingSystem: { name: "Debian", version: "13" }, architecture: "amd64", uptimeSeconds: 3661, health: "healthy" },

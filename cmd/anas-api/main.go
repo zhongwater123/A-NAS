@@ -64,6 +64,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "share-service" {
+		if err := runShareService(logger); err != nil {
+			logger.Error("A-NAS share service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == photoServiceCommand {
 		if err := runPhotoService(logger); err != nil {
 			logger.Error("A-NAS photo service stopped", "error", err)
@@ -120,6 +127,8 @@ func runPhotoService(logger *slog.Logger) error {
 }
 
 func run(logger *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	address := environment("ANAS_HTTP_ADDR", "127.0.0.1:8080")
 	stateDirectory, err := stateDirectory()
 	if err != nil {
@@ -280,6 +289,11 @@ func run(logger *slog.Logger) error {
 		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, false) }
 	}
 
+	shareAPI, closeShares, err := configuredShares(ctx, live, volumeRoot, accountService, fileService, mediaWorker, logger)
+	if err != nil {
+		return err
+	}
+	defer closeShares()
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
@@ -288,6 +302,7 @@ func run(logger *slog.Logger) error {
 		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
 		AppShortcuts: appstoreapi.NewShortcuts(appStore),
 		Photos:       photoAPI,
+		Shares:       shareAPI,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
 		FilePreviews: previewService,
@@ -309,8 +324,6 @@ func run(logger *slog.Logger) error {
 		Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	// The Host Agent takes scheduled snapshots, so they need no session.

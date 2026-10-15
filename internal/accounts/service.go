@@ -64,6 +64,8 @@ const (
 	// same photos again.
 	PhotoServiceUser = "a-nas-photos"
 	PhotoServiceUID  = 31000
+	ShareServiceUser = "a-nas-shares"
+	ShareServiceUID  = 31001
 )
 
 // Password rules for every password a user sets. MaxPasswordLength keeps the
