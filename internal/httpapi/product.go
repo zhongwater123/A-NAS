@@ -560,18 +560,26 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
+		// Conflict is ask (the default), rename or replace, as for uploads.
+		Conflict files.ConflictPolicy `json:"conflict"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name)
+	switch request.Conflict {
+	case "", files.ConflictAsk, files.ConflictRename, files.ConflictReplace:
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "conflict must be ask, rename or replace")
+		return
+	}
+	restored, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name, request.Conflict)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
 	}
-	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusOK, entry)
+	h.filesChanged(r, session, restored.SpaceID)
+	writeJSON(w, http.StatusOK, restored)
 }
 
 func (h *productHandler) handlePurgeTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {

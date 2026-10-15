@@ -223,7 +223,7 @@ func TestFileServiceWorksThroughTheBroker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
-	if _, err := service.Restore(userCtx, owner, trashed.ID, "", ""); err != nil {
+	if _, err := service.Restore(userCtx, owner, trashed.ID, "", "", files.ConflictAsk); err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
 	if _, err := service.List(ctx, owner, private.ID, ""); !errors.Is(err, files.ErrForbidden) {

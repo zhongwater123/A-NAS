@@ -126,7 +126,7 @@ func TestExistingNamesAreKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored, err := f.service.Restore(f.ctx, f.alice, item.ID, "", ""); err != nil || restored.Name != "notes:old.txt" {
+	if restored, err := f.service.Restore(f.ctx, f.alice, item.ID, "", "", files.ConflictAsk); err != nil || restored.Name != "notes:old.txt" {
 		t.Fatalf("restoring under its own name = %+v, %v", restored, err)
 	}
 }

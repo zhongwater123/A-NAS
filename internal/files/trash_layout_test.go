@@ -80,7 +80,7 @@ func TestSambaKeeptreeDeletionsBecomeSeparateRestorableItems(t *testing.T) {
 		t.Fatalf("second import produced %d items (err %v), want 3", len(again), err)
 	}
 
-	restored, err := service.Restore(ctx, owner, second.ID, "", "")
+	restored, err := service.Restore(ctx, owner, second.ID, "", "", files.ConflictAsk)
 	if err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
