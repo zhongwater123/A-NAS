@@ -29,6 +29,8 @@ expect_fail "write into shared space"            sh -c 'echo x > /nas/共享空�
 expect_fail "write into own Agent space directly" sh -c 'echo x > /nas/共享空间/Agent空间/alice/x.txt'
 expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待确认 && echo x > /nas/助手/待确认/x.txt'
 expect_fail "read the gateway's model key"       cat /etc/anas-spike/model.key
+expect_fail "reach the change broker's product socket" python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-spike-broker/broker.sock")'
+expect_ok   "reach the change broker's agent socket"   python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-change-agent/agent.sock")'
 expect_fail "change the Hermes user config"      sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
 expect_fail "write the Hermes .env"              sh -c 'echo x >> /var/lib/hermes-home/.env'
 expect_fail "rewrite SOUL.md"                    sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'

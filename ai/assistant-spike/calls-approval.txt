@@ -1,0 +1,11 @@
+CALL mcp__anas__recent_changes {}
+CALL write_file {"path": "/nas/助手/待确认/个人空间/计划.md", "content": "# 计划\n- 买菜\n- 交电费\n"}
++approve | CALL mcp__anas__submit_changes {"summary": "在计划.md 里加一项交电费", "operations": [{"op": "write", "path": "/nas/个人空间/计划.md", "source": "/nas/助手/待确认/个人空间/计划.md"}]}
++CALL mcp__anas__recent_changes {}
+deny | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}
+wait | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}
+stop | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}
+late | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}
+forge | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}
+approve | CALL mcp__anas__submit_changes {"summary": "在共享空间根目录建 todo.md", "operations": [{"op": "write", "path": "/nas/共享空间/todo.md", "source": "/nas/助手/待确认/个人空间/计划.md"}]}
+approve | CALL mcp__anas__submit_changes {"summary": "把 secret.txt 移到 归档/ 并建文件夹", "operations": [{"op": "mkdir", "path": "/nas/个人空间/归档"}, {"op": "move", "path": "/nas/个人空间/secret.txt", "to": "/nas/个人空间/归档/secret.txt"}]}

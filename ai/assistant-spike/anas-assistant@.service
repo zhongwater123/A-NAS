@@ -41,6 +41,9 @@ BindReadOnlyPaths=/srv/a-nas/data/spaces/shared/.a-nas-trash/%i:/nas/共享空�
 TemporaryFileSystem=/srv:ro
 # The real model key stays with the gateway outside the sandbox.
 InaccessiblePaths=-/etc/anas-spike
+# The change broker's product socket, where the member's approvals are
+# registered; the assistant reaches only its agent socket in /run/anas-change-agent.
+InaccessiblePaths=-/run/anas-spike-broker
 UMask=0077
 NoNewPrivileges=true
 CapabilityBoundingSet=

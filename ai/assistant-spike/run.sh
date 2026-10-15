@@ -11,10 +11,13 @@
 #
 # The suggested order is build, sandbox, then: api-basic.sh, "api-tools.sh alice calls.txt",
 # api-after.sh, api-managed.sh, boundary.sh, crash.sh, quota.sh. Those use a scripted fake model.
+# In-turn approvals (#111), with SPIKE_APPROVAL_TIMEOUT=20 given to sandbox: approvals-broker.sh,
+# "scenarios calls-approval.txt", approvals-managed.sh.
 #
 # With a real OpenAI-compatible model (the key stays in gateway.py outside the sandbox):
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
-#   ai/assistant-spike/run.sh scenarios [scenarios.txt|scenarios-publish.txt|scenarios-boundary.txt]
+#   ai/assistant-spike/run.sh scenarios FILE [--answer ANSWER]   how the member answers: scenarios.py
+#     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt or scenarios-boundary.txt
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
 #
 # Several sessions on one machine share the built runtime in $HERMES_SPIKE_DIR (mounted
@@ -62,12 +65,15 @@ case "${1:-}" in
       docker exec "$name" systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break
       sleep 0.5
     done
-    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}"       -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" "$name" bash /spike/setup.sh 2>&1 | tail -3
+    # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
+    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" \
+      -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
+      "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
     ;;
   scenarios)
-    docker exec "$name" python3 /spike/scenarios.py "/spike/${2:-scenarios.txt}"
+    docker exec "$name" python3 -u /spike/scenarios.py "/spike/${2:-scenarios.txt}" "${@:3}"
     ;;
   test)
     shift
@@ -77,7 +83,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,22p' "$0"
+    sed -n '2,25p' "$0"
     exit 2
     ;;
 esac
