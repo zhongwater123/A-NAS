@@ -178,12 +178,11 @@ func run(logger *slog.Logger) error {
 	fileOptions := files.Options{AllowUnverifiedVolume: !live}
 	terminalConfig := terminal.Config{}
 	if live {
-		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
-			volumes, err := storageService.ListVolumes(ctx)
-			if err != nil || len(volumes) != 1 || volumes[0].State != storage.VolumeStateAvailable {
-				return "", err
-			}
-			return volumes[0].FilesystemUUID, nil
+		// The guard runs before every file request, so the expected UUID
+		// comes from the stored volume, not from a Host Agent disk read; the
+		// guard itself proves the mounted volume carries it.
+		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(context.Context) (string, error) {
+			return storageService.DataVolumeFilesystemUUID(), nil
 		}}}
 		fileOptions.SnapshotBackend = operations
 		brokerSocket, err := fileBrokerSocket()
