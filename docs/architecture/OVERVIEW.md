@@ -18,6 +18,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一媒体 Worker 探测与解码；ADR 0018）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
+  │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0022）
   │                              └── AI Orchestrator ──► AI Worker（M2 规划；只读 fd，无网络）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
@@ -29,7 +30,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                     ├── 类型化身份、ACL、卷、Samba 与 Btrfs 快照操作
                     ├── 白名单服务日志查询（固定参数的 journalctl，只读；ADR 0020）
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
-                    └── 会话查询（供相册服务确认身份）
+                    └── 会话与账号查询（供相册服务确认会话，或助手套接字对端 UID 的账号）
 
 Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内核 POSIX ACL → 个人空间或 Shared → Btrfs 数据卷
                          ├── 隐藏回收站
@@ -84,7 +85,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
-| `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
+| `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，由 `internal/httpapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md)；尚未部署 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |

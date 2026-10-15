@@ -499,3 +499,23 @@ func TestActivityListsOnlyTheCallersOwnPhotoEvents(t *testing.T) {
 		t.Fatalf("bad limit status = %d", response.Code)
 	}
 }
+
+func TestAssistantOnlyReads(t *testing.T) {
+	handler, _ := newAPI(t)
+	assistant := client{t: t, handler: handler, as: photosapi.NewAssistantPrincipal(alice.UserID, "alice")}
+
+	if response := assistant.do(http.MethodGet, "/api/v1/photos/libraries", nil, ""); response.Code != http.StatusOK {
+		t.Fatalf("GET libraries = %d, want 200", response.Code)
+	}
+	for _, request := range [][2]string{
+		{http.MethodPost, "/api/v1/photos/image-searches"},
+		{http.MethodPost, "/api/v1/photos/assets/photo:x/tags"},
+		{http.MethodPatch, "/api/v1/photos/assets/photo:x"},
+		{http.MethodDelete, "/api/v1/photos/assets/photo:x"},
+	} {
+		response := assistant.do(request[0], request[1], nil, "")
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "assistant_read_only") {
+			t.Errorf("%s %s = %d %s, want 403 assistant_read_only", request[0], request[1], response.Code, response.Body)
+		}
+	}
+}

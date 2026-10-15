@@ -27,6 +27,10 @@ agent:
     a2a, browser-cdp, browser-use]
   # Never switch to the coding posture (its own toolset and prompt) in a git workspace.
   coding_context: "off"
+  # Images in tool results never reach the model as pixels, even with a model configured
+  # as vision-capable: Hermes keeps them as a file path (photos-vision.sh, #113). Showing
+  # photos to a local multimodal model is a decision of its own (ADR 0022 decision 7).
+  image_input_mode: text
 # How long a session's first agent build waits for MCP discovery (default 1.5 s);
 # serve starts discovery when the first /api/ws client connects.
 mcp_discovery_timeout: 20

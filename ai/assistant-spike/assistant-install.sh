@@ -33,6 +33,9 @@ sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 300$/  tim
   "$here/managed-config.yaml" > /etc/hermes/config.yaml
 chmod 0644 /etc/hermes/config.yaml
 
+# Mount point for the photo service's assistant socket (#113): an empty file on the host,
+# the socket itself inside each sandbox (anas-assistant@.service).
+install -d -m 0755 /run/anas-assistant-photos && : > /run/anas-assistant-photos/photos.sock
 install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-api@.service" "$here/anas-assistant-api@.socket" /etc/systemd/system/
 if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -d /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d

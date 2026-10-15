@@ -330,7 +330,7 @@ Hermes 的 profile 是另一个完整的 Hermes 主目录，有自己的 `config
 | `gateway.ready` | 连接就绪；`replay_epoch` 变化说明后端重启过，需要重新取历史（`skin` 可去掉） |
 | `message.start`、`message.delta`、`message.interim`、`message.complete` | 回复开始、逐字内容、工具调用旁的说明、结束（带结果、用量与错误） |
 | `reasoning.delta`、`reasoning.available`、`thinking.delta` | 推理过程；`thinking.delta` 只用于“等待模型”的状态 |
-| `tool.generating`、`tool.start`、`tool.complete` | “处理过程”中的工具行；`tool.start` 带完整参数 |
+| `tool.generating`、`tool.start`、`tool.complete` | “处理过程”中的工具行；`tool.start` 带完整参数；照片工具的 `tool.complete` 带照片编号，窗口据此用 A-NAS 自己的相册接口显示缩略图，不经 Hermes（见“相册只读访问”） |
 | `todo.updated`、`status.update`、`error` | 待办；压缩上下文等状态行；回合之外的失败 |
 | `session.info`、`session.usage`、`session.title` | 对话设置与运行状态、用量、自动标题（`session_id` 是存储 id） |
 | `sessions.changed`、`session.reclaimed` | 刷新对话列表；后端收回了运行时会话，下次打开重新 `session.resume` |
@@ -475,6 +475,106 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 - 参数摘要来自 `tool.started` 的显示副本。参数中若有像密钥的字符串被 Hermes 脱敏，摘要对不上，更改不执行（失败时关闭）。
 - 拒绝、超时与停止对模型是同一句话，助手分不清成员是拒绝还是不在；卡片上要分开显示。这句话提到 “untrusted server”，模型会转述给成员（见上文 `serve` 重跑），`anas-files` 技能可以再要求只说“没有得到你的同意”、不提 MCP 与服务器。
 - 切换对话或刷新后恢复卡片：API Server 有 `GET /v1/runs/{run_id}`（`waiting_for_approval` 与当时的审批事件），`hermes serve` 有 `approval.pending`；产品服务按 `request_id` 找回自己生成的卡片。
+
+## 相册只读访问（#113，2026-10-15，开发机）
+
+[#113](https://github.com/zhongwater123/A-NAS/issues/113)：ADR 0022 决定 6 让助手经 MCP 只读工具读相册，规格中“找去年在海边拍的照片”此前没有 spike。本节在相册服务中实现助手身份，在 spike 中加照片工具，并实测模型能不能“看到”照片。
+
+### 身份：相册服务按对端 UID 认人
+
+相册服务只认浏览器会话：`anas-api` 转发会话令牌，相册服务交给 Host Agent 换取账号，从不信任产品服务声明的身份（ADR 0011 决定 4）。助手调用工具时没有会话。照片工具因此不经产品服务，产品服务也不持有任何能读私有图库的身份：
+
+- 相册服务另开一个助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭；[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)）。沙箱中的 MCP 服务以成员本人的 UID 运行并直接连接它，相册服务从内核的对端凭据（`SO_PEERCRED`）取得 UID，再经 Host Agent 会话查询套接字上新增的 `/v1/accounts/resolve-uid` 确认这是一个在用账号（读 `linux_identities` 与 `users`，停用或不存在即 401；[`ResolveAccountUID`](../../internal/accounts/session_identity.go)）。请求里带的会话令牌一概不看。对端是 root 或取不到凭据时是接错了，返回 503 并记错误日志，不去问 Host Agent。
+- `/v1/accounts/resolve-uid` 能把任何 UID 对应到账号，所以 Host Agent 只在 `ANAS_PHOTO_ASSISTANT_LOOKUP=1` 时提供它，与相册服务的助手套接字一样默认关闭。
+- 这个套接字对所有 UID 开放（`0666`），挡住其他进程的是它所在的目录：相册服务打开它之前核对目录属于自己、组与其他人都进不去，否则拒绝启动（`requirePrivateDirectory`）。systemd 把套接字本身绑定进每个助手沙箱中的一个空文件上（[`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)），宿主上那个路径只是一个空文件。
+- 其他成员连不上这个套接字，也进不了别人沙箱的 `/proc/<pid>/root`。同一成员自己的进程（网页终端、以本人身份运行的 Samba 进程）能经 `/proc/<助手进程>/root/…` 进入沙箱的挂载命名空间连上它：读 `/proc/<pid>/root` 只要求与目标同一 UID，Yama 只限制附加，开发机 `ptrace_scope` 为 1 时也连上了（`photos-socket.sh` 实测；实验 NAS 为 0）。它得到的是这个成员自己的照片、只读，与助手看到的相同，不越过任何边界。
+- 套接字只开放助手工具用到的 10 条读取路由；其余一律回答照片 API 格式的 `not_found`（`{"error": {"code": "not_found", …}}`），包括原图、缩略图、AI 状态、操作记录、回收站与一切写入。
+
+剩下的风险在产品服务一侧：它持有每个成员实例的套接字与 `serve` 令牌（上文“沙箱中以 `hermes serve` 代替 API Server”的“鉴权”），被攻破时可以在成员不在线时指挥任何成员的助手调用这 4 个只读工具（它们不需要审批），读到这个人私有图库中照片的名称、拍摄时间、标签与相册，只是拿不到像素；同一条路也能读这个成员个人空间的文件。用户 2026-10-15 [决定](https://github.com/zhongwater123/A-NAS/pull/121#issuecomment-6186654287)加会话闸门：到达成员实例的连接先由一个组件向 Host Agent 核对这个成员的在线会话再转给实例，“提交更改”的确认授权也由执行方凭有效会话登记，在集成时实现并写入 ADR 0022。有了闸门之后，产品服务被攻破只能经正在登录的成员的助手读这些元数据，与 ADR 0011 的威胁模型一致；ADR 0011 已补上这条身份路径。
+
+### 助手 Principal
+
+`photos.Principal` 增加 `Assistant`（[`policy.go`](../../internal/photos/policy.go)）：
+
+- Policy 对助手拒绝一切新增与更改（导入、复制、改名、移动、删除、标签、相册、目录、AI 纠错），忽略查看授权，即使成员是管理员；所以只能看到本人的私有图库与共享图库。回收站中的照片也看不到，因为能看到的前提是能恢复。清空回收站对助手直接拒绝。
+- 原图与缩略图对助手在服务层就拒绝（不只靠套接字的路由白名单）；照片详情里的“也被谁保存”（`alsoKeptBy`，其他成员的名字）对助手不填。
+- 列出图库与搜索范围原本会在成员第一次访问时创建他的私有图库、并更新图库的所有者名；助手只查不建，成员没打开过相册时它只看到共享图库。
+- 照片 API 对助手只放行 GET 与 HEAD（以图搜图的 POST 也不行）。
+- 助手的请求和成员自己的一样会让后台 AI 任务继续等待（`gate.Touch`），循环调用会推迟索引；相册服务没有按 UID 的并发上限，Hermes 对同一 MCP 服务器的调用是串行的。
+- 测试：权限矩阵增加“本人的助手”与“持有查看授权的管理员的助手”两列（40 个子测试，[`policy_test.go`](../../internal/photos/policy_test.go)）；[`assistant_test.go`](../../internal/photos/assistant_test.go) 4 个，覆盖矩阵之外的每一种更改（相册改名与删除、移出相册、去掉标签、AI 纠错、移动、目录改名与删除）以及原图、缩略图与别人的名字；照片服务 5 个（[`assistant_test.go`](../../internal/photoservice/assistant_test.go) 与 [`assistant_internal_test.go`](../../internal/photoservice/assistant_internal_test.go)：对端 UID 决定身份、Host Agent 带回的查看授权也不用、`viewing=` 与他人图库的相册和找相似都 404、只开放读取路由且其余为 JSON `not_found`、目录不私有就拒绝启动、需要在用账号、root 是接错）、照片 API 1 个、Host Agent 查询 3 个（含默认关闭）。
+
+### MCP 只读工具
+
+[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 新增 4 个工具，全部标 `readOnlyHint`，经助手套接字调用相册现有的接口，不另写检索：
+
+| 工具 | 相册接口 | 用途 |
+|---|---|---|
+| `search_photos(query, page)` | `GET /search` | 按画面内容（设备上的向量检索）、名称与本人的标签搜索；`closest` 标出最接近的一组 |
+| `browse_photos(month, album_id, tag, page)` | `…/timeline/months`、`…/timeline?month=`、`…/albums`、`/albums/{id}/assets`、`/tags`、`/tags/{name}/assets` | 不填参数时列出每月的照片数、相册与标签；按月、相册或标签列出照片 |
+| `photo_details(photo_id)` | `GET /assets/{id}` | 名称、拍摄时间、图库、尺寸、标签与相册 |
+| `similar_photos(photo_id, page)` | `GET /assets/{id}/similar` | 画面相似的照片 |
+
+每张照片给模型的只有编号、名称、拍摄时间（`taken`）、图库（我的或共享）与本人的标签和相册。工具结果的文本就是一段 JSON，同时作为 `structuredContent`；两者相同时 Hermes 只传一份（`tools/mcp_tool_handlers.py:505-563`）。相册现在没有拍摄地点（只读 EXIF 时间，没有 GPS），认不出人，没有 AI 描述，搜索也没有时间条件；工具说明写明这些，“去年”由模型按 `taken` 自己筛。按月浏览会翻完所有页（每个图库最多 2,000 张，超过时在结果中注明不完整）。相册连不上（例如相册服务刚重启）或回答的不是 JSON 时，工具给模型一句中文错误（“相册暂时连不上，请稍后再试”），不把异常原样交给模型。
+
+spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 从本仓库编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面内容的替身 AI Worker，以及 18 张种子照片（alice 私有 13 张，含一个“2025 夏天 青岛”相册与“青岛”标签；bob 私有 2 张；共享 3 张）。结果：
+
+- 探针增加 3 项，变基到集成分支后共 42 项通过。
+- [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh) 19 项通过：两个成员的助手各自只看到本人与共享的图库和照片；拿着 bob 照片的编号也打不开；随请求带上会话令牌没有作用；缩略图与改名得到 JSON 的 `not_found`；沙箱里连不到相册服务自己的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员也进不了 alice 的 `/proc/<pid>/root`；对端是 root 时得到 503；相册服务重启后，正在运行的助手连接被拒绝，照片工具告诉模型“相册暂时连不上”，助手实例重启后恢复。
+- [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)（假模型）：4 个工具都正常返回，没有一个请求审批；同一会话中的“提交更改”照常请求审批。
+- 替身 Worker 的局限：查询里没有它认识的内容词时（如“青岛”“去年夏天”），所有照片同样相似，`closest` 为全部照片；按名称和标签匹配的照片仍排在最前。真实的向量检索会给出有高有低的相似度。
+
+### 模型能不能看到照片
+
+Hermes 把 MCP 结果中的图片存进 `$HERMES_HOME/cache/images/`，再决定要不要把像素交给模型。决定看的是它对模型能力的判断（`agent/image_routing.py` 的 `decide_image_input_mode`：配置的 `agent.image_input_mode`，其次模型是否被声明为支持视觉），与 `vision` toolset 是否关闭无关。[`photos-vision.sh`](../../ai/assistant-spike/photos-vision.sh) 用只在实验中出现的 `view_photo` 工具（返回一张画出来的海边图）测了三种设置（假模型）：
+
+| managed scope | 发给模型 | `tool.complete` 带给客户端 | Hermes 主目录 |
+|---|---|---|---|
+| spike 现在的设置：`agent.image_input_mode: text` | 没有图片，只有 `MEDIA:/var/lib/hermes-home/cache/images/…` 一行路径 | 约 400 字符，只有路径 | 留下 1 个图片文件 |
+| 再声明模型支持视觉（`model.supports_vision: true`） | 同上 | 同上 | 同上 |
+| 声明支持视觉，`image_input_mode` 改回默认的 `auto` | 1 张图（`image_url` 数据 URL） | 约 10 KB，含 base64 图片 | 同上 |
+
+- `provider: custom` 默认不被认为支持视觉，所以即使不固定，开发用的 DeepSeek 也只会收到路径、不会报错；但只要有人把模型声明为支持视觉，像素就会发给模型（DeepSeek 实际能看懂，见下文“真实模型”），还会经 `tool.complete` 整个发给窗口。managed scope 因此固定 `agent.image_input_mode: text`（[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)）。
+- 这个图片缓存在 `serve` 下不会清理（只有消息网关的定时任务清理它，`gateway/run.py`），会占用助手目录的容量。
+- 所以照片工具只给文字，不返回图片；助手套接字也不提供缩略图。哪种工具会把像素发出去：返回 `ImageContent`（或带图片的 `EmbeddedResource`）的工具，且仅当模型被判定为支持视觉时。缩略图交给云端模型，与 ADR 0016“照片只在这台设备上分析”的承诺冲突（按 ADR 0022 的约定只在此注明）；接入本地多模态模型时，“把照片给模型看”要另行决定，并处理上面两点：客户端会收到 base64，请求失败时 Hermes 写下的转储文件也会含图（`agent/turn_recovery.py`）。
+
+### 结果呈现
+
+- 工具结果里的照片编号就够了：窗口从 `tool.complete` 的 `payload.result.result`（那段 JSON 文本），或 REST 历史中工具那一行的内容里取出编号，再用成员自己的 A-NAS 会话请求 `/api/v1/photos/assets/{id}/thumbnail`。缩略图不经 Hermes，也不进对话记录。
+- 助手在回复中提到某张照片时，按工具说明写成一个以照片名称为文字、以照片编号为地址的 Markdown 链接（编号本身以 `photo:` 开头），窗口把这种链接显示成缩略图，点开进入相册。相册窗口现在只能整体打开（`openWindow("photos")`），要补一个按照片打开的入口。
+- Hermes 白名单不用改：`tool.complete` 与 REST 历史已经放行；缩略图走的是 A-NAS 自己的相册接口（见上文“`hermes serve` 的接口面与产品服务白名单”）。
+
+### 真实模型
+
+[`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 的 10 个请求，deepseek-flash，每行一个新对话（“+”接着上一个），只有最后一个的审批由成员确认。工具调用为这一轮的调用次数，token 为这一轮全部模型请求之和：
+
+| 请求 | 助手的回答 | 工具调用 | token |
+|---|---|---|---|
+| 找去年在海边拍的照片 | 列出 2025 年的 3 张（自己 2 张、共享 1 张），说明 2024 年那两张不算；bob 的照片没有出现 | 12 | 6.3 万 |
+| （接着）第一张是在哪里拍的？ | 没有定位信息，只有本人加的“青岛”标签和相册名，说明这不是相机定位 | 0 | 2.2 万 |
+| （接着）再找几张和它相似的 | 用 `similar_photos`，按相似度列出 | 1 | 4.5 万 |
+| 我和妈妈的合照有哪些？ | 认不出照片里的人，列出能用的线索：相册、标签、名称里带“全家福”的那张 | 8 | 4.2 万 |
+| 去年冬天下雪的照片是哪天拍的？ | 2025 年 1 月 18 日的两张；并指出若“去年冬天”指 2025 年 12 月到 2026 年 2 月，那段时间没有雪景 | 12 | 5.9 万 |
+| 青岛那次旅行的照片给我看看 | 相册“2025 夏天 青岛”的 3 张，另问要不要看其他海边照片 | 4 | 3.8 万 |
+| bob 私有图库里的照片给我看看 | 看不到，只能看本人与共享图库 | 1 | 2.3 万 |
+| 把去年海边的照片都加上“海边”标签 | 照片工具只读，“提交更改”也改不了相册，请在相册中操作，并列出候选照片；没有调用“提交更改” | 9 | 7.4 万 |
+| 这些猫的照片里，哪张是在室内拍的？ | 看不到画面也没有地点，判断不了 | 16 | 5.7 万 |
+| 把青岛那次旅行的照片名称和拍摄时间写到个人空间的 照片清单.md 里 | 按相册取 3 张，暂存后提交，请求一次审批，确认后执行 | 9 | 9.7 万 |
+
+- 没有一个照片工具请求审批；写清单时的“提交更改”照常请求。两段做不到的请求（认人、看画面）与越权请求都如实回答，没有编造人物或地点。
+- 回复中提到照片时都写成照片名称加照片链接，链接地址就是照片编号（编号本身以 `photo:` 开头），窗口按这个前缀识别；万一模型写成 `photo:photo:…`，窗口也按同一编号处理。
+- 调用偏多：模型会逐张调用 `photo_details`，想从中找地点或人物（“室内”那一轮查了 13 张）。把 `photo_details` 的说明改为“只多出尺寸、标签与相册，没有地点、人物或画面内容，不要为找这些逐张查看”后重跑这两轮：找海边照片从 12 次降到 6 次，“室内”从 16 次降到 9 次（逐张查看从 13 次降到 2 次），token 基本不变（5.5 万、5.7 万）。
+- 4 个照片工具的定义合计约 1,860 字符，每次模型请求都要带上。
+
+视觉实验用真实模型重跑（[`photos-vision.sh`](../../ai/assistant-spike/photos-vision.sh) 检测到真实模型时，请模型看 `photo:demo` 并描述画面）：
+
+- 前两种设置下，模型只拿到路径，如实回答看不到画面；它还试图用 `read_file` 读那个缓存文件，Hermes 拒绝读取图片。
+- 第三种设置下，**DeepSeek 接受了图片并准确描述了画面**（“浅蓝天空、右上角红色太阳、深蓝海面、底部沙黄色”）。也就是说，开发用的 DeepSeek 并不是只认文字的模型，这条通路一旦打开，照片像素就会发到云端。managed scope 固定 `agent.image_input_mode: text` 因此是必需的，不只是纵深防御。
+
+### 运维注意
+
+- 相册服务重启后，正在运行的助手实例里绑定的仍是旧的套接字，连接被拒绝，要等实例重启才能再读相册（`photos-socket.sh` 实测）。正式实现应由 systemd 的 socket 单元持有这个套接字、相册服务经套接字激活接收它，这样它跨服务重启不变。
+- 助手的请求和成员自己的一样，会让后台 AI 任务继续等待（`gate.Touch`）。
+- 搜索要靠设备上的 AI Worker 把查询编码成向量；Worker 不可用时只按名称与标签匹配，工具在结果中注明。
 
 ## 记忆与自建技能（#114，2026-10-15，开发机）
 
@@ -681,6 +781,6 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 - 决定：[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
 - Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh) 与 [`review.sh`](../../ai/assistant-spike/review.sh)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
-- Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
+- Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#113](https://github.com/zhongwater123/A-NAS/issues/113)（“相册只读访问”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)、[系统测试](../../scripts/system-test.sh)与其中助手一节 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)、Host Agent 的替身 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)

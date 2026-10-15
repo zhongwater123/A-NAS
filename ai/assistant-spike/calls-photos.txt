@@ -1,0 +1,11 @@
+CALL mcp__anas__search_photos {"query": "海边"}
++CALL mcp__anas__photo_details {"photo_id": "{{photo}}"}
++CALL mcp__anas__similar_photos {"photo_id": "{{photo}}"}
+CALL mcp__anas__browse_photos {}
++CALL mcp__anas__browse_photos {"album_id": "{{album}}"}
+CALL mcp__anas__browse_photos {"month": "2025-07"}
+CALL mcp__anas__browse_photos {"tag": "青岛"}
+CALL mcp__anas__search_photos {"query": "青岛"}
+CALL mcp__anas__search_photos {"query": "去年夏天"}
+CALL mcp__anas__photo_details {"photo_id": "photo:does-not-exist"}
+approve | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}

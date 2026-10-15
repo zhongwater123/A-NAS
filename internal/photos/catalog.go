@@ -316,6 +316,21 @@ func (s *Service) ensurePrivateLibrary(ctx context.Context, p Principal) (librar
 	return lib, nil
 }
 
+// ownLibrary returns the caller's private library and whether it has one. A
+// member's own request creates it on first use; the member's assistant only
+// reads, so until the member has opened the photo library it has none.
+func (s *Service) ownLibrary(ctx context.Context, p Principal) (library, bool, error) {
+	if !p.Assistant {
+		lib, err := s.ensurePrivateLibrary(ctx, p)
+		return lib, err == nil, err
+	}
+	lib, err := s.privateLibrary(ctx, s.db, p.UserID)
+	if errors.Is(err, ErrNotFound) {
+		return library{}, false, nil
+	}
+	return lib, err == nil, err
+}
+
 type library struct {
 	id          string
 	kind        LibraryKind

@@ -2,13 +2,17 @@
 
 Listens on a Unix socket, logs every request (which tools Hermes offered), and
 answers deterministically:
-  user "CALL <tool> <json>"  -> one tool call with those arguments
+  user "CALL <tool> <json>"  -> one tool call with those arguments; "{{photo}}" and
+                                "{{album}}" in them become the first such ID in an
+                                earlier tool result of the conversation
   user "SLEEP <seconds>"     -> "ok" after that many seconds (a long model call)
   last message is a tool result -> text echoing the start of that result
   anything else              -> "ok"
+The log also counts the image parts a request carried (#113).
 """
 import json
 import os
+import re
 import socketserver
 import sys
 import time
@@ -47,6 +51,11 @@ def decide(messages):
             args = json.dumps(json.JSONDecoder().raw_decode(args)[0], ensure_ascii=False)
         except ValueError:
             pass
+        for kind in ("photo", "album"):
+            if "{{" + kind + "}}" in args:
+                found = [m for msg in messages if msg.get("role") == "tool"
+                         for m in re.findall(r'\\?"id\\?": ?\\?"(' + kind + r':[^"\\]+)', text_of(msg.get("content")))]
+                args = args.replace("{{" + kind + "}}", found[0] if found else kind + ":none")
         return {"tool": name, "args": args}
     if said.startswith("SLEEP "):
         return {"text": "ok", "sleep": float(said.split()[1])}
@@ -94,6 +103,8 @@ class Handler(BaseHTTPRequestHandler):
         with open(LOG, "a", encoding="utf-8") as log:
             log.write(json.dumps({"t": time.time(), "path": self.path, "stream": bool(body.get("stream")),
                                   "tools": tools, "messages": len(messages), "decision": choice, "review": review,
+                                  "image_parts": sum(1 for m in messages if isinstance(m.get("content"), list)
+                                                     for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"),
                                   "system_chars": sum(len(text_of(m.get("content"))) for m in messages if m.get("role") == "system")},
                                  ensure_ascii=False) + "\n")
         time.sleep(choice.get("sleep", 0))
