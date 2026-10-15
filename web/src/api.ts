@@ -168,7 +168,7 @@ export interface Profile { id: string; username: string; nickname?: string; avat
 // credentialReset is the latest time an administrator chose the user's
 // password; the user keeps seeing it.
 export interface Session { csrfToken: string; expiresAt: string; user: User; credentialReset?: { actorUsername: string; at: string } }
-export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
+export interface Space { writable?: boolean; id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
 export interface Notification { id: string; kind: "admin_viewing" | "admin_library_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
 export type ViewingScope = "space" | "library";
 export interface ViewingGrant { id: string; scope: ViewingScope; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }

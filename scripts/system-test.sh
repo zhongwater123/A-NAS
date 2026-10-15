@@ -99,7 +99,7 @@ printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/
 stage() {
   install -d "$1"
   install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh "$1/"
-  for unit in anas-api anas-host-agent anas-photos; do
+  for unit in anas-api anas-host-agent anas-photos anas-shares; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
@@ -213,7 +213,7 @@ api=http://127.0.0.1:8080
 data=/srv/a-nas/data
 
 # --- Every service runs under its production unit (issue #38).
-check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api smbd
+check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
@@ -268,6 +268,17 @@ check "Shared upload is owned by the member's UID" test "$(owner_uid "$data/spac
 check "administrator reads the member's Shared file" \
   cmp -s /tmp/shared.txt <(curl -fsS -b /tmp/owner.jar "$api/api/v1/files/$shared_file/content")
 
+# --- Member sharing crosses the product bridge, independent service and broker.
+shares_ready() {
+  for _ in $(seq 1 100); do
+    curl -fsS -b /tmp/owner.jar "$api/api/v1/shares" >/dev/null 2>&1 && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "member sharing works through production service sandboxes" \
+  python3 /src/scripts/smoke-member-sharing.py "$api" /tmp/owner.jar /tmp/alice.jar \
+    "$owner_csrf" "$alice_csrf" "$owner_file" "$alice_private"
 # --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
 lan=http://$ip
 lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
@@ -409,6 +420,7 @@ check "a disabled terminal refuses sessions" denied terminal "$api" /tmp/owner.j
 printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "sharing recovers after the Product Service restarts" shares_ready
 check "the operator turns the terminal on" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = true
 check "members cannot use the terminal" test "$(status_of -b /tmp/alice.jar "$api/api/v1/terminal")" = 403
@@ -713,6 +725,7 @@ check "Host Agent proves the identity switch again after a restart" \
   bash -c "for _ in \$(seq 1 30); do journalctl -u anas-host-agent --since '$restarted_at' -o cat --no-pager |
     grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "sharing recovers after the Host Agent restarts" shares_ready
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 
 # --- Screen saver videos are long-lived media, not part of a release (ADR 0014).

@@ -88,13 +88,15 @@ import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
 import type { TransferLocation } from "./transfers/transfersApi";
 import { useHostState } from "./useHostState";
 import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
+import { SharesProvider, useShares } from "./shares/SharesProvider";
+import { SharesPanel } from "./shares/SharesPanel";
 import "./styles.css";
 
 // The transfer center loads when first opened; the desktop only needs its
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store";
+type WindowID = "shares" | "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store";
 
 interface WindowModel {
   id: WindowID;
@@ -123,6 +125,7 @@ type WindowAction =
   | { type: "restore"; ids: WindowID[] };
 
 const initialWindows: WindowModel[] = [
+  { id: "shares", title: "分享", open: false, minimized: false, maximized: false, x: 250, y: 65, width: 950, height: 680, z: 2, opened: 0 },
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
 	{ id: "transfers", title: "传输中心", open: false, minimized: false, maximized: false, x: 270, y: 84, width: 900, height: 600, z: 2, opened: 0 },
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
@@ -136,6 +139,7 @@ const initialWindows: WindowModel[] = [
 ];
 
 const windowIcons: Record<WindowID, AppGlyph> = {
+  shares: Share2,
   files: FolderClosed,
   transfers: ArrowDownUp,
   photos: PhotosGlyph,
@@ -153,6 +157,7 @@ const wallpaperClickSlop = 6;
 const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
+  shares: "download",
   files: "files",
   transfers: "download",
   photos: "photos",
@@ -353,6 +358,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
     { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+    { id: "shares", label: "分享", ariaLabel: "打开分享", keywords: "分享 成员 留言 私聊 收到 发出", tone: "download", icon: <Share2 />, active: isOpen("shares"), onClick: () => openWindow("shares") },
     // Installed apps open their own web interface; a stopped one shows its
     // containers in Docker to administrators.
     ...shortcuts.map((shortcut) => shortcutApp(shortcut, session.user.role === "admin" ? () => showInDocker(shortcut.id) : undefined)),
@@ -393,7 +399,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
   };
 
   return (
-    <main className="desktop-shell" onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
+    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}><main className="desktop-shell" onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
       <div className="wallpaper-glow" />
 
       <SystemRail
@@ -418,6 +424,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
           if (!window.open) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
+              {window.id === "shares" && <SharesPanel />}
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onUserChange={changeUser} onLogout={onLogout} />}
 			  {window.id === "files" && <FilePanel userID={session.user.id} navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
@@ -444,7 +451,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
       <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
       <FeedbackChannel />
       <LocalConsoleScreenSaver enabled={isLocalConsole()} />
-    </main>
+    </main></SharesProvider>
   );
 }
 
@@ -558,6 +565,7 @@ interface FilePanelProps {
 }
 
 function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPhotos, onOpenMedia, onOpenMusic }: FilePanelProps) {
+  const shares = useShares();
 	const people = usePeople();
 	// A viewed private space is named by its owner, the way they go by.
 	const ownerName = (space: Space) => { const owner = people.byId(space.ownerUserId); return owner ? displayName(owner) : space.name; };
@@ -691,6 +699,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 	const usedBytes = usageKnown ? capacityBytes - availableBytes : 0;
 	const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
 	const canMutateSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
+	const canShareSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
 	const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
 	// Snapshot versions are for the user's own spaces; viewing a member's is for browsing files.
 	const canShowVersions = selectedEntries.length === 1 && selectedItems.length === 1 && selectedEntry?.kind === "file" && !viewing;
@@ -979,6 +988,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 			<div className="file-action-bar" aria-label="文件命令">
 				<button className="file-command-button" disabled={!spaceID || Boolean(viewing) || Boolean(activity)} onClick={() => setCreatingDirectory((value) => !value)}><FolderPlus /><span>新建</span></button>
 				<i />
+				<button className="file-command-button" aria-label="分享" title="分享给成员" disabled={!canShareSelection} onClick={() => shares.compose(selectedEntries)}><Share2 /><span>分享</span></button>
 				<button className="file-command-button" aria-label="剪切" title="剪切" disabled={!canMutateSelection} onClick={() => setClipboard({ entries: selectedEntries, mode: "move" })}><Scissors /><span>剪切</span></button>
 				<button className="file-command-button" aria-label="复制" title="复制" disabled={!canMutateSelection} onClick={() => setClipboard({ entries: selectedEntries, mode: "copy" })}><Copy /><span>复制</span></button>
 				<button className="file-command-button" aria-label="粘贴" title="粘贴到当前目录" disabled={!canPaste} onClick={() => void pasteEntry()}><ClipboardPaste /><span>粘贴</span></button>
@@ -1055,6 +1065,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 				{contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name) && selectedEntries.length <= 1 && <button role="menuitem" onClick={() => { download([contextMenu.item!.entry!]); setContextMenu(undefined); }}><Download /><span>下载</span></button>}
 				{canDownload && archiveDownload && <button role="menuitem" onClick={() => { download(selectedEntries); setContextMenu(undefined); }}><Download /><span>{selectedEntries.length > 1 ? `打包下载 ${selectedEntries.length} 项` : "打包下载"}</span><kbd>ZIP</kbd></button>}
 				<i />
+				<button role="menuitem" disabled={!canShareSelection} onClick={() => { shares.compose(selectedEntries); setContextMenu(undefined); }}><Share2 /><span>分享给成员</span></button>
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "move" }); setContextMenu(undefined); }}><Scissors /><span>剪切</span><kbd>Ctrl+X</kbd></button>
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "copy" }); setContextMenu(undefined); }}><Copy /><span>复制</span><kbd>Ctrl+C</kbd></button>
 				<button role="menuitem" disabled={!canRenameSelection} onClick={() => { setRenaming(selectedEntry); setContextMenu(undefined); }}><Pencil /><span>重命名</span></button>

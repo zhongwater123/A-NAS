@@ -35,6 +35,8 @@ var knownOps = map[string]bool{
 }
 
 type request struct {
+	ShareEpoch string `json:"shareEpoch,omitempty"`
+	ShareID    string `json:"shareId,omitempty"`
 	// Token is sent by the Product Service and removed before the request
 	// reaches a worker.
 	Token  string         `json:"token,omitempty"`

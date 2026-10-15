@@ -21,10 +21,13 @@ func NewClient(socket string) *Client { return &Client{socket: socket} }
 
 func (c *Client) call(ctx context.Context, req request) (response, *os.File, error) {
 	token := accounts.SessionToken(ctx)
-	if token == "" {
+	if token == "" && req.Op != opShareReset && req.Op != opShareFence && req.Op != opShareCheck {
 		return response{}, nil, fmt.Errorf("%w: no session for file operation", files.ErrForbidden)
 	}
 	req.Token = token
+	if publication, ok := ctx.Value(sharePublicationKey{}).(sharePublication); ok {
+		req.ShareEpoch, req.ShareID = publication.epoch, publication.id
+	}
 	var dialer net.Dialer
 	connection, err := dialer.DialContext(ctx, "unix", c.socket)
 	if err != nil {

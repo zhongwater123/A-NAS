@@ -54,7 +54,7 @@ ops-check:
 	grep -Fq 'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' scripts/install-v1.0.1-system-services.sh
 	grep -Fq '[[ -S /run/a-nas-container/agent.sock ]]' scripts/install-v1.0.1-system-services.sh
 	grep -Fq "printf 'ANAS_CONTAINERS_MODE=agent\\n' >> /etc/a-nas/anas-api.env" scripts/install-v1.0.1-system-services.sh
-	grep -Fqx 'ReadWritePaths=/var/lib/a-nas' deploy/systemd/system/anas-api.service
+	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Fq 'setfacl getfacl' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'acl btrfs-progs' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
@@ -72,14 +72,17 @@ ops-check:
 	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'User=a-nas-shares' deploy/systemd/system/anas-shares.service
+	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api share-service' deploy/systemd/system/anas-shares.service
+	grep -Fq 'anas-shares-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'RuntimeDirectory=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket

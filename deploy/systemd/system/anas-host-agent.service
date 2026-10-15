@@ -15,8 +15,8 @@ Restart=on-failure
 RestartSec=2s
 TimeoutStartSec=30min
 TimeoutStopSec=20s
-# a-nas-sessions holds the photo service's session lookup socket (ADR 0011).
-RuntimeDirectory=a-nas a-nas-sessions
+# Separate session directories preserve the photo and share socket group permissions.
+RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions
 RuntimeDirectoryMode=0750
 UMask=0007
 NoNewPrivileges=true

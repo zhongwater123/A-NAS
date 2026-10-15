@@ -31,6 +31,8 @@
 
 - [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
 
+- [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed locally；系统回归通过）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

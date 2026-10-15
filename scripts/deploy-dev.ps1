@@ -174,6 +174,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-api.service'); Destination = "${target}:$release/anas-api-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-photos.service'); Destination = "${target}:$release/anas-photos-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-shares.service'); Destination = "${target}:$release/anas-shares-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas.slice'); Destination = "${target}:$release/anas-system.slice.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.socket'); Destination = "${target}:$release/anas-ai-system.socket.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.service'); Destination = "${target}:$release/anas-ai-system.service.incoming" },

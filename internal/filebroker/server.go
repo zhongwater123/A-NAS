@@ -50,10 +50,13 @@ type Config struct {
 }
 
 type Server struct {
-	config  Config
-	mu      sync.Mutex
-	workers map[workerKey]*worker
-	closed  bool
+	config      Config
+	mu          sync.Mutex
+	workers     map[workerKey]*worker
+	closed      bool
+	shareMu     sync.Mutex
+	shareEpoch  string
+	shareFenced map[string]bool
 }
 
 type workerKey struct {
@@ -173,6 +176,18 @@ func (s *Server) handle(conn *net.UnixConn) {
 }
 
 func (s *Server) dispatch(ctx context.Context, req request) (response, *os.File) {
+	// This gate lives with the worker, so a Product Service crash cannot
+	// release a publication that a restarted sharing service has fenced.
+	if req.Op == opShareReset || req.Op == opShareFence || req.Op == opShareCheck {
+		return s.shareControl(req), nil
+	}
+	if req.ShareEpoch != "" || req.ShareID != "" {
+		s.shareMu.Lock()
+		defer s.shareMu.Unlock()
+		if req.ShareEpoch == "" || req.ShareEpoch != s.shareEpoch || req.ShareID == "" || s.shareFenced[req.ShareID] {
+			return response{Error: &wireError{Code: codeForbidden}}, nil
+		}
+	}
 	if !knownOps[req.Op] {
 		return response{Error: &wireError{Code: codeInvalidRequest, Message: "unknown file operation"}}, nil
 	}
