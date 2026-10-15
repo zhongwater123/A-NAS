@@ -1,6 +1,6 @@
 # 0022：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行
 
-状态：proposed（2026-10-14 与用户讨论后起草；同日在开发机完成 spike，含 DeepSeek 真实模型测试与助手窗口原型；实验 NAS 上尚未验证）；行为见 [AI 助手规格](../specs/ai-assistant.md)，外部事实见 [Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)。
+状态：proposed（2026-10-14 与用户讨论后起草；同日在开发机完成 spike，含 DeepSeek 真实模型测试与助手窗口原型；实验 NAS 上尚未验证）。2026-10-15 对照上游后用户决定：助手与 Hermes 之间改用官方 Desktop 所用的 `hermes serve`（REST 加 `/api/ws` 上的 JSON-RPC），写入确认改用 Hermes 的回合内审批；决定 4 与 9 待 [#109](https://github.com/zhongwater123/A-NAS/issues/109)、[#110](https://github.com/zhongwater123/A-NAS/issues/110)、[#111](https://github.com/zhongwater123/A-NAS/issues/111) 验证后改写。行为见 [AI 助手规格](../specs/ai-assistant.md)，外部事实见 [Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)。
 
 AI 助手需要记忆、技能、多模型与工具调用这些智能体能力，自己实现等于重写一个成熟框架；但 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 是为单一主人设计的，默认带终端与文件的全部权限，而 A-NAS 有多名成员，文件只由内核 ACL 授权。我们决定：以 Hermes Agent 为运行时，每个账号运行一个独立实例，由 systemd 沙箱只给它看本人能读的几处位置，只让它自由写自己的助手目录；对个人空间与 Agent空间的更改先写入暂存区，只有账号本人在自己的会话中确认后才由文件代理执行。权限由内核与 A-NAS 强制，不依赖 Hermes 的配置或模型的自觉。
 
