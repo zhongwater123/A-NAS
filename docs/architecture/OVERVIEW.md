@@ -106,6 +106,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 
 ## 关联
 
+- [成员分享技术方案与开发切片](member-sharing.md)（proposed，尚未实现；不改变本页现有不变量）
+
 - [领域语言](../../CONTEXT.md)
 - [当前状态](../status/CURRENT.md)
 - [ADR 索引](../adr/README.md)

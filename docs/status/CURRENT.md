@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-14
+更新时间：2026-10-15
 
 ## 当前阶段
 
@@ -47,6 +47,8 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - Debian `systemd-timesyncd` 在上次实机检查时为 enabled/active、`NTPSynchronized=yes`，见[时间调查](../investigations/2026-10-06-system-clock-drift-and-network-sync.md)。
 
 ## 下一步
+
+- 成员文件分享进入开发准备：已确认[产品规格](../specs/member-sharing.md)，[技术方案与开发切片](../architecture/member-sharing.md)和独立分享服务的 [ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md) 已提出。下一步先实现分享生命周期、参与者隔离及“撤回立即停止、自然到期允许已有保存完成”的测试与领域逻辑；功能尚未实现，权限提案尚未接受，尚未部署。
 
 1. 在 Web 中验收 PR #50 的文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口和资源文件夹跳转，再打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `9923c5987c0b` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。
