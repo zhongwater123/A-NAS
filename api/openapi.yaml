@@ -565,6 +565,72 @@ paths:
       parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "204": { description: Snapshot deleted }
+  /api/v1/task-manager/device:
+    get:
+      operationId: getTaskManagerDevice
+      summary: Read device utilisation and accelerator availability
+      description: >-
+        Every signed-in account, including members, can read this snapshot. This API is read-only.
+        Rates use the shared Host Agent sampling window; CPU percentages use whole-machine capacity.
+        Unknown metrics are present as null. Partial or unavailable groups retain explicit status and arrays.
+        No command lines, environment variables or host paths are exposed.
+      responses:
+        "200":
+          description: The latest observation and its data source.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskManagerDeviceResponse"
+        "401":
+          description: A valid signed-in session is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          description: The observation cannot currently be read (task_manager_unavailable).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/task-manager/tasks:
+    get:
+      operationId: getTaskManagerTasks
+      summary: Read running services and processes
+      description: >-
+        Every signed-in account, including members, can read this snapshot. This API is read-only.
+        Rates use the shared Host Agent sampling window; CPU percentages use whole-machine capacity.
+        Unknown metrics are present as null. Partial or unavailable groups retain explicit status and arrays.
+        No command lines, environment variables or host paths are exposed.
+      responses:
+        "200":
+          description: The latest observation and its data source.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskManagerTasksResponse"
+        "401":
+          description: A valid signed-in session is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          description: The observation cannot currently be read (task_manager_unavailable).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/metrics:
     get:
       operationId: getHostMetrics
@@ -2670,6 +2736,183 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    TaskManagerStatus:
+      type: string
+      enum: [available, partial, unavailable, unsupported, absent]
+      description: Availability of a collection or accelerator; unknown metrics remain null.
+    TaskManagerID:
+      type: string
+      minLength: 1
+      maxLength: 512
+      description: Opaque observation identity, never a host path. Process identities include PID and start time.
+    TaskManagerPercent:
+      type: [number, "null"]
+      minimum: 0
+      maximum: 100
+      description: Percentage of whole-machine CPU capacity or of the named accelerator; null when unknown.
+    TaskManagerRate:
+      type: [number, "null"]
+      minimum: 0
+      description: Bytes per second during sampleSeconds; null without a valid sampling baseline.
+    TaskManagerBytes:
+      type: [integer, "null"]
+      minimum: 0
+      description: Bytes, or null when the observation is unavailable.
+    TaskManagerCPU:
+      type: object
+      additionalProperties: false
+      required: [model, logicalCores, usagePercent]
+      properties:
+        model: { type: string }
+        logicalCores: { type: integer, minimum: 1 }
+        usagePercent: { $ref: "#/components/schemas/TaskManagerPercent" }
+    TaskManagerMemory:
+      type: object
+      additionalProperties: false
+      required: [totalBytes, usedBytes]
+      properties:
+        totalBytes: { type: integer, minimum: 1 }
+        usedBytes:
+          type: integer
+          minimum: 0
+          description: MemTotal minus MemAvailable; reclaimable cache is available memory.
+    TaskManagerNetwork:
+      type: object
+      additionalProperties: false
+      required: [id, name, physical, receiveBytes, transmitBytes, receiveBytesPerSecond, transmitBytesPerSecond]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        name: { type: string, minLength: 1 }
+        physical: { type: boolean }
+        receiveBytes: { type: integer, minimum: 0 }
+        transmitBytes: { type: integer, minimum: 0 }
+        receiveBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+        transmitBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+    TaskManagerDisk:
+      type: object
+      additionalProperties: false
+      required: [id, model, capacityBytes, readBytesPerSecond, writeBytesPerSecond]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        model: { type: string }
+        capacityBytes: { type: integer, minimum: 0 }
+        readBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+        writeBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+    TaskManagerMetricStatus:
+      type: string
+      enum: [available, unsupported, unavailable]
+      description: Per-metric availability; unsupported means the driver lacks the interface, unavailable means reading failed.
+    TaskManagerAccelerator:
+      type: object
+      additionalProperties: false
+      required: [id, name, driver, status, usageStatus, memoryUsedStatus, memoryTotalStatus, usagePercent, memoryUsedBytes, memoryTotalBytes]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        name: { type: string, minLength: 1 }
+        driver: { type: string }
+        usageStatus: { $ref: "#/components/schemas/TaskManagerMetricStatus" }
+        memoryUsedStatus: { $ref: "#/components/schemas/TaskManagerMetricStatus" }
+        memoryTotalStatus: { $ref: "#/components/schemas/TaskManagerMetricStatus" }
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        usagePercent: { $ref: "#/components/schemas/TaskManagerPercent" }
+        memoryUsedBytes: { $ref: "#/components/schemas/TaskManagerBytes" }
+        memoryTotalBytes: { $ref: "#/components/schemas/TaskManagerBytes" }
+    TaskManagerTask:
+      type: object
+      additionalProperties: false
+      required: [id, name, pid, state, cpuPercent, memoryBytes, readBytesPerSecond, writeBytesPerSecond]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        name: { type: string, minLength: 1 }
+        pid:
+          type: integer
+          minimum: 0
+          description: Process ID; services use zero because their usage aggregates the cgroup.
+        state: { type: string }
+        cpuPercent: { $ref: "#/components/schemas/TaskManagerPercent" }
+        memoryBytes: { $ref: "#/components/schemas/TaskManagerBytes" }
+        readBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+        writeBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+    TaskManagerNetworkGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerNetwork" }
+    TaskManagerDiskGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerDisk" }
+    TaskManagerAcceleratorGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerAccelerator" }
+    TaskManagerProcessGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerTask" }
+    TaskManagerServiceGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 1024
+          items: { $ref: "#/components/schemas/TaskManagerTask" }
+    TaskManagerDeviceResponse:
+      type: object
+      additionalProperties: false
+      required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu]
+      properties:
+        observedAt: { type: string, format: date-time }
+        sampleSeconds:
+          type: number
+          exclusiveMinimum: 0
+          description: Shared sampling window in seconds.
+        dataSource: { $ref: "#/components/schemas/DataSource" }
+        cpu: { $ref: "#/components/schemas/TaskManagerCPU" }
+        memory: { $ref: "#/components/schemas/TaskManagerMemory" }
+        network: { $ref: "#/components/schemas/TaskManagerNetworkGroup" }
+        disks: { $ref: "#/components/schemas/TaskManagerDiskGroup" }
+        gpu: { $ref: "#/components/schemas/TaskManagerAcceleratorGroup" }
+        npu: { $ref: "#/components/schemas/TaskManagerAcceleratorGroup" }
+    TaskManagerTasksResponse:
+      type: object
+      additionalProperties: false
+      required: [observedAt, sampleSeconds, dataSource, processes, services]
+      properties:
+        observedAt: { type: string, format: date-time }
+        sampleSeconds:
+          type: number
+          exclusiveMinimum: 0
+          description: Shared sampling window in seconds.
+        dataSource: { $ref: "#/components/schemas/DataSource" }
+        processes: { $ref: "#/components/schemas/TaskManagerProcessGroup" }
+        services: { $ref: "#/components/schemas/TaskManagerServiceGroup" }
     Health:
       type: string
       enum: [healthy, warning, critical, unknown]

@@ -12,6 +12,8 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 ## 已就绪
 
+- [任务管理器](../specs/task-manager.md)已在本地实现，尚未合并、未部署：设置中新增设备运行状态的总览、CPU、GPU、NPU、内存、网络、硬盘分页，以及运行中服务和进程的 CPU、内存与磁盘读写速率排序、搜索。管理员和成员均可只读查看，GPU 使用率目前支持 AMD amdgpu sysfs；其他 GPU 驱动与 NPU 的未支持指标明确显示不可用。部署需同时更新 Host Agent 和产品服务，实机硬件验收待部署后进行。
+
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)、[存储架构](../architecture/storage-and-files.md)、[ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)和 [v1.0.1 发布记录](../releases/v1.0.1.md)已建立。
 - 磁盘状态包含稳定 ID、removable/in-use、文件系统、SMART、温度、数据卷资格及拒绝原因；公开接口不返回设备路径。
 - 存储计划持久化于 SQLite，支持十分钟过期、确认短语、执行前身份复核、幂等成功结果和中断后 `needs_attention`。

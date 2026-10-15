@@ -1510,7 +1510,7 @@ describe("Installed apps on the desktop", () => {
 describe("Settings", () => {
   const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
 
-  it("shows members their account, the overview and read-only storage", async () => {
+  it("shows members their account, task manager, overview and read-only storage", async () => {
     const fetchMock = installAPI({ session: { ...session, user: alice } });
     const user = userEvent.setup();
     render(<App />);
@@ -1518,7 +1518,7 @@ describe("Settings", () => {
     const settings = screen.getByRole("dialog", { name: "设置" });
     const sections = within(settings).getByRole("navigation", { name: "设置分区" });
     const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
-    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "存储", "日志"]);
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "任务管理器", "存储", "日志"]);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
     expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();

@@ -80,7 +80,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
-| `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md) |
+| `internal/hoststate` / `internal/taskmanager` | 只读宿主机状态、CPU/内存/网络指标与设备、服务、进程采样；Fake 与 Debian Linux Adapter | 状态和状态栏指标见[状态栏规格](../specs/host-metrics-status-bar.md)；[任务管理器](../specs/task-manager.md)经同一 Host Agent IPC 向所有已登录账号提供只读观测，不返回命令参数或环境变量 |
 | `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性（含[昵称与头像](../specs/account-profile.md)，头像由 `internal/avatar` 压缩为 256 px JPEG 后存入账号数据库），文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
 | `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |

@@ -172,6 +172,14 @@ func (h *productHandler) routes() {
 			h.state.ServeHTTP(w, r)
 		}))
 	}
+	// The task manager is read-only and available to members as well as admins.
+	// Register the path without a method so the state handler returns JSON 405
+	// after authentication instead of falling through the catch-all 404.
+	for _, path := range []string{"/api/v1/task-manager/device", "/api/v1/task-manager/tasks"} {
+		h.mux.HandleFunc(path, h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+			h.state.ServeHTTP(w, r)
+		}))
+	}
 	h.mux.HandleFunc("GET /api/v1/spaces", h.withSession(h.handleSpaces))
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/entries", h.withSession(h.handleEntries))
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/directories", h.withMutation(h.handleCreateDirectory))
