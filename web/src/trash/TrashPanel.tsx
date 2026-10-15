@@ -1,15 +1,15 @@
-import { ArchiveRestore, Check, FolderOpen, HardDrive, MapPin, Minus, RefreshCw, RotateCcw, Search, Trash2, UsersRound, X } from "lucide-react";
+import { ArchiveRestore, Check, CircleAlert, CopyPlus, FolderOpen, HardDrive, MapPin, Minus, RefreshCw, Replace, RotateCcw, Search, Trash2, UsersRound, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { APIError, listEntries, listSpaces, listTrash, purgeTrash, restoreTrash, type Space, type TrashItem } from "../api";
+import { APIError, listEntries, listSpaces, listTrash, purgeTrash, type RestoreConflict, type RestoredEntry, restoreTrash, type Space, type TrashItem } from "../api";
 import { formatClock, formatDateTime } from "../backup/format";
 import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../backup/parts";
 import { formatBytes } from "../bytes";
 import { fileTypeLabel } from "../fileTypes";
 import type { TransferLocation } from "../transfers/transfersApi";
 import {
-  type BatchOutcome, expiryOf, type ExpiryTone, groupItems, locationOf, matches, messageOf, restoredName, restoreSummary, sortItems, spaceName,
-  type TrashSort,
+  type BatchOutcome, emptyOutcome, expiryOf, type ExpiryTone, groupItems, locationOf, matches, messageOf, restoredName, restoredText, restoreSummary,
+  sortItems, spaceName, type TrashSort,
 } from "./model";
 import "../backup/backup.css";
 import "./trash.css";
@@ -30,12 +30,17 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [restoring, setRestoring] = useState<TrashItem>();
   const [purging, setPurging] = useState<{ items: TrashItem[]; everything: boolean }>();
+  // conflicts are the items of a selection whose name was taken where they
+  // go back, waiting for the user to say what to do with them.
+  const [conflicts, setConflicts] = useState<{ items: TrashItem[]; outcome: BatchOutcome }>();
   const [progress, setProgress] = useState<{ label: string; done: number; total: number }>();
   const { toast, element: toasts } = useToasts();
   const root = useRef<HTMLDivElement>(null);
   // Buttons are disabled while a batch runs, which drops focus to the page;
   // the panel takes it back so Escape and Tab keep working.
   const refocus = () => { if (!root.current?.contains(document.activeElement)) root.current?.focus({ preventScroll: true }); };
+  // The same after the dialog for taken names closes with the focus in it.
+  const refocusAfterConflicts = useRef(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -50,6 +55,12 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (conflicts || !refocusAfterConflicts.current) return;
+    refocusAfterConflicts.current = false;
+    if (!root.current?.contains(document.activeElement)) root.current?.focus({ preventScroll: true });
+  }, [conflicts]);
 
   const all = useMemo(() => items ?? [], [items]);
   const spaceOf = useCallback((item: TrashItem) => spaces.find((space) => space.id === item.spaceId), [spaces]);
@@ -91,18 +102,20 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     onShowInFiles({ spaceId: space.id, spaceKind: space.kind, folders: trail });
   };
 
-  // restoreChosen puts each selected item back where it came from, under
-  // its own name; the ones whose name is taken there stay selected.
-  const restoreChosen = async () => {
-    const batch = chosen;
-    const outcome: BatchOutcome = { done: [], conflicts: [], gone: [], failed: [] };
+  // restoreBatch puts each item back where it came from, under its own name.
+  // With "ask", the items whose name is taken there are returned for the
+  // user to decide; a folder is never replaced and keeps both instead.
+  const restoreBatch = async (batch: TrashItem[], choice: RestoreConflict, outcome: BatchOutcome) => {
+    const taken: TrashItem[] = [];
     for (const [index, item] of batch.entries()) {
       setProgress({ label: "正在恢复", done: index, total: batch.length });
       try {
-        await restoreTrash(item.id, item.name);
+        const restored = await restoreTrash(item.id, item.name, choice === "replace" && item.kind === "directory" ? "rename" : choice);
         outcome.done.push(item);
+        if (restored.replaced) outcome.replaced += 1;
+        else if (restored.name !== item.name) outcome.renamed += 1;
       } catch (caught) {
-        if (caught instanceof APIError && caught.code === "name_conflict") outcome.conflicts.push(item);
+        if (choice === "ask" && caught instanceof APIError && caught.code === "name_conflict") taken.push(item);
         else if (caught instanceof APIError && caught.code === "not_found") outcome.gone.push(item);
         else outcome.failed.push(messageOf(caught));
       }
@@ -110,9 +123,32 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     setProgress(undefined);
     refocus();
     forget([...outcome.done, ...outcome.gone]);
-    setSelected(new Set(outcome.conflicts.map((item) => item.id)));
+    return taken;
+  };
+
+  const finishBatch = (outcome: BatchOutcome) => {
+    setSelected(new Set(outcome.skipped.map((item) => item.id)));
+    // A replaced file went to the recycle bin and is listed from now on.
+    if (outcome.replaced) void refresh();
     const summary = restoreSummary(outcome);
     toast(summary.text, summary.tone);
+  };
+
+  const restoreChosen = async () => {
+    const outcome = emptyOutcome();
+    const taken = await restoreBatch(chosen, "ask", outcome);
+    if (taken.length) setConflicts({ items: taken, outcome });
+    else finishBatch(outcome);
+  };
+
+  const resolveConflicts = async (choice: RestoreConflict | "skip") => {
+    if (!conflicts) return;
+    const { items: taken, outcome } = conflicts;
+    refocusAfterConflicts.current = true;
+    setConflicts(undefined);
+    if (choice === "skip") outcome.skipped.push(...taken);
+    else await restoreBatch(taken, choice, outcome);
+    finishBatch(outcome);
   };
 
   const purgeItems = async (batch: TrashItem[]) => {
@@ -137,7 +173,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   };
 
   const keyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape" && selected.size && !restoring && !purging && !busy) setSelected(new Set());
+    if (event.key === "Escape" && selected.size && !restoring && !purging && !conflicts && !busy) setSelected(new Set());
   };
 
   return (
@@ -263,11 +299,19 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
           space={spaceOf(restoring)}
           onClose={() => setRestoring(undefined)}
           onGone={(message) => { setRestoring(undefined); forget([restoring]); toast(message, "error"); }}
-          onRestored={(name, location) => {
+          onRestored={(restored, text, location) => {
             const item = restoring;
             setRestoring(undefined); forget([item]);
-            toast(`已恢复“${name}”到 ${location.text}`, "success", { label: "在文件管理中显示", run: () => void showInFiles(spaceOf(item), location.folders) });
+            if (restored.replaced) void refresh();
+            toast(text, "success", { label: "在文件管理中显示", run: () => void showInFiles(spaceOf(item), location.folders) });
           }}
+        />
+      )}
+      {conflicts && (
+        <ConflictDialog
+          items={conflicts.items}
+          locate={(item) => locationOf(item, spaceOf(item)).text}
+          onChoose={(choice) => void resolveConflicts(choice)}
         />
       )}
       {purging && (
@@ -355,53 +399,52 @@ function RestoreDialog({ item, space, onClose, onRestored, onGone }: {
   item: TrashItem;
   space?: Space;
   onClose: () => void;
-  onRestored: (name: string, location: { text: string; folders: string[] }) => void;
+  onRestored: (restored: RestoredEntry, text: string, location: { text: string; folders: string[] }) => void;
   onGone: (message: string) => void;
 }) {
   const location = locationOf(item, space);
   const [name, setName] = useState(item.name);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<RestoreConflict>();
   const [error, setError] = useState("");
-  const [suggestion, setSuggestion] = useState<string>();
-  const [attempt, setAttempt] = useState(1);
+  // taken is the name found taken where the item goes back.
+  const [taken, setTaken] = useState("");
+  const choices = useRef<HTMLDivElement>(null);
+  // The name field leaves with the choices' arrival; focus goes to them.
+  useEffect(() => { if (taken) choices.current?.querySelector<HTMLElement>("button")?.focus(); }, [taken]);
 
-  const submit = async (event?: FormEvent) => {
+  const restore = async (choice: RestoreConflict, event?: FormEvent) => {
     event?.preventDefault();
     const finalName = name.trim();
     if (!finalName || busy) return;
-    setBusy(true); setError(""); setSuggestion(undefined);
+    setBusy(choice); setError("");
     try {
-      await restoreTrash(item.id, finalName);
-      onRestored(finalName, location);
+      const restored = await restoreTrash(item.id, finalName, choice);
+      onRestored(restored, restoredText(restored, finalName, location.text, choice), location);
     } catch (caught) {
       if (caught instanceof APIError && caught.code === "not_found") {
         onGone(messageOf(caught));
         return;
       }
-      if (caught instanceof APIError && caught.code === "name_conflict") {
-        setError(`“${location.text}”中已有名为“${finalName}”的项目。`);
-        setSuggestion(restoredName(item.name, item.kind, attempt));
-        setAttempt(attempt + 1);
-      } else {
-        setError(messageOf(caught));
-      }
+      if (caught instanceof APIError && caught.code === "name_conflict") setTaken(finalName);
+      else setError(messageOf(caught));
     } finally {
-      setBusy(false);
+      setBusy(undefined);
     }
   };
 
+  const file = item.kind === "file";
   return (
     <Dialog
-      title={`恢复${item.kind === "directory" ? "文件夹" : "文件"}`}
+      title={`恢复${file ? "文件" : "文件夹"}`}
       icon={<ArchiveRestore />}
-      busy={busy}
+      busy={Boolean(busy)}
       onClose={onClose}
       footer={<>
-        <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>取消</button>
-        <button type="submit" form="tr-restore-form" className="bk-primary" disabled={busy || !name.trim()}>{busy ? <><Spinner small />正在恢复…</> : "恢复"}</button>
+        <button type="button" className="bk-secondary" disabled={Boolean(busy)} onClick={onClose}>取消</button>
+        {!taken && <button type="submit" form="tr-restore-form" className="bk-primary" disabled={Boolean(busy) || !name.trim()}>{busy ? <><Spinner small />正在恢复…</> : "恢复"}</button>}
       </>}
     >
-      <form id="tr-restore-form" className="bk-restore" onSubmit={(event) => void submit(event)}>
+      <form id="tr-restore-form" className="bk-restore" onSubmit={(event) => void restore("ask", event)}>
         <div className="bk-restore-source">
           <EntryIcon kind={item.kind} />
           <div>
@@ -424,22 +467,78 @@ function RestoreDialog({ item, space, onClose, onRestored, onGone }: {
           )}
         </div>
 
-        <label className="bk-field">
-          <span className="bk-field-label">名称</span>
-          <input data-autofocus value={name} disabled={busy} aria-label="恢复后的名称"
-            onChange={(event) => { setName(event.target.value); setError(""); setSuggestion(undefined); }} />
-        </label>
-
-        {error && (
-          <div className="bk-inline-error" role="alert">
-            <span>{error}</span>
-            {suggestion && <button type="button" className="bk-link" onClick={() => { setName(suggestion); setError(""); setSuggestion(undefined); }}>改用“{suggestion}”</button>}
-          </div>
+        {taken ? (
+          <section className="tr-conflict" role="group" aria-label="同名项目">
+            <div className="tr-conflict-head">
+              <CircleAlert />
+              <p><strong>这里已有“{taken}”</strong><span>选择怎么恢复；不会覆盖任何文件。</span></p>
+            </div>
+            <div ref={choices} className="tr-choices">
+              <button type="button" className="tr-choice" disabled={Boolean(busy)} onClick={() => void restore("rename")}>
+                <span className="tr-choice-icon">{busy === "rename" ? <Spinner small /> : <CopyPlus />}</span>
+                <span className="tr-choice-text"><strong>保留两者</strong><small>改用新名称放在旁边，如“{restoredName(taken, item.kind)}”</small></span>
+              </button>
+              {file && (
+                <button type="button" className="tr-choice warning" disabled={Boolean(busy)} onClick={() => void restore("replace")}>
+                  <span className="tr-choice-icon">{busy === "replace" ? <Spinner small /> : <Replace />}</span>
+                  <span className="tr-choice-text"><strong>替换</strong><small>现有的“{taken}”移到回收站，之后仍可恢复</small></span>
+                </button>
+              )}
+            </div>
+            {!file && <p className="tr-conflict-note">文件夹不会被替换或合并。</p>}
+            <button type="button" className="bk-link tr-conflict-rename" disabled={Boolean(busy)} onClick={() => { setTaken(""); setName(restoredName(taken, item.kind)); }}>自己起个名称</button>
+          </section>
+        ) : (
+          <>
+            <label className="bk-field">
+              <span className="bk-field-label">名称</span>
+              <input data-autofocus value={name} disabled={Boolean(busy)} aria-label="恢复后的名称"
+                onChange={(event) => { setName(event.target.value); setError(""); }} />
+            </label>
+            {error && <div className="bk-inline-error" role="alert"><span>{error}</span></div>}
+            <p className="bk-fine">
+              {file ? "" : "文件夹里的全部内容会一起恢复。"}恢复不会覆盖已有的文件；那里已有同名项目时，可以选择保留两者{file ? "或替换" : ""}。
+            </p>
+          </>
         )}
-        <p className="bk-fine">
-          {item.kind === "directory" ? "文件夹里的全部内容会一起恢复。" : ""}恢复不会覆盖已有的文件：如果那里已有同名项目，换个名称再恢复。
-        </p>
       </form>
+    </Dialog>
+  );
+}
+
+// ConflictDialog asks once what to do with every item of a selection whose
+// name is taken where it goes back.
+function ConflictDialog({ items, locate, onChoose }: {
+  items: TrashItem[];
+  locate: (item: TrashItem) => string;
+  onChoose: (choice: RestoreConflict | "skip") => void;
+}) {
+  const files = items.filter((item) => item.kind === "file").length;
+  const shown = items.slice(0, 5);
+  return (
+    <Dialog
+      title={items.length === 1 ? `“${items[0].name}”的原位置已有同名项目` : `${items.length} 个项目的原位置已有同名项目`}
+      icon={<CopyPlus />}
+      label="同名项目"
+      onClose={() => onChoose("skip")}
+      footer={<>
+        <button type="button" className="bk-secondary" onClick={() => onChoose("skip")}>跳过</button>
+        {files > 0 && <button type="button" className="bk-secondary tr-replace" onClick={() => onChoose("replace")}><Replace />替换</button>}
+        <button type="button" className="bk-primary" onClick={() => onChoose("rename")}><CopyPlus />保留两者</button>
+      </>}
+    >
+      <p className="bk-dialog-text">
+        保留两者时，恢复的项目改用“名称 (恢复)”这样的新名称放在旁边。{files > 0 ? `替换时，现有的同名文件移到回收站${files < items.length ? "；文件夹不会被替换，仍然保留两者" : ""}。` : "文件夹不会被替换或合并。"}跳过的项目留在回收站中。
+      </p>
+      <ul className="tr-conflict-list">
+        {shown.map((item) => (
+          <li key={item.id}>
+            <EntryIcon kind={item.kind} />
+            <span><strong title={item.name}>{item.name}</strong><small title={locate(item)}>{locate(item)}</small></span>
+          </li>
+        ))}
+      </ul>
+      {items.length > shown.length && <p className="bk-fine">以及另外 {items.length - shown.length} 项</p>}
     </Dialog>
   );
 }
