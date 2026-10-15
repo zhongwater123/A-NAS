@@ -160,7 +160,11 @@ function isNumberIn(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && value >= min && value <= max;
 }
 
-export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string; mustChangePassword?: boolean }
+// nickname, when set, is what pages show instead of username; avatarVersion
+// names the current avatar (see avatarURL).
+export interface User { id: string; username: string; role: "admin" | "member"; status: "pending" | "active" | "disabled" | "error"; createdAt: string; mustChangePassword?: boolean; nickname?: string; avatarVersion?: string }
+// Profile is how an account appears to everyone signed in.
+export interface Profile { id: string; username: string; nickname?: string; avatarVersion?: string }
 // credentialReset is the latest time an administrator chose the user's
 // password; the user keeps seeing it.
 export interface Session { csrfToken: string; expiresAt: string; user: User; credentialReset?: { actorUsername: string; at: string } }
@@ -238,6 +242,13 @@ export async function setupAdministrator(username: string, password: string, loc
 export async function login(username: string, password: string, localConsole = false) { const value = await request<Session>("/api/v1/session", credentials(username, password, localConsole)); setSession(value); return value; }
 export async function currentSession() { const value = await request<Session>("/api/v1/session"); setSession(value); return value; }
 export const changePassword = (currentPassword: string, newPassword: string) => request<void>("/api/v1/session/password", json({ currentPassword, newPassword }), true);
+export const updateNickname = (nickname: string) => request<User>("/api/v1/session/profile", { ...json({ nickname }), method: "PATCH" }, true);
+// uploadAvatar sends the cropped picture; the server makes the stored avatar from it.
+export const uploadAvatar = (picture: Blob) => request<User>("/api/v1/session/avatar", { method: "PUT", headers: { "Content-Type": picture.type || "image/jpeg" }, body: picture }, true);
+export const removeAvatar = () => request<User>("/api/v1/session/avatar", { method: "DELETE" }, true);
+export const listProfiles = async () => (await request<{items: Profile[]}>("/api/v1/profiles")).items;
+// A version names one picture for good, so the browser keeps it cached.
+export const avatarURL = (userId: string, version: string) => `/api/v1/users/${encodeURIComponent(userId)}/avatar?v=${encodeURIComponent(version)}`;
 export const listNotifications = async () => (await request<{items: Notification[]}>("/api/v1/notifications")).items;
 export const acknowledgeNotification = (id: string) => request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`, json({}), true);
 export const startViewing = (userId: string, password: string, reason: string, scope: ViewingScope = "space") => request<ViewingGrant>(`/api/v1/users/${encodeURIComponent(userId)}/viewing`, json({ password, reason, scope }), true);

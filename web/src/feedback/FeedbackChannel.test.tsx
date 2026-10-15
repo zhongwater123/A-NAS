@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api";
+import { forgetPeople, rememberPerson } from "../people";
 import { FeedbackChannel } from "./FeedbackChannel";
 import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
 import { describeTime } from "./time";
@@ -60,7 +61,7 @@ beforeEach(() => {
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => `blob:preview-${++next}`), revokeObjectURL: vi.fn() }));
   capture.result = undefined;
 });
-afterEach(() => { vi.unstubAllGlobals(); setSession(); });
+afterEach(() => { vi.unstubAllGlobals(); setSession(); forgetPeople(); });
 
 async function openPanel(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /^问题反馈(，\d+ 条待处理)?$/ }));
@@ -68,6 +69,22 @@ async function openPanel(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("问题反馈", () => {
+  it("names authors by nickname next to their avatar", async () => {
+    rememberPerson({ id: "user:lin", username: "lin", nickname: "林老师", avatarVersion: "0123abcd" });
+    serve([upload, heic]);
+    const user = userEvent.setup();
+    render(<FeedbackChannel />);
+    const panel = await openPanel(user);
+    const card = (await within(panel).findByText(upload.text)).closest("li") as HTMLElement;
+    expect(within(card).getByText("林老师")).toBeTruthy();
+    expect(within(card).queryByText("lin")).toBeNull();
+    expect(card.querySelector(".fb-avatar img")?.getAttribute("src")).toBe("/api/v1/users/user%3Alin/avatar?v=0123abcd");
+    // An author without a profile keeps the account name and its initial.
+    const other = (within(panel).getByText(heic.text)).closest("li") as HTMLElement;
+    expect(within(other).getByText("owner")).toBeTruthy();
+    expect(other.querySelector(".fb-avatar")?.textContent).toBe("O");
+  });
+
   it("shows the open count on the edge button and lists open items first", async () => {
     serve([upload, heic, subtitles]);
     const focus = vi.spyOn(HTMLElement.prototype, "focus");

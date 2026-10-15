@@ -24,6 +24,7 @@ const systemActor = "system"
 type activityAccount struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	Nickname string `json:"nickname,omitempty"`
 }
 
 type activitySpace struct {
@@ -105,7 +106,7 @@ func (h *productHandler) handleActivity(w http.ResponseWriter, r *http.Request, 
 	if q.Text != "" {
 		text := strings.ToLower(q.Text)
 		for id, user := range directory.Users {
-			if strings.Contains(user.Username, text) {
+			if strings.Contains(user.Username, text) || strings.Contains(strings.ToLower(user.Nickname), text) {
 				q.TextActors = append(q.TextActors, id)
 			}
 		}
@@ -156,7 +157,7 @@ func (h *productHandler) handleActivity(w http.ResponseWriter, r *http.Request, 
 func presentActivity(event activity.Event, directory accounts.Directory, reveal *activity.Reveal) activityItem {
 	account := func(id string) *activityAccount {
 		if user, ok := directory.Users[id]; ok {
-			return &activityAccount{ID: id, Username: user.Username}
+			return &activityAccount{ID: id, Username: user.Username, Nickname: user.Nickname}
 		}
 		return nil
 	}

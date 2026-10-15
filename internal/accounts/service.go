@@ -100,6 +100,11 @@ type User struct {
 	// MustChangePassword is set after an administrator resets the password;
 	// the user can do nothing else until choosing a new one.
 	MustChangePassword bool `json:"mustChangePassword"`
+	// Nickname is the name the user chose to be shown by; pages show Username
+	// while it is empty. Logins, SMB and Linux keep using Username.
+	Nickname string `json:"nickname,omitempty"`
+	// AvatarVersion names the user's current avatar image; empty means none.
+	AvatarVersion string `json:"avatarVersion,omitempty"`
 }
 
 type SpaceKind string
@@ -269,6 +274,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TEXT NOT NULL,
     acknowledged_at TEXT
 );
+-- One small, already compressed picture per account (see SetAvatar).
+CREATE TABLE IF NOT EXISTS avatars (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    image BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
 CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resource_id, occurred_at);
@@ -277,6 +290,12 @@ CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resourc
 		return fmt.Errorf("migrate SQLite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "users", "nickname", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "users", "avatar_version", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	// Grants made before private libraries could be viewed are for spaces.
@@ -473,6 +492,15 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 		return User{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// A new member must not take the name another account is shown by. The
+	// device's first account has no one to collide with.
+	if actorID != "" {
+		if taken, err := nameTaken(ctx, tx, "", username); err != nil {
+			return User{}, err
+		} else if taken {
+			return User{}, ErrUsernameUnavailable
+		}
+	}
 	insert := "INSERT INTO users(id, username, role, status, password_hash, created_at) VALUES(?,?,?,?,?,?)"
 	if actorID == "" {
 		// Setup found no users before hashing, but so may a concurrent setup:
@@ -573,8 +601,8 @@ func (s *Service) authenticate(ctx context.Context, username, password string, l
 	var user User
 	var encodedHash, createdAt string
 	err := s.store.db.QueryRowContext(ctx,
-		"SELECT id, username, role, status, password_hash, created_at, must_change_password FROM users WHERE username = ?", username,
-	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt, &user.MustChangePassword)
+		"SELECT id, username, role, status, password_hash, created_at, must_change_password, nickname, avatar_version FROM users WHERE username = ?", username,
+	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt, &user.MustChangePassword, &user.Nickname, &user.AvatarVersion)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		s.recordSignInFailure(ctx, "", username, SignInUnknownUser)
@@ -613,11 +641,12 @@ func (s *Service) ResolveSession(ctx context.Context, token string) (Session, er
 	var session Session
 	var expiresAt, createdAt string
 	err := s.store.db.QueryRowContext(ctx, `
-SELECT s.csrf_token, s.expires_at, u.id, u.username, u.role, u.status, u.created_at, u.must_change_password
+SELECT s.csrf_token, s.expires_at, u.id, u.username, u.role, u.status, u.created_at, u.must_change_password, u.nickname, u.avatar_version
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = ?`, tokenHash(token)).Scan(
 		&session.CSRFToken, &expiresAt, &session.User.ID, &session.User.Username,
 		&session.User.Role, &session.User.Status, &createdAt, &session.User.MustChangePassword,
+		&session.User.Nickname, &session.User.AvatarVersion,
 	)
 	if err != nil {
 		return Session{}, ErrSessionNotFound
@@ -657,38 +686,34 @@ func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
 	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
 		return nil, ErrForbidden
 	}
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role, status, created_at, must_change_password FROM users ORDER BY username")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+userColumns+" FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var users []User
 	for rows.Next() {
-		var user User
-		var createdAt string
-		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &createdAt, &user.MustChangePassword); err != nil {
+		user, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 		users = append(users, user)
 	}
 	return users, rows.Err()
 }
 
 func (s *Service) ActiveUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role, status, created_at, must_change_password FROM users WHERE status = 'active' ORDER BY username")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+userColumns+" FROM users WHERE status = 'active' ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var users []User
 	for rows.Next() {
-		var user User
-		var createdAt string
-		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.Status, &createdAt, &user.MustChangePassword); err != nil {
+		user, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 		users = append(users, user)
 	}
 	return users, rows.Err()

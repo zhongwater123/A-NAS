@@ -24,6 +24,17 @@ const tus = vi.hoisted(() => {
 });
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
+// The cropper needs layout jsdom lacks; this one reports a fixed square.
+vi.mock("react-easy-crop", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: function MockCropper({ image, onCropComplete }: { image: string; onCropComplete: (area: unknown, pixels: unknown) => void }) {
+      useEffect(() => { onCropComplete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 }); }, [image]);
+      return <div data-testid="cropper" data-image={image} />;
+    },
+  };
+});
+
 vi.mock("./XtermSession", async () => {
   const { useEffect } = await import("react");
   return {
@@ -1117,10 +1128,19 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; shortcuts?: unknown[] } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[] } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
+    const signedIn = (options.session ?? session) as { user: Record<string, unknown> };
+    if (path === "/api/v1/profiles") return ok({ items: options.profiles ?? [] });
+    if (path === "/api/v1/session/profile" && init?.method === "PATCH") {
+      const { nickname } = JSON.parse(String(init.body)) as { nickname: string };
+      if (nickname === "owner") return failure(409, "nickname_unavailable");
+      return ok({ ...signedIn.user, nickname: nickname || undefined });
+    }
+    if (path === "/api/v1/session/avatar" && init?.method === "PUT") return ok({ ...signedIn.user, avatarVersion: "0123456789abcdef" });
+    if (path === "/api/v1/session/avatar" && init?.method === "DELETE") return ok({ ...signedIn.user, avatarVersion: undefined });
     if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
@@ -1154,6 +1174,7 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
 }
 
 function ok(body: unknown, status = 200) { return { ok: true, status, json: async () => body } as Response; }
+function failure(status: number, code: string) { return { ok: false, status, json: async () => ({ error: { code, message: code } }) } as Response; }
 
 async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, desktop: HTMLElement, section: string) {
   await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
@@ -1604,5 +1625,148 @@ describe("Settings", () => {
     await user.click(within(within(settings).getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }));
     expect(await within(settings).findByText("已禁用 alice。")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/users/user%3Aalice", expect.objectContaining({ method: "DELETE" }));
+  });
+});
+
+describe("Avatars and nicknames", () => {
+  const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+
+  // jsdom neither decodes images nor draws on a canvas.
+  function stubPictures() {
+    class DecodedImage {
+      naturalWidth = 400; naturalHeight = 320; decoding = ""; onload?: () => void; onerror?: () => void; private source = "";
+      get src() { return this.source; }
+      set src(value: string) { this.source = value; queueMicrotask(() => (value.includes("broken") ? this.onerror?.() : this.onload?.())); }
+    }
+    vi.stubGlobal("Image", DecodedImage);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:avatar-source"), revokeObjectURL: vi.fn() }));
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ fillRect: vi.fn(), drawImage } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["jpeg"], { type: "image/jpeg" })));
+    return drawImage;
+  }
+
+  it("lets a member choose a nickname that the desktop shows instead of the account name", async () => {
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await openSettingsSection(user, desktop, "我的账号");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(within(settings).getByText("未设置，显示账号名 alice")).toBeTruthy();
+    await user.click(within(settings).getByRole("button", { name: "设置昵称…" }));
+    const form = within(settings).getByRole("form", { name: "修改昵称" });
+    await user.type(within(form).getByLabelText("昵称"), "一二三四五六七八九十一二三四五六七八九十一二三四五");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(within(form).getByText("昵称最多 24 个字符")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/session/profile")).toBe(false);
+
+    await user.clear(within(form).getByLabelText("昵称"));
+    await user.type(within(form).getByLabelText("昵称"), "owner");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(await within(form).findByText("这个名字已经是其他人的账号名或昵称，请换一个")).toBeTruthy();
+
+    await user.clear(within(form).getByLabelText("昵称"));
+    await user.type(within(form).getByLabelText("昵称"), " 小爱 ");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(await within(settings).findByText("昵称已改为“小爱”。")).toBeTruthy();
+    const call = fetchMock.mock.calls.filter(([path]) => path === "/api/v1/session/profile").at(-1);
+    expect(call?.[1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ nickname: "小爱" });
+    expect(within(settings).getByRole("heading", { name: "小爱" })).toBeTruthy();
+    expect(within(settings).getByText("账号名 alice")).toBeTruthy();
+    expect(within(within(settings).getByRole("navigation", { name: "设置分区" })).getByRole("button", { name: "我的账号" }).textContent).toContain("小爱");
+    expect(screen.getByRole("button", { name: "账号（小爱）" })).toBeTruthy();
+  });
+
+  it("crops a picture from this computer into the avatar and can remove it again", async () => {
+    const drawImage = stubPictures();
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(within(settings).getByRole("button", { name: "更换头像" }));
+    const picker = within(settings).getByRole("dialog", { name: "更换头像" });
+    expect(within(picker).getByRole("tab", { name: "本机图片" }).getAttribute("aria-selected")).toBe("true");
+    await user.upload(within(picker).getByLabelText("从本机选择图片"), new File(["png"], "me.png", { type: "image/png" }));
+
+    expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe("blob:avatar-source");
+    expect(within(picker).getByRole("heading", { name: "调整头像" })).toBeTruthy();
+    await user.click(within(picker).getByRole("button", { name: "保存头像" }));
+    expect(await within(settings).findByText("头像已更新。")).toBeTruthy();
+    expect(within(settings).queryByRole("dialog", { name: "更换头像" })).toBeNull();
+
+    // The page sends the chosen square, drawn on white at no more than 512 px.
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 40, 0, 320, 320, 0, 0, 320, 320);
+    const sent = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "PUT");
+    expect((sent?.[1]?.body as Blob).type).toBe("image/jpeg");
+    expect(new Headers(sent?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    const rail = screen.getByRole("button", { name: "账号（alice）" });
+    expect(rail.querySelector("img")?.getAttribute("src")).toBe("/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef");
+
+    await user.click(within(settings).getByRole("button", { name: "移除" }));
+    expect(await within(settings).findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "DELETE")).toBe(true);
+    expect(rail.querySelector("img")).toBeNull();
+    expect(rail.textContent).toContain("A");
+  });
+
+  it("picks the avatar from a picture on the NAS, but not from a space being viewed", async () => {
+    stubPictures();
+    installAPI({
+      session: { ...session, user: alice },
+      spaces: [
+        { id: "space:alice", kind: "private", name: "alice", ownerUserId: "user:alice", createdAt: "2026-10-07T10:00:00Z" },
+        { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" },
+        { id: "space:bob", kind: "private", name: "bob", ownerUserId: "user:bob", createdAt: "2026-10-07T10:00:00Z", viewing: { grantId: "grant:1", expiresAt: "2026-10-08T10:00:00Z" } },
+      ],
+      entries: [
+        { id: "file:trip", spaceId: "space:alice", name: "海边.jpg", kind: "file", sizeBytes: 2048, modifiedAt: "2026-10-07T10:00:00Z" },
+        { id: "file:notes", spaceId: "space:alice", name: "notes.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-07T10:00:00Z" },
+        { id: "dir:2026", spaceId: "space:alice", name: "2026", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(within(settings).getByRole("button", { name: "设置头像…" }));
+    const picker = within(settings).getByRole("dialog", { name: "更换头像" });
+    await user.click(within(picker).getByRole("tab", { name: "NAS 文件" }));
+    const spaces = await within(picker).findByRole("group", { name: "空间" });
+    expect(within(spaces).getAllByRole("button").map((button) => button.textContent)).toEqual(["个人空间", "共享空间"]);
+    expect(within(picker).getByRole("button", { name: "2026" })).toBeTruthy();
+    expect(within(picker).queryByText("notes.txt")).toBeNull();
+    await user.click(within(picker).getByRole("button", { name: "选择 海边.jpg" }));
+    expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe("/api/v1/files/file%3Atrip/content?disposition=inline");
+    await user.click(within(picker).getByRole("button", { name: "重新选择图片" }));
+    expect(within(picker).getByRole("tab", { name: "NAS 文件" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(within(settings).queryByRole("dialog", { name: "更换头像" })).toBeNull();
+  });
+
+  it("shows other accounts by nickname and keeps the account name where it matters", async () => {
+    installAPI({
+      users: [session.user, { ...alice, nickname: "小爱", avatarVersion: "feedface00000000" }],
+      profiles: [{ id: "user:owner", username: "owner", nickname: "爸爸" }, { id: "user:alice", username: "alice", nickname: "小爱", avatarVersion: "feedface00000000" }],
+      notifications: [{ id: "notification:1", kind: "credential_reset", actorUsername: "owner", createdAt: "2026-10-07T10:00:00Z" }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(await within(notice).findByText(/管理员 爸爸（owner） 于 .* 重置了你的密码/)).toBeTruthy();
+    await user.click(within(notice).getByRole("button", { name: "知道了" }));
+
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "用户与权限");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    const menu = await within(settings).findByRole("button", { name: "小爱（alice） 的更多操作" });
+    const row = menu.closest(".set-row") as HTMLElement;
+    expect(within(row).getByText("小爱")).toBeTruthy();
+    expect(within(row).getByText("alice")).toBeTruthy();
+    expect(row.querySelector("img")?.getAttribute("src")).toBe("/api/v1/users/user%3Aalice/avatar?v=feedface00000000");
+    await user.click(menu);
+    await user.click(within(settings).getByRole("menuitem", { name: "重置密码…" }));
+    expect(within(settings).getByRole("form", { name: "重置 小爱（alice） 的密码" })).toBeTruthy();
   });
 });

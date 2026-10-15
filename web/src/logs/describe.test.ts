@@ -44,6 +44,20 @@ describe("activity sentences", () => {
     expect(describeActivity(viewing, alice.id).meta[0]).toBe("原因：找回照片");
   });
 
+  it("names accounts by nickname and keeps the account name beside a new nickname", () => {
+    const mom = { id: "user:alice", username: "alice", nickname: "妈妈" };
+    expect(sentence(event({ category: "session", action: "session.signed_in", actor: mom, subject: mom }))).toBe("妈妈 登录了");
+    const renamed = describeActivity(event({ category: "account", action: "user.nickname_changed", actor: mom, subject: mom, detail: '{"from":"","to":"妈妈"}' }), owner.id);
+    expect(plainText(renamed.parts)).toBe("alice 把昵称改为 妈妈");
+    expect(renamed.meta).toEqual(["原来显示账号名"]);
+    expect(sentence(event({ category: "account", action: "user.nickname_changed", actor: mom, subject: mom, detail: '{"from":"小爱","to":"妈妈"}' }), mom.id)).toBe("你 把昵称改为 妈妈");
+    expect(describeActivity(event({ category: "account", action: "user.nickname_changed", actor: alice, subject: alice, detail: '{"from":"小爱","to":""}' }), owner.id).meta).toEqual(["原昵称：小爱"]);
+    expect(sentence(event({ category: "account", action: "user.nickname_changed", actor: alice, subject: alice, detail: '{"from":"小爱","to":""}' }))).toBe("alice 清除了昵称");
+    expect(sentence(event({ category: "account", action: "user.avatar_changed", actor: mom, subject: mom }), mom.id)).toBe("你 更换了头像");
+    const viewing = event({ category: "account", action: "space.viewing_started", actor: owner, resourceType: "space", space: { id: "space:alice", kind: "private", owner: mom } });
+    expect(sentence(viewing)).toBe("你 开始只读查看 妈妈 的个人空间");
+  });
+
   it("names files in visible spaces and only counts hidden ones", () => {
     const shared = event({ actor: alice, detail: "家庭旅行.pdf", space: { id: "space:shared", kind: "shared" } });
     expect(sentence(shared)).toBe("alice 上传了 家庭旅行.pdf");

@@ -254,6 +254,8 @@ button { font: inherit; }
 .account-card { padding: 10px 10px 8px; display: flex; align-items: center; gap: 12px; }
 .account-face { width: 46px; height: 46px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 19px; font-weight: 800; text-shadow: 0 1px 1px rgba(0,0,0,.18); box-shadow: 0 0 0 2px rgba(255,255,255,.24); }
 .account-who { min-width: 0; display: grid; justify-items: start; gap: 4px; }
+.account-meta { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 7px; }
+.account-username { overflow: hidden; color: rgba(255,255,255,.6); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
 .account-who strong { max-width: 100%; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .account-role { padding: 1px 8px; border-radius: 999px; color: rgba(255,255,255,.85); background: rgba(255,255,255,.13); font-size: 10.5px; font-weight: 700; }
 .account-session { margin: 0 4px 6px; padding: 7px 8px; display: flex; align-items: center; gap: 7px; border-radius: 10px; color: rgba(255,255,255,.66); background: rgba(255,255,255,.05); font-size: 11px; }
@@ -854,8 +856,16 @@ button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .set-tile.update, .set-tile.key, .set-tile.warning { background: linear-gradient(160deg, #ffbd4f, #ec8510); }
 .set-tile.hdd { background: linear-gradient(160deg, #7690ff, #4560d6); }
 .set-tile.danger { background: linear-gradient(160deg, #ff7a7f, #d23b48); }
+.set-tile.nickname { background: linear-gradient(160deg, #ff8fb8, #e0457f); }
+.set-tile.handle { background: linear-gradient(160deg, #a3adbd, #6b7586); }
 .set-avatar { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 50%; font-size: 14px; font-weight: 650; text-shadow: 0 1px 1px rgba(0, 0, 0, .14); box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .08); }
 .set-avatar.lg { width: 64px; height: 64px; font-size: 26px; }
+.set-avatar.xl { width: 88px; height: 88px; font-size: 36px; }
+/* Any avatar disc may hold the account's picture instead of its initial. */
+.person-avatar { position: relative; overflow: hidden; user-select: none; }
+.person-avatar > img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; border-radius: inherit; }
+.person-avatar.pictured { text-shadow: none; }
+.set-handle { overflow: hidden; color: var(--set-faint); font-size: 12px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
 .avatar-c0 { background: linear-gradient(150deg, #ffbe8a, #ee7a4b); color: #fff; }
 .avatar-c1 { background: linear-gradient(150deg, #7cb8ff, #3b74e6); color: #fff; }
 .avatar-c2 { background: linear-gradient(150deg, #6fdba5, #22a067); color: #fff; }
@@ -1039,9 +1049,18 @@ button.ov-stat:hover { border-color: rgba(47, 111, 228, .35); box-shadow: 0 6px 
 .wiz-warn svg { width: 15px; height: 15px; }
 
 /* Account */
-.acct-hero { display: flex; align-items: center; gap: 16px; padding: 18px 20px; }
-.acct-hero h3 { font-size: 19px; font-weight: 650; }
-.acct-hero p { margin-top: 6px; display: flex; align-items: center; gap: 10px; color: var(--set-muted); font-size: 12.5px; }
+.acct-hero { display: flex; align-items: center; gap: 18px; padding: 18px 20px; }
+.acct-hero-text { min-width: 0; }
+.acct-hero h3 { overflow: hidden; font-size: 21px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
+.acct-hero p { margin-top: 7px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--set-muted); font-size: 12.5px; }
+.acct-handle { color: var(--set-faint); }
+.acct-avatar { position: relative; flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.acct-avatar .set-avatar { box-shadow: 0 0 0 3px #fff, 0 0 0 4px var(--set-line), 0 6px 16px rgba(20, 30, 45, .12); transition: filter .15s; }
+.acct-avatar:hover .set-avatar { filter: brightness(.92); }
+.acct-avatar-badge { position: absolute; right: -2px; bottom: -2px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--set-accent); box-shadow: 0 0 0 3px #fff, 0 2px 6px rgba(47, 111, 228, .35); transition: transform .15s; }
+.acct-avatar:hover .acct-avatar-badge { transform: scale(1.08); }
+.acct-avatar-badge svg { width: 15px; height: 15px; }
+.acct-username { color: var(--set-muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
 .acct-hero > .set-btn { margin-left: auto; }
 .acct-form { display: grid; gap: 14px; padding: 4px 14px 16px 50px; border-top: 1px solid var(--set-line); padding-top: 14px; }
 .acct-form .set-field { max-width: 360px; }

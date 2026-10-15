@@ -5,6 +5,7 @@ import {
 import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { endViewing } from "../api";
+import { usePeople } from "../people";
 import { AlbumPicker } from "./AlbumPicker";
 import { AssetGrid } from "./AssetGrid";
 import { AIHome, type AIHomeSnapshot } from "./AIHome";
@@ -74,7 +75,13 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const [libraries, setLibraries] = useState<PhotoLibrary[]>();
   const [failure, setFailure] = useState("");
   const [place, setPlaceState] = useState<Place>();
-  const caller: Caller = useMemo(() => ({ userId, isAdmin, libraries: libraries ?? [] }), [userId, isAdmin, libraries]);
+  // The photo service knows owners by account name; pages show nicknames.
+  const people = usePeople();
+  const named = useMemo(() => libraries?.map((library) => {
+    const owner = people.byId(library.ownerUserId);
+    return owner?.nickname ? { ...library, ownerName: owner.nickname } : library;
+  }), [libraries, people]);
+  const caller: Caller = useMemo(() => ({ userId, isAdmin, libraries: named ?? [] }), [userId, isAdmin, named]);
   const [rowHeight, setRowHeight] = useStored("a-nas.photos.rowHeight", defaultRowHeight);
   const [info, setInfo] = useStored("a-nas.photos.info", true);
   const [docked, setDocked] = useStored("a-nas.photos.sidebar", true);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accountErrorText, passwordProblem, usernameProblem } from "./accountRules";
+import { accountErrorText, nicknameProblem, passwordProblem, usernameProblem } from "./accountRules";
 import { APIError } from "./api";
 
 describe("account rules", () => {
@@ -27,6 +27,18 @@ describe("account rules", () => {
     for (const password of ["short\nshort\nthen any text", "short\u0000then any text", "tab\tseparated text"]) {
       expect(passwordProblem(password), JSON.stringify(password)).toMatch(/控制字符/);
     }
+  });
+
+  it("check nicknames as the NAS does", () => {
+    for (const nickname of ["小爱", "  Mom  ", "老 爸", "👩\u200d💻 程序员", "一".repeat(24), `${"一".repeat(24)}   `]) {
+      expect(nicknameProblem(nickname), nickname).toBeUndefined();
+    }
+    expect(nicknameProblem("一".repeat(25))).toMatch(/最多 24/);
+    for (const nickname of ["line\nbreak", "tab\there", "evil\u202ename", "zero\u200bwidth"]) {
+      expect(nicknameProblem(nickname), JSON.stringify(nickname)).toMatch(/不可见/);
+    }
+    expect(accountErrorText(new APIError(409, "nickname_unavailable", "x"))).toMatch(/换一个/);
+    expect(accountErrorText(new APIError(415, "unsupported_image", "x"))).toMatch(/JPEG/);
   });
 
   it("word the NAS's account errors", () => {

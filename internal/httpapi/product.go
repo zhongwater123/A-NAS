@@ -202,6 +202,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
 	h.mux.HandleFunc("GET /api/v1/system-logs", h.withSession(h.handleSystemLogs))
 	h.musicRoutes()
+	h.profileRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -1166,6 +1167,10 @@ func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "username_unavailable", err.Error())
 	case errors.Is(err, accounts.ErrViewingActive):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, accounts.ErrNicknameUnavailable):
+		writeError(w, http.StatusConflict, "nickname_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrInvalidNickname):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_nickname", err.Error())
 	case errors.Is(err, accounts.ErrInvalidUsername):
 		writeError(w, http.StatusUnprocessableEntity, "invalid_username", err.Error())
 	case errors.Is(err, accounts.ErrInvalidPassword):

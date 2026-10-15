@@ -81,7 +81,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
 | `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md) |
-| `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性，文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
+| `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性（含[昵称与头像](../specs/account-profile.md)，头像由 `internal/avatar` 压缩为 256 px JPEG 后存入账号数据库），文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
 | `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |

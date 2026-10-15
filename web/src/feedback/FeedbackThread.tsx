@@ -2,7 +2,8 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { APIError } from "../api";
-import { avatarTone } from "../settings/parts";
+import { nameOf, person, usePeople } from "../people";
+import { PersonAvatar } from "../PersonAvatar";
 import { Draft, FeedbackEditor, emptyDraft, releaseDraft } from "./FeedbackEditor";
 import {
   FeedbackComment, FeedbackItem, MAX_COMMENT_IMAGES, MAX_COMMENT_TEXT, addComment, deleteComment, describeFeedbackError, editComment,
@@ -97,6 +98,7 @@ interface CommentRowProps {
 
 // Like items, any account may edit or delete any comment.
 function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, onCaptured }: CommentRowProps) {
+  const people = usePeople();
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -137,7 +139,7 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
       if (caught instanceof APIError && caught.code === "comment_changed") {
         // Keep the draft; show what changed and save over it on the next try.
         const latest = (await onRefresh())?.find((candidate) => candidate.id === item.id)?.comments.find((candidate) => candidate.id === comment.id);
-        if (latest) { setBaseVersion(latest.version); setChangedBy(latest.updatedBy ?? latest.createdBy); }
+        if (latest) { setBaseVersion(latest.version); setChangedBy(nameOf(people, latest.updatedBy ?? latest.createdBy)); }
       } else fail(caught);
     } finally {
       setBusy(false);
@@ -185,12 +187,12 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
 
   return (
     <li className="fb-comment">
-      <span className={`fb-avatar ${avatarTone(comment.createdBy)}`} aria-hidden="true">{[...comment.createdBy][0]?.toUpperCase()}</span>
+      <PersonAvatar who={person(people, { username: comment.createdBy })} className="fb-avatar" />
       <div className="fb-comment-body">
         <div className="fb-comment-head">
-          <span className="fb-author">{comment.createdBy}</span>
+          <span className="fb-author">{nameOf(people, comment.createdBy)}</span>
           <time dateTime={comment.createdAt} title={fullTime(comment.createdAt)}>{describeTime(comment.createdAt)}</time>
-          {comment.updatedBy && comment.updatedAt && <span className="fb-edited" title={`${comment.updatedBy} 于 ${fullTime(comment.updatedAt)} 编辑`}>已编辑</span>}
+          {comment.updatedBy && comment.updatedAt && <span className="fb-edited" title={`${nameOf(people, comment.updatedBy)} 于 ${fullTime(comment.updatedAt)} 编辑`}>已编辑</span>}
           {mode === "view" && (
             <span className="fb-comment-actions">
               <button aria-label="编辑评论" title="编辑" onClick={startEdit}><Pencil /></button>

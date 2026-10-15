@@ -48,7 +48,7 @@ import {
 import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 
 import {
-  APIError, FileEntry, Notification, Session, Space, Volume,
+  APIError, FileEntry, Notification, Session, Space, User, Volume,
   acknowledgeNotification, changePassword, copyFile, createDirectory, currentSession, deleteFile,
   endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications,
   listSpaces, listVolumes, login, logout, moveFile, onSessionEnded, readFileTextPreview,
@@ -76,6 +76,7 @@ import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
 import { PhotosGlyph } from "./PhotosGlyph";
 import { fileVisualURL } from "./files/preview";
 import { MusicPanel } from "./music/MusicPanel";
+import { displayName, forgetPeople, fullName, loadPeople, rememberPerson, usePeople, type People } from "./people";
 import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
 import { StatusBar } from "./StatusBar";
@@ -195,7 +196,7 @@ export default function App() {
 	if (session.user.mustChangePassword) {
 		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
 	}
-	return <Desktop session={session} onLogout={signOut} />;
+	return <Desktop session={session} onLogout={signOut} onUserChange={(user) => setSessionState((current) => current && { ...current, user })} />;
 }
 
 // PasswordChange blocks the desktop after an administrator reset the
@@ -231,6 +232,7 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 // NotificationCenter shows what administrators did to the account since the
 // user last acknowledged it: viewing the private space or resetting the password.
 function NotificationCenter() {
+	const people = usePeople();
 	const [items, setItems] = useState<Notification[]>([]);
 	useEffect(() => { void listNotifications().then(setItems).catch(() => undefined); }, []);
 	if (!items.length) return null;
@@ -240,19 +242,21 @@ function NotificationCenter() {
 	};
 	return <div className="notice-layer"><section className="notice-card" role="alertdialog" aria-label="账号通知">
 		<p className="section-label">ACCOUNT NOTICE</p><h2>账号通知</h2>
-		<ul>{items.map((item) => <li key={item.id}>{describeNotification(item)}</li>)}</ul>
+		<ul>{items.map((item) => <li key={item.id}>{describeNotification(item, people)}</li>)}</ul>
 		<button className="primary" onClick={() => void acknowledge()}>知道了</button>
 	</section></div>;
 }
 
-function describeNotification(item: Notification): string {
+function describeNotification(item: Notification, people: People): string {
 	const when = new Date(item.createdAt).toLocaleString("zh-CN");
+	// What an administrator did names them with the account name too.
+	const actor = fullName(people.byUsername(item.actorUsername) ?? { username: item.actorUsername });
 	if (item.kind === "admin_viewing" || item.kind === "admin_library_viewing") {
 		const what = item.kind === "admin_library_viewing" ? "私有图库" : "个人空间";
 		const until = item.expiresAt ? `，${new Date(item.expiresAt).toLocaleString("zh-CN")} 自动结束` : "";
-		return `管理员 ${item.actorUsername} 于 ${when} 开启了对你${what}的只读查看${until}。原因：${item.reason ?? "未填写"}`;
+		return `管理员 ${actor} 于 ${when} 开启了对你${what}的只读查看${until}。原因：${item.reason ?? "未填写"}`;
 	}
-	return `管理员 ${item.actorUsername} 于 ${when} 重置了你的密码。`;
+	return `管理员 ${actor} 于 ${when} 重置了你的密码。`;
 }
 
 type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
@@ -300,8 +304,17 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 	</form></main>;
 }
 
-function Desktop({ session, onLogout }: { session: Session; onLogout: () => void }) {
+function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogout: () => void; onUserChange: (user: User) => void }) {
   const host = useHostState(true);
+  // Names and avatars of every account; read again whenever the page comes
+  // back into view, so someone else's new nickname shows up without a reload.
+  useEffect(() => {
+    void loadPeople();
+    const refresh = () => { if (document.visibilityState === "visible") void loadPeople(); };
+    document.addEventListener("visibilitychange", refresh);
+    return () => { document.removeEventListener("visibilitychange", refresh); forgetPeople(); };
+  }, [session.user.id]);
+  const changeUser = (user: User) => { rememberPerson(user); onUserChange(user); };
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
   const openWindow = (id: WindowID) => dispatch({ type: "open", id });
@@ -385,10 +398,10 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
           if (!window.open) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
-			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
+			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onUserChange={changeUser} onLogout={onLogout} />}
 			  {window.id === "files" && <FilePanel userID={session.user.id} navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
-			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={displayName(session.user)} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
@@ -525,6 +538,9 @@ interface FilePanelProps {
 }
 
 function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPhotos, onOpenMedia, onOpenMusic }: FilePanelProps) {
+	const people = usePeople();
+	// A viewed private space is named by its owner, the way they go by.
+	const ownerName = (space: Space) => { const owner = people.byId(space.ownerUserId); return owner ? displayName(owner) : space.name; };
 	const [spaces, setSpaces] = useState<Space[]>([]);
 	const [spaceID, setSpaceID] = useState("");
 	const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -648,7 +664,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 	const directoryCount = visibleItems.filter((item) => item.kind === "directory").length;
 	const resourceCount = visibleItems.filter((item) => item.kind === "resource").length;
 	const totalSize = visibleItems.reduce((total, item) => total + (item.kind === "file" ? item.sizeBytes : 0), 0);
-	const selectedSpaceLabel = selectedSpace?.kind === "shared" ? "共享空间" : selectedSpace?.viewing ? `只读查看 · ${selectedSpace.name}` : "个人空间";
+	const selectedSpaceLabel = selectedSpace?.kind === "shared" ? "共享空间" : selectedSpace?.viewing ? `只读查看 · ${ownerName(selectedSpace)}` : "个人空间";
 	const capacityBytes = volume?.capacityBytes ?? 0;
 	const usageKnown = capacityBytes > 0 && volume?.availableBytes !== undefined;
 	const availableBytes = usageKnown ? Math.min(capacityBytes, Math.max(0, volume.availableBytes!)) : 0;
@@ -906,7 +922,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 			<p className="file-sidebar-label">空间</p>
 			<nav className="file-tree">{spaces.map((space) => {
 				const active = space.id === spaceID; const collapsed = collapsedSpaceIDs.includes(space.id);
-				const label = space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${space.name}` : "个人空间";
+				const label = space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${ownerName(space)}` : "个人空间";
 				return <div className="file-tree-group" key={space.id}>
 					<button className={`file-tree-root ${active ? "active" : ""}`} aria-expanded={active && !collapsed} onClick={() => toggleSpace(space)}>
 						<ChevronDown className={!active || collapsed ? "collapsed" : ""} /><span className={`file-tree-icon ${space.kind}`}>{space.kind === "shared" ? <UsersRound /> : space.viewing ? <ShieldCheck /> : <FolderOpen />}</span><strong>{label}</strong><small>{space.kind === "shared" ? "共享" : space.name}</small>
@@ -935,7 +951,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 					<button className="file-icon-button" aria-label="向上一级" title="向上一级" disabled={!trail.length || loading} onClick={() => navigateTo(trail.length - 1)}><ArrowUp /></button>
 					<button className="file-icon-button" aria-label="刷新文件列表" title="刷新" disabled={!spaceID || loading} onClick={() => { void refresh(spaceID, parentID); void refreshVolume(); }}><RefreshCw className={loading ? "spinning" : ""} /></button>
 				</div>
-				<select className="file-space-select" aria-label="空间" value={spaceID} onChange={(event) => chooseSpace(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${space.name}` : `个人空间 · ${space.name}`}</option>)}</select>
+				<select className="file-space-select" aria-label="空间" value={spaceID} onChange={(event) => chooseSpace(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${ownerName(space)}` : `个人空间 · ${space.name}`}</option>)}</select>
 				<nav className="file-breadcrumb" aria-label="当前路径"><FolderOpen /><button onClick={() => navigateTo(0)}>{selectedSpaceLabel || "空间"}</button>{trail.map((item, index) => <span key={item.id}><ChevronRight /><button aria-current={index === trail.length - 1 ? "page" : undefined} onClick={() => navigateTo(index + 1)}>{item.name}</button></span>)}</nav>
 				<label className="file-search"><Search /><input type="search" aria-label="搜索当前目录" placeholder={`在${trail.at(-1)?.name ?? selectedSpaceLabel ?? "当前目录"}中搜索`} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
 			</div>
