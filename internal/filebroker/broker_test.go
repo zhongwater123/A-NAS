@@ -76,6 +76,19 @@ func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 	if err != nil || info.Kind != files.KindFile || info.Size != int64(len(contents)) || info.Inode == 0 {
 		t.Fatalf("Lstat() = %#v, %v", info, err)
 	}
+	saved := time.Date(2026, 9, 24, 10, 0, 0, 123456789, time.UTC)
+	if err := fsys.SetModTime(ctx, target, saved); err != nil {
+		t.Fatalf("SetModTime() error = %v", err)
+	}
+	if info, err := fsys.Lstat(ctx, target); err != nil || !info.ModTime.Equal(saved) {
+		t.Fatalf("modification time after SetModTime() = %v, %v; want %v", info.ModTime, err, saved)
+	}
+	if err := fsys.SetModTime(ctx, filepath.Join(space, "docs"), saved); !errors.Is(err, files.ErrUnsupportedType) {
+		t.Fatalf("SetModTime(folder) error = %v, want ErrUnsupportedType", err)
+	}
+	if err := fsys.SetModTime(ctx, "/etc/passwd", saved); !errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("SetModTime outside the volume error = %v, want ErrForbidden", err)
+	}
 	if err := fsys.Copy(ctx, filepath.Join(space, "docs"), filepath.Join(space, "copy")); err != nil {
 		t.Fatalf("Copy() error = %v", err)
 	}

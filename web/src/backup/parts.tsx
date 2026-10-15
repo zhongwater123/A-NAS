@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, FileText, Folder, HardDrive, UsersRound, X } from "lucide-react";
+import { CircleAlert, CircleCheck, FileText, Folder, HardDrive, Minus, Plus, UsersRound, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import type { Space } from "../api";
@@ -44,6 +44,22 @@ export function Switch({ checked, disabled, label, onChange }: { checked: boolea
   );
 }
 
+// Stepper edits a small whole number with buttons or by typing.
+export function Stepper({ value, min, max, label, disabled, onChange }: {
+  value: number; min: number; max: number; label: string; disabled?: boolean; onChange: (value: number) => void;
+}) {
+  return (
+    <div className="bk-stepper">
+      <button type="button" aria-label={`${label}减一`} disabled={disabled || value <= min} onClick={() => onChange(value - 1)}><Minus /></button>
+      <input
+        type="number" min={min} max={max} value={value} disabled={disabled} aria-label={label}
+        onChange={(event) => { const next = Math.round(Number(event.target.value)); if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next))); }}
+      />
+      <button type="button" aria-label={`${label}加一`} disabled={disabled || value >= max} onClick={() => onChange(value + 1)}><Plus /></button>
+    </div>
+  );
+}
+
 export function EmptyState({ icon, title, children, actions }: { icon: ReactNode; title: string; children?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="bk-empty">
@@ -61,8 +77,8 @@ export function Notice({ tone = "warning", children }: { tone?: "warning" | "dan
 
 // Dialog is a modal sheet over the backup center. Escape and the close button
 // call onClose unless the dialog is busy.
-export function Dialog({ title, icon, tone = "accent", busy, onClose, children, footer, label }: {
-  title: string; icon: ReactNode; tone?: "accent" | "danger"; busy?: boolean; onClose: () => void; children: ReactNode; footer: ReactNode; label?: string;
+export function Dialog({ title, icon, tone = "accent", busy, wide, onClose, children, footer, label }: {
+  title: string; icon: ReactNode; tone?: "accent" | "danger"; busy?: boolean; wide?: boolean; onClose: () => void; children: ReactNode; footer: ReactNode; label?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -71,13 +87,17 @@ export function Dialog({ title, icon, tone = "accent", busy, onClose, children, 
     target?.focus();
   }, []);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); };
+    // Only the topmost of stacked dialogs answers Escape.
+    const onKey = (event: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll(".bk-dialog");
+      if (event.key === "Escape" && !busy && dialogs[dialogs.length - 1] === panel.current) onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
   return (
     <div className="bk-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <div ref={panel} className="bk-dialog" role="dialog" aria-modal="true" aria-label={label ?? title}>
+      <div ref={panel} className={`bk-dialog${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={label ?? title}>
         <header>
           <span className={`bk-dialog-icon ${tone}`} aria-hidden="true">{icon}</span>
           <h3>{title}</h3>

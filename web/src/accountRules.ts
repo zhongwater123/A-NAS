@@ -30,6 +30,17 @@ export function passwordProblem(value: string): string | undefined {
   return undefined;
 }
 
+export const nicknameRuleText = "最多 24 个字符，可用中文、空格和表情；不能与其他人的账号名或昵称相同";
+
+// nicknameProblem checks a nickname the way the server does after trimming
+// it: invisible formatting characters other than the joiner inside emoji are
+// refused, so one name cannot be made to look like another.
+export function nicknameProblem(value: string): string | undefined {
+  if (/[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}]/u.test(value.replaceAll("\u200d", ""))) return "昵称不能包含换行或不可见的格式字符";
+  if ([...value.normalize("NFC").trim().split(/\s+/).join(" ")].length > 24) return "昵称最多 24 个字符";
+  return undefined;
+}
+
 // accountErrorText words the API's account errors.
 export function accountErrorText(error: unknown): string | undefined {
   if (!(error instanceof APIError)) return undefined;
@@ -44,6 +55,10 @@ export function accountErrorText(error: unknown): string | undefined {
     case "setup_local_only": return "只能在 NAS 本机屏幕上（或经 SSH 隧道）启用设备";
     case "smb_disable_pending": return "账号已禁用，网页登录已失效；SMB 凭据暂未停用。可以再点一次“禁用账号”重试，产品服务重启时也会自动停用";
     case "credential_provision_failed": return "SMB 凭据没有设置成功，请稍后重试";
+    case "invalid_nickname": return "昵称最多 24 个字符，不能包含换行或不可见的格式字符";
+    case "nickname_unavailable": return "这个名字已经是其他人的账号名或昵称，请换一个";
+    case "unsupported_image": return "这张图片无法读取。请选择 JPEG、PNG、GIF 或 WebP 图片";
+    case "image_too_large": return "图片太大了，请选择 12 MB 以内的图片";
   }
   return undefined;
 }

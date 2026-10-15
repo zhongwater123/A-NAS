@@ -36,6 +36,7 @@ type activityPage struct {
 		Actor    *struct {
 			ID       string `json:"id"`
 			Username string `json:"username"`
+			Nickname string `json:"nickname"`
 		} `json:"actor"`
 		Subject *struct {
 			Username string `json:"username"`

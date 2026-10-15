@@ -116,6 +116,66 @@ paths:
         "204": { description: Password changed and SMB re-enabled }
         "403": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/session/profile:
+    patch:
+      operationId: updateProfile
+      description: >-
+        Change the name the signed-in user is shown by. Pages show the nickname instead of the username everywhere
+        except where the account name itself matters (sign-in, SMB, the terminal). An empty nickname shows the
+        username again.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProfileChange" } } } }
+      responses:
+        "200": { description: The updated account, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/session/avatar:
+    put:
+      operationId: setAvatar
+      description: >-
+        Replace the signed-in user's avatar with the picture in the body. The server turns it upright, crops the
+        centre square, scales it to at most 256 pixels and stores it as a JPEG of a few dozen kilobytes; the
+        original is not kept. Clients crop first and send the square they want.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/gif: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        "200": { description: The updated account with its new avatarVersion, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "413": { description: "image_too_large: more than 12 MiB or 25 million pixels", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "415": { description: "unsupported_image: not a JPEG, PNG, GIF or WebP picture", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+    delete:
+      operationId: removeAvatar
+      description: Go back to the initial on a coloured disc.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The updated account, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      description: >-
+        How every account appears, disabled ones included, for any signed-in user: the name to show and the avatar.
+        Role and status stay with listUsers, which only administrators may call.
+      responses:
+        "200": { description: Profiles, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Profile" } } } } } } }
+  /api/v1/users/{userId}/avatar:
+    get:
+      operationId: getAvatar
+      description: >-
+        An account's avatar for any signed-in user. Ask with v set to the account's avatarVersion: that URL never
+        changes content and is cached for a year; without it the answer must be revalidated (ETag).
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { name: v, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Square JPEG avatar, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "304": { description: The cached avatar is current }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -340,6 +400,18 @@ paths:
       parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200": { description: Trash item, content: { application/json: { schema: { $ref: "#/components/schemas/TrashItem" } } } }
+  /api/v1/files/{fileId}/versions:
+    get:
+      operationId: listFileVersions
+      summary: List the versions of a file or folder that the snapshots of its space hold at its path
+      description: >-
+        Versions are newest first. Snapshots holding a file of the same size and modification time are merged into
+        one version; the version equal to the file as it is now is marked current.
+      parameters: [{ $ref: "#/components/parameters/FileID" }]
+      responses:
+        "200": { description: The path and its versions, content: { application/json: { schema: { $ref: "#/components/schemas/SnapshotMatch" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/files/{fileId}/copies:
     post:
       operationId: copyFile
@@ -396,8 +468,9 @@ paths:
       summary: Change the snapshot schedule of a space
       description: >-
         Only the owner of a personal space and administrators for the shared space may change it. Times are local
-        to the device. After each successful scheduled snapshot, scheduled snapshots beyond the newest keep are
-        deleted; manual snapshots are never deleted by a schedule.
+        to the device. After each successful scheduled snapshot, scheduled snapshots the retention no longer keeps
+        are deleted: beyond the newest keep under count retention, or outside every tier under tiered retention.
+        Manual snapshots are never deleted by a schedule.
       parameters: [{ $ref: "#/components/parameters/SpaceID" }, { $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SnapshotScheduleSettings" } } } }
       responses:
@@ -422,9 +495,41 @@ paths:
                   items: { type: array, items: { $ref: "#/components/schemas/SnapshotMatch" } }
                   truncated: { type: boolean, description: More paths matched than were returned. }
         "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/spaces/{spaceId}/removed-entries:
+    get:
+      operationId: listRemovedEntries
+      summary: List what the snapshots of a space hold that the space no longer lists, most recently removed first
+      description: >-
+        The space is reconciled first, so deletions over SMB are included. Only the topmost removed item of a removed
+        folder is listed. Moved or renamed items are listed under their old path.
+      parameters: [{ $ref: "#/components/parameters/SpaceID" }]
+      responses:
+        "200":
+          description: Removed items
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, truncated]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/RemovedEntry" } }
+                  truncated: { type: boolean, description: The list stopped at 200 items or before the oldest snapshot was compared. }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+  /api/v1/snapshots/{snapshotId}/restore:
+    post:
+      operationId: restoreSnapshot
+      summary: Copy everything a snapshot holds into a new folder of its space
+      parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      responses:
+        "201": { description: The new folder holding the snapshot's files, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/snapshots/{snapshotId}/entries:
     get:
       operationId: listSnapshotEntries
+      description: Each entry is compared with the space as it is now; opening the top level reconciles the space first.
       parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { name: parentId, in: query, schema: { type: string } }]
       responses:
         "200": { description: Snapshot entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/SnapshotEntry" } } } } } } }
@@ -432,7 +537,7 @@ paths:
     post:
       operationId: restoreSnapshotEntry
       parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { name: entryId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SnapshotRestore" } } } }
       responses:
         "201": { description: File or folder restored as a new entry; a folder brings everything below it, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
         "409": { $ref: "#/components/responses/ProductError" }
@@ -2368,6 +2473,29 @@ components:
         status: { type: string, enum: [pending, active, disabled, error] }
         createdAt: { type: string, format: date-time }
         mustChangePassword: { type: boolean }
+        nickname: { type: string, maxLength: 24, description: "The name pages show instead of username; absent when the user has not chosen one." }
+        avatarVersion: { type: string, description: "Names the current avatar; absent when the user has none. See getAvatar." }
+    Profile:
+      type: object
+      additionalProperties: false
+      required: [id, username]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        nickname: { type: string }
+        avatarVersion: { type: string }
+    ProfileChange:
+      type: object
+      additionalProperties: false
+      required: [nickname]
+      properties:
+        nickname:
+          type: string
+          description: >-
+            Trimmed, with runs of spaces folded into one; at most 24 Unicode code points without control or invisible
+            formatting characters (a zero-width joiner inside emoji is allowed), else 422 invalid_nickname. It must
+            not equal, ignoring case, another account's username or nickname (409 nickname_unavailable). Empty
+            clears it.
     PasswordChange:
       type: object
       additionalProperties: false
@@ -2555,6 +2683,21 @@ components:
         kind: { type: string, enum: [file, directory] }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         modifiedAt: { type: string, format: date-time, description: Absent for snapshots taken before modification times were recorded. }
+        change:
+          type: string
+          enum: [removed, modified, inside]
+          description: >-
+            How the space differs now at the entry's path: removed (deleted, moved or renamed), modified (a file of
+            another size or modification time), or inside (a folder still there with something below it removed or
+            modified). Absent when the path holds the same thing.
+    SnapshotRestore:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        parentId: { type: string }
+        name: { type: string, minLength: 1 }
+        replace: { type: boolean, description: "Files only: a file of that name goes to the recycle bin and the restored file takes its place. Without it a taken name answers 409." }
     SnapshotScheduleSettings:
       type: object
       additionalProperties: false
@@ -2564,11 +2707,26 @@ components:
         frequency: { type: string, enum: [hourly, daily, weekly] }
         time: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: Local time of daily and weekly runs; hourly runs use its minute. }
         weekday: { type: integer, minimum: 0, maximum: 6, description: "Day of weekly runs, 0 for Sunday." }
-        keep: { type: integer, minimum: 1, maximum: 100, description: Scheduled snapshots kept after each successful run. }
+        keep: { type: integer, minimum: 1, maximum: 100, description: Scheduled snapshots kept after each successful run under count retention. }
+        retention: { type: string, enum: [count, tiered], default: count }
+        tiers: { $ref: "#/components/schemas/RetentionTiers" }
+    RetentionTiers:
+      type: object
+      additionalProperties: false
+      required: [hourly, daily, weekly, monthly]
+      description: >-
+        Under tiered retention, how many of the latest hours, days, weeks and months keep their newest scheduled
+        snapshot; periods without a snapshot do not count. All are zero under count retention. Together they keep at
+        most 100; daily schedules keep no hours, weekly ones neither hours nor days.
+      properties:
+        hourly: { type: integer, minimum: 0, maximum: 100 }
+        daily: { type: integer, minimum: 0, maximum: 100 }
+        weekly: { type: integer, minimum: 0, maximum: 100 }
+        monthly: { type: integer, minimum: 0, maximum: 100 }
     SnapshotSchedule:
       type: object
       additionalProperties: false
-      required: [spaceId, enabled, frequency, time, weekday, keep, canManage]
+      required: [spaceId, enabled, frequency, time, weekday, keep, retention, tiers, canManage]
       properties:
         spaceId: { type: string }
         enabled: { type: boolean }
@@ -2576,6 +2734,8 @@ components:
         time: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
         weekday: { type: integer, minimum: 0, maximum: 6 }
         keep: { type: integer, minimum: 1, maximum: 100 }
+        retention: { type: string, enum: [count, tiered] }
+        tiers: { $ref: "#/components/schemas/RetentionTiers" }
         updatedAt: { type: string, format: date-time }
         lastRun: { $ref: "#/components/schemas/ScheduleRun" }
         nextRunAt: { type: string, format: date-time, description: When the next attempt is expected; absent while disabled. }
@@ -2613,6 +2773,25 @@ components:
         modifiedAt: { type: string, format: date-time }
         snapshots: { type: integer, minimum: 1, description: How many snapshots hold the same version. }
         oldestAt: { type: string, format: date-time, description: When the oldest snapshot holding it was taken. }
+        current: { type: boolean, description: The space holds this version of the file now. }
+    RemovedEntry:
+      type: object
+      additionalProperties: false
+      required: [path, name, kind, sizeBytes, fileCount, snapshotId, snapshotName, origin, entryId, lastSeenAt]
+      properties:
+        path: { type: string, description: Slash-separated path the item had in the space. }
+        name: { type: string }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes: { type: integer, format: int64, minimum: 0, description: "A file's size, or the total of the files in a folder." }
+        fileCount: { type: integer, format: int64, minimum: 0, description: 1 for a file; the files in a folder. }
+        modifiedAt: { type: string, format: date-time }
+        snapshotId: { type: string, description: The newest snapshot holding the item; restores and downloads read it. }
+        snapshotName: { type: string }
+        origin: { type: string, enum: [manual, scheduled] }
+        entryId: { type: string, description: The item's entry in that snapshot. }
+        lastSeenAt: { type: string, format: date-time, description: When that snapshot was taken. }
+        goneBy: { type: string, format: date-time, description: When the next snapshot was taken without the item; absent when it went after the newest snapshot. }
+        inTrash: { type: boolean, description: "The recycle bin holds an item deleted from the same path; restoring it from there brings back its latest version." }
     AuditEvent:
       type: object
       additionalProperties: false
@@ -2635,6 +2814,7 @@ components:
       properties:
         id: { type: string }
         username: { type: string }
+        nickname: { type: string, description: "The account's current nickname, which pages show instead of username." }
     ActivityEvent:
       type: object
       additionalProperties: false

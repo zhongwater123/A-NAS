@@ -323,6 +323,26 @@ func removeAllAt(ctx context.Context, dir int, name string) error {
 	return unix.Unlinkat(dir, name, unix.AT_REMOVEDIR)
 }
 
+func (r *RootFileSystem) SetModTime(_ context.Context, name string, modTime time.Time) error {
+	dir, last, relative, err := r.parent(name)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dir)
+	var stat unix.Stat_t
+	if err := unix.Fstatat(dir, last, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &fs.PathError{Op: "lstat", Path: relative, Err: err}
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return ErrUnsupportedType
+	}
+	times := []unix.Timespec{{Nsec: unix.UTIME_OMIT}, unix.NsecToTimespec(modTime.UnixNano())}
+	if err := unix.UtimesNanoAt(dir, last, times, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &fs.PathError{Op: "chtimes", Path: relative, Err: err}
+	}
+	return nil
+}
+
 func (r *RootFileSystem) Open(_ context.Context, name string) (*os.File, error) {
 	dir, last, relative, err := r.parent(name)
 	if err != nil {

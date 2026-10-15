@@ -1,17 +1,20 @@
 import {
-  ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
-  LayoutDashboard, LogOut, Monitor, Network, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
+  AtSign, Camera, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
+  LayoutDashboard, LogOut, Monitor, Network, PenLine, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   Health, HostState, Session, StoragePlan, User, ViewingScope, Volume,
-  changePassword, confirmStoragePlan, createMember, createStoragePlan, disableMember, executeStoragePlan, listUsers, listVolumes, resetMember, startViewing,
+  changePassword, confirmStoragePlan, createMember, createStoragePlan, disableMember, executeStoragePlan, listUsers, listVolumes, removeAvatar, resetMember, startViewing,
+  updateNickname,
 } from "./api";
-import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
+import { nicknameProblem, nicknameRuleText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { formatBytes, formatNominalCapacity } from "./bytes";
 import { isLocalConsole } from "./LocalConsoleScreenSaver";
 import { LogsSection, type LogsPreset } from "./logs/LogsSection";
+import { displayName, fullName, usePeople } from "./people";
+import { AvatarDialog } from "./settings/AvatarDialog";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
 import { TerminalSection } from "./settings/TerminalSection";
 import type { SessionStatus } from "./terminal";
@@ -70,12 +73,14 @@ export function useStoragePlan(): StoragePlanFlow {
   };
 }
 
-export function SettingsPanel({ session, host, section, onSectionChange, storagePlan, onLogout }: {
+export function SettingsPanel({ session, host, section, onSectionChange, storagePlan, onUserChange, onLogout }: {
   session: Session;
   host: HostStateView;
   section: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
   storagePlan: StoragePlanFlow;
+  // onUserChange receives the account after its owner changed the nickname or avatar.
+  onUserChange: (user: User) => void;
   onLogout: () => void;
 }) {
   const { user } = session;
@@ -95,8 +100,8 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
     <div className="set-shell">
       <nav className="set-nav" aria-label="设置分区">
         <button className={`set-nav-account ${current === "account" ? "active" : ""}`} aria-label="我的账号" aria-current={current === "account" ? "page" : undefined} onClick={() => navigate("account")}>
-          <Avatar name={user.username} />
-          <span><strong>{user.username}</strong><small>{roleLabel(user.role)} · 我的账号</small></span>
+          <Avatar who={user} />
+          <span><strong>{displayName(user)}</strong><small>{roleLabel(user.role)} · 我的账号</small></span>
         </button>
         {systemSections.filter((link) => isAdmin || !link.adminOnly).map(({ id, label, icon, tone }) => (
           <button key={id} className={current === id ? "active" : ""} aria-current={current === id ? "page" : undefined} onClick={() => navigate(id)}>
@@ -110,7 +115,7 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
       <div className={`set-main ${current === "terminal" ? "fill" : ""}`}>
         {current !== "terminal" && (
           <div className={`set-page ${current === "logs" ? "wide" : ""}`}>
-            {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onLogout={onLogout}
+            {current === "account" && <AccountSection session={session} editing={editingPassword} onEditingChange={setEditingPassword} onUserChange={onUserChange} onLogout={onLogout}
               onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
             {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
             {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
@@ -142,14 +147,28 @@ function useVolumes(planState?: string): VolumesView {
 
 // ---------------------------------------------------------------- My account
 
-function AccountSection({ session, editing, onEditingChange, onLogout, onShowSignIns }: {
+function AccountSection({ session, editing, onEditingChange, onUserChange, onLogout, onShowSignIns }: {
   session: Session;
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
+  onUserChange: (user: User) => void;
   onLogout: () => void;
   onShowSignIns: () => void;
 }) {
   const { user } = session;
+  const people = usePeople();
+  const [choosingAvatar, setChoosingAvatar] = useState(false);
+  const [profileNotice, setProfileNotice] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [removing, setRemoving] = useState(false);
+  const profileSaved = (next: User, message: string) => { onUserChange(next); setProfileError(""); setProfileNotice(message); };
+  const dropAvatar = async () => {
+    setRemoving(true); setProfileNotice("");
+    try { profileSaved(await removeAvatar(), "已移除头像，现在显示名字的第一个字。"); }
+    catch (caught) { setProfileError(messageOf(caught)); }
+    finally { setRemoving(false); }
+  };
+  const resetBy = session.credentialReset ? people.byUsername(session.credentialReset.actorUsername) : undefined;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -172,15 +191,34 @@ function AccountSection({ session, editing, onEditingChange, onLogout, onShowSig
   const localConsole = isLocalConsole();
   return (
     <>
-      <PageHeader title="我的账号" subtitle="你的登录身份、密码与当前会话" />
+      <PageHeader title="我的账号" subtitle="你的头像、昵称、密码与当前会话" />
       <div className="set-card acct-hero">
-        <Avatar name={user.username} size="lg" />
-        <div>
-          <h3>{user.username}</h3>
-          <p><Pill tone={user.role === "admin" ? "accent" : "neutral"}>{roleLabel(user.role)}</Pill><StatusText status={user.status} /></p>
+        <button className="acct-avatar" aria-label="更换头像" title="更换头像" onClick={() => setChoosingAvatar(true)}>
+          <Avatar who={user} size="xl" />
+          <span className="acct-avatar-badge" aria-hidden="true"><Camera /></span>
+        </button>
+        <div className="acct-hero-text">
+          <h3>{displayName(user)}</h3>
+          <p>
+            <Pill tone={user.role === "admin" ? "accent" : "neutral"}>{roleLabel(user.role)}</Pill><StatusText status={user.status} />
+            {user.nickname && <span className="acct-handle">账号名 {user.username}</span>}
+          </p>
         </div>
         <button className="set-btn" onClick={onLogout}><LogOut />退出登录</button>
       </div>
+      {profileError && <Banner tone="error" onClose={() => setProfileError("")}>{profileError}</Banner>}
+      {profileNotice && <Banner tone="success" onClose={() => setProfileNotice("")}>{profileNotice}</Banner>}
+      <Group title="个人资料" footnote="昵称和头像会显示在桌面、日志、问题反馈和相册中，家里的每个账号都能看到。登录和 SMB 共享仍使用账号名。">
+        <Row icon={<Avatar who={user} />} label="头像" detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示名字的第一个字"}>
+          {user.avatarVersion && <button className="set-btn" disabled={removing} onClick={() => void dropAvatar()}>{removing ? "正在移除…" : "移除"}</button>}
+          <button className="set-btn" onClick={() => { setProfileNotice(""); setChoosingAvatar(true); }}>{user.avatarVersion ? "更换…" : "设置头像…"}</button>
+        </Row>
+        <NicknameRow user={user} onEditing={() => setProfileNotice("")} onSaved={(next) => profileSaved(next, next.nickname ? `昵称已改为“${next.nickname}”。` : `已清除昵称，现在显示账号名 ${next.username}。`)} />
+        <Row icon={<IconTile tone="handle" icon={AtSign} />} label="账号名" detail="登录、SMB 共享和设备上的 Linux 账号使用，不能修改">
+          <span className="acct-username">{user.username}</span>
+        </Row>
+      </Group>
+      {choosingAvatar && <AvatarDialog onClose={() => setChoosingAvatar(false)} onSaved={(next) => { setChoosingAvatar(false); profileSaved(next, "头像已更新。"); }} />}
       <Group title="登录与安全">
         <Row icon={<IconTile tone="key" icon={KeyRound} />} label="密码" detail="网页登录和 SMB 共享使用同一个密码">
           {!editing && <button className="set-btn" onClick={open}>修改密码…</button>}
@@ -189,7 +227,7 @@ function AccountSection({ session, editing, onEditingChange, onLogout, onShowSig
           <Row
             icon={<IconTile tone="warning" icon={TriangleAlert} />}
             label="管理员重置过密码"
-            detail={`${session.credentialReset.actorUsername || "管理员"} 于 ${new Date(session.credentialReset.at).toLocaleString("zh-CN")} 重置了这个账号的密码。此后的密码若不是你自己设置的，请当面确认。`}
+            detail={`${session.credentialReset.actorUsername ? fullName(resetBy ?? { username: session.credentialReset.actorUsername }) : "管理员"} 于 ${new Date(session.credentialReset.at).toLocaleString("zh-CN")} 重置了这个账号的密码。此后的密码若不是你自己设置的，请当面确认。`}
           />
         )}
         {editing && (
@@ -214,6 +252,42 @@ function AccountSection({ session, editing, onEditingChange, onLogout, onShowSig
           <button className="set-btn" onClick={onShowSignIns}>查看<ChevronRight /></button>
         </Row>
       </Group>
+    </>
+  );
+}
+
+function NicknameRow({ user, onEditing, onSaved }: { user: User; onEditing: () => void; onSaved: (user: User) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const open = () => { setValue(user.nickname ?? ""); setError(""); setEditing(true); onEditing(); };
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const problem = nicknameProblem(value);
+    if (problem) { setError(problem); return; }
+    setSaving(true);
+    try { const next = await updateNickname(value.trim()); setEditing(false); setError(""); onSaved(next); }
+    catch (caught) { setError(messageOf(caught)); }
+    finally { setSaving(false); }
+  };
+  return (
+    <>
+      <Row icon={<IconTile tone="nickname" icon={PenLine} />} label="昵称" detail={user.nickname || `未设置，显示账号名 ${user.username}`}>
+        {!editing && <button className="set-btn" onClick={open}>{user.nickname ? "修改…" : "设置昵称…"}</button>}
+      </Row>
+      {editing && (
+        <form className="acct-form" aria-label="修改昵称" autoComplete="off" onSubmit={(event) => void submit(event)}>
+          <Field label="昵称" hint={`${nicknameRuleText}。留空则显示账号名。`}>
+            <input className="set-input" name="nickname" value={value} onChange={(event) => setValue(event.target.value)} placeholder={user.username} autoFocus spellCheck={false} />
+          </Field>
+          {error && <Banner tone="error">{error}</Banner>}
+          <div className="acct-form-actions">
+            <button type="button" className="set-btn" onClick={() => { setEditing(false); setError(""); }}>取消</button>
+            <button className="set-btn primary" disabled={saving}>{saving ? "正在保存…" : "保存昵称"}</button>
+          </div>
+        </form>
+      )}
     </>
   );
 }
@@ -502,14 +576,14 @@ function UsersSection({ currentUser, onChangeOwnPassword }: { currentUser: User;
           const self = user.id === currentUser.id;
           return (
             <div className="set-row" key={user.id}>
-              <Avatar name={user.username} />
+              <Avatar who={user} />
               <div className="set-row-text">
-                <span><strong>{user.username}</strong>{self && <Pill tone="accent">你</Pill>}</span>
+                <span><strong>{displayName(user)}</strong>{user.nickname && <span className="set-handle">{user.username}</span>}{self && <Pill tone="accent">你</Pill>}</span>
                 <small><span className={`set-dot status-${user.status}`} />{roleLabel(user.role)} · {statusLabel(user.status)}</small>
               </div>
               <div className="set-row-end">
                 {self ? <button className="set-btn" onClick={onChangeOwnPassword}>修改我的密码</button> : (
-                  <RowMenu label={`${user.username} 的更多操作`} items={[
+                  <RowMenu label={`${fullName(user)} 的更多操作`} items={[
                     { label: "重置密码…", icon: KeyRound, onSelect: () => open({ kind: "reset", user }) },
                     { label: "查看个人空间…", icon: FolderLock, onSelect: () => open({ kind: "viewing", user, scope: "space" }) },
                     { label: "查看私有图库…", icon: Images, onSelect: () => open({ kind: "viewing", user, scope: "library" }) },
@@ -547,26 +621,26 @@ function UserDialogView({ dialog, onClose, onDone }: { dialog: UserDialog; onClo
     } else if (dialog.kind === "reset") {
       void run(async () => {
         await resetMember(dialog.user.id, value("password"));
-        return `已重置 ${dialog.user.username} 的密码。对方下次登录时必须先设置新密码，SMB 共享在此之前保持停用。`;
+        return `已重置 ${fullName(dialog.user)} 的密码。对方下次登录时必须先设置新密码，SMB 共享在此之前保持停用。`;
       });
     } else if (dialog.kind === "viewing") {
       const { user, scope } = dialog;
       void run(async () => {
         await startViewing(user.id, value("password"), value("reason"), scope);
         return scope === "library"
-          ? `已开启对 ${user.username} 私有图库的只读查看，可在相册中选择“只读查看 · ${user.username}”。`
-          : `已开启对 ${user.username} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${user.username}”。`;
+          ? `已开启对 ${fullName(user)} 私有图库的只读查看，可在相册中选择“只读查看 · ${displayName(user)}”。`
+          : `已开启对 ${fullName(user)} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${displayName(user)}”。`;
       });
     } else {
-      void run(async () => { await disableMember(dialog.user.id); return `已禁用 ${dialog.user.username}。`; });
+      void run(async () => { await disableMember(dialog.user.id); return `已禁用 ${fullName(dialog.user)}。`; });
     }
   };
   const what = dialog.kind === "viewing" && dialog.scope === "library" ? "私有图库" : "个人空间";
   const content = {
     create: { title: "添加成员", label: "添加成员", icon: UserPlus, tone: "accent", description: "成员拥有自己的个人空间和私有图库，并可使用 Shared 共享空间。", submit: "创建成员", danger: false },
-    reset: dialog.kind === "reset" && { title: `重置 ${dialog.user.username} 的密码`, label: `重置 ${dialog.user.username} 的密码`, icon: KeyRound, tone: "warning", description: `重置后 ${dialog.user.username} 下次登录必须先设置新密码，在此之前 SMB 共享保持停用。重置会写入审计，并一直显示在对方的“我的账号”中。`, submit: "确认重置", danger: false },
-    viewing: dialog.kind === "viewing" && { title: `只读查看 ${dialog.user.username} 的${what}`, label: `查看 ${dialog.user.username} 的${what}`, icon: what === "私有图库" ? Images : FolderLock, tone: "warning", description: `查看他人${what}会写入审计，并在 ${dialog.user.username} 下次登录时通知对方。访问为只读，24 小时后自动结束。`, submit: "开始只读查看", danger: false },
-    disable: dialog.kind === "disable" && { title: `禁用 ${dialog.user.username}？`, label: `禁用 ${dialog.user.username}`, icon: UserX, tone: "danger", description: `${dialog.user.username} 将无法登录网页和 SMB 共享，已建立的 SMB 连接会立即断开；个人空间中的文件不会被删除。账号禁用后暂时无法重新启用。`, submit: "禁用账号", danger: true },
+    reset: dialog.kind === "reset" && { title: `重置 ${fullName(dialog.user)} 的密码`, label: `重置 ${fullName(dialog.user)} 的密码`, icon: KeyRound, tone: "warning", description: `重置后 ${displayName(dialog.user)} 下次登录必须先设置新密码，在此之前 SMB 共享保持停用。重置会写入审计，并一直显示在对方的“我的账号”中。`, submit: "确认重置", danger: false },
+    viewing: dialog.kind === "viewing" && { title: `只读查看 ${fullName(dialog.user)} 的${what}`, label: `查看 ${fullName(dialog.user)} 的${what}`, icon: what === "私有图库" ? Images : FolderLock, tone: "warning", description: `查看他人${what}会写入审计，并在 ${displayName(dialog.user)} 下次登录时通知对方。访问为只读，24 小时后自动结束。`, submit: "开始只读查看", danger: false },
+    disable: dialog.kind === "disable" && { title: `禁用 ${fullName(dialog.user)}？`, label: `禁用 ${fullName(dialog.user)}`, icon: UserX, tone: "danger", description: `${displayName(dialog.user)} 将无法登录网页和 SMB 共享，已建立的 SMB 连接会立即断开；个人空间中的文件不会被删除。账号禁用后暂时无法重新启用。`, submit: "禁用账号", danger: true },
   }[dialog.kind] as { title: string; label: string; icon: LucideIcon; tone: string; description: string; submit: string; danger: boolean };
   return (
     <Dialog title={content.title} onClose={busy ? undefined : onClose}>
@@ -723,7 +797,7 @@ function diskHealth(health: Health): { label: string; tone: Tone } {
 // The signed-in account comes first, then administrators, then members by name.
 function sortUsers(users: User[], selfID: string): User[] {
   const rank = (user: User) => (user.id === selfID ? 0 : user.role === "admin" ? 1 : 2);
-  return [...users].sort((left, right) => rank(left) - rank(right) || left.username.localeCompare(right.username, "zh-CN"));
+  return [...users].sort((left, right) => rank(left) - rank(right) || displayName(left).localeCompare(displayName(right), "zh-CN"));
 }
 
 function roleLabel(role: User["role"]): string {

@@ -135,20 +135,21 @@ type Directory struct {
 
 type DirectoryUser struct {
 	Username string
+	Nickname string
 	Role     Role
 }
 
 // Directory reads every account and space; callers decide what to show.
 func (s *Service) Directory(ctx context.Context) (Directory, error) {
 	directory := Directory{Users: map[string]DirectoryUser{}, Spaces: map[string]Space{}}
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, role FROM users")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT id, username, nickname, role FROM users")
 	if err != nil {
 		return Directory{}, err
 	}
 	for rows.Next() {
 		var id string
 		var user DirectoryUser
-		if err := rows.Scan(&id, &user.Username, &user.Role); err != nil {
+		if err := rows.Scan(&id, &user.Username, &user.Nickname, &user.Role); err != nil {
 			rows.Close()
 			return Directory{}, err
 		}

@@ -2,7 +2,8 @@ import { request } from "../api";
 
 export type ActivityCategory = "session" | "account" | "file" | "storage" | "photo";
 
-export interface ActivityAccount { id: string; username: string }
+// nickname is the account's current nickname, shown instead of username.
+export interface ActivityAccount { id: string; username: string; nickname?: string }
 
 export interface ActivityEvent {
   id: string;

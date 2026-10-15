@@ -23,8 +23,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 )
 
-// contractChecked validates every exchange on a snapshot path against the
-// OpenAPI document: responses always, requests when the server accepted them.
+// contractChecked validates every exchange on a snapshot, version or removed
+// item path against the OpenAPI document: responses always, requests when
+// the server accepted them.
 func contractChecked(t *testing.T, next http.Handler) http.Handler {
 	t.Helper()
 	ctx := context.Background()
@@ -41,7 +42,7 @@ func contractChecked(t *testing.T, next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		recorder := httptest.NewRecorder()
 		next.ServeHTTP(recorder, r)
-		if strings.Contains(r.URL.Path, "snapshot") {
+		if strings.Contains(r.URL.Path, "snapshot") || strings.HasSuffix(r.URL.Path, "/versions") || strings.HasSuffix(r.URL.Path, "/removed-entries") {
 			request := httptest.NewRequest(r.Method, "http://127.0.0.1:8080"+r.URL.RequestURI(), bytes.NewReader(body))
 			request.Header = r.Header.Clone()
 			route, params, err := router.FindRoute(request)
@@ -168,6 +169,19 @@ func TestBackupCenterAPIManagesSchedulesSearchesAndRestoresFolders(t *testing.T)
 	if _, err := fileService.DeleteByID(ctx, adminSession.User, folder.ID); err != nil {
 		t.Fatal(err)
 	}
+	admin.call(http.MethodGet, "/api/v1/snapshots/"+snapshot.ID+"/entries", nil, http.StatusOK, &root)
+	if root.Items[0].Change != files.ChangeRemoved {
+		t.Fatalf("deleted folder in the snapshot = %+v", root.Items[0])
+	}
+	var removed struct {
+		Items     []files.RemovedEntry `json:"items"`
+		Truncated bool                 `json:"truncated"`
+	}
+	admin.call(http.MethodGet, "/api/v1/spaces/"+private.ID+"/removed-entries", nil, http.StatusOK, &removed)
+	if len(removed.Items) != 1 || removed.Items[0].Path != "Docs" || removed.Items[0].FileCount != 1 || removed.Truncated {
+		t.Fatalf("removed entries = %+v", removed)
+	}
+	member.call(http.MethodGet, "/api/v1/spaces/"+private.ID+"/removed-entries", nil, http.StatusForbidden, nil)
 	var restored files.Entry
 	admin.call(http.MethodPost, "/api/v1/snapshots/"+snapshot.ID+"/entries/"+root.Items[0].ID+"/restore", map[string]string{"name": "Docs"}, http.StatusCreated, &restored)
 	if restored.Kind != files.EntryKindDirectory {
@@ -175,12 +189,44 @@ func TestBackupCenterAPIManagesSchedulesSearchesAndRestoresFolders(t *testing.T)
 	}
 	admin.call(http.MethodPost, "/api/v1/snapshots/"+snapshot.ID+"/entries/"+root.Items[0].ID+"/restore", map[string]string{"name": "Docs"}, http.StatusConflict, nil)
 
+	// The restored plan has the snapshot's version and can be put back over itself.
+	restoredFiles, err := fileService.List(ctx, adminSession.User, private.ID, restored.ID)
+	if err != nil || len(restoredFiles) != 1 {
+		t.Fatalf("restored folder = %+v, %v", restoredFiles, err)
+	}
+	var versions files.SnapshotMatch
+	admin.call(http.MethodGet, "/api/v1/files/"+restoredFiles[0].ID+"/versions", nil, http.StatusOK, &versions)
+	if versions.Path != "Docs/plan.txt" || len(versions.Versions) != 1 || versions.Versions[0].SnapshotID != snapshot.ID {
+		t.Fatalf("versions = %+v", versions)
+	}
+	member.call(http.MethodGet, "/api/v1/files/"+restoredFiles[0].ID+"/versions", nil, http.StatusForbidden, nil)
+	var replaced files.Entry
+	admin.call(http.MethodPost, "/api/v1/snapshots/"+snapshot.ID+"/entries/"+inside.Items[0].ID+"/restore",
+		map[string]any{"parentId": restored.ID, "name": "plan.txt", "replace": true}, http.StatusCreated, &replaced)
+	if replaced.Name != "plan.txt" || replaced.ID == restoredFiles[0].ID {
+		t.Fatalf("replaced = %+v", replaced)
+	}
+	var whole files.Entry
+	admin.call(http.MethodPost, "/api/v1/snapshots/"+snapshot.ID+"/restore", map[string]string{"name": "before 的全部文件"}, http.StatusCreated, &whole)
+	if whole.Kind != files.EntryKindDirectory || whole.Name != "before 的全部文件" {
+		t.Fatalf("whole snapshot restored = %+v", whole)
+	}
+	admin.call(http.MethodPost, "/api/v1/snapshots/"+snapshot.ID+"/restore", map[string]string{"name": "before 的全部文件"}, http.StatusConflict, nil)
+
 	schedulePath := "/api/v1/spaces/" + private.ID + "/snapshot-schedule"
 	var schedule files.SnapshotSchedule
 	admin.call(http.MethodGet, schedulePath, nil, http.StatusOK, &schedule)
 	if !schedule.Enabled || !schedule.CanManage || schedule.Keep != 14 || schedule.Time != "03:00" {
 		t.Fatalf("default schedule = %+v", schedule)
 	}
+	tiered := map[string]any{"enabled": true, "frequency": "daily", "time": "03:00", "weekday": 0, "keep": 14,
+		"retention": "tiered", "tiers": map[string]int{"hourly": 0, "daily": 7, "weekly": 4, "monthly": 6}}
+	admin.call(http.MethodPut, schedulePath, tiered, http.StatusOK, &schedule)
+	if schedule.Retention != files.RetentionTiered || schedule.Tiers != (files.RetentionTiers{Daily: 7, Weekly: 4, Monthly: 6}) {
+		t.Fatalf("tiered schedule = %+v", schedule)
+	}
+	tiered["tiers"] = map[string]int{"hourly": 24, "daily": 7, "weekly": 4, "monthly": 6}
+	admin.call(http.MethodPut, schedulePath, tiered, http.StatusUnprocessableEntity, nil)
 	hourly := map[string]any{"enabled": true, "frequency": "hourly", "time": "00:00", "weekday": 0, "keep": 24}
 	admin.call(http.MethodPut, schedulePath, hourly, http.StatusOK, &schedule)
 	if !schedule.NextRunAt.Equal(time.Date(2026, 10, 12, 11, 0, 0, 0, time.UTC)) {
