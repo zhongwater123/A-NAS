@@ -7,6 +7,7 @@ authenticated with the instance's session token as `?token=` (Hermes's loopback 
   serve_client.py USER ready                 connect and wait for gateway.ready (cold start)
   serve_client.py USER chat TEXT [TEXT...]   one new session, one turn per TEXT
   serve_client.py USER calls FILE            the same with the lines of FILE (in /spike)
+  serve_client.py USER resume ID TEXT...     continue the stored session ID, one turn per TEXT
   serve_client.py USER rpc METHOD [JSON]     one raw call; prints the result or the error
 """
 import asyncio
@@ -112,10 +113,14 @@ class Gateway:
                 "types": sorted(set(types)), "seconds": round(time.time() - started, 1)}
 
 
-async def chat(user: str, lines: list[str]):
+async def chat(user: str, lines: list[str], resume: str | None = None):
     async with Gateway(user) as gw:
-        sid = await gw.new_session()
-        print(f"session {sid}")
+        if resume:
+            sid = (await gw.call("session.resume", {"session_id": resume, "cols": 100}))["session_id"]
+            print(f"session {sid} (resumed {resume})")
+        else:
+            sid = await gw.new_session()
+            print(f"session {sid}")
         for said in lines:
             result = await gw.turn(sid, said)
             print(f"> {short(said, 110)}\n< {short(result['answer'])}")
@@ -133,6 +138,8 @@ async def main():
             print(f"gateway.ready after {time.time() - started:.1f} s; payload keys {sorted(gw.ready_payload or {})}")
     elif action == "chat":
         await chat(user, rest)
+    elif action == "resume":
+        await chat(user, rest[1:], resume=rest[0])
     elif action == "calls":
         lines = Path("/spike", rest[0]).read_text(encoding="utf-8").splitlines()
         await chat(user, [line for line in lines if line.strip()])
