@@ -52,3 +52,61 @@ func TestClientResolvesThroughTheSocket(t *testing.T) {
 		t.Fatalf("an absent Host Agent resolved a session")
 	}
 }
+
+// directory also looks accounts up by UID, as accounts.SessionDirectory does.
+type directory struct {
+	sessions
+	uids map[int]accounts.SessionUser
+}
+
+func (d directory) ResolveAccountUID(_ context.Context, uid int) (accounts.SessionUser, error) {
+	if uid == 29998 {
+		return accounts.SessionUser{}, errors.New("database is locked")
+	}
+	user, ok := d.uids[uid]
+	if !ok {
+		return accounts.SessionUser{}, accounts.ErrUserNotFound
+	}
+	return user, nil
+}
+
+func serve(t *testing.T, resolver sessionlookup.Resolver) *sessionlookup.Client {
+	t.Helper()
+	socket := filepath.Join(t.TempDir(), "sessions.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: sessionlookup.NewHandler(resolver, nil)}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+	return sessionlookup.NewClient(socket)
+}
+
+func TestClientResolvesAccountsByUID(t *testing.T) {
+	alice := accounts.SessionUser{UserID: "user:alice", Username: "alice", Role: accounts.RoleMember}
+	client := serve(t, directory{sessions: sessions{}, uids: map[int]accounts.SessionUser{20101: alice}})
+	ctx := context.Background()
+
+	if user, err := client.ResolveAccountUID(ctx, 20101); err != nil || !reflect.DeepEqual(user, alice) {
+		t.Fatalf("ResolveAccountUID() = %+v, %v", user, err)
+	}
+	for _, uid := range []int{20102, 0, -1} {
+		if _, err := client.ResolveAccountUID(ctx, uid); err == nil {
+			t.Fatalf("ResolveAccountUID(%d) resolved", uid)
+		}
+	}
+	if _, err := client.ResolveAccountUID(ctx, 20102); !errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("unknown UID error = %v, want ErrUserNotFound", err)
+	}
+	if _, err := client.ResolveAccountUID(ctx, 29998); err == nil || errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("lookup failure error = %v, want an outage rather than an unknown account", err)
+	}
+}
+
+func TestAccountLookupIsServedOnlyByAResolverThatHasIt(t *testing.T) {
+	client := serve(t, sessions{})
+	if _, err := client.ResolveAccountUID(context.Background(), 20101); err == nil || errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("error = %v, want the lookup to be unavailable", err)
+	}
+}

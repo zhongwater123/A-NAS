@@ -54,6 +54,11 @@ type Principal struct {
 	// Viewing lists the caller's Administrative Viewing Mode grants for
 	// members' private libraries; each is read-only and expires on its own.
 	Viewing []ViewingGrant
+	// Assistant marks a member's AI assistant (ADR 0022). It sees only the
+	// member's own private library and the shared library, changes nothing,
+	// and never acts as an administrator or through a viewing grant, even
+	// when the member could.
+	Assistant bool
 }
 
 type ViewingGrant struct {

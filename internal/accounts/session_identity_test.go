@@ -93,6 +93,60 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	}
 }
 
+func TestSessionDirectoryResolvesActiveAccountsByUID(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateMember(ctx, admin, "alice", "alice password for testing"); err != nil {
+		t.Fatal(err)
+	}
+	alice, err := service.UserIDForUsername(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartLibraryViewing(ctx, admin, alice, "correct horse battery staple", "family album request"); err != nil {
+		t.Fatal(err)
+	}
+	aliceSession, err := service.Authenticate(ctx, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := accounts.NewSessionDirectory(path)
+	t.Cleanup(func() { _ = directory.Close() })
+	aliceIdentity, err := directory.ResolveSessionIdentity(ctx, aliceSession.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The administrator's grant does not travel with a lookup by UID.
+	user, err := directory.ResolveAccountUID(ctx, 20100)
+	if err != nil || !reflect.DeepEqual(user, accounts.SessionUser{UserID: admin.ID, Username: "owner", Role: accounts.RoleAdmin}) {
+		t.Fatalf("ResolveAccountUID(owner) = %#v, %v", user, err)
+	}
+	user, err = directory.ResolveAccountUID(ctx, aliceIdentity.UID)
+	if err != nil || !reflect.DeepEqual(user, accounts.SessionUser{UserID: alice, Username: "alice", Role: accounts.RoleMember}) {
+		t.Fatalf("ResolveAccountUID(alice) = %#v, %v", user, err)
+	}
+	if _, err := directory.ResolveAccountUID(ctx, 29999); !errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("unallocated UID error = %v, want ErrUserNotFound", err)
+	}
+	if err := service.DisableUser(ctx, admin, alice); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := directory.ResolveAccountUID(ctx, aliceIdentity.UID); !errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("disabled account error = %v, want ErrUserNotFound", err)
+	}
+}
+
 func TestSessionTokenTravelsInTheContext(t *testing.T) {
 	ctx := accounts.WithSessionToken(context.Background(), "token")
 	if got := accounts.SessionToken(ctx); got != "token" {

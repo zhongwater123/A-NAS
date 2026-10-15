@@ -35,7 +35,13 @@ type Config struct {
 	Root       string
 	SocketPath string
 	Sessions   SessionResolver
-	Logger     *slog.Logger
+	// AssistantSocketPath, when set, also serves members' AI assistants, who
+	// read through the Policy as their member and change nothing. Accounts
+	// confirms whose assistant connected. Its directory is private to this
+	// service; systemd binds the socket into each assistant's sandbox.
+	AssistantSocketPath string
+	Accounts            AccountResolver
+	Logger              *slog.Logger
 	// CheckStore proves Root is the photo store on the mounted, writable data
 	// volume; it defaults to RequireOwnedStore. While it fails, requests
 	// answer photos_unavailable and nothing is created.
@@ -91,6 +97,9 @@ func Run(parent context.Context, config Config) error {
 	if config.Sessions == nil || config.Root == "" || config.SocketPath == "" {
 		return errors.New("photo service needs a store, a socket and a session lookup")
 	}
+	if config.AssistantSocketPath != "" && config.Accounts == nil {
+		return errors.New("the assistant socket needs an account lookup")
+	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
@@ -102,9 +111,17 @@ func Run(parent context.Context, config Config) error {
 	if config.RetryInterval <= 0 {
 		config.RetryInterval = 2 * time.Second
 	}
-	listener, err := listen(config.SocketPath)
+	listener, err := listen(config.SocketPath, 0o660)
 	if err != nil {
 		return err
+	}
+	var assistantListener net.Listener
+	if config.AssistantSocketPath != "" {
+		// Any member's assistant connects; the peer's UID says which member.
+		if assistantListener, err = listen(config.AssistantSocketPath, 0o666); err != nil {
+			_ = listener.Close()
+			return err
+		}
 	}
 	var api atomic.Pointer[http.Handler]
 	serve := func(handler http.Handler) { api.Store(&handler) }
@@ -121,14 +138,24 @@ func Run(parent context.Context, config Config) error {
 	} else {
 		config.Logger.Info("AI work yields to the whole system's pressure")
 	}
+	current := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		(*api.Load()).ServeHTTP(w, r)
+	})
 	server := &http.Server{
-		Handler: authenticate(config.Sessions, config.Logger, gate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			(*api.Load()).ServeHTTP(w, r)
-		})),
+		Handler:           authenticate(config.Sessions, config.Logger, gate, current),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
-	serveError := make(chan error, 1)
+	serveError := make(chan error, 2)
 	go func() { serveError <- server.Serve(listener) }()
+	var assistantServer *http.Server
+	if assistantListener != nil {
+		assistantServer = &http.Server{
+			Handler:           authenticateAssistant(config.Accounts, config.Logger, gate, assistantAPI(current)),
+			ConnContext:       withPeerUID,
+			ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
+		}
+		go func() { serveError <- assistantServer.Serve(assistantListener) }()
+	}
 
 	ctx, stop := context.WithCancel(parent)
 	supervised := make(chan struct{})
@@ -150,6 +177,12 @@ func Run(parent context.Context, config Config) error {
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	if assistantServer != nil {
+		if err := assistantServer.Shutdown(shutdown); err != nil {
+			return err
+		}
+		_ = os.Remove(config.AssistantSocketPath)
+	}
 	if err := server.Shutdown(shutdown); err != nil {
 		return err
 	}
@@ -317,9 +350,10 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 	})
 }
 
-// listen opens the API socket for the Product Service, whose user is a member
-// of this service's group; the runtime directory keeps everyone else out.
-func listen(socketPath string) (net.Listener, error) {
+// listen opens an API socket. The Product Service's socket is 0660, for its
+// user is a member of this service's group; the runtime directory keeps
+// everyone else out.
+func listen(socketPath string, mode os.FileMode) (net.Listener, error) {
 	if info, err := os.Lstat(socketPath); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("%s exists and is not a socket", socketPath)
@@ -334,7 +368,7 @@ func listen(socketPath string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(socketPath, 0o660); err != nil {
+	if err := os.Chmod(socketPath, mode); err != nil {
 		_ = listener.Close()
 		return nil, err
 	}

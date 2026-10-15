@@ -107,11 +107,16 @@ func runPhotoService(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	lookup := sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock"))
 	return photoservice.Run(ctx, photoservice.Config{
 		Root:       environment("ANAS_PHOTOS_ROOT", "/srv/a-nas/data/photos"),
 		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
-		Sessions:   sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")),
-		Logger:     logger,
+		Sessions:   lookup,
+		// The AI assistant is not shipped yet (ADR 0022), so its socket is off
+		// unless named.
+		AssistantSocketPath: os.Getenv("ANAS_PHOTOS_ASSISTANT_SOCKET"),
+		Accounts:            lookup,
+		Logger:              logger,
 		// Without the AI component the socket is absent and photos wait for it.
 		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
 		AIQuietPeriod: quiet,
