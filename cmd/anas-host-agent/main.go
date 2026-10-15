@@ -66,6 +66,13 @@ func run(logger *slog.Logger) error {
 		_ = os.Remove(socketPath)
 	}()
 	reader := linuxhoststate.New()
+	// State reads only show SMART readings and refresh them in the
+	// background; the first read then already has them.
+	go func() {
+		if err := reader.RefreshSMART(context.Background()); err != nil {
+			logger.Warn("initial SMART read failed", "error", err)
+		}
+	}()
 	mountPoint := environment("ANAS_DATA_MOUNT", "/srv/a-nas/data")
 	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
 		MountPoint:   mountPoint,
