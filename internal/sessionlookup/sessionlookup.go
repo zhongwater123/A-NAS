@@ -49,9 +49,10 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-// NewHandler serves ResolvePath for one resolver, and AccountUIDPath when the
-// resolver also looks accounts up by UID.
-func NewHandler(resolver Resolver, logger *slog.Logger) http.Handler {
+// NewHandler serves ResolvePath for one resolver, and AccountUIDPath only when
+// accountResolver is set: the lookup by UID names any account to whoever asks,
+// so it is on only while the photo service serves assistants.
+func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -75,7 +76,7 @@ func NewHandler(resolver Resolver, logger *slog.Logger) http.Handler {
 			writeJSON(w, http.StatusOK, user)
 		}
 	})
-	if accountResolver, ok := resolver.(AccountResolver); ok {
+	if accountResolver != nil {
 		mux.HandleFunc("POST "+AccountUIDPath, func(w http.ResponseWriter, r *http.Request) {
 			var request accountRequest
 			decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<10))

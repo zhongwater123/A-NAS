@@ -166,8 +166,14 @@ func serveSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger
 	if err != nil {
 		return nil, fmt.Errorf("listen for photo session lookups: %w", err)
 	}
+	// Looking accounts up by UID serves the photo service's socket for members' AI
+	// assistants (ADR 0022), which is not shipped yet; it stays off until named.
+	var accountsByUID sessionlookup.AccountResolver
+	if os.Getenv("ANAS_PHOTO_ASSISTANT_LOOKUP") == "1" {
+		accountsByUID = sessions
+	}
 	server := &http.Server{
-		Handler:           sessionlookup.NewHandler(sessions, logger),
+		Handler:           sessionlookup.NewHandler(sessions, accountsByUID, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 	}
 	go func() {

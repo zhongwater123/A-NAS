@@ -117,8 +117,14 @@ func Run(parent context.Context, config Config) error {
 	}
 	var assistantListener net.Listener
 	if config.AssistantSocketPath != "" {
-		// Any member's assistant connects; the peer's UID says which member.
-		if assistantListener, err = listen(config.AssistantSocketPath, 0o666); err != nil {
+		// Any member's assistant connects; the peer's UID says which member. The
+		// socket is open to every UID, so its directory must keep out all but the
+		// sandboxes systemd binds the socket into.
+		err = requirePrivateDirectory(filepath.Dir(config.AssistantSocketPath))
+		if err == nil {
+			assistantListener, err = listen(config.AssistantSocketPath, 0o666)
+		}
+		if err != nil {
 			_ = listener.Close()
 			return err
 		}
@@ -177,16 +183,27 @@ func Run(parent context.Context, config Config) error {
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	var shutdownErr error
 	if assistantServer != nil {
-		if err := assistantServer.Shutdown(shutdown); err != nil {
-			return err
-		}
+		shutdownErr = assistantServer.Shutdown(shutdown)
 		_ = os.Remove(config.AssistantSocketPath)
 	}
-	if err := server.Shutdown(shutdown); err != nil {
+	shutdownErr = errors.Join(shutdownErr, server.Shutdown(shutdown))
+	_ = os.Remove(config.SocketPath)
+	return shutdownErr
+}
+
+// requirePrivateDirectory accepts dir only when it is a directory of this
+// service that nobody else may enter.
+func requirePrivateDirectory(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
 		return err
 	}
-	_ = os.Remove(config.SocketPath)
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || int(stat.Uid) != os.Geteuid() || info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("%s must be a directory private to the photo service: its assistant socket is open to every UID", dir)
+	}
 	return nil
 }
 

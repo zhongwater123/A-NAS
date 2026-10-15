@@ -78,14 +78,42 @@ class PhotoError(Exception):
 
 
 def photos(path: str, **query) -> dict:
+    """One read of the photo API; any failure is a PhotoError the model can read."""
     query = {key: value for key, value in query.items() if value}
     conn = UnixHTTP(PHOTOS)
-    conn.request("GET", "/api/v1/photos" + path + ("?" + urllib.parse.urlencode(query) if query else ""))
-    response = conn.getresponse()
-    body = json.loads(response.read() or b"{}")
+    try:
+        conn.request("GET", "/api/v1/photos" + path + ("?" + urllib.parse.urlencode(query) if query else ""))
+        response = conn.getresponse()
+        raw = response.read()
+    except OSError:
+        # Also what an assistant sees after the photo service restarted under it.
+        raise PhotoError("相册暂时连不上，请稍后再试") from None
+    finally:
+        conn.close()
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        raise PhotoError(f"相册返回了看不懂的结果（{response.status}）") from None
     if response.status != 200:
         raise PhotoError((body.get("error") or {}).get("message") or f"相册返回 {response.status}")
     return body
+
+
+# A month of one library longer than this is reported as cut short.
+MONTH_LIMIT = 2000
+
+
+def every_page(path: str, **query) -> tuple[list[dict], bool]:
+    """All items of a paged listing, up to MONTH_LIMIT; True when there were more."""
+    items, cursor = [], ""
+    while True:
+        page = photos(path, cursor=cursor, limit="500", **query)
+        items += page["items"]
+        cursor = page.get("next") or ""
+        if not cursor:
+            return items, False
+        if len(items) >= MONTH_LIMIT:
+            return items, True
 
 
 def libraries() -> dict[str, str]:
@@ -153,11 +181,15 @@ def browse_photos(month: str = "", album_id: str = "", tag: str = "", page: str 
     try:
         libs = libraries()
         if month:
-            items = []
+            items, cut = [], False
             for library in libs:
-                items += photos(f"/libraries/{library}/timeline", month=month, limit="200")["items"]
+                found, more = every_page(f"/libraries/{library}/timeline", month=month)
+                items, cut = items + found, cut or more
             items.sort(key=lambda asset: asset.get("takenAt") or "")
-            return result({"month": month, "photos": [photo(asset, libs) for asset in items]})
+            data = {"month": month, "count": len(items), "photos": [photo(asset, libs) for asset in items]}
+            if cut:
+                data["note"] = f"这个月的照片太多，只列出了前 {len(items)} 张，实际更多。"
+            return result(data)
         if album_id:
             return paged(photos(f"/albums/{urllib.parse.quote(album_id, safe='')}/assets", cursor=page), libs)
         if tag:

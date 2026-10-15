@@ -3,6 +3,7 @@ package photos_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -83,13 +84,24 @@ func TestAssistantCreatesNothingForAMemberWhoNeverOpenedPhotos(t *testing.T) {
 
 func TestAssistantChangesNothing(t *testing.T) {
 	ctx := context.Background()
-	service, _, _ := newService(t)
+	service := labelService(t, filepath.Join(t.TempDir(), "photos"), &colorEmbedder{}, colourLabels(t, "colour-1"))
 	member := photos.Principal{UserID: alice.UserID, Username: "alice"}
 	alicePrivate, shared := libraries(t, service, member)
+	directory, err := service.CreateDirectory(ctx, member, alicePrivate.ID, "", "Trip")
+	if err != nil {
+		t.Fatalf("CreateDirectory() error = %v", err)
+	}
 	own := importPhoto(t, service, member, alicePrivate.ID, "", "own.png", pngBytes(t, 5))
+	tagged := importPhoto(t, service, member, alicePrivate.ID, directory.ID, "tagged.png", pngBytes(t, 7))
+	if _, err := service.AddTag(ctx, member, tagged.ID, "青岛"); err != nil {
+		t.Fatalf("AddTag() error = %v", err)
+	}
 	album, err := service.CreateAlbum(ctx, member, alicePrivate.ID, "Trip")
 	if err != nil {
 		t.Fatalf("CreateAlbum() error = %v", err)
+	}
+	if _, err := service.AddToAlbum(ctx, member, album.ID, tagged.ID); err != nil {
+		t.Fatalf("AddToAlbum() error = %v", err)
 	}
 	trashed := importPhoto(t, service, member, alicePrivate.ID, "", "old.png", pngBytes(t, 6))
 	if _, err := service.Trash(ctx, member, trashed.ID); err != nil {
@@ -99,17 +111,38 @@ func TestAssistantChangesNothing(t *testing.T) {
 	assistant := photos.Principal{UserID: alice.UserID, Username: "someone-else", Assistant: true}
 
 	writes := map[string]func() error{
-		"tag": func() error { _, err := service.AddTag(ctx, assistant, own.ID, "海边"); return err },
+		"tag":           func() error { _, err := service.AddTag(ctx, assistant, own.ID, "海边"); return err },
+		"untag":         func() error { _, err := service.RemoveTag(ctx, assistant, tagged.ID, "青岛"); return err },
+		"hide-ai-label": func() error { _, err := service.HideAILabel(ctx, assistant, own.ID, "red"); return err },
+		"rename": func() error {
+			_, err := service.Update(ctx, assistant, own.ID, photos.AssetUpdate{Name: new("renamed.png")})
+			return err
+		},
+		"move": func() error {
+			_, err := service.Update(ctx, assistant, own.ID, photos.AssetUpdate{DirectoryID: &directory.ID})
+			return err
+		},
+		"trash": func() error { _, err := service.Trash(ctx, assistant, own.ID); return err },
 		"album": func() error {
 			_, err := service.CreateAlbum(ctx, assistant, alicePrivate.ID, "Beach")
 			return err
 		},
-		"add-to-album": func() error { _, err := service.AddToAlbum(ctx, assistant, album.ID, own.ID); return err },
+		"rename-album":      func() error { _, err := service.RenameAlbum(ctx, assistant, album.ID, "Beach"); return err },
+		"delete-album":      func() error { return service.DeleteAlbum(ctx, assistant, album.ID) },
+		"add-to-album":      func() error { _, err := service.AddToAlbum(ctx, assistant, album.ID, own.ID); return err },
+		"remove-from-album": func() error { return service.RemoveFromAlbum(ctx, assistant, album.ID, tagged.ID) },
 		"directory": func() error {
 			_, err := service.CreateDirectory(ctx, assistant, shared.ID, "", "Trip")
 			return err
 		},
-		"empty-trash": func() error { _, err := service.EmptyTrash(ctx, assistant, alicePrivate.ID); return err },
+		"rename-directory": func() error {
+			_, err := service.UpdateDirectory(ctx, assistant, directory.ID, photos.DirectoryUpdate{Name: new("Beach")})
+			return err
+		},
+		"delete-directory": func() error { return service.DeleteDirectory(ctx, assistant, directory.ID) },
+		"empty-trash":      func() error { _, err := service.EmptyTrash(ctx, assistant, alicePrivate.ID); return err },
+		"open":             func() error { _, err := service.Open(ctx, assistant, own.ID); return err },
+		"thumbnail":        func() error { _, err := service.Thumbnail(ctx, assistant, own.ID); return err },
 	}
 	for name, write := range writes {
 		if err := write(); !errors.Is(err, photos.ErrForbidden) {
@@ -120,12 +153,20 @@ func TestAssistantChangesNothing(t *testing.T) {
 	if _, err := service.Get(ctx, assistant, trashed.ID); !errors.Is(err, photos.ErrNotFound) {
 		t.Errorf("Get() of a trashed photo error = %v, want ErrNotFound", err)
 	}
-	asset, err := service.Get(ctx, member, own.ID)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if len(asset.Tags) != 0 || len(asset.Albums) != 0 {
-		t.Fatalf("photo after the assistant's attempts = %+v, want no tags or albums", asset)
+	for _, check := range []struct {
+		asset      photos.Asset
+		name       string
+		directory  string
+		tags, albs int
+	}{{own, "own.png", "", 0, 0}, {tagged, "tagged.png", directory.ID, 1, 1}} {
+		asset, err := service.Get(ctx, member, check.asset.ID)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if asset.Name != check.name || asset.DirectoryID != check.directory || asset.Trash != nil ||
+			len(asset.Tags) != check.tags || len(asset.Albums) != check.albs {
+			t.Fatalf("photo after the assistant's attempts = %+v", asset)
+		}
 	}
 	all, err := service.Libraries(ctx, assistant)
 	if err != nil {
@@ -133,5 +174,26 @@ func TestAssistantChangesNothing(t *testing.T) {
 	}
 	if all[0].ID != alicePrivate.ID || all[0].OwnerName != "alice" {
 		t.Fatalf("own library = %+v, want alice's, still named alice", all[0])
+	}
+}
+
+func TestAssistantSeesNoOtherMembersNames(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+	aliceNamed := photos.Principal{UserID: alice.UserID, Username: "alice"}
+	bobNamed := photos.Principal{UserID: bob.UserID, Username: "bob"}
+	alicePrivate, _ := libraries(t, service, aliceNamed)
+	bobPrivate, _ := libraries(t, service, bobNamed)
+	same := pngBytes(t, 8)
+	photo := importPhoto(t, service, aliceNamed, alicePrivate.ID, "", "same.png", same)
+	importPhoto(t, service, bobNamed, bobPrivate.ID, "", "same.png", same)
+
+	asset, err := service.Get(ctx, aliceNamed, photo.ID)
+	if err != nil || !slices.Equal(asset.AlsoKeptBy, []string{"bob"}) {
+		t.Fatalf("member's view = %+v, %v; want bob in AlsoKeptBy", asset.AlsoKeptBy, err)
+	}
+	asset, err = service.Get(ctx, photos.Principal{UserID: alice.UserID, Username: "alice", Assistant: true}, photo.ID)
+	if err != nil || len(asset.AlsoKeptBy) != 0 {
+		t.Fatalf("assistant's view = %+v, %v; want no other member's name", asset.AlsoKeptBy, err)
 	}
 }

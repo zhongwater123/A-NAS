@@ -147,7 +147,11 @@ func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, asse
 }
 
 // Open returns the original read-only. The caller must close Content.Reader.
+// An assistant gets no pixels: the model sees names, times and tags only.
 func (s *Service) Open(ctx context.Context, p Principal, assetID string) (Content, error) {
+	if p.Assistant {
+		return Content{}, ErrForbidden
+	}
 	record, err := s.visibleAsset(ctx, s.db, p, assetID)
 	if err != nil {
 		return Content{}, err

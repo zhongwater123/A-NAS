@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -93,8 +96,10 @@ func sharedLibrary(t *testing.T, r running, token string) string {
 }
 
 func TestAssistantIsTheMemberThePeerUIDNames(t *testing.T) {
-	// The administrator is viewing alice's private library (viewer-token).
-	r, socket := startWithAssistant(t, accounts.SessionUser{UserID: "user:admin", Username: "admin", Role: accounts.RoleAdmin})
+	// The administrator is viewing alice's private library (viewer-token), and even
+	// if the account lookup handed the grant on, the assistant would not use it.
+	r, socket := startWithAssistant(t, accounts.SessionUser{UserID: "user:admin", Username: "admin", Role: accounts.RoleAdmin,
+		Viewing: []accounts.LibraryViewing{{GrantID: "viewing:1", OwnerUserID: "user:alice", ExpiresAt: time.Now().Add(time.Hour)}}})
 	alicePrivate := r.privateLibrary(t, "alice-token")
 	adminPrivate := r.privateLibrary(t, "viewer-token")
 	shared := sharedLibrary(t, r, "alice-token")
@@ -131,9 +136,57 @@ func TestAssistantIsTheMemberThePeerUIDNames(t *testing.T) {
 	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/search?q=beach&viewing="+alicePrivate, nil); response.StatusCode != http.StatusNotFound {
 		t.Fatalf("search in the viewed library = %d, want 404", response.StatusCode)
 	}
-	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries/"+alicePrivate+"/timeline", asAlice); response.StatusCode != http.StatusNotFound {
-		t.Fatalf("timeline of the viewed library = %d, want 404", response.StatusCode)
+	// Every read that takes a library or a viewed library stays within the scope.
+	var album photos.Album
+	recorder := r.upload(t, "alice-token", alicePrivate, "beach-alice-2.png")
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("upload: %d", recorder.Code)
 	}
+	var aliceAsset photos.Asset
+	_ = json.NewDecoder(recorder.Body).Decode(&aliceAsset)
+	if err := sessionJSON(t, r, "alice-token", http.MethodPost, "/api/v1/photos/libraries/"+alicePrivate+"/albums", `{"name":"Trip"}`, &album); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/v1/photos/libraries/" + alicePrivate + "/timeline",
+		"/api/v1/photos/libraries/" + alicePrivate + "/timeline/months",
+		"/api/v1/photos/libraries/" + alicePrivate + "/albums",
+		"/api/v1/photos/albums/" + album.ID + "/assets",
+		"/api/v1/photos/assets/" + aliceAsset.ID,
+		"/api/v1/photos/assets/" + aliceAsset.ID + "/similar",
+		"/api/v1/photos/tags?viewing=" + alicePrivate,
+		"/api/v1/photos/tags/x/assets?viewing=" + alicePrivate,
+		"/api/v1/photos/search?q=beach&library=" + alicePrivate,
+		"/api/v1/photos/assets/" + sharedAsset(t, socket) + "/similar?viewing=" + alicePrivate,
+	} {
+		if response := assistantRequest(t, socket, http.MethodGet, path, asAlice); response.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, response.StatusCode)
+		}
+	}
+}
+
+// sharedAsset returns the ID of a photo in the shared library, as the assistant sees it.
+func sharedAsset(t *testing.T, socket string) string {
+	t.Helper()
+	for _, asset := range decodeItems[photos.Asset](t, assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/search?q=beach-shared", nil)) {
+		return asset.ID
+	}
+	t.Fatal("no shared photo")
+	return ""
+}
+
+// sessionJSON sends one JSON request through the Product Service's proxy.
+func sessionJSON(t *testing.T, r running, token, method, path, body string, out any) error {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(accounts.WithSessionToken(request.Context(), token))
+	recorder := httptest.NewRecorder()
+	photosapi.NewProxy(r.socket, nil).ServeHTTP(recorder, request)
+	if recorder.Code >= 300 {
+		return fmt.Errorf("%s %s: %d %s", method, path, recorder.Code, recorder.Body)
+	}
+	return json.NewDecoder(recorder.Body).Decode(out)
 }
 
 func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
@@ -164,12 +217,33 @@ func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
 		{http.MethodPost, "/api/v1/photos/assets/" + asset.ID + "/tags"},
 	} {
 		response := assistantRequest(t, socket, request[0], request[1], nil)
-		if response.StatusCode != http.StatusNotFound && response.StatusCode != http.StatusMethodNotAllowed {
-			t.Errorf("%s %s = %d, want it out of the assistant's reach", request[0], request[1], response.StatusCode)
+		if response.StatusCode != http.StatusNotFound || errorCode(t, response) != "not_found" {
+			t.Errorf("%s %s = %d, want 404 not_found", request[0], request[1], response.StatusCode)
 		}
 	}
 	if response := r.get(t, "/api/v1/photos/assets/"+asset.ID, "alice-token"); response.StatusCode != http.StatusOK {
 		t.Fatalf("the member's photo after the assistant's attempts: %d", response.StatusCode)
+	}
+}
+
+func TestAssistantSocketNeedsAPrivateDirectory(t *testing.T) {
+	dir, err := os.MkdirTemp("", "photos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = photoservice.Run(context.Background(), photoservice.Config{
+		Root: filepath.Join(dir, "store"), SocketPath: filepath.Join(dir, "photos.sock"), Sessions: knownSessions,
+		AssistantSocketPath: filepath.Join(dir, "assistant.sock"), Accounts: uidAccounts{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "private") {
+		t.Fatalf("Run() with a shared directory error = %v, want a refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "assistant.sock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the assistant socket was created: %v", err)
 	}
 }
 

@@ -482,20 +482,26 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 
 ### 身份：相册服务按对端 UID 认人
 
-相册服务只认浏览器会话：`anas-api` 转发会话令牌，相册服务交给 Host Agent 换取账号，从不信任产品服务声明的身份（ADR 0011 决定 4）。助手调用工具时没有会话。如果由产品服务转告“这是账号 X 的助手”，产品服务被攻破就能读任何成员的私有图库，正是决定 4 拒绝的情形。所以照片工具不经产品服务：
+相册服务只认浏览器会话：`anas-api` 转发会话令牌，相册服务交给 Host Agent 换取账号，从不信任产品服务声明的身份（ADR 0011 决定 4）。助手调用工具时没有会话。照片工具因此不经产品服务，产品服务也不持有任何能读私有图库的身份：
 
-- 相册服务另开一个助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭；[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)）。沙箱中的 MCP 服务以成员本人的 UID 运行并直接连接它，相册服务从内核的对端凭据（`SO_PEERCRED`）取得 UID，再经 Host Agent 会话查询套接字上新增的 `/v1/accounts/resolve-uid` 确认这是一个在用账号（读 `linux_identities` 与 `users`，停用或不存在即 401；[`ResolveAccountUID`](../../internal/accounts/session_identity.go)）。请求里带的会话令牌一概不看。
-- 套接字所在目录只有相册服务能进；systemd 把套接字本身绑定进每个助手沙箱中的一个空文件上（[`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)）。宿主上成员自己的进程（终端、Samba）连不到它，在宿主上那个路径只是一个空文件。
-- 套接字只开放助手工具用到的 10 条读取路由；原图、缩略图、AI 状态、操作记录、回收站与一切写入都是 404 或 405。
+- 相册服务另开一个助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭；[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)）。沙箱中的 MCP 服务以成员本人的 UID 运行并直接连接它，相册服务从内核的对端凭据（`SO_PEERCRED`）取得 UID，再经 Host Agent 会话查询套接字上新增的 `/v1/accounts/resolve-uid` 确认这是一个在用账号（读 `linux_identities` 与 `users`，停用或不存在即 401；[`ResolveAccountUID`](../../internal/accounts/session_identity.go)）。请求里带的会话令牌一概不看。对端是 root 或取不到凭据时是接错了，返回 503 并记错误日志，不去问 Host Agent。
+- `/v1/accounts/resolve-uid` 能把任何 UID 对应到账号，所以 Host Agent 只在 `ANAS_PHOTO_ASSISTANT_LOOKUP=1` 时提供它，与相册服务的助手套接字一样默认关闭。
+- 这个套接字对所有 UID 开放（`0666`），挡住其他进程的是它所在的目录：相册服务打开它之前核对目录属于自己、组与其他人都进不去，否则拒绝启动（`requirePrivateDirectory`）。systemd 把套接字本身绑定进每个助手沙箱中的一个空文件上（[`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)），宿主上那个路径只是一个空文件。
+- 其他成员连不上这个套接字，也进不了别人沙箱的 `/proc/<pid>/root`。同一成员自己的进程（网页终端、以本人身份运行的 Samba 进程）能经 `/proc/<助手进程>/root/…` 进入沙箱的挂载命名空间连上它：读 `/proc/<pid>/root` 只要求与目标同一 UID，Yama 只限制附加，开发机 `ptrace_scope` 为 1 时也连上了（`photos-socket.sh` 实测；实验 NAS 为 0）。它得到的是这个成员自己的照片、只读，与助手看到的相同，不越过任何边界。
+- 套接字只开放助手工具用到的 10 条读取路由；其余一律回答照片 API 格式的 `not_found`（`{"error": {"code": "not_found", …}}`），包括原图、缩略图、AI 状态、操作记录、回收站与一切写入。
+
+剩下的风险在产品服务一侧：它持有每个成员实例的套接字与 `serve` 令牌（上文“沙箱中以 `hermes serve` 代替 API Server”的“鉴权”），被攻破时可以在成员不在线时指挥任何成员的助手调用这 4 个只读工具（它们不需要审批），读到这个人私有图库中照片的名称、拍摄时间、标签与相册，只是拿不到像素；同一条路也能读这个成员个人空间的文件。用户 2026-10-15 [决定](https://github.com/zhongwater123/A-NAS/pull/121#issuecomment-6186654287)加会话闸门：到达成员实例的连接先由一个组件向 Host Agent 核对这个成员的在线会话再转给实例，“提交更改”的确认授权也由执行方凭有效会话登记，在集成时实现并写入 ADR 0022。有了闸门之后，产品服务被攻破只能经正在登录的成员的助手读这些元数据，与 ADR 0011 的威胁模型一致；ADR 0011 已补上这条身份路径。
 
 ### 助手 Principal
 
 `photos.Principal` 增加 `Assistant`（[`policy.go`](../../internal/photos/policy.go)）：
 
 - Policy 对助手拒绝一切新增与更改（导入、复制、改名、移动、删除、标签、相册、目录、AI 纠错），忽略查看授权，即使成员是管理员；所以只能看到本人的私有图库与共享图库。回收站中的照片也看不到，因为能看到的前提是能恢复。清空回收站对助手直接拒绝。
+- 原图与缩略图对助手在服务层就拒绝（不只靠套接字的路由白名单）；照片详情里的“也被谁保存”（`alsoKeptBy`，其他成员的名字）对助手不填。
 - 列出图库与搜索范围原本会在成员第一次访问时创建他的私有图库、并更新图库的所有者名；助手只查不建，成员没打开过相册时它只看到共享图库。
 - 照片 API 对助手只放行 GET 与 HEAD（以图搜图的 POST 也不行）。
-- 测试：权限矩阵增加“本人的助手”与“持有查看授权的管理员的助手”两列（40 个子测试，[`policy_test.go`](../../internal/photos/policy_test.go)），[`assistant_test.go`](../../internal/photos/assistant_test.go)、照片服务 3 个（[`assistant_test.go`](../../internal/photoservice/assistant_test.go)：对端 UID 决定身份、只开放读取路由、需要在用账号）、API 1 个、Host Agent 查询 3 个。
+- 助手的请求和成员自己的一样会让后台 AI 任务继续等待（`gate.Touch`），循环调用会推迟索引；相册服务没有按 UID 的并发上限，Hermes 对同一 MCP 服务器的调用是串行的。
+- 测试：权限矩阵增加“本人的助手”与“持有查看授权的管理员的助手”两列（40 个子测试，[`policy_test.go`](../../internal/photos/policy_test.go)）；[`assistant_test.go`](../../internal/photos/assistant_test.go) 4 个，覆盖矩阵之外的每一种更改（相册改名与删除、移出相册、去掉标签、AI 纠错、移动、目录改名与删除）以及原图、缩略图与别人的名字；照片服务 5 个（[`assistant_test.go`](../../internal/photoservice/assistant_test.go) 与 [`assistant_internal_test.go`](../../internal/photoservice/assistant_internal_test.go)：对端 UID 决定身份、Host Agent 带回的查看授权也不用、`viewing=` 与他人图库的相册和找相似都 404、只开放读取路由且其余为 JSON `not_found`、目录不私有就拒绝启动、需要在用账号、root 是接错）、照片 API 1 个、Host Agent 查询 3 个（含默认关闭）。
 
 ### MCP 只读工具
 
@@ -508,12 +514,12 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 | `photo_details(photo_id)` | `GET /assets/{id}` | 名称、拍摄时间、图库、尺寸、标签与相册 |
 | `similar_photos(photo_id, page)` | `GET /assets/{id}/similar` | 画面相似的照片 |
 
-每张照片给模型的只有编号、名称、拍摄时间（`taken`）、图库（我的或共享）与本人的标签和相册。工具结果的文本就是一段 JSON，同时作为 `structuredContent`；两者相同时 Hermes 只传一份（`tools/mcp_tool_handlers.py:505-563`）。相册现在没有拍摄地点（只读 EXIF 时间，没有 GPS），认不出人，没有 AI 描述，搜索也没有时间条件；工具说明写明这些，“去年”由模型按 `taken` 自己筛。
+每张照片给模型的只有编号、名称、拍摄时间（`taken`）、图库（我的或共享）与本人的标签和相册。工具结果的文本就是一段 JSON，同时作为 `structuredContent`；两者相同时 Hermes 只传一份（`tools/mcp_tool_handlers.py:505-563`）。相册现在没有拍摄地点（只读 EXIF 时间，没有 GPS），认不出人，没有 AI 描述，搜索也没有时间条件；工具说明写明这些，“去年”由模型按 `taken` 自己筛。按月浏览会翻完所有页（每个图库最多 2,000 张，超过时在结果中注明不完整）。相册连不上（例如相册服务刚重启）或回答的不是 JSON 时，工具给模型一句中文错误（“相册暂时连不上，请稍后再试”），不把异常原样交给模型。
 
 spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 从本仓库编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面内容的替身 AI Worker，以及 18 张种子照片（alice 私有 13 张，含一个“2025 夏天 青岛”相册与“青岛”标签；bob 私有 2 张；共享 3 张）。结果：
 
-- 探针增加 3 项，共 41 项通过。
-- [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh) 17 项通过：两个成员的助手各自只看到本人与共享的图库和照片；拿着 bob 照片的编号也打不开；随请求带上会话令牌没有作用；缩略图与改名被拒绝；沙箱里连不到相册服务自己的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到；不是成员的 UID 得到 401。
+- 探针增加 3 项，变基到集成分支后共 42 项通过。
+- [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh) 19 项通过：两个成员的助手各自只看到本人与共享的图库和照片；拿着 bob 照片的编号也打不开；随请求带上会话令牌没有作用；缩略图与改名得到 JSON 的 `not_found`；沙箱里连不到相册服务自己的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员也进不了 alice 的 `/proc/<pid>/root`；对端是 root 时得到 503；相册服务重启后，正在运行的助手连接被拒绝，照片工具告诉模型“相册暂时连不上”，助手实例重启后恢复。
 - [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)（假模型）：4 个工具都正常返回，没有一个请求审批；同一会话中的“提交更改”照常请求审批。
 - 替身 Worker 的局限：查询里没有它认识的内容词时（如“青岛”“去年夏天”），所有照片同样相似，`closest` 为全部照片；按名称和标签匹配的照片仍排在最前。真实的向量检索会给出有高有低的相似度。
 

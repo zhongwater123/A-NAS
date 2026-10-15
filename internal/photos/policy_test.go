@@ -113,10 +113,10 @@ func TestPolicyMatrix(t *testing.T) {
 	want := map[string]map[string][]error{
 		// Order follows principals: owner, member, admin, viewing admin,
 		// expired viewing admin, member with a grant, owner's assistant,
-		// viewing admin's assistant.
+		// viewing admin's assistant. An assistant reads no originals at all.
 		"private": {
 			"get":                 {ok, notFound, notFound, ok, notFound, notFound, ok, notFound},
-			"open":                {ok, notFound, notFound, ok, notFound, notFound, ok, notFound},
+			"open":                {ok, notFound, notFound, ok, notFound, notFound, forbidden, forbidden},
 			"timeline":            {ok, notFound, notFound, ok, notFound, notFound, ok, notFound},
 			"import":              {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, notFound},
 			"rename":              {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, notFound},
@@ -131,7 +131,7 @@ func TestPolicyMatrix(t *testing.T) {
 		// which creates nothing, has no private library to copy into.
 		"shared": {
 			"get":                 {ok, ok, ok, ok, ok, ok, ok, ok},
-			"open":                {ok, ok, ok, ok, ok, ok, ok, ok},
+			"open":                {ok, ok, ok, ok, ok, ok, forbidden, forbidden},
 			"timeline":            {ok, ok, ok, ok, ok, ok, ok, ok},
 			"import":              {ok, ok, ok, ok, ok, ok, forbidden, forbidden},
 			"rename":              {ok, forbidden, ok, ok, ok, forbidden, forbidden, forbidden},

@@ -6,7 +6,9 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 # scripts/build-system-test-image.sh now includes them; an image built before needs them.
+# The image's own package index is tried first: refreshing it from a slow mirror takes minutes.
 command -v socat >/dev/null && command -v rg >/dev/null && command -v tini >/dev/null ||
+  apt-get install -y -qq socat ripgrep tini >/dev/null 2>&1 ||
   { apt-get update -qq && apt-get install -y -qq socat ripgrep tini >/dev/null; }
 mkdir -p /opt/a-nas/assistant-runtimes
 tar -C /opt/a-nas/assistant-runtimes -xzf /spike-out/runtime.tar.gz

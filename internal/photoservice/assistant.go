@@ -63,12 +63,16 @@ func withPeerUID(ctx context.Context, conn net.Conn) context.Context {
 	return context.WithValue(ctx, peerUIDKey{}, int(cred.Uid))
 }
 
-// assistantAPI serves only assistantRoutes, and only for reading.
+// assistantAPI serves only assistantRoutes, and only for reading; anything
+// else is not_found, in the photo API's error format.
 func assistantAPI(api http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range assistantRoutes {
 		mux.Handle("GET "+photosapi.PathPrefix+route, api)
 	}
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		photosapi.WriteError(w, http.StatusNotFound, "not_found", "the assistant cannot use this part of the photo library")
+	})
 	return mux
 }
 
@@ -78,8 +82,11 @@ func assistantAPI(api http.Handler) http.Handler {
 func authenticateAssistant(resolver AccountResolver, logger *slog.Logger, gate *Gate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := r.Context().Value(peerUIDKey{}).(int)
-		if !ok {
-			photosapi.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+		if !ok || uid <= 0 {
+			// Only assistants, running as members, reach this socket: no credentials
+			// or root at the other end means it is wired wrong.
+			logger.ErrorContext(r.Context(), "assistant socket peer is not a member", "uid", uid, "credentials", ok)
+			photosapi.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 			return
 		}
 		user, err := resolver.ResolveAccountUID(r.Context(), uid)

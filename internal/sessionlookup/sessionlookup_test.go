@@ -33,7 +33,7 @@ func TestClientResolvesThroughTheSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	alice := accounts.SessionUser{UserID: "user:alice", Username: "alice", Role: accounts.RoleMember}
-	server := &http.Server{Handler: sessionlookup.NewHandler(sessions{"alice-token": alice}, nil)}
+	server := &http.Server{Handler: sessionlookup.NewHandler(sessions{"alice-token": alice}, nil, nil)}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 	client := sessionlookup.NewClient(socket)
@@ -70,14 +70,14 @@ func (d directory) ResolveAccountUID(_ context.Context, uid int) (accounts.Sessi
 	return user, nil
 }
 
-func serve(t *testing.T, resolver sessionlookup.Resolver) *sessionlookup.Client {
+func serve(t *testing.T, resolver sessionlookup.Resolver, accountResolver sessionlookup.AccountResolver) *sessionlookup.Client {
 	t.Helper()
 	socket := filepath.Join(t.TempDir(), "sessions.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: sessionlookup.NewHandler(resolver, nil)}
+	server := &http.Server{Handler: sessionlookup.NewHandler(resolver, accountResolver, nil)}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 	return sessionlookup.NewClient(socket)
@@ -85,7 +85,8 @@ func serve(t *testing.T, resolver sessionlookup.Resolver) *sessionlookup.Client 
 
 func TestClientResolvesAccountsByUID(t *testing.T) {
 	alice := accounts.SessionUser{UserID: "user:alice", Username: "alice", Role: accounts.RoleMember}
-	client := serve(t, directory{sessions: sessions{}, uids: map[int]accounts.SessionUser{20101: alice}})
+	lookup := directory{sessions: sessions{}, uids: map[int]accounts.SessionUser{20101: alice}}
+	client := serve(t, lookup, lookup)
 	ctx := context.Background()
 
 	if user, err := client.ResolveAccountUID(ctx, 20101); err != nil || !reflect.DeepEqual(user, alice) {
@@ -104,8 +105,9 @@ func TestClientResolvesAccountsByUID(t *testing.T) {
 	}
 }
 
-func TestAccountLookupIsServedOnlyByAResolverThatHasIt(t *testing.T) {
-	client := serve(t, sessions{})
+func TestAccountLookupIsOffUnlessGiven(t *testing.T) {
+	// The directory could look accounts up, but the handler was not given it.
+	client := serve(t, directory{sessions: sessions{}, uids: map[int]accounts.SessionUser{}}, nil)
 	if _, err := client.ResolveAccountUID(context.Background(), 20101); err == nil || errors.Is(err, accounts.ErrUserNotFound) {
 		t.Fatalf("error = %v, want the lookup to be unavailable", err)
 	}
