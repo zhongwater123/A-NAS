@@ -26,13 +26,32 @@ export interface PhotoAsset {
   // User tags and albums; only a single photo's details carry them.
   tags?: string[];
   albums?: { id: string; name: string }[];
+  // The faces and pets in the photo, with who each is in its library; only a
+  // single photo's details carry them.
+  people?: PhotoAssetPerson[];
 }
+// A person or pet of one library, found by local AI and named by members.
+// coverId is the occurrence whose avatar stands for them; canChange says
+// whether the caller may name, merge, hide and correct them.
+export interface PhotoPerson {
+  id: string;
+  libraryId: string;
+  kind: "person" | "cat" | "dog";
+  name: string;
+  hidden: boolean;
+  photos: number;
+  coverId: string;
+  canChange: boolean;
+}
+// A face or pet in a photo; personId is absent while it is nobody yet.
+export interface PhotoAssetPerson { occurrenceId: string; kind: "face" | "cat" | "dog"; personId?: string; name?: string }
 export interface PhotoAlbum { id: string; libraryId: string; name: string; createdBy: string; createdAt: string; photos: number; coverId?: string }
 export interface PhotoPage { items: PhotoAsset[]; next?: string }
 // semantic is false when local AI could not encode the query and only names
 // and user tags were matched. closest counts the results, over all pages, in
 // the closest group; the results after them are less related.
-export interface PhotoSearchPage extends PhotoPage { semantic: boolean; closest: number; objects?: PhotoObjectsFound }
+// people are the person names in the query; the results keep to their photos.
+export interface PhotoSearchPage extends PhotoPage { semantic: boolean; closest: number; objects?: PhotoObjectsFound; people?: string[] }
 // For a query about things the object detector finds reliably, such as 手机:
 // the closest group is the photos it found them in. undetected counts the
 // photos in scope it has not looked at yet.
@@ -54,6 +73,7 @@ export interface PhotoAIStatus {
   reason?: string;
   model?: string;
   objectModel?: string;
+  faceModel?: string;
   ready: number;
   pending: number;
   failed: number;
@@ -102,6 +122,21 @@ export const listTagPhotos = (name: string, viewing = "", cursor = "", limit = 1
 // Takes a photo out of an AI cluster, for that photo only.
 export const hideAILabel = (assetId: string, labelId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}/ai-labels/${id(labelId)}`, { method: "DELETE" }, true);
 export const getAIStatus = () => request<PhotoAIStatus>(`${base}/ai`);
+export const listPeople = async (viewing = "", hidden = false) =>
+  (await request<{ items: PhotoPerson[] }>(`${base}/people${hidden || viewing ? "?" : ""}${[viewing && `viewing=${id(viewing)}`, hidden && "hidden=1"].filter(Boolean).join("&")}`)).items;
+export const listPersonPhotos = (personId: string, cursor = "", limit = 120) =>
+  request<PhotoPage>(`${base}/people/${id(personId)}/assets?${page(cursor, limit)}`);
+export const updatePerson = (personId: string, change: { name?: string; hidden?: boolean; coverId?: string }) =>
+  request<PhotoPerson>(`${base}/people/${id(personId)}`, json("PATCH", change), true);
+// Every face of personId moves into the other person, which keeps its name
+// (or takes this one's); personId is gone afterwards.
+export const mergePeople = (personId: string, into: string) => request<PhotoPerson>(`${base}/people/${id(personId)}/merge`, json("POST", { into }), true);
+// Takes a photo out of a person for good; local AI never puts it back.
+export const removeFromPerson = (personId: string, assetId: string) => request<void>(`${base}/people/${id(personId)}/assets/${id(assetId)}`, { method: "DELETE" }, true);
+// Says who a face or pet in a photo is: an existing person, or a new one by name.
+export const assignFace = (assetId: string, occurrenceId: string, who: { personId: string } | { name: string }) =>
+  request<PhotoAsset>(`${base}/assets/${id(assetId)}/people/${id(occurrenceId)}`, json("PUT", who), true);
+export const avatarURL = (occurrenceId: string) => `${base}/occurrences/${id(occurrenceId)}/avatar`;
 export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal, motion?: File) {
   const body = new FormData();
   body.set("file", file);

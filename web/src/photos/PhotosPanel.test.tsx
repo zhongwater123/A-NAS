@@ -679,6 +679,85 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
   });
 });
 
+describe("PhotosPanel people and pets", () => {
+  const ming = { id: "person:ming", libraryId: "library:mine", kind: "person", name: "小明", hidden: false, photos: 3, coverId: "face:ming", canChange: true };
+  const nameless = { id: "person:new", libraryId: "library:mine", kind: "person", name: "", hidden: false, photos: 2, coverId: "face:new", canChange: true };
+  const cat = { id: "person:cat", libraryId: "library:shared", kind: "cat", name: "", hidden: true, photos: 4, coverId: "face:cat", canChange: true };
+
+  it("lists people and pets on AI 聚合, names a person and takes a wrong photo out", async () => {
+    let named = "";
+    let removed = false;
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, { ...nameless, name: named }, cat] });
+      if (url === "/api/v1/photos/people/person%3Anew" && init?.method === "PATCH") {
+        named = JSON.parse(String(init.body)).name;
+        return json({ ...nameless, name: named });
+      }
+      if (url.startsWith("/api/v1/photos/people/person%3Anew/assets?")) return json({ items: removed ? [asset("photo:grandma")] : [asset("photo:grandma"), asset("photo:aunt")] });
+      if (url === "/api/v1/photos/people/person%3Anew/assets/photo%3Aaunt" && init?.method === "DELETE") { removed = true; return new Response(null, { status: 204 }); }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+    const row = await screen.findByLabelText("人物与宠物");
+    // Named people first; a nameless one invites a name; hidden ones wait.
+    const cards = within(row).getAllByRole("button", { name: /^打开 / });
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["打开 小明", "打开 未命名"]);
+    expect(within(row).getByText("添加名字")).toBeTruthy();
+    expect(screen.getByText(/照片和人脸都在这台 NAS 上由本地 AI 识别/)).toBeTruthy();
+    await user.click(within(row).getByRole("button", { name: "已隐藏 1 位" }));
+    expect(within(row).getByRole("button", { name: "打开 未命名的猫" })).toBeTruthy();
+
+    await user.click(within(row).getByRole("button", { name: "打开 未命名" }));
+    expect(await screen.findByRole("heading", { name: "未命名" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Anew/assets?limit=120", expect.anything());
+    await user.click(screen.getByRole("button", { name: "添加名字" }));
+    await user.type(await screen.findByRole("textbox", { name: "名字" }), "奶奶");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("heading", { name: "奶奶" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Anew", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: "奶奶" }) }));
+    expect(await screen.findByText("搜索“奶奶”就能找到 TA 的照片")).toBeTruthy();
+
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:aunt.jpg" }));
+    await user.click(screen.getByRole("button", { name: "不是奶奶" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Anew/assets/photo%3Aaunt", expect.objectContaining({ method: "DELETE" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "查看 photo:aunt.jpg" })).toBeNull());
+    expect(await screen.findByText("已从“奶奶”移出 1 张，照片仍在图库中")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByLabelText("人物与宠物")).toBeTruthy();
+  });
+
+  it("names a face in a photo's details by choosing someone already named", async () => {
+    let details: PhotoAsset = { ...asset("photo:party"), people: [{ occurrenceId: "face:1", kind: "face" }] };
+    const fetchMock = serve(
+      (url, init) => {
+        if (url === "/api/v1/photos/assets/photo%3Aparty" && !init?.method) return json(details);
+        if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, nameless] });
+        if (url === "/api/v1/photos/assets/photo%3Aparty/people/face%3A1" && init?.method === "PUT") {
+          details = { ...details, people: [{ occurrenceId: "face:1", kind: "face", personId: ming.id, name: "小明" }] };
+          return json(details);
+        }
+        if (url.startsWith("/api/v1/photos/people/person%3Aming/assets?")) return json({ items: [asset("photo:party")] });
+        return undefined;
+      },
+      timeline(privateLibrary.id, () => [asset("photo:party")]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:party.jpg");
+    const faces = await screen.findByLabelText("照片中的人物");
+    await user.click(within(faces).getByRole("button", { name: "这是谁？" }));
+    await user.type(within(faces).getByRole("textbox", { name: "名字" }), "小");
+    await user.click(await within(faces).findByRole("option", { name: /小明/ }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/assets/photo%3Aparty/people/face%3A1",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ personId: "person:ming" }) }));
+    await user.click(await within(faces).findByRole("button", { name: "小明" }));
+    expect(await screen.findByRole("heading", { name: "小明" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Aming/assets?limit=120", expect.anything());
+  });
+});
+
 describe("PhotosPanel search and viewing", () => {
   it("searches from any page into AI search and divides the closest results from the less related", async () => {
     const results: Record<string, object> = {
