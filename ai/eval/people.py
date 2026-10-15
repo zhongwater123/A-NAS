@@ -6,8 +6,11 @@ incrementally as they arrive. The candidates here are the Immich-style rule
 the plan describes, with the product's own constraints:
 
 - An occurrence joins a person when an already assigned occurrence within the
-  similarity threshold belongs to it ("nearest") or when most of its assigned
-  neighbours do ("majority").
+  similarity threshold belongs to it ("nearest"), when most of its assigned
+  neighbours do ("majority"), or when its nearest assigned neighbour's person
+  is also within the threshold of the person's mean vector ("centroid"): a
+  chain of look-alikes, one sibling to the next, drifts away from the mean
+  and stops there.
 - With no person nearby, it founds one when it has at least min_core - 1
   unassigned neighbours (itself included, min_core occurrences), and those
   neighbours join it.
@@ -48,6 +51,7 @@ def cluster(occurrences, threshold, min_core=3, assign="nearest", retry=True):
     vectors = np.stack([o.vector for o in occurrences]).astype(np.float32)
     person = np.full(count, -1, dtype=np.int64)
     photos_of = []  # person -> set of photos it already holds
+    sums = []  # person -> sum of its members' vectors
 
     def free_of(p, photo):
         return photo not in photos_of[p]
@@ -55,6 +59,11 @@ def cluster(occurrences, threshold, min_core=3, assign="nearest", retry=True):
     def join(i, p):
         person[i] = p
         photos_of[p].add(occurrences[i].photo)
+        sums[p] += vectors[i]
+
+    def near_mean(i, p):
+        mean = sums[p] / np.linalg.norm(sums[p])
+        return float(mean @ vectors[i]) >= threshold
 
     def place(i, seen):
         """Gives occurrence i a person among the first `seen` occurrences, if it earns one."""
@@ -72,6 +81,12 @@ def cluster(occurrences, threshold, min_core=3, assign="nearest", retry=True):
                 best = max(assigned, key=lambda j: similarity[j])
                 join(i, person[best])
                 return True
+            if assign == "centroid":
+                for j in sorted(assigned, key=lambda j: -similarity[j]):
+                    if near_mean(i, person[j]):
+                        join(i, person[j])
+                        return True
+                return False
             votes = collections.Counter(person[j] for j in assigned)
             top, top_votes = votes.most_common(1)[0]
             # A tie between two people is not a majority: leave it to the user.
@@ -89,6 +104,7 @@ def cluster(occurrences, threshold, min_core=3, assign="nearest", retry=True):
         if len(members) + 1 < min_core:
             return False
         photos_of.append(set())
+        sums.append(np.zeros(vectors.shape[1], np.float32))
         p = len(photos_of) - 1
         join(i, p)
         for j in members:
@@ -130,6 +146,15 @@ def score(occurrences, person):
         if p >= 0:
             split[o.identity].add(p)
     assigned = sum(1 for p in person if p >= 0)
+    # BCubed, per occurrence rather than per pair, so that a few people seen in
+    # hundreds of photos do not outweigh everyone else: of an occurrence's
+    # person, the share that is its identity; of its identity, the share in
+    # its person (an unassigned occurrence is alone).
+    together = collections.Counter((p, o.identity) for o, p in zip(occurrences, person) if p >= 0)
+    sizes = collections.Counter(p for p in person if p >= 0)
+    b_precision = sum(together[(p, o.identity)] / sizes[p] for o, p in zip(occurrences, person) if p >= 0)
+    b_recall = sum((together[(p, o.identity)] if p >= 0 else 1) / identities[o.identity]
+                   for o, p in zip(occurrences, person))
     return summary({
         "occurrences": len(occurrences),
         "identities": len(identities),
@@ -141,11 +166,13 @@ def score(occurrences, person):
         "mixedPeople": mixed,
         "splitIdentities": len(split),
         "identityPeople": sum(len(s) for s in split.values()),
+        "bPrecisionSum": b_precision,
+        "bRecallSum": b_recall,
     })
 
 
 COUNTS = ("occurrences", "identities", "people", "assigned", "clusteredPairs", "rightPairs", "samePairs",
-          "mixedPeople", "splitIdentities", "identityPeople")
+          "mixedPeople", "splitIdentities", "identityPeople", "bPrecisionSum", "bRecallSum")
 
 
 def summary(counts):
@@ -155,6 +182,8 @@ def summary(counts):
     found["recall"] = counts["rightPairs"] / counts["samePairs"] if counts["samePairs"] else 0.0
     found["coverage"] = counts["assigned"] / counts["occurrences"] if counts["occurrences"] else 0.0
     found["peoplePerIdentity"] = counts["identityPeople"] / counts["splitIdentities"] if counts["splitIdentities"] else 0.0
+    found["bcubedPrecision"] = counts["bPrecisionSum"] / counts["assigned"] if counts["assigned"] else 1.0
+    found["bcubedRecall"] = counts["bRecallSum"] / counts["occurrences"] if counts["occurrences"] else 0.0
     return found
 
 
@@ -188,9 +217,13 @@ def verification(occurrences, max_pairs=2_000_000, seed=0):
     draws = min(max_pairs, max(10 * len(same), 10_000))
     a = rng.integers(0, count, draws)
     b = rng.integers(0, count, draws)
-    keep = [k for k in range(draws) if occurrences[a[k]].identity != occurrences[b[k]].identity]
-    different = np.einsum("ij,ij->i", vectors[a[keep]], vectors[b[keep]]).tolist()
-    return np.asarray(same), np.asarray(different)
+    identities = np.array([o.identity for o in occurrences], dtype=object)
+    keep = identities[a] != identities[b]
+    a, b = a[keep], b[keep]
+    # In chunks: two million pairs of 512 floats at once would need 8 GB.
+    different = np.concatenate([np.einsum("ij,ij->i", vectors[a[i:i + 50_000]], vectors[b[i:i + 50_000]])
+                                for i in range(0, len(a), 50_000)] or [np.zeros(0, np.float32)])
+    return np.asarray(same), different
 
 
 def threshold_for_far(different, far):

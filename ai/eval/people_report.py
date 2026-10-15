@@ -44,6 +44,31 @@ def original_size(path):
     return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
 
 
+class Sizes:
+    """Each photo's shown size, kept beside the face caches: reading 13,000
+    headers over the development machine's shared drive takes minutes."""
+
+    def __init__(self, set_name):
+        self.path = os.path.join(datasets.ROOT, "cache", "faces", f"sizes-{set_name}.json")
+        self.sizes = {}
+        if os.path.exists(self.path):
+            with open(self.path, encoding="utf-8") as file:
+                self.sizes = {key: tuple(value) for key, value in json.load(file).items()}
+        self.changed = False
+
+    def of(self, photo):
+        if photo.key not in self.sizes:
+            self.sizes[photo.key] = original_size(photo.path)
+            self.changed = True
+        return self.sizes[photo.key]
+
+    def save(self):
+        if self.changed:
+            with open(self.path + ".partial", "w", encoding="utf-8") as file:
+                json.dump(self.sizes, file)
+            os.replace(self.path + ".partial", self.path)
+
+
 def iou(a, b):
     x0, y0 = max(a[0], b[0]), max(a[1], b[1])
     x1, y1 = min(a[2], b[2]), min(a[3], b[3])
@@ -97,11 +122,12 @@ def collect(set_name, cache, min_score, min_edge):
     """Detection counts and, per embedder, the matched occurrences by library."""
     detection = collections.Counter()
     occurrences = collections.defaultdict(lambda: collections.defaultdict(list))
+    sizes = Sizes(set_name)
     for photo in face_sets.SETS[set_name]():
         entry = cache.photos.get(photo.key)
         if entry is None:
             continue
-        size = original_size(photo.path)
+        size = sizes.of(photo)
         scale = min(1.0, AI_INPUT_EDGE / max(size))
         faces = entry["faces"]
         keep = [i for i, f in enumerate(faces) if f[14] >= min_score and min(f[2], f[3]) >= min_edge]
@@ -127,6 +153,7 @@ def collect(set_name, cache, min_score, min_edge):
                 vector = vectors[keep[index]]
                 occurrences[embedder][photo.library or set_name].append(
                     people.Occurrence(f"{photo.key}#{keep[index]}", photo.key, label.identity, vector, label.group))
+    sizes.save()
     return detection, occurrences
 
 
@@ -155,7 +182,8 @@ def sweep(libraries, thresholds, cores, assigns):
 def choose(results, precision):
     """The setting with the best calibration recall at the precision floor."""
     passing = [r for r in results if r["calibration"] and r["calibration"]["precision"] >= precision]
-    return max(passing, key=lambda r: (r["calibration"]["recall"], -r["threshold"]), default=None)
+    # Among equal recall, the stricter threshold: it leaves a margin.
+    return max(passing, key=lambda r: (round(r["calibration"]["recall"], 3), r["threshold"]), default=None)
 
 
 def operating_points(occurrences):
@@ -177,7 +205,7 @@ def main():
     parser.add_argument("--min-edge", type=float, default=0, help="ignore faces narrower than this in AI-input pixels")
     parser.add_argument("--precision", type=float, default=0.99)
     parser.add_argument("--cores", default="2,3,4")
-    parser.add_argument("--assign", default="nearest,majority")
+    parser.add_argument("--assign", default="nearest,majority,centroid")
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
     calibrate = set(args.calibrate.split(","))
@@ -205,6 +233,8 @@ def main():
         low = float(np.quantile(different, 0.5)) if len(different) else 0.0
         high = float(np.quantile(same, 0.95)) if len(same) else 1.0
         thresholds = np.round(np.arange(max(0.0, low), min(1.0, high), 0.02), 2)
+        print(f"{embedder}: sweeping {len(thresholds)} thresholds over {len(calibration)} libraries, "
+              f"{len(everything)} occurrences", flush=True)
         results = sweep(calibration, thresholds, [int(c) for c in args.cores.split(",")], args.assign.split(","))
         chosen = choose(results, args.precision)
         entry = {"calibrationVerification": verification, "chosen": chosen, "sweep": results, "results": {}}
@@ -218,6 +248,7 @@ def main():
             for pool, result in entry["results"].items():
                 found = result["all"] or {}
                 print(f"  {pool}: P {found.get('precision', 0):.4f} R {found.get('recall', 0):.3f} "
+                      f"B3 P {found.get('bcubedPrecision', 0):.4f} R {found.get('bcubedRecall', 0):.3f} "
                       f"coverage {found.get('coverage', 0):.3f} people {found.get('people')} "
                       f"identities {found.get('identities')} mixed {found.get('mixedPeople')}", flush=True)
                 for name, group in result["groups"].items():
