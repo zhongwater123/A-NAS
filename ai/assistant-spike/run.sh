@@ -9,12 +9,21 @@
 #   ai/assistant-spike/run.sh test SCRIPT [ARGS]  run one test script inside it, e.g. api-basic.sh
 #   ai/assistant-spike/run.sh clean        remove the container
 #
-# The suggested order is build, sandbox, then: api-basic.sh, "api-tools.sh alice calls.txt",
-# api-after.sh, api-managed.sh, boundary.sh, crash.sh, quota.sh. Those use a scripted fake model.
+# The assistant runs `hermes serve` (Hermes Desktop's backend). The suggested order is build,
+# sandbox, then: serve-basic.sh, "serve-tools.sh alice calls.txt", serve-after.sh,
+# serve-managed.sh, serve-surface.sh, "serve-background.sh alice 30", serve-environ.sh,
+# measure.sh, crash.sh, quota.sh. Those use a scripted fake model; serve_client.py is the
+# JSON-RPC client. The probe also runs toolsets-check.py against the managed policy.
+# In-turn approvals (#111), with SPIKE_APPROVAL_TIMEOUT=20 given to sandbox: approvals-broker.sh,
+# "scenarios calls-approval.txt", approvals-managed.sh.
+# SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
+# (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
+# boundary.sh and the UI prototype; scenarios works on either channel.
 #
 # With a real OpenAI-compatible model (the key stays in gateway.py outside the sandbox):
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
-#   ai/assistant-spike/run.sh scenarios [scenarios.txt|scenarios-publish.txt|scenarios-boundary.txt]
+#   ai/assistant-spike/run.sh scenarios FILE [--answer ANSWER]   how the member answers: scenarios.py
+#     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt or scenarios-boundary.txt
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
 #
 # Several sessions on one machine share the built runtime in $HERMES_SPIKE_DIR (mounted
@@ -51,8 +60,9 @@ case "${1:-}" in
     # broker's socket in $run on the host, owned by that UID, so a product
     # service running on the host (the UI prototype) reaches them.
     if [[ -n "${SPIKE_PRODUCT_UID:-}" ]]; then
-      mkdir -p "$run/assistant" "$run/broker"
-      key_mount+=(-v "$run/assistant:/run/a-nas-assistant" -v "$run/broker:/run/anas-spike-broker")
+      mkdir -p "$run/assistant" "$run/broker" "$run/tokens"
+      chmod 0700 "$run/tokens"
+      key_mount+=(-v "$run/assistant:/run/a-nas-assistant" -v "$run/broker:/run/anas-spike-broker" -v "$run/tokens:/run/anas-spike-tokens")
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
@@ -62,12 +72,15 @@ case "${1:-}" in
       docker exec "$name" systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break
       sleep 0.5
     done
-    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}"       -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" "$name" bash /spike/setup.sh 2>&1 | tail -3
+    # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
+    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
+      -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
+      "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
     ;;
   scenarios)
-    docker exec "$name" python3 /spike/scenarios.py "/spike/${2:-scenarios.txt}"
+    docker exec "$name" /opt/a-nas/assistant-runtimes/spike/venv/bin/python -u /spike/scenarios.py "/spike/${2:-scenarios.txt}" "${@:3}"
     ;;
   test)
     shift
@@ -77,7 +90,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,22p' "$0"
+    sed -n '2,31p' "$0"
     exit 2
     ;;
 esac

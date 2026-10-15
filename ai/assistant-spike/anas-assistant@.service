@@ -10,11 +10,17 @@ Group=%i
 SupplementaryGroups=a-nas-users
 Environment=HOME=/nas/助手 HERMES_HOME=/var/lib/hermes-home HERMES_MANAGED_DIR=/etc/hermes
 Environment=HERMES_WRITE_SAFE_ROOT=/nas/助手 PYTHONDONTWRITEBYTECODE=1
-Environment=API_SERVER_ENABLED=true API_SERVER_HOST=127.0.0.1 API_SERVER_PORT=8642 API_SERVER_KEY=k7Qx9vT2mR4pL8wNz3Jd-%i
+# HERMES_DASHBOARD_SESSION_TOKEN for `hermes serve`, one per instance. systemd
+# reads this root-only file before dropping privileges; the product service
+# holds the only other copy. The api-server-channel/ drop-ins switch back to
+# the API Server.
+EnvironmentFile=/etc/a-nas-assistant/tokens/%i.env
 WorkingDirectory=/nas/助手
 ExecStart=/usr/bin/tini -- /bin/bash /spike/assistant-start.sh
-ExecStartPost=/bin/bash /spike/wait-port.sh 8642
+ExecStartPost=/bin/bash /spike/wait-port.sh 9119
 TimeoutStartSec=120
+# serve flushes its transcripts on SIGTERM and then dies of it; that is a clean stop.
+SuccessExitStatus=143
 # The member's own data, read-only; the assistant directory is the only
 # writable place. Everything else under /srv disappears.
 BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i:/nas/个人空间
@@ -32,6 +38,12 @@ BindReadOnlyPaths=/etc/a-nas-assistant/empty.env:/var/lib/hermes-home/.env
 BindReadOnlyPaths=/etc/a-nas-assistant/SOUL.md:/var/lib/hermes-home/SOUL.md
 BindReadOnlyPaths=/etc/a-nas-assistant/empty:/var/lib/hermes-home/hooks
 BindReadOnlyPaths=/etc/a-nas-assistant/empty:/var/lib/hermes-home/plugins
+# A Hermes profile is a second Hermes home with its own writable config, .env, hooks
+# and plugins; `hermes serve` creates them on request (POST /api/profiles, ?profile=)
+# and starts in the sticky active_profile. One member has exactly one, so both are
+# empty and read-only.
+BindReadOnlyPaths=/etc/a-nas-assistant/empty:/var/lib/hermes-home/profiles
+BindReadOnlyPaths=/etc/a-nas-assistant/empty.env:/var/lib/hermes-home/active_profile
 # Recycle bins hold one folder per member and only the member's is readable. An
 # unreadable folder makes Hermes's ripgrep searches fail outright, so the agent sees
 # each bin as an empty tmpfs holding just its member's own folder.
@@ -39,8 +51,14 @@ TemporaryFileSystem=/nas/个人空间/.a-nas-trash /nas/共享空间/.a-nas-tras
 BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i/.a-nas-trash/%i:/nas/个人空间/.a-nas-trash/%i
 BindReadOnlyPaths=/srv/a-nas/data/spaces/shared/.a-nas-trash/%i:/nas/共享空间/.a-nas-trash/%i
 TemporaryFileSystem=/srv:ro
-# The real model key stays with the gateway outside the sandbox.
+# The real model key stays with the gateway outside the sandbox, and the
+# session tokens with systemd and the product service.
 InaccessiblePaths=-/etc/anas-spike
+InaccessiblePaths=-/etc/a-nas-assistant/tokens
+InaccessiblePaths=-/run/anas-spike-tokens
+# The change broker's product socket, where the member's approvals are
+# registered; the assistant reaches only its agent socket in /run/anas-change-agent.
+InaccessiblePaths=-/run/anas-spike-broker
 UMask=0077
 NoNewPrivileges=true
 CapabilityBoundingSet=
