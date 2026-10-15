@@ -3680,6 +3680,7 @@ components:
         reason: { type: string, description: "Why work is paused, such as foreground or cpu_pressure." }
         model: { type: string }
         objectModel: { type: string, description: The object detector's model while the AI Worker has one. }
+        faceModel: { type: string, description: "The face models while the AI Worker has them; a photo then also counts as ready once its faces are scanned." }
         ready: { type: integer, minimum: 0, description: "Originals with a vector of the current pipeline and, while the AI Worker has a detector, its detection." }
         pending: { type: integer, minimum: 0 }
         failed: { type: integer, minimum: 0 }

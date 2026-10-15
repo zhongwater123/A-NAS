@@ -123,9 +123,11 @@ type AIStatus struct {
 	Model  string `json:"model,omitempty"`
 	// ObjectModel is the detector's model while the Worker has one.
 	ObjectModel string `json:"objectModel,omitempty"`
+	// FaceModel names the face models while the Worker has them.
+	FaceModel string `json:"faceModel,omitempty"`
 	// The counts cover the originals of the caller's visible photos. An
 	// original is ready once it has its vector and, while the Worker has a
-	// detector, its detection.
+	// detector or face models, its detection and its face scan.
 	Ready   int `json:"ready"`
 	Pending int `json:"pending"`
 	Failed  int `json:"failed"`
@@ -694,34 +696,37 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	}
 	state, reason, model := s.ai.get()
 	s.aiModelMu.Lock()
-	detector := s.aiDetector
+	detector, faces := s.aiDetector, s.aiFaces
 	s.aiModelMu.Unlock()
-	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector}
+	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector, FaceModel: faces}
 	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
 		return AIStatus{}, err
 	}
 	if len(libraries) == 0 {
 		return status, nil
 	}
-	detecting := detector != ""
-	args := []any{detecting, detecting}
+	detecting, facing := detector != "", faces != ""
+	args := []any{detecting, facing, detecting, facing}
 	for _, lib := range libraries {
 		args = append(args, lib.ID)
 	}
-	args = append(args, embeddingDerivation, detectionDerivation, embeddingDerivation, thumbnailDerivation, detectionDerivation)
+	args = append(args, embeddingDerivation, detectionDerivation, facesDerivation, embeddingDerivation, thumbnailDerivation,
+		detectionDerivation, facesDerivation)
 	var total int
 	err = s.db.QueryRowContext(ctx, `
 SELECT COUNT(*), COUNT(CASE WHEN ready THEN 1 END), COUNT(CASE WHEN NOT ready AND failed THEN 1 END)
 FROM (
-  SELECT e.object_id IS NOT NULL AND (NOT ? OR d.object_id IS NOT NULL) AS ready,
-         IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed'), 0) AS failed
+  SELECT e.object_id IS NOT NULL AND (NOT ? OR d.object_id IS NOT NULL) AND (NOT ? OR f.object_id IS NOT NULL) AS ready,
+         IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed') OR (? AND g.state = 'failed'), 0) AS failed
   FROM (SELECT DISTINCT object_id FROM assets
         WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)) a
   LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
   LEFT JOIN detections d ON d.object_id = a.object_id AND d.derivation = ?
+  LEFT JOIN face_scans f ON f.object_id = a.object_id AND f.derivation = ?
   LEFT JOIN jobs j ON j.object_id = a.object_id AND j.derivation = ?
   LEFT JOIN jobs t ON t.object_id = a.object_id AND t.derivation = ?
   LEFT JOIN jobs k ON k.object_id = a.object_id AND k.derivation = ?
+  LEFT JOIN jobs g ON g.object_id = a.object_id AND g.derivation = ?
 )`, args...).Scan(&total, &status.Ready, &status.Failed)
 	if err != nil {
 		return AIStatus{}, err

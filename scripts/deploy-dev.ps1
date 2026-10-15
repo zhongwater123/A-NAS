@@ -22,6 +22,11 @@ param(
     # (docs/research/photo-ai-object-detection.md).
     [string]$DetectorDirectory = 'D:\A-NAS-models\dfine-obj365\official',
 
+    # Where the face models that deploy\models\yunet-2026may.json and the
+    # face embedder's manifest pin live (docs/architecture/photo-people.md).
+    [string]$FaceDetectorDirectory = 'D:\A-NAS-models\faces\yunet',
+    [string]$FaceEmbedderDirectory = 'D:\A-NAS-models\faces\sface',
+
     [switch]$StageOnly
 )
 
@@ -106,9 +111,13 @@ try {
     # Each model has the role its release link is named after.
     $modelManifestPath = Join-Path $repoRoot 'deploy\models\embeddinggemma-2-740m.json'
     $detectorManifestPath = Join-Path $repoRoot 'deploy\models\dfine-m-obj365.json'
+    $faceDetectorManifestPath = Join-Path $repoRoot 'deploy\models\yunet-2026may.json'
+    $faceEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\sface-2021dec.json'
     $models = @(
         @{ Manifest = $modelManifestPath; Directory = $ModelDirectory },
-        @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory }
+        @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory },
+        @{ Manifest = $faceDetectorManifestPath; Directory = $FaceDetectorDirectory },
+        @{ Manifest = $faceEmbedderManifestPath; Directory = $FaceEmbedderDirectory }
     )
     foreach ($model in $models) {
         $model.Pinned = Get-Content -LiteralPath $model.Manifest -Raw | ConvertFrom-Json
@@ -182,6 +191,8 @@ try {
         @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
         @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
         @{ Source = $detectorManifestPath; Destination = "${target}:$release/ai-detector.json.incoming" },
+        @{ Source = $faceDetectorManifestPath; Destination = "${target}:$release/ai-face-detector.json.incoming" },
+        @{ Source = $faceEmbedderManifestPath; Destination = "${target}:$release/ai-face-embedder.json.incoming" },
         @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },

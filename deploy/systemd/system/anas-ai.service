@@ -7,7 +7,7 @@ After=anas-ai.socket
 [Service]
 Type=simple
 # Turns thumbnails the photo service passes as descriptors, and search text,
-# into vectors, and finds the things in photos. It has no network and no data
+# into vectors, and finds the things and faces in photos. It has no network and no data
 # volume, so photos cannot leave the device through it (ADR 0011, ADR 0016);
 # the system test proves both.
 User=a-nas-ai
@@ -16,7 +16,7 @@ DynamicUser=true
 # once per content under /opt/a-nas.
 Environment=PYTHONPATH=/opt/a-nas/current/ai
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json
+ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json --face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json
 # XNNPack keeps repacked weights here so later starts load faster.
 CacheDirectory=a-nas-ai
 CacheDirectoryMode=0700
@@ -41,7 +41,9 @@ RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
 # The embedding model peaked at 815 MB on the Experimental NAS, the detector
-# adds about 400 MiB while it is loaded (docs/architecture/photo-objects.md).
+# adds about 400 MiB while it is loaded (docs/architecture/photo-objects.md),
+# and the face models load and unload with it
+# (docs/architecture/photo-people.md).
 # Above MemoryHigh the kernel reclaims first; MemoryMax is the hard limit.
 MemoryHigh=1792M
 MemoryMax=2G

@@ -1,0 +1,9 @@
+{
+  "name": "yunet-2026may",
+  "source": "https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet",
+  "revision": "26cc381e4d2594bb9f47a26eb8fd96c94a13660d",
+  "file": "face_detection_yunet_2026may.onnx",
+  "sizeBytes": 229738,
+  "sha256": "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",
+  "license": "MIT (the model directory's LICENSE, Copyright (c) 2020 Shiqi Yu). The opencv_zoo re-export of face_detection_yunet_2023mar.onnx with symbolic height and width for OpenCV 5's ONNX Runtime engine."
+}
