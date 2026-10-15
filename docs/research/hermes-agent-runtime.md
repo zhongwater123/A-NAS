@@ -160,7 +160,7 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 4. Hermes 随后调用 MCP 工具，工具到达产品服务：只执行本人授权过、参数摘要相同、没用过且没过期的更改，写入的是卡片生成时复制的内容；目标在卡片生成后被改动就不执行。执行以本人身份经文件代理完成，结果在同一回合返回给助手。
 5. 回合结束时，本回合未决的更改全部作废，不保存跨回合的待确认更改。
 
-spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替产品服务的更改存储与文件代理，有两个套接字：产品套接字只有产品服务能连，沙箱中不可见；助手套接字按调用者的 UID（`SO_PEERCRED`）认定账号，只能执行或查看。[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 在沙箱内只做转发，另有只读的 `recent_changes`；[`scenarios.py`](../../ai/assistant-spike/scenarios.py) 扮演产品服务，按场景替成员应答。
+spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替产品服务的更改存储与文件代理，有两个套接字：产品套接字只有产品服务能连，沙箱中不可见；助手套接字按调用者的 UID（`SO_PEERCRED`）认定账号，只能执行或查看。生成卡片时读取目标与暂存文件、执行时写入，都以成员身份进行，并从数据卷逐级打开每一层、不跟随任何链接（相当于文件代理的 `openat2(RESOLVE_NO_SYMLINKS)`）；broker 自己从不以 root 打开成员一侧的路径。[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 在沙箱内只做转发，另有只读的 `recent_changes`；[`scenarios.py`](../../ai/assistant-spike/scenarios.py) 扮演产品服务，按场景替成员应答。
 
 ### 假模型与执行层
 
@@ -176,7 +176,7 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 | 新建文件夹再移动文件 | 一张卡片列出两项，按顺序执行 |
 | 成员配置写入 `trust: full`、`approvals.mode: off`、`timeout: 1`（[`approvals-managed.sh`](../../ai/assistant-spike/approvals-managed.sh)，模拟写保护被绕过） | 仍请求审批，等满 managed scope 的 20 秒 |
 
-[`approvals-broker.sh`](../../ai/assistant-spike/approvals-broker.sh) 不经 Hermes 直接测执行层，12 项全部符合预期：卡片生成后暂存文件被改写，执行的仍是卡片中的内容；同一授权只能执行一次；没有授权、授权作废后都不执行；助手套接字不能登记授权；bob 的助手用同样的参数也用不了 alice 的授权；成员在卡片之后改过的目标不被覆盖；带 `..` 的路径、指向别处的暂存链接、移动到已存在的文件都在生成卡片前被拒绝；状态目录为 `0700`。
+[`approvals-broker.sh`](../../ai/assistant-spike/approvals-broker.sh) 不经 Hermes 直接测执行层，15 项全部符合预期：卡片生成后暂存文件被改写，执行的仍是卡片中的内容；同一授权只能执行一次；没有授权、授权作废后都不执行；助手套接字不能登记授权；bob 的助手用同样的参数也用不了 alice 的授权；成员在卡片之后改过的目标不被覆盖；带 `..` 的路径、指向别处的暂存链接、移动到已存在的文件都在生成卡片前被拒绝；成员自己建的链接夹在路径中间（个人空间里 `系统 -> /etc`，目标或暂存各一次）时生成卡片被拒绝，什么都没读；卡片之后把文件夹换成指向共享空间的链接，确认后也不会写过去；状态目录为 `0700`。最初的实现以 root 读取目标与暂存文件，`O_NOFOLLOW` 只管最后一段：同样的测试中卡片的“修改前”显示了 `/etc/shadow`，暂存副本也复制了它；执行虽以成员身份进行，却跟着中间的链接把文件写进了共享空间根目录（spike 没有 Landlock）。
 
 ### 真实模型
 

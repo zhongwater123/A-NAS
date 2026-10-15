@@ -95,5 +95,20 @@ status, change = product("POST", "/changes/prepare", {"summary": "x", "operation
 check("a staged link is not followed", status == 422, json.dumps(change, ensure_ascii=False)[:200])
 status, change = product("POST", "/changes/prepare", {"summary": "x", "operations": [{"op": "move", "path": "/nas/个人空间/secret.txt", "to": "/nas/个人空间/计划.md"}]})
 check("a move onto an existing file is refused", status == 422, json.dumps(change, ensure_ascii=False)[:200])
+
+# Links the member made (web terminal, SMB) in the middle of a path: nothing is read or written through them.
+as_alice(f"printf '# 计划\\n- 买菜\\n' > '{STAGED}' && ln -s /etc '{DATA}/spaces/private/alice/系统' && ln -s /etc '{os.path.dirname(STAGED)}/系统'")
+status, change = product("POST", "/changes/prepare", {"summary": "x", "operations": [{"op": "write", "path": "/nas/个人空间/系统/shadow", "source": "/nas/助手/待确认/个人空间/计划.md"}]})
+check("a target behind a linked folder is refused and not read", status == 422 and "root:" not in json.dumps(change), json.dumps(change, ensure_ascii=False)[:200])
+status, change = product("POST", "/changes/prepare", {"summary": "x", "operations": [{"op": "write", "path": "/nas/个人空间/新.md", "source": "/nas/助手/待确认/个人空间/系统/shadow"}]})
+check("a staged file behind a linked folder is refused and not read", status == 422 and "root:" not in json.dumps(change), json.dumps(change, ensure_ascii=False)[:200])
+as_alice(f"mkdir '{DATA}/spaces/private/alice/子目录'")
+sub = {"summary": "x", "operations": [{"op": "write", "path": "/nas/个人空间/子目录/a.md", "source": "/nas/助手/待确认/个人空间/计划.md"}]}
+status, change = product("POST", "/changes/prepare", sub)
+product("POST", f"/changes/{change['id']}/approve")
+as_alice(f"rmdir '{DATA}/spaces/private/alice/子目录' && ln -s {DATA}/spaces/shared '{DATA}/spaces/private/alice/子目录'")
+result = agent("alice", "POST", "/apply", sub)
+check("a folder swapped for a link to Shared after the card is not written through", "已执行" not in result
+      and not os.path.exists(f"{DATA}/spaces/shared/a.md"), result)
 print("INFO state dir mode", oct(os.stat("/var/lib/anas-spike/changes").st_mode & 0o777))
 PY
