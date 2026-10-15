@@ -147,6 +147,8 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   docker: DockerGlyph,
   store: ShoppingBag,
 };
+// A press on the wallpaper that moves this many pixels or more is a drag, not a click.
+const wallpaperClickSlop = 6;
 // Apps on a white tile (相册) keep it in their window's title bar too.
 const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
@@ -362,18 +364,36 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
   const [revealed, setRevealed] = useState<WindowID[]>([]);
   const hidden = revealed.filter((id) => windows.some((window) => window.id === id && window.open && window.minimized));
   const desktopView: DesktopView = visible.length ? "windows" : hidden.length ? "revealed" : "clear";
+  const showDesktop = () => {
+    setRevealed(visible.map((window) => window.id));
+    dispatch({ type: "show-desktop" });
+  };
   const toggleDesktop = () => {
-    if (visible.length) {
-      setRevealed(visible.map((window) => window.id));
-      dispatch({ type: "show-desktop" });
-    } else if (hidden.length) {
+    if (visible.length) showDesktop();
+    else if (hidden.length) {
       setRevealed([]);
       dispatch({ type: "restore", ids: hidden });
     }
   };
+  // A click on the bare wallpaper, or between desktop icons, puts the visible
+  // windows away as 显示桌面 does. The press must start there and stay put, so
+  // a window drag or a selection released over the wallpaper keeps the
+  // windows, and the press that closes a rail popover only closes it.
+  const wallpaperPress = useRef<{ x: number; y: number }>(undefined);
+  const pressDesktop = (event: ReactPointerEvent<HTMLElement>) => {
+    const shell = event.currentTarget;
+    const bare = event.target === shell || (event.target instanceof Element && event.target.classList.contains("desktop-grid"));
+    const railPopoverOpen = shell.querySelector('.system-rail [aria-expanded="true"]') !== null;
+    wallpaperPress.current = bare && event.button === 0 && !railPopoverOpen ? { x: event.clientX, y: event.clientY } : undefined;
+  };
+  const clickDesktop = (event: ReactMouseEvent<HTMLElement>) => {
+    const press = wallpaperPress.current;
+    wallpaperPress.current = undefined;
+    if (press && visible.length && Math.hypot(event.clientX - press.x, event.clientY - press.y) < wallpaperClickSlop) showDesktop();
+  };
 
   return (
-    <main className="desktop-shell">
+    <main className="desktop-shell" onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
       <div className="wallpaper-glow" />
 
       <SystemRail
