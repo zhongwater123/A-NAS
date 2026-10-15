@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -126,6 +127,10 @@ func (c *Client) Usage(ctx context.Context, path string) (int64, error) {
 	result, file, err := c.call(ctx, request{Op: opUsage, Path: path})
 	closeFile(file)
 	return result.Size, err
+}
+
+func (c *Client) SetModTime(ctx context.Context, path string, modTime time.Time) error {
+	return c.simple(ctx, request{Op: opSetModTime, Path: path, ModTime: modTime})
 }
 
 var _ files.FileSystem = (*Client)(nil)

@@ -170,6 +170,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/uploads", h.withMutation(h.handleUpload))
 	h.mux.HandleFunc("GET /api/v1/files/{fileID}/content", h.withSession(h.handleDownload))
 	h.mux.HandleFunc("GET /api/v1/files/{fileID}/preview", h.withSession(h.handleFilePreview))
+	h.mux.HandleFunc("GET /api/v1/files/{fileID}/versions", h.withSession(h.handleFileVersions))
 	h.mux.HandleFunc("PATCH /api/v1/files/{fileID}", h.withMutation(h.handleMoveFile))
 	h.mux.HandleFunc("POST /api/v1/files/{fileID}/copies", h.withMutation(h.handleCopyFile))
 	h.mux.HandleFunc("DELETE /api/v1/files/{fileID}", h.withMutation(h.handleDeleteFile))
@@ -181,9 +182,11 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshot-schedule", h.withSession(h.handleSnapshotSchedule))
 	h.mux.HandleFunc("PUT /api/v1/spaces/{spaceID}/snapshot-schedule", h.withMutation(h.handleUpdateSnapshotSchedule))
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshot-search", h.withSession(h.handleSearchSnapshots))
+	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/removed-entries", h.withSession(h.handleRemovedEntries))
 	h.mux.HandleFunc("GET /api/v1/snapshots/{snapshotID}/entries", h.withSession(h.handleSnapshotEntries))
 	h.mux.HandleFunc("GET /api/v1/snapshots/{snapshotID}/entries/{entryID}/content", h.withSession(h.handleSnapshotContent))
 	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/entries/{entryID}/restore", h.withMutation(h.handleRestoreSnapshotEntry))
+	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/restore", h.withMutation(h.handleRestoreSnapshot))
 	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/keep", h.withMutation(h.handleKeepSnapshot))
 	h.mux.HandleFunc("DELETE /api/v1/snapshots/{snapshotID}", h.withMutation(h.handleDeleteSnapshot))
 	h.mux.HandleFunc("GET /api/v1/users", h.withSession(h.handleUsers))
@@ -624,6 +627,24 @@ func (h *productHandler) handleSearchSnapshots(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }
 
+func (h *productHandler) handleRemovedEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	items, truncated, err := h.files.RemovedEntries(r.Context(), session.User, r.PathValue("spaceID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
+}
+
+func (h *productHandler) handleFileVersions(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	match, err := h.files.EntryVersions(r.Context(), session.User, r.PathValue("fileID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, match)
+}
+
 func (h *productHandler) handleSnapshotSchedule(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	schedule, err := h.files.SnapshotSchedule(r.Context(), session.User, r.PathValue("spaceID"))
 	if err != nil {
@@ -660,12 +681,32 @@ func (h *productHandler) handleRestoreSnapshotEntry(w http.ResponseWriter, r *ht
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
+		Replace  bool   `json:"replace"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.RestoreSnapshotEntry(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"), request.ParentID, request.Name)
+	entry, err := h.files.RestoreSnapshotEntry(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"),
+		request.ParentID, request.Name, request.Replace)
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	h.filesChanged(r, session, entry.SpaceID)
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+func (h *productHandler) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	var request struct {
+		ParentID string `json:"parentId"`
+		Name     string `json:"name"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	entry, err := h.files.RestoreSnapshot(r.Context(), session.User, r.PathValue("snapshotID"), request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return

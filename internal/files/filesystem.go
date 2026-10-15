@@ -32,6 +32,10 @@ type FileSystem interface {
 	Copy(ctx context.Context, from, to string) error
 	// Usage returns the total size of the regular files at or below path.
 	Usage(ctx context.Context, path string) (int64, error)
+	// SetModTime sets the modification time of a regular file and leaves
+	// its access time; it never follows a symlink. Restores use it so a
+	// file comes back as it was saved.
+	SetModTime(ctx context.Context, path string, modTime time.Time) error
 }
 
 const (

@@ -8,3 +8,4 @@
 - [相册 AI 标签校准与中文检索评估](photo-ai-label-calibration.md)（完成；2026-10-10 起按 AI 聚合从严重新校准，2026-10-12 加入 COCO train 子集）
 - [相册物体检测与混合检索可行性](photo-ai-object-detection.md)（完成；D-FINE Objects365，[实施方案](../architecture/photo-objects.md)已确认）
 - [应用目录扩充评审（2026-10）](app-catalog-review-2026-10.md)（完成；入选应用待实机安装验证）
+- [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
