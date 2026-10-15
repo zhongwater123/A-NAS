@@ -116,7 +116,22 @@ Hermes 的文档说明，能写 Hermes 主目录的人就能执行代码：`hook
 - 对话页不是聊天界面，而是把 Hermes 的终端界面（`hermes --tui`，Node.js 程序）跑在伪终端里，经 WebSocket 用 xterm.js 显示；每个对话页另起一个 Hermes 进程。
 - API Server 自己提供外部界面所需的会话接口：`/api/sessions` 的列出、新建、改名、删除、历史消息与分叉，以及 `POST /api/sessions/{id}/chat/stream` 的 SSE 事件（`assistant.delta`、`tool.started`、`tool.completed`、`tool.failed`、`run.completed`），都由 `API_SERVER_KEY` 保护，不需要启动 dashboard。
 
-结论：dashboard 不适合作为 A-NAS 的助手页面。它的管理页正是 managed scope 固定住的配置；对话页是终端界面，需要在沙箱里加 Node.js 与伪终端、每个对话多一个进程；机器级的 profile 切换与成员隔离相反；确认卡片也只能在 A-NAS 中由本人会话发出。可复用的是 API Server 的会话与流式接口，以及 A-NAS 前端已有的 `react-markdown`、`remark-gfm` 与图标库。
+结论：dashboard 不适合作为 A-NAS 的助手页面。它的管理页正是 managed scope 固定住的配置；对话页是终端界面，需要在沙箱里加 Node.js 与伪终端、每个对话多一个进程；机器级的 profile 切换与成员隔离相反；确认卡片也只能在 A-NAS 中由本人会话发出。可复用的是 API Server 的会话与流式接口，以及 Hermes Desktop 的聊天层（下一节）。
+
+## Hermes Desktop 与助手窗口原型（2026-10-14，开发机）
+
+Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 JSON-RPC（`/api/ws`，`src/lib/gateway-rpc.ts`）连接 Hermes 的网关，而不是 API Server。它的对话区用 assistant-ui 0.14.24 与 streamdown 2.5.0 渲染；`src/lib/chat-messages` 把 Hermes 存储的消息行（`/api/sessions/{id}/messages` 返回的同一形式）折叠成 assistant-ui 的消息：工具调用并入回复、推理与文本分开、重复的图片回显去掉，流式更新用同一组函数（`appendAssistantTextPart`、`upsertToolPart`）。这一层不依赖 Electron，所以原型按固定提交把它复制进前端，由 A-NAS 的产品服务转发 API Server 的会话接口（[`internal/assistantapi`](../../internal/assistantapi/handler.go)），再由一个连接层把 SSE 事件交给这些函数（[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)）。
+
+用 DeepSeek flash 在开发机上验证的结果：
+
+- 对话列表、自动标题、逐字回复、折叠的“处理过程”、共享空间里诱导文字被拒绝，都与 spike 中直接调用 API 时一致。确认卡片经 spike 的 change broker 以本人身份执行：`计划.md` 属于 alice，旧版本在 alice 的回收站。
+- `@assistant-ui/tap` 0.9.23 与 assistant-ui 0.14.24 组合时，对话区报 “Maximum update depth exceeded … getSnapshot should be cached” 并停止渲染，换成 `useLocalRuntime` 也一样；改用 Desktop 锁定的 0.9.8（`package.json` 的 `overrides`）后正常。
+- 停止：客户端关闭 `chat/stream` 后，Hermes 记录 `Interrupted during API call` 并中断该回合（`api_server.py` 中 “Session SSE client disconnected; interrupted live run”）。在浏览器中 9 秒时停止的一轮，停止时已发出的 9 个读取仍执行完，几秒后才出现在记录中，之后不再请求模型；窗口因此在停止 4 秒后再读一次记录。产品服务的转发使用请求的上下文，所以浏览器中止会一路传到 Hermes。
+- 被停止的一轮在记录中没有正常的结尾：有时是一条空的 assistant 消息，有时是 `Operation interrupted: waiting for model response (10.0s elapsed).` 这句英文。Hermes 的 TUI 把后者当作取消的元数据而不是回复（`tui_gateway/prompt_turn.py`），API Server 却原样保存；Desktop 的模型只认 `display_metadata.interrupted`，而且合并工具调用行时会丢掉这个标记。原型因此按回合判断：最后一次工具调用之后没有文字回答的一轮标为“已停止”，并去掉这句英文。
+- 会话标题在一个实例内必须唯一，最长 100 字；重名时 API Server 返回 400 `invalid_title`，产品服务转为 409 `title_in_use`。
+- API Server 另有 `/v1/runs`（新建、状态、事件、`stop`）；要让回合在离开对话后继续并能重新接上，应改用它。
+- Hermes 调用 MCP 工具只传工具名与参数（`session.call_tool(name, arguments=args)`），工具不知道自己在哪个对话中被调用；`tool.completed` 事件也不带结果。`tool.started` 带 `session_id` 与完整参数，所以产品服务按参数（摘要与操作）把“提交更改”对应到那份更改。最初的原型把全部待确认更改显示在每个对话下面，用户指出卡片“穿透”到了其他对话。
+- 助手为后一次提交改写了同一份草稿（`待确认/个人空间/计划.md` 在“买牛奶”未确认时又加上“倒垃圾”），前一份更改的暂存内容随之改变。按 SHA-256 确认会被拒绝，但预览读的是当前草稿，会显示它已不会写入的内容；原型因此把这样的卡片标为“内容已变化”并禁止确认。助手在回复中主动说明了这次提交带着上一次的改动。
 
 其他观察：
 
@@ -129,5 +144,6 @@ Hermes 的文档说明，能写 Hermes 主目录的人就能执行代码：`hook
 
 - 决定：[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
-- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)）
+- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、原型用的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)

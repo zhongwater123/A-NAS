@@ -1,6 +1,6 @@
 # 0022：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行
 
-状态：proposed（2026-10-14 与用户讨论后起草；同日在开发机完成 spike，含 DeepSeek 真实模型测试；实验 NAS 上尚未验证）；行为见 [AI 助手规格](../specs/ai-assistant.md)，外部事实见 [Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)。
+状态：proposed（2026-10-14 与用户讨论后起草；同日在开发机完成 spike，含 DeepSeek 真实模型测试与助手窗口原型；实验 NAS 上尚未验证）；行为见 [AI 助手规格](../specs/ai-assistant.md)，外部事实见 [Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)。
 
 AI 助手需要记忆、技能、多模型与工具调用这些智能体能力，自己实现等于重写一个成熟框架；但 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 是为单一主人设计的，默认带终端与文件的全部权限，而 A-NAS 有多名成员，文件只由内核 ACL 授权。我们决定：以 Hermes Agent 为运行时，每个账号运行一个独立实例，由 systemd 沙箱只给它看本人能读的几处位置，只让它自由写自己的助手目录；对个人空间与 Agent空间的更改先写入暂存区，只有账号本人在自己的会话中确认后才由文件代理执行。权限由内核与 A-NAS 强制，不依赖 Hermes 的配置或模型的自觉。
 
@@ -14,7 +14,7 @@ AI 助手需要记忆、技能、多模型与工具调用这些智能体能力�
 6. **相册**：照片不是普通文件，助手经 MCP 只读工具访问相册服务；`photos.Principal` 增加助手标记，相册服务据此只允许读取，去掉管理员身份与查看授权，范围为本人的私有图库与共享图库（[ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
 7. **模型**：产品服务提供 OpenAI 兼容的模型网关并持有密钥。开发期转发到云端 API，仅用于开发测试；之后换成设备上的本地多模态模型，Hermes 一侧的配置不变。
 8. **固定策略与关闭的能力**：模型地址、启用的工具与各项关闭写在 root 所有、沙箱内只读的 Hermes managed scope（`/etc/hermes`）中，Agent 自己的配置无法覆盖。只启用 `file`、`memory`、`session_search`、`skills`、`todo` 与 A-NAS 的 MCP 工具，并关闭 `tool_search`，让 A-NAS 的工具直接出现在模型的工具列表中；关闭 `terminal`、`code_execution`、`browser`、`web`、`cronjob` 与消息平台，以及 Nous Tool Gateway、Honcho、`smart` 审批的辅助模型、更新检查、模型目录拉取、运行时装包与语言服务器。沙箱使这些能力即使被误开也越不出上述三处，以后重新启用某项另行决定。
-9. **界面**：AI 助手窗口是 A-NAS 自己的桌面应用，经产品服务使用 Hermes API Server 的会话接口（列出、改名、删除、历史消息，与带工具事件的流式回复），确认卡片也在这里；不嵌入 Hermes 自带的网页控制台。
+9. **界面**：AI 助手窗口是 A-NAS 自己的桌面应用，经产品服务的 `/api/v1/assistant` 使用 Hermes API Server 的会话接口（列出、新建、改名、删除、历史消息，与带工具事件的流式回复），确认卡片也在这里。对话区复用 Hermes Desktop 的聊天层，不另写：同样用 assistant-ui 渲染，并把 Desktop 的会话记录模型（`src/lib/chat-messages`，把 Hermes 存储的消息行折叠成工具调用、推理与文本组成的聊天消息）按固定提交复制进 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)，依赖版本与 Desktop 的锁文件一致。会话列表、确认卡片、样式与连接层是 A-NAS 的。每份待确认更改记下提交它的对话：Hermes 调用 MCP 工具时不带会话，但产品服务转发回合时会看到“提交更改”的 `tool.started` 事件（带会话与参数），按参数对应到那份更改；卡片只出现在这个对话中，标题栏汇总本人全部待确认更改。不嵌入 Hermes 自带的网页控制台，也不嵌入整个 Hermes Desktop。
 
 ## 后果
 
@@ -25,7 +25,8 @@ AI 助手需要记忆、技能、多模型与工具调用这些智能体能力�
 - Hermes 每开始一个新对话会多请求一次模型生成标题，正式配置须写明模型的上下文长度，否则它会反复探测；系统提示约 13,000 字符。
 - 实例闲置退出后 Hermes 的定时任务不会触发，所以第一版关闭 `cronjob`；以后由 A-NAS 的调度唤醒实例。
 - Hermes 的 `memory` 与 `skill_manage` 会把内容留到以后的对话，这是诱导文字持续生效的唯一途径；边界测试中两个模型都没有把诱导写进去，但成员仍应能查看和清除助手记住的内容与它创建的技能。
-- Hermes 上游没有版本号，升级等同于一次依赖升级，需要重跑沙箱探针与契约测试。
+- Hermes 上游没有版本号，升级等同于一次依赖升级，需要重跑沙箱探针与契约测试。复制进前端的 Desktop 代码随同一提交更新：[`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py) 重新复制并改写导入，会牵连 Desktop 其余部分的四个模块由 A-NAS 的小替身代替；`@assistant-ui/tap` 必须与 Desktop 锁定的版本一致（现为 0.9.8），较新的 0.9.23 会让对话区陷入无限更新。
+- 一个回合只在它的流打开时运行：关闭流（成员点停止或离开这个对话）后 Hermes 中断该回合，已完成的工具调用留在记录中。要让回合在后台继续、重新打开时接上，须改用 API Server 的 `/v1/runs`（状态、事件、停止）。
 - 删除账号时须同时删除其助手目录与 `Agent空间/<账号>`，随账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）实现。
 - Host Agent 新增类型化操作：为账号建立与删除助手目录、Agent空间子目录与实例套接字。
 
@@ -34,6 +35,7 @@ AI 助手需要记忆、技能、多模型与工具调用这些智能体能力�
 - **装进应用中心现有的 Docker**：安装策略不允许挂载个人空间；即使允许，Docker 默认给容器 `CAP_DAC_OVERRIDE`，Hermes 官方容器加固也保留它，容器内的 root 会无视 ACL。
 - **每个账号一个独立 Docker 容器**：隔离强度与 systemd 沙箱相当，但依赖由管理员另装的 Docker、要扩展容器代理、镜像要另走离线交付，现有系统测试也不能直接证明它的边界。
 - **直接使用 Hermes 自带的网页控制台（`hermes dashboard`）作为助手页面**：它是整台机器的管理台，配置、密钥、模型、插件等页面正是要固定住的部分，且可以切换机器上所有 profile；对话页是在伪终端里运行的终端界面，需要 Node.js 并为每个对话另起进程；确认卡片只能由成员本人在 A-NAS 会话中发出，控制台里做不到。
+- **直接使用 Hermes Desktop**：它是 Electron 应用，经 WebSocket 上的 JSON-RPC（`/api/ws`）连接 Hermes 的网关，而不是沙箱只开放的 API Server；它还带设置、模型、Profiles 与插件等页面。A-NAS 只复用它的聊天层（决定 9）。
 - **一个进程服务多个 profile**：官方明说 profile 不是沙箱，成员之间的隔离只能依赖 Hermes 的代码。
 - **以独立 UID 运行、所有读写都经 A-NAS 自写的 MCP 工具**：不需要成员 UID，但要重写读取、搜索与编辑工具，重复造轮子；读取范围已由挂载与 ACL 限定，同 UID 的风险已由沙箱封住。
 - **overlayfs 让 Hermes 原地修改个人空间**：对工具最透明，但成员同时在使用的个人空间就是下层，内核文档把下层在挂载期间变化定义为未定义行为；挂载与清理暂存层还需要特权与卸载。
@@ -43,5 +45,6 @@ AI 助手需要记忆、技能、多模型与工具调用这些智能体能力�
 
 - [AI 助手规格](../specs/ai-assistant.md)、[Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)
 - Spike：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元、managed scope 与探针）
+- 原型：[`internal/assistantapi`](../../internal/assistantapi/handler.go)、[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[OpenAPI](../../api/openapi.yaml)
 - [ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md)、[ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - [架构不变量](../architecture/OVERVIEW.md#不变量)、[存储与文件架构](../architecture/storage-and-files.md)

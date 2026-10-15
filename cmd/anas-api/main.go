@@ -20,6 +20,7 @@ import (
 	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantapi"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -284,6 +285,7 @@ func run(logger *slog.Logger) error {
 		Music:      musicService,
 		Feedback:   feedbackapi.New(feedbackStore, logger),
 		Transfers:  transferAPI,
+		Assistant:  assistantAPI(logger),
 		SystemLogs: systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -558,4 +560,20 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 	default:
 		return nil, nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
 	}
+}
+
+// assistantAPI configures the AI assistant (ADR 0022). Without
+// ANAS_ASSISTANT_SOCKET_DIR it answers assistant_unavailable and the desktop
+// keeps the assistant as planned. ANAS_ASSISTANT_CHANGES_SOCKET points at the
+// spike's change broker and is only for the UI prototype.
+func assistantAPI(logger *slog.Logger) http.Handler {
+	options := assistantapi.Options{
+		SocketDir: os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"),
+		KeyDir:    os.Getenv("ANAS_ASSISTANT_KEY_DIR"),
+		Logger:    logger,
+	}
+	if socket := os.Getenv("ANAS_ASSISTANT_CHANGES_SOCKET"); socket != "" {
+		options.Changes = assistantapi.BrokerChanges(socket)
+	}
+	return assistantapi.New(options)
 }

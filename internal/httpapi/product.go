@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/assistantapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -61,6 +62,10 @@ type ProductDependencies struct {
 	// to every signed-in user and receives the user through
 	// transfersapi.WithUser.
 	Transfers http.Handler
+	// Assistant serves /api/v1/assistant to every signed-in user, each reaching
+	// only their own assistant, and receives the user through
+	// assistantapi.WithUser.
+	Assistant http.Handler
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.
 	SystemLogs systemlog.Reader
@@ -85,6 +90,7 @@ type productHandler struct {
 	music      *music.Service
 	feedback   http.Handler
 	transfers  http.Handler
+	assistant  http.Handler
 	systemLogs systemlog.Reader
 	dataSource DataSource
 	changed    func(context.Context, accounts.User, string)
@@ -102,7 +108,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
 		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
-		transfers: dependencies.Transfers, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
+		transfers: dependencies.Transfers, assistant: dependencies.Assistant, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -126,6 +132,9 @@ func (h *productHandler) routes() {
 	if h.feedback != nil {
 		h.mux.Handle(feedbackapi.PathPrefix, h.withUser(h.feedback, feedbackapi.WithUser))
 		h.mux.Handle(feedbackapi.PathPrefix+"/", h.withUser(h.feedback, feedbackapi.WithUser))
+	}
+	if h.assistant != nil {
+		h.mux.Handle(assistantapi.PathPrefix+"/", h.withUser(h.assistant, assistantapi.WithUser))
 	}
 	if h.transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {

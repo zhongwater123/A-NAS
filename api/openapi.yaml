@@ -5,8 +5,8 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
-    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, and container lifecycle actions that go through the separate
-    container agent.
+    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
+    container agent, and each member's AI assistant (proposed in ADR 0022).
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -1784,6 +1784,124 @@ paths:
       responses:
         "204": { description: Canceled }
         "404": { description: The upload is unknown }
+  /api/v1/assistant/status:
+    get:
+      operationId: getAssistantStatus
+      summary: "Whether the signed-in member has an AI assistant instance, and whether its pending changes can be read (ADR 0022)"
+      description: "Answers 503 assistant_unavailable when the assistant is not enabled on this device; the desktop then shows the app as planned."
+      responses:
+        "200": { description: Status, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantStatus" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions:
+    get:
+      operationId: listAssistantSessions
+      summary: "The member's conversations, newest first, from the member's own assistant instance"
+      responses:
+        "200": { description: Conversations, content: { application/json: { schema: { type: object, additionalProperties: false, required: [sessions], properties: { sessions: { type: array, items: { $ref: "#/components/schemas/AssistantSession" } } } } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    post:
+      operationId: createAssistantSession
+      summary: "Start a conversation; without a title the assistant names it after the first turn"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: false, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { title: { type: string, maxLength: 100 } } } } } }
+      responses:
+        "201": { description: The conversation, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantSessionEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions/{sessionId}:
+    parameters: [{ $ref: "#/components/parameters/AssistantSessionID" }]
+    patch:
+      operationId: renameAssistantSession
+      summary: "Rename a conversation; title_in_use when another conversation of the member has the title"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [title], properties: { title: { type: string, minLength: 1, maxLength: 100 } } } } } }
+      responses:
+        "200": { description: The conversation, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantSessionEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteAssistantSession
+      summary: Delete a conversation and its transcript
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions/{sessionId}/messages:
+    parameters: [{ $ref: "#/components/parameters/AssistantSessionID" }]
+    get:
+      operationId: getAssistantMessages
+      summary: "A conversation's transcript in Hermes Agent's own message form"
+      description: "The desktop folds these rows into chat messages with Hermes Desktop's transcript model (web/src/assistant/hermes), so the rows are passed through as Hermes stores them."
+      responses:
+        "200": { description: Transcript, content: { application/json: { schema: { type: object, additionalProperties: false, required: [messages], properties: { messages: { type: array, items: { $ref: "#/components/schemas/AssistantMessage" } } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions/{sessionId}/chat:
+    parameters: [{ $ref: "#/components/parameters/AssistantSessionID" }]
+    post:
+      operationId: chatWithAssistant
+      summary: "Run one turn and stream its events"
+      description: >-
+        Relays Hermes Agent's session stream as server-sent events: run.started, message.started, assistant.delta,
+        tool.started, tool.progress, tool.completed, tool.failed, assistant.completed, run.completed, run.failed and done,
+        each with a JSON data line. Closing the stream stops the turn: Hermes interrupts a run whose client disconnected.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [input], properties: { input: { type: string, minLength: 1, maxLength: 65536 } } } } } }
+      responses:
+        "200": { description: The turn's events, content: { text/event-stream: {} } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "429": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/changes:
+    get:
+      operationId: listAssistantChanges
+      summary: "File changes the member's assistant submitted, with a before and after of each write; nothing outside the assistant's own directory changes until the member confirms"
+      description: "Every change of the member, whichever conversation it came from; sessionId names that conversation, recorded when the product service relayed the turn in which the assistant submitted it."
+      responses:
+        "200": { description: Changes, content: { application/json: { schema: { type: object, additionalProperties: false, required: [changes], properties: { changes: { type: array, items: { $ref: "#/components/schemas/AssistantChange" } } } } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/changes/{changeId}/confirm:
+    parameters: [{ $ref: "#/components/parameters/AssistantChangeID" }]
+    post:
+      operationId: confirmAssistantChange
+      summary: "Apply a pending change as the member; replaced and deleted files go to the member's recycle bin"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The decided change; status is applied or failed, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantChange" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/changes/{changeId}/reject:
+    parameters: [{ $ref: "#/components/parameters/AssistantChangeID" }]
+    post:
+      operationId: rejectAssistantChange
+      summary: Refuse a pending change; no file changes
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The rejected change, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantChange" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
 components:
   securitySchemes:
     cookieAuth:
@@ -1810,6 +1928,8 @@ components:
     CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
     FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
+    AssistantSessionID: { name: sessionId, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,128}$" } }
+    AssistantChangeID: { name: changeId, in: path, required: true, schema: { type: string, pattern: "^[0-9]{1,18}$" } }
     TusResumable: { name: Tus-Resumable, in: header, required: true, schema: { type: string, enum: ["1.0.0"] } }
     AppId:
       name: appId
@@ -3170,6 +3290,63 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/ErrorDetail"
+    AssistantStatus:
+      type: object
+      additionalProperties: false
+      required: [available, changes]
+      properties:
+        available: { type: boolean, description: The member has an assistant instance. }
+        changes: { type: boolean, description: Pending changes can be read and decided. }
+    AssistantSession:
+      type: object
+      additionalProperties: false
+      required: [id, title, preview, startedAt, messageCount]
+      properties:
+        id: { type: string }
+        title: { type: string, description: Empty until the member or the assistant names the conversation. }
+        preview: { type: string }
+        startedAt: { type: number, description: Unix seconds. }
+        lastActive: { type: number, description: Unix seconds. }
+        messageCount: { type: integer, minimum: 0 }
+    AssistantSessionEnvelope:
+      type: object
+      additionalProperties: false
+      required: [session]
+      properties:
+        session: { $ref: "#/components/schemas/AssistantSession" }
+    AssistantMessage:
+      type: object
+      description: "One transcript row as Hermes Agent stores it; fields beyond role and content vary with the row (tool_calls, tool_call_id, reasoning, finish_reason, timestamp, display_metadata and others)."
+      required: [role]
+      properties:
+        role: { type: string, enum: [user, assistant, tool, system] }
+        content: {}
+      additionalProperties: true
+    AssistantChange:
+      type: object
+      additionalProperties: false
+      required: [id, summary, status, operations]
+      properties:
+        id: { type: integer }
+        sessionId: { type: string, description: "The conversation the assistant submitted it in; absent when that is not known." }
+        summary: { type: string }
+        status: { type: string, enum: [pending, applied, rejected, failed] }
+        decidedAt: { type: number, description: "Unix seconds; absent while pending." }
+        error: { type: string, description: Why a confirmed change failed. }
+        operations:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [op, path]
+            properties:
+              op: { type: string, enum: [write, delete, move, mkdir] }
+              path: { type: string, description: "Path as the assistant sees it, under /nas." }
+              to: { type: string, description: Destination of a move. }
+              exists: { type: boolean, description: The target exists now. }
+              before: { type: string, description: "Current text of a written file; absent when it is new or not text." }
+              after: { type: string, description: "Text the write would leave; absent when it is not text." }
+              problem: { type: string, description: Why the operation cannot be previewed. }
     MediaLibraryInput:
       type: object
       additionalProperties: false

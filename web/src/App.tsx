@@ -55,6 +55,7 @@ import {
   setSession, setupAdministrator,
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
+import { assistantStatus } from "./assistant/assistantApi";
 import { BackupCenter } from "./backup/BackupCenter";
 import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import { formatBytes } from "./bytes";
@@ -84,11 +85,13 @@ import { useHostState } from "./useHostState";
 import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 import "./styles.css";
 
+// The assistant window, with its chat libraries, loads when first opened.
+const AssistantPanel = lazy(() => import("./assistant/AssistantPanel").then((module) => ({ default: module.AssistantPanel })));
 // The transfer center loads when first opened; the desktop only needs its
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store";
+type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store" | "assistant";
 
 interface WindowModel {
   id: WindowID;
@@ -127,6 +130,7 @@ const initialWindows: WindowModel[] = [
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 960, height: 660, z: 0, opened: 0 },
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
+  { id: "assistant", title: "AI 助手", open: false, minimized: false, maximized: false, x: 260, y: 54, width: 1040, height: 700, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, AppGlyph> = {
@@ -140,6 +144,7 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   settings: Settings,
   docker: Box,
   store: ShoppingBag,
+  assistant: Bot,
 };
 // Apps on a white tile (相册) keep it in their window's title bar too.
 const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
@@ -155,6 +160,7 @@ const windowTones: Record<WindowID, string> = {
   settings: "settings",
   docker: "docker",
   store: "store",
+  assistant: "ai",
 };
 
 export default function App() {
@@ -284,6 +290,9 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
   useEffect(() => { transferStore.attach(session.user.id); }, [session.user.id]);
+  // The assistant opens only when this device runs one for this account (ADR 0022).
+  const [assistantReady, setAssistantReady] = useState(false);
+  useEffect(() => { void assistantStatus().then((status) => setAssistantReady(status.available)).catch(() => setAssistantReady(false)); }, [session.user.id]);
   // A folder the transfer center asks the file manager to show.
   const [fileNavigation, setFileNavigation] = useState<TransferLocation>();
   const showInFiles = (location: TransferLocation) => { setFileNavigation(location); openWindow("files"); };
@@ -307,7 +316,9 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
-    { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+    assistantReady
+      ? { id: "ai", label: "AI 助手", ariaLabel: "打开 AI 助手", keywords: "助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <Bot />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
+      : { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
   ];
   const visible = windows.filter((window) => window.open && !window.minimized);
   const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
@@ -362,6 +373,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
+			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} /></Suspense>}
             </AppWindow>
           );
         })}

@@ -88,6 +88,17 @@ if [[ -n "${SPIKE_MODEL:-}" ]]; then
 else
   systemd-run --unit fake-model --quiet python3 /spike/fake_model.py /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi
+if [[ -n "${SPIKE_PRODUCT_UID:-}" ]]; then
+  # Only the product service may connect, as in A-NAS where it is the a-nas user.
+  useradd -u "$SPIKE_PRODUCT_UID" -M -d /nonexistent -s /usr/sbin/nologin anas-product
+  install -d /etc/systemd/system/anas-assistant-api@.socket.d
+  printf '[Socket]
+SocketUser=anas-product
+SocketMode=0600
+' > /etc/systemd/system/anas-assistant-api@.socket.d/product.conf
+  install -d /run/anas-spike-broker
+  systemd-run --unit change-broker --quiet python3 /spike/change_broker.py /run/anas-spike-broker/broker.sock
+fi
 systemctl daemon-reload
 systemctl start anas-assistant-api@alice.socket anas-assistant-api@bob.socket
 echo setup-done

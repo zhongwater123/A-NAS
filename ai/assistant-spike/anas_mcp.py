@@ -74,7 +74,8 @@ def submit_changes(summary: str, operations: list[dict]) -> str:
         return "提交被拒绝：\n" + "\n".join(errors)
     number = int(time.time() * 1000) % 100000
     with RECORD.open("a", encoding="utf-8") as out:
-        out.write(json.dumps({"id": number, "summary": summary, "operations": recorded}, ensure_ascii=False) + "\n")
+        out.write(json.dumps({"id": number, "summary": summary, "operations": recorded,
+                              "createdAt": int(time.time())}, ensure_ascii=False) + "\n")
     return f"已提交 {len(recorded)} 项更改（编号 {number}），等待用户在确认卡片中确认；确认前不会生效。"
 
 

@@ -16,11 +16,16 @@
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
 #   ai/assistant-spike/run.sh scenarios [scenarios.txt|scenarios-publish.txt|scenarios-boundary.txt]
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
+#
+# Several sessions on one machine share the built runtime in $HERMES_SPIKE_DIR (mounted
+# read-only) but each needs its own container: HERMES_SPIKE_NAME=<name>, and with
+# SPIKE_PRODUCT_UID also HERMES_SPIKE_RUN=<dir> for the sockets.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=${HERMES_SPIKE_DIR:-$HOME/hermes-spike}
 commit=0e427d788d253630d38a3a51cd76849e73cd6925
-name=hermes-spike-sbx
+name=${HERMES_SPIKE_NAME:-hermes-spike-sbx}
+run=${HERMES_SPIKE_RUN:-$work/run}
 
 case "${1:-}" in
   build)
@@ -42,6 +47,13 @@ case "${1:-}" in
     if [[ -n "${SPIKE_MODEL:-}" ]]; then
       key_mount=(-v "${SPIKE_KEY_FILE:?set SPIKE_KEY_FILE}:/etc/anas-spike/model.key:ro")
     fi
+    # SPIKE_PRODUCT_UID=<uid> puts each member's assistant socket and the change
+    # broker's socket in $run on the host, owned by that UID, so a product
+    # service running on the host (the UI prototype) reaches them.
+    if [[ -n "${SPIKE_PRODUCT_UID:-}" ]]; then
+      mkdir -p "$run/assistant" "$run/broker"
+      key_mount+=(-v "$run/assistant:/run/a-nas-assistant" -v "$run/broker:/run/anas-spike-broker")
+    fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
       --tmpfs /run --tmpfs /run/lock -v "$work/out:/spike-out:ro" -v "$here:/spike:ro" "${key_mount[@]}" \
@@ -50,7 +62,7 @@ case "${1:-}" in
       docker exec "$name" systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break
       sleep 0.5
     done
-    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" "$name" bash /spike/setup.sh 2>&1 | tail -3
+    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}"       -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
     ;;
@@ -65,7 +77,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,18p' "$0"
+    sed -n '2,22p' "$0"
     exit 2
     ;;
 esac
