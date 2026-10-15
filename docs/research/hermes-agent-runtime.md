@@ -143,7 +143,7 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 
 ## 沙箱中以 `hermes serve` 代替 API Server（2026-10-15，开发机）
 
-[#109](https://github.com/zhongwater123/A-NAS/issues/109)：沙箱单元改为运行 Hermes Desktop 所用的无界面后端 `hermes serve`（REST `/api/*` 与 `/api/ws` 上的 JSON-RPC），其余沙箱不变；在产品服务的位置上（沙箱外的 root，经成员的 Unix 套接字）逐项测试鉴权、工具、MCP、额外接口与资源。客户端是 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)，测试为 [`serve-basic.sh`](../../ai/assistant-spike/serve-basic.sh)、[`serve-tools.sh`](../../ai/assistant-spike/serve-tools.sh)、[`serve-after.sh`](../../ai/assistant-spike/serve-after.sh)、[`serve-managed.sh`](../../ai/assistant-spike/serve-managed.sh)、[`serve-surface.sh`](../../ai/assistant-spike/serve-surface.sh) 与 [`serve-background.sh`](../../ai/assistant-spike/serve-background.sh)，模型为假模型；`SPIKE_CHANNEL=api_server` 用 [`api-server-channel/`](../../ai/assistant-spike/api-server-channel/anas-assistant.conf) 中的 drop-in 换回 API Server 作对比。
+[#109](https://github.com/zhongwater123/A-NAS/issues/109)：沙箱单元改为运行 Hermes Desktop 所用的无界面后端 `hermes serve`（REST `/api/*` 与 `/api/ws` 上的 JSON-RPC），其余沙箱不变；在产品服务的位置上（沙箱外的 root，经成员的 Unix 套接字）逐项测试鉴权、工具、MCP、额外接口与资源。客户端是 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)，测试为 [`serve-basic.sh`](../../ai/assistant-spike/serve-basic.sh)、[`serve-tools.sh`](../../ai/assistant-spike/serve-tools.sh)、[`serve-after.sh`](../../ai/assistant-spike/serve-after.sh)、[`serve-managed.sh`](../../ai/assistant-spike/serve-managed.sh)、[`serve-surface.sh`](../../ai/assistant-spike/serve-surface.sh)、[`serve-background.sh`](../../ai/assistant-spike/serve-background.sh) 与 [`serve-environ.sh`](../../ai/assistant-spike/serve-environ.sh)，模型为假模型；`SPIKE_CHANNEL=api_server` 用 [`api-server-channel/`](../../ai/assistant-spike/api-server-channel/anas-assistant.conf) 中的 drop-in 换回 API Server 作对比。
 
 ### 启动
 
@@ -169,7 +169,16 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 
 `?ticket=`（一次性、30 秒）与 `?internal=` 只在启用登录时有效，回环模式下 Desktop 也用 `?token=`。`/api/ws` 另要求对端是回环地址，socket-proxyd 在实例的网络命名空间内从 `127.0.0.1` 连入，满足这一条。
 
-做法：每个实例一个随机令牌，由 root 写在 `/etc/a-nas-assistant/tokens/<账号>.env`（0600），systemd 在降权之前以 `EnvironmentFile=` 读入，沙箱内这个目录不可访问（探针新增两项）；产品服务持有另一份（spike 中 `SPIKE_PRODUCT_UID` 模式写到 `$HERMES_SPIKE_RUN/tokens/`）。令牌最终在 Hermes 进程的环境中，与此前的 `API_SERVER_KEY` 一样：Agent 的文件工具不读 `/proc/*/environ`，Hermes 给 MCP 子进程只传 `PATH`、`HOME` 等少数变量（`tools/mcp_tool_config.py`），本地命令的环境策略也去掉它；能在沙箱里执行代码的人本来就能做这个实例能做的一切，所以令牌挡的是沙箱外的进程，而这些套接字只有产品服务能连。令牌没有出现在 Hermes 的日志与 journal 中（uvicorn 不记访问日志）。产品服务转发时要把 `Host` 设为 `127.0.0.1:9119`，`/api/ws` 的 URL 含令牌，不能写进日志。
+做法：每个实例一个随机令牌，由 root 写在 `/etc/a-nas-assistant/tokens/<账号>.env`（0600），systemd 在降权之前以 `EnvironmentFile=` 读入，沙箱内这个目录不可访问（探针新增两项）；产品服务持有另一份（spike 中 `SPIKE_PRODUCT_UID` 模式写到 `$HERMES_SPIKE_RUN/tokens/`）。令牌最终在 tini（实例中的 1 号进程）与 `hermes serve`（2 号）的初始环境中，与此前的 `API_SERVER_KEY` 一样。Agent 能否读到，用假模型逐项实测（[`serve-environ.sh`](../../ai/assistant-spike/serve-environ.sh)）：
+
+| 层 | 结果 |
+|---|---|
+| 内核 | 同一沙箱中以成员身份运行的 shell（`shell.exec`）能读 1 号与 2 号进程的 `/proc/<pid>/environ`，其中有令牌；同一 UID 的进程本来就可以互读，沙箱不挡这一层。MCP 子进程与 Hermes 派生的 shell 的环境中没有令牌（Hermes 给 MCP 子进程只传 `PATH`、`HOME` 等少数变量，`tools/mcp_tool_config.py`） |
+| `read_file` | `/proc/self/environ`、`/proc/1/environ`、`/proc/2/environ` 与 MCP 子进程的都被拒绝（“this is a device file…”）：Hermes 按路径拒读 `/proc/<pid>/` 下以 `/environ`、`/cmdline`、`/mem`、`/maps` 等结尾的文件，也检查符号链接（`tools/file_tools.py` 的 `_BLOCKED_PROC_SUFFIXES`） |
+| `search_files` 列出与递归搜索 | 能列出 `/proc/self` 下的文件名；递归搜索 `/proc/2` 与搜索 `/proc/self/environ`（这时指向搜索用的 ripgrep 子进程，环境中没有令牌）都是 0 条 |
+| `search_files` 搜索 `/proc/2/environ`、`/proc/1/environ` | 不返回内容：ripgrep 不打印含 NUL 的匹配行，Hermes 报 0 条精确匹配，但附带“有 1 处大小写不敏感的匹配”；改用 `output_mode: count` 时，令牌前 8 个字符写对的模式计数为 1，写错 1 个字符为 0 |
+
+所以挡住直接读取的是 Hermes 的路径检查，不是内核；而计数可以作为判定条件逐字符猜出令牌：Agent（或被诱导的模型）能取得令牌，模型以及开发期的云端 API 也就可能看到它。它在沙箱里没有用处：Agent 没有 HTTP 或终端工具，`serve` 只在实例的私有网络命名空间内监听，外面只有产品服务能连那个套接字；能在沙箱内执行代码的人本来就能做实例能做的一切。实测中回给模型的结果与 Hermes 主目录（会话、`state.db`、日志）里都没有出现令牌原文，journal 中也没有（uvicorn 不记访问日志）。要让令牌连间接也读不到，就不能让它出现在进程的初始环境中：由一个启动器在 exec 之后再设置它，或者由 Hermes 从文件读取（目前只有 Desktop 经 SSH 启动的 `--ssh-session-token-file` 这条路径支持，它还会带上 SSH 专用的行为）；两者都没有在这次做。产品服务转发时要把 `Host` 设为 `127.0.0.1:9119`，`/api/ws` 的 URL 含令牌，不能写进日志。
 
 ### 工具
 
@@ -180,7 +189,9 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 - `agent.coding_context` 默认 `auto`：工作区是代码仓库时换用编码模式的提示，设为 `focus` 时还换用它自己的 toolset。
 - `POST /api/cron/jobs/{id}/trigger` 立即在进程内执行一个定时任务，它的 Agent 按 cron 平台的默认工具构建，多出 `manage_connections` 与 `vision_analyze`（后者会把图片交给模型）。平台列表只管写明的平台，所以只靠 `platform_toolsets` 不够。
 
-因此 [`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml) 增加 `platform_toolsets.cli`，`agent.disabled_toolsets` 改为固定提交中除 `file`、`memory`、`session_search`、`skills`、`todo` 之外的全部 29 个内置 toolset（对所有平台生效），并设 `agent.coding_context: "off"`。之后：
+因此 [`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml) 增加 `platform_toolsets.cli`，`agent.disabled_toolsets` 改为固定提交中除 `file`、`memory`、`session_search`、`skills`、`todo` 之外的全部 32 个 toolset（对所有平台生效），并设 `agent.coding_context: "off"`。这 32 个包括 29 个写在 `toolsets.py` 中的，以及运行时注册的 3 个：`a2a`（自带的 Agent 互调平台插件 `plugins/platforms/a2a`）、`browser-cdp` 与 `browser-use`（浏览器工具模块）。组合 toolset `debugging` 与 `safe` 不能列入：关闭一个 toolset 会去掉它展开后的全部工具（平台包与 `coding` 这类 posture 例外，只去掉非核心的部分），而 `debugging` 包含文件工具，列入后 `read_file` 等随之消失。
+
+探针新增一项 [`toolsets-check.py`](../../ai/assistant-spike/toolsets-check.py)：在运行环境中加载全部工具模块与插件，再用 Hermes 自己的选择函数（`model_tools._select_tool_names`）核对：所有 toolset 都启用、再减去关闭列表时，剩下的不超过允许的那几个工具；只启用允许的 toolset 时，关闭列表一个也没去掉；除平台包与组合 toolset 外，每个 toolset 都写在允许或关闭列表中。升级 Hermes 时，新增的 toolset 或工具会让这一项失败。它第一次运行就发现了上面 3 个运行时注册的 toolset；从关闭列表删去 `vision` 或加入 `debugging`，它都失败。之后：
 
 - 普通会话、手动触发的定时任务，以及成员 `config.yaml` 被换成敌意内容（启用 `terminal`、`web`、`code_execution`、`vision`、`clarify`，清空关闭项，`coding_context: focus`，关闭审批，改模型地址）并把工作区做成 git 仓库后重启，模型看到的都只是 `read_file`、`write_file`、`patch`、`search_files`、`memory`、`session_search`、`skill_*`、`todo_list` 与 `mcp__anas__submit_changes`；请求仍发往 managed 的模型地址。
 - 直接调用 `terminal`、`execute_code`、`tool_search`、`tool_call` 得到“工具不存在”；[`calls.txt`](../../ai/assistant-spike/calls.txt) 的其余结果与 API Server 下相同：能读本人个人空间、回收站、共享空间与他人的 Agent空间，读不到他人的空间与回收站，`patch`/`write_file` 写两处空间被写保护拒绝，助手目录内可写。
@@ -203,7 +214,7 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 | `cli.exec` | 运行任意 `hermes` 子命令 | `config set approvals.mode off` 被拒绝（managed 的键）；`update` 因运行环境只读失败；`plugins install` 因无网络克隆失败 |
 | `PUT /api/config`、`PUT /api/env`、`config.set`、`POST /api/ops/hooks`、`PUT /api/tools/toolsets/terminal`、`PUT /api/tools/terminal/backend`、`POST /api/mcp/servers` | 改配置、写密钥、加 shell 钩子、开工具、加 MCP 服务器 | 全部失败：`config.yaml` 与 `.env` 是只读绑定 |
 | `POST /api/fs/write-text`、`POST /api/files/mkdir` | 写文件、建目录 | 个人空间、共享空间与 `SOUL.md` 都写不进 |
-| `GET /api/fs/read-text` | 读文件 | 能读 Agent 能读的一切，例如他人的 Agent空间；`/proc/1/environ` 读到空 |
+| `GET /api/fs/read-text` | 读文件 | 能读 Agent 能读的一切，例如他人的 Agent空间；`/proc/1/environ` 返回空内容，这只是因为 `/proc` 文件的大小为 0，不说明读不到 |
 | `POST /api/skills/hub/install`、`POST /api/gateway/start` | 派生 `hermes skills install`、`hermes gateway start` | 分别因无网络、没有 systemd 用户会话失败；派生的进程退出后留下僵尸进程（`serve` 不回收，实例停止时消失） |
 | `POST /api/cron/jobs` | 新建定时任务 | 不设 `HERMES_DESKTOP` 时没有调度：每分钟一次的任务 75 秒内没有执行；`…/trigger` 立即执行（工具见上文） |
 
@@ -253,13 +264,14 @@ Hermes 的 profile 是另一个完整的 Hermes 主目录，有自己的 `config
 | 额外能力 | 定时任务接口 | 配置、密钥、profile、技能与插件安装、`shell.exec`/`cli.exec`、文件读写、伪终端，全部要由产品服务白名单挡住 |
 | 停止时的退出状态 | 1，单元每次停止都记为失败（此前没有注意到） | 143（SIGTERM），单元以 `SuccessExitStatus=143` 视为正常 |
 
-沙箱单元为此做的改动：`ExecStart` 改为 `serve`，令牌经 `EnvironmentFile=` 传入，`profiles/` 与 `active_profile` 只读，`SuccessExitStatus=143`；managed scope 增加 `platform_toolsets.cli`、完整的 `disabled_toolsets`、`coding_context: "off"` 与 `mcp_discovery_timeout`；成员 `config.yaml` 增加 `mcp_servers`。探针 35 项全部通过（原 31 项，加两项令牌、两项 profile）。
+沙箱单元为此做的改动：`ExecStart` 改为 `serve`，令牌经 `EnvironmentFile=` 传入，`profiles/` 与 `active_profile` 只读，`SuccessExitStatus=143`；managed scope 增加 `platform_toolsets.cli`、完整的 `disabled_toolsets`、`coding_context: "off"` 与 `mcp_discovery_timeout`，并由探针中的 `toolsets-check.py` 核对；成员 `config.yaml` 增加 `mcp_servers`。探针 36 项全部通过（原 31 项，加令牌两项、profile 两项与 toolset 检查一项）。
 
 留给产品服务与整合（[#110](https://github.com/zhongwater123/A-NAS/issues/110)、[#111](https://github.com/zhongwater123/A-NAS/issues/111)）：
 
 - 只放行列出的 JSON-RPC 方法与 REST 路由，拒绝其余全部，也拒绝 `profile` 参数；
 - 连接时先调用 `client.capabilities` 声明能回答服务端请求，否则审批会被立即撤回；
 - 本人有回合在跑时保持到实例的连接，转发时 `Host` 为 `127.0.0.1:9119`，带令牌的 URL 不写日志。
+- 决定是否把会话令牌移出进程的初始环境（Agent 现在能借 `search_files` 的计数逐字符取得它，见“鉴权”）。
 
 ## 关联
 
