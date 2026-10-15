@@ -116,13 +116,15 @@ class Cache:
         if os.path.exists(path):
             with np.load(path, allow_pickle=False) as data:
                 keys, counts, boxes = data["keys"].tolist(), data["counts"].tolist(), data["boxes"]
-                names = [name[2:] for name in data.files if name.startswith("v_")]
+                # Each array once: indexing the archive reads it again every time.
+                vectors = {name[2:]: data[name] for name in data.files if name.startswith("v_")}
+                missing = {name: data["m_" + name] for name in vectors}
                 start = 0
                 for index, (key, count) in enumerate(zip(keys, counts)):
                     self.photos[key] = {
                         "boxes": boxes[start:start + count],
-                        "vectors": {name: data["v_" + name][start:start + count] for name in names
-                                    if not data["m_" + name][index]},
+                        "vectors": {name: found[start:start + count] for name, found in vectors.items()
+                                    if not missing[name][index]},
                     }
                     start += count
 
