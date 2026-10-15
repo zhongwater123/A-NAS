@@ -22,25 +22,9 @@ skills() {
     grep -v -F -f <(sed -n 's#^\([^:]*\):.*#/\1/SKILL.md#p' .bundled_manifest 2>/dev/null; echo /no-such-skill/))
 }
 
-cp -p /etc/hermes/config.yaml /tmp/managed-config.yaml
-if [[ -n $extra ]]; then
-  # Merged key by key, so a block the policy already has (skills:) keeps its other keys.
-  "$py" - "$extra" <<'PY'
-import sys
-from ruamel.yaml import YAML
-yaml = YAML(typ="safe")
-yaml.default_flow_style, yaml.allow_unicode = False, True
-def merge(base, extra):
-    for key, value in extra.items():
-        base[key] = merge(base.get(key) or {}, value) if isinstance(value, dict) else value
-    return base
-policy = merge(yaml.load(open("/etc/hermes/config.yaml")), yaml.load(sys.argv[1]))
-with open("/etc/hermes/config.yaml", "w") as out:
-    yaml.dump(policy, out)
-PY
-  echo "managed policy for this run adds: $(tr '\n' ' ' <<<"$extra")"
-fi
-systemctl stop "anas-assistant-api@$user.service" "anas-assistant@$user.service" 2>/dev/null
+# shellcheck source=policy.sh
+. /spike/policy.sh
+policy "$extra"
 touch "$log"
 before=$(wc -l < "$log")
 skills > /tmp/skills.before
@@ -67,5 +51,3 @@ skills | diff /tmp/skills.before - | sed -n 's/^> /  new skill /p'
 (cd "$home/skills" && find . -name SKILL.md -not -path './.archive/*' -newer /tmp/review-start) | while read -r f; do
   echo "  [written during the run: $f]"; sed -n '1,30p' "$home/skills/$f" | sed 's/^/    /'
 done
-cp -p /tmp/managed-config.yaml /etc/hermes/config.yaml
-systemctl stop "anas-assistant-api@$user.service" "anas-assistant@$user.service" 2>/dev/null

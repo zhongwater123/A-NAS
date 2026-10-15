@@ -67,3 +67,7 @@ plugins:
 gateway:
   multiplex_profiles: false
   auto_multiplex_migration: false
+# agent.log in the Hermes home is readable by the agent's own file tools, and at Hermes's default
+# INFO it records every member message, so cleared memory could be found again there (#114).
+logging:
+  level: WARNING

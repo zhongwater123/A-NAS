@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # What the assistant learns and how a member sees and clears it (#114): where Hermes keeps
 # memory and the skills the agent creates, what the official learning interface
-# (/api/learning/*, /api/memory*) shows and deletes, and what a new conversation still gets
-# afterwards (system prompt, session_search, archived skills). Fake model, `hermes serve`,
-# called as root with the instance's token, the position of the product service.
+# (/api/learning/*, /api/memory*) shows and deletes, and what is left afterwards: new
+# conversations, an old conversation continued, session_search, the skill archive, the curator
+# backups and the logs. Fake model, `hermes serve`, called as root with the instance's token, the
+# position of the product service.
+#   memory-skills.sh [--managed YAML]   e.g. --managed '{logging: {level: INFO}}' (Hermes's default)
 set -uo pipefail
-user=${1:-alice}
+user=alice
 home=/srv/a-nas/data/assistant/$user/hermes
 sock=/run/a-nas-assistant/$user.sock
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+# Written by the fake model for the conversation's own requests only (not titles, not reviews).
 system=/var/log/fake-model.jsonl.system.txt
+# shellcheck source=policy.sh
+. /spike/policy.sh
+policy "$([[ ${1:-} == --managed ]] && echo "$2")"
+echo "logging.level in the managed policy: $(sed -n '/^logging:/,/^[a-z]/s/^  level: //p' /etc/hermes/config.yaml)"
+
 rest() {  # rest METHOD PATH [JSON]: the body, then the status on its own line
   curl -sS --max-time 150 --unix-socket "$sock" -X "$1" -H "X-Hermes-Session-Token: $token" \
     -H 'Content-Type: application/json' ${3:+-d "$3"} -w '\n%{http_code}\n' "http://127.0.0.1:9119$2"
@@ -20,6 +28,9 @@ show() { printf '%-52s ' "$1 $2"; rest "$@" | tr '\n' ' ' | cut -c1-230; echo; }
 chat() { "$py" /spike/serve_client.py "$user" chat "$@" | grep -E '^(session|<)' | cut -c1-230; }
 q() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
 memories() { for f in "$home"/memories/*.md; do [ -e "$f" ] && echo "  [$(basename "$f")] $(tr '\n' ' ' < "$f")"; done; }
+mentions() {  # what the last system prompt carries of the learned items
+  for word in 团子 简短 family-trip; do printf '  system prompt mentions %s: %s\n' "$word" "$(grep -c -- "$word" "$system")"; done
+}
 # Stored id of the newest conversation whose list entry (title, preview of the first message) contains $1.
 stored() { body GET '/api/sessions?limit=50' | python3 -c '
 import json, sys
@@ -52,6 +63,11 @@ echo "  skills the agent created: $(cd "$home/skills" && find . -name SKILL.md -
 echo "  SKILL.md files in the Hermes home: $(find "$home/skills" -name SKILL.md | grep -vc '/.archive/') (bundled copies included)"
 python3 -c 'import json, sys; u = json.load(open(sys.argv[1])); print("  usage record of family-trip:", {k: v for k, v in u.get("family-trip", {}).items() if v})' "$home/skills/.usage.json"
 
+echo "=== a new conversation before anything is cleared (control)"
+chat hello > /dev/null
+mentions
+control=$(stored hello)
+
 echo "=== official interfaces"
 show GET /api/memory
 graph=$(body GET /api/learning/graph)
@@ -62,10 +78,17 @@ for n in g["nodes"]:
     print("  node %-6s %-46s createdBy=%s useCount=%s" % (n["kind"], n["id"][:44], n.get("createdBy"), n.get("useCount")))
 print("  stats:", {k: g["stats"][k] for k in ("learned_skills", "memory_nodes", "agent_created")})' "$graph"
 body GET /api/skills | python3 -c '
-import json, sys
+import json, re, sys
 d = json.load(sys.stdin)
-items = d if isinstance(d, list) else d.get("skills", [])
-print("  GET /api/skills:", len(items), "skills; fields", sorted(items[0]) if items else "-")'
+listed = {s["name"] for s in (d if isinstance(d, list) else d.get("skills", []))}
+home = sys.argv[1]
+bundled = {line.split(":")[0] for line in open(f"{home}/skills/.bundled_manifest") if ":" in line}
+print(f"  GET /api/skills: {len(listed)} skills = {len(bundled & listed)} bundled + {sorted(listed - bundled)}")
+import glob
+for name in sorted(bundled - listed):
+    md = next(iter(glob.glob(f"{home}/skills/**/{name}/SKILL.md", recursive=True)), "")
+    platforms = re.search(r"^platforms:.*$", open(md).read(), re.M) if md else None
+    print(f"    not listed: {name} ({platforms.group(0) if platforms else md or "missing"})")' "$home"
 mem_id=$(python3 -c 'import json, sys; print(next(n["id"] for n in json.loads(sys.argv[1])["nodes"] if n["kind"] == "memory"))' "$graph")
 show GET "/api/learning/node?id=$(q "$mem_id")"
 show GET "/api/learning/node?id=family-trip"
@@ -85,13 +108,28 @@ show POST /api/memory/reset '{"target": "all"}'
 echo "  memories left: $(find "$home/memories" -mindepth 1 -printf '%f ')"
 
 echo "=== a new conversation"
-chat hello
-for word in 团子 简短 family-trip; do echo "  system prompt mentions $word: $(grep -c -- "$word" "$system")"; done
+chat hello > /dev/null
+mentions
+echo "=== the control conversation (started before the clearing), continued"
+"$py" /spike/serve_client.py "$user" resume "$control" '还记得我家的猫吗？' | grep '^session' | sed 's/^/  /'
+mentions
+python3 -c '
+import sqlite3, sys
+db = sqlite3.connect(f"file:{sys.argv[1]}/state.db?mode=ro", uri=True)
+# Stored once per distinct prompt in system_prompts, referenced by sessions.system_prompt_hash.
+row = db.execute("select coalesce(s.system_prompt, p.prompt) from sessions s left join system_prompts p "
+                 "on p.hash = s.system_prompt_hash where s.id = ?", (sys.argv[2],)).fetchone()
+print("  state.db keeps the system prompt of that conversation with 团子:", bool(row and row[0] and "团子" in row[0]))' "$home" "$control"
+
+echo "=== what the agent can still find"
 chat 'CALL session_search {"query": "团子"}' > /dev/null
 search1=$(stored session_search)
 echo "  session_search for 团子 returned: $(found "$search1")   (the conversation that taught it: $learned)"
 archived=$(cd "$home/skills/.archive" && find . -name SKILL.md | grep family-trip | head -1)
-chat "CALL read_file {\"path\": \"/var/lib/hermes-home/skills/.archive/${archived#./}\"}" | grep '^<' | sed 's/^/  read_file of the archived skill: /'
+chat "CALL read_file {\"path\": \"/var/lib/hermes-home/skills/.archive/${archived#./}\"}" | grep '^<' | cut -c1-140 | sed 's/^/  read_file of the archived skill: /'
+blob=$(cd "$home" && grep -l -r 'family-trip' .curator_backups/blobs 2>/dev/null | head -1)
+chat "CALL read_file {\"path\": \"/var/lib/hermes-home/${blob#./}\"}" | grep '^<' | cut -c1-140 | sed 's/^/  read_file of the curator backup: /'
+chat 'CALL search_files {"pattern": "团子", "path": "/var/lib/hermes-home/logs", "target": "content"}' | grep '^<' | cut -c1-140 | sed 's/^/  search_files for 团子 in the logs: /'
 
 echo "=== the member deletes the conversation that taught it"
 show DELETE "/api/sessions/$learned"

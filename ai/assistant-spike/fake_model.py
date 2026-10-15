@@ -80,15 +80,20 @@ class Handler(BaseHTTPRequestHandler):
         messages = body.get("messages", [])
         tools = [t.get("function", {}).get("name") for t in body.get("tools", []) or []]
         choice = decide(messages)
+        # Hermes's background review asks with this prompt as the last user message.
+        user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
+        review = text_of(user.get("content")).strip().startswith("Review the conversation above")
         if body.get("tools"):
             with open(LOG + ".tools.json", "w", encoding="utf-8") as dump:
                 json.dump(body["tools"], dump, ensure_ascii=False, indent=1)
-        if messages and messages[0].get("role") == "system":
-            with open(LOG + ".system.txt", "w", encoding="utf-8") as dump:
-                dump.write(text_of(messages[0].get("content")))
+            # The system prompt of the conversation's own requests only: title requests carry no
+            # tools, and a review reuses the prompt of the conversation it reviews.
+            if messages and messages[0].get("role") == "system" and not review:
+                with open(LOG + ".system.txt", "w", encoding="utf-8") as dump:
+                    dump.write(text_of(messages[0].get("content")))
         with open(LOG, "a", encoding="utf-8") as log:
             log.write(json.dumps({"t": time.time(), "path": self.path, "stream": bool(body.get("stream")),
-                                  "tools": tools, "messages": len(messages), "decision": choice,
+                                  "tools": tools, "messages": len(messages), "decision": choice, "review": review,
                                   "system_chars": sum(len(text_of(m.get("content"))) for m in messages if m.get("role") == "system")},
                                  ensure_ascii=False) + "\n")
         time.sleep(choice.get("sleep", 0))

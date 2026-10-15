@@ -6,24 +6,8 @@
 set -uo pipefail
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 log=/var/log/fake-model.jsonl
-policy() {  # policy YAML: merge into the managed policy (restored by restore)
-  cp -p /etc/hermes/config.yaml /tmp/managed-config.yaml
-  "$py" - "$1" <<'PY'
-import sys
-from ruamel.yaml import YAML
-yaml = YAML(typ="safe")
-yaml.default_flow_style, yaml.allow_unicode = False, True
-def merge(base, extra):
-    for key, value in extra.items():
-        base[key] = merge(base.get(key) or {}, value) if isinstance(value, dict) else value
-    return base
-policy = merge(yaml.load(open("/etc/hermes/config.yaml")), yaml.load(sys.argv[1]))
-with open("/etc/hermes/config.yaml", "w") as out:
-    yaml.dump(policy, out)
-PY
-  systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null
-}
-restore() { cp -p /tmp/managed-config.yaml /etc/hermes/config.yaml; }
+# shellcheck source=policy.sh
+. /spike/policy.sh
 touch "$log"
 try() {  # try POLICY_YAML TOOL JSON
   policy "$1"
@@ -34,11 +18,10 @@ try() {  # try POLICY_YAML TOOL JSON
   tail -n +$((before + 1)) "$log" | python3 -c '
 import json, sys
 rows = [json.loads(l) for l in sys.stdin]
-# The review fork: its requests carry the turn plus the review prompt (more than 2 messages).
-i = next((n for n, r in enumerate(rows) if r["decision"].get("tool") == sys.argv[1] and r["messages"] > 2), None)
+# The review fork asked for the planted call (the fake model marks review requests).
+i = next((n for n, r in enumerate(rows) if r["decision"].get("tool") == sys.argv[1] and r.get("review")), None)
 print("review never attempted it" if i is None else
       (rows[i + 1]["decision"].get("text", "?")[:200] if i + 1 < len(rows) else "no result (yet)").replace("\n", " "))' "$2"
-  restore
 }
 memory_review='{memory: {nudge_interval: 1}}'
 skill_review='{skills: {creation_nudge_interval: 1}}'
@@ -62,8 +45,9 @@ async def main():
         await gw.call("client.capabilities", {"server_requests": True})
         sid = await gw.new_session()
         await gw.call("prompt.submit", {"session_id": sid, "text": said})
+        # A turn right after a restart can take a while (MCP discovery); watch 15 s past its end.
         loop, after = asyncio.get_running_loop(), ""
-        end = loop.time() + 25
+        end = loop.time() + 90
         while (left := end - loop.time()) > 0:
             try:
                 frame = await asyncio.wait_for(gw.events.get(), left)
@@ -72,6 +56,7 @@ async def main():
             kind, payload = frame.get("type"), frame.get("payload") or {}
             if kind == "message.complete":
                 after = " (after message.complete)"
+                end = min(end, loop.time() + 15)
                 print("  message.complete")
             elif kind == "server.request":
                 params = payload.get("params") or {}
@@ -80,4 +65,3 @@ async def main():
                 print(f"  {kind} {payload.get('name')}{after}")
 asyncio.run(main())
 PY
-restore
