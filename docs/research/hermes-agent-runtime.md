@@ -12,6 +12,7 @@
 | Python | `requires-python = ">=3.11,<3.15"`，核心依赖逐个固定版本；官方安装器默认准备 Python 3.14、Node.js、ripgrep 与 FFmpeg | [pyproject.toml](https://raw.githubusercontent.com/NousResearch/hermes-agent/main/pyproject.toml) |
 | 版本 | `pyproject.toml` 的版本号为 `0.0.0`，仓库没有发布版本，提交超过五万次；只能按提交固定 | 同上 |
 | API Server | 默认 `127.0.0.1:8642`，要求 `API_SERVER_KEY`；提供 OpenAI 兼容的 Chat Completions 与 Responses、带 SSE 事件的 Runs（`approval.request` 事件与 `POST /v1/runs/{id}/approval`）、会话与定时任务接口；页面提醒 API 默认带终端能力 | [API Server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server) |
+| `hermes serve` | Hermes Desktop 启动的无界面后端，与 `hermes dashboard` 同一个服务器但不提供网页：REST `/api/*` 与 `/api/ws` 上的 JSON-RPC（`tui_gateway`），一个进程服务所有 profile；回环绑定时以会话令牌 `HERMES_DASHBOARD_SESSION_TOKEN` 鉴权 | `hermes_cli/subcommands/dashboard.py`、`hermes_cli/web_server.py`（固定提交） |
 | 工具 | 内置 toolset 包括 `file`（`read_file`、`write_file`、`patch`、搜索）、`terminal`、`code_execution`、`browser`、`web`、`memory`、`session_search`、`skills`、`cronjob`、`delegation` 等，可按平台启用；MCP 服务器的工具以 `mcp-<名称>` 出现 | [Tools](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools) |
 | MCP | 作为客户端连接 stdio 或 HTTP 服务器；每个服务器可配 `headers`、`identity_header`，可用 `tools.include`/`exclude` 白名单 | [MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) |
 | 写保护 | `HERMES_WRITE_SAFE_ROOT` 把 `write_file` 与 `patch` 限制在指定目录；官方说明这些保护不能把恶意或被攻破的 Agent 关进沙箱，`terminal` 仍以同一系统用户运行 | [Security](https://hermes-agent.nousresearch.com/docs/user-guide/security) |
@@ -140,6 +141,138 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 - Hermes 默认会联网检查更新、拉取模型目录、在运行时安装缺少的包并按需安装语言服务器；managed scope 中分别以 `updates.check`、`model_catalog.enabled`、`security.allow_lazy_installs`、`lsp.enabled` 关闭（[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)）。
 - systemd 在 `PrivatePIDs` 下提示 “Supervising process ... which is not our child”，但停止、闲置退出与崩溃都被正确识别。
 
+## 沙箱中以 `hermes serve` 代替 API Server（2026-10-15，开发机）
+
+[#109](https://github.com/zhongwater123/A-NAS/issues/109)：沙箱单元改为运行 Hermes Desktop 所用的无界面后端 `hermes serve`（REST `/api/*` 与 `/api/ws` 上的 JSON-RPC），其余沙箱不变；在产品服务的位置上（沙箱外的 root，经成员的 Unix 套接字）逐项测试鉴权、工具、MCP、额外接口与资源。客户端是 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)，测试为 [`serve-basic.sh`](../../ai/assistant-spike/serve-basic.sh)、[`serve-tools.sh`](../../ai/assistant-spike/serve-tools.sh)、[`serve-after.sh`](../../ai/assistant-spike/serve-after.sh)、[`serve-managed.sh`](../../ai/assistant-spike/serve-managed.sh)、[`serve-surface.sh`](../../ai/assistant-spike/serve-surface.sh)、[`serve-background.sh`](../../ai/assistant-spike/serve-background.sh) 与 [`serve-environ.sh`](../../ai/assistant-spike/serve-environ.sh)，模型为假模型；`SPIKE_CHANNEL=api_server` 用 [`api-server-channel/`](../../ai/assistant-spike/api-server-channel/anas-assistant.conf) 中的 drop-in 换回 API Server 作对比。
+
+### 启动
+
+- Desktop 为每个 profile 起一个后端：`hermes --profile <名> serve --host 127.0.0.1 --port 0`，环境中带它生成的 `HERMES_DASHBOARD_SESSION_TOKEN` 与 `HERMES_DESKTOP=1`（`apps/desktop/electron/main.ts`）。沙箱中是 `hermes serve --host 127.0.0.1 --port 9119`（[`assistant-start.sh`](../../ai/assistant-spike/assistant-start.sh)），不设 `HERMES_DESKTOP`：它让后端自己按时执行定时任务，并把会话当作 Desktop 会话、多给 Desktop 界面专用的工具。
+- `serve` 不构建也不提供网页，只需要 fastapi、uvicorn 与 websockets，三者已在现有运行环境的 99 个包中：运行环境不用重建，也不需要 Node.js。
+- tini、`PrivateNetwork`、只读挂载、socket-proxyd 套接字激活与闲置退出都不变；代理是纯 TCP 转发，WebSocket 经它正常。就绪时 Hermes 打印 `HERMES_BACKEND_READY port=9119`，单元仍以端口可连为准。
+- 收到 SIGTERM 时 `serve` 先把内存中的记录写进 `state.db`，再以 SIGTERM 退出（状态 143），否则每次闲置退出都被 systemd 记为失败；单元因此设 `SuccessExitStatus=143`。
+
+### 鉴权
+
+只绑定回环地址时 Hermes 不启用登录（只有非回环绑定或配置了公开地址时才启用 OAuth/密码），唯一的凭据是会话令牌：取环境变量 `HERMES_DASHBOARD_SESSION_TOKEN`，未设则每次启动随机生成（`hermes_cli/web_server.py`）。实测：
+
+| 请求 | 结果 |
+|---|---|
+| REST 不带令牌、带另一成员实例的令牌 | 401 |
+| REST 以 `X-Hermes-Session-Token` 或 `Authorization: Bearer` 带令牌 | 200 |
+| REST 以 `?token=` 带令牌 | 401（查询参数只对 `/api/files/download` 有效） |
+| 公开路径 `/api/health`、`/api/status`、`/api/config/defaults`、`/api/config/schema`、`/api/model/info`、`/api/dashboard/themes`、`/api/dashboard/plugins` | 不带令牌 200；另有 `/api/cron/fire`，由它自己的 JWT 校验 |
+| `Host` 不是 `127.0.0.1`、`localhost` 或 `::1` | REST 400，WebSocket 403（防 DNS 重绑定） |
+| `/api/ws` 不带令牌、带另一成员的令牌、令牌只放在请求头 | 403 |
+| `/api/ws?token=<令牌>` | 接受，第一帧为 `gateway.ready` 事件 |
+| 同上但 `Origin` 是其他网站 | 403；非 http(s) 的 Origin（Electron 的 `app://`）照常接受 |
+
+`?ticket=`（一次性、30 秒）与 `?internal=` 只在启用登录时有效，回环模式下 Desktop 也用 `?token=`。`/api/ws` 另要求对端是回环地址，socket-proxyd 在实例的网络命名空间内从 `127.0.0.1` 连入，满足这一条。
+
+做法：每个实例一个随机令牌，由 root 写在 `/etc/a-nas-assistant/tokens/<账号>.env`（0600），systemd 在降权之前以 `EnvironmentFile=` 读入，沙箱内这个目录不可访问（探针新增两项）；产品服务持有另一份（spike 中 `SPIKE_PRODUCT_UID` 模式写到 `$HERMES_SPIKE_RUN/tokens/`）。令牌最终在 tini（实例中的 1 号进程）与 `hermes serve`（2 号）的初始环境中，与此前的 `API_SERVER_KEY` 一样。Agent 能否读到，用假模型逐项实测（[`serve-environ.sh`](../../ai/assistant-spike/serve-environ.sh)）：
+
+| 层 | 结果 |
+|---|---|
+| 内核 | 同一沙箱中以成员身份运行的 shell（`shell.exec`）能读 1 号与 2 号进程的 `/proc/<pid>/environ`，其中有令牌；同一 UID 的进程本来就可以互读，沙箱不挡这一层。MCP 子进程与 Hermes 派生的 shell 的环境中没有令牌（Hermes 给 MCP 子进程只传 `PATH`、`HOME` 等少数变量，`tools/mcp_tool_config.py`） |
+| `read_file` | `/proc/self/environ`、`/proc/1/environ`、`/proc/2/environ` 与 MCP 子进程的都被拒绝（“this is a device file…”）：Hermes 按路径拒读 `/proc/<pid>/` 下以 `/environ`、`/cmdline`、`/mem`、`/maps` 等结尾的文件，也检查符号链接（`tools/file_tools.py` 的 `_BLOCKED_PROC_SUFFIXES`） |
+| `search_files` 列出与递归搜索 | 能列出 `/proc/self` 下的文件名；递归搜索 `/proc/2` 与搜索 `/proc/self/environ`（这时指向搜索用的 ripgrep 子进程，环境中没有令牌）都是 0 条 |
+| `search_files` 搜索 `/proc/2/environ`、`/proc/1/environ` | 不返回内容：ripgrep 不打印含 NUL 的匹配行，Hermes 报 0 条精确匹配，但附带“有 1 处大小写不敏感的匹配”；改用 `output_mode: count` 时，令牌前 8 个字符写对的模式计数为 1，写错 1 个字符为 0 |
+
+所以挡住直接读取的是 Hermes 的路径检查，不是内核；而计数可以作为判定条件逐字符猜出令牌：Agent（或被诱导的模型）能取得令牌，模型以及开发期的云端 API 也就可能看到它。它在沙箱里没有用处：Agent 没有 HTTP 或终端工具，`serve` 只在实例的私有网络命名空间内监听，外面只有产品服务能连那个套接字；能在沙箱内执行代码的人本来就能做实例能做的一切。实测中回给模型的结果与 Hermes 主目录（会话、`state.db`、日志）里都没有出现令牌原文，journal 中也没有（uvicorn 不记访问日志）。要让令牌连间接也读不到，就不能让它出现在进程的初始环境中：由一个启动器在 exec 之后再设置它，或者由 Hermes 从文件读取（目前只有 Desktop 经 SSH 启动的 `--ssh-session-token-file` 这条路径支持，它还会带上 SSH 专用的行为）；两者都没有在这次做。产品服务转发时要把 `Host` 设为 `127.0.0.1:9119`，`/api/ws` 的 URL 含令牌，不能写进日志。
+
+### 工具
+
+`serve` 的会话由 `tui_gateway/server.py` 的 `_make_agent` 构建，与 API Server 不同：
+
+- 工具来自 `platform_toolsets.cli`（不是 `api_server`），会话平台为 `tui`（设了 `HERMES_DESKTOP` 时为 `desktop`），再并入客户端界面的 toolset：`tui` 加 `project`（Desktop 的工作区工具），`desktop` 加 `project`、`desktop_ui`、`catalog`。
+- managed scope 只写 `api_server` 时，`serve` 的会话按 CLI 的默认工具减去关闭项构建，模型多看到 `clarify`、`desktop_project`、`manage_connections` 与 `vision_analyze`。
+- `agent.coding_context` 默认 `auto`：工作区是代码仓库时换用编码模式的提示，设为 `focus` 时还换用它自己的 toolset。
+- `POST /api/cron/jobs/{id}/trigger` 立即在进程内执行一个定时任务，它的 Agent 按 cron 平台的默认工具构建，多出 `manage_connections` 与 `vision_analyze`（后者会把图片交给模型）。平台列表只管写明的平台，所以只靠 `platform_toolsets` 不够。
+
+因此 [`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml) 增加 `platform_toolsets.cli`，`agent.disabled_toolsets` 改为固定提交中除 `file`、`memory`、`session_search`、`skills`、`todo` 之外的全部 32 个 toolset（对所有平台生效），并设 `agent.coding_context: "off"`。这 32 个包括 29 个写在 `toolsets.py` 中的，以及运行时注册的 3 个：`a2a`（自带的 Agent 互调平台插件 `plugins/platforms/a2a`）、`browser-cdp` 与 `browser-use`（浏览器工具模块）。组合 toolset `debugging` 与 `safe` 不能列入：关闭一个 toolset 会去掉它展开后的全部工具（平台包与 `coding` 这类 posture 例外，只去掉非核心的部分），而 `debugging` 包含文件工具，列入后 `read_file` 等随之消失。
+
+探针新增一项 [`toolsets-check.py`](../../ai/assistant-spike/toolsets-check.py)：在运行环境中加载全部工具模块与插件，再用 Hermes 自己的选择函数（`model_tools._select_tool_names`）核对：所有 toolset 都启用、再减去关闭列表时，剩下的不超过允许的那几个工具；只启用允许的 toolset 时，关闭列表一个也没去掉；除平台包与组合 toolset 外，每个 toolset 都写在允许或关闭列表中。升级 Hermes 时，新增的 toolset 或工具会让这一项失败。它第一次运行就发现了上面 3 个运行时注册的 toolset；从关闭列表删去 `vision` 或加入 `debugging`，它都失败。之后：
+
+- 普通会话、手动触发的定时任务，以及成员 `config.yaml` 被换成敌意内容（启用 `terminal`、`web`、`code_execution`、`vision`、`clarify`，清空关闭项，`coding_context: focus`，关闭审批，改模型地址）并把工作区做成 git 仓库后重启，模型看到的都只是 `read_file`、`write_file`、`patch`、`search_files`、`memory`、`session_search`、`skill_*`、`todo_list` 与 `mcp__anas__submit_changes`；请求仍发往 managed 的模型地址。
+- 直接调用 `terminal`、`execute_code`、`tool_search`、`tool_call` 得到“工具不存在”；[`calls.txt`](../../ai/assistant-spike/calls.txt) 的其余结果与 API Server 下相同：能读本人个人空间、回收站、共享空间与他人的 Agent空间，读不到他人的空间与回收站，`patch`/`write_file` 写两处空间被写保护拒绝，助手目录内可写。
+- 用文件工具写工作区里的 `.hermes/config.yaml` 会被 Hermes 当作需要审批的写入；客户端没有声明能回答服务端请求时，Hermes 立即撤回审批并拒绝（“the attached client cannot answer approval requests”）。客户端要先调用 `client.capabilities`（`{"server_requests": true}`）才会收到审批请求，见 [#111](https://github.com/zhongwater123/A-NAS/issues/111)。
+
+### MCP
+
+第一次测试时 A-NAS 的 MCP 工具在任何一轮都没有出现，MCP 子进程也没有启动。原因：`serve` 启动 MCP 发现之前先判断是否配置了 MCP 服务器（`hermes_cli/mcp_startup.py` 的 `_has_configured_mcp_servers`），用的是 `read_raw_config()`，只读成员自己的 `config.yaml`，不含 managed scope；而 `hermes gateway run` 直接调用 `discover_mcp_tools()`，读合并后的配置，所以 API Server 下正常。与技能目录（上文“真实模型”第 1 项）一样，`mcp_servers` 也写进 root 为每个成员生成的只读 `config.yaml`（[`setup.sh`](../../ai/assistant-spike/setup.sh) 从 managed 配置截取同一段），managed scope 中的那份仍然优先。
+
+`serve` 在第一个 `/api/ws` 客户端连上时开始 MCP 发现（独立运行的 `serve` 不在启动时就发现，以免闲置时白白起 MCP 进程），会话第一次构建 Agent 时最多等 `mcp_discovery_timeout`（默认 1.5 秒）；managed scope 设为 20 秒，只在发现尚未完成时才等。修改后，测试中每次冷启动后的第一次模型请求都带 `mcp__anas__submit_changes`，调用正常。MCP 的结果被 Hermes 包在 `<untrusted_tool_result>` 中交给模型。
+
+### 额外接口
+
+`serve` 是整台 Hermes 的后端，接口远多于聊天：约 150 个 JSON-RPC 方法与数十组 REST 路由。产品服务按白名单转发（[#110](https://github.com/zhongwater123/A-NAS/issues/110)）；这里以 root 带令牌直接调用，确认白名单失守时沙箱仍兜得住（[`serve-surface.sh`](../../ai/assistant-spike/serve-surface.sh)）：
+
+| 接口 | 作用 | 沙箱中的结果 |
+|---|---|---|
+| `/api/pty`（WebSocket） | 在伪终端中运行 Hermes 的终端界面 | 需要 Node.js，运行环境没有：显示 “Hermes needs Node.js” 后以 1011 关闭 |
+| `shell.exec`（JSON-RPC） | 以 `sh -c` 运行任意命令，绕过 Hermes 的写保护与工具开关，只拦它认定的危险命令 | 以 alice 身份运行：`/srv` 为空，能读共享空间，写个人空间得到只读错误，只能写助手目录，没有 DNS，TCP 不通 |
+| `cli.exec` | 运行任意 `hermes` 子命令 | `config set approvals.mode off` 被拒绝（managed 的键）；`update` 因运行环境只读失败；`plugins install` 因无网络克隆失败 |
+| `PUT /api/config`、`PUT /api/env`、`config.set`、`POST /api/ops/hooks`、`PUT /api/tools/toolsets/terminal`、`PUT /api/tools/terminal/backend`、`POST /api/mcp/servers` | 改配置、写密钥、加 shell 钩子、开工具、加 MCP 服务器 | 全部失败：`config.yaml` 与 `.env` 是只读绑定 |
+| `POST /api/fs/write-text`、`POST /api/files/mkdir` | 写文件、建目录 | 个人空间、共享空间与 `SOUL.md` 都写不进 |
+| `GET /api/fs/read-text` | 读文件 | 能读 Agent 能读的一切，例如他人的 Agent空间；`/proc/1/environ` 返回空内容，这只是因为 `/proc` 文件的大小为 0，不说明读不到 |
+| `POST /api/skills/hub/install`、`POST /api/gateway/start` | 派生 `hermes skills install`、`hermes gateway start` | 分别因无网络、没有 systemd 用户会话失败；派生的进程退出后留下僵尸进程（`serve` 不回收，实例停止时消失） |
+| `POST /api/cron/jobs` | 新建定时任务 | 不设 `HERMES_DESKTOP` 时没有调度：每分钟一次的任务 75 秒内没有执行；`…/trigger` 立即执行（工具见上文） |
+
+结论：`serve` 把 Hermes 主目录里一切可写的东西都开放给了客户端，其中 `shell.exec`、`cli.exec` 与下面的 profile 等于在沙箱内执行任意代码。沙箱仍然兜得住——读写范围、网络与身份都与 Agent 自己相同——但这也说明产品服务的白名单必须是“只放行列出的方法与路由”，而不是排除危险项。
+
+### Profile
+
+Hermes 的 profile 是另一个完整的 Hermes 主目录，有自己的 `config.yaml`、`.env`、`SOUL.md`、`hooks/`、`plugins/` 与技能。`serve` 一个进程服务所有 profile：`POST /api/profiles` 在 `<Hermes 主目录>/profiles/` 下新建，许多 REST 路由接受 `?profile=`，`session.create` 接受 `profile`；`POST /api/profiles/active` 写入 `active_profile`，不带 `--profile` 启动的 `hermes` 会读它。
+
+加固前实测：客户端能新建 profile `evil`，写进它的 `config.yaml`（managed 的键在保存时被 Hermes 去掉，其余保留），加一个 `pre_tool_call` shell 钩子并记下同意；在这个 profile 中开会话后，工具仍是 managed 的那几个，但钩子在第一次工具调用前以 alice 身份执行了命令。设为活动 profile 后重启，`serve` 自己以 `-p default` 重新执行，没有切换主目录。也就是说：只要能调用这些接口，就能在助手目录里留下下次会话自动执行的代码。
+
+一个成员只需要一个 profile，所以 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service) 把 `profiles/` 绑定为 root 所有的只读空目录，`active_profile` 绑定为只读空文件（探针新增两项）。之后新建 profile 得到只读错误，`?profile=evil` 与设为活动 profile 都返回 404，钩子没有机会写入。上游已对会话目录上的 git 探测做了加固（`core.fsmonitor=false`、`core.hooksPath=/dev/null`，GHSA-7x36-8jrh-v4pw），工作区中的 `.git` 不会借此执行代码。
+
+### 回合与闲置退出
+
+`serve` 在客户端断开后保留它的会话：没有回合在跑的会话 20 秒后从内存中释放（记录在 `state.db` 中）；在跑的回合继续，事件先缓存，客户端重新连上（`session.resume`）后补发（`tui_gateway/session_lifecycle.py`）。这与 API Server 断开即中断不同。但 A-NAS 的实例只在套接字代理上有连接时存活（[`serve-background.sh`](../../ai/assistant-spike/serve-background.sh)，客户端提交后立即离开，假模型按指定秒数后回答）：
+
+- 30 秒的回合照常完成，记录中有回答；实例在客户端离开约 50 秒后停止。
+- 90 秒的回合在客户端离开约 45 秒时随闲置退出被打断，记录中的回答是 “Your request was not processed. Send it again…”。
+- 只开着一条 `/api/ws` 而不发消息时，65 秒后实例仍在运行；没有连接时约 45 秒停止，单元结果为 success。`kill -9` 主进程后约 1 秒单元进入 failed。
+
+所以要让回合在窗口关闭后继续，产品服务须在本人有回合在跑时保持一条到实例的 `/api/ws`（回合结束由 `message.complete` 事件得知），之后再断开。上游只给 Desktop 经 SSH 启动的 `serve --isolated` 配了“没有客户端且没有回合时退出”的看门狗（`hermes_cli/web_server_idle_exit.py`），不适用于这里。
+
+### 内存与冷启动
+
+同一台开发机上，容器中没有其他实例运行时，用 [`measure.sh`](../../ai/assistant-spike/measure.sh) 对两种通道各测一轮（假模型；冷启动为经套接字从停止到健康检查返回，三次）：
+
+| | API Server | `hermes serve` |
+|---|---|---|
+| 冷启动 | 8.3、12.2、11.9 秒 | 5.7、8.0、4.8 秒 |
+| 启动后闲置 | 301 MB | 164 MB |
+| 一轮对话后 | 337 MB | 347 MB |
+| 21 次脚本调用后（峰值） | 352 MB（354 MB） | 338 MB（347 MB） |
+| 任务数 | 44 | 45 |
+
+`serve` 启动时不起 MCP 子进程、也不构建 Agent，等第一个客户端连上才做，所以启动更快、闲置更省；有对话之后两者相当。一个成员第一次启动时还要把 57 个自带技能写进 Hermes 主目录并建库，`serve` 这次用了 10.7–19.3 秒（同时有其他测试在跑）；两个成员同时冷启动 12.6 秒，各约 290 MB。两种通道给模型的系统提示几乎相同（15,599 与 15,647 字符，都含 57 个自带技能的索引）。
+
+### 与 API Server 的差异
+
+| 方面 | API Server（`hermes gateway run`） | `hermes serve` |
+|---|---|---|
+| 接口 | OpenAI 兼容接口、`/api/sessions` 与 SSE、`/v1/runs` | REST `/api/*` 与 `/api/ws` 上约 150 个 JSON-RPC 方法，Desktop 的全部功能 |
+| 凭据 | `API_SERVER_KEY`（不少于 16 个字符） | 会话令牌：REST 放请求头，`/api/ws` 放 `?token=`；`Host` 必须是回环地址 |
+| 工具配置 | `platform_toolsets.api_server` | `platform_toolsets.cli` 加客户端界面的 toolset；手动触发的定时任务按 cron 平台 |
+| MCP | 启动时发现 | 第一个客户端连上时发现，且只在成员自己的 `config.yaml` 列出 MCP 服务器时 |
+| 客户端断开 | 中断回合 | 回合继续，可重新接上（受实例闲置退出限制） |
+| 额外能力 | 定时任务接口 | 配置、密钥、profile、技能与插件安装、`shell.exec`/`cli.exec`、文件读写、伪终端，全部要由产品服务白名单挡住 |
+| 停止时的退出状态 | 1，单元每次停止都记为失败（此前没有注意到） | 143（SIGTERM），单元以 `SuccessExitStatus=143` 视为正常 |
+
+沙箱单元为此做的改动：`ExecStart` 改为 `serve`，令牌经 `EnvironmentFile=` 传入，`profiles/` 与 `active_profile` 只读，`SuccessExitStatus=143`；managed scope 增加 `platform_toolsets.cli`、完整的 `disabled_toolsets`、`coding_context: "off"` 与 `mcp_discovery_timeout`，并由探针中的 `toolsets-check.py` 核对；成员 `config.yaml` 增加 `mcp_servers`。探针 36 项全部通过（原 31 项，加令牌两项、profile 两项与 toolset 检查一项）。
+
+留给产品服务与整合（[#110](https://github.com/zhongwater123/A-NAS/issues/110)、[#111](https://github.com/zhongwater123/A-NAS/issues/111)）：
+
+- 只放行列出的 JSON-RPC 方法与 REST 路由，拒绝其余全部，也拒绝 `profile` 参数；
+- 连接时先调用 `client.capabilities` 声明能回答服务端请求，否则审批会被立即撤回；
+- 本人有回合在跑时保持到实例的连接，转发时 `Host` 为 `127.0.0.1:9119`，带令牌的 URL 不写日志。
+- 决定是否把会话令牌移出进程的初始环境（Agent 现在能借 `search_files` 的计数逐字符取得它，见“鉴权”）。
+
 ## 回合内审批（#111，2026-10-15，开发机）
 
 用户决定写入确认改用 Hermes 官方的回合内审批（[#111](https://github.com/zhongwater123/A-NAS/issues/111)）。本节读固定提交 `0e427d78` 的源码选定触发方式，再在 spike 中验证产品服务一侧的可信执行；仍在 API Server 的会话流上验证，`hermes serve` 见 [#109](https://github.com/zhongwater123/A-NAS/issues/109)。
@@ -206,6 +339,7 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 
 - 决定：[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
-- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)、[#111](https://github.com/zhongwater123/A-NAS/issues/111)
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)

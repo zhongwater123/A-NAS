@@ -63,14 +63,18 @@ install -m 0644 /opt/a-nas/assistant-runtimes/spike/src/SOUL.md /etc/a-nas-assis
 cp -r /spike/skills/. /opt/a-nas/assistant-skills/ && chown -R root:root /opt/a-nas/assistant-skills && chmod -R u=rwX,go=rX /opt/a-nas/assistant-skills
 # Hermes reads skills.external_dirs from the user config.yaml only, not from the
 # managed layer, so each member gets one written by root and read-only to them.
+# `hermes serve` also starts MCP discovery only when the user config.yaml names
+# MCP servers (mcp_startup._has_configured_mcp_servers reads the raw file), so
+# the managed mcp_servers block is repeated there; the managed layer still wins.
 for u in alice bob; do
   install -d -m 0755 "/etc/a-nas-assistant/members/$u"
-  printf 'skills:
-  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]
-' "$u" > "/etc/a-nas-assistant/members/$u/config.yaml"
+  { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$u"
+    sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' /spike/managed-config.yaml
+  } > "/etc/a-nas-assistant/members/$u/config.yaml"
   # Mount points for the read-only files and folders the unit binds into the Hermes home.
   : > "$d/assistant/$u/hermes/config.yaml"; : > "$d/assistant/$u/hermes/.env"; : > "$d/assistant/$u/hermes/SOUL.md"
-  install -d "$d/assistant/$u/hermes/hooks" "$d/assistant/$u/hermes/plugins"
+  : > "$d/assistant/$u/hermes/active_profile"
+  install -d "$d/assistant/$u/hermes/hooks" "$d/assistant/$u/hermes/plugins" "$d/assistant/$u/hermes/profiles"
   install -d -m 0755 "/etc/a-nas-assistant/members/$u/anas-member"
   sed "s/{{member}}/$u/g" /spike/member-skill.md > "/etc/a-nas-assistant/members/$u/anas-member/SKILL.md"
   chmod 0644 "/etc/a-nas-assistant/members/$u/anas-member/SKILL.md"
@@ -80,6 +84,18 @@ sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 300$/  tim
   /spike/managed-config.yaml > /etc/hermes/config.yaml
 chmod 0644 /etc/hermes/config.yaml
 install -m 0644 /spike/anas-assistant@.service /spike/anas-assistant-api@.service /spike/anas-assistant-api@.socket /etc/systemd/system/
+# One session token per instance for `hermes serve`, readable by root only;
+# systemd passes it in through EnvironmentFile=.
+install -d -m 0700 /etc/a-nas-assistant/tokens
+for u in alice bob; do
+  printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')" > "/etc/a-nas-assistant/tokens/$u.env"
+  chmod 0600 "/etc/a-nas-assistant/tokens/$u.env"
+done
+if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
+  install -d /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d
+  install -m 0644 /spike/api-server-channel/anas-assistant.conf /etc/systemd/system/anas-assistant@.service.d/channel.conf
+  install -m 0644 /spike/api-server-channel/anas-assistant-api.conf /etc/systemd/system/anas-assistant-api@.service.d/channel.conf
+fi
 sed -e 's#^ExecStart=.*#ExecStart=/bin/bash /spike/probe.sh#' -e '/^ExecStartPost=/d' -e 's/^Type=.*/Type=oneshot/' -e '/^StopWhenUnneeded/d' \
   /spike/anas-assistant@.service > /etc/systemd/system/anas-assistant-probe@.service
 if [[ -n "${SPIKE_MODEL:-}" ]]; then
@@ -97,6 +113,11 @@ if [[ -n "${SPIKE_PRODUCT_UID:-}" ]]; then
 SocketUser=anas-product
 SocketMode=0600
 ' > /etc/systemd/system/anas-assistant-api@.socket.d/product.conf
+  # The product service's copy of each session token.
+  for u in alice bob; do
+    sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$u.env" > "/run/anas-spike-tokens/$u.token"
+    chown anas-product "/run/anas-spike-tokens/$u.token"; chmod 0600 "/run/anas-spike-tokens/$u.token"
+  done
 fi
 # The change broker (in A-NAS the product service and the File Broker): the product
 # socket for the product service, the agent socket for the assistants' MCP tool.
