@@ -47,7 +47,13 @@ const (
 
 // defaultPeopleCalibrations are the built-in calibrations. A Worker whose face
 // models have none scans faces, but nobody is clustered from them.
-var defaultPeopleCalibrations = []PeopleCalibration{}
+var defaultPeopleCalibrations = []PeopleCalibration{
+	// AuraFace on YuNet's faces: held at least 99.6% pairwise precision on
+	// LFW, FG-NET (children growing up) and Gallagher's family album
+	// (docs/research/photo-people-evaluation.md).
+	{Kind: OccurrenceFace, Model: "yunet-2026may@ebafce4e3c11+auraface-v1@a7933ea53301+opencv-5.0.0+ort-1.31.0+s0.8k64",
+		Threshold: 0.48, MinCore: 2, Rule: RuleCentroid},
+}
 
 // Person kinds.
 const (
@@ -134,7 +140,10 @@ func (s *Service) clusterPeople(ctx context.Context) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT DISTINCT a.library_id, o.kind, o.model FROM occurrences o
 JOIN assets a ON a.object_id = o.object_id
-WHERE NOT EXISTS (SELECT 1 FROM person_occurrences po WHERE po.library_id = a.library_id AND po.occurrence_id = o.id)`)
+WHERE NOT EXISTS (SELECT 1 FROM person_occurrences po WHERE po.library_id = a.library_id AND po.occurrence_id = o.id)
+UNION
+SELECT DISTINCT po.library_id, o.kind, o.model FROM person_occurrences po
+JOIN occurrences o ON o.id = po.occurrence_id WHERE po.source = 'moved'`)
 	if err != nil {
 		return false, err
 	}
@@ -175,8 +184,15 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 		return false, err
 	}
 	pending, err := s.clusterMembers(ctx, libraryID, calibration, false)
-	if err != nil || len(pending) == 0 {
+	if err != nil {
 		return false, err
+	}
+	moved := false
+	for _, m := range members {
+		moved = moved || m.source == "moved"
+	}
+	if len(pending) == 0 && !moved {
+		return false, nil
 	}
 	photosOf := make(map[string]map[string]bool)
 	sums := make(map[string][]float64) // person -> sum of its members' vectors
@@ -209,6 +225,64 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 	var created []string
 	founded := make(map[string][]int) // person -> members that founded it
 	placedSet := make(map[int]bool)
+
+	// What moved over from earlier models stays only where the new vectors
+	// agree with the person's core: the faces a member confirmed, or else
+	// the densest group of the person's faces. The rest is nobody again and
+	// gets a second chance below, so a better model can undo an older one's
+	// merges while the name stays with the face it was given for.
+	settled := make(map[int]bool)
+	byPerson := make(map[string][]int)
+	for i, m := range members {
+		switch {
+		case m.person != "":
+			byPerson[m.person] = append(byPerson[m.person], i)
+		case m.source == "moved":
+			// Nobody before, nobody now: it only stops waiting.
+			settled[i] = true
+			members[i].source = "auto"
+		}
+	}
+	for person, held := range byPerson {
+		var waiting, anchors []int
+		for _, i := range held {
+			switch members[i].source {
+			case "moved":
+				waiting = append(waiting, i)
+			case "user":
+				anchors = append(anchors, i)
+			}
+		}
+		if len(waiting) == 0 {
+			continue
+		}
+		if len(anchors) == 0 {
+			anchors = densestGroup(members, held, calibration.Threshold)
+		}
+		centre := make([]float64, len(members[held[0]].vector))
+		for _, i := range anchors {
+			for k, value := range members[i].vector {
+				centre[k] += float64(value)
+			}
+		}
+		for _, i := range waiting {
+			settled[i] = true
+			members[i].source = "auto"
+			var norm, product float64
+			for k, value := range centre {
+				norm += value * value
+				product += value * float64(members[i].vector[k])
+			}
+			if norm > 0 && product/math.Sqrt(norm) >= calibration.Threshold {
+				continue
+			}
+			for k, value := range members[i].vector {
+				sums[person][k] -= float64(value)
+			}
+			delete(photosOf[person], members[i].objectID)
+			members[i].person = ""
+		}
+	}
 
 	// place gives member i a person among the first seen members, if it
 	// earns one: in arrival order a face sees only those before it, as the
@@ -283,8 +357,11 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 	// to a face this pass placed or added, so only those neighbours are
 	// tried, not every pair of the library again.
 	retry := make(map[int]bool)
+	for i := range settled {
+		retry[i] = members[i].person == ""
+	}
 	for j := range members {
-		if j < start && !placedSet[j] {
+		if j < start && !placedSet[j] && !settled[j] {
 			continue
 		}
 		for i := range members {
@@ -325,6 +402,14 @@ ON CONFLICT(library_id, occurrence_id) DO NOTHING`, libraryID, m.id, person, now
 				}
 				continue
 			}
+			if settled[i] {
+				if _, err := tx.ExecContext(ctx,
+					"UPDATE person_occurrences SET person_id = ?, source = 'auto' WHERE library_id = ? AND occurrence_id = ? AND source = 'moved'",
+					person, libraryID, m.id); err != nil {
+					return err
+				}
+				continue
+			}
 			if placedSet[i] {
 				// Only an unplaced face moves, so a member's decision stays.
 				if _, err := tx.ExecContext(ctx,
@@ -337,6 +422,24 @@ ON CONFLICT(library_id, occurrence_id) DO NOTHING`, libraryID, m.id, person, now
 		return nil
 	})
 	return true, err
+}
+
+// densestGroup is the member of held with the most neighbours within
+// threshold among held, with those neighbours.
+func densestGroup(members []clusterMember, held []int, threshold float64) []int {
+	var best []int
+	for _, i := range held {
+		group := []int{i}
+		for _, j := range held {
+			if j != i && dot(members[i].vector, members[j].vector) >= threshold {
+				group = append(group, j)
+			}
+		}
+		if len(group) > len(best) {
+			best = group
+		}
+	}
+	return best
 }
 
 // clusterMembers reads a library's occurrences of one kind and model: those

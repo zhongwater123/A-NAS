@@ -25,7 +25,7 @@ param(
     # Where the face models that deploy\models\yunet-2026may.json and the
     # face embedder's manifest pin live (docs/architecture/photo-people.md).
     [string]$FaceDetectorDirectory = 'D:\A-NAS-models\faces\yunet',
-    [string]$FaceEmbedderDirectory = 'D:\A-NAS-models\faces\sface',
+    [string]$FaceEmbedderDirectory = 'D:\A-NAS-models\faces\auraface',
 
     [switch]$StageOnly
 )
@@ -112,7 +112,7 @@ try {
     $modelManifestPath = Join-Path $repoRoot 'deploy\models\embeddinggemma-2-740m.json'
     $detectorManifestPath = Join-Path $repoRoot 'deploy\models\dfine-m-obj365.json'
     $faceDetectorManifestPath = Join-Path $repoRoot 'deploy\models\yunet-2026may.json'
-    $faceEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\sface-2021dec.json'
+    $faceEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\auraface-v1.json'
     $models = @(
         @{ Manifest = $modelManifestPath; Directory = $ModelDirectory },
         @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory },

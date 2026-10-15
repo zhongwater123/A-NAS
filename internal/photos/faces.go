@@ -241,7 +241,9 @@ func sheetRows(faces int) int { return (faces + avatarColumns - 1) / avatarColum
 
 // moveDecisions hands what old faces of an object were to the new face of the
 // same kind that overlaps each most, when it overlaps at least half: who it
-// is, whether the user said so, which people it is not, and covers.
+// is, whether the user said so, which people it is not, and covers. What
+// clustering decided moves as provisional: the next pass keeps it only if the
+// new face is near its person by the new models too.
 func moveDecisions(ctx context.Context, tx *sql.Tx, old, added []storedOccurrence) error {
 	taken := make(map[string]bool)
 	for _, before := range old {
@@ -259,7 +261,7 @@ func moveDecisions(ctx context.Context, tx *sql.Tx, old, added []storedOccurrenc
 		}
 		taken[best] = true
 		for _, statement := range []string{
-			"UPDATE person_occurrences SET occurrence_id = ? WHERE occurrence_id = ?",
+			"UPDATE person_occurrences SET occurrence_id = ?, source = CASE source WHEN 'auto' THEN 'moved' ELSE source END WHERE occurrence_id = ?",
 			"UPDATE occurrence_rejections SET occurrence_id = ? WHERE occurrence_id = ?",
 			"UPDATE people SET cover_occurrence_id = ? WHERE cover_occurrence_id = ?",
 		} {

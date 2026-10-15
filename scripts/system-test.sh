@@ -71,7 +71,7 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   ln -s "/ai-detector/$(jq -r .file "$ai/detector.json")" "$ai/detector.onnx"
   cp /src/deploy/models/yunet-2026may.json "$ai/face-detector.json"
   ln -s "/ai-faces/yunet/$(jq -r .file "$ai/face-detector.json")" "$ai/face-detector.onnx"
-  cp "/src/deploy/models/${ANAS_SYSTEM_TEST_FACE_EMBEDDER:-sface-2021dec}.json" "$ai/face-embedder.json"
+  cp "/src/deploy/models/${ANAS_SYSTEM_TEST_FACE_EMBEDDER:-auraface-v1}.json" "$ai/face-embedder.json"
   ln -s "/ai-faces/$(jq -r .name "$ai/face-embedder.json" | cut -d - -f 1)/$(jq -r .file "$ai/face-embedder.json")" "$ai/face-embedder.onnx"
   cp /src/build/ai-runtime.json "$ai/runtime.json"
   ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"

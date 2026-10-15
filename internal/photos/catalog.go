@@ -216,7 +216,10 @@ CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AN
 	// belong to a library: who is who there, and what the user named,
 	// confirmed, merged or took out, is user data. An occurrence a library
 	// has considered has a row in person_occurrences, with no person while
-	// it is nobody yet. Originals that already have thumbnails are queued.
+	// it is nobody yet; its source says whether clustering put it there, a
+	// member did, or it moved over from a face found by earlier models and
+	// waits to be checked against the new ones. Originals that already have
+	// thumbnails are queued.
 	`
 CREATE TABLE face_scans (
     object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
@@ -257,7 +260,7 @@ CREATE TABLE person_occurrences (
     library_id TEXT NOT NULL REFERENCES libraries(id),
     occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE,
     person_id TEXT REFERENCES people(id) ON DELETE SET NULL,
-    source TEXT NOT NULL CHECK (source IN ('auto', 'user')),
+    source TEXT NOT NULL CHECK (source IN ('auto', 'user', 'moved')),
     created_at TEXT NOT NULL,
     PRIMARY KEY (library_id, occurrence_id)
 );

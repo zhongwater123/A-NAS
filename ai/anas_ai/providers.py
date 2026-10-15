@@ -485,6 +485,9 @@ class FaceProvider:
                 options.intra_op_num_threads = self.threads
                 options.inter_op_num_threads = 1
                 options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+                # AuraFace's export declares a batch of one for its output and
+                # warns on every larger batch, which it runs correctly.
+                options.log_severity_level = 3
                 self._embedder = onnxruntime.InferenceSession(self._embedder_path, options,
                                                               providers=["CPUExecutionProvider"])
         return self._embedder

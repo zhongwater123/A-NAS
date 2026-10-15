@@ -8,10 +8,12 @@ set it matches the cached faces to the labelled ones, then reports:
   10^3, 10^4 and 10^5 different-person pairs, and how many same-person pairs
   pass it;
 - clustering: per embedder, eval.people.cluster over each library at every
-  threshold and min_core in the sweep. The libraries of the --calibrate sets
-  are split in two halves by a hash of their name: the calibration half
-  chooses the setting with the best recall at precision >= --precision, and
-  the test half reports it, as does every other set in full (Gallagher's
+  threshold, min_core and rule in the sweep. The libraries of each --calibrate
+  set are split in two halves by a hash of their name (or used whole with
+  --whole). A setting must keep every set's calibration half at precision >=
+  --precision on its own, so that adults in LFW cannot outvote the children
+  of FG-NET; of those, the one with the best recall on the worst set wins.
+  The test halves report it, as does every other set in full (Gallagher's
   family album is the one that matters most).
 
     python -m eval.people_report --detector face_detection_yunet_2026may.onnx-dfull-s0.5 \\
@@ -169,21 +171,24 @@ def run(libraries, setting):
             "groups": {name: people.total(values) for name, values in sorted(groups.items())}}
 
 
-def sweep(libraries, thresholds, cores, assigns):
+def sweep(pools, thresholds, cores, assigns):
+    """Every setting's score on each calibration pool."""
     results = []
     for assign in assigns:
         for min_core in cores:
             for threshold in thresholds:
                 setting = {"assign": assign, "minCore": min_core, "threshold": round(float(threshold), 4)}
-                results.append({**setting, "calibration": run(libraries, setting)["all"]})
+                results.append({**setting, "calibration": {pool: run(libraries, setting)["all"] for pool, libraries in pools.items()}})
     return results
 
 
 def choose(results, precision):
-    """The setting with the best calibration recall at the precision floor."""
-    passing = [r for r in results if r["calibration"] and r["calibration"]["precision"] >= precision]
-    # Among equal recall, the stricter threshold: it leaves a margin.
-    return max(passing, key=lambda r: (round(r["calibration"]["recall"], 3), r["threshold"]), default=None)
+    """The setting that keeps every calibration set at the precision floor with
+    the best recall on the worst of them; among equals, the stricter one."""
+    passing = [r for r in results if r["calibration"] and all(found and found["precision"] >= precision
+                                                              for found in r["calibration"].values())]
+    return max(passing, key=lambda r: (round(min(found["recall"] for found in r["calibration"].values()), 3),
+                                       r["threshold"]), default=None)
 
 
 def operating_points(occurrences):
@@ -196,23 +201,35 @@ def operating_points(occurrences):
     return {"samePairs": len(same), "differentPairs": len(different), "points": points}, same, different
 
 
+def describe(found):
+    return (f"P {found.get('precision', 0):.4f} R {found.get('recall', 0):.3f} "
+            f"B3 P {found.get('bcubedPrecision', 0):.4f} R {found.get('bcubedRecall', 0):.3f} "
+            f"coverage {found.get('coverage', 0):.3f} people {found.get('people')} "
+            f"identities {found.get('identities')} mixed {found.get('mixedPeople')}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--detector", required=True, help="the cache directory's name under cache/faces")
     parser.add_argument("--sets", default="lfw")
     parser.add_argument("--calibrate", default="lfw", help="sets whose calibration halves choose the setting")
+    parser.add_argument("--whole", action="store_true", help="calibrate on all of each calibration set (no test half)")
     parser.add_argument("--min-score", type=float, default=0.8)
     parser.add_argument("--min-edge", type=float, default=0, help="ignore faces narrower than this in AI-input pixels")
     parser.add_argument("--precision", type=float, default=0.99)
     parser.add_argument("--cores", default="2,3,4")
     parser.add_argument("--assign", default="nearest,majority,centroid")
+    parser.add_argument("--thresholds", default="0.30,0.80,0.02", help="first,last,step of the threshold grid")
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
     calibrate = set(args.calibrate.split(","))
+    first, last, step = (float(value) for value in args.thresholds.split(","))
+    thresholds = np.round(np.arange(first, last + step / 2, step), 3)
 
     report = {"detector": args.detector, "minScore": args.min_score, "minEdge": args.min_edge,
-              "precisionFloor": args.precision, "calibrate": sorted(calibrate), "sets": {}, "embedders": {}}
-    # embedder -> pool ("calibration", "test" or a held-out set) -> library -> occurrences
+              "precisionFloor": args.precision, "calibrate": sorted(calibrate), "whole": args.whole,
+              "sets": {}, "embedders": {}}
+    # embedder -> pool ("<set>:calibration", "<set>:test" or a held-out set) -> library -> occurrences
     pools = collections.defaultdict(lambda: collections.defaultdict(dict))
     for set_name in args.sets.split(","):
         cache = Cache(os.path.join(datasets.ROOT, "cache", "faces", args.detector, f"{set_name}.npz"))
@@ -221,41 +238,37 @@ def main():
         for embedder, libraries in sorted(occurrences.items()):
             found["verification"][embedder] = operating_points([o for f in libraries.values() for o in f])[0]
             for library, members in libraries.items():
-                pool = half(library) if set_name in calibrate else set_name
+                if set_name not in calibrate:
+                    pool = set_name
+                elif args.whole:
+                    pool = f"{set_name}:calibration"
+                else:
+                    pool = f"{set_name}:{half(library)}"
                 pools[embedder][pool][f"{set_name}/{library}"] = members
         report["sets"][set_name] = found
         print(f"{set_name}: {found['photos']} photos, detection {found['detection']}", flush=True)
 
     for embedder, by_pool in sorted(pools.items()):
-        calibration = by_pool.get("calibration", {})
-        everything = [o for f in calibration.values() for o in f]
-        verification, same, different = operating_points(everything)
-        low = float(np.quantile(different, 0.5)) if len(different) else 0.0
-        high = float(np.quantile(same, 0.95)) if len(same) else 1.0
-        thresholds = np.round(np.arange(max(0.0, low), min(1.0, high), 0.02), 2)
-        print(f"{embedder}: sweeping {len(thresholds)} thresholds over {len(calibration)} libraries, "
-              f"{len(everything)} occurrences", flush=True)
+        calibration = {pool: libraries for pool, libraries in by_pool.items() if pool.endswith(":calibration")}
+        print(f"{embedder}: sweeping {len(thresholds)} thresholds over {', '.join(sorted(calibration))}", flush=True)
         results = sweep(calibration, thresholds, [int(c) for c in args.cores.split(",")], args.assign.split(","))
         chosen = choose(results, args.precision)
-        entry = {"calibrationVerification": verification, "chosen": chosen, "sweep": results, "results": {}}
+        entry = {"chosen": chosen, "sweep": results, "results": {}}
         if chosen:
             setting = {key: chosen[key] for key in ("assign", "minCore", "threshold")}
+            print(f"{embedder}: threshold {setting['threshold']} minCore {setting['minCore']} {setting['assign']}", flush=True)
+            for pool, found in sorted(chosen["calibration"].items()):
+                print(f"  {pool}: {describe(found)}", flush=True)
             for pool, libraries in sorted(by_pool.items()):
-                if pool != "calibration":
-                    entry["results"][pool] = run(libraries, setting)
-            print(f"{embedder}: threshold {setting['threshold']} minCore {setting['minCore']} {setting['assign']}; "
-                  f"calibration P {chosen['calibration']['precision']:.4f} R {chosen['calibration']['recall']:.3f}", flush=True)
-            for pool, result in entry["results"].items():
-                found = result["all"] or {}
-                print(f"  {pool}: P {found.get('precision', 0):.4f} R {found.get('recall', 0):.3f} "
-                      f"B3 P {found.get('bcubedPrecision', 0):.4f} R {found.get('bcubedRecall', 0):.3f} "
-                      f"coverage {found.get('coverage', 0):.3f} people {found.get('people')} "
-                      f"identities {found.get('identities')} mixed {found.get('mixedPeople')}", flush=True)
-                for name, group in result["groups"].items():
-                    print(f"    {name}: P {group['precision']:.4f} R {group['recall']:.3f} "
-                          f"coverage {group['coverage']:.3f}", flush=True)
+                if pool.endswith(":calibration"):
+                    continue
+                entry["results"][pool] = run(libraries, setting)
+                print(f"  {pool}: {describe(entry['results'][pool]['all'] or {})}", flush=True)
+                for name, group in entry["results"][pool]["groups"].items():
+                    print(f"    {name}: P {group['precision']:.4f} R {group['recall']:.3f} coverage {group['coverage']:.3f}",
+                          flush=True)
         else:
-            print(f"{embedder}: no setting reaches precision {args.precision}", flush=True)
+            print(f"{embedder}: no setting keeps every calibration set at precision {args.precision}", flush=True)
         report["embedders"][embedder] = entry
     os.makedirs(os.path.dirname(args.report), exist_ok=True)
     with open(args.report, "w", encoding="utf-8") as file:

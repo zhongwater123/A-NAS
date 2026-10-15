@@ -166,12 +166,19 @@ var peopleCalibration = []photos.PeopleCalibration{
 func newPeopleService(t *testing.T) (*photos.Service, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "photos")
+	return openPeopleService(t, root), root
+}
+
+// openPeopleService opens the photo service on root, as a release does when it
+// starts; new models reach the service with a release.
+func openPeopleService(t *testing.T, root string) *photos.Service {
+	t.Helper()
 	service, err := photos.Open(root, photos.Options{Now: newClock().Now, DisableCapacityReserve: true, People: peopleCalibration})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
-	return service, root
+	return service
 }
 
 // organise runs thumbnails, then every AI job and clustering until nothing is
@@ -296,7 +303,7 @@ func TestTwoFacesOfOnePhotoNeverShareAPerson(t *testing.T) {
 
 func TestNamesMergesAndRemovalsSurviveARescan(t *testing.T) {
 	ctx := context.Background()
-	service, _ := newPeopleService(t)
+	service, root := newPeopleService(t)
 	private, _ := libraries(t, service, alice)
 	worker := newFacingEmbedder()
 	var names []string
@@ -334,9 +341,15 @@ func TestNamesMergesAndRemovalsSurviveARescan(t *testing.T) {
 		t.Fatalf("小明's photos after removal = %v", got)
 	}
 
-	// New face models rescan every photo; who is who carries over.
+	// New face models come with a release and rescan every photo; who is
+	// who carries over.
 	worker.setFaceModel("faces-2")
+	_ = service.Close()
+	service = openPeopleService(t, root)
 	organise(t, service, worker)
+	if len(worker.faceInputs) != 8 {
+		t.Fatalf("face scans = %d; want every photo scanned again", len(worker.faceInputs))
+	}
 	found = people(t, service, alice, false)
 	if len(found) != 1 || found[0].ID != red.ID || found[0].Name != "小明" {
 		t.Fatalf("People() after the rescan = %+v; want 小明 kept", found)
@@ -536,5 +549,61 @@ func TestTheCentroidRuleStopsAChainOfLookAlikes(t *testing.T) {
 			t.Errorf("%s: People() = %d people; want %d", rule, len(found), want)
 		}
 		_ = service.Close()
+	}
+}
+
+func TestNewModelsUndoAnOlderModelsMergeAndKeepTheName(t *testing.T) {
+	ctx := context.Background()
+	service, root := newPeopleService(t)
+	private, _ := libraries(t, service, alice)
+	worker := newFacingEmbedder()
+	// The old models cannot tell red from green: both at 0 degrees.
+	worker.angles = []float64{0, 0}
+	for i := range 3 {
+		importPhoto(t, service, alice, private.ID, "", "red"+string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), 0))
+		importPhoto(t, service, alice, private.ID, "", "green"+string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), 1))
+	}
+	organise(t, service, worker)
+	found := people(t, service, alice, false)
+	if len(found) != 1 || found[0].Photos != 6 {
+		t.Fatalf("People() under the old models = %+v; want one mixed person", found)
+	}
+	merged := found[0]
+	// The member names the person from a red photo, confirming that face.
+	page, err := service.PersonPhotos(ctx, alice, merged.ID, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var red photos.Asset
+	for _, asset := range page.Assets {
+		if asset.Name == "reda.png" {
+			red = asset
+		}
+	}
+	details, err := service.Get(ctx, alice, red.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AssignOccurrence(ctx, alice, red.ID, details.People[0].OccurrenceID, merged.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	name := "小红"
+	if _, err := service.UpdatePerson(ctx, alice, merged.ID, photos.PersonChange{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+
+	// New models, with a release, tell them apart: the name stays with red,
+	// green leaves.
+	worker.setFaceModel("faces-2")
+	worker.angles = []float64{0, 90}
+	_ = service.Close()
+	service = openPeopleService(t, root)
+	organise(t, service, worker)
+	if got := personPhotos(t, service, alice, merged.ID); !slices.Equal(got, []string{"reda.png", "redb.png", "redc.png"}) {
+		t.Fatalf("小红's photos after the new models = %v", got)
+	}
+	found = people(t, service, alice, false)
+	if len(found) != 2 || found[0].Name != "小红" || found[1].Name != "" || found[1].Photos != 3 {
+		t.Fatalf("People() after the new models = %+v; want 小红 and green apart", found)
 	}
 }
