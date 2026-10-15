@@ -80,7 +80,7 @@ case "${1:-}" in
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
     ;;
   scenarios)
-    docker exec "$name" python3 -u /spike/scenarios.py "/spike/${2:-scenarios.txt}" "${@:3}"
+    docker exec "$name" /opt/a-nas/assistant-runtimes/spike/venv/bin/python -u /spike/scenarios.py "/spike/${2:-scenarios.txt}" "${@:3}"
     ;;
   test)
     shift

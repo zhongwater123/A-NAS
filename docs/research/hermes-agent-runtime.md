@@ -275,7 +275,7 @@ Hermes 的 profile 是另一个完整的 Hermes 主目录，有自己的 `config
 
 ## 回合内审批（#111，2026-10-15，开发机）
 
-用户决定写入确认改用 Hermes 官方的回合内审批（[#111](https://github.com/zhongwater123/A-NAS/issues/111)）。本节读固定提交 `0e427d78` 的源码选定触发方式，再在 spike 中验证产品服务一侧的可信执行；仍在 API Server 的会话流上验证，`hermes serve` 见 [#109](https://github.com/zhongwater123/A-NAS/issues/109)。
+用户决定写入确认改用 Hermes 官方的回合内审批（[#111](https://github.com/zhongwater123/A-NAS/issues/111)）。本节读固定提交 `0e427d78` 的源码选定触发方式，再在 spike 中验证产品服务一侧的可信执行。先在 API Server 的会话流上验证；[#109](https://github.com/zhongwater123/A-NAS/issues/109) 把沙箱改为 `hermes serve` 之后，假模型与真实模型在 `serve` 上重跑（见下文“在 `hermes serve` 上”）。
 
 ### 上游怎么做
 
@@ -288,22 +288,31 @@ Hermes 的 profile 是另一个完整的 Hermes 主目录，有自己的 `config
 ### A-NAS 的做法
 
 1. managed scope 中 `mcp_servers.anas.trust: untrusted`，只读的 A-NAS 工具标 `readOnlyHint`；`approvals.timeout` 也由 managed scope 固定（[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)，Hermes 默认 300 秒）。
-2. 产品服务转发回合时记下本回合最近一次“提交更改”的 `tool.started` 参数。收到 `approval.request` 时：没有对应的提交就拒绝；提交本身不合规（目标越界、暂存文件不存在等）就不出卡片，直接应答“一次”，由 MCP 工具把原因告诉助手，否则助手只会听到“用户没有同意”；合规就把暂存内容复制到产品服务自己的存储，记下每个目标的现状，生成卡片。
-3. 成员在本人会话中点确认：产品服务先登记一次性授权（账号、更改、参数摘要），再向 Hermes 应答 `once`；Hermes 回答审批已不在（超时或停止，409 `approval_not_active`）就作废授权。点拒绝：记为拒绝并应答 `deny`。只有这两种应答，不转发 `session`、`always`。
+2. 产品服务转发回合时记下最近一次“提交更改”开始时的参数（API Server 按回合，`serve` 按会话）。收到审批请求时：没有对应的提交就拒绝；提交本身不合规（目标越界、暂存文件不存在等）就不出卡片，直接应答“一次”，由 MCP 工具把原因告诉助手，否则助手只会听到“用户没有同意”；合规就把暂存内容复制到产品服务自己的存储，记下每个目标的现状，生成卡片。
+3. 成员在本人会话中点确认：产品服务先登记一次性授权（账号、更改、参数摘要），再向 Hermes 应答 `once`；Hermes 回答审批已不在（超时或停止：API Server 返回 409 `approval_not_active`，`serve` 返回 `{"resolved": 0}`）就作废授权。点拒绝：记为拒绝并应答 `deny`。只有这两种应答，不转发 `session`、`always`。
 4. Hermes 随后调用 MCP 工具，工具到达产品服务：只执行本人授权过、参数摘要相同、没用过且没过期的更改，写入的是卡片生成时复制的内容；目标在卡片生成后被改动就不执行。执行以本人身份经文件代理完成，结果在同一回合返回给助手。
 5. 回合结束时，本回合未决的更改全部作废，不保存跨回合的待确认更改。
 
 spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替产品服务的更改存储与文件代理，有两个套接字：产品套接字只有产品服务能连，沙箱中不可见；助手套接字按调用者的 UID（`SO_PEERCRED`）认定账号，只能执行或查看。生成卡片时读取目标与暂存文件、执行时写入，都以成员身份进行，并从数据卷逐级打开每一层、不跟随任何链接（相当于文件代理的 `openat2(RESOLVE_NO_SYMLINKS)`）；broker 自己从不以 root 打开成员一侧的路径。[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 在沙箱内只做转发，另有只读的 `recent_changes`；[`scenarios.py`](../../ai/assistant-spike/scenarios.py) 扮演产品服务，按场景替成员应答。
 
+### 在 `hermes serve` 上
+
+[`scenarios.py`](../../ai/assistant-spike/scenarios.py) 两种通道都能驱动，`serve` 一侧用 #109 的 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)，与 Desktop 的做法相同：
+
+- 连上 `/api/ws` 后先调用 `client.capabilities {"server_requests": true}`，否则 Hermes 立即撤回审批。
+- 审批是服务端发给客户端的请求 `approval`，参数为 `session_id`、`request_id`、`command`、`description`、`pattern_key(s)` 与 `choices`；同样不带工具参数，也没有 `run_id`。参数在同一会话紧挨着的 `tool.start` 事件中（`args`，同样是显示用的副本），所以 `serve` 上按会话配对：一个会话同一时间只有一个回合，MCP 调用串行。
+- 应答用 Desktop 的 `approval.respond {session_id, request_id, choice}`，返回 `{"resolved": 1}`；审批已超时或被撤回时返回 `{"resolved": 0}`，不是错误，产品服务据此作废授权。它缺少 `choice` 时按 `deny` 处理，并接受 `all`（一次应答全部），所以接口白名单（[#110](https://github.com/zhongwater123/A-NAS/issues/110)）只放行带 `request_id` 的 `once` 与 `deny`。
+- 停止用 `session.interrupt`，回合以 `interrupted` 结束；`tool.complete` 带工具结果。拒绝、超时与停止时模型收到的文字与 API Server 相同。
+
 ### 假模型与执行层
 
-`approvals.timeout` 设为 20 秒，探针增至 33 项，全部通过（新增：沙箱连不上产品套接字，连得上助手套接字）。
+`approvals.timeout` 设为 20 秒。探针在 API Server 下 33 项、在 `serve` 下 38 项，全部通过（本节新增两项：沙箱连不上产品套接字，连得上助手套接字）。下表在两种通道上结果相同，只有停止与超时后应答的形式不同。
 
 | 情形（[`calls-approval.txt`](../../ai/assistant-spike/calls-approval.txt)） | 结果 |
 |---|---|
 | 只读的 `recent_changes` | 不请求审批 |
 | 暂存后提交修改，成员确认 | 一张卡片，显示 `计划.md` 的新内容；应答后立即执行，新文件属于 alice，旧版本在 alice 的回收站；工具返回“用户已确认，1 项更改已执行” |
-| 成员拒绝；20 秒不回答；停止这一轮（`/v1/runs/{id}/stop`）；超时后才确认 | 文件不变。模型收到同一句英文 “The user did not approve running write-capable MCP tool 'submit_changes' on untrusted server 'anas'. The command was NOT run. Do not retry without explicit user direction.”；停止的回合以 `run.cancelled` 结束，这一行仍写入记录；超时后的确认被 Hermes 以 409 拒绝，授权随即作废 |
+| 成员拒绝；20 秒不回答；停止这一轮（`/v1/runs/{id}/stop` 或 `session.interrupt`）；超时后才确认 | 文件不变。模型收到同一句英文 “The user did not approve running write-capable MCP tool 'submit_changes' on untrusted server 'anas'. The command was NOT run. Do not retry without explicit user direction.”；停止的回合以 `run.cancelled` 或 `interrupted` 结束，这一行仍写入记录；超时后的确认，Hermes 回答 409 或 `{"resolved": 0}`，授权随即作废 |
 | 只在 Hermes 中应答 `once`，不登记本人授权 | Hermes 放行，工具返回“这批更改没有得到用户本人的确认”，什么都没改 |
 | 目标是共享空间根目录 | 不出卡片，工具返回越界原因 |
 | 新建文件夹再移动文件 | 一张卡片列出两项，按顺序执行 |
@@ -328,12 +337,16 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 
 两个模型在每一轮中最多请求一次审批，拒绝、超时或停止后都没有在同一轮换个方式再提交；两段诱导文字下没有提交任何更改，也就没有反复请求审批。回答都按工具结果说已执行或没有改变。v4-pro 这一遍之后 Hermes 的记忆为空，Agent 没有创建技能。v4-pro 每个对话 2–5 次模型请求、1.1–4.3 万 token（含生成标题的请求）。
 
+#109 合并后，在 `serve` 上用 flash 重跑同样的 10 个对话（新容器，探针 38 项）：每次写入都只请求一次审批，确认后才执行；拒绝、超时、停止后什么都没变，同一轮内没有重试；两段诱导文字下没有提交；记忆与技能为空。与 API Server 下不同的两处：
+
+- 超时之后，模型把 Hermes 那句英文转述给了成员：“`submit_changes` 属于未受信任的 MCP 服务器 `anas`，需要你明确批准”。
+- 第一轮回答顺带提到“输入 `/help` 可以看所有可用命令”：`serve` 按终端界面（`tui`）平台构建会话。这条属于 #109/#110 的整合，与审批无关。
+
 ### 仍要注意
 
 - 参数摘要来自 `tool.started` 的显示副本。参数中若有像密钥的字符串被 Hermes 脱敏，摘要对不上，更改不执行（失败时关闭）。
-- 拒绝、超时与停止对模型是同一句话，助手分不清成员是拒绝还是不在；卡片上要分开显示。
+- 拒绝、超时与停止对模型是同一句话，助手分不清成员是拒绝还是不在；卡片上要分开显示。这句话提到 “untrusted server”，模型会转述给成员（见上文 `serve` 重跑），`anas-files` 技能可以再要求只说“没有得到你的同意”、不提 MCP 与服务器。
 - 切换对话或刷新后恢复卡片：API Server 有 `GET /v1/runs/{run_id}`（`waiting_for_approval` 与当时的审批事件），`hermes serve` 有 `approval.pending`；产品服务按 `request_id` 找回自己生成的卡片。
-- `hermes serve` 的 `approval.respond` 缺少 `choice` 时按 `deny` 处理，并接受 `all`（一次应答全部）；接口白名单（[#110](https://github.com/zhongwater123/A-NAS/issues/110)）应只放行带 `request_id` 的 `once` 与 `deny`。
 
 ## 关联
 
