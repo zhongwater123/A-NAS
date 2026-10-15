@@ -3,6 +3,7 @@
 Listens on a Unix socket, logs every request (which tools Hermes offered), and
 answers deterministically:
   user "CALL <tool> <json>"  -> one tool call with those arguments
+  user "SLEEP <seconds>"     -> "ok" after that many seconds (a long model call)
   last message is a tool result -> text echoing the start of that result
   anything else              -> "ok"
 """
@@ -34,6 +35,8 @@ def decide(messages):
     if said.startswith("CALL "):
         _, name, *rest = said.split(" ", 2)
         return {"tool": name, "args": rest[0] if rest else "{}"}
+    if said.startswith("SLEEP "):
+        return {"text": "ok", "sleep": float(said.split()[1])}
     return {"text": "ok"}
 
 
@@ -75,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                                   "tools": tools, "messages": len(messages), "decision": choice,
                                   "system_chars": sum(len(text_of(m.get("content"))) for m in messages if m.get("role") == "system")},
                                  ensure_ascii=False) + "\n")
+        time.sleep(choice.get("sleep", 0))
         cid = "chatcmpl-" + uuid.uuid4().hex[:12]
         if "tool" in choice:
             call = {"id": "call_" + uuid.uuid4().hex[:8], "type": "function",

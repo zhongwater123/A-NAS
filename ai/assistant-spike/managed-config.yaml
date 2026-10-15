@@ -9,10 +9,27 @@ model:
   # The gateway outside the sandbox adds the real key.
   api_key: spike-not-a-secret
   context_length: 128000
+# `hermes serve` builds every session's agent from the cli entry (tui_gateway
+# server._load_enabled_toolsets); api_server is the API Server channel.
 platform_toolsets:
+  cli: [file, memory, session_search, skills, todo, anas]
   api_server: [file, memory, session_search, skills, todo, anas]
 agent:
-  disabled_toolsets: [terminal, code_execution, browser, web, cronjob, delegation, image_gen, tts, x_search, computer_use, kanban]
+  # Every toolset at the pinned commit except the five above, including the ones tool
+  # modules and plugins register at runtime (a2a, browser-cdp, browser-use). The platform
+  # lists only cover the platforms named there, and serve also builds agents for others (a
+  # triggered cron job got connections and vision); this list applies to all. Composites
+  # (debugging, safe) stay out: a disabled toolset removes every tool it resolves to, and
+  # debugging includes the file tools. toolsets-check.py (run by probe.sh) checks all this.
+  disabled_toolsets: [web, search, x_search, vision, video, image_gen, video_gen, computer_use, terminal,
+    browser, cronjob, tts, context_engine, connections, project, bot_room, desktop_ui, onboarding, catalog,
+    clarify, code_execution, delegation, kanban, discord, discord_admin, yuanbao, feishu_doc, feishu_drive, coding,
+    a2a, browser-cdp, browser-use]
+  # Never switch to the coding posture (its own toolset and prompt) in a git workspace.
+  coding_context: "off"
+# How long a session's first agent build waits for MCP discovery (default 1.5 s);
+# serve starts discovery when the first /api/ws client connects.
+mcp_discovery_timeout: 20
 mcp_servers:
   anas:
     command: /opt/a-nas/assistant-runtimes/spike/venv/bin/python

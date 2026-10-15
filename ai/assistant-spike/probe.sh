@@ -29,11 +29,15 @@ expect_fail "write into shared space"            sh -c 'echo x > /nas/共享空�
 expect_fail "write into own Agent space directly" sh -c 'echo x > /nas/共享空间/Agent空间/alice/x.txt'
 expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待确认 && echo x > /nas/助手/待确认/x.txt'
 expect_fail "read the gateway's model key"       cat /etc/anas-spike/model.key
+expect_fail "read its own serve session token"  cat /etc/a-nas-assistant/tokens/alice.env
+expect_fail "read another member's session token" cat /etc/a-nas-assistant/tokens/bob.env
 expect_fail "change the Hermes user config"      sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
 expect_fail "write the Hermes .env"              sh -c 'echo x >> /var/lib/hermes-home/.env'
 expect_fail "rewrite SOUL.md"                    sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'
 expect_fail "add a Hermes hook"                  mkdir /var/lib/hermes-home/hooks/x
 expect_fail "add a Hermes plugin"                mkdir /var/lib/hermes-home/plugins/x
+expect_fail "add a Hermes profile"               mkdir /var/lib/hermes-home/profiles/x
+expect_fail "set a sticky Hermes profile"        sh -c 'echo x > /var/lib/hermes-home/active_profile'
 expect_ok   "write Hermes state"                 sh -c 'echo x > /var/lib/hermes-home/probe-state'
 expect_fail "write into /etc/hermes policy"     sh -c 'echo x >> /etc/hermes/config.yaml'
 expect_fail "write into /opt runtime"            sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
@@ -55,3 +59,10 @@ sys.exit(0 if r == 0 else 1)'
 expect_fail "setuid to root"                     python3 -c 'import os; os.setuid(0)'
 expect_fail "unshare a user namespace"           unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
+# Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
+# Hermes upgrade that adds one fails here (toolsets-check.py).
+if out=$(/opt/a-nas/assistant-runtimes/spike/venv/bin/python /spike/toolsets-check.py 2>&1); then
+  ok "every Hermes toolset allowed or disabled ($(tail -n 1 <<<"$out"))"
+else
+  bad "every Hermes toolset allowed or disabled" "$(tr '\n' ';' <<<"$out")"
+fi
