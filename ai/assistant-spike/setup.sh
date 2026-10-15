@@ -80,7 +80,8 @@ for u in alice bob; do
   chmod 0644 "/etc/a-nas-assistant/members/$u/anas-member/SKILL.md"
   chmod 0644 "/etc/a-nas-assistant/members/$u/config.yaml"
 done
-sed "s/spike-model/${SPIKE_MODEL:-spike-model}/" /spike/managed-config.yaml > /etc/hermes/config.yaml
+sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 300$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-300}/" \
+  /spike/managed-config.yaml > /etc/hermes/config.yaml
 chmod 0644 /etc/hermes/config.yaml
 install -m 0644 /spike/anas-assistant@.service /spike/anas-assistant-api@.service /spike/anas-assistant-api@.socket /etc/systemd/system/
 # One session token per instance for `hermes serve`, readable by root only;
@@ -112,14 +113,17 @@ if [[ -n "${SPIKE_PRODUCT_UID:-}" ]]; then
 SocketUser=anas-product
 SocketMode=0600
 ' > /etc/systemd/system/anas-assistant-api@.socket.d/product.conf
-  install -d /run/anas-spike-broker
-  systemd-run --unit change-broker --quiet python3 /spike/change_broker.py /run/anas-spike-broker/broker.sock
   # The product service's copy of each session token.
   for u in alice bob; do
     sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$u.env" > "/run/anas-spike-tokens/$u.token"
     chown anas-product "/run/anas-spike-tokens/$u.token"; chmod 0600 "/run/anas-spike-tokens/$u.token"
   done
 fi
+# The change broker (in A-NAS the product service and the File Broker): the product
+# socket for the product service, the agent socket for the assistants' MCP tool.
+install -d -m 0755 /run/anas-spike-broker /run/anas-change-agent
+systemd-run --unit change-broker --quiet -E SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" python3 /spike/change_broker.py \
+  /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 systemctl daemon-reload
 systemctl start anas-assistant-api@alice.socket anas-assistant-api@bob.socket
 echo setup-done

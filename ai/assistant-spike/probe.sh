@@ -31,6 +31,8 @@ expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待
 expect_fail "read the gateway's model key"       cat /etc/anas-spike/model.key
 expect_fail "read its own serve session token"  cat /etc/a-nas-assistant/tokens/alice.env
 expect_fail "read another member's session token" cat /etc/a-nas-assistant/tokens/bob.env
+expect_fail "reach the change broker's product socket" python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-spike-broker/broker.sock")'
+expect_ok   "reach the change broker's agent socket"   python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-change-agent/agent.sock")'
 expect_fail "change the Hermes user config"      sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
 expect_fail "write the Hermes .env"              sh -c 'echo x >> /var/lib/hermes-home/.env'
 expect_fail "rewrite SOUL.md"                    sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'

@@ -56,6 +56,9 @@ TemporaryFileSystem=/srv:ro
 InaccessiblePaths=-/etc/anas-spike
 InaccessiblePaths=-/etc/a-nas-assistant/tokens
 InaccessiblePaths=-/run/anas-spike-tokens
+# The change broker's product socket, where the member's approvals are
+# registered; the assistant reaches only its agent socket in /run/anas-change-agent.
+InaccessiblePaths=-/run/anas-spike-broker
 UMask=0077
 NoNewPrivileges=true
 CapabilityBoundingSet=

@@ -34,6 +34,9 @@ mcp_servers:
   anas:
     command: /opt/a-nas/assistant-runtimes/spike/venv/bin/python
     args: [/spike/anas_mcp.py]
+    # Each call of a tool without readOnlyHint (提交更改) waits for the member's
+    # in-turn approval; Hermes asks before it reaches the server.
+    trust: untrusted
     tools:
       prompts: false
       resources: false
@@ -46,6 +49,8 @@ tools:
     enabled: "off"
 approvals:
   mode: manual
+  # setup.sh replaces it with SPIKE_APPROVAL_TIMEOUT when set.
+  timeout: 300
 security:
   allow_lazy_installs: false
   allow_private_urls: false
