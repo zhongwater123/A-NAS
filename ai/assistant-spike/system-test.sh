@@ -80,39 +80,68 @@ assistant_probe owner 1
 
 # --- What the member approves is applied as the member, with the broker's own checks.
 fold "assistant broker" < <(bash /spike/approvals-broker.sh 2>&1 || true)
+check "the broker's execution tests ran" test "$folded" -ge 15
 # shellcheck disable=SC2329 # invoked through check
 in_web_trash() { # JQ_CONDITION: alice's Web recycle bin holds an item matching it
   curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -e "any(.items[]; $1)" >/dev/null
 }
-check "a file the broker replaced is in the Web recycle bin under its own name and folder" \
-  in_web_trash '.name == "计划.md" and .originalPath == ""'
-# A file in a folder replaced twice: both earlier copies keep the folder, the second one
-# named as Samba's recycle names it.
-as alice mkdir -p "$data/spaces/private/alice/笔记" "$data/assistant/alice/files/待确认/笔记" || true
-as alice sh -c "printf 'v1\n' > '$data/spaces/private/alice/笔记/a.md'" || true
-replace_note() { # TEXT
-  local note='{"summary":"改笔记","operations":[{"op":"write","path":"/nas/个人空间/笔记/a.md","source":"/nas/助手/待确认/笔记/a.md"}]}' change
-  as alice sh -c "printf '%s\n' '$1' > '$data/assistant/alice/files/待确认/笔记/a.md'" || true
-  change=$(python3 /spike/broker_client.py product POST '/changes/prepare?account=alice' "$note" | cut -d' ' -f2- | jq -r .id || true)
-  python3 /spike/broker_client.py product POST "/changes/$change/approve?account=alice" >/dev/null || true
-  as alice python3 /spike/broker_client.py agent POST /apply "$note" >/dev/null || true
+web_restore() { # JQ_CONDITION NAME: restores the first matching item under NAME; prints the status
+  local id
+  id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r "[.items[] | select($1)][0].id // empty" || true)
+  status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$2\"}" "$api/api/v1/trash/$id/restore" || true
 }
-replace_note v2
-replace_note v3
+broker_apply() { # SUBMISSION: alice approves it and her assistant applies it
+  local change
+  change=$(python3 /spike/broker_client.py product POST '/changes/prepare?account=alice' "$1" | cut -d' ' -f2- | jq -r .id || true)
+  python3 /spike/broker_client.py product POST "/changes/$change/approve?account=alice" >/dev/null || true
+  as alice python3 /spike/broker_client.py agent POST /apply "$1" >/dev/null || true
+}
+stage() { # PATH TEXT: alice's assistant stages TEXT at PATH below /nas/助手/待确认
+  local file=$data/assistant/alice/files/待确认/$1
+  as alice mkdir -p "$(dirname "$file")" || true
+  printf '%s\n' "$2" | as alice tee "$file" >/dev/null || true
+}
+check "a file the broker replaced is in the Web recycle bin under its own name, at the root" \
+  in_web_trash '.name == "计划.md" and .originalPath == "" and .originalGone == false'
+# A file in a folder alice made on the Web, replaced twice: both earlier copies keep the folder,
+# the second named as Samba's recycle names it, and a restore puts it back there.
+notes_id=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d '{"parentId":"","name":"笔记"}' "$api/api/v1/spaces/$alice_private/directories" | jq -r .id || true)
+printf 'v1\n' > /tmp/a.md
+curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F "parentId=$notes_id" \
+  -F 'file=@/tmp/a.md;filename=a.md' "$api/api/v1/spaces/$alice_private/uploads" || true
+note='{"summary":"改笔记","operations":[{"op":"write","path":"/nas/个人空间/笔记/a.md","source":"/nas/助手/待确认/笔记/a.md"}]}'
+stage 笔记/a.md v2
+broker_apply "$note"
+stage 笔记/a.md v3
+broker_apply "$note"
 check "the replaced note is the newest" grep -qx v3 "$data/spaces/private/alice/笔记/a.md"
-check "its first copy is in the recycle bin in its folder" in_web_trash '.name == "a.md" and (.originalPath | test("笔记"))'
-check "the second copy is named as Samba names it" in_web_trash '.name == "Copy #1 of a.md" and (.originalPath | test("笔记"))'
+check "its first copy is in the recycle bin, its folder still there" \
+  in_web_trash '.name == "a.md" and .originalPath == "笔记" and .originalGone == false'
+check "the second copy is named as Samba names it" \
+  in_web_trash '.name == "Copy #1 of a.md" and .originalPath == "笔记" and .originalGone == false'
+check "restoring the first copy on the Web puts it back in its folder" \
+  test "$(web_restore '.name == "a.md"' a-v1.md)" = 200 -a "$(cat "$data/spaces/private/alice/笔记/a-v1.md" 2>/dev/null)" = v1
+# A folder the broker made itself is not in the Web index until something lists it, so the
+# recycle bin records it as gone and a restore lands at the space root. Recorded only: in
+# A-NAS the change runs through the file service, which indexes what it creates.
+stage 草稿/b.md v1
+broker_apply '{"summary":"新草稿","operations":[{"op":"mkdir","path":"/nas/个人空间/草稿"},{"op":"write","path":"/nas/个人空间/草稿/b.md","source":"/nas/助手/待确认/草稿/b.md"}]}'
+stage 草稿/b.md v2
+broker_apply '{"summary":"改草稿","operations":[{"op":"write","path":"/nas/个人空间/草稿/b.md","source":"/nas/助手/待确认/草稿/b.md"}]}'
+draft_item=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -c '[.items[] | select(.name == "b.md") | {originalPath, originalGone}][0]' || true)
+draft_restore=$(web_restore '.name == "b.md"' b-v1.md)
+echo "INFO assistant broker: replaced in a folder the broker made: $draft_item; restored (HTTP $draft_restore) to" \
+  "$(cd "$data/spaces/private/alice" && find . -name b-v1.md -printf '%h ' 2>/dev/null)"
 echo "INFO assistant broker: alice's Web recycle bin: $(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" |
-  jq -c '[.items[] | {name, originalPath}]' 2>/dev/null || true)"
+  jq -c '[.items[] | {name, originalPath, originalGone}]' 2>/dev/null || true)"
 
 # --- Agent空间 (ADR 0022 decision 5): everyone reads it, each member writes only their own
 # folder, and the assistant only through the broker.
 agent_space=$data/spaces/shared/Agent空间
-as alice sh -c "printf '周日大扫除\n' > '$data/assistant/alice/files/待确认/公告.md'" || true
-publish='{"summary":"发布公告","operations":[{"op":"write","path":"/nas/共享空间/Agent空间/alice/公告.md","source":"/nas/助手/待确认/公告.md"}]}'
-change=$(python3 /spike/broker_client.py product POST '/changes/prepare?account=alice' "$publish" | cut -d' ' -f2- | jq -r .id || true)
-python3 /spike/broker_client.py product POST "/changes/$change/approve?account=alice" >/dev/null || true
-as alice python3 /spike/broker_client.py agent POST /apply "$publish" >/dev/null || true
+stage 公告.md 周日大扫除
+broker_apply '{"summary":"发布公告","operations":[{"op":"write","path":"/nas/共享空间/Agent空间/alice/公告.md","source":"/nas/助手/待确认/公告.md"}]}'
 check "alice's assistant publishes into her Agent空间 folder through the broker" \
   test "$(owner_uid "$agent_space/alice/公告.md" 2>/dev/null)" = "$alice_id"
 check "every member reads what she published" quiet as bob cat "$agent_space/alice/公告.md"
@@ -126,21 +155,36 @@ check "the Web lists her publication to other members" grep -qx 公告.md \
 printf 'bob\n' > /tmp/bob.txt
 check "another member cannot upload into her folder on the Web" test "$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" \
   -F "parentId=$alice_folder_id" -F 'file=@/tmp/bob.txt;filename=x.txt' "$api/api/v1/spaces/$shared/uploads")" != 201
-# Shared is writable for every member, so its entries can be renamed and deleted (moved to
-# the member's recycle bin), Agent空间 included. Recorded here; see the research notes.
+# Deleting moves it into bob's recycle bin, another folder: that needs write access to it.
+check "another member cannot delete Agent空间 on the Web" \
+  test "$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -X DELETE "$api/api/v1/files/$agent_space_id" || true)" != 200 -a -d "$agent_space"
+# Renaming in place needs only write access to Shared. The product service is to refuse it on
+# the Web (decided with #115); what the Web answers today is recorded.
 renamed=$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -H 'Content-Type: application/json' -X PATCH \
   -d '{"name":"Agent空间-bob"}' "$api/api/v1/files/$agent_space_id" || true)
-echo "INFO assistant Agent空间: another member renames it on the Web: HTTP $renamed; now there: $(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -printf '%f ')"
-if [[ -d "$data/spaces/shared/Agent空间-bob" ]]; then mv -T "$data/spaces/shared/Agent空间-bob" "$agent_space"; fi
+echo "INFO assistant Agent空间: another member renames it on the Web: HTTP $renamed"
+# Over SMB the rename cannot be refused, and bob can then make his own Agent空间 with a folder
+# for alice. The Host Agent's repair moves that impostor aside, with what he made inside it.
+if [[ -d "$agent_space" ]]; then as bob mv -T "$agent_space" "$data/spaces/shared/Agent空间-bob" || true; fi
+as bob mkdir -p "$agent_space/alice" || true
+check "after a rename, another member can make an Agent空间 with a folder for alice" \
+  test "$(stat -c %U "$agent_space/alice" 2>/dev/null)" = bob
+PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" owner alice bob >/dev/null 2>&1 || true
+check "the repair moves the impostor aside with what was made inside it" \
+  test -n "$(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间.displaced-*' -user bob)"
+check "and puts Agent空间 and her folder back as root's" \
+  test "$(stat -c %U "$agent_space" 2>/dev/null):$(stat -c %U "$agent_space/alice" 2>/dev/null)" = root:root
+check "her folder is hers alone again" denied as bob touch "$agent_space/alice/y.md"
+echo "INFO assistant Agent空间: Shared now holds $(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间*' -printf '%f ')"
 
 # --- Assistant directories: one Btrfs subvolume per account, capped by simple quota.
 check "each assistant directory is its own Btrfs subvolume" quiet btrfs subvolume show "$data/assistant/alice"
 if quota_error=$(bash /spike/assistant-layout.sh quota "$data" 64M owner alice bob 2>&1); then
   as alice dd if=/dev/zero of="$data/assistant/alice/files/big" bs=1M count=100 status=none 2>/dev/null || true
   sync
-  check "an assistant directory stops at its quota" \
-    test "$(stat -c %s "$data/assistant/alice/files/big" 2>/dev/null || echo 0)" -lt $((100 * 1024 * 1024))
-  echo "INFO assistant quota: $(btrfs qgroup show -re "$data" 2>/dev/null | grep -c '^0/') qgroups; alice wrote $(stat -c %s "$data/assistant/alice/files/big" 2>/dev/null || echo 0) bytes"
+  written=$(stat -c %s "$data/assistant/alice/files/big" 2>/dev/null || echo 0)
+  check "an assistant directory stops at its quota" test "$written" -gt 0 -a "$written" -lt $((100 * 1024 * 1024))
+  echo "INFO assistant quota: $(btrfs qgroup show -re "$data" 2>/dev/null | grep -c '^0/') qgroups; alice wrote $written bytes"
   rm -f "$data/assistant/alice/files/big"
   check "snapshots still work with quotas on the volume" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
     -H 'Content-Type: application/json' -d '{"name":"after-quota"}' "$api/api/v1/spaces/$alice_private/snapshots")" = 201

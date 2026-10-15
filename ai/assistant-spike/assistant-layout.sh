@@ -3,8 +3,15 @@
 # root. Every subcommand is idempotent. Directories are root:root without setgid and get
 # exactly the ACL below, written as internal/hostops/linux/acl.go writes them (setfacl
 # --set; defaults dropped first when the ACL has none); a reserved name holding something
-# other than a directory is moved aside. The real Host Agent opens each directory with
-# openat2(RESOLVE_NO_SYMLINKS) and acts on the open file, which this script does not.
+# other than a directory is moved aside, and so is a directory at Agent空间's names that root
+# does not own (an impostor made after the real one was renamed).
+#
+# Only for the disposable spike and system-test containers, never on the Experimental NAS
+# (#116): it chowns and setfacls by path in folders members can write (Shared) and writes
+# the token into the product service's own directory, both following links, so whoever
+# controls those folders could turn it against root. The Host Agent opens every directory
+# with openat2(RESOLVE_NO_SYMLINKS) and O_NOFOLLOW, acts only on what it opened, and hands
+# the token to the product service in its typed response.
 #
 #   assistant-layout.sh spaces  DATA ACCOUNT...   spaces and recycle bins as the Host Agent
 #                                                 makes them (spike only; the installer does
@@ -38,12 +45,17 @@ inherited() {
 container() { echo "user::rwx,group::---,other::---,group:$users:--x,mask::--x"; }
 trash_root() { echo "user::rwx,group::---,other::---,$1:--x,mask::--x"; }
 
-# ensure_dir PATH ACL [reserved] [subvolume]
+displace() { mv -T "$1" "$1.displaced-$(date +%s%N)"; }
+
+# ensure_dir PATH ACL [reserved|owned] [subvolume]: owned also moves aside a directory root
+# does not own, with whatever others made inside it, instead of taking it over in place.
 ensure_dir() {
   local path=$1 acl=$2 reserved=${3:-} subvolume=${4:-}
   if [[ -L "$path" || ( -e "$path" && ! -d "$path" ) ]]; then
-    [[ "$reserved" == reserved ]] || { echo "$path is not a safe directory" >&2; return 1; }
-    mv -T "$path" "$path.displaced-$(date +%s%N)"
+    [[ -n "$reserved" ]] || { echo "$path is not a safe directory" >&2; return 1; }
+    displace "$path"
+  elif [[ "$reserved" == owned && -d "$path" && "$(stat -c %u "$path")" != 0 ]]; then
+    displace "$path"
   fi
   if [[ ! -e "$path" ]]; then
     if [[ "$subvolume" == subvolume && "$(stat -f -c %T "$(dirname "$path")")" == btrfs ]]; then
@@ -58,8 +70,10 @@ ensure_dir() {
   setfacl --set "$acl" "$path"
 }
 
-# A file the unit binds read-only into Hermes's home needs something to mount over.
-mount_point_file() { [[ -f "$1" && ! -L "$1" ]] || { rm -rf -- "$1"; install -m 0644 /dev/null "$1"; }; }
+# Hermes's home needs something at each path the unit binds over; anything else there is
+# moved aside.
+mount_point_file() { [[ -f "$1" && ! -L "$1" ]] || { [[ ! -e "$1" && ! -L "$1" ]] || displace "$1"; install -m 0644 /dev/null "$1"; }; }
+mount_point_dir() { [[ -d "$1" && ! -L "$1" ]] || { [[ ! -e "$1" && ! -L "$1" ]] || displace "$1"; install -d "$1"; }; }
 
 cmd=${1:?usage}; data=${2:?data volume}; shift 2
 case $cmd in
@@ -78,20 +92,20 @@ case $cmd in
     ;;
   prepare)
     # ADR 0022 decision 5: every member reads Agent空间; each member writes only their own
-    # folder there (through the change broker), the pattern of .a-nas-trash/<username>.
-    ensure_dir "$data/spaces/shared/Agent空间" "$(inherited "group:$users:r-x")" reserved
+    # folder there (through the change broker), the pattern of .a-nas-trash/<username>. It sits
+    # in Shared, which members can write: the product service refuses to rename, move or delete
+    # it, and this repair (the Host Agent's reconciliation) covers what SMB can still do.
+    ensure_dir "$data/spaces/shared/Agent空间" "$(inherited "group:$users:r-x")" owned
     # The change broker walks to the staging area as the member, so members pass through.
     ensure_dir "$data/assistant" "$(container)"
     for account in "$@"; do
-      ensure_dir "$data/spaces/shared/Agent空间/$account" "$(inherited "group:$users:r-x" "user:$account:rwx")" reserved
+      ensure_dir "$data/spaces/shared/Agent空间/$account" "$(inherited "group:$users:r-x" "user:$account:rwx")" owned
       home=$data/assistant/$account
       ensure_dir "$home" "user::rwx,group::---,other::---,user:$account:--x,mask::--x" "" subvolume
       ensure_dir "$home/files" "$(inherited "user:$account:rwx")"
       ensure_dir "$home/hermes" "$(inherited "user:$account:rwx")"
       for file in config.yaml .env SOUL.md active_profile; do mount_point_file "$home/hermes/$file"; done
-      for folder in hooks plugins profiles; do
-        [[ -d "$home/hermes/$folder" && ! -L "$home/hermes/$folder" ]] || { rm -rf -- "$home/hermes/$folder"; install -d "$home/hermes/$folder"; }
-      done
+      for folder in hooks plugins profiles; do mount_point_dir "$home/hermes/$folder"; done
       # Hermes reads skills.external_dirs and, under serve, mcp_servers from this file only.
       install -d -m 0755 "/etc/a-nas-assistant/members/$account" "/etc/a-nas-assistant/members/$account/anas-member"
       { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$account"
@@ -139,7 +153,7 @@ case $cmd in
     # like the member's recycle bins, is decided with account deletion (#26).
     ;;
   *)
-    sed -n '2,23p' "$0"
+    sed -n '2,29p' "$0"
     exit 2
     ;;
 esac

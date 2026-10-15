@@ -7,6 +7,8 @@
 # Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
 # run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
 # instance sockets and the broker's product socket and gets a copy of each session token.
+# Like assistant-layout.sh, only for the disposable spike and system-test containers, never
+# on the Experimental NAS (#116). Running it again replaces the model and the broker.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 runtime=/opt/a-nas/assistant-runtimes/spike
@@ -46,17 +48,23 @@ if [[ -n "$product_user" ]]; then
   printf '[Socket]\nSocketUser=%s\nSocketMode=0600\n' "$product_user" > /etc/systemd/system/anas-assistant-api@.socket.d/product.conf
 fi
 
+# transient UNIT ARGS...: (re)start a transient service, replacing one left by an earlier run.
+transient() {
+  systemctl stop "$1" 2>/dev/null || true
+  systemctl reset-failed "$1" 2>/dev/null || true
+  systemd-run --unit "$@"
+}
 if [[ -n "${SPIKE_MODEL:-}" ]]; then
   # Real model: the gateway holds the key; the sandbox cannot see the key file.
-  systemd-run --unit model-gateway --quiet python3 "$here/gateway.py" /run/anas-assistant-gw/model.sock \
+  transient model-gateway --quiet python3 "$here/gateway.py" /run/anas-assistant-gw/model.sock \
     /var/log/gateway.jsonl "${SPIKE_UPSTREAM:-api.deepseek.com}" /etc/anas-spike/model.key
 else
-  systemd-run --unit fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
+  transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi
 # The change broker (in A-NAS the product service and the File Broker): the product
 # socket for the product service, the agent socket for the assistants' MCP tool.
 install -d -m 0755 /run/anas-spike-broker /run/anas-change-agent
-systemd-run --unit change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
+transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
   python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 systemctl daemon-reload
 PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" prepare /srv/a-nas/data "$@"

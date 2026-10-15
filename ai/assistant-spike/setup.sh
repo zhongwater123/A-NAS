@@ -5,7 +5,9 @@
 # ai/assistant-spike/system-test.sh does the same on the real installer's accounts.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq && apt-get install -y -qq socat ripgrep tini >/dev/null
+# scripts/build-system-test-image.sh now includes them; an image built before needs them.
+command -v socat >/dev/null && command -v rg >/dev/null && command -v tini >/dev/null ||
+  { apt-get update -qq && apt-get install -y -qq socat ripgrep tini >/dev/null; }
 mkdir -p /opt/a-nas/assistant-runtimes
 tar -C /opt/a-nas/assistant-runtimes -xzf /spike-out/runtime.tar.gz
 

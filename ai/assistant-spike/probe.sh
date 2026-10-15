@@ -10,11 +10,14 @@ echo "INFO id: $(id)"
 echo "INFO caps: $(grep CapEff /proc/self/status)"
 # ADR 0022 decision 2: the member's own group and a-nas-users. For an administrator systemd
 # also adds a-nas-admins (User= applies the account's groups from /etc/group, and
-# SupplementaryGroups= can only add), so what holds is that nothing the sandbox reaches
-# grants that group (PROBE_IDENTITY_ONLY, run by system-test.sh for its administrator).
+# SupplementaryGroups= can only add), so what holds is that nothing the sandbox reaches grants
+# that group (PROBE_IDENTITY_ONLY, run by system-test.sh for its administrator). Checked: the
+# spaces, Hermes's home, /run, the assistant's policy and config, and /opt/a-nas, as owning
+# group, ACL entry or default ACL entry.
 if [ -n "${PROBE_IDENTITY_ONLY:-}" ]; then
   expect_fail "nothing in the sandbox grants a-nas-admins" sh -c \
-    'getfacl -R -p /nas /var/lib/hermes-home 2>/dev/null | grep -Eq "^(# group: |group:)a-nas-admins"'
+    'getfacl -R -p /nas /var/lib/hermes-home /run /etc/hermes /etc/a-nas-assistant /opt/a-nas 2>/dev/null |
+      grep -Eq "^(# group: |(default:)?group:)a-nas-admins(:|\$)"'
   exit 0
 fi
 expect_fail "no a-nas-admins in the sandbox"     sh -c 'id -G | tr " " "\n" | grep -qx 20001'
