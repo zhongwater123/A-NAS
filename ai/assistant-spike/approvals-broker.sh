@@ -4,7 +4,7 @@
 # The agent side runs as the member's UID, like the MCP tool in the sandbox.
 set -uo pipefail
 python3 - <<'PY'
-import http.client, json, os, socket, subprocess
+import http.client, json, os, pwd, socket, subprocess
 
 DATA = "/srv/a-nas/data"
 STAGED = f"{DATA}/assistant/alice/files/待确认/个人空间/计划.md"
@@ -64,7 +64,7 @@ product("POST", f"/changes/{change['id']}/approve")
 result = agent("alice", "POST", "/apply", write)
 written = open(PLAN, encoding="utf-8").read()
 check("applies the copy the member saw, not the staged file rewritten after the card", "看牙医" in written and "删光" not in written, result)
-check("the written file belongs to the member", os.stat(PLAN).st_uid == 20100)
+check("the written file belongs to the member", os.stat(PLAN).st_uid == pwd.getpwnam("alice").pw_uid)
 result = agent("alice", "POST", "/apply", write)
 check("the same approval applies only once", "没有得到用户本人的确认" in result, result)
 

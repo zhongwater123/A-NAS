@@ -582,11 +582,105 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 - managed scope 设 `logging.level: WARNING`；`skills.ledger` 保持默认；删除的技能留在归档，不另做清理（见“清除能做到什么”）。
 - Curator 保持默认。
 
+## 真实安装器布局上的沙箱（#115，2026-10-15，开发机）
+
+此前的探针都跑在 `setup.sh` 手搭的布局上（[#115](https://github.com/zhongwater123/A-NAS/issues/115)）。现在 [`scripts/system-test.sh`](../../scripts/system-test.sh) 的最后一节执行 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)。前面的系统测试已经用真实安装器、Host Agent 与 Product Service 建出了数据卷、管理员 owner、成员 alice 及其空间与 ACL；这一节在此基础上依次：
+
+1. 经 API 再建成员 bob；
+2. 装上 spike 的沙箱单元（`serve` 通道），由成员自己写入探针用的文件，经 API 给 alice 的空间拍一份快照；
+3. 跑探针、执行层测试、Agent空间与配额检查，最后输出布局清单。
+
+Hermes 运行环境是可选的：
+- 没有它（CI）时只检查沙箱、执行层与布局；
+- 设 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME=<runtime.tar.gz>` 时，另跑 `toolsets-check.py`，并以 alice 的身份起一个真实的 `hermes serve`。
+
+系统测试镜像为此增加了 `tini`、`socat`、`ripgrep`（[`build-system-test-image.sh`](../../scripts/build-system-test-image.sh)）。
+
+Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh) 代替。它按 [`acl.go`](../../internal/hostops/linux/acl.go) 的写法建目录与 ACL：属主 `root:root`、不带 setgid、`setfacl --set` 写入完整 ACL，保留名上的非目录先挪开，Agent空间位置上不归 root 所有的目录也挪开。它与 `assistant-install.sh` **只能在一次性的 spike 与系统测试容器中运行，不能在实验 NAS 上跑**（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）：它们以 root 按路径 `chown`、`setfacl`，其中包括成员可写的共享空间，还往产品服务自己的目录里写令牌，这些操作都会跟随链接，控制这些目录的人就能借此拿到 root。spike 的 [`setup.sh`](../../ai/assistant-spike/setup.sh) 也改为用它的 `spaces` 子命令建空间，不再手写 ACL；装上助手的部分拆成 [`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)，成员写入的样本文件拆成 [`seed.sh`](../../ai/assistant-spike/seed.sh)，两种环境共用。
+
+结果（开发机，带运行环境）：系统测试 220 项全部通过，其中助手一节 91 项。alice 的沙箱探针 39 项（含 `toolsets-check.py`）全部通过；执行层测试 15 项全部通过；alice 的助手以她的真实 UID（20101）运行，经产品服务的套接字回答，读到自己的文件，第一次模型请求就带 A-NAS 的 MCP 工具。spike 自己的沙箱换成新布局后，探针与执行层测试也全部通过。
+
+### 与手搭布局的差异
+
+用 [`layout-acl.sh`](../../ai/assistant-spike/layout-acl.sh) 在三种布局上导出同一组目录的类型、属主与 ACL：合并时手搭的布局、真实安装器建的布局，以及改用 Host Agent 写法后的 spike 布局。
+
+| 方面 | 原手搭布局 | 真实安装器 | 影响与处理 |
+|---|---|---|---|
+| UID | alice 固定 20100 | 按建账号的顺序分配；系统测试先建管理员，alice 是 20101 | `approvals-broker.sh` 写死了 20100，改为按账号查 |
+| 管理员 | 没有 | 管理员的账号在 `a-nas-admins` 中 | 管理员的助手沙箱带上这个组，见下文 |
+| 空间 | 普通目录 | 每个空间、`spaces` 与挂载点都是 Btrfs 子卷 | 绑定挂载不受影响；助手目录也做成子卷（见下文） |
+| 目录本身的权限位 | `user::---`；挂载点与其父目录 `0711`，没有 ACL | `user::rwx`；挂载点与父目录为 `root:a-nas`、`group::r-x`、`other::---`，另授 `a-nas-users` 与 `a-nas-photos` 穿过 | root 不受这些位限制，沙箱结果不变 |
+| 个人回收站根目录 | 带默认 ACL | 没有默认 ACL（`trashRootACL`） | 成员在这里本来就不能新建，结果不变 |
+| Agent空间与助手目录 | Agent空间 `mask::r-x`；`assistant/<账号>` 授本人 `rwx` | 安装器不建 | 改由 `assistant-layout.sh` 按 Host Agent 的写法建立（见下文的操作清单） |
+| broker 放进回收站的文件 | `<时间>-<名字>`，放在回收站根目录 | Web 回收站按 Samba `recycle:keeptree` 导入：子目录即原文件夹，文件名即原名 | 见下一段 |
+
+**broker 放进回收站的文件**：在真实系统里，Web 回收站把 broker 替换下来的旧版本显示为 `20261015-042143-计划.md`，原文件夹为空，恢复只能回到空间根目录，名字还带着时间。现在 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 的做法与 Samba 一致：
+- 文件放到 `.a-nas-trash/<账号>/<原文件夹>/<原名>`；
+- 已有同名文件时，按 `recycle:versions` 命名为 `Copy #1 of <原名>`。
+
+实测：`计划.md` 回到原名。成员在 Web 上建的文件夹“笔记”中，`a.md` 连续替换两次后，Web 回收站有 `a.md` 与 `Copy #1 of a.md`，原文件夹都是“笔记”且仍在（`originalGone: false`）；在 Web 上恢复 `a.md`，它回到“笔记/”。
+
+但 Web 回收站只在导入时按路径在索引中查一次原文件夹（`files.Service.importSambaTrashFile`）：查不到就记为原文件夹已不在，恢复时落到空间根目录。broker 自己新建的文件夹没有经过 Web，被列出之前不在索引中。实测：broker 建的“草稿”中的文件被替换后，回收站记为 `originalPath: 草稿`、`originalGone: true`，恢复回到了根目录。这是 spike 的 broker 像 SMB 一样直接写盘造成的；A-NAS 中执行经文件服务进行，它新建的文件夹与回收站条目直接写进索引，不依赖导入。
+
+### 管理员的助手
+
+管理员的助手沙箱带着 `a-nas-admins`：owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`。原因是 systemd 设了 `User=` 就按 `/etc/group` 加上该账号的全部附加组（`initgroups`），而 `SupplementaryGroups=` 只能再加、不能去掉。目前它不授予任何东西：
+- 数据卷上没有任何 ACL 用到 `a-nas-admins`；
+- Samba 的共享按 `@a-nas-users` 授权；
+- 文件代理给管理员工作进程的附加组是它自己显式设定的（`internal/filebroker/server.go`），不读 `/etc/group`。
+
+用户决定照旧：ADR 0022 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查，以后有人给这个组开权限就会报警。探针对管理员的沙箱以 `getfacl -R` 扫描沙箱中的空间（`/nas`）、Hermes 主目录、`/run`、`/etc/hermes`、`/etc/a-nas-assistant` 与 `/opt/a-nas`，属组、ACL 条目或默认 ACL 条目是 `a-nas-admins` 都算失败；只读的系统目录（`/usr` 等）不在扫描范围内。成员的沙箱仍检查不带这个组。
+
+### Agent空间
+
+`assistant-layout.sh prepare` 按 ADR 0022 决定 5 建立两层：
+- `共享空间/Agent空间`：`a-nas-users` 只读，默认 ACL 同样只读；
+- 每个账号的子目录：`a-nas-users` 只读，加本人 `rwx`，与 `.a-nas-trash/<账号>` 同一模式。
+
+在真实布局上：
+- alice 的助手经 broker 发布的文件属于 alice；
+- bob 在文件系统与 Web 上都读得到，写不进她的子目录；Web 上传返回非 201；
+- 任何成员都不能直接写 `Agent空间` 本身。
+
+共享空间根目录对全体成员可写，所以其中的条目谁都能改名，Agent空间也不例外：实测 bob 经 Web 把它改名为 `Agent空间-bob`，返回 HTTP 200。删除则不行：Web 的删除是把它移进 bob 的回收站，跨目录移动目录需要对它本身有写权限，bob 只有 `r-x`，实测被拒绝，目录仍在。改名之后，bob 可以再建一个同名目录（继承共享空间的 `rwx`）并在其中建 `alice`，alice 的助手就会写进 bob 控制的目录。
+
+用户决定（#115 评审中）：Agent空间与成员子目录是保留名。产品服务拒绝在 Web 上对它们改名、移动与删除；SMB 上的改名无法拒绝，由 Host Agent 的定时对账修复。修复时位置上的目录如果不归 root 所有，就是冒名的，要连同其中他人建的子文件夹一起挪开，再按原 ACL 重建；不能像现有的空间对账那样原地接管（`chown` 加顶层 ACL），否则 bob 事先建的子文件夹会保持他可写。
+
+`assistant-layout.sh` 已按此修复（`ensure_dir` 的 `owned`）。实测：bob 在文件系统上改名（相当于 SMB）并建了 `Agent空间/alice`，修复后冒名目录被挪成 `Agent空间.displaced-<时间>`，新的 `Agent空间` 与 `Agent空间/alice` 归 root，bob 写不进 alice 的子目录。被改名的原目录 `Agent空间-bob` 仍归 root，已发布的文件都在其中；修复时可以凭只有 root 能写的扩展属性（`trusted.*`）认出它并改回原名，留给正式实现。产品服务对 Web 改名的拒绝还没有实现，系统测试把 Web 改名的结果记为 INFO。
+
+### 助手目录与配额
+
+`assistant/<账号>` 是 Btrfs 子卷，本人只有穿过权限；下分 `files/`（工作区）与 `hermes/`（Hermes 主目录），都授本人 `rwx` 并继承，`hermes/` 中预先建好单元要绑定的文件与目录。
+
+在已有空间、快照与相册的真实数据卷上开启 simple quota（内核 6.18，btrfs-progs 6.14）并给每个助手目录设 64 MiB 上限：alice 在 `files/` 中写 100 MiB，写到 67,092,480 字节时停止；之后快照与 Web 上传都正常。在不支持 simple quota 的内核（6.7 以前）上 `quota` 子命令会失败，系统测试只记 INFO，因此 CI 的内核不会让它变红。实验 NAS（内核 6.12）上的影响仍需在 [#116](https://github.com/zhongwater123/A-NAS/issues/116) 中确认。
+
+### 实例、令牌与删除账号
+
+- 实例套接字 `/run/a-nas-assistant/<账号>.sock` 由 `a-nas`（产品服务账号）持有、`0600`，成员连不上。
+- 会话令牌 `/etc/a-nas-assistant/tokens/<账号>.env` 只有 root 可读，产品服务那份为 `a-nas` 的 `0600`。
+- `assistant-layout.sh remove` 删除 bob 的助手后，令牌、成员配置、套接字与 `assistant/bob` 子卷都不再存在。为此套接字单元增加了 `RemoveOnStop=yes`。`Agent空间/bob` 与 bob 的回收站随账号删除一并决定（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）。
+
+### Host Agent 需要新增的类型化操作
+
+`assistant-layout.sh` 的 4 个子命令覆盖其中 6 项：`quota` 对应开启卷配额与上限，`prepare` 对应建立助手目录、Agent空间、成员配置、令牌与启用实例，`remove` 对应删除；`spaces` 只是 spike 自己建空间用。令牌轮换没有实现。正式实现与现有的空间对账一样：以 `openat2(RESOLVE_NO_SYMLINKS)` 打开目录，只对打开的文件操作（文件用 `O_NOFOLLOW`）；纳入启动时与每 15 分钟的漂移修复。
+
+| 操作 | 参数 | 做什么 | 幂等与漂移 | 失败与回滚 |
+|---|---|---|---|---|
+| 开启卷配额 | 数据卷 | `btrfs quota enable --simple`，在卷初始化或升级时执行一次 | 已开启则跳过 | 不支持的内核拒绝并报告；关闭配额会丢掉全部限额，不做自动回滚 |
+| 建立助手目录 | 账号、容量上限 | 容器 `assistant`（`a-nas-users` 仅穿过）；子卷 `assistant/<账号>`（本人仅穿过）；`files/` 与 `hermes/`（本人 `rwx` 并继承）；`hermes/` 中的挂载点（`config.yaml`、`.env`、`SOUL.md`、`active_profile` 与 `hooks/`、`plugins/`、`profiles/`）；qgroup 上限 | 存在则只对齐属主与 ACL；挂载点位置上是别的东西就挪开重建 | 新建的子卷在后续步骤失败时删除 |
+| 建立 Agent空间 | 全部账号 | `共享空间/Agent空间` 与每个账号的子目录（见上文） | 保留名：缺失时重建；位置上是不归 root 所有的目录或非目录时，连同其中内容挪开再重建，不原地接管 | 只增不删；挪开的内容保留，不删除 |
+| 写成员配置 | 账号 | `/etc/a-nas-assistant/members/<账号>/config.yaml`（`skills.external_dirs` 与 `mcp_servers`）与 `anas-member` 技能 | 原子替换 | 写临时文件，成功后改名 |
+| 会话令牌 | 账号；轮换（spike 未实现） | `/etc/a-nas-assistant/tokens/<账号>.env`（root `0600`），已存在则保留；轮换时换新令牌并重启实例 | 已存在不覆盖 | 令牌经类型化响应交给产品服务，由产品服务写进自己的文件；Host Agent 不以 root 写进产品服务的目录（spike 这样做，只适合一次性容器） |
+| 启用或停用实例 | 账号 | 启用或停用 `anas-assistant-api@<账号>.socket`（`SocketUser=a-nas`、`0600`、`RemoveOnStop`） | `enable --now` 与 `disable --now` 本身幂等 | 停用同时停止实例 |
+| 删除账号的助手 | 账号 | 停止实例与套接字，删除令牌、成员配置与 `assistant/<账号>` 子卷 | 不存在即视为完成 | `Agent空间/<账号>` 与回收站随 [#26](https://github.com/zhongwater123/A-NAS/issues/26) 决定 |
+
+托管策略（`/etc/hermes`）、系统技能、`SOUL.md` 与单元文件随 release 安装，由安装器负责，不是 Host Agent 的操作。
+
 ## 关联
 
 - 决定：[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
 - Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh) 与 [`review.sh`](../../ai/assistant-spike/review.sh)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
-- Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）
+- Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
-- 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)
+- 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)、[系统测试](../../scripts/system-test.sh)与其中助手一节 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)、Host Agent 的替身 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)

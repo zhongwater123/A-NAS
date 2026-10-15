@@ -27,6 +27,11 @@
 #     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt or scenarios-boundary.txt
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
 #
+# setup.sh makes accounts and spaces by hand (assistant-layout.sh spaces), then installs the
+# assistant (assistant-install.sh) and the probe's files (seed.sh). scripts/system-test.sh
+# does the same on the real installer's accounts and spaces (system-test.sh here), with
+# ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME=$HERMES_SPIKE_DIR/out/runtime.tar.gz for Hermes itself.
+#
 # Several sessions on one machine share the built runtime in $HERMES_SPIKE_DIR (mounted
 # read-only) but each needs its own container: HERMES_SPIKE_NAME=<name>, and with
 # SPIKE_PRODUCT_UID also HERMES_SPIKE_RUN=<dir> for the sockets.
@@ -91,7 +96,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,32p' "$0"
+    sed -n '2,37p' "$0"
     exit 2
     ;;
 esac

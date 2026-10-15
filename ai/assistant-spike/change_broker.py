@@ -13,7 +13,8 @@ Runs as root in the spike container with two Unix sockets:
   is the caller's UID (SO_PEERCRED). The MCP tool asks it to apply a
   submission; it applies only a change the member approved with exactly
   these arguments, once, from the copies the member saw. Replaced and
-  deleted files go to the member's recycle bin.
+  deleted files go to the member's recycle bin where Samba's recycle would
+  put them, so the Web recycle bin shows them with their folder and name.
 
 The broker never opens the member's paths itself: reading for the card and
 applying both run as the member (setpriv to the member's UID, so the kernel
@@ -82,9 +83,15 @@ def volume_path(account: str, sandbox_path: str, *, target: bool) -> str:
 
 
 def trash_for(account: str, sandbox_path: str) -> str:
+    """The folder Samba's recycle (keeptree) would move this path into: the member's recycle
+    bin in its space, then the folders it was in. The Web recycle bin imports files found
+    there under their own name and original folder (files.Service.reconcileSambaTrash)."""
     if sandbox_path.startswith("/nas/共享空间/"):
-        return f"spaces/shared/.a-nas-trash/{account}"
-    return f"spaces/private/{account}/.a-nas-trash/{account}"
+        bin_, inside = f"spaces/shared/.a-nas-trash/{account}", sandbox_path[len("/nas/共享空间/"):]
+    else:
+        bin_, inside = f"spaces/private/{account}/.a-nas-trash/{account}", sandbox_path[len("/nas/个人空间/"):]
+    parent = str(PurePosixPath(inside).parent)
+    return bin_ if parent == "." else f"{bin_}/{parent}"
 
 
 def submission(summary, operations) -> dict:
@@ -104,7 +111,7 @@ def digest(sub: dict) -> str:
 # Broker's openat2(RESOLVE_NO_SYMLINKS) does. A link anywhere along a path, even
 # one the member made, stops it: nothing is read or written through it.
 MEMBER = r'''
-import base64, hashlib, json, os, stat, sys, time
+import base64, hashlib, json, os, stat, sys
 
 DATA, LIMIT = "/srv/a-nas/data", 64 * 1024
 WALK = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -196,9 +203,19 @@ def inspect(items):
 
 
 def to_trash(dfd, name, trash):
+    # Samba's recycle:versions keeps an earlier copy and names the next "Copy #1 of <name>".
+    # The File Broker renames with RENAME_NOREPLACE; os.rename has no flags, so this spike
+    # checks first.
     tfd = folder(trash, create=True)
     try:
-        os.rename(name, time.strftime("%Y%m%d-%H%M%S-") + name, src_dir_fd=dfd, dst_dir_fd=tfd)
+        target, n = name, 1
+        while True:
+            try:
+                os.stat(target, dir_fd=tfd, follow_symlinks=False)
+            except FileNotFoundError:
+                break
+            target, n = f"Copy #{n} of {name}", n + 1
+        os.rename(name, target, src_dir_fd=dfd, dst_dir_fd=tfd)
     finally:
         os.close(tfd)
 
