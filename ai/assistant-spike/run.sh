@@ -15,7 +15,8 @@
 # measure.sh, crash.sh, quota.sh. Those use a scripted fake model; serve_client.py is the
 # JSON-RPC client. The probe also runs toolsets-check.py against the managed policy.
 # In-turn approvals (#111), with SPIKE_APPROVAL_TIMEOUT=20 given to sandbox: approvals-broker.sh,
-# "scenarios calls-approval.txt", approvals-managed.sh.
+# "scenarios calls-approval.txt", approvals-managed.sh. Memory, skills and the background review
+# (#114): memory-skills.sh, review-whitelist.sh, review-defaults.sh; review-scenarios.sh needs a real model.
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh and the UI prototype; scenarios works on either channel.
@@ -95,7 +96,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,36p' "$0"
+    sed -n '2,37p' "$0"
     exit 2
     ;;
 esac
