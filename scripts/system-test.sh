@@ -518,7 +518,7 @@ ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
 check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
 check "the kernel reclaims the Worker's memory before its hard limit" \
-  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 1879048192:2147483648
+  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 2684354560:3221225472
 check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \

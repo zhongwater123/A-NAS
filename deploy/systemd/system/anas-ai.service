@@ -43,10 +43,13 @@ SystemCallArchitectures=native
 # The embedding model peaked at 815 MB on the Experimental NAS, the detector
 # adds about 400 MiB while it is loaded (docs/architecture/photo-objects.md),
 # and the face models load and unload with it
-# (docs/architecture/photo-people.md).
-# Above MemoryHigh the kernel reclaims first; MemoryMax is the hard limit.
-MemoryHigh=1792M
-MemoryMax=2G
+# (docs/architecture/photo-people.md): with all three loaded the Worker held
+# 1.74 GiB on the development machine, model page cache included, which the
+# old 1792M would have reclaimed from mid-scan. Above MemoryHigh the kernel
+# reclaims first; MemoryMax is the hard limit, the 3 GB the photo design
+# budgets for the Worker on an 8 GB device.
+MemoryHigh=2560M
+MemoryMax=3G
 # AI works while the photo library is idle with every core but two, which stay
 # free for what the user does next: the Worker runs that many threads, and the
 # installer caps it at that many cores in anas-ai.service.d/cpu-reserve.conf.

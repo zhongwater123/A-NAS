@@ -1,6 +1,6 @@
 # 相册人物与宠物（M3 切片 13）实施方案
 
-状态：draft（2026-10-15 用户已定范围与四项决定，模型与阈值待评估冻结）
+状态：实现中（2026-10-15 用户已定范围与四项决定；人脸的模型与阈值已由评估冻结，宠物评估中）
 更新时间：2026-10-15
 
 本文把[相册技术设计](photo-library.md)的切片 13 细化为可实现的方案：在每个图库内认出反复出现的人和宠物，用户命名后可以按人物浏览和搜索。产品行为以[相册规格](../specs/photo-library.md)为准：人脸识别首版默认启用，每个私有图库与共享图库各有独立的[人物库](../../CONTEXT.md)，可以按图库关闭并清除。方案复用 M2 的 Worker、持久任务、空闲门控与内置交付（[相册本地 AI](photo-ai.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)），以及切片 18 的物体检测与 1600 px 检测输入（[物体检测](photo-objects.md)）。
@@ -31,11 +31,13 @@
 
 ### 人脸
 
+评估（[报告](../research/photo-people-evaluation.md)）选定 **YuNet + AuraFace**：只有 AuraFace 在不参与校准的家庭相册（Gallagher）上保持 99% 以上的成对精确率，跨年龄的召回也高得多；代价是每张人脸的 CPU 约为 SFace 的十倍。SFace 不再作为候选。
+
 | 用途 | 候选 | 许可 | 运行方式 | 判断 |
 |---|---|---|---|---|
 | 检测与 5 个关键点 | [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)（OpenCV Zoo，`2026may` 动态尺寸版） | MIT | 运行环境里 OpenCV 5.0 的 `FaceDetectorYN` | **首选**。WIDER Face 验证集 AP 0.834 / 0.824 / 0.708（easy / medium / hard），小脸召回在评估中单测 |
-| 身份向量 | [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)（MobileFaceNet，128 维，约 37 MB） | Apache-2.0 | OpenCV 的 `FaceRecognizerSF`，用 YuNet 的关键点对齐到 112×112 | **基线**，不新增依赖；官方 LFW 0.9940 |
-| 身份向量 | [AuraFace v1](https://huggingface.co/fal/AuraFace-v1)（ArcFace 结构的 ResNet100，512 维） | Apache-2.0，权重称以可商用数据训练 | 运行环境里的 ONNX Runtime，同样 5 点对齐到 112×112 | **对照**。模型卡报告 LFW 0.9965、AgeDB 0.9610；第三方按“检测、对齐、编码”全流程在 LFW 上只测到 96.9%，以本项目评估为准 |
+| 身份向量 | [AuraFace v1](https://huggingface.co/fal/AuraFace-v1)（ArcFace 结构的 ResNet100，512 维，约 261 MB） | Apache-2.0，权重称以可商用数据训练；同一仓库的其他文件与 InsightFace 的 antelopev2 逐字节相同、只许非商业使用，不取用 | 运行环境里的 ONNX Runtime，按 YuNet 的 5 个关键点对齐到 112×112 | **选定** |
+| 身份向量 | [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)（MobileFaceNet，128 维，约 37 MB） | Apache-2.0 | OpenCV 的 `FaceRecognizerSF` | 落选：家庭相册上最好只到 99.1%，召回低 |
 | — | InsightFace（Immich 使用的 buffalo_l 等） | 预训练权重只许非商业研究 | — | 不可用 |
 | — | Open Model Zoo 三件套（原设计） | Apache-2.0 | 需要 OpenVINO，Debian 13 不在官方支持列表 | 回退 |
 
@@ -61,7 +63,8 @@
 
 ### Worker
 
-- 新增操作 `detect_faces`：输入一张图的描述符，返回每张人脸的框、5 个关键点、检测分数和 L2 归一化的身份向量，以及模型 ID（检测器与向量模型的权重哈希、输入尺寸、检测阈值）。最小人脸边长与检测阈值由评估确定。
+- 新增操作 `detect_faces`：输入一张图的描述符，返回每张人脸的框、5 个关键点、检测分数和 L2 归一化的身份向量，以及模型 ID（检测器与向量模型的权重哈希、运行时版本、检测分数下限 0.8、每张至多 64 张人脸）。人脸在完整的 1600 px 输入上检测，不另缩小（评估：缩到 640 px 时 24–48 px 的人脸召回从 73% 降到 59%）。
+- 内存：向量模型、物体检测器与人脸模型同时加载时，开发机上 Worker 占 1.74 GiB（含模型文件的页缓存），原来的 `MemoryHigh=1792M` 会在扫描中途开始回收，因此上调为 `MemoryHigh=2560M`、`MemoryMax=3G`（相册技术设计为 8 GB 设备预留的 Worker 上限）。
 - 宠物：若评估选定 EmbeddingGemma 基线，相册服务把框内区域裁成小图走现有 `embed_image`，Worker 不变；若选定专门模型，新增 `embed_animals`，输入描述符与框，返回每个框的向量。
 - 与检测一样可以中途取消：门控关闭时相册服务挂断连接，Worker 立即停下。人脸与宠物模型只在有任务时加载，队列清空或有人使用设备时随检测器一起卸载（[资源策略](photo-objects.md#资源策略)）。
 - Fake Provider 按图片哈希返回确定性的人脸与宠物向量，供 Go 测试与系统测试使用；它要能造出“同一个人出现在多张照片里”和“两个不同的人”，聚类测试才有意义。
@@ -81,9 +84,12 @@
 
 ### 聚类
 
-在相册服务（Go）中按图库、按种类（人、猫、狗分开）增量进行，参照 Immich 的做法（DBSCAN 思路：一个出现在距离阈值内至少有 N 个邻居才算核心点）：
+在相册服务（Go）中按图库、按种类（人、猫、狗分开）增量进行，参照 Immich 的做法（DBSCAN 思路：一个出现在距离阈值内至少有 N 个邻居才算核心点）。规则与参数与评估逐一对应（`ai/eval/people.py` 与 `internal/photos/people.go`）：
 
-- 新的出现：在同一图库、同一种类的向量中找相似度高于阈值的邻居。邻居多数已归某个人物时归入该人物；否则邻居数达到下限时新建人物；都不满足时留作“未归类”，不显示为人物。积累到下限后由定期的整理把未归类的出现再聚一次。
+- 新的出现按照片到达的顺序处理，只看在它之前的出现：阈值内有已分配的邻居时，按相似度从高到低找第一个**同时接近该人物平均向量**的人物归入（centroid 规则）；有邻居却都不够接近时暂不归入；附近没有人物、但阈值内有来自其他照片的未归类邻居，连同自己达到下限时，新建人物并带上它们；都不满足时留作“未归类”，不显示为人物。
+- 一轮结束后，与本轮新放下或新加入的出现相邻的未归类出现再试一次，不必重算全部配对。
+- 人脸的参数：阈值 0.48（余弦相似度）、下限 2 张照片、centroid 规则。在 LFW、FG-NET（儿童成长）与 Gallagher 家庭相册上成对精确率都不低于 99.6%；FG-NET 跨年龄的召回只有约 68%，同一个孩子会被拆成几个人物，靠用户合并。
+- 只看平均向量的近邻规则（nearest）会顺着长得像的人一路连下去：本地栈上兄弟姐妹被并成一个人。centroid 规则在评估中更准，召回只略低。
 - **同一张照片里的两张脸不归入同一人物**（宠物同理）。这是家庭合照里防止把兄弟姐妹、父母子女并在一起的最便宜的约束。
 - 阈值偏保守：同一人被拆成两个人物，用户合并即可；两个人被合成一个，会混淆甚至暴露家人，必须避免。
 - 图库内精确扫描：几万个向量在内存中逐一比较足够快，不引入向量数据库或 ANN。
@@ -95,7 +101,7 @@
 
 - `people(id, library_id, kind ∈ {person, cat, dog}, name, hidden, cover_occurrence, created_at, updated_at)`：聚类自动创建的人物没有名字；命名、隐藏、换封面由用户操作。
 - `person_occurrences(library_id, occurrence_id, person_id, source)`：`source` 为 `auto` 或 `user`。用户确认、合并、移出（`occurrence_rejections(library_id, occurrence_id, person_id)`）都保存为用户数据。重新聚类只改动 `auto` 的归属，不推翻用户的决定。
-- 更换模型后要重新检测，出现的 ID 会变。新旧出现在同一原图对象上按框的重叠度（IoU）对应，把用户的命名、归属与拒绝转移过去；对应不上的用户决定保留在人物上，作为该人物的锚点。
+- 更换模型后要重新检测，出现的 ID 会变。新旧出现在同一原图对象上按框的重叠度（IoU 至少 0.5）对应，把用户的命名、归属与拒绝转移过去。聚类自动做出的归属只作为待核对的归属（`moved`）转移：下一轮里，只有按新向量接近该人物核心的才保留，核心是用户确认过的人脸，没有时取该人物里相互最接近的一组；其余重新聚类。这样新模型能纠正旧模型的误合并，名字仍留在用户命名时的那张脸所在的人物上。新模型随 release 到达，相册服务启动时发现并排入重新检测。
 - 规格要求人工人物名称是用户元数据：关闭人脸能力或重建派生数据时，删除出现与自动归属，保留人物名称及用户的决定。
 
 ### 权限
