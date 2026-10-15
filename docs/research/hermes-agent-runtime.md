@@ -1,6 +1,6 @@
 # Hermes Agent 作为 AI 助手运行时的可行性
 
-更新时间：2026-10-14
+更新时间：2026-10-15
 
 本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
@@ -139,6 +139,123 @@ Hermes Desktop（`apps/desktop`）是 Electron 40 应用，经 WebSocket 上的 
 - 系统提示约 13,000 字符，选择本地模型时要计入预填充开销。
 - Hermes 默认会联网检查更新、拉取模型目录、在运行时安装缺少的包并按需安装语言服务器；managed scope 中分别以 `updates.check`、`model_catalog.enabled`、`security.allow_lazy_installs`、`lsp.enabled` 关闭（[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)）。
 - systemd 在 `PrivatePIDs` 下提示 “Supervising process ... which is not our child”，但停止、闲置退出与崩溃都被正确识别。
+
+## `hermes serve` 的接口面与产品服务白名单（2026-10-15 查阅源码）
+
+改用 `hermes serve` 后，浏览器不直接连 Hermes：产品服务按账号转发到该成员的实例，只放行 AI 助手窗口需要的部分（[#110](https://github.com/zhongwater123/A-NAS/issues/110)）。本节按固定提交 `0e427d78` 查阅服务端（`hermes_cli/web_server*.py`、`hermes_cli/web_routers/*`、`tui_gateway/*` 与 `tui_gateway/contracts/*`）和官方 Desktop（`apps/desktop/src`），没有运行；行号以该提交为准。沙箱一侧的启动、鉴权与探针见 [#109](https://github.com/zhongwater123/A-NAS/issues/109)，审批与可信执行见 [#111](https://github.com/zhongwater123/A-NAS/issues/111)。
+
+### 接口面
+
+- **入口**：`hermes serve` 是 `cmd_dashboard(headless_backend=True)`（`hermes_cli/subcommands/dashboard.py:59`），挂载的路由与 `hermes dashboard` 完全相同（`web_server.py:1023-1088`），只是不提供网页：非 `/api` 路径一律 404，唯独 `GET /` 例外（见“鉴权”）。REST 约 290 条，分布在 26 个路由文件，另有插件 API（自带的 kanban 约 48 条）；WebSocket 有 `/api/ws`（JSON-RPC）、`/api/pty`（在伪终端中启动 Node 写的终端界面，带进程的全部环境变量）、`/api/console`（进程内的 `hermes` 命令行，变更命令只需同一客户端再发一帧确认）、`/api/pub` 与 `/api/events`（按频道转发任意文本）、`/api/audio/*-stream`、`/api/display/ws`（VNC，凭 RPC `display.observe` 签发的票据，不需要令牌）。
+- **JSON-RPC**：`/api/ws` 上每个文本帧是一个 JSON 对象（不接受数组），共四种：客户端请求（`method` 加 `id`）；客户端对服务端请求的应答（字符串 `id` 形如 `srq-<12 位十六进制>`，有 `result` 或 `error`，没有 `method`）；服务端事件（`method: "event"`，`params` 为 `type`、`session_id`、`payload` 与每个会话递增的 `seq`）；服务端请求（`id` 为 `srq-…`，`method` 为 `approval` 等）。连接建立后服务端先发 `gateway.ready` 事件；`gateway.ping` 由读循环直接应答（`tui_gateway/ws.py:420-424`），不经合约。合约登记了 **257 个方法、16 种服务端请求、77 种事件**（Desktop 使用的生成文件已复制在 [`web/src/assistant/hermes/shared/gateway-contract.generated.ts`](../../web/src/assistant/hermes/shared/gateway-contract.generated.ts)，`RPC_METHODS`、`SERVER_REQUEST_METHODS`、`GATEWAY_EVENT_TYPES`）。方法按名称空间：`session` 33、`groups` 18、`projects` 15、`pet` 15、`mcp` 11、`connectors` 11、`shared_metrics` 10、`display` 9、`vault` 7，其余是计费、订阅、免费额度、语音、唤醒词、浏览器控制、插件、技能、profile、配置、定时任务、子代理与机器人中继等。上游按合约拒绝未知的参数键（错误 4000，`tui_gateway/contracts/registry.py:94-109`），但不检查值，也不检查调用者。
+- **鉴权**：只有一个令牌 `_SESSION_TOKEN`（`HERMES_DASHBOARD_SESSION_TOKEN`，未设时每次启动随机生成，`web_server.py:401-405`），它打开全部 REST 与全部 WebSocket，没有范围之分。绑定回环地址时，REST 认 `X-Hermes-Session-Token` 或 `Authorization: Bearer`，`/api/ws` 只认 `?token=`（`web_server_chat.py:369-374`；票据只在启用 OAuth 或密码门时有效）；另外要求 `Host` 是 `localhost`、`127.0.0.1` 或 `::1`，http(s) 的 `Origin` 同样是回环地址，WebSocket 对端是回环地址，否则以 4403/4408 关闭。不需要令牌的路径：`/api/health`、`/api/status`、`/api/config/defaults`、`/api/config/schema`、`/api/model/info`、`/api/dashboard/themes`、`/api/dashboard/plugins`、`/api/cron/fire`、`/api/mcp/oauth/callback/*`，以及全部非 `/api` 路径。
+- **令牌能从三处读到**：环境变量；未启用鉴权门的无界面服务在 `GET /` 返回的页面里直接写着 `window.__HERMES_SESSION_TOKEN__`（`web_server_dashboard.py:118-139`，为 Desktop 的启动握手而设）；绑定后发布的主机记录 `host-serve.token`（`web_server.py:1339-1390`），位于锁目录，默认 `$XDG_STATE_HOME/hermes/gateway-locks`，否则 `~/.local/state/hermes/gateway-locks`（`gateway/status.py:319-335`）。沙箱里 `HOME` 是 `/nas/助手`，即 Agent 自己的工作区，所以要由 #109 用 `HERMES_GATEWAY_LOCK_DIR` 把它移到 Agent 读不到或写不进的位置（从代码看，锁文件打不开时只记一条“不可发现”的警告并跳过发布，`web_server.py:1354-1358`）。Agent 现在没有 HTTP 或终端工具，拿到令牌也用不上，这是纵深防御。
+- **profile**：同一个进程可以服务多个 profile。约 172 个 RPC 参数类型和几乎所有 REST 路由接受 `profile`，`_profile_home`（`tui_gateway/server.py:574-595`）解析到 `$HERMES_HOME/profiles/<名字>` 并开启多 profile 托管；只带 `session_id` 的 RPC 在该会话的 profile 中执行。`profiles.create` 与 `POST /api/profiles` 会在 `$HERMES_HOME/profiles` 下新建 profile，而沙箱中 `$HERMES_HOME` 是可写的 Hermes 状态目录：新 profile 的 `config.yaml`、`.env`、`SOUL.md`、`hooks/` 与 `plugins/` 都不是 root 只读文件，边界测试中[助手目录的划分](#助手目录的划分)要防的正是这些。
+- **会话**：进程内的会话放在全局的 `_sessions` 中，按 id 查找，不检查是哪个连接或哪个调用者（`_sess_nowait`，`tui_gateway/server.py:1228-1244`）；`session.active_list` 能列出全部活动会话。会话有两种 id：运行时 id（`session.create`/`session.resume` 返回的 `session_id`，`prompt.submit`、`session.title`、`session.interrupt`、`approval.*` 用它）与存储 id（`stored_session_id`，`session.list` 返回，`session.resume`、`session.delete` 用它）。每个实例只属于一个成员，实例里的会话都是这个成员的，所以“只能访问本人的会话”由产品服务按登录账号选择实例来保证，不需要逐个会话核对；前提是账号与实例从来不取自请求内容。
+- **审批**：在这条通道上，审批是服务端请求 `approval`（`tui_gateway/server.py:818-851`），浏览器以应答帧 `{"choice", "all"}` 回答，也可以调用 `approval.respond`（`methods_prompt.py:1258-1272`）。只有发过 `client.capabilities {server_requests: true}` 的连接才会收到服务端请求；会话上没有这样的连接时，审批被撤回而不是拒绝（`server.py:832-842`）。`approval.respond` 的 `all: true` 一次解决这个会话的全部待审批；`session.interrupt` 把这个会话的全部待审批按拒绝处理（`methods_session_interrupt.py:63-67`）；超时、停止或会话关闭时服务端发 `request.cancel`。客户端断线重连后，`session.resume`、`session.activate` 与 `session.events.since` 的结果在 `open_requests` 中带回仍在等待的服务端请求（`server_requests.py:15-18`）。
+- **关闭审批的入口**：`config.set` 的 `yolo`（会话级）、`approvals.mode` 与 `approval_mode`（`methods_config_set.py:281-302, 490`），斜杠命令 `/yolo`（`slash.exec`、`command.dispatch`），以及 `cli.exec`。会话级 yolo 是运行时状态并写进会话记录，managed scope 固定的 `approvals.mode: manual` 管不住它（`tui_gateway/server.py:2366-2372` 把进程级、会话级与配置三者取“或”）。从源码看，MCP 信任门的审批（`tools/mcp_tool_handlers.py:60-85` → `approval_gateway_wait._await_gateway_decision`）不读 yolo，由 #111 实测确认；无论结果如何，这些入口都要封住。
+- **斜杠命令**：`prompt.submit` 不解释以 `/` 开头的文字（`methods_prompt.py:735-886`），它们作为普通消息交给模型；斜杠命令只经 `slash.exec`、`command.dispatch` 执行。
+- **历史**：RPC 的 `session.history` 与 `session.resume` 返回的消息保留 `display_metadata`（`tui_gateway/session_history.py:332, 359-360`），与 API Server 不同（见上一节）。但 Desktop 的历史与对话列表都走 REST（下文），复制进来的聊天层吃的也是 REST 的消息行。
+- **断开与后台回合**：WebSocket 断开时，Hermes 把这个连接上的会话挂起等待重连：闲置的会话 20 秒后回收，正在运行的回合继续，只有 600 秒没有任何活动才中断（`tui_gateway/server.py:139-155`）；重新打开时用 `session.resume` 或 `session.activate` 加 `session.events.since` 接上，`session.info` 的 `running` 表示回合仍在进行。
+
+### 白名单（第一版）
+
+按 Desktop 的聊天流程整理；Desktop 位置中 `D/` 指 `apps/desktop/src/`，`S/` 指 `apps/shared/src/`（上游的合约生成文件也在 `S/gateway-contract.generated.ts`）。A-NAS 的窗口只复用聊天层、自己写连接层（决定 9），所以不照搬 Desktop 的全部调用，例如不要 `/` 命令、附件、改写历史与模型选择。“参数”列是产品服务接受的全部参数键，其余键（包括 `profile`）一律拒绝；Desktop 在 `session.create` 与 `session.resume` 中总带 `profile: "default"`，复用它的代码时要去掉。id 按 Hermes 自己生成的格式校验：运行时 id 为 8 位十六进制（`methods_session.py:65-67`），存储 id 为 `YYYYMMDD_HHMMSS_` 加 6 位十六进制（`server.py:2801-2806`），服务端请求 id 为 `srq-` 加 12 位十六进制；这也挡住了 `session.resume` 按标题（`methods_session.py:803`）、REST 按 id 前缀（`hermes_state_sessions.py:929-938`）查找会话的路径。
+
+**客户端请求（JSON-RPC）**
+
+| 方法 | 用途 | 参数 | Desktop 位置 |
+|---|---|---|---|
+| `client.capabilities` | 声明本连接回答服务端请求；不发则审批被撤回 | 只接受 `{server_requests: true}` | `S/json-rpc-channel.ts:508-518`（收到 `gateway.ready` 后自动发） |
+| `gateway.ping`、`ping` | 心跳（每 15 秒一次，45 秒收不到任何帧即重连）与唤醒后的存活探测 | 无 | `S/json-rpc-channel.ts:568`；`D/app/gateway/hooks/use-gateway-boot.ts:680` |
+| `session.create` | 新对话 | `cols`；`source` 由产品服务固定为 `desktop`。拒绝 `cwd`、`cwd_explicit`、`model`、`provider`、`reasoning_effort`、`fast`、`service_tier`（模型由网关决定）、`messages`（可伪造历史）、`parent_session_id`、`title`、`hidden`、`room_plumbing`、`follow_profile_config`、`close_on_disconnect`、`idempotency_key` | `D/app/session/hooks/use-session-actions/session-create-request.ts:119-140` |
+| `session.resume` | 打开存储的对话，得到运行时 id | `session_id`（存储 id）、`cols`、`omit_messages`、`defer_history`；拒绝 `source`、`lazy`、`eager_build`、`inline_images`、`close_on_disconnect` | `D/app/session/hooks/use-session-actions/index.ts:2085-2099` |
+| `session.activate` | 切回或重连到仍在进程内的对话，把它的事件改送到本连接 | `session_id`（运行时 id）、`cols`、`omit_messages` | 同上 `:1584-1588` |
+| `session.events.since` | 重连后补发错过的事件与仍在等待的服务端请求 | `session_id`（运行时 id）、`last_seen`（非负整数） | `S/json-rpc-gateway.ts:541-546` |
+| `session.active_list` | 进程内对话的状态，`waiting` 即其他对话上“等你回答”的点 | 无 | `D/app/contrib/hooks/use-background-sync.ts:1255` |
+| `prompt.submit` | 发送一条消息，回合在事件中进行；忙时排队 | `session_id`、`text`（字符串，限长）；拒绝改写历史的 `truncate_before_*`、`confirm_*`、`rebind_survivor_row_ids`，以及 `display_kind`、`surface`、`voice_*`、`interrupted`、`queued`、`title_preview` | `D/app/session/hooks/use-prompt-actions/submit.ts:936` |
+| `session.interrupt` | 停止；同时把这个对话的待审批按拒绝处理 | `session_id`；拒绝 `expected_hosted_task_id` | `D/app/session/hooks/use-prompt-actions/index.ts:776` |
+| `session.title` | 改仍在进程内的对话的标题 | `session_id`、`title`（1–100 字） | `D/app/chat/sidebar/session-actions-menu.tsx:62-143` |
+| `session.close` | 删除前关闭进程内的对话 | `session_id` | `D/app/session/hooks/use-session-actions/index.ts:754-757, 3212-3214` |
+| `approval.pending` | 切换对话、刷新或重连后取回待审批 | `session_id` | `D/store/prompts.ts:283` |
+| `approval.received` | 取回的审批卡片已显示，开始计时 | `session_id`、`request_id` | `D/store/prompts.ts:256` |
+| `approval.respond` | 回答取回的审批；实时收到的审批用应答帧回答 | `session_id`、`request_id`（必填）、`choice` 只能是 `once` 或 `deny`；拒绝 `all` | `D/store/prompts.ts:363-407` |
+
+**服务端请求与应答帧**
+
+| 帧 | 处理 |
+|---|---|
+| 服务端请求 `approval` | 转发给浏览器，并按账号登记（见下文“改写与校验”）。卡片按钮：Desktop 的“运行”是 `once`、“拒绝”是 `deny`，另在下拉菜单提供 `session` 与 `always`（`D/components/assistant-ui/tool/approval.tsx:279-284, 351-389`）；A-NAS 只给前两个 |
+| 浏览器对 `approval` 的应答帧 | id 必须已登记、属于本账号且尚未结束；`result` 只接受 `{"choice": "once"}` 或 `{"choice": "deny"}`，去掉 `all`；不转发 `error` 应答 |
+| 其他 15 种服务端请求（`clarify`、`sudo`、`secret`、`vault.*`、`preview.*`、`terminal.read`、`window.read`、`theme.*`、`tour`、`setup_beat`、`display.install.sudo`） | 不转发，由产品服务以 `-32601` 应答：Hermes 把错误应答当作无人回答，工具立刻得到失败而不是等到超时（`server_requests.py:175-211`）；Desktop 对没有处理器的服务端请求也这样应答（`S/json-rpc-channel.ts:407`） |
+
+**事件**：只转发下面 21 种，其余 56 种（子代理、MoA、语音与唤醒、宠物、桌面与浏览器控制、预览、连接器、计费与免费额度、定时任务与项目变化、皮肤、通知与提示、后台任务、表情反应、目标控制等）丢弃。
+
+| 事件 | 窗口用途 |
+|---|---|
+| `gateway.ready` | 连接就绪；`replay_epoch` 变化说明后端重启过，需要重新取历史（`skin` 可去掉） |
+| `message.start`、`message.delta`、`message.interim`、`message.complete` | 回复开始、逐字内容、工具调用旁的说明、结束（带结果、用量与错误） |
+| `reasoning.delta`、`reasoning.available`、`thinking.delta` | 推理过程；`thinking.delta` 只用于“等待模型”的状态 |
+| `tool.generating`、`tool.start`、`tool.complete` | “处理过程”中的工具行；`tool.start` 带完整参数 |
+| `todo.updated`、`status.update`、`error` | 待办；压缩上下文等状态行；回合之外的失败 |
+| `session.info`、`session.usage`、`session.title` | 对话设置与运行状态、用量、自动标题（`session_id` 是存储 id） |
+| `sessions.changed`、`session.reclaimed` | 刷新对话列表；后端收回了运行时会话，下次打开重新 `session.resume` |
+| `approval.cancelled`、`request.cancel` | 撤下审批卡片（`request.cancel` 只转发登记过的 id） |
+
+**REST**：Desktop 的对话列表、历史、改名与删除走 REST，复制进来的聊天层（`D/lib/chat-messages`）解析的也是 REST 的消息行（`display_content`、`display_metadata`、工具标签），所以放行下面 5 条。产品服务带上 `X-Hermes-Session-Token`，不转发浏览器的任何头。
+
+| 路由 | 用途 | 参数 | Desktop 位置 |
+|---|---|---|---|
+| `GET /api/sessions` | 对话列表 | `limit`（≤100）、`offset`、`min_messages`、`order=recent`、`archived=exclude`；拒绝 `full`（会带出系统提示与模型配置）、`source`、`sources`、`exclude_sources`、`cwd_prefix` | Desktop 用跨 profile 的 `/api/profiles/sessions/sidebar` 与 `/api/profiles/sessions`（`D/api/sessions.ts:136-164, 310-371`），参数相同；A-NAS 的实例只有一个 profile，用单 profile 的这条 |
+| `GET /api/sessions/{id}` | 列表中没有的对话 | 无 | `D/api/sessions.ts:447-458` |
+| `GET /api/sessions/{id}/messages` | 历史，最新一页在前 | `limit`（≤500）、`offset`、`order`、`include_compacted`；拒绝 `inline_images` | `D/api/sessions.ts:464-571`（与 `session.resume` 并行预取） |
+| `PATCH /api/sessions/{id}` | 改存储对话的标题 | 请求体只接受 `title`（1–100 字）；拒绝 `archived`、`hidden`、`pinned`、`unread` | `D/api/sessions.ts:731-744` |
+| `DELETE /api/sessions/{id}` | 删除（先 `session.interrupt` 与 `session.close`） | 无 | `D/api/sessions.ts:709-729` |
+
+Desktop 在远程模式下用 `/api/fs/read-data-url` 读取历史中的图片，那是任意路径读取，不放行；`/api/sessions/{id}/messages` 默认已把图片内联。
+
+产品服务自己调用、不对浏览器开放的：`GET /api/health/idle`（见下文闲置退出）。
+
+### 产品服务的改写与校验
+
+1. **实例与凭据**：按 A-NAS 登录会话的账号选择该账号的实例套接字，从不取自请求内容。实例令牌只在产品服务（启动实例时以 `HERMES_DASHBOARD_SESSION_TOKEN` 传入）；上游 WebSocket 用 `?token=`，REST 用 `X-Hermes-Session-Token`；`Host` 写成 `127.0.0.1:<端口>`，不带浏览器的 `Origin`、Cookie 或 `Authorization`。浏览器一侧的 WebSocket 用 A-NAS 会话鉴权并检查 `Origin`。
+2. **逐帧过滤**：每帧一个 JSON 对象，限制大小（Hermes 自己允许 384 MiB）；不在白名单中的请求由产品服务直接返回 JSON-RPC 错误，不转发。
+3. **审批对应到本人的点击**：
+   - 转发 `approval` 时登记账号、运行时会话、`srq` id、`request_id`、`command` 与 `description`，以及同一会话最近一次 `tool.start` 的工具名与参数摘要。从代码看，MCP 信任门发出的审批只带一段固定的说明（`tools/approval_prompt.py:319-322`，`pattern_key` 为 `mcp_elicitation`），不带工具参数，所以差异预览要靠 `tool.start` 对应；是否可靠由 #111 实测。
+   - 浏览器回答时核对：id 已登记、属于本账号、尚未结束（收到 `request.cancel` 或 `approval.cancelled` 即注销），`choice` 只能是 `once` 或 `deny`。`approval.respond` 同样核对，它的 `request_id` 须是本账号经 `approval` 或 `approval.pending` 见过的。
+   - 登记按账号而不是按连接：服务端请求只发给最后接上该会话的连接，同一成员的另一个窗口经 `approval.pending` 取回后用 `approval.respond` 回答。
+   - Hermes 不检查应答帧来自哪个连接（`server_requests.py:265-306`），也不检查 `approval.respond` 的调用者，所以产品服务是唯一的核对点。选 `once` 后让文件代理执行所需的一次性授权（只有产品服务能登记，沙箱只能消费）由 #111 设计。
+4. **结果与事件**：`session.resume`、`session.activate` 结果中的 `open_requests` 只保留 `approval` 并登记，去掉 `pending_connection`；`session.events.since` 的 `events` 按事件白名单过滤，`open_requests` 同上。`info`（`SessionLiveInfo`）与 `session.info` 事件中去掉 `system_prompt`（约 13,000 字符）、`mcp_servers`、`update_command`、`update_behind`。保留 `yolo` 与 `approval_mode` 作为检查：出现 `yolo: true` 或 `approval_mode` 不是 `manual` 时，说明审批已被绕过，产品服务应停止转发该对话并记录。
+5. **断开与闲置退出**：浏览器断开时产品服务关闭对应的上游连接，Hermes 挂起会话、回合继续（见“接口面”），这使规格中“回合不在后台继续”不再成立。但实例现在按连接数闲置退出（socket-proxyd `--exit-idle-time=45s`），浏览器一断，45 秒后实例停止，回合随之被杀。闲置退出应改由产品服务按 `GET /api/health/idle` 决定：没有回合在运行、也没有人在等待回答时才返回 `idle: true`，无法判断时返回 `null`（`hermes_cli/web_server_idle_proof.py:39-58`）。交 #109 与集成时处理。
+
+### 必须封住的部分
+
+产品服务默认拒绝：不在下面白名单中的方法、事件、服务端请求、REST 路径与 WebSocket 一律不转发。下表列出必须封住、以后也不应放开的部分及原因；沙箱使它们即使漏过也越不出三处挂载（#109 另行确认），白名单是第一道防线。
+
+| 类别 | JSON-RPC | REST 与 WebSocket | 原因 |
+|---|---|---|---|
+| 执行命令 | `shell.exec`（`shell=True`，只有危险命令黑名单，不经审批，`methods_tools.py:1936-1966`）、`cli.exec`、`slash.exec`、`command.dispatch`、`process.*`、`preview.restart`、`prompt.background`、`prompt.btw` | `/api/pty`、`/api/console`、`/api/ops/*`（含 `POST /api/ops/hooks` 加 shell 钩子）、`/api/gateway/*`、`/api/hermes/update`、`/api/git/*`、`/api/cron/jobs/{id}/trigger`、`/api/curator/run`、`/api/tools/toolsets/{name}/post-setup`、`/api/profiles/{name}/open-terminal` | 以成员身份在沙箱中执行任意命令或另起 Agent，绕过 managed scope 的工具收窄 |
+| 配置、密钥与审批 | `config.set`、`config.get`、`config.show`、`model.*`、`reload.env`、`vault.*`、`connectors.*`、`tools.*`、`toolsets.list` | `/api/config*`、`/api/env*`（`POST /api/env/reveal` 返回明文）、`/api/providers/*`、`/api/credentials/pool`、`/api/model/*`、`/api/tools/*`、`/api/audio/voice-config`（返回语音提供方的密钥）、`/api/memory/*` | 改写或读出 managed scope 之外的设置与密钥；`config.set` 能打开会话级 yolo |
+| 安装代码 | `plugins.*`、`skills.manage`、`skills.reload`、`mcp.*`、`reload.mcp`、`display.install`、`display.switchSandboxImage` | `/api/dashboard/*`、`/api/skills*`、`/api/mcp/*`（OAuth 回调免鉴权）、`/api/learning/node`、`/api/ops/import*`、`/api/plugins/*`、`/dashboard-plugins/*` | 插件与 MCP 的 stdio 服务器就是代码；技能写入 Hermes 状态目录后进入每次提示 |
+| Profile | `profiles.*`；任何方法的 `profile` 参数 | `/api/profiles*`；任何路由的 `?profile=` | 在可写的 `$HERMES_HOME/profiles` 新建不受 root 只读文件约束的 profile |
+| 定时与后台 | `cron.manage`、`delegation.*`、`subagent.*`、`spawn_tree.*`、`wake.*`、`handoff.*` | `/api/cron/*` | 第一版关闭 `cronjob` 与 `delegation`（ADR 0022 决定 8）；回合之外的模型调用不经窗口 |
+| 任意路径 | `image.attach`、`pdf.attach`、`file.attach`（参数是主机路径）、`complete.path`、`session.cwd.set`、`session.workspace.move`、`projects.*`、`rollback.*`、`session.foreign.*`、`session.save` | `/api/fs/*`（读写任意路径，`POST /api/fs/write-text`）、`/api/files*`（默认根为 `$HOME`）、`/api/media`、`/api/chat/image-upload` | 绕过 Hermes 文件工具的写保护；附件以后另行设计（成员上传进助手目录，再按路径引用） |
+| 联网与计费 | `llm.oneshot`、`image.generate`、`billing.*`、`subscription.*`、`free_tier.*`、`shared_metrics.*`、`diagnostics.share_nous`、`groups.*`、`bot_relay.*` | `/api/providers/custom-endpoints/validate`（探测任意 URL）、`/api/skills/hub/*`、`/api/local-models/*`、`/api/messaging/*`、`/api/shared-metrics/consent`、`/api/providers/oauth/*` | 实例没有网络，但这些调用要么花钱、要么绕过模型网关 |
+| 设备与桌面 | `display.*`、`browser.*`、`voice.*`、`pet.*`、`onboarding.*`、`setup.*`、`system.battery`、`machine.facts`、`clipboard.paste`、`input.detect_drop`、`terminal.resize` | `/api/display/ws`、`/api/audio/*`、`/api/system/stats`、`/api/logs`、`/api/host/identity` | 面向单机桌面，与 A-NAS 无关或暴露主机信息 |
+| 代答与令牌 | `request.answer`（按 id 回答任意服务端请求） | `GET /`（未启用鉴权门时返回令牌）、`/api/pub`、`/api/events` | 绕过产品服务对审批应答的核对；令牌打开全部接口 |
+
+### 以后可以考虑放行
+
+这些对成员有用、风险可控，但第一版不需要，放行前各自补设计：
+
+- `clarify` 服务端请求与 `clarify.lock`：助手向成员提问（1–5 题）。需要在 managed scope 中启用 `clarify` 工具。
+- `session.steer`、`session.redirect`：回合进行中插话或改方向；不放行时 `prompt.submit` 在忙时排队。
+- 附件：只接受内容的 `image.attach_bytes` 与带 `data_url` 的 `file.attach`（Desktop 位置 `D/app/session/hooks/use-prompt-actions/index.ts:157-189`），拒绝主机路径；先确认它们写到哪里、是否计入助手目录的容量。
+- 编辑并重发、撤销与分叉：`prompt.submit` 的 `truncate_before_*` 与 `confirm_*`、`session.undo`、`session.branch*`。它们只改本人的对话记录，但会删掉之后的历史。
+- `GET /api/sessions/search`（对话搜索），`PATCH /api/sessions/{id}` 的 `pinned`。
+- `tool.output_risk` 事件：工具输出被判为提示注入或含密钥时发出，可以在卡片上提示成员（Desktop 没有处理它）。
+
+对 ADR 0022 决定 9 的改写：产品服务的 `/api/v1/assistant` 由“转发 API Server 的会话接口”改为一条按上表逐帧过滤的 WebSocket 加 5 条 REST 会话路由；停止用 `session.interrupt`；确认卡片改为审批卡片（#111）；离开对话后回合继续的前提是闲置退出改按 `GET /api/health/idle`（#109）。
 
 ## 关联
 
