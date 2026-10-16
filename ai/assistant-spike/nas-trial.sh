@@ -6,15 +6,20 @@
 #
 #   nas-trial.sh check        what is in place and what install would do; changes nothing
 #   nas-trial.sh install      install for every member of a-nas-users, once, on fresh state
+#   nas-trial.sh update       this bundle's scripts, units, policy and runtime over an install,
+#                             keeping each member's assistant folder, conversations and memory
 #   nas-trial.sh smoke USER   start USER's assistant and wait for it (no model call)
-#   nas-trial.sh remove       undo install, delete the key and the gateway's log
+#   nas-trial.sh remove [--purge-key]
+#                             undo install and delete the gateway's log; the key stays unless
+#                             --purge-key
 #
-# The key is /etc/anas-spike/model.key (root, 0600), which the owner writes by hand before
-# install. ANAS_TRIAL_MODEL (default deepseek-flash) and ANAS_TRIAL_UPSTREAM (default
+# The key is /etc/anas-spike/model.key (root, 0600), which the owner writes by hand once;
+# install, update and remove leave it. ANAS_TRIAL_MODEL (default deepseek-flash) and ANAS_TRIAL_UPSTREAM (default
 # api.deepseek.com) pick the OpenAI-compatible service.
 #
 # install runs assistant-layout.sh prepare, which works by path in folders members can
-# write; it therefore refuses to run over anything an earlier run or a member left.
+# write; it therefore refuses to run over anything an earlier run or a member left. update
+# touches only root's own files (assistant-layout.sh members).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 bundle=$(dirname "$here")
@@ -85,15 +90,8 @@ check() {
   else say "fresh:        nothing from an earlier install"; fi
 }
 
-install_trial() {
-  local api_user list left deb todo=()
-  api_user=$(preflight)
-  [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]] || fail "write the key to $key (root, 0600) first"
-  left=$(leftovers)
-  [[ -z "$left" ]] || fail "not fresh, remove first: $(tr '\n' ' ' <<<"$left")"
-  list=$(accounts)
-  [[ -n "$list" ]] || fail "no member of a-nas-users has a space"
-
+install_packages() {
+  local deb todo=()
   say "--- packages"
   for deb in "$bundle"/debs/*.deb; do
     if ! dpkg-query -W -f='${Status}' "$(dpkg-deb -f "$deb" Package)" 2>/dev/null | grep -q 'install ok installed'; then
@@ -102,17 +100,34 @@ install_trial() {
   done
   if ((${#todo[@]})); then dpkg -i "${todo[@]}"; fi
   for tool in socat rg tini; do command -v "$tool" >/dev/null || fail "$tool is missing"; done
+}
 
+# install_files puts this bundle's scripts and runtime in place, replacing earlier ones.
+install_files() {
   say "--- files"
   install -d -m 0755 "$trial" "$runtimes"
+  rm -rf -- "$trial/spike" "$runtimes/spike"
   cp -r "$bundle/spike" "$trial/spike"
   chown -R root:root "$trial" && chmod -R go-w "$trial"
-  ln -s "$trial/spike" /spike
   tar -C "$runtimes" -xzf "$bundle/runtime.tar.gz"
   chown -R root:root "$runtimes/spike"
   install -m 0644 "$trial/spike/anas-assistant-trial.tmpfiles" /etc/tmpfiles.d/anas-assistant-trial.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/anas-assistant-trial.conf
   sed "s/@UPSTREAM@/$upstream/" "$trial/spike/anas-assistant-trial-gateway.service" > /etc/systemd/system/anas-assistant-trial-gateway.service
+}
+
+install_trial() {
+  local api_user list left
+  api_user=$(preflight)
+  [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]] || fail "write the key to $key (root, 0600) first"
+  left=$(leftovers)
+  [[ -z "$left" ]] || fail "not fresh, remove first: $(tr '\n' ' ' <<<"$left")"
+  list=$(accounts)
+  [[ -n "$list" ]] || fail "no member of a-nas-users has a space"
+
+  install_packages
+  install_files
+  ln -s "$trial/spike" /spike
 
   say "--- the assistant for $(wc -l <<<"$list") accounts"
   # shellcheck disable=SC2046 # one argument per account
@@ -148,6 +163,28 @@ verify() {
   say "installed: open AI 助手 on the desktop (members of a-nas-users)"
 }
 
+update_trial() {
+  local api_user list account ready=() missing=()
+  api_user=$(preflight)
+  [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]] || fail "write the key to $key (root, 0600) first"
+  [[ "$(readlink /spike)" == "$trial/spike" && -d /etc/a-nas-assistant ]] || fail "no trial installed here; use install"
+  list=$(accounts)
+  for account in $list; do
+    if [[ -d "$data/assistant/$account" ]]; then ready+=("$account"); else missing+=("$account"); fi
+  done
+  ((${#ready[@]})) || fail "no member has an assistant folder; use install"
+  say "--- stopping the running assistants"
+  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 2>/dev/null || true
+  install_packages
+  install_files
+  say "--- the assistant for ${#ready[@]} accounts"
+  ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_MODEL_GATEWAY=external ASSISTANT_LAYOUT=members \
+    bash /spike/assistant-install.sh "${ready[@]}"
+  systemctl restart anas-assistant-trial-gateway.service
+  ((${#missing[@]} == 0)) || say "not set up (new since install; remove and install again to include them): ${missing[*]}"
+  verify
+}
+
 smoke() {
   local account=${1:?account}
   [[ -f "/etc/a-nas-assistant/tokens/$account.env" ]] || fail "$account has no assistant"
@@ -166,7 +203,9 @@ drop() {
 }
 
 remove_trial() {
+  local purge=${1:-}
   [[ $EUID -eq 0 ]] || fail "run as root"
+  [[ -z "$purge" || "$purge" == --purge-key ]] || fail "remove takes only --purge-key"
   # Without the volume the assistant directories cannot be deleted, and once the tokens
   # are gone nothing would name them.
   [[ "$(findmnt -n -o FSTYPE --target "$data" 2>/dev/null)" == btrfs ]] || fail "$data is not mounted; mount it first"
@@ -208,15 +247,22 @@ remove_trial() {
     /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills "$runtimes/spike" "$trial"
   rmdir "$runtimes" 2>/dev/null || true
   if [[ -L /spike ]]; then rm -f /spike; fi
-  say "--- the key and the gateway's log"
-  drop /etc/anas-spike /var/log/anas-assistant-gateway
+  say "--- the gateway's log"
+  drop /var/log/anas-assistant-gateway
+  if [[ -n "$purge" ]]; then
+    drop /etc/anas-spike
+    say "the key is deleted"
+  else
+    say "the key stays at $key (remove --purge-key deletes it)"
+  fi
   say "removed; socat and ripgrep stay installed (dpkg -r socat ripgrep removes them)"
 }
 
 case ${1:-} in
   check) check ;;
   install) install_trial ;;
+  update) update_trial ;;
   smoke) smoke "${2:-}" ;;
-  remove) remove_trial ;;
-  *) sed -n '2,17p' "$0"; exit 2 ;;
+  remove) remove_trial "${2:-}" ;;
+  *) sed -n '2,24p' "$0"; exit 2 ;;
 esac

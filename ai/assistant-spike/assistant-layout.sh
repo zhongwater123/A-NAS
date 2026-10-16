@@ -19,8 +19,10 @@
 #                                                 this on a real volume)
 #   assistant-layout.sh prepare DATA ACCOUNT...   Agent空间 and its member folders, the
 #                                                 assistant directories, the files Hermes's
-#                                                 home binds, member config, session tokens,
-#                                                 instance sockets
+#                                                 home binds, then members
+#   assistant-layout.sh members DATA ACCOUNT...   only what lives in root's own /etc: member
+#                                                 config, session tokens, instance sockets
+#                                                 (nothing members can write; the trial's update)
 #   assistant-layout.sh quota   DATA SIZE ACCOUNT...  simple quota on the volume, SIZE per
 #                                                 assistant directory
 #   assistant-layout.sh remove  DATA ACCOUNT      what deleting the account removes
@@ -111,6 +113,10 @@ case $cmd in
       ensure_dir "$home/hermes" "$(inherited "user:$account:rwx")"
       for file in config.yaml .env SOUL.md active_profile; do mount_point_file "$home/hermes/$file"; done
       for folder in hooks plugins profiles; do mount_point_dir "$home/hermes/$folder"; done
+    done
+    ;&
+  members)
+    for account in "$@"; do
       # Hermes reads skills.external_dirs and, under serve, mcp_servers from this file only.
       install -d -m 0755 "/etc/a-nas-assistant/members/$account" "/etc/a-nas-assistant/members/$account/anas-member"
       { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$account"

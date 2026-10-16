@@ -5,7 +5,8 @@
 # spike's hand-made layout, ai/assistant-spike/system-test.sh on the real installer's.
 #   assistant-install.sh ACCOUNT...
 # Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
-# run.sh; SPIKE_MODEL_GATEWAY=external when the caller runs the model gateway itself (the
+# run.sh; ASSISTANT_LAYOUT=members to leave the folders on the volume as they are (the
+# trial's update; assistant-layout.sh members); SPIKE_MODEL_GATEWAY=external when the caller runs the model gateway itself (the
 # trial on the Experimental NAS, nas-trial.sh); PRODUCT_USER, the account of the product service, which alone may connect to the
 # broker's product socket; ASSISTANT_GATE=host-agent when the Host Agent's File Broker is the
 # session gate (ADR 0024 decision 10) and the executor of the changes: only root then
@@ -94,4 +95,4 @@ else
     python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 fi
 systemctl daemon-reload
-PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" prepare /srv/a-nas/data "$@"
+PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" "${ASSISTANT_LAYOUT:-prepare}" /srv/a-nas/data "$@"
