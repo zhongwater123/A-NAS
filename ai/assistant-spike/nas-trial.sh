@@ -161,7 +161,7 @@ verify() {
   check_one "gateway log is root's alone" test "$(stat -c '%a' /var/log/anas-assistant-gateway)" = 700
   check_one "weekly curator for $first" systemctl is-enabled "anas-assistant-curator@$first.timer"
   ((ok)) || fail "see the FAIL lines; remove undoes the install"
-  say "installed: open AI 助手 on the desktop (members of a-nas-users)"
+  say "installed: open VNAS on the desktop (members of a-nas-users)"
 }
 
 update_trial() {
