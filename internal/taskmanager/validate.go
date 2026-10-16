@@ -60,7 +60,7 @@ func (g AcceleratorGroup) valid() bool {
 }
 
 func (s TaskSnapshot) Valid() bool {
-	return !s.ObservedAt.IsZero() && finiteNonnegative(s.SampleSeconds) && s.SampleSeconds > 0 && s.Processes.valid(4096) && s.Services.valid(1024)
+	return !s.ObservedAt.IsZero() && finiteNonnegative(s.SampleSeconds) && s.SampleSeconds > 0 && s.Processes.valid(4096) && s.Services.valid(1024) && s.iconsValid()
 }
 func (g TaskGroup) valid(limit int) bool {
 	if !g.Status.valid() || g.Items == nil || len(g.Items) > limit {

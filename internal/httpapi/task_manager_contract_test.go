@@ -13,6 +13,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
 func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
@@ -39,7 +40,7 @@ func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &contractClient{t: t, router: router, handler: httpapi.NewProduct(httpapi.ProductDependencies{
-		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
+		Reader: iconContractReader{fake.NewHealthy()}, DataSource: httpapi.DataSourceSimulated, Accounts: service,
 	})}
 	paths := []string{"/api/v1/task-manager/device", "/api/v1/task-manager/tasks"}
 	for _, path := range paths {
@@ -112,4 +113,15 @@ func TestTaskManagerSchemaPreservesUnknownsAndRejectsHostMetadata(t *testing.T) 
 
 func firstTaskManagerItem(body map[string]any, group string) map[string]any {
 	return body[group].(map[string]any)["items"].([]any)[0].(map[string]any)
+}
+
+type iconContractReader struct{ *fake.Reader }
+
+func (r iconContractReader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error) {
+	s, err := r.Reader.ReadTasks(ctx)
+	id, src := taskmanager.NormalizeIcon([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="#369"/></svg>`))
+	s.Icons = map[string]string{id: src}
+	s.Processes.Items[0].IconID = id
+	s.Services.Items[0].IconID = id
+	return s, err
 }
