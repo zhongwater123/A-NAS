@@ -547,14 +547,15 @@ func (u *upstream) local(f frame) frame {
 }
 
 // linger keeps the connection open after the window left while a turn runs on
-// it, so the instance does not exit idle under the turn. The session gate
+// it, so the instance does not exit idle under the turn, and a while after the
+// turn so that Hermes's background review of it can finish. The session gate
 // still cuts it when the member's session ends.
 func (u *upstream) linger(ctx context.Context) {
 	limit := time.NewTimer(lingerLimit)
 	defer limit.Stop()
 	ticker := time.NewTicker(lingerCheck)
 	defer ticker.Stop()
-	for u.m.busy(u) {
+	for u.m.busy(u) || u.m.settling(u) {
 		select {
 		case <-u.closed:
 			return

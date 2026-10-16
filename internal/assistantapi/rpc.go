@@ -166,6 +166,8 @@ var forwardedEvents = map[string]bool{
 	"tool.generating": true, "tool.start": true, "tool.complete": true,
 	"todo.updated": true, "status.update": true, "error": true,
 	"session.info": true, "session.usage": true, "session.title": true, "sessions.changed": true, "session.reclaimed": true,
+	// What the background review changed in memory and skills, in Hermes's words.
+	"review.summary": true,
 }
 
 // hiddenInfo are the parts of a live session's info the window has no use

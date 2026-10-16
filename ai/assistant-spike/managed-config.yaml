@@ -90,3 +90,7 @@ gateway:
 # INFO it records every member message, so cleared memory could be found again there (#114).
 logging:
   level: WARNING
+# Hermes's own Chinese for what it shows the member, the background review's
+# summary among it (locales/zh.yaml).
+display:
+  language: zh

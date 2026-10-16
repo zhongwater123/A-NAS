@@ -19,8 +19,10 @@ import (
 var sessionTokenOf = accounts.SessionToken
 
 func init() {
-	// A connection kept for a turn notices quickly that the turn ended.
+	// A connection kept for a turn notices quickly that the turn ended, and
+	// waits for its review a short while.
 	lingerCheck = 20 * time.Millisecond
+	reviewWait = 3 * time.Second
 }
 
 type harness struct {
@@ -382,6 +384,30 @@ func TestATurnKeepsTheInstanceAfterTheWindowLeaves(t *testing.T) {
 	case <-h.serve.closed:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the connection outlived the turn")
+	}
+}
+
+func TestTheConnectionWaitsForTheReviewOfATurn(t *testing.T) {
+	h := newHarness(t)
+	w := h.open()
+	w.call("session.create", `{"cols":80}`)
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"hello"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+	_ = w.conn.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.serve.closed:
+		t.Fatal("the connection closed under the review of the turn")
+	case <-time.After(500 * time.Millisecond):
+	}
+	started := time.Now()
+	h.serve.reviewed()
+	select {
+	case <-h.serve.closed:
+		if waited := time.Since(started); waited > 2*time.Second {
+			t.Fatalf("the connection stayed %s after the review", waited)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection outlived the review")
 	}
 }
 

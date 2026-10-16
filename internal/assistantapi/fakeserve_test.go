@@ -307,6 +307,15 @@ func (f *fakeServe) finish() {
 	f.event(conn, "message.complete", fakeRuntime, `{"text":"late","status":"complete"}`)
 }
 
+// reviewed reports a background review of the last turn, as Hermes does
+// when the review changed memory or skills.
+func (f *fakeServe) reviewed() {
+	f.mu.Lock()
+	conn := f.conn
+	f.mu.Unlock()
+	f.event(conn, "review.summary", fakeRuntime, `{"text":"💾 自我改进检阅：记忆已更新"}`)
+}
+
 func (f *fakeServe) record(choice string) {
 	f.mu.Lock()
 	f.answers = append(f.answers, choice)
