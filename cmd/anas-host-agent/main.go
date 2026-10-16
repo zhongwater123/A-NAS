@@ -89,6 +89,10 @@ func run(logger *slog.Logger) error {
 	defer sessions.Close()
 	broker, err := filebroker.NewServer(filebroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
+		// The AI assistant is not shipped yet (ADR 0022): off unless its
+		// sockets are named.
+		AssistantSockets: strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR")),
+		AssistantTokens:  environment("ANAS_ASSISTANT_TOKEN_DIR", "/etc/a-nas-assistant/tokens"),
 	})
 	if err != nil {
 		return err

@@ -53,6 +53,14 @@ type response struct {
 	Size    int64             `json:"size,omitempty"`
 	// ExitCode ends a terminal session.
 	ExitCode *int `json:"exitCode,omitempty"`
+	// Assistant comes with a connection to the member's assistant.
+	Assistant *assistantGrant `json:"assistant,omitempty"`
+}
+
+type assistantGrant struct {
+	Username string `json:"username"`
+	// Token is the instance's `hermes serve` session token.
+	Token string `json:"token"`
 }
 
 const (

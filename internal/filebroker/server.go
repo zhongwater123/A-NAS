@@ -42,8 +42,15 @@ type Config struct {
 	// ShellCommand builds the administrator's terminal shell; the default is
 	// a login bash, or sh where bash is missing.
 	ShellCommand func() *exec.Cmd
-	// TerminalRecheck is how often a running terminal's session is verified.
+	// TerminalRecheck is how often a running terminal's session, or an open
+	// connection to an assistant, is verified.
 	TerminalRecheck time.Duration
+	// AssistantSockets holds each member's assistant socket, <username>.sock,
+	// which only root may connect to; empty turns the assistant off (ADR 0022).
+	AssistantSockets string
+	// AssistantTokens holds <username>.env with the instance's
+	// HERMES_DASHBOARD_SESSION_TOKEN, readable by root alone.
+	AssistantTokens string
 
 	// skipCredentials lets unprivileged tests run workers as the test user.
 	skipCredentials bool
@@ -53,7 +60,10 @@ type Server struct {
 	config  Config
 	mu      sync.Mutex
 	workers map[workerKey]*worker
-	closed  bool
+	// assistants are the broker's copies of the assistant connections it
+	// handed out, cut when the broker stops.
+	assistants map[*net.UnixConn]struct{}
+	closed     bool
 }
 
 type workerKey struct {
@@ -114,7 +124,7 @@ func NewServer(config Config) (*Server, error) {
 			return strconv.Atoi(account.Uid)
 		}
 	}
-	return &Server{config: config, workers: make(map[workerKey]*worker)}, nil
+	return &Server{config: config, workers: make(map[workerKey]*worker), assistants: make(map[*net.UnixConn]struct{})}, nil
 }
 
 // Serve accepts Product Service connections until the listener closes.
@@ -139,15 +149,20 @@ func (s *Server) Serve(listener net.Listener) error {
 	}
 }
 
-// Close stops every worker.
+// Close stops every worker and cuts every assistant connection.
 func (s *Server) Close() {
 	s.mu.Lock()
 	s.closed = true
 	workers := s.workers
 	s.workers = make(map[workerKey]*worker)
+	assistants := s.assistants
+	s.assistants = make(map[*net.UnixConn]struct{})
 	s.mu.Unlock()
 	for _, w := range workers {
 		w.stop()
+	}
+	for instance := range assistants {
+		cut(instance)
 	}
 }
 
@@ -161,8 +176,12 @@ func (s *Server) handle(conn *net.UnixConn) {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
-	if req.Op == opTerminal {
+	switch req.Op {
+	case opTerminal:
 		s.serveTerminal(conn, req)
+		return
+	case opAssistant:
+		s.serveAssistant(conn, req)
 		return
 	}
 	result, file := s.dispatch(context.Background(), req)
