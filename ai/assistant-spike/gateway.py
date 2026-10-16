@@ -2,7 +2,9 @@
 
 Listens on the Unix socket bound into the sandbox, adds the provider key that
 only this process can read, forwards to an OpenAI-compatible upstream and logs
-every request (tools offered, messages) and the token usage it saw.
+every request (tools offered, messages) and the token usage it saw. With
+GATEWAY_LOG_MESSAGES=0 (the trial on the Experimental NAS, where the requests
+carry members' files) it logs how many messages there were instead of them.
 """
 import http.client
 import json
@@ -14,6 +16,7 @@ from http.server import BaseHTTPRequestHandler
 
 SOCK, LOG, UPSTREAM_HOST, KEY_FILE = sys.argv[1:5]
 KEY = open(KEY_FILE, encoding="utf-8").read().strip()
+LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
 
 
 def log(record):
@@ -84,7 +87,8 @@ class Handler(BaseHTTPRequestHandler):
         log({"t": started, "seconds": round(time.time() - started, 2), "path": self.path, "status": status,
              "model": body.get("model"), "stream": bool(body.get("stream")),
              "tools": [t.get("function", {}).get("name") for t in body.get("tools") or []],
-             "messages": body.get("messages", []), "usage": usage})
+             "messages": body.get("messages", []) if LOG_MESSAGES else len(body.get("messages") or []),
+             "usage": usage})
 
 
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):

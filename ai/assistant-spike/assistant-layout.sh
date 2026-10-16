@@ -6,10 +6,11 @@
 # other than a directory is moved aside, and so is a directory at Agent空间's names that root
 # does not own (an impostor made after the real one was renamed).
 #
-# Only for the disposable spike and system-test containers, never on the Experimental NAS
-# (#116): it chowns and setfacls by path in folders members can write (Shared) and writes
-# the token into the product service's own directory, both following links, so whoever
-# controls those folders could turn it against root. The Host Agent opens every directory
+# Only for the disposable spike and system-test containers. It chowns and setfacls by path
+# in folders members can write (Shared, a Hermes home) and writes the token into the product
+# service's own directory, both following links, so whoever controls those folders could
+# turn it against root. The trial on the Experimental NAS (nas-trial.sh) therefore runs
+# prepare only once, on fresh state, with the session gate (no token copies). The Host Agent opens every directory
 # with openat2(RESOLVE_NO_SYMLINKS) and O_NOFOLLOW, acts only on what it opened, and hands
 # the token to the product service in its typed response.
 #

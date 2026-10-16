@@ -5,14 +5,16 @@
 # spike's hand-made layout, ai/assistant-spike/system-test.sh on the real installer's.
 #   assistant-install.sh ACCOUNT...
 # Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
-# run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
+# run.sh; SPIKE_MODEL_GATEWAY=external when the caller runs the model gateway itself (the
+# trial on the Experimental NAS, nas-trial.sh); PRODUCT_USER, the account of the product service, which alone may connect to the
 # broker's product socket; ASSISTANT_GATE=host-agent when the Host Agent's File Broker is the
 # session gate (ADR 0024 decision 10) and the executor of the changes: only root then
 # connects to the instance sockets, the product service gets no token copies, and the spike's
 # change broker does not run. Without it the product service connects to the sockets itself,
 # gets a copy of each token, and the change broker executes (spike and UI prototype).
-# Like assistant-layout.sh, only for the disposable spike and system-test containers, never
-# on the Experimental NAS (#116). Running it again replaces the model and the broker.
+# Like assistant-layout.sh, only for the disposable spike and system-test containers; on the
+# Experimental NAS only through nas-trial.sh, once, on fresh state. Running it again replaces
+# the model and the broker.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 runtime=/opt/a-nas/assistant-runtimes/spike
@@ -63,7 +65,9 @@ transient() {
   systemctl reset-failed "$1" 2>/dev/null || true
   systemd-run --unit "$@"
 }
-if [[ -n "${SPIKE_MODEL:-}" ]]; then
+if [[ "${SPIKE_MODEL_GATEWAY:-}" == external ]]; then
+  : # the caller's own unit serves /run/anas-assistant-gw/model.sock
+elif [[ -n "${SPIKE_MODEL:-}" ]]; then
   # Real model: the gateway holds the key; the sandbox cannot see the key file.
   transient model-gateway --quiet python3 "$here/gateway.py" /run/anas-assistant-gw/model.sock \
     /var/log/gateway.jsonl "${SPIKE_UPSTREAM:-api.deepseek.com}" /etc/anas-spike/model.key
