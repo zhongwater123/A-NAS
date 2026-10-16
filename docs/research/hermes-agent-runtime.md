@@ -756,8 +756,8 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 
 ### 实例、令牌与删除账号
 
-- 实例套接字 `/run/a-nas-assistant/<账号>.sock` 由 `a-nas`（产品服务账号）持有、`0600`，成员连不上。
-- 会话令牌 `/etc/a-nas-assistant/tokens/<账号>.env` 只有 root 可读，产品服务那份为 `a-nas` 的 `0600`。
+- 实例套接字 `/run/a-nas-assistant/<账号>.sock` 起初由 `a-nas`（产品服务账号）持有、`0600`，成员连不上；加入会话闸门后改为 root 的 `0600`，产品服务也连不上，只经文件代理（下文“集成：会话闸门与产品服务的转发”）。
+- 会话令牌 `/etc/a-nas-assistant/tokens/<账号>.env` 只有 root 可读。起初产品服务另有一份 `a-nas` 的 `0600` 副本；加入闸门后不再保存，由文件代理随每条连接交给产品服务。
 - `assistant-layout.sh remove` 删除 bob 的助手后，令牌、成员配置、套接字与 `assistant/bob` 子卷都不再存在。为此套接字单元增加了 `RemoveOnStop=yes`。`Agent空间/bob` 与 bob 的回收站随账号删除一并决定（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）。
 
 ### Host Agent 需要新增的类型化操作
@@ -770,11 +770,48 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 | 建立助手目录 | 账号、容量上限 | 容器 `assistant`（`a-nas-users` 仅穿过）；子卷 `assistant/<账号>`（本人仅穿过）；`files/` 与 `hermes/`（本人 `rwx` 并继承）；`hermes/` 中的挂载点（`config.yaml`、`.env`、`SOUL.md`、`active_profile` 与 `hooks/`、`plugins/`、`profiles/`）；qgroup 上限 | 存在则只对齐属主与 ACL；挂载点位置上是别的东西就挪开重建 | 新建的子卷在后续步骤失败时删除 |
 | 建立 Agent空间 | 全部账号 | `共享空间/Agent空间` 与每个账号的子目录（见上文） | 保留名：缺失时重建；位置上是不归 root 所有的目录或非目录时，连同其中内容挪开再重建，不原地接管 | 只增不删；挪开的内容保留，不删除 |
 | 写成员配置 | 账号 | `/etc/a-nas-assistant/members/<账号>/config.yaml`（`skills.external_dirs` 与 `mcp_servers`）与 `anas-member` 技能 | 原子替换 | 写临时文件，成功后改名 |
-| 会话令牌 | 账号；轮换（spike 未实现） | `/etc/a-nas-assistant/tokens/<账号>.env`（root `0600`），已存在则保留；轮换时换新令牌并重启实例 | 已存在不覆盖 | 令牌经类型化响应交给产品服务，由产品服务写进自己的文件；Host Agent 不以 root 写进产品服务的目录（spike 这样做，只适合一次性容器） |
-| 启用或停用实例 | 账号 | 启用或停用 `anas-assistant-api@<账号>.socket`（`SocketUser=a-nas`、`0600`、`RemoveOnStop`） | `enable --now` 与 `disable --now` 本身幂等 | 停用同时停止实例 |
+| 会话令牌 | 账号；轮换（spike 未实现） | `/etc/a-nas-assistant/tokens/<账号>.env`（root `0600`），已存在则保留；轮换时换新令牌并重启实例 | 已存在不覆盖 | 令牌不交给产品服务保存：文件代理随每条连接交出（会话闸门）；Host Agent 不以 root 写进产品服务的目录（闸门之前的 spike 这样做，只适合一次性容器） |
+| 启用或停用实例 | 账号 | 启用或停用 `anas-assistant-api@<账号>.socket`（root `0600`、`RemoveOnStop`；只有文件代理连接） | `enable --now` 与 `disable --now` 本身幂等 | 停用同时停止实例 |
 | 删除账号的助手 | 账号 | 停止实例与套接字，删除令牌、成员配置与 `assistant/<账号>` 子卷 | 不存在即视为完成 | `Agent空间/<账号>` 与回收站随 [#26](https://github.com/zhongwater123/A-NAS/issues/26) 决定 |
 
 托管策略（`/etc/hermes`）、系统技能、`SOUL.md` 与单元文件随 release 安装，由安装器负责，不是 Host Agent 的操作。
+
+## 集成：会话闸门与产品服务的转发（2026-10-15，开发机）
+
+#109–#115 合并后，按 ADR 0022 决定 9 与决定 10 把它们接到产品服务与窗口上。
+
+### 会话闸门
+
+做法与管理员终端相同（[`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)）：
+
+- 产品服务把请求所在会话的令牌交给文件代理（操作 `assistant`）；文件代理用与文件操作相同的只读会话表查询确认会话有效、账号在用，以 root 连接**这个会话的账号**的实例套接字，把已连接的描述符（SCM_RIGHTS）与实例令牌交回。请求里没有账号参数，所以管理员也只能连到自己的助手。
+- 文件代理留着这条连接的副本，每 30 秒复查一次会话；失效时对它 `shutdown`，产品服务手里的那份随之失效（关闭自己的副本做不到这一点）。Host Agent 停止时同样切断全部助手连接。
+- Host Agent 以 `ANAS_ASSISTANT_SOCKET_DIR` 开启，默认关闭；令牌目录默认 `/etc/a-nas-assistant/tokens`。
+- 产品服务在生产中只经它连接（[`cmd/anas-api`](../../cmd/anas-api/main.go) 的 `gatedAssistant`，并核对文件代理找到的账号就是登录的账号）；没有文件代理的开发模式直接连套接字，读取 `ANAS_ASSISTANT_TOKEN_DIR` 中的令牌，这不是闸门。
+- 执行方同样凭会话：spike 的 change broker 以 `ASSISTANT_GATE=host-agent` 安装时，产品套接字上的每个请求都要带 `X-A-NAS-Session`，它向 Host Agent 的会话查询确认是这位成员才生成卡片或登记授权；正式实现中执行方就是文件代理本身。
+
+### 产品服务的转发
+
+[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：
+
+- 每个窗口一条 WebSocket（`/api/v1/assistant/ws`，`Origin` 必须是本机），对应一条经闸门到实例 `/api/ws` 的连接。产品服务先等实例的 `gateway.ready`，自己发 `client.capabilities {server_requests: true}`，再把 ready 交给窗口。
+- 窗口的请求只放行白名单中的方法与参数（[`rpc.go`](../../internal/assistantapi/rpc.go)），id 由产品服务改写，避免与它自己的请求冲突；`client.capabilities`、`approval.pending`、`approval.received` 由产品服务自己回答，窗口对服务端请求的应答一律丢弃。
+- 事件只转发白名单中的 19 种（两种审批事件由卡片代替）；`session.info` 与结果中的 `info` 去掉系统提示、MCP 服务器与更新信息；`session.resume`/`session.activate`/`session.events.since` 的结果去掉 `open_requests`、`pending_connection`、`pending_approval`。出现 `yolo: true` 或 `approval_mode` 不是 `manual` 时关闭这条连接并记错误。
+- 审批按[回合内审批](#回合内审批1112026-10-15开发机)的规则对应到“提交更改”（[`approvals.go`](../../internal/assistantapi/approvals.go)）：会话、回合与正在进行的调用按账号记录，同一成员的每个窗口共享；对应不上的审批（包括回合结束后才到的）由产品服务直接应答 `deny`，不出卡片。卡片经 `anas.approval` 事件推给该成员的每个窗口，成员在任一窗口点确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。
+- 窗口离开时，若这条连接上的会话仍有回合在跑，产品服务保持连接直到 `message.complete`（最多 2 小时），之后断开让实例闲置退出；闸门仍会在会话失效时切断它。
+- 对话列表、历史、改名与删除走 REST，每次请求一条经闸门的连接；列表只列有消息的对话（Hermes 在第一条消息时才存储新对话）。
+
+### 窗口
+
+[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx) 改用 Desktop 与网页控制台共用的 JSON-RPC 客户端（`apps/shared` 的 `json-rpc-channel`、`json-rpc-gateway`、`reconnect-backoff`，由 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py) 复制）：新对话 `session.create`，打开旧对话 `session.resume`，发送 `prompt.submit`，停止 `session.interrupt`；回复用 Desktop 的 `appendAssistantTextPart`、`appendReasoningPart` 与 `upsertToolPart` 按事件逐步构建，回合结束后换成 REST 中存储的记录。切换对话不再停止回合。原型中标题栏汇总全部待确认更改的入口与规格“没有汇总列表”不符，已去掉；侧栏标出“等你确认”与“正在回答”（`session.active_list`）的对话。
+
+### 验证
+
+- 单元测试：文件代理（[`assistant_test.go`](../../internal/filebroker/assistant_test.go)）：伪造的、缺少的会话被拒绝，管理员连不到别人的助手，会话失效与文件代理停止时产品服务手里的连接被切断，经交出的连接能走 HTTP。产品服务（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)，对着模拟 `hermes serve` 的 [`fakeserve_test.go`](../../internal/assistantapi/fakeserve_test.go)）：白名单外的方法与参数到不了 Hermes，信息被去掉；审批成为卡片，窗口自己的应答到不了 Hermes，确认时执行方带着成员会话先登记授权；拒绝应答 `deny`；Hermes 已不再等待时确认作废授权；回合结束后的审批被拒绝；窗口离开后回合期间保持连接，回合结束或没有回合时断开。
+- 系统测试（真实安装器、Host Agent 与产品服务，`ASSISTANT_GATE=host-agent`）：实例套接字只有 root 能连，产品服务不保存令牌；change broker 拒绝没有会话与他人会话的产品请求；经产品服务与闸门打开的网关到得了 alice 的实例，`shell.exec` 得到 -32601，`session.create` 带 `profile` 得到 -32602，新对话的结果中没有系统提示；alice 退出登录后，网关在 30 秒时以 1013 关闭。第一次运行发现 `hermes serve` 的对话列表中 `hidden` 是 SQLite 的 0/1，不是布尔值，产品服务解码失败；已修正，测试中的模拟数据也改成与 Hermes 一致。
+- 浏览器（本地原型：产品服务以开发模式直连沙箱中的实例，DeepSeek flash，`approvals.timeout` 120 秒）：窗口 A 请助手在 `计划.md` 加一项，卡片在 A 的对话中出现，显示差异，侧栏标“等你确认”；alice 另一次登录的窗口 B 侧栏出现同一对话的标记，打开后看到同一张卡片并确认，两个窗口的卡片都变为“已按你的确认完成”，A 也收到这一轮的回答（经产品服务转发给打开同一对话的窗口），文件已修改，旧版本在回收站。不确认时卡片在 120 秒后变为“等待确认超时”，助手说明文件没有变化。
+- 冷启动：在负载约 10 的开发机上，实例冷启动要 100 秒（空闲时 5–11 秒），超过了产品服务 90 秒的请求时限，窗口先报“助手暂时没有响应”；窗口因此在每次连上后重新载入对话列表并清掉这条提示，启动期间发出的消息等到连上再发送（最多 3 分钟）。
+- 仍未解决：系统技能写明窗口里没有斜杠命令后，DeepSeek flash 仍在回答末尾提到“输入 `/help`”，并主动提出整理用户档案。前者来自 `tui` 会话的平台说明，后者来自 Hermes 的引导；要去掉需另定 A-NAS 的 `SOUL.md` 或会话平台。
 
 ## 关联
 

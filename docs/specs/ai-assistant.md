@@ -1,6 +1,6 @@
 # AI 助手
 
-状态：draft（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；对话列表、对话、停止与确认卡片已有在开发机上跑通的原型；待评审）
+状态：draft（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；窗口经产品服务与会话闸门使用 `hermes serve`，对话、回合内审批卡片与多窗口已在开发机原型上跑通；待评审）
 更新时间：2026-10-15
 
 ## 目标
@@ -51,8 +51,14 @@
 ### 停止回答
 
 - Given：助手正在回答。
-- When：成员点“停止”，或在回答结束前切到另一个对话。
-- Then：Hermes 中断这一轮；已完成的动作留在记录中，回复标为“已停止”，没有英文的内部提示。成员可以接着发下一条。回合不在后台继续，重新打开对话时也不会接上（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 后果）。
+- When：成员点“停止”。
+- Then：Hermes 中断这一轮；已完成的动作留在记录中，回复标为“已停止”，没有英文的内部提示。成员可以接着发下一条。
+
+### 离开正在回答的对话
+
+- Given：助手正在回答。
+- When：成员切到另一个对话、关闭窗口或刷新页面。
+- Then：这一轮在后台继续，侧栏中这个对话标为“正在回答”；回到这个对话时看到已完成的部分，回答继续逐字出现，等待确认的卡片仍在。成员退出登录后，助手的连接在 30 秒内被切断，未完成的这一轮随之中断（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 与后果）。
 
 ### 查看与清除助手记住的内容
 
@@ -97,7 +103,7 @@
 
 - Given：助手在一个对话中等待确认。
 - When：成员打开另一个对话。
-- Then：那个对话中没有这张卡片，也没有汇总所有待确认更改的列表。这一轮仍在进行时（见“停止回答”），侧栏中发起它的对话带“等你确认”的标记，回到这个对话时卡片仍在。
+- Then：那个对话中没有这张卡片，也没有汇总所有待确认更改的列表。这一轮仍在进行时（见“离开正在回答的对话”），侧栏中发起它的对话带“等你确认”的标记，回到这个对话时卡片仍在；同一成员的另一个窗口也能在那个对话中确认。
 
 ### 本人确认
 
@@ -130,9 +136,15 @@
 - When：管理员的会话、其他成员的会话或助手自己的通道尝试确认某成员的待确认更改，或 Hermes 在没有本人点击的情况下应答“同意”。
 - Then：请求被拒绝，更改不执行；助手在对话里声称“用户已同意”不产生任何效果。
 
+### 没有登录就到不了助手
+
+- When：产品服务在成员没有有效登录会话时（例如被攻破后）要连到这位成员的助手、为卡片读取文件或登记确认。
+- Then：文件代理与执行方各自核对会话，全部拒绝：产品服务自己连不到任何成员的实例，只有凭这位成员正在登录的会话才能连到这位成员的，确认也只能凭这个会话登记（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 10）。
+
 ## 边界与失败
 
 - 实例只看得到三处挂载：个人空间（只读）、共享空间（只读）、助手目录（读写）；没有网络，只经 Unix 套接字访问产品服务的模型网关与 MCP 端点，以及相册服务只读的助手套接字。相册服务重启后，正在运行的实例要重启才能再读相册（套接字由 systemd 持有之前）。
+- 到实例的连接只经文件代理，以成员正在登录的会话为限：退出登录、会话过期或账号停用后 30 秒内被切断；Host Agent 重启时窗口断开并自动重连。窗口只能使用 `hermes serve` 中白名单列出的方法与事件，其余由产品服务拒绝；Hermes 发来的审批从不直接交给窗口。
 - 实例以本人 Linux 身份运行，附加组只有 `a-nas-users`；看不到实例外的进程，不能 ptrace，没有任何能力。两处空间的回收站在实例中只显示本人的文件夹。
 - 助手在每个对话中都知道它代表哪位成员、目录规则与暂存流程（随系统提供的技能），不需要先探索。
 - 模型网关不可用时，助手报告“模型暂不可用”；文件、相册与其他功能不受影响（[架构不变量](../architecture/OVERVIEW.md#不变量) 1）。
@@ -151,13 +163,14 @@
 - 产品服务测试：越界提交不出卡片；非本人会话与助手通道的确认被拒绝；Hermes 未经本人点击的“同意”不执行；时限过后或停止后的确认无效；参数与卡片不一致时不执行；卡片之后改写的暂存内容不被写入，目标变化后不执行；同一更改不能执行两次。spike 中的对应测试见[研究](../research/hermes-agent-runtime.md#回合内审批1112026-10-15开发机)。
 - 相册服务测试：带助手标记的 Principal 不能写入，不带查看授权与管理员身份，不替成员创建私有图库；助手套接字按对端 UID 认定成员，只开放工具用到的读取路由（[`internal/photos/assistant_test.go`](../../internal/photos/assistant_test.go)、[`policy_test.go`](../../internal/photos/policy_test.go)、[`internal/photoservice/assistant_test.go`](../../internal/photoservice/assistant_test.go)）。spike 中经真实沙箱的检查见 [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh)。
 - 真实模型场景：修改、删除、发布、总结、找回已删文件与共享空间中的诱导文字，按[研究](../research/hermes-agent-runtime.md#真实模型deepseek2026-10-14开发机)中的场景重跑，提交全部指向允许的位置并说明需要确认。
-- 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已在开发机上用真实模型跑通对话、停止、切换对话与确认（确认后的文件属于本人，旧版本进入本人的回收站），卡片只出现在提交它的对话中，标题栏汇总全部待确认更改，草稿被后一次提交改写的旧卡片不能确认；拒绝、过期与部分失败尚未验收。原型中的确认卡片仍是持久保存的待确认更改，改为回合内审批后要重新验收。
-- 契约测试：`/api/v1/assistant` 每个接口的请求与响应符合 [OpenAPI](../../api/openapi.yaml)；管理员与其他成员到不了别人的实例；写操作需要 CSRF 令牌（[`assistant_test.go`](../../internal/httpapi/assistant_test.go)）。
+- 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已改为 `hermes serve` 与回合内审批，在开发机上用真实模型跑通：卡片只出现在提交它的对话中，侧栏标“等你确认”；同一成员另一个窗口打开这个对话后看到同一张卡片并确认，两个窗口都显示已完成，文件已修改、旧版本在回收站；不回答时卡片在等待时限后变为超时，文件不变（[研究](../research/hermes-agent-runtime.md#集成会话闸门与产品服务的转发2026-10-15开发机)）。拒绝、停止与部分失败在浏览器中尚未验收。
+- 契约测试：`/api/v1/assistant` 每个接口的请求与响应符合 [OpenAPI](../../api/openapi.yaml)；管理员与其他成员到不了别人的实例；写操作需要 CSRF 令牌（[`assistant_test.go`](../../internal/httpapi/assistant_test.go)）。网关只放行白名单中的方法、参数与事件，审批只经卡片接口回答，窗口离开后回合期间保持到实例的连接，同一对话在多个窗口中都收到事件（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）。
+- 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 
 ## 关联
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[0022 每个账号一个沙箱中的 Hermes Agent](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
-- 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx) 与连接层 [`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；确认与执行暂时由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替，正式实现由产品服务登记授权、文件代理执行
-- 测试：[`internal/assistantapi/handler_test.go`](../../internal/assistantapi/handler_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)
+- 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方暂时由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替，正式实现在文件代理中凭本人会话登记授权并执行
+- 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)
