@@ -87,12 +87,21 @@ func run(logger *slog.Logger) error {
 	}
 	sessions := accounts.NewSessionDirectory(filepath.Join(environment("ANAS_STATE_DIR", "/var/lib/a-nas"), "control.db"))
 	defer sessions.Close()
+	// The AI assistant is not shipped yet (ADR 0022): off unless its sockets
+	// are named. With it come the session gate and the executor of its changes,
+	// which keeps the copies the members' cards show beside the assistant
+	// directories, where only root may read them.
+	assistantSockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
+	var assistantChanges string
+	if assistantSockets != "" {
+		assistantChanges = environment("ANAS_ASSISTANT_CHANGES_DIR", filepath.Join(mountPoint, "assistant", ".changes"))
+	}
 	broker, err := filebroker.NewServer(filebroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
-		// The AI assistant is not shipped yet (ADR 0022): off unless its
-		// sockets are named.
-		AssistantSockets: strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR")),
+		AssistantSockets: assistantSockets,
 		AssistantTokens:  environment("ANAS_ASSISTANT_TOKEN_DIR", "/etc/a-nas-assistant/tokens"),
+		AssistantChanges: assistantChanges,
+		Accounts:         sessions,
 	})
 	if err != nil {
 		return err
@@ -120,6 +129,13 @@ func run(logger *slog.Logger) error {
 			logger.Error("file broker stopped", "error", err)
 		}
 	}()
+	if assistantChanges != "" {
+		stopChanges, err := serveAssistantChanges(broker, logger)
+		if err != nil {
+			return err
+		}
+		defer stopChanges()
+	}
 	stopSessionLookup, err := serveSessionLookup(sessions, logger)
 	if err != nil {
 		return err
@@ -153,6 +169,32 @@ func run(logger *slog.Logger) error {
 		}
 		return err
 	}
+}
+
+// serveAssistantChanges answers the assistants' MCP tool. The socket is open
+// to everyone but sits in /run/a-nas, which members cannot enter; the units
+// bind it into each assistant's sandbox, and the member is the caller's UID.
+func serveAssistantChanges(broker *filebroker.Server, logger *slog.Logger) (func(), error) {
+	socketPath := environment("ANAS_ASSISTANT_CHANGES_SOCKET", "/run/a-nas/assistant-changes.sock")
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("listen for the assistants' changes: %w", err)
+	}
+	if err := os.Chmod(socketPath, 0o666); err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	go func() {
+		if err := broker.ServeAssistantChanges(listener); err != nil {
+			logger.Error("assistant changes stopped", "error", err)
+		}
+	}()
+	logger.Info("assistant changes listening", "socket", socketPath)
+	return func() {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+	}, nil
 }
 
 // serveSessionLookup lets the photo service confirm who stands behind a

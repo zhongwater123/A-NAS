@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -23,6 +25,7 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -575,8 +578,9 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 // keeps the assistant as planned. With the File Broker every connection to a
 // member's instance goes through it, the session gate (decision 10); without
 // it, in development only, the sockets are dialled directly with the tokens in
-// ANAS_ASSISTANT_TOKEN_DIR. ANAS_ASSISTANT_CHANGES_SOCKET points at the
-// spike's change broker, which stands in for the File Broker's executor.
+// ANAS_ASSISTANT_TOKEN_DIR. The File Broker also executes the assistant's
+// changes; ANAS_ASSISTANT_CHANGES_SOCKET points at the spike's change broker
+// instead, which stands in for it where there is no File Broker.
 func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
 	sockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
 	options := assistantapi.Options{SocketDir: sockets, Logger: logger}
@@ -589,8 +593,48 @@ func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
 	}
 	if socket := os.Getenv("ANAS_ASSISTANT_CHANGES_SOCKET"); socket != "" {
 		options.Changes = assistantapi.BrokerChanges(socket)
+	} else if broker != nil {
+		options.Changes = executedChanges{broker}
 	}
 	return assistantapi.New(options)
+}
+
+// executedChanges is the File Broker's executor of the assistant's changes. It
+// acts for the member whose session the request carries, whatever account
+// the caller names.
+type executedChanges struct{ broker *filebroker.Client }
+
+func (e executedChanges) Prepare(ctx context.Context, _ string, submission assistantapi.Submission) (assistantapi.Change, error) {
+	return asChange(e.broker.PrepareChange(ctx, submission.SessionID, submission.RequestID, submission.Args))
+}
+
+func (e executedChanges) Decide(ctx context.Context, _, id string, decision assistantapi.Decision) (assistantapi.Change, error) {
+	return asChange(e.broker.DecideChange(ctx, id, string(decision)))
+}
+
+func (e executedChanges) Get(ctx context.Context, _, id string) (assistantapi.Change, error) {
+	return asChange(e.broker.GetChange(ctx, id))
+}
+
+func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
+	switch {
+	case errors.Is(err, assistantchanges.ErrInvalid):
+		return assistantapi.Change{}, fmt.Errorf("%w: %v", assistantapi.ErrInvalidSubmission, err)
+	case errors.Is(err, assistantchanges.ErrDecided):
+		return assistantapi.Change{}, assistantapi.ErrChangeDecided
+	case errors.Is(err, assistantchanges.ErrNotFound):
+		return assistantapi.Change{}, assistantapi.ErrChangeNotFound
+	case errors.Is(err, files.ErrForbidden):
+		return assistantapi.Change{}, assistantapi.ErrChangeSession
+	case err != nil:
+		return assistantapi.Change{}, err
+	}
+	var change assistantapi.Change
+	if err := json.Unmarshal(raw, &change); err != nil || change.ID == "" {
+		return assistantapi.Change{}, errors.New("the executor answered without a change")
+	}
+	change.Raw = raw
+	return change, nil
 }
 
 // gatedAssistant reaches a member's assistant through the File Broker, which
