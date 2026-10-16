@@ -158,7 +158,7 @@ export function useAssistantThread(gateway: AssistantGateway, storedId: string |
     updateReply((message) => ({ ...message, pending: false, interrupted: status === "interrupted" }));
     replyId.current = undefined;
     setRunning(false);
-    if (failure) setError("助手没能完成这次回答，请重试");
+    if (failure) setError("VNAS 没能完成这次回答，请重试");
     const id = shown.current;
     if (id) void reload(id).catch(() => undefined);
     notify.current.onChanged();
@@ -231,7 +231,7 @@ export function useAssistantThread(gateway: AssistantGateway, storedId: string |
       }
       await client.request("prompt.submit", { session_id: id, text: input });
     } catch {
-      setError("助手暂时没有响应，请稍后再试");
+      setError("VNAS 暂时没有响应，请稍后再试");
       updateReply((message) => ({ ...message, pending: false }));
       replyId.current = undefined;
       setRunning(false);

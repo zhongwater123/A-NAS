@@ -1,4 +1,4 @@
-// AI 助手 window (ADR 0024 decision 9). The thread is assistant-ui — the chat
+// AI 助手 window, named VNAS on the desktop (ADR 0024 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
 // model over its own JSON-RPC client; the conversation list, confirmation cards
 // and styling are A-NAS's.
@@ -170,13 +170,9 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     <PhotoOpener.Provider value={onShowPhoto}>
     <div className="as-app">
       <aside className="as-side">
-        <div className="as-brand">
-          <span className="as-brand-mark"><AssistantGlyph /></span>
-          <div><strong>AI 助手</strong><small>{username} 的助手</small></div>
-        </div>
         <button type="button" className="as-new" onClick={() => { setActiveId(undefined); setView("chat"); }}><MessageSquarePlus />新对话</button>
         <button type="button" className={`as-nav${view === "memory" ? " active" : ""}`} aria-pressed={view === "memory"} onClick={() => setView("memory")}>
-          <Brain />记忆<small>助手记住的内容</small>
+          <Brain />记忆<small>VNAS 记住的内容</small>
         </button>
         <div className="as-side-label"><History />对话</div>
         <ul className="as-sessions">
@@ -185,16 +181,16 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
               running={busy.has(session.id)}
               onOpen={() => { setActiveId(session.id); setView("chat"); }} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
           ))}
-          {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动助手…</>}</li>}
+          {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动 VNAS…</>}</li>}
         </ul>
-        <div className="as-side-foot"><ShieldCheck /><span>助手只能读你的个人空间和共享空间；改动文件都要你确认。</span></div>
+        <div className="as-side-foot"><ShieldCheck /><span>VNAS 只能读你的个人空间和共享空间；改动文件都要你确认。</span></div>
       </aside>
 
       <main className="as-main">
         <header className="as-head">
           <h2>{view === "memory" ? "记忆" : active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
           {thread.running && <span className="as-working"><LoaderCircle />正在处理</span>}
-          {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接助手</span>}
+          {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接 VNAS</span>}
         </header>
 
         {view === "memory" && <MemoryView onConversationsDeleted={() => { setActiveId(undefined); void refreshSessions(); }} />}
@@ -226,7 +222,7 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
             )}
 
             <ComposerPrimitive.Root className="as-composer">
-              <ComposerPrimitive.Input className="as-input" placeholder="让助手帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
+              <ComposerPrimitive.Input className="as-input" placeholder="让 VNAS 帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
               {thread.running
                 ? <ComposerPrimitive.Cancel className="as-send stop" aria-label="停止"><Square /></ComposerPrimitive.Cancel>
                 : <ComposerPrimitive.Send className="as-send" aria-label="发送"><ArrowUp /></ComposerPrimitive.Send>}
@@ -433,7 +429,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
       <header>
         <span className="as-change-mark">{CARD_MARKS[status]}</span>
         <div>
-          <strong>{change.summary || "助手提交的更改"}</strong>
+          <strong>{change.summary || "VNAS 提交的更改"}</strong>
           <small>{statusText(approval)}</small>
         </div>
       </header>

@@ -105,18 +105,18 @@ export function gatewayUrl(): string {
 // server's messages are for logs.
 export function failureText(reason: unknown): string {
   switch (reason instanceof APIError ? reason.code : "") {
-    case "assistant_unavailable": return "助手暂时没有响应，请稍后再试";
-    case "assistant_busy": return "助手正忙，请稍后再试";
-    case "assistant_failed": return "助手没能完成这次操作，请重试";
+    case "assistant_unavailable": return "VNAS 暂时没有响应，请稍后再试";
+    case "assistant_busy": return "VNAS 正忙，请稍后再试";
+    case "assistant_failed": return "VNAS 没能完成这次操作，请重试";
     case "session_not_found": return "这个对话已经不存在";
     case "title_in_use": return "已经有对话用了这个名字";
     case "invalid_title": return "名字最多 100 个字";
     case "changes_unavailable": return "暂时无法处理这项更改，请稍后再试";
     case "approval_not_found": return "这项更改已经不存在";
     case "approval_decided": return "这项更改已经处理过了";
-    case "approval_expired": return "助手已经不再等这项确认，文件没有变化";
+    case "approval_expired": return "VNAS 已经不再等这项确认，文件没有变化";
     case "authentication_required": return "登录已过期，请重新登录";
-    case "memory_changed": return "助手的记忆刚刚有变化，请再试一次";
+    case "memory_changed": return "VNAS 的记忆刚刚有变化，请再试一次";
     case "memory_not_found": return "这一条已经不在了";
   }
   return reason instanceof TypeError ? "网络连接中断" : "操作没有完成，请重试";

@@ -39,7 +39,7 @@ export function useAssistantGateway(): AssistantGateway {
       // The socket says nothing about why it closed; the status route does, and a
       // session that ended is handled there like everywhere else on the desktop.
       assistantStatus()
-        .then((status) => { if (!stopped) setProblem(status.available ? "" : "你的账号还没有助手"); })
+        .then((status) => { if (!stopped) setProblem(status.available ? "" : "你的账号还没有 VNAS"); })
         .catch((reason) => { if (!stopped) setProblem(failureText(reason)); });
     };
     const dial = async () => {
