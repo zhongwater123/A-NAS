@@ -47,6 +47,7 @@ type Reader struct {
 	metrics       metricsSampler
 	deviceTasks   deviceTaskSampler
 	workloadTasks workloadTaskSampler
+	smart         smartCache
 }
 
 type ResolvedDevice struct {
@@ -76,16 +77,7 @@ func New() *Reader {
 				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,FSTYPE,MOUNTPOINTS,WWN,SERIAL",
 			).Output()
 		},
-		readSMART: func(ctx context.Context, deviceName string) ([]byte, error) {
-			if deviceName == "" || strings.ContainsAny(deviceName, `/\\`) {
-				return nil, errors.New("invalid block device name")
-			}
-			output, err := exec.CommandContext(ctx, "smartctl", "--json", "--all", "/dev/"+deviceName).Output()
-			if err != nil && len(output) == 0 {
-				return nil, err
-			}
-			return output, nil
-		},
+		readSMART: readSMARTCommand,
 		readFilesystemUsage: func(path string) (uint64, uint64, error) {
 			var stats syscall.Statfs_t
 			if err := syscall.Statfs(path, &stats); err != nil {
@@ -138,10 +130,11 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
-	disks, err := parseDisks(ctx, blockDevices, r.dependencies.readSMART)
+	disks, smartTargets, err := parseDisks(blockDevices, r.smartFor)
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
+	r.refreshSMARTInBackground(smartTargets)
 	observeDataVolumeUsage(disks, r.dependencies.readFilesystemUsage)
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
@@ -192,7 +185,7 @@ func (r *Reader) ResolveDevice(ctx context.Context, diskID string) (ResolvedDevi
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return ResolvedDevice{}, err
 	}
-	disks, err := parseDisks(ctx, contents, r.dependencies.readSMART)
+	disks, _, err := parseDisks(contents, r.smartFor)
 	if err != nil {
 		return ResolvedDevice{}, err
 	}
@@ -316,13 +309,16 @@ type blockDevice struct {
 	Children    []blockDevice `json:"children"`
 }
 
-func parseDisks(ctx context.Context, contents []byte, readSMART func(context.Context, string) ([]byte, error)) ([]hoststate.Disk, error) {
+// parseDisks maps lsblk's disks to public disks with the SMART readings smart
+// has for them, and lists the disks SMART can be read from. smart may be nil.
+func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, *int)) ([]hoststate.Disk, []smartTarget, error) {
 	var document blockDeviceDocument
 	if err := json.Unmarshal(contents, &document); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	disks := make([]hoststate.Disk, 0, len(document.BlockDevices))
+	targets := make([]smartTarget, 0, len(document.BlockDevices))
 	seen := make(map[string]struct{})
 	systemDisks := 0
 	for _, device := range document.BlockDevices {
@@ -330,18 +326,18 @@ func parseDisks(ctx context.Context, contents []byte, readSMART func(context.Con
 			continue
 		}
 		if device.Size == 0 || strings.TrimSpace(device.Model) == "" {
-			return nil, fmt.Errorf("disk %q is missing model or capacity", device.Name)
+			return nil, nil, fmt.Errorf("disk %q is missing model or capacity", device.Name)
 		}
 		identity, err := stableDiskIdentity(device)
 		if err != nil {
-			return nil, fmt.Errorf("disk %q: %w", device.Name, err)
+			return nil, nil, fmt.Errorf("disk %q: %w", device.Name, err)
 		}
 		id, err := derivedResourceID("disk", diskIdentityDomain, identity)
 		if err != nil {
-			return nil, fmt.Errorf("disk %q: %w", device.Name, err)
+			return nil, nil, fmt.Errorf("disk %q: %w", device.Name, err)
 		}
 		if _, exists := seen[id.String()]; exists {
-			return nil, errors.New("duplicate stable disk identity")
+			return nil, nil, errors.New("duplicate stable disk identity")
 		}
 		seen[id.String()] = struct{}{}
 
@@ -354,10 +350,11 @@ func parseDisks(ctx context.Context, contents []byte, readSMART func(context.Con
 		}
 		smartStatus := hoststate.HealthUnknown
 		var temperature *int
-		if readSMART != nil {
-			if smartJSON, smartErr := readSMART(ctx, device.Name); smartErr == nil {
-				smartStatus, temperature = parseSMART(smartJSON)
-			}
+		if smart != nil {
+			smartStatus, temperature = smart(identity)
+		}
+		if device.Name != "" && !strings.ContainsAny(device.Name, `/\\`) {
+			targets = append(targets, smartTarget{identity: identity, name: device.Name})
 		}
 		health := smartStatus
 		if health == "" {
@@ -379,49 +376,13 @@ func parseDisks(ctx context.Context, contents []byte, readSMART func(context.Con
 		})
 	}
 	if systemDisks != 1 {
-		return nil, fmt.Errorf("found %d system disks, want exactly one", systemDisks)
+		return nil, nil, fmt.Errorf("found %d system disks, want exactly one", systemDisks)
 	}
 
 	sort.Slice(disks, func(i, j int) bool {
 		return disks[i].ID.String() < disks[j].ID.String()
 	})
-	return disks, nil
-}
-
-type smartDocument struct {
-	SMARTStatus *struct {
-		Passed bool `json:"passed"`
-	} `json:"smart_status"`
-	Temperature *struct {
-		Current int `json:"current"`
-	} `json:"temperature"`
-	NVMeHealth *struct {
-		Temperature int `json:"temperature"`
-	} `json:"nvme_smart_health_information_log"`
-}
-
-func parseSMART(contents []byte) (hoststate.Health, *int) {
-	var document smartDocument
-	if len(contents) == 0 || json.Unmarshal(contents, &document) != nil {
-		return hoststate.HealthUnknown, nil
-	}
-	health := hoststate.HealthUnknown
-	if document.SMARTStatus != nil {
-		if document.SMARTStatus.Passed {
-			health = hoststate.HealthHealthy
-		} else {
-			health = hoststate.HealthCritical
-		}
-	}
-	var temperature *int
-	if document.Temperature != nil {
-		value := document.Temperature.Current
-		temperature = &value
-	} else if document.NVMeHealth != nil {
-		value := document.NVMeHealth.Temperature
-		temperature = &value
-	}
-	return health, temperature
+	return disks, targets, nil
 }
 
 func deviceInUse(device blockDevice) bool {

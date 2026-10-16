@@ -3,6 +3,7 @@ package storage_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -183,20 +184,62 @@ func TestListVolumesRefreshesFilesystemUsageFromHostState(t *testing.T) {
 	}
 }
 
+// The file service checks the mounted volume against this UUID before every
+// request; a Host Agent read there made each one wait for the disks.
+func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
+	ctx := context.Background()
+	state, err := fake.NewHealthy().Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &stateReader{state: state}
+	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-uuid" }})
+	if got := service.DataVolumeFilesystemUUID(); got != "" {
+		t.Fatalf("UUID before any volume = %q, want empty", got)
+	}
+	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	reader.reads = 0
+	reader.failing = true
+
+	if got, want := service.DataVolumeFilesystemUUID(), "0f6e1c2a-data"; got != want {
+		t.Fatalf("UUID = %q, want %q", got, want)
+	}
+	if reader.reads != 0 {
+		t.Fatalf("host reads = %d, want none", reader.reads)
+	}
+}
+
 type recordingExecutor struct {
 	executedDiskID string
 }
 
-type stateReader struct{ state hoststate.State }
+type stateReader struct {
+	state   hoststate.State
+	reads   int
+	failing bool
+}
 
 func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
+	r.reads++
 	if err := ctx.Err(); err != nil {
 		return hoststate.State{}, err
+	}
+	if r.failing {
+		return hoststate.State{}, errors.New("host agent timed out")
 	}
 	return r.state, nil
 }
 
 func (e *recordingExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
 	e.executedDiskID = request.DiskID
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, State: storage.VolumeStateAvailable}, nil
+	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable}, nil
 }
