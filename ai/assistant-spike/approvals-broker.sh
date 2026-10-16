@@ -1,33 +1,24 @@
 #!/usr/bin/env bash
-# What the change broker applies, driven directly (no Hermes): only a change the
-# member approved, once, from the copy the member saw, and only for that member.
-# The agent side runs as the member's UID, like the MCP tool in the sandbox.
+# What the executor of the assistant's changes applies, driven directly (no Hermes): only a
+# change the member approved, once, from the copy the member saw, and only for that member.
+# The agent side runs as the member's UID, like the MCP tool in the sandbox. The executor is
+# the spike's change_broker.py, or with EXECUTOR=host-agent the Host Agent's File Broker
+# (broker_client.py speaks to either).
 set -uo pipefail
 python3 - <<'PY'
-import http.client, json, os, pwd, socket, subprocess
+import json, os, pwd, subprocess, sys
+
+sys.path.insert(0, "/spike")
+from broker_client import product as call_product
 
 DATA = "/srv/a-nas/data"
 STAGED = f"{DATA}/assistant/alice/files/待确认/个人空间/计划.md"
 PLAN = f"{DATA}/spaces/private/alice/计划.md"
 
 
-class UDS(http.client.HTTPConnection):
-    def __init__(self, path):
-        super().__init__("uds", timeout=60)
-        self.path = path
-
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.connect(self.path)
-
-
 def product(method, path, body=None):
-    conn = UDS("/run/anas-spike-broker/broker.sock")
-    # The member's session, when the broker checks it (the system test's session gate).
-    headers = {"X-A-NAS-Session": os.environ["BROKER_SESSION"]} if os.environ.get("BROKER_SESSION") else {}
-    conn.request(method, path + ("&" if "?" in path else "?") + "account=alice", json.dumps(body or {}, ensure_ascii=False).encode(), headers)
-    resp = conn.getresponse()
-    return resp.status, json.loads(resp.read() or b"{}")
+    # The member's session (BROKER_SESSION), when the executor checks it (the session gate).
+    return call_product(method, path + ("&" if "?" in path else "?") + "account=alice", body or {})
 
 
 AGENT = r'''
@@ -112,5 +103,6 @@ as_alice(f"rmdir '{DATA}/spaces/private/alice/子目录' && ln -s {DATA}/spaces/
 result = agent("alice", "POST", "/apply", sub)
 check("a folder swapped for a link to Shared after the card is not written through", "已执行" not in result
       and not os.path.exists(f"{DATA}/spaces/shared/a.md"), result)
-print("INFO state dir mode", oct(os.stat("/var/lib/anas-spike/changes").st_mode & 0o777))
+state = "/srv/a-nas/data/assistant/.changes" if os.environ.get("EXECUTOR") == "host-agent" else "/var/lib/anas-spike/changes"
+print("INFO state dir mode", oct(os.stat(state).st_mode & 0o777))
 PY

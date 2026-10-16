@@ -7,10 +7,10 @@
 # Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
 # run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
 # broker's product socket; ASSISTANT_GATE=host-agent when the Host Agent's File Broker is the
-# session gate (ADR 0022 decision 10): only root then connects to the instance sockets, the
-# product service gets no token copies, and the broker accepts a product request only with
-# the member's live session, checked with the Host Agent. Without it the product service
-# connects to the sockets itself and gets a copy of each token (spike and UI prototype).
+# session gate (ADR 0022 decision 10) and the executor of the changes: only root then
+# connects to the instance sockets, the product service gets no token copies, and the spike's
+# change broker does not run. Without it the product service connects to the sockets itself,
+# gets a copy of each token, and the change broker executes (spike and UI prototype).
 # Like assistant-layout.sh, only for the disposable spike and system-test containers, never
 # on the Experimental NAS (#116). Running it again replaces the model and the broker.
 set -euo pipefail
@@ -70,13 +70,19 @@ if [[ -n "${SPIKE_MODEL:-}" ]]; then
 else
   transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi
-# The change broker (in A-NAS the product service and the File Broker): the product
-# socket for the product service, the agent socket for the assistants' MCP tool.
+# The executor of the assistants' changes. With the gate it is the Host Agent's File Broker:
+# the product service reaches it over file-broker.sock with the member's session, and the
+# unit binds its assistant socket (/run/a-nas/assistant-changes.sock) over the empty file
+# here. Otherwise the spike's change broker stands in, with a product socket for the product
+# service and the agent socket for the assistants' MCP tool.
 install -d -m 0755 /run/anas-spike-broker /run/anas-change-agent
-lookup=
-[[ "$gate" == host-agent ]] && lookup=/run/a-nas-sessions/photos.sock
-transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
-  -E SPIKE_SESSION_LOOKUP="$lookup" \
-  python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
+if [[ "$gate" == host-agent ]]; then
+  systemctl stop change-broker 2>/dev/null || true
+  rm -f /run/anas-change-agent/agent.sock /run/anas-spike-broker/broker.sock
+  : > /run/anas-change-agent/agent.sock
+else
+  transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
+    python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
+fi
 systemctl daemon-reload
 PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" prepare /srv/a-nas/data "$@"

@@ -31,9 +31,9 @@ check "the Host Agent made bob's space and recycle bins" \
   test -d "$data/spaces/private/bob/.a-nas-trash/bob" -a -d "$data/spaces/shared/.a-nas-trash/bob"
 
 # --- Installed beside the real accounts, with the Host Agent's File Broker as the session
-# gate (ADR 0022 decision 10): only root reaches the instance sockets and the session tokens;
-# the Product Service reaches a member's instance through the broker, with that member's live
-# session, and alone reaches the change broker's product socket, again only with the session.
+# gate (ADR 0022 decision 10) and the executor of the assistant's changes: only root reaches
+# the instance sockets and the session tokens; the Product Service reaches a member's instance,
+# and prepares or grants that member's changes, only with the member's live session.
 if ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-install.sh owner alice bob >/tmp/assistant-install.log 2>&1; then
   check "the assistant installs beside the real accounts" true
 else
@@ -54,24 +54,35 @@ check "session tokens are root's alone" test "$(stat -c '%a %U' /etc/a-nas-assis
 check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spike-tokens/alice.token
 # The gate on, and the assistant's API in the Product Service (both off by default).
 printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/host-agent.env
-printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\nANAS_ASSISTANT_CHANGES_SOCKET=/run/anas-spike-broker/broker.sock\n' \
-  >> /etc/a-nas/anas-api.env
+printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-host-agent && systemctl restart anas-api || true
-for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
+changes_socket='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas/assistant-changes.sock")'
+check "the executor's assistant socket is out of a member's reach outside the sandbox" denied as alice python3 -c "$changes_socket"
+# The units bind it into each sandbox. To drive it as alice from outside one, the test binds
+# it at the sandbox's path on the host too.
+mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
+export EXECUTOR=host-agent
 alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
 bob_csrf=$(login bob "$bob_password" /tmp/bob.jar || true)
 session_of() { awk '$6 == "anas_session" {print $7}' "$1"; }
 check "alice's assistant is available through the Product Service" \
   test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available)" = true
-# The change broker stands in for the File Broker's executor: it prepares and grants only with
-# the member's own live session, which it checks with the Host Agent.
-broker_status() { # SESSION: the status of preparing an empty change for alice with SESSION
-  BROKER_SESSION=$1 python3 /spike/broker_client.py product POST '/changes/prepare?account=alice' \
-    '{"summary":"x","operations":[]}' | cut -d' ' -f1
+# The executor prepares, grants and shows changes only for the member whose live session the
+# Product Service carries; no request names the account.
+executor() { # SESSION METHOD PATH [JSON]: status and body
+  BROKER_SESSION=$1 python3 /spike/broker_client.py product "$2" "$3" "${4:-}"
 }
-check "the change broker refuses the Product Service without a session" test "$(broker_status '')" = 401
-check "and with another member's session" test "$(broker_status "$(session_of /tmp/bob.jar)")" = 401
-check "and accepts alice's own" test "$(broker_status "$(session_of /tmp/alice.jar)")" != 401
+check "the executor refuses the Product Service without a session" \
+  test "$(executor '' POST /changes/prepare '{"summary":"x","operations":[]}' | cut -d' ' -f1)" = 401
+probe_change=$(executor "$(session_of /tmp/alice.jar)" POST /changes/prepare \
+  '{"summary":"x","operations":[{"op":"mkdir","path":"/nas/个人空间/闸门"}]}' | cut -d' ' -f2- | jq -r .id || true)
+check "it prepares alice's change with her session" test -n "$probe_change" -a "$probe_change" != null
+check "another member's session does not see it" \
+  test "$(executor "$(session_of /tmp/bob.jar)" GET "/changes/$probe_change" | cut -d' ' -f1)" = 404
+check "nor grant it" test "$(executor "$(session_of /tmp/bob.jar)" POST "/changes/$probe_change/approve" | cut -d' ' -f1)" = 404
+check "it keeps its copies where only root can read them" \
+  test "$(stat -c '%a %U' "$data/assistant/.changes" 2>/dev/null)" = "700 root"
 export BROKER_SESSION
 BROKER_SESSION=$(session_of /tmp/alice.jar)
 
@@ -237,6 +248,20 @@ if [[ -x "$assistant_python" ]]; then
     journalctl -u anas-api -u anas-host-agent --since "$listed_at" -o cat --no-pager | grep -i assistant | tail -n 5 |
       sed 's/^/INFO assistant gate: /' || true
   fi
+  # The whole chain: Hermes asks to run 提交更改, the Product Service shows the card, alice
+  # confirms it from her session, and the Host Agent's executor writes as alice through her
+  # confined worker while the assistant waits.
+  stage 计划.md "$(printf '# 计划\n- 买菜\n- 经网关确认\n')"
+  submission='{"summary":"经网关加一项","operations":[{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}'
+  "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice.jar)" \
+    submit "$alice_csrf" "$submission" >/tmp/gate-submit.out 2>&1 || true
+  check "a turn's call of 提交更改 becomes a card in the window" grep -q '^card awaiting: 经网关加一项' /tmp/gate-submit.out
+  check "alice's confirmation is accepted" grep -qx 'confirm answered 200' /tmp/gate-submit.out
+  check "the executor applies it" grep -qx 'card applied: 经网关加一项' /tmp/gate-submit.out
+  check "and the assistant hears so" bash -c "sed -n '/^answer:/,\$p' /tmp/gate-submit.out | grep -q '1 项更改已执行'"
+  check "her plan has the confirmed line, written as her" \
+    test "$(grep -c 经网关确认 "$data/spaces/private/alice/计划.md" 2>/dev/null):$(owner_uid "$data/spaces/private/alice/计划.md")" = "1:$alice_id"
+  echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate-submit.out | cut -c1-400)"
   gate_session=$(curl -fsS -c /tmp/alice-gate.jar -H 'Content-Type: application/json' \
     -d "{\"username\":\"alice\",\"password\":\"$new_password\"}" "$api/api/v1/session" | jq -r .csrfToken || true)
   "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice-gate.jar)" 90 \

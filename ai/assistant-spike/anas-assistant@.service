@@ -59,6 +59,9 @@ InaccessiblePaths=-/run/anas-spike-tokens
 # The change broker's product socket, where the member's approvals are
 # registered; the assistant reaches only its agent socket in /run/anas-change-agent.
 InaccessiblePaths=-/run/anas-spike-broker
+# With the Host Agent as the executor its assistant socket, in /run/a-nas where members
+# cannot enter, is bound over that agent socket; the member is the peer UID.
+BindReadOnlyPaths=-/run/a-nas/assistant-changes.sock:/run/anas-change-agent/agent.sock
 # The photo service's assistant socket (#113) sits in a directory only that service
 # can enter, so other processes of the member cannot reach it; it is bound in over an
 # empty file. The photo service learns the member from the peer UID.
