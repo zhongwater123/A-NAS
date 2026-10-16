@@ -51,6 +51,7 @@ const (
 // dropped those seven and no person's.
 const (
 	personClass     = 1
+	dogClass        = 93
 	catClass        = 140
 	animalFaceScore = 0.3
 	personFaceScore = 0.5
@@ -163,7 +164,8 @@ ON CONFLICT(object_id, derivation) DO NOTHING`,
 
 // found is one face or animal a scan found, as an occurrence stores it.
 type found struct {
-	box [4]float32
+	kind string
+	box  [4]float32
 	// landmarks are a face's five points; animals have none.
 	landmarks []float32
 	score     float32
@@ -173,7 +175,6 @@ type found struct {
 // scan is what one face or pet scan of an object found.
 type scan struct {
 	derivation string
-	kind       string
 	model      string
 	found      []found
 	// margin is how much wider than the box an avatar is.
@@ -193,10 +194,10 @@ type storedOccurrence struct {
 
 // completeFaces stores what the face models found in an object.
 func (s *Service) completeFaces(ctx context.Context, job claimedJob, model string, faces []Face, input *os.File) error {
-	result := scan{derivation: facesDerivation, kind: OccurrenceFace, model: model, margin: avatarMargin}
+	result := scan{derivation: facesDerivation, model: model, margin: avatarMargin}
 	for _, face := range faces {
-		result.found = append(result.found, found{box: face.Box, landmarks: face.Landmarks[:], score: face.Score,
-			vector: face.Vector})
+		result.found = append(result.found, found{kind: OccurrenceFace, box: face.Box, landmarks: face.Landmarks[:],
+			score: face.Score, vector: face.Vector})
 	}
 	return s.completeScan(ctx, job, result, input)
 }
@@ -247,8 +248,8 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, created
 		}
 		added := make([]storedOccurrence, 0, len(result.found))
 		for ordinal, item := range result.found {
-			occurrence := storedOccurrence{id: s.randomID(result.kind), objectID: job.objectID, ordinal: ordinal,
-				kind: result.kind, model: result.model, box: item.box, vector: item.vector}
+			occurrence := storedOccurrence{id: s.randomID(item.kind), objectID: job.objectID, ordinal: ordinal,
+				kind: item.kind, model: result.model, box: item.box, vector: item.vector}
 			var landmarks []byte
 			if item.landmarks != nil {
 				landmarks = encodeFractions(item.landmarks)
@@ -256,7 +257,7 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, created
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO occurrences(id, object_id, derivation, ordinal, kind, model, box, landmarks, score, vector, created_at)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				occurrence.id, job.objectID, result.derivation, ordinal, result.kind, result.model,
+				occurrence.id, job.objectID, result.derivation, ordinal, item.kind, result.model,
 				encodeFractions(item.box[:]), landmarks, item.score, encodeVector(item.vector), now); err != nil {
 				return err
 			}

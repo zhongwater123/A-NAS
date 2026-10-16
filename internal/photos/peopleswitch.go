@@ -189,7 +189,7 @@ SELECT d.model, d.boxes FROM detections d WHERE d.object_id = ? AND d.derivation
 		return err
 	}
 	boxes, err := decodeBoxes(encoded)
-	if err != nil || len(s.dogsIn(model, boxes)) == 0 {
+	if err != nil || len(s.petsIn(model, boxes)) == 0 {
 		return nil
 	}
 	return s.enqueuePets(ctx, tx, objectID, model, boxes)

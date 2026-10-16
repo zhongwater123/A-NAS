@@ -57,7 +57,7 @@ func (w wantedScans) derivations() []string {
 // claimDetection claims the next due detection job, or else face scan, or
 // else pet scan, with the same object's other wanted jobs that are due, and
 // renders the input; with none due it returns sql.ErrNoRows. A detection
-// comes first, so that a pet scan claimed with it reads its dogs.
+// comes first, so that a pet scan claimed with it reads its cats and dogs.
 func (s *Service) claimDetection(ctx context.Context, wanted wantedScans) (*detectionInput, error) {
 	derivations := wanted.derivations()
 	var job claimedJob

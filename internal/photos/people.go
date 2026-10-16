@@ -57,6 +57,11 @@ var defaultPeopleCalibrations = []PeopleCalibration{
 	// MPDD households with stranger dogs beside them, about 70% recall.
 	{Kind: OccurrenceDog, Model: "dinov2-small@f22797eabf81+ort-1.31.0+m1.1",
 		Threshold: 0.72, MinCore: 3, Rule: RuleCentroid},
+	// And on its cats, stricter: look-alike cats merge more readily than
+	// dogs; at 0.80 none of 300 different cats did. How many of one cat's
+	// photos find each other is not measured yet.
+	{Kind: OccurrenceCat, Model: "dinov2-small@f22797eabf81+ort-1.31.0+m1.1",
+		Threshold: 0.80, MinCore: 3, Rule: RuleCentroid},
 }
 
 // Person kinds.

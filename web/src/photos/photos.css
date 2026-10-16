@@ -271,11 +271,6 @@
 .ph-person strong { max-width: 100%; overflow: hidden; font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .ph-person.nameless strong { color: var(--ph-accent-ink); font-weight: 600; }
 .ph-person small { color: var(--ph-muted); font-size: 12px; }
-.ph-group-cover { position: relative; margin-bottom: 7px; }
-.ph-person .ph-group-cover .ph-avatar { margin-bottom: 0; }
-.ph-group-mark { position: absolute; right: 1px; bottom: 1px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--ph-accent-ink); background: var(--ph-surface); box-shadow: 0 1px 3px rgba(16, 24, 40, .2); transition: transform .25s var(--ph-ease); }
-.ph-group-mark svg { width: 15px; height: 15px; }
-.ph-pet-group:hover .ph-group-mark { transform: translateY(-2px); }
 .ph-people-more { display: flex; flex-wrap: wrap; gap: 4px; }
 .ph-browse-more.quiet { color: var(--ph-muted); }
 .ph-browse-more.quiet:hover { color: var(--ph-ink-2); background: rgba(20, 26, 38, .06); }

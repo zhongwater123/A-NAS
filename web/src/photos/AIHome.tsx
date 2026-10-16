@@ -45,8 +45,6 @@ interface Props {
 // Cluster cards are at least this wide; a collapsed group shows one row.
 const cardWidth = 124;
 const cardGap = 14;
-// The AI group of cats (internal/photos/labels/v1.json).
-const catLabel = "cat";
 
 // AIHome is AI 聚合: a sentence finds photos by meaning; below, the people
 // and pets local AI keeps finding, the photos it has grouped by what they
@@ -75,14 +73,9 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
     if (ai) wasSettled.current = settled;
     if (settled && (was === false || (clusters && !clusters.ready))) setReload((value) => value + 1);
   }, [settled, clusters]);
-  // Cats are not told apart (docs/research/photo-people-evaluation.md), so
-  // their group stands among the people and pets rather than under 动物.
-  const cats = clusters?.items.find((label) => label.id === catLabel);
   const groups = useMemo(() => {
     const byCategory = new Map<string, PhotoLabelCount[]>();
-    for (const label of clusters?.items ?? []) {
-      if (label.id !== catLabel) byCategory.set(label.category, [...byCategory.get(label.category) ?? [], label]);
-    }
+    for (const label of clusters?.items ?? []) byCategory.set(label.category, [...byCategory.get(label.category) ?? [], label]);
     const order = Object.keys(categoryNames);
     return [...byCategory].sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   }, [clusters]);
@@ -91,7 +84,7 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
   const scroller = useRef<HTMLDivElement>(null);
   const [perRow, setPerRow] = useState(back?.perRow ?? 6);
   const [peoplePerRow, setPeoplePerRow] = useState(7);
-  const shown = (clusters === undefined ? "" : groups.length ? "groups" : waiting ? "waiting" : "") + (tags.length ? ":tags" : "") + (people?.length || cats ? ":people" : "");
+  const shown = (clusters === undefined ? "" : groups.length ? "groups" : waiting ? "waiting" : "") + (tags.length ? ":tags" : "") + (people?.length ? ":people" : "");
   // A row holds as many cards as the first group section has room for.
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -162,10 +155,9 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
         </p>
       </section>
 
-      {people?.length || cats ? (
-        <PeopleRow people={people ?? []} perRow={peoplePerRow} expanded={peopleExpanded} showHidden={showHidden}
-          onExpand={setPeopleExpanded} onShowHidden={setShowHidden} onOpen={(person) => onOpenPerson(person, remember())}
-          cats={cats} onOpenCats={(group) => onOpenCluster(group, remember())} />
+      {people?.length ? (
+        <PeopleRow people={people} perRow={peoplePerRow} expanded={peopleExpanded} showHidden={showHidden}
+          onExpand={setPeopleExpanded} onShowHidden={setShowHidden} onOpen={(person) => onOpenPerson(person, remember())} />
       ) : null}
 
       {clusters === undefined ? <div className="ph-loading"><span className="ph-spinner" /></div> : groups.length ? (
