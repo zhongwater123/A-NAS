@@ -1,10 +1,11 @@
-import { ArchiveRestore, Download, FileSearch, Search, X } from "lucide-react";
+import { ArchiveRestore, Download, FileSearch, History, Search, X } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
 
+import type { Space } from "../api";
 import { formatBytes } from "../bytes";
 import { useBackup } from "./BackupCenter";
-import { messageOf, searchSnapshots, snapshotDownloadURL, type SnapshotMatch, type SnapshotVersion } from "./backupApi";
-import { formatDateTime, formatDay, spaceLabel } from "./format";
+import { listRemovedEntries, messageOf, searchSnapshots, snapshotDownloadURL, type RemovedEntry, type SnapshotMatch, type SnapshotVersion } from "./backupApi";
+import { formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
 import { EmptyState, EntryIcon, Notice, SpaceSwitcher, Spinner } from "./parts";
 import { snapshotTitle } from "./SnapshotsPage";
 
@@ -51,9 +52,9 @@ export function FindPage() {
 
       {error ? <Notice tone="danger">{error}</Notice>
         : !query.trim() ? (
-          <EmptyState icon={<FileSearch />} title={snapshotCount === 0 ? `${spaceLabel(space)}还没有快照` : "误删或改坏了文件？"}>
-            {snapshotCount === 0 ? "有了快照之后，就可以在这里找回过去的文件。" : `输入名称后，会列出每个匹配项在快照里的不同版本。${snapshotCount ? `目前共有 ${snapshotCount} 份快照可供查找。` : ""}`}
-          </EmptyState>
+          snapshotCount === 0 ? (
+            <EmptyState icon={<FileSearch />} title={`${spaceLabel(space)}还没有快照`}>有了快照之后，就可以在这里找回过去的文件。</EmptyState>
+          ) : <RemovedList key={space.id} space={space} />
         ) : result && result.query === query.trim() ? (
           result.items.length === 0 ? (
             <EmptyState icon={<FileSearch />} title={`没有找到“${result.query}”`}>换一个更短的关键词试试，或者切换到另一个空间。</EmptyState>
@@ -101,7 +102,7 @@ function MatchCard({ match, query }: { match: SnapshotMatch; query: string }) {
               <strong>
                 {match.kind === "directory" ? "文件夹" : version.modifiedAt ? `修改于 ${formatDateTime(version.modifiedAt)}` : "版本"}
                 {match.kind === "file" && <span> · {formatBytes(version.sizeBytes)}</span>}
-                {index === 0 && match.versions.length > 1 && <em>最新</em>}
+                {version.current ? <em className="current">与现在相同</em> : index === 0 && match.versions.length > 1 && <em>最新</em>}
               </strong>
               <small>
                 {version.snapshots > 1
@@ -120,6 +121,73 @@ function MatchCard({ match, query }: { match: SnapshotMatch; query: string }) {
         <button type="button" className="bk-link bk-more" onClick={() => setExpanded((value) => !value)}>{expanded ? "收起" : `显示全部 ${match.versions.length} 个版本`}</button>
       )}
     </li>
+  );
+}
+
+// RemovedList shows what the snapshots hold that is no longer in the space,
+// most recently gone first: what people look for when they cannot recall a name.
+function RemovedList({ space }: { space: Space }) {
+  const { restore, restored } = useBackup();
+  const [result, setResult] = useState<{ items: RemovedEntry[]; truncated: boolean }>();
+  const [error, setError] = useState("");
+
+  // A restore brings items back into the space, so the list reloads.
+  useEffect(() => {
+    const controller = new AbortController();
+    setError("");
+    listRemovedEntries(space.id, controller.signal)
+      .then((found) => setResult(found))
+      .catch((caught) => { if (!controller.signal.aborted) setError(messageOf(caught)); });
+    return () => controller.abort();
+  }, [space.id, restored]);
+
+  if (error) return <Notice tone="danger">{error}</Notice>;
+  if (!result) return <div className="bk-loading inline"><Spinner />正在比对快照与现在的空间…</div>;
+  if (!result.items.length) {
+    return (
+      <EmptyState icon={<FileSearch />} title="快照里的文件都还在">
+        最近的快照中没有被删除或移走的项目。想找改坏之前的版本，可以在上面输入文件名。
+      </EmptyState>
+    );
+  }
+  return (
+    <section className="bk-removed" aria-label="最近删除或移走">
+      <header className="bk-section-head">
+        <h3><History />最近删除或移走</h3>
+        <span>{formatCount(result.items.length)} 项{result.truncated ? "，只显示最近的一部分" : ""}</span>
+      </header>
+      <ul className="bk-removed-list">
+        {result.items.map((item) => {
+          const folders = item.path.split("/").slice(0, -1);
+          const size = item.kind === "directory" ? `${formatCount(item.fileCount)} 个文件 · ${formatBytes(item.sizeBytes)}` : formatBytes(item.sizeBytes);
+          return (
+            <li key={item.path}>
+              <EntryIcon kind={item.kind} />
+              <div className="bk-removed-copy">
+                <strong title={item.name}>{item.name}{item.inTrash && <span className="bk-badge neutral" title="回收站里还有它，从回收站恢复可以拿回删除前的最新内容">在回收站中</span>}</strong>
+                <small title={item.path}>{[spaceLabel(space), ...folders].join(" / ")}</small>
+                <small className="bk-removed-meta">{size} · 最后见于 {formatDateTime(item.lastSeenAt)}</small>
+              </div>
+              <span className="bk-removed-size">{size}</span>
+              <span className="bk-removed-when" title={item.goneBy ? `${formatDateTime(item.lastSeenAt)} 的快照里还有，${formatDateTime(item.goneBy)} 的快照里已没有` : `最近一份快照（${formatDateTime(item.lastSeenAt)}）之后不见的`}>
+                最后见于 {formatDateTime(item.lastSeenAt)}
+              </span>
+              <div className="bk-version-actions">
+                {item.kind === "file" && <a className="bk-icon-button" href={snapshotDownloadURL(item.snapshotId, item.entryId)} download={item.name} aria-label={`下载 ${item.name}`} title="下载"><Download /></a>}
+                <button
+                  type="button" className="bk-restore-button" aria-label={`恢复 ${item.name}`}
+                  onClick={() => restore({
+                    space, folders,
+                    snapshot: { id: item.snapshotId, name: snapshotTitle({ name: item.snapshotName, origin: item.origin }), createdAt: item.lastSeenAt },
+                    entry: { id: item.entryId, name: item.name, kind: item.kind },
+                  })}
+                ><ArchiveRestore />恢复</button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

@@ -4,6 +4,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listUsers, type Session, type User } from "../api";
+import { displayName, fullName } from "../people";
 import { Banner, messageOf } from "../settings/parts";
 import { SearchField, Select, downloadText, exportLimit, fileStamp, toCSV, useDebounced, useRemembered } from "./common";
 import {
@@ -123,7 +124,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
       const kept = rows.slice(0, exportLimit);
       const table = [["时间", "类别", "成员", "描述", "来源", "操作代码", "对象类型", "对象 ID", "记录 ID"], ...kept.map((event) => {
         const described = describeActivity(event, viewerId);
-        return [fullTime(event.occurredAt), categoryInfo[event.category].label, event.system ? "系统" : event.actor?.username ?? "",
+        return [fullTime(event.occurredAt), categoryInfo[event.category].label, event.system ? "系统" : event.actor ? fullName(event.actor) : "",
           plainText(described.parts), described.meta.join(" · "), event.action, event.resourceType, event.resourceId ?? "", event.id];
       })];
       downloadText(`a-nas-activity-${fileStamp()}.csv`, toCSV(table), "text/csv;charset=utf-8");
@@ -135,7 +136,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
     }
   };
 
-  const actorOptions = [{ id: "", label: "所有成员" }, ...users.map((user) => ({ id: user.id, label: user.id === viewerId ? `${user.username}（你）` : user.username })), { id: "system", label: "系统任务" }];
+  const actorOptions = [{ id: "", label: "所有成员" }, ...users.map((user) => ({ id: user.id, label: user.id === viewerId ? `${displayName(user)}（你）` : displayName(user) })), { id: "system", label: "系统任务" }];
   return (
     <div className="lg-panel">
       <div className="lg-toolbar">

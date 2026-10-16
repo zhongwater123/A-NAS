@@ -16,7 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
 
-// ChangeStore is the executor of 提交更改 (ADR 0022 decision 4). It checks a
+// ChangeStore is the executor of 提交更改 (ADR 0024 decision 4). It checks a
 // submission and copies what it would write, which is what the member's card
 // shows; it records the member's one-time grant; and it applies a granted
 // change when the assistant's MCP tool asks, as the member. Every call carries

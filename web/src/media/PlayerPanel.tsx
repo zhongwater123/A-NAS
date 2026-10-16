@@ -1,10 +1,11 @@
-import { AudioLines, Search, X } from "lucide-react";
+import { AudioLines, ChevronsUpDown, LibraryBig, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { messageOf } from "./Browse";
 import { Artwork } from "./Cards";
+import { ChoiceList, type Choice } from "./Dropdown";
 import { episodeCode, progressShare, runtime } from "./format";
-import { getShow, listTitles, type Category, type ShowDetail, type Title, type VideoDetail } from "./mediaApi";
+import { getShow, listLibraries, listTitles, type Category, type MediaLibrary, type ShowDetail, type Title, type VideoDetail } from "./mediaApi";
 
 export type PanelTab = "episodes" | "library";
 
@@ -93,9 +94,47 @@ function Episodes({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: s
   );
 }
 
+// LibrarySwitch shows which library the list comes from. Pressing it moves
+// on to the next library; its arrows open them all to pick from.
+function LibrarySwitch({ value, choices, onChange }: { value: string; choices: Choice[]; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const index = Math.max(0, choices.findIndex((choice) => choice.value === value));
+  const current = choices[index];
+  const following = choices[(index + 1) % choices.length];
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) toggle.current?.focus({ preventScroll: true });
+  };
+  return (
+    <div ref={box} className={`mc-scope ${open ? "open" : ""}`}>
+      <button type="button" className="mc-scope-name" title={`切换到${following.label}`} aria-label={`媒体库：${current.label}，切换到${following.label}`}
+        onClick={() => onChange(following.value)}>
+        <LibraryBig /><span key={current.value}>{current.label}</span>
+      </button>
+      <button ref={toggle} type="button" className="mc-scope-toggle" aria-label="选择媒体库" title="选择媒体库" aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => setOpen(!open)}><ChevronsUpDown /></button>
+      <ChoiceList anchor={box} open={open} choices={choices} value={value} label="媒体库" align="end"
+        onPick={(next) => { close(true); if (next !== value) onChange(next); }} onClose={close} />
+    </div>
+  );
+}
+
 function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: string) => void }) {
   const [category, setCategory] = useState<Category>(detail.type === "episode" ? "show" : detail.type === "other" ? "other" : "movie");
-  const [everywhere, setEverywhere] = useState(false);
+  // scope is the library the list comes from; empty means every library.
+  const [scope, setScope] = useState(detail.libraryId);
+  const [libraries, setLibraries] = useState<MediaLibrary[]>([]);
+  useEffect(() => {
+    let live = true;
+    listLibraries().then((result) => { if (live) setLibraries(result.items); }, () => undefined);
+    return () => { live = false; };
+  }, []);
+  const scopes = useMemo<Choice[]>(() => [
+    ...libraries.map((library) => ({ value: library.id, label: library.name })),
+    { value: "", label: "全部媒体库" },
+  ], [libraries]);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Title[]>();
   const [error, setError] = useState("");
@@ -107,11 +146,11 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
     setError("");
     // Typing waits for a pause before it asks again.
     const timer = window.setTimeout(() => {
-      listTitles({ category, library: everywhere ? undefined : detail.libraryId, q: search || undefined, sort: search ? "name" : "added", limit: 80 })
+      listTitles({ category, library: scope || undefined, q: search || undefined, sort: search ? "name" : "added", limit: 80 })
         .then((page) => { if (live) setItems(page.items); }, (caught) => { if (live) { setItems([]); setError(messageOf(caught)); } });
     }, search ? 250 : 0);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [category, everywhere, search, detail.libraryId]);
+  }, [category, scope, search]);
   const playingID = detail.type === "episode" ? detail.showId : detail.id;
   const pick = async (title: Title) => {
     if (title.id === playingID) return;
@@ -126,20 +165,21 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
     finally { setOpening(""); }
   };
   const still = category === "other";
-  const empty = useMemo(() => (search ? "没有找到匹配的影片" : everywhere ? "还没有这类视频" : "这个媒体库里还没有这类视频"), [search, everywhere]);
+  const empty = useMemo(() => (search ? "没有找到匹配的影片" : scope ? "这个媒体库里还没有这类视频" : "还没有这类视频"), [search, scope]);
   return (
     <>
       <div className="mc-pick-filters">
-        <label className="mc-pick-search">
-          <Search />
-          <input value={query} placeholder="搜索片名" aria-label="搜索片库" onChange={(event) => setQuery(event.target.value)} />
-        </label>
+        <div className="mc-pick-row">
+          <label className="mc-pick-search">
+            <Search />
+            <input value={query} placeholder="搜索片名" aria-label="搜索片库" onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          {libraries.length > 1 && <LibrarySwitch value={scope} choices={scopes} onChange={setScope} />}
+        </div>
         <div className="mc-pick-chips" role="group" aria-label="分类">
           {categories.map((item) => (
             <button key={item.value} type="button" className={item.value === category ? "active" : ""} aria-pressed={item.value === category} onClick={() => setCategory(item.value)}>{item.label}</button>
           ))}
-          <span className="mc-pick-gap" />
-          <button type="button" className={`scope ${everywhere ? "active" : ""}`} aria-pressed={everywhere} onClick={() => setEverywhere(!everywhere)}>全部媒体库</button>
         </div>
       </div>
       {error && <p className="mc-pick-empty">{error}</p>}

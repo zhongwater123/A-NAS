@@ -34,7 +34,7 @@ const (
 )
 
 // card is one approval Hermes asked for, paired with the call of 提交更改 it
-// is about (ADR 0022 decision 4).
+// is about (ADR 0024 decision 4).
 type card struct {
 	RequestID       string          `json:"requestId"`
 	SessionID       string          `json:"sessionId"`

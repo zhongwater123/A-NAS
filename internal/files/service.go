@@ -264,6 +264,11 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 		{"snapshots", "size_bytes", "INTEGER NOT NULL DEFAULT -1"},
 		{"snapshot_entries", "modified_at", "TEXT NOT NULL DEFAULT ''"},
 		{"trash", "original_path", "TEXT NOT NULL DEFAULT ''"},
+		{"snapshot_schedules", "retention", "TEXT NOT NULL DEFAULT 'count'"},
+		{"snapshot_schedules", "keep_hourly", "INTEGER NOT NULL DEFAULT 0"},
+		{"snapshot_schedules", "keep_daily", "INTEGER NOT NULL DEFAULT 0"},
+		{"snapshot_schedules", "keep_weekly", "INTEGER NOT NULL DEFAULT 0"},
+		{"snapshot_schedules", "keep_monthly", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := s.ensureColumn(ctx, column.table, column.name, column.definition); err != nil {
 			return err
@@ -848,27 +853,52 @@ func (s *Service) removeEmptyTrashParents(ctx context.Context, root, trashRelati
 	}
 }
 
-func (s *Service) Restore(ctx context.Context, actor accounts.User, trashID, targetParentID, targetName string) (Entry, error) {
+// Restored is a recycle-bin item back in its space.
+type Restored struct {
+	Entry
+	// Replaced is set when the item took the place of a file of its name,
+	// which went to the recycle bin.
+	Replaced bool `json:"replaced,omitempty"`
+}
+
+// Restore puts a recycle-bin item back, in its original folder when
+// targetParentID is empty, under targetName or its own name. conflict says
+// what happens when that name is taken there: ConflictAsk fails with
+// ErrConflict; ConflictRename keeps both, the item taking the first free
+// "name (恢复).ext", "name (恢复 2).ext"…; ConflictReplace, for a file only,
+// sends the file of that name to the recycle bin first. A folder in the way
+// is never replaced: the file then comes back beside it, as with uploads.
+func (s *Service) Restore(ctx context.Context, actor accounts.User, trashID, targetParentID, targetName string, conflict ConflictPolicy) (Restored, error) {
+	switch conflict {
+	case "":
+		conflict = ConflictAsk
+	case ConflictAsk, ConflictRename, ConflictReplace:
+	default:
+		return Restored{}, ErrInvalidName
+	}
 	var item TrashItem
 	var originalParentID, trashRelative, deletedAt string
 	err := s.store.db.QueryRowContext(ctx, `
-SELECT id, entry_id, space_id, original_name, original_parent_id, trash_relative_path, deleted_by, deleted_at
-FROM trash WHERE id = ?`, trashID).Scan(
-		&item.ID, &item.EntryID, &item.SpaceID, &item.Name, &originalParentID, &trashRelative, &item.DeletedBy, &deletedAt,
+SELECT t.id, t.entry_id, t.space_id, t.original_name, IFNULL(e.kind, 'file'), t.original_parent_id, t.trash_relative_path, t.deleted_by, t.deleted_at
+FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).Scan(
+		&item.ID, &item.EntryID, &item.SpaceID, &item.Name, &item.Kind, &originalParentID, &trashRelative, &item.DeletedBy, &deletedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Entry{}, ErrNotFound
+		return Restored{}, ErrNotFound
 	}
 	if err != nil {
-		return Entry{}, err
+		return Restored{}, err
 	}
 	item.DeletedAt, _ = time.Parse(time.RFC3339Nano, deletedAt)
+	if conflict == ConflictReplace && item.Kind != EntryKindFile {
+		return Restored{}, ErrUnsupportedType
+	}
 	_, root, err := s.authorizedSpace(ctx, actor, item.SpaceID, true)
 	if err != nil {
-		return Entry{}, err
+		return Restored{}, err
 	}
 	if item.DeletedBy != actor.ID {
-		return Entry{}, ErrForbidden
+		return Restored{}, ErrForbidden
 	}
 	toOriginal := targetParentID == ""
 	if toOriginal {
@@ -878,7 +908,7 @@ FROM trash WHERE id = ?`, trashID).Scan(
 		targetName = item.Name
 	}
 	if err := checkName(targetName, item.Name); err != nil {
-		return Entry{}, err
+		return Restored{}, err
 	}
 	parent, err := s.parentPath(ctx, root, item.SpaceID, targetParentID)
 	if errors.Is(err, ErrNotFound) && toOriginal {
@@ -887,20 +917,46 @@ FROM trash WHERE id = ?`, trashID).Scan(
 		targetParentID, parent, err = "", root, nil
 	}
 	if err != nil {
-		return Entry{}, err
+		return Restored{}, err
 	}
-	if err := s.refuseCaseTwin(ctx, item.SpaceID, targetParentID, targetName, item.EntryID); err != nil {
-		return Entry{}, err
-	}
-	target := filepath.Join(parent, targetName)
 	source := filepath.Join(root, filepath.FromSlash(trashRelative))
-	if !withinRoot(root, source) || !withinRoot(root, target) {
-		return Entry{}, ErrNotFound
+	if !withinRoot(root, source) || !withinRoot(root, filepath.Join(parent, targetName)) {
+		return Restored{}, ErrNotFound
 	}
-	if err := s.fs.Rename(ctx, source, target); errors.Is(err, fs.ErrExist) {
-		return Entry{}, ErrConflict
-	} else if err != nil {
-		return Entry{}, err
+	replaced := false
+	if conflict == ConflictReplace {
+		existing := targetName
+		if twin, found, err := s.caseTwin(ctx, item.SpaceID, targetParentID, targetName, item.EntryID); err != nil {
+			return Restored{}, err
+		} else if found && twin.Kind == EntryKindFile {
+			existing = twin.Name
+		}
+		if replaced, err = s.trashForReplacement(ctx, actor, item.SpaceID, root, targetParentID, filepath.Join(parent, existing)); err != nil {
+			return Restored{}, err
+		}
+	}
+	// Renames never replace, so a name taken in the meantime keeps both
+	// unless the caller asked to be told.
+	var target string
+	for number := 0; ; number++ {
+		if number > maxNumberedCopies || (number > 0 && conflict == ConflictAsk) {
+			return Restored{}, ErrConflict
+		}
+		name := restoredName(targetName, item.Kind, number)
+		if _, taken, err := s.caseTwin(ctx, item.SpaceID, targetParentID, name, item.EntryID); err != nil {
+			return Restored{}, err
+		} else if taken {
+			continue
+		}
+		target = filepath.Join(parent, name)
+		err := s.fs.Rename(ctx, source, target)
+		if err == nil {
+			targetName = name
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return Restored{}, err
+		}
 	}
 	rollback := func() { _ = s.fs.Rename(context.WithoutCancel(ctx), target, source) }
 	newRelative, _ := filepath.Rel(root, target)
@@ -908,7 +964,7 @@ FROM trash WHERE id = ?`, trashID).Scan(
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		rollback()
-		return Entry{}, err
+		return Restored{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
@@ -916,24 +972,42 @@ UPDATE entries
 SET relative_path = ? || substr(relative_path, length(?) + 1), trashed = 0, trash_id = NULL
 WHERE trash_id = ?`, newRelative, trashRelative, trashID); err != nil {
 		rollback()
-		return Entry{}, err
+		return Restored{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE entries SET parent_id = ?, name = ? WHERE id = ?", targetParentID, targetName, item.EntryID); err != nil {
 		rollback()
-		return Entry{}, err
+		return Restored{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM trash WHERE id = ?", trashID); err != nil {
 		rollback()
-		return Entry{}, err
+		return Restored{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		rollback()
-		return Entry{}, err
+		return Restored{}, err
 	}
 	s.removeEmptyTrashParents(ctx, root, trashRelative)
-	_ = s.audit(ctx, actor.ID, "file.restored", item.SpaceID, item.EntryID, targetName)
+	detail := targetName
+	if replaced {
+		detail += " (replaced)"
+	}
+	_ = s.audit(ctx, actor.ID, "file.restored", item.SpaceID, item.EntryID, detail)
 	entry, _, err := s.entryPath(ctx, root, item.SpaceID, item.EntryID)
-	return entry, err
+	return Restored{Entry: entry, Replaced: replaced}, err
+}
+
+// restoredName is the name a restored item takes beside one already there:
+// itself for 0, then "计划 (恢复).txt", "计划 (恢复 2).txt"; a folder's name
+// keeps any dot it has.
+func restoredName(name string, kind EntryKind, number int) string {
+	switch number {
+	case 0:
+		return name
+	case 1:
+		return withSuffix(name, " (恢复)", kind == EntryKindFile)
+	default:
+		return withSuffix(name, fmt.Sprintf(" (恢复 %d)", number), kind == EntryKindFile)
+	}
 }
 
 func (s *Service) Purge(ctx context.Context, actor accounts.User, trashID string) error {
@@ -1224,11 +1298,12 @@ func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spac
 }
 
 func (s *Service) Upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader) (Entry, error) {
-	return s.upload(ctx, actor, spaceID, parentID, name, contents, nameChosen)
+	return s.upload(ctx, actor, spaceID, parentID, name, contents, nameChosen, time.Time{})
 }
 
-// upload writes a file named as naming allows.
-func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader, naming naming) (Entry, error) {
+// upload writes a file named as naming allows. A modTime that is not zero
+// becomes the file's modification time, as far as the file system lets it.
+func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, parentID, name string, contents io.Reader, naming naming, modTime time.Time) (Entry, error) {
 	space, root, err := s.authorizedSpace(ctx, actor, spaceID, true)
 	if err != nil {
 		return Entry{}, err
@@ -1296,6 +1371,7 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 	if err := temporary.Close(); err != nil {
 		return Entry{}, err
 	}
+	s.keepModTime(ctx, temporaryPath, modTime)
 	if err := s.fs.Rename(ctx, temporaryPath, target); errors.Is(err, fs.ErrExist) {
 		return Entry{}, ErrConflict
 	} else if err != nil {
@@ -1308,6 +1384,14 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 	}
 	_ = s.audit(ctx, actor.ID, "file.uploaded", space.ID, entry.ID, entry.Name)
 	return entry, nil
+}
+
+// keepModTime gives a restored file the modification time it was saved
+// with. It is best effort: the content is what a restore must bring back.
+func (s *Service) keepModTime(ctx context.Context, path string, modTime time.Time) {
+	if !modTime.IsZero() {
+		_ = s.fs.SetModTime(ctx, path, modTime)
+	}
 }
 
 func (s *Service) authorizedSpace(ctx context.Context, actor accounts.User, spaceID string, write bool) (accounts.Space, string, error) {

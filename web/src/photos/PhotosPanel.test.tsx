@@ -182,9 +182,99 @@ describe("PhotosPanel timeline", () => {
     // The text file never left the browser; the queue says why.
     expect(screen.getByText("1 张未能上传")).toBeTruthy();
     // It never appears in the grid either.
-    expect(screen.queryByText("只支持 JPEG 和 PNG 照片")).toBeNull();
+    expect(screen.queryByText("支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV")).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "展开上传队列" }));
-    expect(screen.getByText("只支持 JPEG 和 PNG 照片")).toBeTruthy();
+    expect(screen.getByText("支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV")).toBeTruthy();
+  });
+});
+
+describe("PhotosPanel Live Photos", () => {
+  it("says when a Live Photo arrived without its video and completes it with the MOV later", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:preview", revokeObjectURL: () => undefined }));
+    let stored: PhotoAsset[] = [];
+    FakeUpload.respond = (upload) => {
+      if (upload.url.endsWith("/live-videos")) {
+        stored = stored.map((photo) => ({ ...photo, liveVideoMissing: undefined, motion: { kind: "live-photo", duration: 2.5 } }));
+        return { status: 200, body: { items: stored } };
+      }
+      const still = asset("photo:live", { name: "IMG_1.HEIC", mediaType: "image/heic", liveVideoMissing: true });
+      stored = [still];
+      return { status: 201, body: still };
+    };
+    serve(
+      (url) => url === "/api/v1/photos/assets/photo%3Alive" ? json(stored[0]) : undefined,
+      timeline(privateLibrary.id, () => stored),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    expect(await screen.findByText("把照片拖到这里")).toBeTruthy();
+    const app = document.querySelector(".ph-app") as HTMLElement;
+    const drop = (file: File) => {
+      fireEvent.dragEnter(app, { dataTransfer: { types: ["Files"], files: [file] } });
+      fireEvent.drop(app, { dataTransfer: { types: ["Files"], files: [file] } });
+    };
+
+    // The still alone: it is kept, and the toast says what is missing.
+    drop(new File(["heic"], "IMG_1.HEIC", { type: "image/heic" }));
+    expect(await screen.findByText("照片已保存到我的图库；其中 1 张实况照片只收到了静态画面")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "怎么补上" }));
+    expect(screen.getByText(/导出未修改的原件/)).toBeTruthy();
+    await openPhoto(user, "IMG_1.HEIC");
+    expect(await screen.findByText("实况照片只上传了静态画面")).toBeTruthy();
+    expect(screen.getByText(/HEIC/, { selector: "dd" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    // The MOV on its own completes it instead of being refused.
+    drop(new File(["mov"], "IMG_1.MOV", { type: "video/quicktime" }));
+    expect(await screen.findByText("已为 1 张照片补上实况视频")).toBeTruthy();
+    expect(FakeUpload.sent.at(-1)?.url).toBe("/api/v1/photos/libraries/library%3Amine/live-videos");
+    expect(await screen.findByText("动态照片", { selector: ".ph-motion-badge" })).toBeTruthy();
+  });
+
+  it("uploads the missing video from the photo's details", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    let complete = false;
+    FakeUpload.respond = () => { complete = true; return { status: 200, body: { items: [asset("photo:live", { motion: { kind: "live-photo", duration: 2 } })] } }; };
+    const still = () => asset("photo:live", complete ? { motion: { kind: "live-photo", duration: 2 } } : { liveVideoMissing: true });
+    serve(
+      (url) => url === "/api/v1/photos/assets/photo%3Alive" ? json(still()) : undefined,
+      timeline(privateLibrary.id, () => [still()]),
+    );
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (this: HTMLInputElement) {
+      if (this.type !== "file") return;
+      Object.defineProperty(this, "files", { value: [new File(["mov"], "IMG_9.MOV", { type: "video/quicktime" })] });
+      this.dispatchEvent(new Event("change"));
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:live.jpg");
+    await user.click(await screen.findByRole("button", { name: "上传视频" }));
+    expect(await screen.findByText("已补上实况视频")).toBeTruthy();
+    expect(FakeUpload.sent[0].url).toBe("/api/v1/photos/libraries/library%3Amine/live-videos");
+    expect(await screen.findByRole("button", { name: "播放动态照片" })).toBeTruthy();
+    expect(screen.queryByText("实况照片只上传了静态画面")).toBeNull();
+  });
+});
+
+describe("PhotosPanel slideshow", () => {
+  it("plays full screen from the viewer and comes back to the photo it ended on", async () => {
+    Object.defineProperty(HTMLImageElement.prototype, "decode", { configurable: true, value: () => Promise.resolve() });
+    serve(timeline(privateLibrary.id, () => [asset("photo:a"), asset("photo:b", { takenAt: "2026-05-01T07:00:00Z" })]));
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:a.jpg");
+    await user.keyboard(" ");
+    const show = await screen.findByRole("dialog", { name: "幻灯片" });
+    // It covers the whole page, outside the photos window.
+    expect(show.parentElement).toBe(document.body);
+    expect(screen.getByText(/1 \/ 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "下一张" }));
+    expect(await screen.findByText(/2 \/ 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "退出幻灯片" }));
+    expect(screen.queryByRole("dialog", { name: "幻灯片" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "查看 photo:b.jpg" })).toBeTruthy();
+    delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
   });
 });
 
@@ -603,6 +693,120 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
   });
 });
 
+describe("PhotosPanel people and pets", () => {
+  const ming = { id: "person:ming", libraryId: "library:mine", kind: "person", name: "小明", hidden: false, photos: 3, coverId: "face:ming", canChange: true };
+  const nameless = { id: "person:new", libraryId: "library:mine", kind: "person", name: "", hidden: false, photos: 2, coverId: "face:new", canChange: true };
+  const dog = { id: "person:dog", libraryId: "library:shared", kind: "dog", name: "", hidden: true, photos: 4, coverId: "face:dog", canChange: true };
+  const cat = { id: "person:cat", libraryId: "library:mine", kind: "cat", name: "咪咪", hidden: false, photos: 5, coverId: "face:cat", canChange: true };
+
+  it("lists people and pets on AI 聚合, names a person and takes a wrong photo out", async () => {
+    let named = "";
+    let removed = false;
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, cat, { ...nameless, name: named }, dog] });
+      if (url === "/api/v1/photos/people/person%3Anew" && init?.method === "PATCH") {
+        named = JSON.parse(String(init.body)).name;
+        return json({ ...nameless, name: named });
+      }
+      if (url.startsWith("/api/v1/photos/people/person%3Anew/assets?")) return json({ items: removed ? [asset("photo:grandma")] : [asset("photo:grandma"), asset("photo:aunt")] });
+      if (url === "/api/v1/photos/people/person%3Anew/assets/photo%3Aaunt" && init?.method === "DELETE") { removed = true; return new Response(null, { status: 204 }); }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+    const row = await screen.findByLabelText("人物与宠物");
+    // Named people and pets first, cats as one by one as dogs; a nameless one
+    // invites a name; hidden ones wait.
+    const cards = within(row).getAllByRole("button", { name: /^打开 / });
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["打开 小明", "打开 咪咪", "打开 未命名"]);
+    expect(within(row).getByText("添加名字")).toBeTruthy();
+    expect(screen.getByText(/照片和人脸都在这台 NAS 上由本地 AI 识别/)).toBeTruthy();
+    await user.click(within(row).getByRole("button", { name: "已隐藏 1 位" }));
+    expect(within(row).getByRole("button", { name: "打开 未命名的狗" })).toBeTruthy();
+
+    await user.click(within(row).getByRole("button", { name: "打开 未命名" }));
+    expect(await screen.findByRole("heading", { name: "未命名" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Anew/assets?limit=120", expect.anything());
+    await user.click(screen.getByRole("button", { name: "添加名字" }));
+    await user.type(await screen.findByRole("textbox", { name: "名字" }), "奶奶");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("heading", { name: "奶奶" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Anew", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: "奶奶" }) }));
+    expect(await screen.findByText("搜索“奶奶”就能找到 TA 的照片")).toBeTruthy();
+
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:aunt.jpg" }));
+    await user.click(screen.getByRole("button", { name: "不是奶奶" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Anew/assets/photo%3Aaunt", expect.objectContaining({ method: "DELETE" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "查看 photo:aunt.jpg" })).toBeNull());
+    expect(await screen.findByText("已从“奶奶”移出 1 张，照片仍在图库中")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByLabelText("人物与宠物")).toBeTruthy();
+  });
+
+  it("names a face in a photo's details by choosing someone already named", async () => {
+    let details: PhotoAsset = { ...asset("photo:party"), people: [{ occurrenceId: "face:1", kind: "face" }] };
+    const fetchMock = serve(
+      (url, init) => {
+        if (url === "/api/v1/photos/assets/photo%3Aparty" && !init?.method) return json(details);
+        if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, nameless] });
+        if (url === "/api/v1/photos/assets/photo%3Aparty/people/face%3A1" && init?.method === "PUT") {
+          details = { ...details, people: [{ occurrenceId: "face:1", kind: "face", personId: ming.id, name: "小明" }] };
+          return json(details);
+        }
+        if (url.startsWith("/api/v1/photos/people/person%3Aming/assets?")) return json({ items: [asset("photo:party")] });
+        return undefined;
+      },
+      timeline(privateLibrary.id, () => [asset("photo:party")]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:party.jpg");
+    const faces = await screen.findByLabelText("照片中的人物");
+    await user.click(within(faces).getByRole("button", { name: "这是谁？" }));
+    await user.type(within(faces).getByRole("textbox", { name: "名字" }), "小");
+    await user.click(await within(faces).findByRole("option", { name: /小明/ }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/assets/photo%3Aparty/people/face%3A1",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ personId: "person:ming" }) }));
+    await user.click(await within(faces).findByRole("button", { name: "小明" }));
+    expect(await screen.findByRole("heading", { name: "小明" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/people/person%3Aming/assets?limit=120", expect.anything());
+  });
+
+  it("turns people and pets off for the caller's own library after asking, and leaves the shared one to administrators", async () => {
+    let mine = { ...privateLibrary, people: true, canSetPeople: true };
+    const fetchMock = serve((url, init) => {
+      if (url === "/api/v1/photos/libraries" && !init?.method) return json({ items: [{ ...sharedLibrary, people: true, canSetPeople: false }, mine] });
+      if (url === "/api/v1/photos/libraries/library%3Amine" && init?.method === "PATCH") {
+        mine = { ...mine, people: JSON.parse(String(init.body)).people };
+        return json(mine);
+      }
+      if (url === "/api/v1/photos/people?hidden=1") return json({ items: mine.people ? [ming, nameless] : [] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+    expect(await screen.findByLabelText("人物与宠物")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "人物与宠物设置" }));
+    const settings = await screen.findByRole("dialog", { name: "人物与宠物设置" });
+    const own = within(settings).getByRole("switch", { name: "我的图库的人物与宠物" });
+    expect(own.getAttribute("aria-checked")).toBe("true");
+    expect((within(settings).getByRole("switch", { name: "共享图库的人物与宠物" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(settings).getByText("已开启 · 由管理员设置")).toBeTruthy();
+
+    // Off clears what was recognised, so it asks first.
+    await user.click(own);
+    const ask = await screen.findByRole("dialog", { name: "关闭我的图库的人物与宠物？" });
+    await user.click(within(ask).getByRole("button", { name: "关闭并删除" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/photos/libraries/library%3Amine", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ people: false }) }));
+    expect(await screen.findByText("已关闭我的图库的人物与宠物")).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("switch", { name: "我的图库的人物与宠物" }).getAttribute("aria-checked")).toBe("false"));
+    await user.click(within(screen.getByRole("dialog", { name: "人物与宠物设置" })).getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(screen.queryByLabelText("人物与宠物")).toBeNull());
+  });
+});
+
 describe("PhotosPanel search and viewing", () => {
   it("searches from any page into AI search and divides the closest results from the less related", async () => {
     const results: Record<string, object> = {
@@ -905,5 +1109,39 @@ describe("PhotosPanel search and viewing", () => {
     available = true;
     await act(async () => { await user.click(screen.getByRole("button", { name: "重试" })); });
     expect(await screen.findByRole("tab", { name: "我的" })).toBeTruthy();
+  });
+});
+
+
+describe("PhotosPanel motion photos", () => {
+  it("uploads a Live Photo pair once and preserves both form parts", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    let uploaded = false;
+    FakeUpload.respond = () => { uploaded = true; return { status: 201, body: asset("photo:live", { name: "live.heic", motion: { kind: "live-photo", duration: 2 } }) }; };
+    serve(timeline(privateLibrary.id, () => uploaded ? [asset("photo:live", { name: "live.heic", motion: { kind: "live-photo", duration: 2 } })] : []));
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByText("把照片拖到这里");
+    fireEvent.drop(document.querySelector(".ph-app")!, { dataTransfer: { types: ["Files"], files: [new File(["mov"], "live.MOV"), new File(["heic"], "live.heic")] } });
+    await screen.findByRole("button", { name: "查看 live.heic" });
+    expect(FakeUpload.sent).toHaveLength(1);
+    expect(FakeUpload.sent[0].url).toContain("/live-photos");
+    expect((FakeUpload.sent[0].body?.get("motion") as File).name).toBe("live.MOV");
+  });
+  it("loads video only on request and removes it on navigation or failure", async () => {
+    const first = asset("photo:live", { mediaType: "image/heic", motion: { kind: "live-photo", duration: 2 } });
+    serve(timeline(privateLibrary.id, () => [first, asset("photo:next")]));
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    const user = userEvent.setup();
+    await openPhoto(user, first.name);
+    expect(document.querySelector("video")).toBeNull();
+    expect(document.querySelector<HTMLImageElement>(".ph-viewer-full")?.getAttribute("src")).toContain("/preview");
+    await user.click(screen.getByRole("button", { name: "播放动态照片" }));
+    expect(document.querySelector("video")?.getAttribute("src")).toContain("/motion/play");
+    fireEvent.error(document.querySelector("video")!);
+    expect(document.querySelector("video")).toBeNull();
+    expect(screen.getByText("动态片段暂时无法播放，仍可查看照片或下载原件。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "播放动态照片" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
+    expect(document.querySelector("video")).toBeNull();
   });
 });

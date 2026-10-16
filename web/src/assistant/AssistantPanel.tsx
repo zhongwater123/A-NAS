@@ -1,4 +1,4 @@
-// AI 助手 window (ADR 0022 decision 9). The thread is assistant-ui — the chat
+// AI 助手 window (ADR 0024 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
 // model over its own JSON-RPC client; the conversation list, confirmation cards
 // and styling are A-NAS's.

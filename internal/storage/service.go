@@ -376,6 +376,30 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 	return volumes, nil
 }
 
+// DataVolumeFilesystemUUID returns the filesystem UUID of the one data volume
+// this device created, or "" when there is none or more than one. It reads
+// only the stored plans: the file service checks the mounted volume against
+// it before every request, and asking the Host Agent there made each request
+// wait for a full disk read, and fail as unavailable when that read was slow.
+func (s *Service) DataVolumeFilesystemUUID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var found *Volume
+	for _, plan := range s.plans {
+		if plan.State != PlanStateSucceeded || plan.Volume == nil {
+			continue
+		}
+		if found != nil && found.ID != plan.Volume.ID {
+			return ""
+		}
+		found = plan.Volume
+	}
+	if found == nil {
+		return ""
+	}
+	return found.FilesystemUUID
+}
+
 func (s *Service) ListAudit(ctx context.Context) ([]AuditEvent, error) {
 	if s.store == nil {
 		return nil, nil

@@ -18,7 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
-// The executor of 提交更改 (ADR 0022 decision 4). The Product Service
+// The executor of 提交更改 (ADR 0024 decision 4). The Product Service
 // prepares, approves, rejects and expires changes with the member's session,
 // which the broker checks itself (decision 10); the assistant's MCP tool
 // applies them on the assistant socket, where the member is the caller's UID.

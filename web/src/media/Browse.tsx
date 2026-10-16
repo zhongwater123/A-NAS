@@ -3,6 +3,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import { APIError } from "../api";
 import { PosterCard, StillCard, type CardAction } from "./Cards";
+import { Dropdown } from "./Dropdown";
 import { ago, dayLabel, remaining } from "./format";
 import { listFavorites, listHistory, listTitles, type Category, type MediaLibrary, type SortOrder, type Title } from "./mediaApi";
 
@@ -104,20 +105,11 @@ export function CategoryPage({ category, libraries, library: fixedLibrary, searc
     <div className="mc-page">
       <PageHeader title={heading} count={items ? total : undefined}>
         {!fixedLibrary && choices.length > 1 && (
-          <label className="mc-select">
-            <span>媒体库</span>
-            <select value={library} onChange={(event) => setLibrary(event.target.value)}>
-              <option value="">全部媒体库</option>
-              {choices.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-            </select>
-          </label>
+          <Dropdown label="媒体库" prefix="媒体库" align="end" value={library} onChange={setLibrary}
+            choices={[{ value: "", label: "全部媒体库" }, ...choices.map((candidate) => ({ value: candidate.id, label: candidate.name }))]} />
         )}
-        <label className="mc-select">
-          <ArrowDownWideNarrow />
-          <select aria-label="排序" value={sort} onChange={(event) => setSort(event.target.value as SortOrder)}>
-            {(Object.keys(sortLabels) as SortOrder[]).map((key) => <option key={key} value={key}>{sortLabels[key]}</option>)}
-          </select>
-        </label>
+        <Dropdown label="排序" icon={<ArrowDownWideNarrow />} align="end" value={sort} onChange={(value) => setSort(value as SortOrder)}
+          choices={(Object.keys(sortLabels) as SortOrder[]).map((key) => ({ value: key, label: sortLabels[key] }))} />
         {onUpload && <button type="button" className="mc-primary small mc-upload-button" onClick={onUpload}><CloudUpload />上传</button>}
       </PageHeader>
       {genres.length > 1 && (

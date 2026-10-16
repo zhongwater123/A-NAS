@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/appid"
@@ -123,7 +125,7 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 }
 
 func (e *Executor) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
-	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || request.Password == "" {
+	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
 		return errors.New("invalid credential request")
 	}
 	identity := accounts.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
@@ -317,6 +319,14 @@ func validUsername(username string) bool {
 	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
 }
 
+// validSambaPassword reports whether smbpasswd -s receives password whole: it
+// reads each copy as one line of C text into a 256-byte buffer, so a newline,
+// NUL or longer password would set a different password than the Web one.
+func validSambaPassword(password string) bool {
+	return password != "" && len(password) <= 254 && utf8.ValidString(password) &&
+		!strings.ContainsFunc(password, unicode.IsControl)
+}
+
 func commandError(action string, err error, output []byte) error {
 	detail := strings.TrimSpace(string(output))
 	if detail == "" {
@@ -463,9 +473,10 @@ WantedBy=local-fs.target
 	if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
 		return storage.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
 	}
-	// Best effort: a failure only delays photos until the Host Agent's
+	// Best effort: a failure only delays managed stores until the Host Agent's
 	// periodic repair, which logs it.
 	_, _ = e.EnsurePhotosStore(ctx)
+	_, _ = e.EnsureSharesStore(ctx)
 	return storage.Volume{
 		ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: uuid,
 		CapacityBytes: device.Disk.CapacityBytes, State: storage.VolumeStateAvailable,

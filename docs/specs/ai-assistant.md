@@ -1,6 +1,6 @@
 # AI 助手
 
-状态：draft（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；窗口经产品服务与会话闸门使用 `hermes serve`，对话、回合内审批卡片与多窗口已在开发机原型上跑通；待评审）
+状态：draft（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；窗口经产品服务与会话闸门使用 `hermes serve`，对话、回合内审批卡片与多窗口已在开发机原型上跑通；待评审）
 更新时间：2026-10-15
 
 ## 目标
@@ -9,11 +9,11 @@
 
 ## 非目标
 
-- 不提供终端、代码执行、浏览器、联网搜索、定时任务与外部消息平台（微信、飞书等）的入口（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。
+- 不提供终端、代码执行、浏览器、联网搜索、定时任务与外部消息平台（微信、飞书等）的入口（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。
 - 不写照片、图库、用户标签或 AI 纠错；不读快照。
 - 不处理开发期云端 API 的隐私问题：云端 API 只用于开发测试，本地多模态模型接入前不在保存真实家庭数据的设备上为成员开启助手。
 - 不让管理员看到或代为确认成员的助手对话、记忆与待确认更改。
-- 不提供 Hermes 自带的网页控制台；模型、工具、插件与技能目录的配置不对成员开放（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 9）。
+- 不提供 Hermes 自带的网页控制台；模型、工具、插件与技能目录的配置不对成员开放（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 9）。
 
 ## 访问范围
 
@@ -58,7 +58,7 @@
 
 - Given：助手正在回答。
 - When：成员切到另一个对话、关闭窗口或刷新页面。
-- Then：这一轮在后台继续，侧栏中这个对话标为“正在回答”；回到这个对话时看到已完成的部分，回答继续逐字出现，等待确认的卡片仍在。成员退出登录后，助手的连接在 30 秒内被切断，未完成的这一轮随之中断（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 与后果）。
+- Then：这一轮在后台继续，侧栏中这个对话标为“正在回答”；回到这个对话时看到已完成的部分，回答继续逐字出现，等待确认的卡片仍在。成员退出登录后，助手的连接在 30 秒内被切断，未完成的这一轮随之中断（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 与后果）。
 
 ### 查看与清除助手记住的内容
 
@@ -97,7 +97,7 @@
 
 - Given：成员让助手修改个人空间里的 `计划.md`、删除两个旧文件并新建一个文件夹。
 - When：助手把新内容写入助手目录的暂存区，并“提交更改”。
-- Then：这一轮停下等待成员的决定，个人空间中的文件此时都没有变化。这个对话中出现一张确认卡片，列出每项操作、修改的差异或新文件预览、删除的文件名，按钮只有“确认”与“拒绝”。卡片只属于发起它的对话（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 4）。
+- Then：这一轮停下等待成员的决定，个人空间中的文件此时都没有变化。这个对话中出现一张确认卡片，列出每项操作、修改的差异或新文件预览、删除的文件名，按钮只有“确认”与“拒绝”。卡片只属于发起它的对话（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4）。
 
 ### 卡片只在发起它的对话中
 
@@ -139,7 +139,7 @@
 ### 没有登录就到不了助手
 
 - When：产品服务在成员没有有效登录会话时（例如被攻破后）要连到这位成员的助手、为卡片读取文件或登记确认。
-- Then：文件代理与执行方各自核对会话，全部拒绝：产品服务自己连不到任何成员的实例，只有凭这位成员正在登录的会话才能连到这位成员的，确认也只能凭这个会话登记（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 10）。
+- Then：文件代理与执行方各自核对会话，全部拒绝：产品服务自己连不到任何成员的实例，只有凭这位成员正在登录的会话才能连到这位成员的，确认也只能凭这个会话登记（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10）。
 
 ## 边界与失败
 
@@ -170,7 +170,7 @@
 ## 关联
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
-- ADR：[0022 每个账号一个沙箱中的 Hermes Agent](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
+- ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
 - 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 - 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -47,6 +46,9 @@ type SnapshotEntry struct {
 	SizeBytes  int64     `json:"sizeBytes"`
 	// ModifiedAt is unknown for snapshots taken before it was recorded.
 	ModifiedAt time.Time `json:"modifiedAt,omitzero"`
+	// Change compares the entry with the space as it is now; empty when the
+	// same path holds the same thing.
+	Change SnapshotChange `json:"change,omitempty"`
 }
 
 type SnapshotObject struct {
@@ -90,6 +92,8 @@ type SnapshotVersion struct {
 	ModifiedAt   time.Time      `json:"modifiedAt,omitzero"`
 	Snapshots    int            `json:"snapshots"`
 	OldestAt     time.Time      `json:"oldestAt"`
+	// Current marks the version of a file that the space holds now.
+	Current bool `json:"current,omitempty"`
 }
 
 // SnapshotBackend accepts stable space and snapshot identities. Implementations
@@ -242,19 +246,20 @@ func scanSnapshot(row interface{ Scan(...any) error }) (Snapshot, error) {
 	return snapshot, err
 }
 
+// ListSnapshotEntries lists one folder level of a snapshot, each entry
+// compared with the space as it is now. Opening the snapshot's top level
+// reconciles the space, so changes made over SMB are told too.
 func (s *Service) ListSnapshotEntries(ctx context.Context, actor accounts.User, snapshotID, parentID string) ([]SnapshotEntry, error) {
-	if _, _, err := s.authorizeSnapshot(ctx, actor, snapshotID); err != nil {
-		return nil, err
-	}
-	children, err := s.snapshotChildren(ctx, snapshotID, parentID)
+	snapshot, space, err := s.authorizeSnapshot(ctx, actor, snapshotID)
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]SnapshotEntry, 0, len(children))
-	for _, child := range children {
-		entries = append(entries, child.SnapshotEntry)
+	if parentID == "" {
+		if err := s.reconcile(ctx, space, s.spaceRoot(space)); err != nil {
+			return nil, err
+		}
 	}
-	return entries, nil
+	return s.annotateChanges(ctx, snapshot, parentID)
 }
 
 // snapshotChildren reads one folder level completely before returning, so a
@@ -305,9 +310,11 @@ func parseOptionalTime(value string) time.Time {
 }
 
 // RestoreSnapshotEntry copies a file or a whole folder out of a snapshot into
-// the snapshot's space as the user. It never replaces an existing entry; a
-// folder restore that fails part way keeps what it already copied.
-func (s *Service) RestoreSnapshotEntry(ctx context.Context, actor accounts.User, snapshotID, snapshotEntryID, targetParentID, targetName string) (Entry, error) {
+// the snapshot's space as the user. A folder restore that fails part way
+// keeps what it already copied. An existing entry is never overwritten: a
+// taken name fails with ErrConflict, unless replace asks for a file to take
+// the place of the file of that name, which then goes to the recycle bin.
+func (s *Service) RestoreSnapshotEntry(ctx context.Context, actor accounts.User, snapshotID, snapshotEntryID, targetParentID, targetName string, replace bool) (Entry, error) {
 	snapshot, _, err := s.authorizeSnapshot(ctx, actor, snapshotID)
 	if err != nil {
 		return Entry{}, err
@@ -319,22 +326,82 @@ func (s *Service) RestoreSnapshotEntry(ctx context.Context, actor accounts.User,
 	if targetName == "" {
 		targetName = entry.Name
 	}
+	if replace && entry.Kind != EntryKindFile {
+		return Entry{}, ErrUnsupportedType
+	}
 	var restored Entry
 	action := "snapshot.file_restored"
-	if entry.Kind == EntryKindDirectory {
+	if replace {
+		action = "snapshot.file_replaced"
+		restored, err = s.replaceWithSnapshotFile(ctx, actor, snapshot, entry, targetParentID, targetName)
+	} else if entry.Kind == EntryKindDirectory {
 		action = "snapshot.folder_restored"
 		restored, err = s.createDirectory(ctx, actor, snapshot.SpaceID, targetParentID, targetName, keeping(entry.Name))
 		if err == nil {
 			err = s.restoreSnapshotChildren(ctx, actor, snapshot, entry.ID, restored.ID)
 		}
 	} else {
-		restored, err = s.restoreSnapshotFile(ctx, actor, snapshot, entry.backendKey, targetParentID, targetName, keeping(entry.Name))
+		restored, err = s.restoreSnapshotFile(ctx, actor, snapshot, entry, targetParentID, targetName, keeping(entry.Name))
 	}
 	if err != nil {
 		return Entry{}, err
 	}
 	_ = s.audit(ctx, actor.ID, action, snapshot.SpaceID, restored.ID, snapshot.ID)
 	return restored, nil
+}
+
+// RestoreSnapshot copies everything a snapshot holds into a new folder of its
+// space. Like a folder restore, a failure part way keeps what was copied.
+func (s *Service) RestoreSnapshot(ctx context.Context, actor accounts.User, snapshotID, targetParentID, targetName string) (Entry, error) {
+	snapshot, _, err := s.authorizeSnapshot(ctx, actor, snapshotID)
+	if err != nil {
+		return Entry{}, err
+	}
+	restored, err := s.createDirectory(ctx, actor, snapshot.SpaceID, targetParentID, targetName, nameChosen)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := s.restoreSnapshotChildren(ctx, actor, snapshot, "", restored.ID); err != nil {
+		return Entry{}, err
+	}
+	_ = s.audit(ctx, actor.ID, "snapshot.restored", snapshot.SpaceID, restored.ID, snapshot.ID)
+	return restored, nil
+}
+
+// replaceWithSnapshotFile writes a snapshot file in full beside the file it
+// replaces, then moves that file to the recycle bin and puts the restored
+// one in its place, as an upload that replaces does.
+func (s *Service) replaceWithSnapshotFile(ctx context.Context, actor accounts.User, snapshot Snapshot, entry storedSnapshotEntry, targetParentID, targetName string) (Entry, error) {
+	reader, object, err := s.snapshots.Open(ctx, snapshot.ID, entry.backendKey)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer reader.Close()
+	if object.Kind != EntryKindFile {
+		return Entry{}, ErrUnsupportedType
+	}
+	upload, err := s.BeginUpload(ctx, actor, UploadRequest{
+		SpaceID: snapshot.SpaceID, ParentID: targetParentID, Name: targetName, Size: object.SizeBytes, Conflict: ConflictReplace,
+	})
+	if err != nil {
+		return Entry{}, err
+	}
+	upload.modTime = entry.ModifiedAt
+	committed := false
+	defer func() {
+		if !committed {
+			_ = s.AbortUpload(context.WithoutCancel(ctx), actor, upload)
+		}
+	}()
+	if _, err := s.WriteUpload(ctx, upload, 0, reader); err != nil {
+		return Entry{}, err
+	}
+	result, err := s.CommitUpload(ctx, actor, upload)
+	if err != nil {
+		return Entry{}, err
+	}
+	committed = true
+	return result.Entry, nil
 }
 
 func (s *Service) restoreSnapshotChildren(ctx context.Context, actor accounts.User, snapshot Snapshot, parentEntryID, targetParentID string) error {
@@ -357,15 +424,17 @@ func (s *Service) restoreSnapshotChildren(ctx context.Context, actor accounts.Us
 			}
 			continue
 		}
-		if _, err := s.restoreSnapshotFile(ctx, actor, snapshot, child.backendKey, targetParentID, child.Name, nameKept); err != nil {
+		if _, err := s.restoreSnapshotFile(ctx, actor, snapshot, child, targetParentID, child.Name, nameKept); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) restoreSnapshotFile(ctx context.Context, actor accounts.User, snapshot Snapshot, backendKey, targetParentID, targetName string, naming naming) (Entry, error) {
-	reader, object, err := s.snapshots.Open(ctx, snapshot.ID, backendKey)
+// restoreSnapshotFile copies a snapshot file out with the modification time
+// it was saved with.
+func (s *Service) restoreSnapshotFile(ctx context.Context, actor accounts.User, snapshot Snapshot, entry storedSnapshotEntry, targetParentID, targetName string, naming naming) (Entry, error) {
+	reader, object, err := s.snapshots.Open(ctx, snapshot.ID, entry.backendKey)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -373,7 +442,7 @@ func (s *Service) restoreSnapshotFile(ctx context.Context, actor accounts.User, 
 	if object.Kind != EntryKindFile {
 		return Entry{}, ErrUnsupportedType
 	}
-	return s.upload(ctx, actor, snapshot.SpaceID, targetParentID, targetName, reader, naming)
+	return s.upload(ctx, actor, snapshot.SpaceID, targetParentID, targetName, reader, naming, entry.ModifiedAt)
 }
 
 // OpenSnapshotContent opens one file in a snapshot for download.
@@ -421,57 +490,53 @@ LIMIT ?`, spaceID, "%"+likeEscaper.Replace(query)+"%", snapshotSearchRows+1)
 	}
 	defer rows.Close()
 	byPath := map[string]int{}
-	byVersion := map[string]int{}
+	versions := newVersionGroups()
 	read := 0
 	for rows.Next() {
 		if read++; read > snapshotSearchRows {
 			truncated = true
 			break
 		}
-		var version SnapshotVersion
-		var name, path, modifiedAt, createdAt string
-		var kind EntryKind
-		if err := rows.Scan(&version.EntryID, &name, &kind, &version.SizeBytes, &modifiedAt, &path,
-			&version.SnapshotID, &version.SnapshotName, &version.Origin, &createdAt); err != nil {
+		row, err := scanVersionRow(rows)
+		if err != nil {
 			return nil, false, err
 		}
-		version.ModifiedAt = parseOptionalTime(modifiedAt)
-		version.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		position, ok := byPath[path]
+		position, ok := byPath[row.path]
 		if !ok {
 			if len(matches) == snapshotSearchPaths {
 				truncated = true
 				continue
 			}
 			position = len(matches)
-			byPath[path] = position
-			matches = append(matches, SnapshotMatch{Path: path, Name: name, Kind: kind})
+			byPath[row.path] = position
+			matches = append(matches, SnapshotMatch{Path: row.path, Name: row.name, Kind: row.kind})
 		}
-		match := &matches[position]
-		// Rows of a path arrive newest first, so the first row of a version
-		// names its newest snapshot and the last one its oldest.
-		key := path + "\x00" + snapshotVersionKey(kind, version, modifiedAt)
-		if index, ok := byVersion[key]; ok {
-			match.Versions[index].Snapshots++
-			match.Versions[index].OldestAt = version.CreatedAt
-			continue
-		}
-		byVersion[key] = len(match.Versions)
-		version.Snapshots, version.OldestAt = 1, version.CreatedAt
-		match.Versions = append(match.Versions, version)
+		versions.add(&matches[position], row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
 	_ = rows.Close()
 	for index := range matches {
-		var present int
-		if err := s.store.db.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM entries WHERE space_id = ? AND relative_path = ? AND trashed = 0", spaceID, matches[index].Path,
-		).Scan(&present); err != nil {
+		match := &matches[index]
+		var liveKind EntryKind
+		var liveSize int64
+		var liveModified string
+		err := s.store.db.QueryRowContext(ctx,
+			"SELECT kind, size_bytes, modified_at FROM entries WHERE space_id = ? AND relative_path = ? AND trashed = 0", spaceID, match.Path,
+		).Scan(&liveKind, &liveSize, &liveModified)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
 			return nil, false, err
 		}
-		matches[index].InSpace = present > 0
+		match.InSpace = true
+		for version := range match.Versions {
+			current := &match.Versions[version]
+			current.Current = match.Kind == EntryKindFile && liveKind == EntryKindFile && current.SizeBytes == liveSize &&
+				formatOptionalTime(current.ModifiedAt) == liveModified
+		}
 	}
 	// Exact names first; otherwise the order of their paths.
 	folded := strings.ToLower(query)
@@ -479,20 +544,6 @@ LIMIT ?`, spaceID, "%"+likeEscaper.Replace(query)+"%", snapshotSearchRows+1)
 		return strings.ToLower(matches[left].Name) == folded && strings.ToLower(matches[right].Name) != folded
 	})
 	return matches, truncated, nil
-}
-
-// snapshotVersionKey groups the snapshots holding the same version of a path:
-// a folder is one version, a file is its size and modification time. Files
-// recorded without a modification time are not grouped.
-func snapshotVersionKey(kind EntryKind, version SnapshotVersion, modifiedAt string) string {
-	switch {
-	case kind == EntryKindDirectory:
-		return "directory"
-	case modifiedAt == "":
-		return "snapshot:" + version.SnapshotID
-	default:
-		return fmt.Sprintf("%d|%s", version.SizeBytes, modifiedAt)
-	}
 }
 
 func (s *Service) DeleteSnapshot(ctx context.Context, actor accounts.User, snapshotID string) error {

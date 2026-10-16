@@ -335,6 +335,40 @@ describe("MediaCenter", () => {
     expect(tus.uploads[0].metadata.parentId).toBe("file:films");
   });
 
+  // Uploads that finish together refresh the libraries while a load is
+  // still running. A second poll left behind outlived the panel and fired
+  // after the tests had ended (CI, 2026-10-14).
+  it("stops polling libraries when it closes, even after overlapping refreshes", async () => {
+    const polls = new Set<number>();
+    const setTimer = window.setTimeout.bind(window);
+    const clearTimer = window.clearTimeout.bind(window);
+    vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, delay?: number, ...rest: unknown[]) => {
+      const id = setTimer(handler, delay, ...rest);
+      // The library poll waits 3 or 20 seconds; no other media timer does.
+      if (delay === 3000 || delay === 20_000) polls.add(id);
+      return id;
+    }) as typeof window.setTimeout);
+    vi.spyOn(window, "clearTimeout").mockImplementation(((id?: number) => {
+      polls.delete(id as number);
+      clearTimer(id);
+    }) as typeof window.clearTimeout);
+    serve([library]);
+    const user = userEvent.setup();
+    const { unmount } = render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /媒体库/ }));
+    await user.click(await screen.findByRole("button", { name: "家庭影院的操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "上传到此媒体库" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    fireEvent.change(within(dialog).getByLabelText("选择要上传的文件"), { target: { files: [new File(["a"], "Up (2009).mp4"), new File(["b"], "Coco (2017).mp4")] } });
+    await user.click(within(dialog).getByRole("button", { name: "上传 2 个文件" }));
+    await act(async () => { for (const upload of tus.uploads) upload.options.onSuccess(); });
+    await waitFor(() => expect(within(dialog).getAllByText("已上传")).toHaveLength(2));
+
+    unmount();
+    expect(polls.size).toBe(0);
+  });
+
   it("renames a film's file from its card, keeping the extension", async () => {
     let attempts = 0;
     const fetchMock = serve([library],
@@ -364,6 +398,95 @@ describe("MediaCenter", () => {
     expect(screen.queryByRole("dialog", { name: "重命名片源" })).toBeNull();
     const renames = calls(fetchMock, "PATCH", "/api/v1/media/videos/video%3Aheat");
     expect(renames.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ fileName: "盗火线 (1995).mkv" }, { fileName: "盗火线 (1995).mkv" }]);
+  });
+
+  it("renames a film's file with a double-click on its title", async () => {
+    const fetchMock = serve([library], (url, init) => {
+      if (url !== "/api/v1/media/videos/video%3Aheat") return undefined;
+      if (init?.method !== "PATCH") return json(detail(film));
+      return json(detail(film, { file: { name: "盗火线 (1995).mkv", folder: "影视/电影", sizeBytes: 8e9, modifiedAt: "2026-10-01T00:00:00Z" } }));
+    });
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(within(await screen.findByRole("region", { name: "最近添加" })).getByRole("button", { name: "打开盗火线" }));
+    const heading = await screen.findByRole("heading", { level: 1, name: /盗火线/ });
+
+    // The title turns into the file name, without its extension.
+    await user.dblClick(heading);
+    let input = within(heading).getByRole("textbox", { name: "重命名片源" }) as HTMLInputElement;
+    expect(input.value).toBe("Heat (1995)");
+    expect(within(heading).getByText(".mkv")).toBeTruthy();
+    await user.type(input, "{Escape}");
+    expect(within(heading).queryByRole("textbox")).toBeNull();
+    expect(calls(fetchMock, "PATCH", "/api/v1/media/videos/video%3Aheat")).toHaveLength(0);
+
+    await user.dblClick(heading);
+    input = within(heading).getByRole("textbox", { name: "重命名片源" }) as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "盗火线 (1995){Enter}");
+    expect(await screen.findByText("已重命名为“盗火线 (1995).mkv”，正在重新识别片名")).toBeTruthy();
+    const renames = calls(fetchMock, "PATCH", "/api/v1/media/videos/video%3Aheat");
+    expect(renames.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ fileName: "盗火线 (1995).mkv" }]);
+    expect(within(heading).queryByRole("textbox")).toBeNull();
+  });
+
+  it("renames a whole show and an episode's file in place", async () => {
+    const episode = (number: number): Episode => ({ id: `video:blossoms-${number}`, season: 1, episode: number, title: `第 ${number} 集`, addedAt: "2026-10-08T00:00:00Z", artwork: art, duration: 2700, file: `繁花.S01E0${number}.mkv` });
+    const blossoms: ShowDetail = { ...show, collections: [], folder: "繁花 (2023)", next: episode(1), seasonList: [{ number: 1, episodes: [episode(1), episode(2)] }] };
+    const fetchMock = serve([library],
+      (url, init) => (url === "/api/v1/media/shows/show%3Ablossoms" ? json(init?.method === "PATCH" ? { ...blossoms, folder: "Blossoms Shanghai (2023)" } : blossoms) : undefined),
+      (url, init) => (url === "/api/v1/media/videos/video%3Ablossoms-1" && init?.method === "PATCH" ? json(detail({ ...film, id: "video:blossoms-1" }, { file: { name: "繁花 第一集.mkv", folder: "影视/繁花 (2023)", sizeBytes: 1e9, modifiedAt: "" } })) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(within(await screen.findByRole("region", { name: "最近添加" })).getByRole("button", { name: "打开繁花" }));
+    const heading = await screen.findByRole("heading", { level: 1, name: /繁花/ });
+
+    // The show's name is its folder's, year and all.
+    await user.dblClick(heading);
+    const input = within(heading).getByRole("textbox", { name: "重命名剧集" }) as HTMLInputElement;
+    expect(input.value).toBe("繁花 (2023)");
+    expect(within(heading).getByText("剧集文件夹和带剧名的各集文件一起改名")).toBeTruthy();
+    await user.clear(input);
+    await user.type(input, "Blossoms Shanghai (2023){Enter}");
+    expect(await screen.findByText("已重命名为“Blossoms Shanghai (2023)”，正在重新整理剧集")).toBeTruthy();
+    expect(calls(fetchMock, "PATCH", "/api/v1/media/shows/show%3Ablossoms").map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ name: "Blossoms Shanghai (2023)" }]);
+
+    // An episode's title renames its file.
+    const episodes = screen.getByRole("list");
+    await user.dblClick(within(episodes).getByText("第 1 集"));
+    const file = within(episodes).getByRole("textbox", { name: "重命名片源" }) as HTMLInputElement;
+    expect(file.value).toBe("繁花.S01E01");
+    await user.clear(file);
+    await user.type(file, "繁花 第一集");
+    fireEvent.blur(file);
+    expect(await screen.findByText("已重命名为“繁花 第一集.mkv”，正在重新识别片名")).toBeTruthy();
+    expect(calls(fetchMock, "PATCH", "/api/v1/media/videos/video%3Ablossoms-1").map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ fileName: "繁花 第一集.mkv" }]);
+  });
+
+  it("picks a library and an order from the page's dropdowns", async () => {
+    const kids: MediaLibrary = { ...library, id: "library:kids", name: "少儿", covers: [] };
+    const fetchMock = serve([library, kids]);
+    const titleCalls = () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/media/titles?category=movie"));
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
+    await user.click(within(nav).getByRole("button", { name: /电影/ }));
+
+    await user.click(await screen.findByRole("button", { name: "媒体库：全部媒体库" }));
+    const libraries = screen.getByRole("listbox", { name: "媒体库" });
+    expect(within(libraries).getAllByRole("option").map((option) => option.textContent)).toEqual(["全部媒体库", "家庭影院", "少儿"]);
+    await user.click(within(libraries).getByRole("option", { name: "少儿" }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    await waitFor(() => expect(titleCalls().some((url) => url.includes("library=library%3Akids"))).toBe(true));
+
+    // The keyboard opens the list at the current choice and moves through it.
+    screen.getByRole("button", { name: "排序：最近添加" }).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement?.textContent).toBe("最近添加");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(await screen.findByRole("button", { name: "排序：名称" })).toBe(document.activeElement);
+    await waitFor(() => expect(titleCalls().some((url) => url.includes("sort=name") && url.includes("library=library%3Akids"))).toBe(true));
   });
 
   it("picks another episode or another film without leaving the player", async () => {
@@ -396,6 +519,34 @@ describe("MediaCenter", () => {
     await user.click(within(films).getByRole("button", { name: /盗火线/ }));
     expect(navigate).toHaveBeenLastCalledWith("video:heat");
     expect(within(player).queryByRole("complementary")).toBeNull();
+  });
+
+  it("switches the player's library list between libraries", async () => {
+    const kids: MediaLibrary = { ...library, id: "library:kids", name: "少儿", covers: [] };
+    const playing: VideoDetail = detail(film);
+    const fetchMock = serve([library, kids],
+      (url) => (url === "/api/v1/media/videos/video%3Aheat" ? json(playing) : undefined),
+      (url) => (url.startsWith("/api/v1/media/videos/video%3Aheat/playback?") ? json({ mode: "direct", url: "/api/v1/media/videos/video%3Aheat/file", audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+    );
+    const lastList = () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/media/titles?")).at(-1) ?? "";
+    const user = userEvent.setup();
+    render(<Player request={{ videoId: "video:heat" }} onClose={() => undefined} onNavigate={() => undefined} onSaved={() => undefined} />);
+    const player = await screen.findByRole("dialog", { name: "播放 盗火线" });
+    await user.click(within(player).getByRole("button", { name: "片库" }));
+    await waitFor(() => expect(lastList()).toContain("library=library%3Afilms"));
+
+    // Pressing the library moves on to the next one.
+    await user.click(await within(player).findByRole("button", { name: "媒体库：家庭影院，切换到少儿" }));
+    await waitFor(() => expect(lastList()).toContain("library=library%3Akids"));
+    expect(within(player).getByRole("button", { name: "媒体库：少儿，切换到全部媒体库" })).toBeTruthy();
+
+    // Its arrows open every library to pick from.
+    await user.click(within(player).getByRole("button", { name: "选择媒体库" }));
+    const choices = within(player).getByRole("listbox", { name: "媒体库" });
+    expect(within(choices).getByRole("option", { name: "少儿" }).getAttribute("aria-selected")).toBe("true");
+    await user.click(within(choices).getByRole("option", { name: "全部媒体库" }));
+    await waitFor(() => expect(lastList()).not.toContain("library="));
+    expect(within(player).getByRole("button", { name: "媒体库：全部媒体库，切换到家庭影院" })).toBeTruthy();
   });
 
   it("plays what a converted stream already holds and restarts it once after quick skips", async () => {

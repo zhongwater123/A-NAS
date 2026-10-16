@@ -22,6 +22,18 @@
 - [2026-10-13：评估把 Open Images 的大部分“有”读成了“没有”](2026-10-13-open-images-positives-read-as-absent.md)（resolved for 物体检测；AI 聚合的 Open Images 部分待重做）
 - [2026-10-13：闲时检测只用了约 1 个核](2026-10-13-idle-detection-used-one-core.md)（fixed locally；Experimental NAS verification pending）
 
+- [2026-10-14：文件管理没有视频缩略图，HEIC 照片不能预览](2026-10-14-file-media-previews.md)（fixed locally；Experimental NAS verification pending）
+- [2026-10-14：应用容器拿不到共享空间的组权限，root 镜像绕过 ACL](2026-10-14-app-containers-and-the-shared-acl.md)（fixed locally；Experimental NAS verification pending）
+
+- [2026-10-14：Apple Live Photo 配对标识被 EXIF 库遗漏](2026-10-14-live-photo-identifiers.md)（fixed locally）
+
+- [2026-10-14：视频缩略图重访重复解码与队列阻塞](2026-10-14-file-preview-cache.md)（fixed locally；Experimental NAS verification pending）
+
+- [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
+- [2026-10-15：Host Agent 每次请求都读 SMART，读盘超时被杀](2026-10-15-host-agent-smart-on-every-request.md)（fixed locally；Experimental NAS verification pending）
+
+- [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed locally；系统回归通过）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

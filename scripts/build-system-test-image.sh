@@ -10,7 +10,7 @@ set -euo pipefail
 image=${1:-anas-systemd:trixie}
 builder=${2:-debian:bookworm}
 packages=systemd,systemd-sysv,dbus,udev,acl,btrfs-progs,parted,smartmontools,samba,smbclient,
-packages+=curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,python3,caddy,libegl1,libgles2,ffmpeg,
+packages+=curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,python3,caddy,libegl1,libgles2,ffmpeg,heif-thumbnailer,libheif-plugin-libde265,libheif-examples,libheif-plugin-x265,
 # The AI assistant sandbox (ai/assistant-spike): PID 1 in its PID namespace, the
 # model socket bridge and the file search Hermes runs.
 packages+=tini,socat,ripgrep

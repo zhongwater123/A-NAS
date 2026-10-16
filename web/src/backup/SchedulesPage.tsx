@@ -1,12 +1,15 @@
-import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info, Minus, Plus } from "lucide-react";
+import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Space } from "../api";
 
 import { useBackup } from "./BackupCenter";
-import { maxKeep, messageOf, saveSchedule, type Frequency, type ScheduleSettings, type SnapshotSchedule } from "./backupApi";
-import { describeRetention, describeSchedule, formatDateTime, formatUntil, runErrorText, spaceAudience, spaceLabel, weekdayShort } from "./format";
-import { SpaceIcon, Spinner, Switch } from "./parts";
+import { maxKeep, messageOf, saveSchedule, type Frequency, type Retention, type RetentionTiers, type ScheduleSettings, type SnapshotSchedule } from "./backupApi";
+import {
+  describeRetention, describeSchedule, formatDateTime, formatUntil, noTiers, runErrorText, spaceAudience, spaceLabel, suggestedTiers, tierLabel, tierTotal,
+  tiersFor, weekdayShort, type Tier,
+} from "./format";
+import { SpaceIcon, Spinner, Stepper, Switch } from "./parts";
 
 const frequencies: { value: Frequency; label: string }[] = [
   { value: "hourly", label: "每小时" },
@@ -15,6 +18,10 @@ const frequencies: { value: Frequency; label: string }[] = [
 ];
 // What a schedule keeps by default: a day of hours, two weeks of days, two months of weeks.
 const suggestedKeep: Record<Frequency, number> = { hourly: 24, daily: 14, weekly: 8 };
+const retentions: { value: Retention; label: string }[] = [
+  { value: "count", label: "固定份数" },
+  { value: "tiered", label: "智能保留" },
+];
 // Monday first, as calendars in China are.
 const weekOrder = [1, 2, 3, 4, 5, 6, 0];
 const hours = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
@@ -22,16 +29,33 @@ const fiveMinutes = Array.from({ length: 12 }, (_, step) => String(step * 5).pad
 
 const settingsOf = (schedule: SnapshotSchedule): ScheduleSettings => ({
   enabled: schedule.enabled, frequency: schedule.frequency, time: schedule.time, weekday: schedule.weekday, keep: schedule.keep,
+  retention: schedule.retention ?? "count", tiers: schedule.retention === "tiered" ? schedule.tiers : suggestedTiers(schedule.frequency),
 });
-const sameSettings = (a: ScheduleSettings, b: ScheduleSettings) =>
-  a.enabled === b.enabled && a.frequency === b.frequency && a.time === b.time && a.weekday === b.weekday && a.keep === b.keep;
+// saved is what the server stores: tiers only under tiered retention. The
+// draft keeps its tiers while count is chosen, so switching back loses nothing.
+const saved = (settings: ScheduleSettings): ScheduleSettings => (settings.retention === "tiered" ? settings : { ...settings, tiers: noTiers });
+const sameTiers = (a: RetentionTiers, b: RetentionTiers) => a.hourly === b.hourly && a.daily === b.daily && a.weekly === b.weekly && a.monthly === b.monthly;
+const sameSettings = (left: ScheduleSettings, right: ScheduleSettings) => {
+  const [a, b] = [saved(left), saved(right)];
+  return a.enabled === b.enabled && a.frequency === b.frequency && a.time === b.time && a.weekday === b.weekday && a.keep === b.keep &&
+    a.retention === b.retention && sameTiers(a.tiers, b.tiers);
+};
+
+// tiersAfter carries tiers over to a new frequency: suggested ones follow the
+// frequency; the person's own lose only the tiers finer than it.
+function tiersAfter(tiers: RetentionTiers, from: Frequency, to: Frequency): RetentionTiers {
+  if (sameTiers(tiers, suggestedTiers(from))) return suggestedTiers(to);
+  const usable = tiersFor(to);
+  const kept = { ...noTiers, ...Object.fromEntries(usable.map((tier) => [tier, tiers[tier]])) };
+  return tierTotal(kept) ? kept : suggestedTiers(to);
+}
 
 export function SchedulesPage() {
   const { spaces, data } = useBackup();
   return (
     <div className="bk-page bk-schedules-page">
       <header className="bk-page-head">
-        <div><h2>定时快照</h2><p>按计划自动拍摄快照，只保留最近几份。</p></div>
+        <div><h2>定时快照</h2><p>按计划自动拍摄快照，并自动清理较早的。</p></div>
       </header>
       <div className="bk-schedule-list">
         {spaces.map((space) => {
@@ -45,7 +69,7 @@ export function SchedulesPage() {
         <h4><Info />定时快照如何工作</h4>
         <ul>
           <li>时间按这台 A-NAS 的时区计算。设备关机时错过的时间点，开机后会补拍一次，而不是补拍每一次。</li>
-          <li>每次成功拍摄后，只保留最近的若干份定时快照，更早的会被自动删除。</li>
+          <li>每次成功拍摄后，按保留方式自动删除更早的定时快照：“固定份数”只留最近几份；“智能保留”近期每小时或每天一份，往前每周、每月各留一份，用更少的快照回到更久以前。</li>
           <li>手动快照不会被自动删除；想长期保留某份定时快照，可以在快照列表中点“保留”。</li>
           <li>如果拍摄失败（例如数据卷离线），会在 15 分钟后重试，直到下一个时间点。</li>
         </ul>
@@ -58,10 +82,10 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
   const { setSchedule, toast, data } = useBackup();
   const [draft, setDraft] = useState<ScheduleSettings>(() => settingsOf(schedule));
   const [saving, setSaving] = useState(false);
-  const saved = settingsOf(schedule);
-  const dirty = !sameSettings(draft, saved);
+  const stored = settingsOf(schedule);
+  const dirty = !sameSettings(draft, stored);
   const readOnly = !schedule.canManage;
-  const lastSaved = useRef(saved);
+  const lastSaved = useRef(stored);
 
   // Follow what the server reports unless the person is editing.
   useEffect(() => {
@@ -73,16 +97,20 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
   const update = (change: Partial<ScheduleSettings>) => setDraft((current) => {
     const next = { ...current, ...change };
     // A new frequency brings its usual retention unless the person chose one.
-    if (change.frequency && change.frequency !== current.frequency && current.keep === suggestedKeep[current.frequency]) next.keep = suggestedKeep[change.frequency];
+    if (change.frequency && change.frequency !== current.frequency) {
+      if (current.keep === suggestedKeep[current.frequency]) next.keep = suggestedKeep[change.frequency];
+      next.tiers = tiersAfter(current.tiers, current.frequency, change.frequency);
+    }
     return next;
   });
+  const busy = readOnly || saving;
   const [hour, minute] = draft.time.split(":");
   const minutes = fiveMinutes.includes(minute) ? fiveMinutes : [...fiveMinutes, minute].sort();
 
   const save = async () => {
     setSaving(true);
     try {
-      const next = await saveSchedule(space.id, draft);
+      const next = await saveSchedule(space.id, saved(draft));
       setSchedule(next);
       setDraft(settingsOf(next));
       toast(next.enabled ? `${spaceLabel(space)}将${describeSchedule(next)}拍摄快照` : `已关闭${spaceLabel(space)}的定时快照`);
@@ -98,7 +126,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
       <header>
         <SpaceIcon space={space} />
         <div className="bk-space-title"><strong>{spaceLabel(space)}</strong><small>{spaceAudience(space)}</small></div>
-        <Switch checked={draft.enabled} disabled={readOnly || saving} label={`开启${spaceLabel(space)}的定时快照`} onChange={(enabled) => update({ enabled })} />
+        <Switch checked={draft.enabled} disabled={busy} label={`开启${spaceLabel(space)}的定时快照`} onChange={(enabled) => update({ enabled })} />
       </header>
 
       {draft.enabled ? (
@@ -107,7 +135,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
             <span className="bk-row-label">频率</span>
             <div className="bk-segmented small" role="radiogroup" aria-label="频率">
               {frequencies.map((item) => (
-                <button key={item.value} type="button" role="radio" aria-checked={draft.frequency === item.value} className={draft.frequency === item.value ? "active" : ""} disabled={readOnly || saving} onClick={() => update({ frequency: item.value })}>{item.label}</button>
+                <button key={item.value} type="button" role="radio" aria-checked={draft.frequency === item.value} className={draft.frequency === item.value ? "active" : ""} disabled={busy} onClick={() => update({ frequency: item.value })}>{item.label}</button>
               ))}
             </div>
           </div>
@@ -116,7 +144,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
               <span className="bk-row-label">星期</span>
               <div className="bk-weekdays" role="radiogroup" aria-label="星期">
                 {weekOrder.map((day) => (
-                  <button key={day} type="button" role="radio" aria-checked={draft.weekday === day} aria-label={`周${weekdayShort[day]}`} className={draft.weekday === day ? "active" : ""} disabled={readOnly || saving} onClick={() => update({ weekday: day })}>{weekdayShort[day]}</button>
+                  <button key={day} type="button" role="radio" aria-checked={draft.weekday === day} aria-label={`周${weekdayShort[day]}`} className={draft.weekday === day ? "active" : ""} disabled={busy} onClick={() => update({ weekday: day })}>{weekdayShort[day]}</button>
                 ))}
               </div>
             </div>
@@ -125,28 +153,34 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
             <span className="bk-row-label">时间</span>
             <div className="bk-time">
               {draft.frequency === "hourly" ? (
-                <>每小时的第<select aria-label="分钟" value={minute} disabled={readOnly || saving} onChange={(event) => update({ time: `${hour}:${event.target.value}` })}>{minutes.map((value) => <option key={value} value={value}>{value}</option>)}</select>分</>
+                <>每小时的第<select aria-label="分钟" value={minute} disabled={busy} onChange={(event) => update({ time: `${hour}:${event.target.value}` })}>{minutes.map((value) => <option key={value} value={value}>{value}</option>)}</select>分</>
               ) : (
                 <>
-                  <select aria-label="小时" value={hour} disabled={readOnly || saving} onChange={(event) => update({ time: `${event.target.value}:${minute}` })}>{hours.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+                  <select aria-label="小时" value={hour} disabled={busy} onChange={(event) => update({ time: `${event.target.value}:${minute}` })}>{hours.map((value) => <option key={value} value={value}>{value}</option>)}</select>
                   <span className="bk-time-colon">:</span>
-                  <select aria-label="分钟" value={minute} disabled={readOnly || saving} onChange={(event) => update({ time: `${hour}:${event.target.value}` })}>{minutes.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+                  <select aria-label="分钟" value={minute} disabled={busy} onChange={(event) => update({ time: `${hour}:${event.target.value}` })}>{minutes.map((value) => <option key={value} value={value}>{value}</option>)}</select>
                 </>
               )}
             </div>
           </div>
-          <div className="bk-row">
+          <div className="bk-row top">
             <span className="bk-row-label">保留</span>
-            <div className="bk-keep">
-              <div className="bk-stepper">
-                <button type="button" aria-label="少保留一份" disabled={readOnly || saving || draft.keep <= 1} onClick={() => update({ keep: draft.keep - 1 })}><Minus /></button>
-                <input
-                  type="number" min={1} max={maxKeep} value={draft.keep} disabled={readOnly || saving} aria-label="保留份数"
-                  onChange={(event) => { const value = Math.round(Number(event.target.value)); if (Number.isFinite(value)) update({ keep: Math.min(maxKeep, Math.max(1, value)) }); }}
-                />
-                <button type="button" aria-label="多保留一份" disabled={readOnly || saving || draft.keep >= maxKeep} onClick={() => update({ keep: draft.keep + 1 })}><Plus /></button>
+            <div className="bk-retention">
+              <div className="bk-segmented small" role="radiogroup" aria-label="保留方式">
+                {retentions.map((item) => (
+                  <button key={item.value} type="button" role="radio" aria-checked={draft.retention === item.value} className={draft.retention === item.value ? "active" : ""} disabled={busy} onClick={() => update({ retention: item.value })}>{item.label}</button>
+                ))}
               </div>
-              <span>份定时快照<small>{describeRetention(draft.frequency, draft.keep)}</small></span>
+              {draft.retention === "count" ? (
+                <div className="bk-keep">
+                  <Stepper value={draft.keep} min={1} max={maxKeep} label="保留份数" disabled={busy} onChange={(keep) => update({ keep })} />
+                  <span>份定时快照</span>
+                </div>
+              ) : (
+                <TierEditor frequency={draft.frequency} tiers={draft.tiers} disabled={busy} onChange={(tiers) => update({ tiers })} />
+              )}
+              <RetentionStrip settings={draft} />
+              <small className="bk-retention-note">{describeRetention(draft)}</small>
             </div>
           </div>
         </div>
@@ -159,7 +193,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
       {readOnly && draft.enabled && <p className="bk-readonly-note">共享空间的定时快照由管理员设置，你可以浏览和恢复其中的文件。</p>}
       {dirty && !readOnly && (
         <footer className="bk-save-bar">
-          <span>{draft.enabled ? `将${describeSchedule(draft)}拍摄，保留 ${draft.keep} 份` : "将关闭定时快照，已有快照会保留"}</span>
+          <span>{draft.enabled ? `将${describeSchedule(draft)}拍摄，${draft.retention === "tiered" ? `智能保留最多 ${tierTotal(draft.tiers)} 份` : `保留 ${draft.keep} 份`}` : "将关闭定时快照，已有快照会保留"}</span>
           <button type="button" className="bk-secondary small" disabled={saving} onClick={() => setDraft(saved)}>还原</button>
           <button type="button" className="bk-primary small" disabled={saving} onClick={() => void save()}>{saving ? <><Spinner small />保存中…</> : "保存"}</button>
         </footer>
@@ -180,4 +214,85 @@ function ScheduleStatus({ schedule, offline }: { schedule: SnapshotSchedule; off
       {!schedule.enabled && <span><Clock3 />已关闭</span>}
     </div>
   );
+}
+
+// TierEditor sets how many hours, days, weeks and months keep a snapshot;
+// tiers finer than the frequency do not apply.
+function TierEditor({ frequency, tiers, disabled, onChange }: { frequency: Frequency; tiers: RetentionTiers; disabled: boolean; onChange: (tiers: RetentionTiers) => void }) {
+  const total = tierTotal(tiers);
+  return (
+    <div className="bk-tiers" role="group" aria-label="智能保留">
+      {tiersFor(frequency).map((tier) => (
+        <div key={tier} className="bk-tier">
+          <span className="bk-tier-name">{tierLabel[tier].every}一份</span>
+          <Stepper
+            value={tiers[tier]} min={0} max={Math.min(maxKeep, tiers[tier] + maxKeep - total)} disabled={disabled}
+            label={`保留最近几${tierLabel[tier].span}`}
+            onChange={(value) => onChange({ ...tiers, [tier]: value })}
+          />
+          <span className="bk-tier-span">{tiers[tier] ? `最近 ${tiers[tier]} ${tierLabel[tier].span}` : "不保留"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The strip's axis: equal parts for the last day, week, month and year, each
+// linear inside, so a retention's thinning out shows at every distance.
+const zones: { until: number; label: string }[] = [{ until: 24, label: "1 天" }, { until: 168, label: "1 周" }, { until: 730, label: "1 个月" }, { until: 8760, label: "1 年" }];
+const tierHours: Record<Tier, number> = { hourly: 1, daily: 24, weekly: 168, monthly: 730 };
+const frequencyHours: Record<Frequency, number> = { hourly: 1, daily: 24, weekly: 168 };
+
+// restorePoints estimates the ages, in hours, of the scheduled snapshots a
+// retention keeps when the device runs without a break.
+function restorePoints(settings: Pick<ScheduleSettings, "frequency" | "keep" | "retention" | "tiers">): number[] {
+  const step = frequencyHours[settings.frequency];
+  if (settings.retention !== "tiered") return Array.from({ length: settings.keep }, (_, index) => (index + 1) * step);
+  const ages: number[] = [];
+  let reached = 0;
+  for (const tier of tiersFor(settings.frequency)) {
+    const every = tierHours[tier];
+    for (let index = 1; index <= settings.tiers[tier]; index++) {
+      const age = index * every;
+      if (age > reached) ages.push(age);
+    }
+    reached = Math.max(reached, settings.tiers[tier] * every);
+  }
+  return ages;
+}
+
+// RetentionStrip draws the restore points from a year ago, on the left, to
+// now. The axis stays put while settings change, so the past a retention
+// cannot reach shows as empty track.
+function RetentionStrip({ settings }: { settings: ScheduleSettings }) {
+  const ages = restorePoints(settings);
+  if (!ages.length) return null;
+  const oldest = Math.max(...ages);
+  const bounds = [0, ...zones.slice(0, -1).map((zone) => zone.until), Math.max(zones.at(-1)!.until, oldest)];
+  const share = 100 / zones.length;
+  const position = (age: number) => {
+    const zone = Math.max(0, bounds.findIndex((bound, index) => index > 0 && age <= bound) - 1);
+    return 100 - (zone + (age - bounds[zone]) / (bounds[zone + 1] - bounds[zone])) * share;
+  };
+  return (
+    <div className="bk-strip-retention" role="img" aria-label={`保留${settings.retention === "tiered" ? "约" : ""} ${ages.length} 份定时快照，最早约 ${describeAge(oldest)}前`}>
+      <div className="bk-retention-track">
+        <span className="bk-retention-reach" style={{ left: `${position(oldest)}%` }} />
+        {zones.slice(0, -1).map((zone) => <b key={zone.until} style={{ left: `${position(zone.until)}%` }} />)}
+        {ages.map((age) => <i key={age} style={{ left: `${position(age)}%` }} />)}
+      </div>
+      <div className="bk-retention-axis">
+        <span className="far">{describeAge(bounds.at(-1)!)}前</span>
+        {zones.slice(0, -1).map((zone) => <span key={zone.until} style={{ left: `${position(zone.until)}%` }}>{zone.label}</span>)}
+        <span className="now">现在</span>
+      </div>
+    </div>
+  );
+}
+
+function describeAge(hours: number): string {
+  if (hours < 48) return `${hours} 小时`;
+  if (hours < 24 * 60) return `${Math.round(hours / 24)} 天`;
+  if (hours < 24 * 335) return `${Math.round(hours / 730)} 个月`;
+  return `${Math.round((hours / 8760) * 10) / 10} 年`;
 }

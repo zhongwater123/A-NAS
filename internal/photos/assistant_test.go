@@ -11,7 +11,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
-// A member's AI assistant (ADR 0022) reads what the member owns and what the
+// A member's AI assistant (ADR 0024) reads what the member owns and what the
 // shared library holds. It never writes, never sees what the member could see
 // only as an administrator through a viewing grant, and creates nothing.
 
@@ -174,6 +174,69 @@ func TestAssistantChangesNothing(t *testing.T) {
 	}
 	if all[0].ID != alicePrivate.ID || all[0].OwnerName != "alice" {
 		t.Fatalf("own library = %+v, want alice's, still named alice", all[0])
+	}
+}
+
+func TestAssistantChangesNoPeople(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newPeopleService(t)
+	private, shared := libraries(t, service, alice)
+	var first photos.Asset
+	for i, painted := range []int{0, 0, 0, 1, 1, 1} {
+		asset := importPhoto(t, service, alice, private.ID, "", string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), painted))
+		if i == 0 {
+			first = asset
+		}
+	}
+	organise(t, service, newFacingEmbedder())
+	found := people(t, service, alice, false)
+	if len(found) != 2 {
+		t.Fatalf("People() = %+v, want two", found)
+	}
+	assistant := photos.Principal{UserID: alice.UserID, Username: "alice", Assistant: true}
+
+	name, hide := "小明", true
+	writes := map[string]func() error{
+		"name": func() error {
+			_, err := service.UpdatePerson(ctx, assistant, found[0].ID, photos.PersonChange{Name: &name})
+			return err
+		},
+		"hide": func() error {
+			_, err := service.UpdatePerson(ctx, assistant, found[0].ID, photos.PersonChange{Hidden: &hide})
+			return err
+		},
+		"merge":  func() error { _, err := service.MergePeople(ctx, assistant, found[1].ID, found[0].ID); return err },
+		"remove": func() error { return service.RemoveFromPerson(ctx, assistant, found[0].ID, first.ID) },
+		"people-off": func() error {
+			_, err := service.SetPeople(ctx, assistant, private.ID, false)
+			return err
+		},
+		"shared-people-off": func() error {
+			_, err := service.SetPeople(ctx, assistant, shared.ID, false)
+			return err
+		},
+	}
+	for what, write := range writes {
+		if err := write(); !errors.Is(err, photos.ErrForbidden) {
+			t.Errorf("%s error = %v, want ErrForbidden", what, err)
+		}
+	}
+	if after := people(t, service, alice, false); len(after) != 2 || after[0].Name != "" || after[1].Name != "" {
+		t.Fatalf("People() after the assistant's attempts = %+v", after)
+	}
+	for _, person := range people(t, service, assistant, false) {
+		if person.CanChange {
+			t.Errorf("assistant may change %+v", person)
+		}
+	}
+	all, err := service.Libraries(ctx, assistant)
+	if err != nil {
+		t.Fatalf("Libraries() error = %v", err)
+	}
+	for _, lib := range all {
+		if lib.CanSetPeople || (lib.ID == private.ID && !lib.People) {
+			t.Errorf("assistant's library = %+v, want people on and not its to switch", lib)
+		}
 	}
 }
 

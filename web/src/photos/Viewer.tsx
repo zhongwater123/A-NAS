@@ -1,10 +1,10 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderPlus, Info, Pause, Play, ScanSearch, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, CircleDot, Download, FolderPlus, Info, Presentation, ScanSearch, Square, Trash2 } from "lucide-react";
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TransformComponent, TransformWrapper, type ReactZoomPanPinchContentRef } from "react-zoom-pan-pinch";
 
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
 import { PhotoDetails, type DetailsActions } from "./PhotoDetails";
-import { getPhoto, originalURL, previewURL, thumbnailURL, type PhotoAsset } from "./photosApi";
+import { getPhoto, displayURL, motionURL, previewURL, thumbnailURL, type PhotoAsset } from "./photosApi";
 
 export interface ViewerActions extends DetailsActions {
   trash: (asset: PhotoAsset) => void;
@@ -12,6 +12,8 @@ export interface ViewerActions extends DetailsActions {
   download: (assets: PhotoAsset[]) => void;
   // Leaves the viewer for the photos that look like this one.
   findSimilar: (asset: PhotoAsset) => void;
+  // Plays the view's photos full screen from this one.
+  slideshow: (asset: PhotoAsset) => void;
 }
 
 interface Props {
@@ -31,7 +33,6 @@ interface Props {
   actions: ViewerActions;
 }
 
-const slideshowDelay = 4000;
 const idleDelay = 2600;
 const filmstripReach = 40;
 
@@ -67,24 +68,30 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
   const [entering, setEntering] = useState(Boolean(origin));
   const [closing, setClosing] = useState(false);
   const [idle, setIdle] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [previous, setPrevious] = useState<PhotoAsset>();
+  const [livePlaying, setLivePlaying] = useState(false);
+  const [liveError, setLiveError] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
-  // Details carry tags and albums; lists leave them out.
   useEffect(() => {
     setDetails(undefined);
+    setLivePlaying(false);
+    setLiveError(false);
     setOriginalReady(false);
     setZoomed(false);
     if (!asset) return;
+    // The neighbours' originals load ahead.
+    for (const neighbour of [assets[index + 1], assets[index - 1]]) if (neighbour) new Image().src = displayURL(neighbour);
+  }, [asset?.id]);
+  // Details carry tags and albums; lists leave them out. A photo that became
+  // a Live Photo meanwhile is asked for again.
+  useEffect(() => {
+    if (!asset) return;
     let live = true;
     getPhoto(asset.id).then((value) => { if (live) setDetails(value); }, () => undefined);
-    // The neighbours' originals load ahead.
-    for (const neighbour of [assets[index + 1], assets[index - 1]]) if (neighbour) new Image().src = originalURL(neighbour.id);
     return () => { live = false; };
-  }, [asset?.id]);
+  }, [asset?.id, asset?.motion?.kind, asset?.liveVideoMissing]);
 
   // Opening grows the photo from its tile.
   useLayoutEffect(() => {
@@ -95,6 +102,7 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
   }, []);
 
   const close = useCallback(async () => {
+    setLivePlaying(false);
     if (closing) return;
     if (!asset || !motion || zoomed || !stage.current || typeof HTMLElement.prototype.animate !== "function") { onClose(); return; }
     setClosing(true);
@@ -106,24 +114,11 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
 
   const go = useCallback((delta: number) => {
     const next = index + delta;
-    if (next < 0 || next >= assets.length) return false;
-    if (playing) setPrevious(asset);
+    if (next < 0 || next >= assets.length) return;
+    setLivePlaying(false);
     onIndex(next);
-    return true;
-  }, [index, assets.length, onIndex, playing, asset]);
-
-  // The slideshow fades to the next photo and stops at the end.
-  useEffect(() => {
-    if (!playing) return;
-    setIdle(true);
-    const timer = window.setTimeout(() => { if (!go(1)) setPlaying(false); }, slideshowDelay);
-    return () => window.clearTimeout(timer);
-  }, [playing, index, go]);
-  useEffect(() => {
-    if (!previous) return;
-    const timer = window.setTimeout(() => setPrevious(undefined), 700);
-    return () => window.clearTimeout(timer);
-  }, [previous]);
+  }, [index, assets.length, onIndex]);
+  const slideshow = () => { setLivePlaying(false); actions.slideshow(asset); };
 
   // Controls step aside while the pointer rests.
   const idleTimer = useRef(0);
@@ -146,15 +141,16 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
   const moment = momentOf(asset);
   const keyDown = (event: KeyboardEvent) => {
     // Typing a tag keeps its keys; Escape there only leaves the field.
+    if ((event.target as HTMLElement).closest("video") && event.key !== "Escape") return;
     const field = (event.target as HTMLElement).closest<HTMLElement>("input, textarea");
     if (field) { if (event.key === "Escape") { event.stopPropagation(); field.blur(); root.current?.focus(); } return; }
     const handled = () => { event.preventDefault(); event.stopPropagation(); };
     switch (event.key) {
       case "ArrowLeft": handled(); go(-1); break;
       case "ArrowRight": handled(); go(1); break;
-      case "Escape": handled(); if (playing) setPlaying(false); else void close(); break;
+      case "Escape": handled(); if (livePlaying) setLivePlaying(false); else void close(); break;
       case "i": case "I": handled(); onInfo(!info); break;
-      case " ": handled(); setPlaying(!playing); break;
+      case " ": handled(); slideshow(); break;
       case "s": case "S": handled(); actions.findSimilar(asset); break;
       case "Delete": case "Backspace": if (editable) { handled(); actions.trash(asset); } break;
       case "+": case "=": handled(); zoom.current?.zoomIn(0.5); break;
@@ -182,17 +178,17 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
             <small>{moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {asset.name}</small>
           </div>
           <div className="ph-viewer-tools">
-            <button type="button" aria-label={playing ? "暂停幻灯片" : "播放幻灯片"} title="幻灯片 (空格)" onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button>
+            {asset.motion && <button type="button" className="ph-viewer-live" aria-label={livePlaying ? "停止动态照片" : "播放动态照片"} aria-pressed={livePlaying} onClick={() => { setLiveError(false); setLivePlaying(!livePlaying); }}>{livePlaying ? <Square /> : <CircleDot />}动态</button>}
+            <button type="button" aria-label="播放幻灯片" title="幻灯片 (空格)" onClick={slideshow}><Presentation /></button>
             <button type="button" aria-label="找相似" title="找相似的照片 (S)" onClick={() => actions.findSimilar(asset)}><ScanSearch /></button>
             {!libraryReadOnly(caller, asset) && <button type="button" aria-label="加入相册" title="加入相册" onClick={() => actions.addToAlbum([asset])}><FolderPlus /></button>}
-            <button type="button" aria-label="下载原图" title="下载原图" onClick={() => actions.download([asset])}><Download /></button>
+            <button type="button" aria-label={asset.motion ? "下载动态照片原件" : "下载原图"} title={asset.motion ? "下载动态照片原件" : "下载原图"} onClick={() => actions.download([asset])}><Download /></button>
             {editable && <button type="button" aria-label="移到回收站" title="移到回收站 (Delete)" onClick={() => actions.trash(asset)}><Trash2 /></button>}
             <button type="button" aria-label={info ? "隐藏信息" : "显示信息"} aria-pressed={info} title="信息 (I)" className={info ? "on" : ""} onClick={() => onInfo(!info)}><Info /></button>
           </div>
         </header>
 
         <div ref={stage} className="ph-viewer-stage">
-          {previous && previous.id !== asset.id && <img key={`previous-${previous.id}`} className="ph-viewer-previous" src={originalURL(previous.id)} alt="" />}
           <TransformWrapper
             key={asset.id}
             ref={zoom}
@@ -206,11 +202,11 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
             onTransform={(_, state) => setZoomed(state.scale > 1.01)}
           >
             <TransformComponent wrapperClass="ph-zoom-wrapper" contentClass="ph-zoom-content">
-              <div className={`ph-viewer-image${playing && motion ? " fade" : ""}`}>
+              <div className="ph-viewer-image">
                 {asset.thumbnail === "ready" && !originalReady && <img className="ph-viewer-low" src={thumbnailURL(asset.id)} alt="" draggable={false} />}
                 <img
                   className={`ph-viewer-full${originalReady ? " ready" : ""}`}
-                  src={originalURL(asset.id)}
+                  src={displayURL(asset)}
                   alt={asset.name}
                   draggable={false}
                   onLoad={() => setOriginalReady(true)}
@@ -218,6 +214,8 @@ export function Viewer({ assets, index, onIndex, onClose, origin, returnRect, ca
               </div>
             </TransformComponent>
           </TransformWrapper>
+          {livePlaying && <video key={asset.id} className="ph-motion-video" src={motionURL(asset.id)} aria-label="动态照片视频" autoPlay muted playsInline controls onEnded={() => setLivePlaying(false)} onError={() => { setLivePlaying(false); setLiveError(true); }} />}
+          {liveError && <p className="ph-motion-error" role="status">动态片段暂时无法播放，仍可查看照片或下载原件。</p>}
           {index > 0 && <button type="button" className="ph-viewer-nav previous" aria-label="上一张" onClick={() => go(-1)}><ChevronLeft /></button>}
           {index < assets.length - 1 && <button type="button" className="ph-viewer-nav next" aria-label="下一张" onClick={() => go(1)}><ChevronRight /></button>}
         </div>

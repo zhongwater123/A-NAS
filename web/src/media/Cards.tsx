@@ -2,6 +2,7 @@ import { Check, Clapperboard, Ellipsis, Film, Heart, ListPlus, PenLine, Play, Tv
 import { createContext, CSSProperties, KeyboardEvent, ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useFold } from "./Dropdown";
 import { heading, hue, progressShare, subheading, timecode, typeLabel } from "./format";
 import { artworkURL, type ArtworkKind, type Title } from "./mediaApi";
 
@@ -15,8 +16,10 @@ export interface MediaActions {
   toggleFavorite: (title: Title) => void;
   setWatched: (title: Title, watched: boolean) => void;
   addToCollection: (title: Title) => void;
-  // rename renames a film's, episode's or other video's file.
+  // rename asks for a new name for a video's file, or a show's folder.
   rename: (title: Title) => void;
+  // renamed announces a rename and refreshes what shows the old name.
+  renamed: (message: string) => void;
 }
 
 export const ActionsContext = createContext<MediaActions | undefined>(undefined);
@@ -81,7 +84,7 @@ export function cardActions(title: Title, actions: MediaActions, extra: CardActi
     { label: title.favorite ? "取消收藏" : "收藏", icon: <Heart />, run: () => actions.toggleFavorite(title) },
     { label: watched ? "标记为未看" : "标记为已看", icon: <Check />, run: () => actions.setWatched(title, !watched) },
     ...(title.type !== "episode" ? [{ label: "加入合集…", icon: <ListPlus />, run: () => actions.addToCollection(title) }] : []),
-    ...(title.type !== "show" ? [{ label: "重命名片源…", icon: <PenLine />, run: () => actions.rename(title) }] : []),
+    { label: title.type === "show" ? "重命名剧集…" : "重命名片源…", icon: <PenLine />, run: () => actions.rename(title) },
     ...extra,
   ];
 }
@@ -91,6 +94,7 @@ export function cardActions(title: Title, actions: MediaActions, extra: CardActi
 // or cut it off.
 export function Menu({ items, label, className = "", children }: { items: CardAction[]; label: string; className?: string; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const { shown, closing } = useFold(open);
   const [place, setPlace] = useState<{ left: number; top: number; up: boolean; root: Element }>();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -127,8 +131,9 @@ export function Menu({ items, label, className = "", children }: { items: CardAc
         onClick={(event) => { event.stopPropagation(); setOpen(!open); }}>
         {children ?? <Ellipsis />}
       </button>
-      {open && place && createPortal(
-        <div ref={menu} className={`mc-menu ${place.up ? "up" : ""}`} role="menu" aria-label={label} style={{ left: place.left, top: place.top }} onKeyDown={keys}>
+      {shown && place && createPortal(
+        <div ref={menu} className={`mc-menu ${place.up ? "up" : ""} ${closing ? "closing" : ""}`} role="menu" aria-label={label} aria-hidden={closing || undefined}
+          style={{ left: place.left, top: place.top }} onKeyDown={keys}>
           {items.map((item) => (
             <button key={item.label} type="button" role="menuitem" className={item.danger ? "danger" : ""}
               onClick={(event) => { event.stopPropagation(); setOpen(false); item.run(); }}>

@@ -24,6 +24,17 @@ const tus = vi.hoisted(() => {
 });
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
+// The cropper needs layout jsdom lacks; this one reports a fixed square.
+vi.mock("react-easy-crop", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: function MockCropper({ image, onCropComplete }: { image: string; onCropComplete: (area: unknown, pixels: unknown) => void }) {
+      useEffect(() => { onCropComplete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 }); }, [image]);
+      return <div data-testid="cropper" data-image={image} />;
+    },
+  };
+});
+
 vi.mock("./XtermSession", async () => {
   const { useEffect } = await import("react");
   return {
@@ -42,6 +53,31 @@ const session = {
   csrfToken: "csrf-test", expiresAt: "2026-10-07T22:00:00Z",
   user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
 };
+
+describe("member sharing in the file manager", () => {
+  it("offers the desktop entry and shares ordinary files from a read-only shared space", async () => {
+    installAPI({ spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }], entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }] });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(within(desktop).getByRole("button", { name: "打开分享" }).hasAttribute("disabled")).toBe(false);
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /分享计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享给成员" })).toBeTruthy();
+  });
+
+  it("does not share administrative viewing files", async () => {
+    installAPI({ spaces: [{ id: "viewed", kind: "private", name: "Alice", ownerUserId: "alice", viewing: { grantId: "grant", expiresAt: "2099-01-01T00:00:00Z" } }], entries: [{ id: "viewed-file", spaceId: "viewed", name: "查看计划.txt", kind: "file", sizeBytes: 4 }] });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /查看计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(true);
+  });
+});
 
 const healthyState = {
   dataSource: "simulated", productVersion: "v1.0.1-rc.1", observedAt: "2026-10-07T10:00:00Z",
@@ -121,6 +157,32 @@ const metricsState = {
 afterEach(() => { transferStore.reset(); tus.uploads.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("A-NAS v1.0.1 desktop", () => {
+  it.each(["clip.mp4", "photo.HEIC", "photo.heif"])("shows a thumbnail for %s in file management", async (name) => {
+    installAPI({
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
+      entries: [{ id: "file:preview", spaceId: "space:shared", name, kind: "file", sizeBytes: 1024, modifiedAt: "2026-10-14T00:00:00Z" }],
+    });
+    const user = userEvent.setup(); render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await within(dialog).findByText(name);
+    const row = dialog.querySelector<HTMLElement>('[data-file-item="file:preview"]')!;
+    expect(row.querySelector("img")?.getAttribute("src")).toContain("/api/v1/files/file%3Apreview/preview?size=thumbnail");
+    fireEvent.error(row.querySelector("img")!);
+    expect(row.querySelector("img")?.hidden).toBe(true);
+    await user.click(row);
+    const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
+    expect(within(inspector).getByRole("img", { name: name + " 的预览" }).getAttribute("src")).toContain("/preview?size=preview");
+    if (name !== "clip.mp4") {
+      await user.dblClick(row);
+      const viewer = await within(dialog).findByRole("dialog", { name: "预览 " + name });
+      expect(within(viewer).getByRole("img", { name }).getAttribute("src")).toContain("/preview?size=preview");
+      fireEvent.error(within(viewer).getByRole("img", { name }));
+      expect(within(viewer).getByRole("alert").textContent).toContain("无法预览这张图片");
+      expect(within(viewer).getAllByRole("button", { name: "下载" }).length).toBeGreaterThan(0);
+    }
+  });
+
   it("pins folders and preserves manual ordering across views and reopening without moving files", async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
@@ -173,6 +235,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(item("b").querySelector('[aria-label="已置顶"]')).toBeNull();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   }, 15000);
+
+  it("sends a LAN browser to the device's own screen to set it up", async () => {
+    const fetchMock = installAPI({ setupRequired: true, setupAllowed: false });
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "请在 NAS 本机启用" })).toBeTruthy();
+    expect(screen.getByText(/SSH 隧道/)).toBeTruthy();
+    expect(screen.queryByLabelText("账号")).toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/setup/admin")).toBe(false);
+  });
 
   it("activates the local device with only an administrator account and password", async () => {
     const fetchMock = installAPI({ setupRequired: true });
@@ -759,6 +830,47 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("puts the windows away when the bare desktop is clicked", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const wallpaper = document.querySelector<HTMLElement>(".desktop-shell")!;
+    const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
+    const showDesktop = within(rail).getByRole("button", { name: "显示桌面" });
+    const openWindows = () => screen.queryAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"));
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+
+    // A press inside a window keeps the windows.
+    await user.click(screen.getByRole("dialog", { name: "设置" }));
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+    // So does a window drag released over the wallpaper, and a press on the wallpaper that moves away.
+    const titleBar = screen.getByRole("dialog", { name: "回收站" }).querySelector<HTMLElement>(".window-titlebar")!;
+    await user.pointer([{ keys: "[MouseLeft>]", target: titleBar, coords: { clientX: 400, clientY: 90 } }, { target: wallpaper, coords: { clientX: 40, clientY: 600 } }, { keys: "[/MouseLeft]" }]);
+    await user.pointer([{ keys: "[MouseLeft>]", target: wallpaper, coords: { clientX: 1200, clientY: 600 } }, { coords: { clientX: 1100, clientY: 500 } }, { keys: "[/MouseLeft]" }]);
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+    // The click that closes the launcher only closes it.
+    await user.click(within(rail).getByRole("button", { name: "全部应用" }));
+    await user.click(wallpaper);
+    expect(screen.queryByRole("dialog", { name: "全部应用" })).toBeNull();
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+
+    await user.click(wallpaper);
+    expect(openWindows()).toEqual([]);
+    expect(showDesktop.getAttribute("aria-pressed")).toBe("true");
+    // Clicking it again leaves them away; 显示桌面 brings them back with the focus where it was.
+    await user.click(desktop);
+    await user.click(showDesktop);
+    expect(openWindows()).toEqual(["回收站", "设置"]);
+    expect(within(screen.getByRole("navigation", { name: "已打开窗口" })).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
+
+    // The gaps between desktop icons count as the desktop, and a single window goes away too.
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
+    await user.click(desktop);
+    expect(openWindows()).toEqual([]);
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();
@@ -1082,10 +1194,20 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[] } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false });
+    if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
+    const signedIn = (options.session ?? session) as { user: Record<string, unknown> };
+    if (path === "/api/v1/profiles") return ok({ items: options.profiles ?? [] });
+    if (path === "/api/v1/session/profile" && init?.method === "PATCH") {
+      const { nickname } = JSON.parse(String(init.body)) as { nickname: string };
+      if (nickname === "owner") return failure(409, "nickname_unavailable");
+      return ok({ ...signedIn.user, nickname: nickname || undefined });
+    }
+    if (path === "/api/v1/session/avatar" && init?.method === "PUT") return ok({ ...signedIn.user, avatarVersion: "0123456789abcdef" });
+    if (path === "/api/v1/session/avatar" && init?.method === "DELETE") return ok({ ...signedIn.user, avatarVersion: undefined });
+    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
@@ -1097,6 +1219,10 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
     if (path.startsWith("/api/v1/files/") && path.includes("/content")) return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
     if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
 	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
+    if (path === "/api/v1/users" && init?.method === "POST") {
+      const { username } = JSON.parse(String(init.body)) as { username: string };
+      return ok({ id: "user:new", username: username.trim().toLowerCase(), role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z", mustChangePassword: false }, 201);
+    }
     if (path === "/api/v1/users") return ok({ items: options.users ?? [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
     if (path === "/api/v1/transfers/downloads" && init?.method === "POST") {
@@ -1114,6 +1240,7 @@ function installAPI(options: { setupRequired?: boolean; spaces?: unknown[]; entr
 }
 
 function ok(body: unknown, status = 200) { return { ok: true, status, json: async () => body } as Response; }
+function failure(status: number, code: string) { return { ok: false, status, json: async () => ({ error: { code, message: code } }) } as Response; }
 
 async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, desktop: HTMLElement, section: string) {
   await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
@@ -1335,10 +1462,55 @@ describe("ADR 0008 application access", () => {
   });
 });
 
+describe("Installed apps on the desktop", () => {
+  const immich = { id: "immich", title: "Immich", webPort: 2283, scheme: "http", path: "/", running: 4, total: 4 };
+  const navidrome = { id: "navidrome", title: "Navidrome", webPort: 4533, scheme: "http", path: "/", running: 0, total: 1 };
+
+  it("opens an installed app's web page from its desktop icon and from the launcher", async () => {
+    installAPI({ shortcuts: [immich, navidrome] });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const icon = await within(desktop).findByRole("button", { name: "打开 Immich（新窗口）" });
+    expect(icon.querySelector("img")?.getAttribute("src")).toBe("/api/v1/app-shortcuts/immich/icon");
+    await user.click(icon);
+    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^http:\/\/[^/]+:2283\/$/), "_blank", "noopener,noreferrer");
+
+    await user.click(within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "全部应用" }));
+    const launcher = screen.getByRole("dialog", { name: "全部应用" });
+    await user.type(within(launcher).getByRole("searchbox", { name: "搜索应用" }), "immich");
+    await user.keyboard("{Enter}");
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks a stopped app and shows administrators its containers in Docker", async () => {
+    installAPI({ shortcuts: [navidrome] });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const stopped = await within(desktop).findByRole("button", { name: "Navidrome，没有在运行，在 Docker 中查看" });
+    expect(stopped.textContent).toContain("未运行");
+    await user.click(stopped);
+    expect(open).not.toHaveBeenCalled();
+    expect(await screen.findByRole("dialog", { name: "Docker" })).toBeTruthy();
+  });
+
+  it("shows installed apps to members, who cannot open Docker", async () => {
+    installAPI({ shortcuts: [immich, navidrome], session: { ...session, user: { ...session.user, username: "alice", role: "member" } } });
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(await within(desktop).findByRole("button", { name: "打开 Immich（新窗口）" })).toBeTruthy();
+    const stopped = within(desktop).getByRole("button", { name: "Navidrome，没有在运行" });
+    expect(stopped.getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
 describe("Settings", () => {
   const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
 
-  it("shows members their account, the overview and read-only storage", async () => {
+  it("shows members their account, task manager, overview and read-only storage", async () => {
     const fetchMock = installAPI({ session: { ...session, user: alice } });
     const user = userEvent.setup();
     render(<App />);
@@ -1346,7 +1518,7 @@ describe("Settings", () => {
     const settings = screen.getByRole("dialog", { name: "设置" });
     const sections = within(settings).getByRole("navigation", { name: "设置分区" });
     const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
-    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "存储", "日志"]);
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "任务管理器", "存储", "日志"]);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
     expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();
@@ -1367,6 +1539,15 @@ describe("Settings", () => {
     expect(within(settings).getByRole("radio", { name: "登录" }).getAttribute("aria-checked")).toBe("true");
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith("/api/v1/activity?") && String(path).includes("category=session"))).toBe(true));
     expect(within(settings).queryByRole("tab", { name: "系统日志" })).toBeNull();
+  });
+
+  it("keeps showing a member who reset their password", async () => {
+    installAPI({ session: { ...session, user: alice, credentialReset: { actorUsername: "owner", at: "2026-10-14T09:10:00Z" } } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    expect(screen.getByText("管理员重置过密码")).toBeTruthy();
+    expect(screen.getByText(/owner 于 .* 重置了这个账号的密码/)).toBeTruthy();
   });
 
   it("lets a member change their own password", async () => {
@@ -1460,6 +1641,38 @@ describe("Settings", () => {
     prompt.mockRestore();
   });
 
+  it("checks a new member's name and password against the NAS rules before creating it", async () => {
+    const fetchMock = installAPI({ users: [session.user] });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "用户与权限");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(await within(settings).findByRole("button", { name: "添加成员" }));
+    const form = within(settings).getByRole("form", { name: "添加成员" });
+    expect(within(form).getByText(/3–32 位英文字母/)).toBeTruthy();
+    const created = () => fetchMock.mock.calls.filter(([path, init]) => path === "/api/v1/users" && init?.method === "POST");
+
+    await user.type(within(form).getByLabelText("账号"), "Shared");
+    await user.type(within(form).getByLabelText("初始密码"), "carol password 1");
+    await user.click(within(form).getByRole("button", { name: "创建成员" }));
+    expect(await within(form).findByText("“shared”留给系统使用，请换一个账号名")).toBeTruthy();
+    expect(created()).toHaveLength(0);
+
+    await user.clear(within(form).getByLabelText("账号"));
+    await user.type(within(form).getByLabelText("账号"), "Carol");
+    await user.clear(within(form).getByLabelText("初始密码"));
+    await user.type(within(form).getByLabelText("初始密码"), "x".repeat(65));
+    await user.click(within(form).getByRole("button", { name: "创建成员" }));
+    expect(await within(form).findByText("密码最多 64 个字符")).toBeTruthy();
+    expect(created()).toHaveLength(0);
+
+    await user.clear(within(form).getByLabelText("初始密码"));
+    await user.type(within(form).getByLabelText("初始密码"), "carol password 1");
+    await user.click(within(form).getByRole("button", { name: "创建成员" }));
+    expect(await within(settings).findByText("已添加成员 carol。")).toBeTruthy();
+    expect(JSON.parse(String(created()[0]?.[1]?.body))).toEqual({ username: "Carol", password: "carol password 1" });
+  });
+
   it("asks for confirmation before disabling a member", async () => {
     const fetchMock = installAPI({ users: [session.user, alice] });
     const user = userEvent.setup();
@@ -1478,5 +1691,148 @@ describe("Settings", () => {
     await user.click(within(within(settings).getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }));
     expect(await within(settings).findByText("已禁用 alice。")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/users/user%3Aalice", expect.objectContaining({ method: "DELETE" }));
+  });
+});
+
+describe("Avatars and nicknames", () => {
+  const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+
+  // jsdom neither decodes images nor draws on a canvas.
+  function stubPictures() {
+    class DecodedImage {
+      naturalWidth = 400; naturalHeight = 320; decoding = ""; onload?: () => void; onerror?: () => void; private source = "";
+      get src() { return this.source; }
+      set src(value: string) { this.source = value; queueMicrotask(() => (value.includes("broken") ? this.onerror?.() : this.onload?.())); }
+    }
+    vi.stubGlobal("Image", DecodedImage);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:avatar-source"), revokeObjectURL: vi.fn() }));
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ fillRect: vi.fn(), drawImage } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["jpeg"], { type: "image/jpeg" })));
+    return drawImage;
+  }
+
+  it("lets a member choose a nickname that the desktop shows instead of the account name", async () => {
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await openSettingsSection(user, desktop, "我的账号");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(within(settings).getByText("未设置，显示账号名 alice")).toBeTruthy();
+    await user.click(within(settings).getByRole("button", { name: "设置昵称…" }));
+    const form = within(settings).getByRole("form", { name: "修改昵称" });
+    await user.type(within(form).getByLabelText("昵称"), "一二三四五六七八九十一二三四五六七八九十一二三四五");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(within(form).getByText("昵称最多 24 个字符")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/session/profile")).toBe(false);
+
+    await user.clear(within(form).getByLabelText("昵称"));
+    await user.type(within(form).getByLabelText("昵称"), "owner");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(await within(form).findByText("这个名字已经是其他人的账号名或昵称，请换一个")).toBeTruthy();
+
+    await user.clear(within(form).getByLabelText("昵称"));
+    await user.type(within(form).getByLabelText("昵称"), " 小爱 ");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(await within(settings).findByText("昵称已改为“小爱”。")).toBeTruthy();
+    const call = fetchMock.mock.calls.filter(([path]) => path === "/api/v1/session/profile").at(-1);
+    expect(call?.[1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ nickname: "小爱" });
+    expect(within(settings).getByRole("heading", { name: "小爱" })).toBeTruthy();
+    expect(within(settings).getByText("账号名 alice")).toBeTruthy();
+    expect(within(within(settings).getByRole("navigation", { name: "设置分区" })).getByRole("button", { name: "我的账号" }).textContent).toContain("小爱");
+    expect(screen.getByRole("button", { name: "账号（小爱）" })).toBeTruthy();
+  });
+
+  it("crops a picture from this computer into the avatar and can remove it again", async () => {
+    const drawImage = stubPictures();
+    const fetchMock = installAPI({ session: { ...session, user: alice } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(within(settings).getByRole("button", { name: "更换头像" }));
+    const picker = within(settings).getByRole("dialog", { name: "更换头像" });
+    expect(within(picker).getByRole("tab", { name: "本机图片" }).getAttribute("aria-selected")).toBe("true");
+    await user.upload(within(picker).getByLabelText("从本机选择图片"), new File(["png"], "me.png", { type: "image/png" }));
+
+    expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe("blob:avatar-source");
+    expect(within(picker).getByRole("heading", { name: "调整头像" })).toBeTruthy();
+    await user.click(within(picker).getByRole("button", { name: "保存头像" }));
+    expect(await within(settings).findByText("头像已更新。")).toBeTruthy();
+    expect(within(settings).queryByRole("dialog", { name: "更换头像" })).toBeNull();
+
+    // The page sends the chosen square, drawn on white at no more than 512 px.
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 40, 0, 320, 320, 0, 0, 320, 320);
+    const sent = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "PUT");
+    expect((sent?.[1]?.body as Blob).type).toBe("image/jpeg");
+    expect(new Headers(sent?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    const rail = screen.getByRole("button", { name: "账号（alice）" });
+    expect(rail.querySelector("img")?.getAttribute("src")).toBe("/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef");
+
+    await user.click(within(settings).getByRole("button", { name: "移除" }));
+    expect(await within(settings).findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "DELETE")).toBe(true);
+    expect(rail.querySelector("img")).toBeNull();
+    expect(rail.textContent).toContain("A");
+  });
+
+  it("picks the avatar from a picture on the NAS, but not from a space being viewed", async () => {
+    stubPictures();
+    installAPI({
+      session: { ...session, user: alice },
+      spaces: [
+        { id: "space:alice", kind: "private", name: "alice", ownerUserId: "user:alice", createdAt: "2026-10-07T10:00:00Z" },
+        { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" },
+        { id: "space:bob", kind: "private", name: "bob", ownerUserId: "user:bob", createdAt: "2026-10-07T10:00:00Z", viewing: { grantId: "grant:1", expiresAt: "2026-10-08T10:00:00Z" } },
+      ],
+      entries: [
+        { id: "file:trip", spaceId: "space:alice", name: "海边.jpg", kind: "file", sizeBytes: 2048, modifiedAt: "2026-10-07T10:00:00Z" },
+        { id: "file:notes", spaceId: "space:alice", name: "notes.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-07T10:00:00Z" },
+        { id: "dir:2026", spaceId: "space:alice", name: "2026", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(within(settings).getByRole("button", { name: "设置头像…" }));
+    const picker = within(settings).getByRole("dialog", { name: "更换头像" });
+    await user.click(within(picker).getByRole("tab", { name: "NAS 文件" }));
+    const spaces = await within(picker).findByRole("group", { name: "空间" });
+    expect(within(spaces).getAllByRole("button").map((button) => button.textContent)).toEqual(["个人空间", "共享空间"]);
+    expect(within(picker).getByRole("button", { name: "2026" })).toBeTruthy();
+    expect(within(picker).queryByText("notes.txt")).toBeNull();
+    await user.click(within(picker).getByRole("button", { name: "选择 海边.jpg" }));
+    expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe("/api/v1/files/file%3Atrip/content?disposition=inline");
+    await user.click(within(picker).getByRole("button", { name: "重新选择图片" }));
+    expect(within(picker).getByRole("tab", { name: "NAS 文件" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(within(settings).queryByRole("dialog", { name: "更换头像" })).toBeNull();
+  });
+
+  it("shows other accounts by nickname and keeps the account name where it matters", async () => {
+    installAPI({
+      users: [session.user, { ...alice, nickname: "小爱", avatarVersion: "feedface00000000" }],
+      profiles: [{ id: "user:owner", username: "owner", nickname: "爸爸" }, { id: "user:alice", username: "alice", nickname: "小爱", avatarVersion: "feedface00000000" }],
+      notifications: [{ id: "notification:1", kind: "credential_reset", actorUsername: "owner", createdAt: "2026-10-07T10:00:00Z" }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(await within(notice).findByText(/管理员 爸爸（owner） 于 .* 重置了你的密码/)).toBeTruthy();
+    await user.click(within(notice).getByRole("button", { name: "知道了" }));
+
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "用户与权限");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    const menu = await within(settings).findByRole("button", { name: "小爱（alice） 的更多操作" });
+    const row = menu.closest(".set-row") as HTMLElement;
+    expect(within(row).getByText("小爱")).toBeTruthy();
+    expect(within(row).getByText("alice")).toBeTruthy();
+    expect(row.querySelector("img")?.getAttribute("src")).toBe("/api/v1/users/user%3Aalice/avatar?v=feedface00000000");
+    await user.click(menu);
+    await user.click(within(settings).getByRole("menuitem", { name: "重置密码…" }));
+    expect(within(settings).getByRole("form", { name: "重置 小爱（alice） 的密码" })).toBeTruthy();
   });
 });

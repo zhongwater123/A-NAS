@@ -1,4 +1,4 @@
-# 0022：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行
+# 0024：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行
 
 状态：proposed（2026-10-14 与用户讨论后起草；同日在开发机完成 spike，含 DeepSeek 真实模型测试与助手窗口原型；实验 NAS 上尚未验证）。2026-10-15 对照上游后用户决定：助手与 Hermes 之间改用官方 Desktop 所用的 `hermes serve`（REST 加 `/api/ws` 上的 JSON-RPC），写入确认改用 Hermes 的回合内审批；决定 4 已按 [#111](https://github.com/zhongwater123/A-NAS/issues/111) 的验证改写，决定 6 已按 [#113](https://github.com/zhongwater123/A-NAS/issues/113) 的验证细化，决定 9 已按 [#109](https://github.com/zhongwater123/A-NAS/issues/109)、[#110](https://github.com/zhongwater123/A-NAS/issues/110) 的验证改写；同日用户决定加入会话闸门（决定 10）。行为见 [AI 助手规格](../specs/ai-assistant.md)，外部事实见 [Hermes Agent 可行性研究](../research/hermes-agent-runtime.md)。
 

@@ -18,7 +18,7 @@ import (
 
 // Connector reaches the instance of the member signed in on the context's
 // session (accounts.SessionToken). In A-NAS the File Broker is the session
-// gate (ADR 0022 decision 10): it checks the session itself and hands back a
+// gate (ADR 0024 decision 10): it checks the session itself and hands back a
 // connection that stops working when the session does. Connect returns the
 // connection and the instance's `hermes serve` token.
 type Connector interface {

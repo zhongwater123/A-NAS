@@ -5,7 +5,7 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 
 import { AppJob, AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
 import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
-import { appURL, describeError, installFailed, mountLabels, openApp, useElapsed } from "./model";
+import { appURL, describeError, installFailed, mountLabels, openApp, runAsLabels, runtimeSummary, serviceText, useElapsed } from "./model";
 
 interface SheetProps {
   app: CatalogApp;
@@ -118,7 +118,9 @@ function Review({ app, plan, planning, submitting, failure, busyApp, onConfirm, 
 }
 
 function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
-  const shared = plan.mounts.some((mount) => mount.kind === "shared");
+  const sharedMounts = plan.mounts.filter((mount) => mount.kind === "shared");
+  const shared = sharedMounts.length > 0;
+  const writesShared = sharedMounts.some((mount) => !mount.readOnly);
   const counts = (["appdata", "shared", "system"] as const)
     .map((kind) => [kind, plan.mounts.filter((mount) => mount.kind === kind).length] as const)
     .filter(([, count]) => count > 0)
@@ -127,11 +129,22 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
     <section className="ac-plan" aria-label="安装内容">
       <p className="ac-plan-lead">容器不会获得特权、设备或宿主机网络，只能访问下面列出的文件夹。</p>
       {shared && (
-        <div className="ac-banner-note warning"><TriangleAlert />{app.title} 将获得共享空间的读写权限（与成员相同），卸载时撤销；不能访问任何人的个人空间。</div>
+        <div className="ac-banner-note warning"><TriangleAlert />
+          {writesShared
+            ? `${app.title} 将能读写共享空间中的 ${sharedMounts.length} 个文件夹，与成员的权限相同；卸载时撤销，不能访问任何人的个人空间。`
+            : `${app.title} 将能读取共享空间中的 ${sharedMounts.length} 个文件夹，不能修改或删除其中的文件；卸载时撤销，不能访问任何人的个人空间。`}
+        </div>
       )}
       <div className="ac-plan-list">
-        <PlanItem icon={<UserRound />} tone="identity" title="运行身份" summary={`以独立账号 ${plan.identity.username} 运行`}>
+        <PlanItem icon={<UserRound />} tone="identity" title="运行身份" summary={runtimeSummary(plan)}>
           <span className="ac-plan-row"><code>{plan.identity.username}</code>UID {plan.identity.uid}</span>
+          {(plan.services ?? []).map((service) => (
+            <span key={service.service} className="ac-plan-row">
+              <em className={`ac-runas ${service.runAs}`}>{runAsLabels[service.runAs]}</em>
+              <code>{service.service}</code>
+              <small>{serviceText(service, plan)}</small>
+            </span>
+          ))}
           {!shared && <small>只访问自己的应用数据，不能访问共享空间或个人空间。</small>}
         </PlanItem>
         {plan.credentials?.length ? (

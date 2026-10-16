@@ -28,6 +28,7 @@ export function OverviewPage() {
   const troubled = states.filter((state) => state.tone === "danger");
   const all = states.flatMap((state) => state.data.snapshots ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const latest = all[0];
+  const oldest = all.at(-1);
   const upcoming = scheduled
     .map((state) => ({ state, at: state.data.schedule?.nextRunAt }))
     .filter((item): item is { state: SpaceState; at: string } => Boolean(item.at))
@@ -69,7 +70,7 @@ export function OverviewPage() {
           <dl className="bk-hero-facts">
             <div><dt>最近一次快照</dt><dd>{latest ? <>{formatDateTime(latest.createdAt)}<small>{spaceLabel(spaces.find((space) => space.id === latest.spaceId) ?? { kind: "private" })}</small></> : "暂无"}</dd></div>
             <div><dt>下次定时快照</dt><dd>{upcoming ? <>{formatUntil(upcoming.at)}<small>{spaceLabel(upcoming.state.space)}</small></> : "未安排"}</dd></div>
-            <div><dt>快照总数</dt><dd>{formatCount(all.length)}<small>份</small></dd></div>
+            <div><dt>最早可回到</dt><dd>{oldest ? <>{formatDay(oldest.createdAt)}<small>共 {formatCount(all.length)} 份快照</small></> : "暂无"}</dd></div>
           </dl>
           <div className="bk-hero-actions">
             <button type="button" className="bk-primary" onClick={() => navigate("find")}><FileSearch />找回文件</button>

@@ -25,7 +25,7 @@ const opAssistant = "assistant"
 var assistantAccount = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // serveAssistant is the session gate in front of the members' AI assistants
-// (ADR 0022 decision 10). Only root may connect to an assistant's socket; the
+// (ADR 0024 decision 10). Only root may connect to an assistant's socket; the
 // broker does so for the member behind a valid session and hands the
 // connection back with the instance's token, keeping its own copy. Like a
 // terminal, the session is checked again while the connection is open, and

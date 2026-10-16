@@ -1,5 +1,5 @@
 // Package assistantapi exposes the AI assistant under /api/v1/assistant: the
-// signed-in member's own Hermes instance, as Hermes Desktop uses it (ADR 0022
+// signed-in member's own Hermes instance, as Hermes Desktop uses it (ADR 0024
 // decision 9). A WebSocket carries the allowed part of `hermes serve`'s
 // JSON-RPC; REST routes list, read, rename and delete conversations; and the
 // confirmation cards for 提交更改 are answered here, never by the window

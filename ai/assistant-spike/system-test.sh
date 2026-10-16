@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2154 # api, data, the accounts and the helpers come from scripts/system-test.sh
 # Sourced by scripts/system-test.sh after its own checks: the AI assistant's sandbox
-# (ai/assistant-spike, ADR 0022, #115) on the accounts, spaces and ACLs the real installer
+# (ai/assistant-spike, ADR 0024, #115) on the accounts, spaces and ACLs the real installer
 # and Host Agent made, instead of the spike's hand-made layout. assistant-install.sh and
 # assistant-layout.sh play the Host Agent's part for what it does not do yet.
 #
@@ -31,7 +31,7 @@ check "the Host Agent made bob's space and recycle bins" \
   test -d "$data/spaces/private/bob/.a-nas-trash/bob" -a -d "$data/spaces/shared/.a-nas-trash/bob"
 
 # --- Installed beside the real accounts, with the Host Agent's File Broker as the session
-# gate (ADR 0022 decision 10) and the executor of the assistant's changes: only root reaches
+# gate (ADR 0024 decision 10) and the executor of the assistant's changes: only root reaches
 # the instance sockets and the session tokens; the Product Service reaches a member's instance,
 # and prepares or grants that member's changes, only with the member's live session.
 if ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-install.sh owner alice bob >/tmp/assistant-install.log 2>&1; then
@@ -172,7 +172,7 @@ echo "INFO assistant broker: replaced in a folder the broker made: $draft_item; 
 echo "INFO assistant broker: alice's Web recycle bin: $(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" |
   jq -c '[.items[] | {name, originalPath, originalGone}]' 2>/dev/null || true)"
 
-# --- Agent空间 (ADR 0022 decision 5): everyone reads it, each member writes only their own
+# --- Agent空间 (ADR 0024 decision 5): everyone reads it, each member writes only their own
 # folder, and the assistant only through the broker.
 agent_space=$data/spaces/shared/Agent空间
 stage 公告.md 周日大扫除

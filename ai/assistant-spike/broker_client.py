@@ -9,7 +9,7 @@ Prints the HTTP status, a space, and the response body. A product call carries t
 session from BROKER_SESSION when it is set, as the product service does.
 
 The executor is the spike's change_broker.py, or with EXECUTOR=host-agent the Host Agent's
-File Broker (ADR 0022 decision 10): product calls then go over file-broker.sock in the
+File Broker (ADR 0024 decision 10): product calls then go over file-broker.sock in the
 broker's own framing (a 4-byte length, then JSON), and answer as the HTTP broker would.
 """
 import http.client

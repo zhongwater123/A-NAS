@@ -1,6 +1,6 @@
 import type { Space } from "../api";
 
-import type { Frequency, ScheduleSettings, Snapshot, SnapshotSchedule } from "./backupApi";
+import type { Frequency, RetentionTiers, ScheduleSettings, Snapshot, SnapshotSchedule } from "./backupApi";
 
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 export const weekdayShort = ["日", "一", "二", "三", "四", "五", "六"];
@@ -62,8 +62,37 @@ export function describeSchedule(settings: Pick<ScheduleSettings, "frequency" | 
 
 const spanUnit: Record<Frequency, string> = { hourly: "小时", daily: "天", weekly: "周" };
 
+export type Tier = keyof RetentionTiers;
+export const tierOrder: Tier[] = ["hourly", "daily", "weekly", "monthly"];
+export const tierLabel: Record<Tier, { every: string; span: string }> = {
+  hourly: { every: "每小时", span: "小时" },
+  daily: { every: "每天", span: "天" },
+  weekly: { every: "每周", span: "周" },
+  monthly: { every: "每月", span: "个月" },
+};
+export const noTiers: RetentionTiers = { hourly: 0, daily: 0, weekly: 0, monthly: 0 };
+
+// tiersFor names the tiers a frequency can use: none finer than it.
+export const tiersFor = (frequency: Frequency): Tier[] =>
+  frequency === "hourly" ? tierOrder : frequency === "daily" ? tierOrder.slice(1) : tierOrder.slice(2);
+
+// What tiered retention suggests: a day of hours, two weeks of days, two
+// months of weeks and a year of months, from the frequency down.
+export function suggestedTiers(frequency: Frequency): RetentionTiers {
+  const all: RetentionTiers = { hourly: 24, daily: 14, weekly: 8, monthly: 12 };
+  const usable = tiersFor(frequency);
+  return { hourly: 0, daily: 0, weekly: 0, monthly: 0, ...Object.fromEntries(usable.map((tier) => [tier, all[tier]])) };
+}
+
+export const tierTotal = (tiers: RetentionTiers) => tiers.hourly + tiers.daily + tiers.weekly + tiers.monthly;
+
 // describeRetention says how far back the kept scheduled snapshots reach.
-export const describeRetention = (frequency: Frequency, keep: number) => `可回到最近 ${keep} ${spanUnit[frequency]}内的任一份`;
+export function describeRetention(settings: Pick<ScheduleSettings, "frequency" | "keep" | "retention" | "tiers">): string {
+  if (settings.retention !== "tiered") return `可回到最近 ${settings.keep} ${spanUnit[settings.frequency]}内的任一份`;
+  const widest = [...tierOrder].reverse().find((tier) => settings.tiers[tier] > 0);
+  if (!widest) return "没有保留任何定时快照";
+  return `越近越密，最远可回到约 ${settings.tiers[widest]} ${tierLabel[widest].span}前，最多 ${tierTotal(settings.tiers)} 份`;
+}
 
 export const spaceLabel = (space: Pick<Space, "kind">) => (space.kind === "shared" ? "共享空间" : "个人空间");
 export const spaceAudience = (space: Pick<Space, "kind">) => (space.kind === "shared" ? "所有成员可见" : "只有你可见");
@@ -84,11 +113,20 @@ export function defaultSnapshotName(now = new Date()): string {
   return `手动快照 ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
+const stamp = (value: string | Date) => {
+  const date = new Date(value);
+  const pad = (number: number) => String(number).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}.${pad(date.getMinutes())}`;
+};
+
+// restoredSnapshotName names the folder a whole snapshot is restored into:
+// 定时快照 10-12 03.00. Like restoredName it avoids ":".
+export const restoredSnapshotName = (title: string, createdAt: string) => `${title} ${stamp(createdAt)}`;
+
 // restoredName suggests a name beside an existing one: 报告 (恢复 10-12 14.30).docx.
 // It avoids ":", which Windows cannot show over SMB.
 export function restoredName(name: string, kind: "file" | "directory", now = new Date()): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const suffix = ` (恢复 ${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())})`;
+  const suffix = ` (恢复 ${stamp(now)})`;
   const dot = name.lastIndexOf(".");
   if (kind === "directory" || dot <= 0) return `${name}${suffix}`;
   return `${name.slice(0, dot)}${suffix}${name.slice(dot)}`;

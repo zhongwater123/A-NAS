@@ -29,7 +29,7 @@ for binary in anas-api anas-host-agent install-screensavers.sh; do
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-media-system.socket anas-media-system@.service; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-media-system.socket anas-media-system@.service; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -47,7 +47,7 @@ fi
 # and manifests that pin its models and Python runtime by content. Each model
 # has a role: its manifest is ai/ROLE.json and the release links its file as
 # ai/ROLE.EXTENSION, where the Worker's unit looks for it.
-ai_roles=(model:litertlm detector:onnx)
+ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)
 for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing local AI file: $source_release/$file" >&2
@@ -60,8 +60,8 @@ for role in "${ai_roles[@]}"; do
     exit 2
   fi
 done
-# The media center runs Debian's FFmpeg in its worker sandbox (ADR 0017).
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe; do
+# Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe heif-thumbnailer; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3
@@ -147,6 +147,26 @@ elif getent passwd "$photos_id" >/dev/null; then
 else
   useradd --system --uid "$photos_id" --gid "$photos_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-photos
 fi
+shares_id=31001
+if getent group a-nas-shares >/dev/null; then
+  [[ "$(getent group a-nas-shares | cut -d: -f3)" == "$shares_id" ]] || { echo "group a-nas-shares exists with another GID" >&2; exit 3; }
+elif getent group "$shares_id" >/dev/null; then
+  echo "GID $shares_id is taken by another group" >&2; exit 3
+else
+  groupadd --system --gid "$shares_id" a-nas-shares
+fi
+if getent passwd a-nas-shares >/dev/null; then
+  [[ "$(id -u a-nas-shares):$(id -g a-nas-shares)" == "$shares_id:$shares_id" ]] || { echo "user a-nas-shares exists with another UID or GID" >&2; exit 3; }
+elif getent passwd "$shares_id" >/dev/null; then
+  echo "UID $shares_id is taken by another user" >&2; exit 3
+else
+  useradd --system --uid "$shares_id" --gid "$shares_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-shares
+fi
+# setgid makes the Product-owned bridge socket inherit the shares-only group.
+install -d -o root -g root -m 0755 /etc/tmpfiles.d
+printf 'd /run/a-nas-share-files 2750 a-nas a-nas-shares -\n' > /etc/tmpfiles.d/a-nas-shares.conf
+chmod 0644 /etc/tmpfiles.d/a-nas-shares.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-shares.conf
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /var/lib/a-nas/screensavers
@@ -269,6 +289,8 @@ printf '%s\n' \
   'ANAS_HOST_AGENT_GROUP=a-nas' \
   'ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock' \
   'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' \
+  'ANAS_SHARE_SESSION_SOCKET=/run/a-nas-share-sessions/shares.sock' \
+  'ANAS_SHARE_SESSION_GROUP=a-nas-shares' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env
 chown root:root /etc/a-nas/host-agent.env
@@ -277,6 +299,7 @@ chmod 0600 /etc/a-nas/host-agent.env
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
+install -o root -g root -m 0644 "$source_release/anas-shares-system.service" /etc/systemd/system/anas-shares.service
 # Background work gives way to the device's other work (anas.slice).
 install -o root -g root -m 0644 "$source_release/anas-system.slice" /etc/systemd/system/anas.slice
 install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
@@ -312,9 +335,9 @@ systemctl restart anas-ai.socket
 # with the previous release.
 systemctl enable anas-media.socket
 systemctl restart anas-media.socket
-systemctl enable anas-host-agent.service anas-photos.service anas-api.service
+systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
-systemctl restart anas-host-agent.service anas-photos.service anas-api.service
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
@@ -323,7 +346,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-ai.socket anas-media.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-media.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

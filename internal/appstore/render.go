@@ -73,14 +73,17 @@ type PortMapping struct {
 }
 
 // Plan is what the owner confirms before an install: the identity the app
-// runs as, images that will be pulled, host ports that will open, host
-// folders containers can write and Docker networks the app creates.
+// and each of its services run as, images that will be pulled, host ports
+// that will open, host folders containers can read or write and Docker
+// networks the app creates.
 type Plan struct {
-	AppID      string
-	Title      string
-	Version    string
-	Project    string
-	Identity   Identity
+	AppID    string
+	Title    string
+	Version  string
+	Project  string
+	Identity Identity
+	// Services says how each service runs as Identity (runtime.go).
+	Services   []ServiceRuntime
 	Images     []string
 	Containers []string
 	Ports      []PortMapping
@@ -108,8 +111,9 @@ func (e *PolicyError) Error() string {
 }
 
 // Render validates a manifest against policy and produces the Compose file
-// that will run as identity, rewritten to A-NAS paths, labelled with the app
-// ID and holding the app's generated secrets (NewSecrets).
+// that will run as identity (runtime.go), rewritten to A-NAS paths with
+// Shared folders read-only unless the app writes them, labelled with the app
+// ID and runtime rules and holding the app's generated secrets (NewSecrets).
 func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, secrets Secrets) (Plan, error) {
 	if identity.UID <= 0 || identity.GID <= 0 {
 		return Plan{}, &PolicyError{Reasons: []string{"app identity is missing"}}
@@ -181,7 +185,8 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, 
 		service := project.Services[name]
 		descriptions := casaosDescriptions(service.Extensions)
 		checkService(name, service, reject)
-		applyAppIdentity(&service, identity, runAsAppIdentity[entry.App.ID])
+		runAs := runAsFor(entry.App.ID, name, service)
+		shared := SharedNone
 		if err := applySecrets(entry.App.ID, name, &service, secrets); err != nil {
 			return Plan{}, err
 		}
@@ -218,6 +223,23 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, 
 				source := sharedVolume
 				if kind == MountAppData {
 					source = appDataVolume
+				} else {
+					// A service that may run as root ignores the Shared ACL, so
+					// it cannot mount Shared. Other Shared mounts are read-only
+					// unless the app exists to write there, so an app that only
+					// reads its media cannot change the members' files.
+					if runAs == RunAsImage {
+						reject("service %s keeps its image's user, which may be root, so it cannot mount %s from the Shared folder", name, volume.Source)
+						continue
+					}
+					if !sharedWritable(entry.App.ID, volume.Target) {
+						volume.ReadOnly = true
+					}
+					if !volume.ReadOnly {
+						shared = SharedWrite
+					} else if shared == SharedNone {
+						shared = SharedRead
+					}
 				}
 				bases[source] = base
 				volume.Type = types.VolumeTypeVolume
@@ -235,6 +257,7 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, 
 			volumes = append(volumes, volume)
 		}
 		service.Volumes = volumes
+		plan.Services = append(plan.Services, applyRuntime(name, &service, runAs, identity, shared))
 
 		for _, port := range service.Ports {
 			published, err := strconv.ParseUint(port.Published, 10, 16)
@@ -263,6 +286,7 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, 
 			service.Labels = types.Labels{}
 		}
 		service.Labels[AppLabel] = entry.App.ID
+		service.Labels[RuntimeLabel] = RuntimePolicy
 		service.Extensions = nil
 		project.Services[name] = service
 
@@ -303,34 +327,6 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, 
 	return plan, nil
 }
 
-// runAsAppIdentity lists apps whose images run as a fixed non-root user and
-// work under any UID. Their manifests set neither user nor PUID/PGID, so the
-// image user (n8n's node, UID 1000; Grafana's 472; PsiTransfer's node) could
-// not write the folders the Host Agent creates for app-<id>, and the
-// container kept restarting (Demo test report, n8n). They run as the app
-// identity instead.
-var runAsAppIdentity = map[string]bool{"n8n": true, "grafana": true, "psitransfer": true}
-
-// applyAppIdentity adapts the two runtime-identity conventions accepted by
-// the reviewed catalog to the stable Linux identity allocated by the Host
-// Agent. An explicit Compose user overrides the image user, while PUID/PGID
-// are image-specific environment conventions; literal upstream values must
-// not escape the A-NAS identity boundary in either form. force sets the
-// user for images listed in runAsAppIdentity.
-func applyAppIdentity(service *types.ServiceConfig, identity Identity, force bool) {
-	uid := strconv.Itoa(identity.UID)
-	gid := strconv.Itoa(identity.GID)
-	if force || strings.TrimSpace(service.User) != "" {
-		service.User = uid + ":" + gid
-	}
-	for name, value := range map[string]string{"PUID": uid, "PGID": gid} {
-		if _, declared := service.Environment[name]; declared {
-			value := value
-			service.Environment[name] = &value
-		}
-	}
-}
-
 func checkService(name string, service types.ServiceConfig, reject func(string, ...any)) {
 	if service.Build != nil {
 		reject("service %s builds an image", name)
@@ -349,6 +345,7 @@ func checkService(name string, service types.ServiceConfig, reject func(string, 
 		"devices":          len(service.Devices) > 0 || len(service.DeviceCgroupRules) > 0,
 		"gpus":             len(service.Gpus) > 0 || deployDevices(service.Deploy),
 		"security_opt":     len(service.SecurityOpt) > 0,
+		"group_add":        len(service.GroupAdd) > 0,
 		"sysctls":          len(service.Sysctls) > 0,
 		"pid":              service.Pid != "",
 		"ipc":              service.Ipc != "",
@@ -436,7 +433,7 @@ func appendUnique(items []string, item string) []string {
 }
 
 // SharesFolders reports whether the plan mounts anything from the Shared
-// folder; the app identity then needs the Shared folder's ACL.
+// folder, where the Host Agent then creates the mounted folders.
 func (p Plan) SharesFolders() bool {
 	for _, mount := range p.Mounts {
 		if mount.Kind == MountShared {

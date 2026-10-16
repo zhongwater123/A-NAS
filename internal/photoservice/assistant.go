@@ -14,7 +14,7 @@ import (
 )
 
 // A member's AI assistant reads the photo library through a socket of its own
-// (ADR 0022). It has no session: the assistant runs as the member's Linux
+// (ADR 0024). It has no session: the assistant runs as the member's Linux
 // UID, so the kernel's peer credentials say whom it acts for and the Host
 // Agent confirms that account is active. The Product Service is not in the
 // path and cannot claim to be anyone's assistant (ADR 0011 decision 4).

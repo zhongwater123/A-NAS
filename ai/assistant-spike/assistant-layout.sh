@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stand-in for the Host Agent's typed operations for the AI assistant (ADR 0022), run as
+# Stand-in for the Host Agent's typed operations for the AI assistant (ADR 0024), run as
 # root. Every subcommand is idempotent. Directories are root:root without setgid and get
 # exactly the ACL below, written as internal/hostops/linux/acl.go writes them (setfacl
 # --set; defaults dropped first when the ACL has none); a reserved name holding something
@@ -24,7 +24,7 @@
 #                                                 assistant directory
 #   assistant-layout.sh remove  DATA ACCOUNT      what deleting the account removes
 #
-# With ASSISTANT_GATE=host-agent the Host Agent's File Broker is the session gate (ADR 0022
+# With ASSISTANT_GATE=host-agent the Host Agent's File Broker is the session gate (ADR 0024
 # decision 10): the instance sockets stay root's and the product service gets no token, the
 # broker hands both out per session. Otherwise (the spike, and the local UI prototype whose
 # product service runs without a File Broker) PRODUCT_USER (default a-nas) owns the instance
@@ -95,7 +95,7 @@ case $cmd in
     done
     ;;
   prepare)
-    # ADR 0022 decision 5: every member reads Agent空间; each member writes only their own
+    # ADR 0024 decision 5: every member reads Agent空间; each member writes only their own
     # folder there (through the change broker), the pattern of .a-nas-trash/<username>. It sits
     # in Shared, which members can write: the product service refuses to rename, move or delete
     # it, and this repair (the Host Agent's reconciliation) covers what SMB can still do.

@@ -1,6 +1,6 @@
 import { APIError } from "../api";
 import type { ImageQuery } from "./imageSearch";
-import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoTagCount } from "./photosApi";
+import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoPerson, PhotoTagCount } from "./photosApi";
 
 // A place is what the main area shows. AI 聚合 (a search with an empty query
 // is its start page), its clusters and the user tag groups cover the caller's and the shared
@@ -16,6 +16,7 @@ export type Place =
   | { kind: "search"; viewing: string; query: string }
   | { kind: "cluster"; viewing: string; label: PhotoLabelCount }
   | { kind: "tag"; viewing: string; tag: PhotoTagCount }
+  | { kind: "person"; viewing: string; person: PhotoPerson }
   | { kind: "similar"; viewing: string; asset: PhotoAsset; from: Place }
   | { kind: "image"; viewing: string; query: ImageQuery; from: Place };
 
@@ -25,6 +26,14 @@ export const libraryOf = (caller: Caller, libraryId: string) => caller.libraries
 export const ownLibrary = (caller: Caller) => caller.libraries.find((item) => item.kind === "private" && item.ownerUserId === caller.userId && !item.viewing);
 export const sharedLibrary = (caller: Caller) => caller.libraries.find((item) => item.kind === "shared");
 export const viewingLibrary = (caller: Caller) => caller.libraries.find((item) => item.viewing);
+
+// Who may name and correct a library's people: its owner, and every member in
+// the shared library; never an administrator who only views it.
+export function canChangePeople(caller: Caller, libraryId: string) {
+  const library = libraryOf(caller, libraryId);
+  if (!library || library.viewing) return false;
+  return library.kind === "shared" || library.ownerUserId === caller.userId;
+}
 
 // The panel only hides what the photo service would refuse anyway.
 export function canChange(caller: Caller, asset: PhotoAsset) {
@@ -110,6 +119,10 @@ const photoErrors: Record<string, string> = {
   ai_unavailable: "暂时无法识别图片，请稍后再试",
   network_error: "网络连接中断",
 };
+
+// How to send the MOV a Live Photo still came without: Photos on a Mac
+// hands a browser only the still when dragged or chosen directly.
+export const liveVideoHint = "在 Mac 的“照片”App 中选中这张照片，用“文件 → 导出 → 导出未修改的原件”得到同名 MOV，上传后就会补上动态效果。";
 
 export function messageOf(error: unknown) {
   if (error instanceof APIError) return photoErrors[error.code] ?? error.message;

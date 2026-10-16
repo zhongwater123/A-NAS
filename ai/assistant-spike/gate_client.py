@@ -1,4 +1,4 @@
-"""The assistant window's gateway, end to end through the session gate (ADR 0022 decision 10).
+"""The assistant window's gateway, end to end through the session gate (ADR 0024 decision 10).
 
 Run with the Hermes runtime's Python (it has `websockets`) in the system-test container:
 

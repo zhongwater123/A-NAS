@@ -2,7 +2,7 @@ import { Check, CircleAlert, Copy, RotateCcw } from "lucide-react";
 import { DragEvent, MouseEvent, PointerEvent, ReactNode, memo, useRef } from "react";
 
 import type { Box, PendingPhoto } from "./layout";
-import { originalURL, previewURL, type PhotoAsset } from "./photosApi";
+import { displayURL, previewURL, type PhotoAsset } from "./photosApi";
 
 export const dragType = "application/x-a-nas-photos";
 
@@ -64,7 +64,7 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
           onError={(event) => {
             // A thumbnail reported ready can still be missing until the
             // photo service renders it again; the original shows instead.
-            const original = originalURL(asset.id);
+            const original = displayURL(asset);
             if (event.currentTarget.getAttribute("src") !== original) event.currentTarget.src = original;
           }}
         />
@@ -85,6 +85,7 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
         <Check strokeWidth={3} />
       </button>
       {asset.duplicate === "duplicate" && <span className="ph-tile-badge" title="本图库中已有相同照片"><Copy />重复</span>}
+      {asset.motion && <span className="ph-motion-badge">动态照片</span>}
       {badge}
     </div>
   );

@@ -1,16 +1,25 @@
-import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, ImageUp, RotateCcw, ScanSearch, X } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, Film, ImageUp, RotateCcw, ScanSearch, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { groupPhotoUploads } from "./uploadGroups";
 import { transferStore } from "../transfers/store";
 import type { PendingPhoto } from "./layout";
 import { messageOf } from "./model";
-import { addToAlbum, uploadPhoto } from "./photosApi";
+import { addToAlbum, attachLiveVideo, uploadPhoto } from "./photosApi";
 
 export interface UploadTarget { libraryId: string; albumId?: string; label: string }
 // rejected marks files refused before sending, which retrying cannot help.
-export interface UploadItem extends PendingPhoto { file: File; target: UploadTarget; rejected?: boolean }
+// A video item is a Live Photo's MOV completing stills already in the
+// library: completed counts them. liveStill marks a Live Photo still that
+// arrived without its MOV.
+export interface UploadItem extends PendingPhoto {
+  file: File; motion?: File; target: UploadTarget; rejected?: boolean; video?: boolean; completed?: number; liveStill?: boolean;
+}
+// What a finished batch brought: the targets photos went to, how many
+// photos a video completed, and how many Live Photo stills still lack theirs.
+export interface UploadSummary { targets: UploadTarget[]; photos: number; completed: number; liveStills: number }
 
-const accepted = new Set(["image/jpeg", "image/png"]);
+const accepted = new Set(["image/jpeg", "image/png", "image/heic", "image/heif"]);
 // Web uploads of JPEG and PNG originals stop at 256 MiB (photo-library spec).
 const maxBytes = 256 * 1024 ** 2;
 const parallel = 2;
@@ -18,7 +27,7 @@ const parallel = 2;
 // useUploads sends photos two at a time. Each shows at once from the file
 // itself; onSettled runs once nothing is left to send, so views can load
 // the uploaded photos, after which prune drops the finished previews.
-export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
+export function useUploads(onSettled: (summary: UploadSummary) => void) {
   const [items, setItems] = useState<UploadItem[]>([]);
   const started = useRef(new Set<string>());
   const counter = useRef(0);
@@ -30,16 +39,18 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
 
   const add = useCallback((files: File[], target: UploadTarget) => {
     const batch = `photos-${Date.now().toString(36)}-${counter.current + 1}`;
-    const added = files.map((file): UploadItem => {
+    const added = groupPhotoUploads(files).map(({ file, motion, video, error: pairError }): UploadItem => {
       const key = `upload-${++counter.current}`;
-      const error = !accepted.has(file.type) ? "只支持 JPEG 和 PNG 照片" : file.size > maxBytes ? "照片超过 256 MiB" : undefined;
-      const handle = transferStore.trackExternal({ key: `photos-${key}`, app: "photos", name: file.name, size: file.size, label: `相册 · ${target.label}`, batch }, { queued: !error });
+      const supported = video || accepted.has(file.type) || /\.(jpe?g|png|heic|heif)$/i.test(file.name);
+      const error = pairError ?? (!supported ? "支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV" : file.size > maxBytes || (motion?.size ?? 0) > maxBytes ? "每个文件不能超过 256 MiB" : undefined);
+      const handle = transferStore.trackExternal({ key: `photos-${key}`, app: "photos", name: file.name, size: file.size + (motion?.size ?? 0), label: `相册 · ${target.label}`, batch }, { queued: !error });
       if (error) handle.fail(error);
       tracked.current.set(key, handle);
-      return { key, name: file.name, file, target, url: URL.createObjectURL(file), aspect: 4 / 3, progress: 0, state: error ? "failed" : "waiting", error, rejected: Boolean(error) };
+      return { key, name: file.name, file, motion, video, target, url: video ? "" : URL.createObjectURL(file), aspect: 4 / 3, progress: 0, state: error ? "failed" : "waiting", error, rejected: Boolean(error) };
     });
     setItems((current) => [...added, ...current]);
     for (const item of added) {
+      if (item.video) continue;
       // The grid lays a preview out by its shape once the browser knows it.
       const image = new Image();
       image.onload = () => { if (image.naturalWidth && image.naturalHeight) update(item.key, { aspect: image.naturalWidth / image.naturalHeight }); };
@@ -58,9 +69,15 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
       handle?.start();
       void (async () => {
         try {
-          const asset = await uploadPhoto(item.target.libraryId, item.file, (progress) => { update(item.key, { progress }); handle?.progress(progress); });
-          if (item.target.albumId) await addToAlbum(item.target.albumId, asset.id);
-          update(item.key, { state: "done", progress: 1 });
+          const onProgress = (progress: number) => { update(item.key, { progress }); handle?.progress(progress); };
+          if (item.video) {
+            const completed = await attachLiveVideo(item.target.libraryId, item.file, onProgress);
+            update(item.key, { state: "done", progress: 1, completed: completed.length });
+          } else {
+            const asset = await uploadPhoto(item.target.libraryId, item.file, onProgress, undefined, item.motion);
+            if (item.target.albumId) await addToAlbum(item.target.albumId, asset.id);
+            update(item.key, { state: "done", progress: 1, liveStill: asset.liveVideoMissing });
+          }
           handle?.done();
         } catch (caught) {
           started.current.delete(item.key);
@@ -73,13 +90,18 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
     const finished = items.filter((item) => item.state === "done" && !settled.current.has(item.key));
     if (!busy && finished.length) {
       for (const item of finished) settled.current.add(item.key);
-      const targets = new Map(finished.map((item) => [`${item.target.libraryId}/${item.target.albumId ?? ""}`, item.target]));
-      onSettled([...targets.values()]);
+      const photos = finished.filter((item) => !item.video);
+      const targets = new Map(photos.map((item) => [`${item.target.libraryId}/${item.target.albumId ?? ""}`, item.target]));
+      onSettled({
+        targets: [...targets.values()], photos: photos.length,
+        completed: finished.reduce((sum, item) => sum + (item.completed ?? 0), 0),
+        liveStills: photos.filter((item) => item.liveStill).length,
+      });
     }
   }, [items, update, onSettled]);
 
   const remove = useCallback((keep: (item: UploadItem) => boolean) => setItems((current) => {
-    for (const item of current) if (!keep(item)) URL.revokeObjectURL(item.url);
+    for (const item of current) if (!keep(item) && item.url) URL.revokeObjectURL(item.url);
     return current.filter(keep);
   }), []);
   const prune = useCallback(() => remove((item) => item.state !== "done"), [remove]);
@@ -89,7 +111,7 @@ export function useUploads(onSettled: (targets: UploadTarget[]) => void) {
   itemsRef.current = items;
   useEffect(() => () => {
     for (const item of itemsRef.current) {
-      URL.revokeObjectURL(item.url);
+      if (item.url) URL.revokeObjectURL(item.url);
       // The queue lives in the photo window: photos not started stay unsent.
       if (item.state === "waiting") tracked.current.get(item.key)?.cancel("相册窗口已关闭，未上传");
     }
@@ -119,8 +141,9 @@ export function UploadTray({ items, onRetry, onClear }: { items: UploadItem[]; o
         <ul>
           {items.map((item) => (
             <li key={item.key} className={item.state}>
-              <img src={item.url} alt="" />
-              <span><strong>{item.name}</strong><small>{item.state === "failed" ? item.error : item.state === "done" ? `已加入${item.target.label}` : item.state === "uploading" ? `${Math.round(item.progress * 100)}%` : "等待中"}</small></span>
+              {item.video ? <span className="ph-upload-video"><Film /></span> : <img src={item.url} alt="" />}
+              <span><strong>{item.name}</strong><small>{item.state === "failed" ? item.error : item.state === "uploading" ? `${Math.round(item.progress * 100)}%` : item.state === "waiting" ? "等待中"
+                : item.video ? `已为 ${item.completed} 张照片补上实况视频` : item.liveStill ? `已加入${item.target.label} · 实况视频未上传` : `已加入${item.target.label}`}</small></span>
               {item.state === "failed" && !item.rejected && <button type="button" aria-label={`重试上传 ${item.name}`} onClick={() => onRetry(item.key)}><RotateCcw /></button>}
             </li>
           ))}

@@ -10,7 +10,7 @@ import (
 )
 
 // confine restricts the worker with Landlock before it serves anything: it
-// may read the data volume and write only the places given (ADR 0022
+// may read the data volume and write only the places given (ADR 0024
 // decision 4). Renames between those places, such as into the member's
 // recycle bin, need the refer right. It fails rather than run unconfined on a
 // kernel without Landlock ABI 3 (Linux 6.2); a missing place, such as an

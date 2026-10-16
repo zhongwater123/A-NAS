@@ -1,7 +1,7 @@
 # 日志
 
 状态：implemented
-更新时间：2026-10-12
+更新时间：2026-10-14
 
 ## 目标
 
@@ -70,7 +70,7 @@
 
 - Given：活动记录已按某些条件筛选。
 - When：点击页头的“导出”。
-- Then：按当前筛选从最新开始读取至多 5,000 条，下载为 UTF-8（带 BOM，Excel 可直接打开）的 CSV，列为时间、类别、成员、描述、来源、操作代码、对象类型、对象 ID 和记录 ID，文件名形如 `a-nas-activity-20261012-1432.csv`。导出期间按钮显示进度，不能重复点击；超过上限时提示只导出了最新的 5,000 条。
+- Then：按当前筛选从最新开始读取至多 5,000 条，下载为 UTF-8（带 BOM，Excel 可直接打开）的 CSV，列为时间、类别、成员（“昵称（账号名）”）、描述、来源、操作代码、对象类型、对象 ID 和记录 ID，文件名形如 `a-nas-activity-20261012-1432.csv`。昵称和文件名由成员自己决定，以 `=`、`+`、`-`、`@` 或制表符开头的单元格前加一个撇号，表格软件把它当文字而不是公式。导出期间按钮显示进度，不能重复点击；超过上限时提示只导出了最新的 5,000 条。
 
 ### 管理员查看系统日志
 
@@ -82,7 +82,7 @@
 ### 按服务、级别、时间和关键词筛选系统日志
 
 - Given：系统日志已显示。
-- When：选择服务（全部服务、产品服务、Host Agent、相册服务、容器代理、本地 AI、媒体 Worker、本机屏幕、文件共享 Samba、局域网入口 Caddy）、级别（全部、警告及以上、仅错误）、时间范围，或输入关键词。
+- When：选择服务（全部服务、产品服务、Host Agent、相册服务、分享服务、容器代理、本地 AI、媒体 Worker、本机屏幕、文件共享 Samba、局域网入口 Caddy）、级别（全部、警告及以上、仅错误）、时间范围，或输入关键词。
 - Then：从最新重新读取。产品服务等 A-NAS 进程以 JSON 写日志，级别、消息和字段取自日志本身；systemd 自身与其他程序的行使用 journald 优先级。一次读取最多检查 20,000 行；在此之前没有凑满一页时，页尾说明“已检查到某时间”，可以继续加载更早的日志。
 
 ### 实时跟随
@@ -110,7 +110,7 @@
 ## 验收证据
 
 - Go：[活动记录合并与游标](../../internal/activity/activity_test.go)、[账号与登录记录](../../internal/accounts/activity_test.go)、[文件记录的空间与隐藏](../../internal/files/activity_test.go)、[相册活动](../../internal/photosapi/handler_test.go)、[活动记录 API](../../internal/httpapi/activity_test.go)、[系统日志 API](../../internal/httpapi/systemlogs_test.go)、[服务白名单与日志行解析](../../internal/systemlog/systemlog_test.go)、[journal 读取](../../internal/systemlog/journal/journal_test.go)、[Host Agent 系统日志接口](../../internal/hoststate/agent/logs_test.go)。
-- React：[日志分区测试](../../web/src/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/logs/describe.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
+- React：[日志分区测试](../../web/src/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
 - 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)。
 - 本地门禁：`make check`。
 

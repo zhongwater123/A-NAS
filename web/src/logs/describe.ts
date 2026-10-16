@@ -25,7 +25,7 @@ const name = (value: string, muted = false): Part => ({ name: value, muted });
 
 function accountName(account: ActivityAccount | undefined, viewerId: string): Part {
   if (!account) return name("已删除的账号", true);
-  return name(account.id === viewerId ? "你" : account.username);
+  return name(account.id === viewerId ? "你" : account.nickname || account.username);
 }
 
 function actorOf(event: ActivityEvent, viewerId: string): Part {
@@ -87,6 +87,7 @@ const photoVerbs: Record<string, Verb> = {
   "photo.restored": { named: (item) => ["恢复了照片", item], counted: (n) => `恢复了 ${n} 张照片` },
   "photo.purged": { named: (item) => ["彻底删除了照片", item], counted: (n) => `彻底删除了 ${n} 张照片` },
   "photo.renamed": { named: (item) => ["把照片重命名为", item], counted: (n) => `重命名了 ${n} 张照片` },
+  "photo.motion_attached": { named: (item) => ["为照片补上了实况视频", item], counted: (n) => `为 ${n} 张照片补上了实况视频` },
   "photo.moved": { counted: (n) => `移动了 ${n} 张照片` },
   "photo.copied": { counted: (n) => `复制了 ${n} 张照片` },
   "photo.album_created": { named: (item) => ["新建了相册", item], counted: (n) => `新建了 ${n} 个相册` },
@@ -133,17 +134,18 @@ function spaceLabel(event: ActivityEvent, viewerId: string): string | undefined 
   if (!event.space) return undefined;
   if (event.space.kind === "shared") return "共享空间";
   const owner = event.space.owner;
-  return !owner || owner.id === viewerId ? "个人空间" : `${owner.username} 的个人空间`;
+  return !owner || owner.id === viewerId ? "个人空间" : `${owner.nickname || owner.username} 的个人空间`;
 }
 
 // hiddenIn says whose private space a hidden name was in, then what happened.
 function hiddenIn(event: ActivityEvent, what: string): Part[] {
   const owner = event.space?.owner;
   if (!event.space || !owner) return [`在其他成员的空间${what}`];
-  return owner.id === event.actor?.id ? [`在个人空间${what}`] : ["在", name(owner.username), `的个人空间${what}`];
+  return owner.id === event.actor?.id ? [`在个人空间${what}`] : ["在", name(owner.nickname || owner.username), `的个人空间${what}`];
 }
 
-// An upload that replaced a file of the same name says so after the name.
+// An upload or a restore that replaced a file of the same name says so after
+// the name.
 const replacedSuffix = " (replaced)";
 
 function itemName(event: ActivityEvent): string | undefined {
@@ -177,6 +179,14 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
     case "user.disabled": return { parts: [actor, "禁用了", subject, "的账号"], meta: [], tone: "warning" };
     case "user.credential_reset": return { parts: [actor, "重置了", subject, "的密码"], meta: ["对方下次登录时需要设置新密码"], tone: "warning" };
     case "user.password_changed": return { parts: [actor, "修改了自己的密码"], meta: ["SMB 凭据已同步"] };
+    case "user.nickname_changed": {
+      // A rename names the account itself, so a new name cannot hide who chose it.
+      const who = event.actor && event.actor.id !== viewerId ? name(event.actor.username) : actor;
+      const meta = [detail.from ? `原昵称：${detail.from}` : "原来显示账号名"];
+      return detail.to ? { parts: [who, "把昵称改为", name(detail.to)], meta } : { parts: [who, "清除了昵称"], meta };
+    }
+    case "user.avatar_changed": return { parts: [actor, "更换了头像"], meta: [] };
+    case "user.avatar_removed": return { parts: [actor, "移除了头像"], meta: [] };
     case "space.viewing_started": return { parts: [actor, "开始只读查看", owner, "的个人空间"], meta: viewingMeta(), tone: "warning" };
     case "space.viewing_ended": return { parts: [actor, "结束了对", owner, "个人空间的只读查看"], meta: [] };
     case "photos.viewing_started": return { parts: [actor, "开始只读查看", subject, "的私有图库"], meta: viewingMeta(), tone: "warning" };

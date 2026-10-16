@@ -298,12 +298,15 @@ func TestReaderAddsSMARTHealthAndTemperatureWithoutExposingDeviceName(t *testing
 		},
 		readSMART: func(_ context.Context, deviceName string) ([]byte, error) {
 			if got, want := deviceName, "nvme0n1"; got != want {
-				t.Fatalf("SMART device = %q, want %q", got, want)
+				t.Errorf("SMART device = %q, want %q", got, want)
 			}
 			return []byte(`{"smart_status":{"passed":true},"temperature":{"current":34}}`), nil
 		},
 	})
 
+	if err := reader.RefreshSMART(context.Background()); err != nil {
+		t.Fatalf("RefreshSMART() error = %v", err)
+	}
 	state, err := reader.Read(context.Background())
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)

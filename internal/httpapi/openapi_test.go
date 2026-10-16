@@ -68,7 +68,13 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	edit, editType := feedbackForm{text: "改为：MKV 无法播放", version: feedbackItem.Version, keep: []string{feedbackItem.Images[0].ID}}.encode(t)
 	stale, staleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	svg, svgType := feedbackForm{images: [][]byte{[]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)}}.encode(t)
+	reply := feedbackItem.Comments[0]
+	replyPath := feedbackPath + "/comments/" + reply.ID
+	comment, commentType := feedbackForm{text: "我这边也能复现"}.encode(t)
+	commentEdit, commentEditType := feedbackForm{text: "已在 1.0.2 修复", version: reply.Version, keep: []string{reply.Images[0].ID}}.encode(t)
+	commentStale, commentStaleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	searchImage, searchImageType := imageSearchForm(t)
+	liveVideo, liveVideoType := multipartFile(t, "IMG_1.MOV", []byte("\x00\x00\x00\x18ftypqt  "))
 	tests := []struct {
 		name        string
 		method      string
@@ -91,6 +97,13 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo label cluster missing", path: "/api/v1/photos/labels/no-such-label/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo tags", path: "/api/v1/photos/tags", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo tag group", path: "/api/v1/photos/tags/" + url.PathEscape("小橘") + "/assets?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo people", path: "/api/v1/photos/people?hidden=1", handler: photoHandler, wantStatus: http.StatusOK},
+		{name: "photo library people off", method: http.MethodPatch, body: `{"people":false}`, path: "/api/v1/photos/libraries/" + photoLibraryID, handler: photoHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "photo person missing", path: "/api/v1/photos/people/person:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo person rename missing", method: http.MethodPatch, body: `{"name":"小明"}`, path: "/api/v1/photos/people/person:missing", handler: photoHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "photo person merge missing", method: http.MethodPost, body: `{"into":"person:other"}`, path: "/api/v1/photos/people/person:missing/merge", handler: photoHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "photo face assign missing", method: http.MethodPut, body: `{"name":"小明"}`, path: "/api/v1/photos/assets/" + photoAssetID + "/people/face:missing", handler: photoHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "photo avatar missing", path: "/api/v1/photos/occurrences/face:missing/avatar", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo entries", path: "/api/v1/photos/libraries/" + photoLibraryID + "/entries", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo directory", method: http.MethodPost, body: `{"name":"Trips"}`, path: "/api/v1/photos/libraries/" + photoLibraryID + "/directories", handler: photoHandler, csrf: true, wantStatus: http.StatusCreated},
 		{name: "photo asset", path: "/api/v1/photos/assets/" + photoAssetID, handler: photoHandler, wantStatus: http.StatusOK},
@@ -102,6 +115,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo similar", path: "/api/v1/photos/assets/" + photoAssetID + "/similar?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo similar missing", path: "/api/v1/photos/assets/photo:missing/similar", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo image search without local AI", method: http.MethodPost, body: searchImage, contentType: searchImageType, path: "/api/v1/photos/image-searches", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo live video without media", method: http.MethodPost, body: liveVideo, contentType: liveVideoType, path: "/api/v1/photos/libraries/" + photoLibraryID + "/live-videos", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "photo image search expired", path: "/api/v1/photos/image-searches/0123/assets?limit=2", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
@@ -110,6 +124,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "media library", path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, wantStatus: http.StatusOK},
 		{name: "media library missing", path: "/api/v1/media/libraries/library:missing", handler: mediaHandler, wantStatus: http.StatusNotFound},
 		{name: "media library overlap", method: http.MethodPost, body: `{"name":"重复","kind":"movies","spaceId":"` + movies.shared.ID + `","folderIds":["` + movies.folder + `"]}`, path: "/api/v1/media/libraries", handler: mediaHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "media show rename", method: http.MethodPatch, body: `{"name":".hidden"}`, path: "/api/v1/media/shows/" + movies.show, handler: mediaHandler, csrf: true, wantStatus: http.StatusBadRequest},
 		{name: "media video file rename", method: http.MethodPatch, body: `{"fileName":"热天午后.txt"}`, path: "/api/v1/media/videos/" + movies.film, handler: mediaHandler, csrf: true, wantStatus: http.StatusBadRequest},
 		{name: "media library scan", method: http.MethodPost, path: "/api/v1/media/libraries/" + movies.library + "/scan", handler: mediaHandler, csrf: true, wantStatus: http.StatusAccepted},
 		{name: "media library rename", method: http.MethodPatch, body: `{"name":"家庭影院"}`, path: "/api/v1/media/libraries/" + movies.library, handler: mediaHandler, csrf: true, wantStatus: http.StatusOK},
@@ -147,6 +162,13 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "feedback image", path: feedbackPath + "/images/" + feedbackItem.Images[0].ID, handler: feedbackHandler, wantStatus: http.StatusOK},
 		{name: "feedback image missing", path: feedbackPath + "/images/feedback-image:missing", handler: feedbackHandler, wantStatus: http.StatusNotFound},
 		{name: "feedback missing", method: http.MethodDelete, path: "/api/v1/feedback/feedback:missing", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback comment", method: http.MethodPost, body: comment, contentType: commentType, path: feedbackPath + "/comments", handler: feedbackHandler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "feedback comment on a missing item", method: http.MethodPost, body: comment, contentType: commentType, path: "/api/v1/feedback/feedback:missing/comments", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback comment edit", method: http.MethodPut, body: commentEdit, contentType: commentEditType, path: replyPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusOK},
+		{name: "feedback comment stale edit", method: http.MethodPut, body: commentStale, contentType: commentStaleType, path: replyPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "feedback comment image", path: feedbackPath + "/images/" + reply.Images[0].ID, handler: feedbackHandler, wantStatus: http.StatusOK},
+		{name: "feedback comment missing", method: http.MethodDelete, path: feedbackPath + "/comments/feedback-comment:missing", handler: feedbackHandler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "feedback comment delete", method: http.MethodDelete, path: replyPath, handler: feedbackHandler, csrf: true, wantStatus: http.StatusOK},
 		{name: "feedback unavailable", path: "/api/v1/feedback", handler: feedbackapi.New(nil, nil), wantStatus: http.StatusServiceUnavailable},
 		{name: "transfers", path: "/api/v1/transfers", handler: transfer.handler, wantStatus: http.StatusOK},
 		{name: "transfer", path: "/api/v1/transfers/" + transfer.upload, handler: transfer.handler, wantStatus: http.StatusOK},
@@ -173,6 +195,10 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "system unavailable", path: "/api/v1/system", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "disks unavailable", path: "/api/v1/disks", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "host state unavailable", path: "/api/v1/host-state", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
+		{name: "task manager device with unknown accelerator metrics", path: "/api/v1/task-manager/device", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
+		{name: "task manager tasks", path: "/api/v1/task-manager/tasks", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
+		{name: "task manager device unavailable", path: "/api/v1/task-manager/device", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
+		{name: "task manager tasks unavailable", path: "/api/v1/task-manager/tasks", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "metrics", path: "/api/v1/metrics", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "metrics unavailable", path: "/api/v1/metrics", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "containers", path: "/api/v1/containers", handler: containerAPI(fakecontainers.New()), wantStatus: http.StatusOK},
@@ -185,6 +211,9 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "app install stale", method: http.MethodPost, body: `{"digest":"` + strings.Repeat("a", 64) + `"}`, path: "/api/v1/apps/memos/install", handler: appAPI(t), wantStatus: http.StatusConflict},
 		{name: "app uninstall missing", method: http.MethodPost, body: `{}`, path: "/api/v1/apps/memos/uninstall", handler: appAPI(t), wantStatus: http.StatusConflict},
 		{name: "apps disabled", path: "/api/v1/apps", handler: appstoreapi.New(nil, appstoreapi.DataSourceLive, appstoreapi.Options{}), wantStatus: http.StatusServiceUnavailable},
+		{name: "app shortcuts", path: "/api/v1/app-shortcuts", handler: installedShortcuts(t), wantStatus: http.StatusOK},
+		{name: "app shortcuts disabled", path: "/api/v1/app-shortcuts", handler: appstoreapi.NewShortcuts(nil), wantStatus: http.StatusOK},
+		{name: "app shortcut icon missing", path: "/api/v1/app-shortcuts/no-such-app/icon", handler: installedShortcuts(t), wantStatus: http.StatusNotFound},
 		{name: "terminal status", path: terminal.StatusPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusOK},
 		{name: "terminal disabled", path: terminal.SessionPath, handler: terminal.New(terminal.Config{}, nil), wantStatus: http.StatusForbidden},
 	}
@@ -252,13 +281,18 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 }
 
 // feedbackAPI returns the feedback API acting for one member, and an item
-// with one screenshot.
+// with one screenshot and a comment that has one too.
 func feedbackAPI(t *testing.T) (http.Handler, feedback.Item) {
 	t.Helper()
 	store := openFeedback(t)
-	item, err := store.Create(context.Background(), feedback.Actor{ID: "user:contract", Username: "contract"}, feedback.Content{Text: "截图里的按钮错位", New: [][]byte{feedbackPNG(t)}})
+	actor := feedback.Actor{ID: "user:contract", Username: "contract"}
+	item, err := store.Create(context.Background(), actor, feedback.Content{Text: "截图里的按钮错位", New: [][]byte{feedbackPNG(t)}})
 	if err != nil {
 		t.Fatalf("create feedback: %v", err)
+	}
+	item, err = store.AddComment(context.Background(), actor, item.ID, feedback.Content{Text: "附上我这边的截图", New: [][]byte{feedbackPNG(t)}})
+	if err != nil {
+		t.Fatalf("comment on feedback: %v", err)
 	}
 	api := feedbackapi.New(store, nil)
 	member := accounts.User{ID: "user:contract", Username: "contract", Role: accounts.RoleMember}
@@ -381,6 +415,22 @@ func photoAPI(t *testing.T) (http.Handler, string, string) {
 	return withPhotoPrincipal(photosapi.New(service, nil)), private, asset.ID
 }
 
+// multipartFile is a multipart body with one file part.
+func multipartFile(t *testing.T, name string, content []byte) (string, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write(content)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.String(), writer.FormDataContentType()
+}
+
 // imageSearchForm is a multipart body with an image to search by.
 func imageSearchForm(t *testing.T) (string, string) {
 	t.Helper()
@@ -403,6 +453,25 @@ func withPhotoPrincipal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), photos.Principal{UserID: "user:contract"})))
 	})
+}
+
+// installedShortcuts lists Navidrome, installed in the simulated store.
+func installedShortcuts(t *testing.T) http.Handler {
+	store, err := fakeappstore.New(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	identity, _ := appstoreapi.DevelopmentHost{}.AppIdentity(ctx, "navidrome")
+	plan, err := store.Plan(ctx, "navidrome", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(ctx, "navidrome", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	return appstoreapi.NewShortcuts(store)
 }
 
 func appAPI(t *testing.T) http.Handler {

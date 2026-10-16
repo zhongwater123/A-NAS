@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -34,9 +35,10 @@ func TestDockerAndAppCenterAreForAdministratorsWithCSRF(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
-		Containers: containersapi.New(fakecontainers.New(), containersapi.DataSourceSimulated, logger),
-		Apps:       appAPI(t),
-		Logger:     logger,
+		Containers:   containersapi.New(fakecontainers.New(), containersapi.DataSourceSimulated, logger),
+		Apps:         appAPI(t),
+		AppShortcuts: installedShortcuts(t),
+		Logger:       logger,
 	})
 
 	anonymous := httptest.NewRecorder()
@@ -49,6 +51,21 @@ func TestDockerAndAppCenterAreForAdministratorsWithCSRF(t *testing.T) {
 		if got := member.call(t, http.MethodGet, path, ""); got.Code != http.StatusForbidden {
 			t.Errorf("member GET %s = %d %s, want 403", path, got.Code, got.Body)
 		}
+	}
+	// Every signed-in user opens installed apps from the desktop.
+	if anonymous := httptest.NewRecorder(); true {
+		handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/v1/app-shortcuts", nil))
+		if anonymous.Code != http.StatusUnauthorized {
+			t.Errorf("anonymous shortcuts = %d", anonymous.Code)
+		}
+	}
+	for _, path := range []string{"/api/v1/app-shortcuts", "/api/v1/app-shortcuts/navidrome/icon"} {
+		if got := member.call(t, http.MethodGet, path, ""); got.Code != http.StatusOK {
+			t.Errorf("member GET %s = %d %s, want 200", path, got.Code, got.Body)
+		}
+	}
+	if got := member.call(t, http.MethodGet, "/api/v1/app-shortcuts", ""); !strings.Contains(got.Body.String(), `"id":"navidrome"`) || strings.Contains(got.Body.String(), "compose") {
+		t.Errorf("member shortcuts = %s, want Navidrome and nothing about how it was installed", got.Body)
 	}
 	administrator := signIn(t, handler, "owner", "correct horse battery staple")
 	for _, path := range []string{"/api/v1/containers", "/api/v1/apps", "/api/v1/apps/memos/plan"} {

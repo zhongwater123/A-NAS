@@ -1,8 +1,9 @@
-import { Copy, FolderPlus, Pencil, Plus, X } from "lucide-react";
+import { CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 
 import { formatBytes } from "../bytes";
-import { type Caller, canChange, formatDateTime, libraryName, libraryOf, messageOf, ownLibrary, sharedLibrary } from "./model";
+import { type Caller, canChange, canChangePeople, formatDateTime, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, sharedLibrary } from "./model";
+import { PhotoFaces } from "./People";
 import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
 
 export interface DetailsActions {
@@ -11,8 +12,16 @@ export interface DetailsActions {
   addToAlbum: (assets: PhotoAsset[]) => void;
   openAlbum: (album: Pick<PhotoAlbum, "id" | "name" | "libraryId">) => void;
   openTag: (tag: string) => void;
+  // Opens a person's photos.
+  openPerson: (personId: string) => void;
+  // The member library the viewer was opened from, if being viewed.
+  viewing: string;
+  // Uploads the MOV a Live Photo still came without.
+  attachLiveVideo: (asset: PhotoAsset, file: File) => Promise<void>;
   error: (message: string) => void;
 }
+
+const mediaNames: Record<string, string> = { "image/png": "PNG", "image/heic": "HEIC", "image/jpeg": "JPEG" };
 
 interface Props {
   asset: PhotoAsset;
@@ -23,10 +32,11 @@ interface Props {
   onChanged: (asset: PhotoAsset) => void;
 }
 
-// PhotoDetails is the viewer's side panel: when and what the photo is, its
-// tags and its albums.
+// PhotoDetails is the viewer's side panel: when and what the photo is, who is
+// in it, its tags and its albums.
 export function PhotoDetails({ asset, details, caller, actions, onChanged }: Props) {
   const [tag, setTag] = useState("");
+  const [attaching, setAttaching] = useState(false);
   const current = details ?? asset;
   const editable = canChange(caller, asset);
   const library = libraryOf(caller, asset.libraryId);
@@ -43,6 +53,18 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
     setTag("");
     void run(() => addPhotoTag(asset.id, name));
   };
+  const pickLiveVideo = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".mov,video/quicktime";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setAttaching(true);
+      void actions.attachLiveVideo(current, file).finally(() => setAttaching(false));
+    };
+    input.click();
+  };
   const megapixels = current.width * current.height / 1e6;
   const tags = details?.tags ?? [];
   const albums = details?.albums ?? [];
@@ -56,12 +78,23 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
       <p className="ph-details-when">{current.takenAt ? formatDateTime(current.takenAt) : "没有拍摄时间"}</p>
       <dl>
         {current.width > 0 && <><dt>尺寸</dt><dd>{current.width} × {current.height}{megapixels >= 1 ? ` · ${megapixels.toFixed(1)} MP` : ""}</dd></>}
-        <dt>大小</dt><dd>{formatBytes(current.sizeBytes)} · {current.mediaType === "image/png" ? "PNG" : "JPEG"}</dd>
+        <dt>大小</dt><dd>{formatBytes(current.sizeBytes)} · {mediaNames[current.mediaType] ?? "JPEG"}</dd>
+        {current.motion && <><dt>动态</dt><dd>{current.motion.kind === "live-photo" ? "实况照片" : "动态照片"} · {current.motion.duration.toFixed(1)} 秒</dd></>}
         <dt>位置</dt><dd>{libraryName(caller, library)}</dd>
         <dt>导入</dt><dd>{formatDateTime(current.importedAt)}</dd>
         {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}
       </dl>
       {current.alsoKeptBy?.length ? <p className="ph-details-hint">{current.alsoKeptBy.join("、")} 也保存了这张照片。</p> : null}
+      {current.liveVideoMissing && (
+        <section className="ph-details-live" aria-label="实况照片">
+          <p><CircleDot />实况照片只上传了静态画面</p>
+          <small>{liveVideoHint}</small>
+          {editable && <button type="button" disabled={attaching} onClick={pickLiveVideo}>{attaching ? <span className="ph-spinner" /> : <Film />}{attaching ? "正在上传视频" : "上传视频"}</button>}
+        </section>
+      )}
+
+      <PhotoFaces asset={current} faces={details?.people ?? []} editable={canChangePeople(caller, asset.libraryId)} viewing={actions.viewing}
+        onChanged={onChanged} onOpenPerson={actions.openPerson} onError={actions.error} />
 
       <section aria-label="标签">
         <h4>标签</h4>

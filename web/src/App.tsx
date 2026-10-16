@@ -6,7 +6,6 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bot,
-  Box,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -24,11 +23,11 @@ import {
   FolderPlus,
   FolderUp,
   Grid2X2,
+  History,
   Image,
   List,
   Maximize2,
   Minus,
-  Monitor,
   Music2,
   PanelLeftClose,
   Pencil,
@@ -45,10 +44,10 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 
 import {
-  APIError, FileEntry, Notification, Session, Space, Volume,
+  APIError, FileEntry, Notification, Session, Space, User, Volume,
   acknowledgeNotification, changePassword, copyFile, createDirectory, currentSession, deleteFile,
   endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications,
   listSpaces, listVolumes, login, logout, moveFile, onSessionEnded, readFileTextPreview,
@@ -56,22 +55,28 @@ import {
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { assistantStatus } from "./assistant/assistantApi";
+import { shortcutApp, useAppShortcuts } from "./appShortcuts";
 import { BackupCenter } from "./backup/BackupCenter";
+import { VersionsDialog } from "./backup/VersionsDialog";
 import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import { formatBytes } from "./bytes";
 import { DesktopApp, DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
+import { DockerGlyph } from "./DockerGlyph";
 import { DockerFocus, DockerPanel } from "./docker/DockerPanel";
 import { appProject } from "./docker/model";
 import { FeedbackChannel } from "./feedback/FeedbackChannel";
 import { FileViewer } from "./files/FileViewer";
 import { nameErrorText, nameProblem } from "./fileNames";
-import { fileTypeLabel, isBrowserPreviewableImage, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
+import { accountErrorText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
+import { fileTypeLabel, isPreviewableImage, isVideoFile, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
 import { MediaCenter } from "./media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
 import { PhotosGlyph } from "./PhotosGlyph";
+import { fileVisualURL } from "./files/preview";
 import { MusicPanel } from "./music/MusicPanel";
+import { displayName, forgetPeople, fullName, loadPeople, rememberPerson, usePeople, type People } from "./people";
 import { PhotosPanel } from "./photos/PhotosPanel";
 import { SettingsPanel, SettingsSection, useStoragePlan } from "./SettingsPanel";
 import { StatusBar } from "./StatusBar";
@@ -83,6 +88,8 @@ import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
 import type { TransferLocation } from "./transfers/transfersApi";
 import { useHostState } from "./useHostState";
 import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
+import { SharesProvider, useShares } from "./shares/SharesProvider";
+import { SharesPanel } from "./shares/SharesPanel";
 import "./styles.css";
 
 // The assistant window, with its chat libraries, loads when first opened.
@@ -91,7 +98,7 @@ const AssistantPanel = lazy(() => import("./assistant/AssistantPanel").then((mod
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store" | "assistant";
+type WindowID = "shares" | "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store" | "assistant";
 
 interface WindowModel {
   id: WindowID;
@@ -120,6 +127,7 @@ type WindowAction =
   | { type: "restore"; ids: WindowID[] };
 
 const initialWindows: WindowModel[] = [
+  { id: "shares", title: "分享", open: false, minimized: false, maximized: false, x: 250, y: 65, width: 950, height: 680, z: 2, opened: 0 },
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
 	{ id: "transfers", title: "传输中心", open: false, minimized: false, maximized: false, x: 270, y: 84, width: 900, height: 600, z: 2, opened: 0 },
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
@@ -134,6 +142,7 @@ const initialWindows: WindowModel[] = [
 ];
 
 const windowIcons: Record<WindowID, AppGlyph> = {
+  shares: Share2,
   files: FolderClosed,
   transfers: ArrowDownUp,
   photos: PhotosGlyph,
@@ -142,14 +151,17 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   trash: Trash2,
   backup: BackupCenterGlyph,
   settings: Settings,
-  docker: Box,
+  docker: DockerGlyph,
   store: ShoppingBag,
   assistant: Bot,
 };
+// A press on the wallpaper that moves this many pixels or more is a drag, not a click.
+const wallpaperClickSlop = 6;
 // Apps on a white tile (相册) keep it in their window's title bar too.
 const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
+  shares: "download",
   files: "files",
   transfers: "download",
   photos: "photos",
@@ -165,13 +177,13 @@ const windowTones: Record<WindowID, string> = {
 
 export default function App() {
 	const [session, setSessionState] = useState<Session>();
-	const [mode, setMode] = useState<"loading" | "setup" | "login">("loading");
+	const [mode, setMode] = useState<AuthMode>("loading");
 	const [error, setError] = useState("");
 	useEffect(() => {
 		let active = true;
-		void getSetupStatus().then(async ({ setupRequired }) => {
+		void getSetupStatus().then(async ({ setupRequired, setupAllowed }) => {
 			if (!active) return;
-			if (setupRequired) setMode("setup");
+			if (setupRequired) setMode(setupAllowed === false ? "setup-elsewhere" : "setup");
 			else {
 				try { const value = await currentSession(); if (active) setSessionState(value); }
 				catch { if (active) setMode("login"); }
@@ -196,7 +208,7 @@ export default function App() {
 	if (session.user.mustChangePassword) {
 		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
 	}
-	return <Desktop session={session} onLogout={signOut} />;
+	return <Desktop session={session} onLogout={signOut} onUserChange={(user) => setSessionState((current) => current && { ...current, user })} />;
 }
 
 // PasswordChange blocks the desktop after an administrator reset the
@@ -204,10 +216,13 @@ export default function App() {
 function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogout: () => void }) {
 	const [error, setError] = useState("");
 	const [submitting, setSubmitting] = useState(false);
+	const hint = useId();
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
 		const next = String(data.get("newPassword"));
+		const problem = passwordProblem(next);
+		if (problem) { setError(problem); return; }
 		if (next !== String(data.get("confirmPassword"))) { setError("两次输入的新密码不一致"); return; }
 		setSubmitting(true);
 		try { await changePassword(String(data.get("currentPassword")), next); onChanged(); }
@@ -218,7 +233,7 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 		<span className="brand-mark large">A</span><p className="section-label">PASSWORD RESET</p><h1>设置新密码</h1>
 		<p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
 		<label>当前密码<input name="currentPassword" type="password" required autoComplete="current-password" /></label>
-		<label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
+		<div className="auth-field"><label>新密码<input name="newPassword" type="password" minLength={12} required autoComplete="new-password" aria-describedby={hint} /></label><small id={hint}>{passwordRuleText}</small></div>
 		<label>确认新密码<input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" /></label>
 		{error && <p className="form-error">{error}</p>}
 		<button className="primary" disabled={submitting}>{submitting ? "处理中…" : "保存新密码"}</button>
@@ -229,6 +244,7 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 // NotificationCenter shows what administrators did to the account since the
 // user last acknowledged it: viewing the private space or resetting the password.
 function NotificationCenter() {
+	const people = usePeople();
 	const [items, setItems] = useState<Notification[]>([]);
 	useEffect(() => { void listNotifications().then(setItems).catch(() => undefined); }, []);
 	if (!items.length) return null;
@@ -238,47 +254,79 @@ function NotificationCenter() {
 	};
 	return <div className="notice-layer"><section className="notice-card" role="alertdialog" aria-label="账号通知">
 		<p className="section-label">ACCOUNT NOTICE</p><h2>账号通知</h2>
-		<ul>{items.map((item) => <li key={item.id}>{describeNotification(item)}</li>)}</ul>
+		<ul>{items.map((item) => <li key={item.id}>{describeNotification(item, people)}</li>)}</ul>
 		<button className="primary" onClick={() => void acknowledge()}>知道了</button>
 	</section></div>;
 }
 
-function describeNotification(item: Notification): string {
+function describeNotification(item: Notification, people: People): string {
 	const when = new Date(item.createdAt).toLocaleString("zh-CN");
+	// What an administrator did names them with the account name too.
+	const actor = fullName(people.byUsername(item.actorUsername) ?? { username: item.actorUsername });
 	if (item.kind === "admin_viewing" || item.kind === "admin_library_viewing") {
 		const what = item.kind === "admin_library_viewing" ? "私有图库" : "个人空间";
 		const until = item.expiresAt ? `，${new Date(item.expiresAt).toLocaleString("zh-CN")} 自动结束` : "";
-		return `管理员 ${item.actorUsername} 于 ${when} 开启了对你${what}的只读查看${until}。原因：${item.reason ?? "未填写"}`;
+		return `管理员 ${actor} 于 ${when} 开启了对你${what}的只读查看${until}。原因：${item.reason ?? "未填写"}`;
 	}
-	return `管理员 ${item.actorUsername} 于 ${when} 重置了你的密码。`;
+	return `管理员 ${actor} 于 ${when} 重置了你的密码。`;
 }
 
-function Authentication({ mode, error: initialError, onAuthenticated }: { mode: "loading" | "setup" | "login"; error: string; onAuthenticated: (session: Session) => void }) {
+type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
+
+function Authentication({ mode, error: initialError, onAuthenticated }: { mode: AuthMode; error: string; onAuthenticated: (session: Session) => void }) {
 	const [error, setError] = useState(initialError);
 	const [submitting, setSubmitting] = useState(false);
+	const usernameHint = useId();
+	const passwordHint = useId();
 	if (mode === "loading") return <main className="auth-shell"><div className="auth-card"><span className="loader" /><h1>正在启动 A-NAS…</h1></div></main>;
+	// A LAN browser may not claim a device that is not set up yet.
+	if (mode === "setup-elsewhere") return <main className="auth-shell"><section className="auth-card" aria-label="在本机启用 A-NAS">
+		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>请在 NAS 本机启用</h1>
+		<p>这台 A-NAS 还没有管理员。为防止局域网中的其他人抢先认领，首个管理员只能在 NAS 自己的屏幕上创建。</p>
+		<p>没有接屏幕时，用 SSH 隧道把 NAS 的 127.0.0.1:8080 转到这台电脑，再打开 http://127.0.0.1:8080 完成启用。</p>
+		<button className="primary" onClick={() => window.location.reload()}>已启用，刷新页面</button>
+	</section></main>;
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault(); setSubmitting(true); setError("");
+		event.preventDefault(); setError("");
 		const data = new FormData(event.currentTarget);
+		// Signing in applies no rules, so passwords set under earlier ones keep working.
+		const problem = mode === "setup" ? usernameProblem(String(data.get("username"))) ?? passwordProblem(String(data.get("password"))) : undefined;
+		if (problem) { setError(problem); return; }
+		setSubmitting(true);
 		try {
 			const session = mode === "setup"
 				? await setupAdministrator(String(data.get("username")), String(data.get("password")), isLocalConsole())
 				: await login(String(data.get("username")), String(data.get("password")), isLocalConsole());
 			onAuthenticated(session);
-		} catch (caught) { setError(caught instanceof APIError ? caught.message : "请求失败，请稍后再试"); }
+		} catch (caught) { setError(accountErrorText(caught) ?? (caught instanceof APIError ? caught.message : "请求失败，请稍后再试")); }
 		finally { setSubmitting(false); }
 	};
 	return <main className="auth-shell"><form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
 		<span className="brand-mark large">A</span><p className="section-label">A-NAS v1.0.1 PREVIEW</p><h1>{mode === "setup" ? "启用 A-NAS" : "登录 A-NAS"}</h1>
 		{mode === "setup" && <p>创建本机管理员账号以启用设备。</p>}
-		<label>账号<input name="username" required autoComplete="username" /></label>
-		<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} /></label>
+		<div className="auth-field">
+			<label>账号<input name="username" required autoComplete="username" autoCapitalize="none" spellCheck={false} aria-describedby={mode === "setup" ? usernameHint : undefined} /></label>
+			{mode === "setup" && <small id={usernameHint}>{usernameRuleText}</small>}
+		</div>
+		<div className="auth-field">
+			<label>密码<input name="password" type="password" minLength={12} required autoComplete={mode === "setup" ? "new-password" : "current-password"} aria-describedby={mode === "setup" ? passwordHint : undefined} /></label>
+			{mode === "setup" && <small id={passwordHint}>{passwordRuleText}</small>}
+		</div>
 		{error && <p className="form-error">{error}</p>}<button className="primary" disabled={submitting}>{submitting ? "处理中…" : mode === "setup" ? "创建管理员并启用" : "登录"}</button>
 	</form></main>;
 }
 
-function Desktop({ session, onLogout }: { session: Session; onLogout: () => void }) {
+function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogout: () => void; onUserChange: (user: User) => void }) {
   const host = useHostState(true);
+  // Names and avatars of every account; read again whenever the page comes
+  // back into view, so someone else's new nickname shows up without a reload.
+  useEffect(() => {
+    void loadPeople();
+    const refresh = () => { if (document.visibilityState === "visible") void loadPeople(); };
+    document.addEventListener("visibilitychange", refresh);
+    return () => { document.removeEventListener("visibilitychange", refresh); forgetPeople(); };
+  }, [session.user.id]);
+  const changeUser = (user: User) => { rememberPerson(user); onUserChange(user); };
   const [windows, dispatch] = useReducer(windowReducer, initialWindows);
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
   const openWindow = (id: WindowID) => dispatch({ type: "open", id });
@@ -290,7 +338,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
   useEffect(() => { transferStore.attach(session.user.id); }, [session.user.id]);
-  // The assistant opens only when this device runs one for this account (ADR 0022).
+  // The assistant opens only when this device runs one for this account (ADR 0024).
   const [assistantReady, setAssistantReady] = useState(false);
   useEffect(() => { void assistantStatus().then((status) => setAssistantReady(status.available)).catch(() => setAssistantReady(false)); }, [session.user.id]);
   // A folder the transfer center asks the file manager to show.
@@ -302,6 +350,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const [photoFocus, setPhotoFocus] = useState<{ assetId: string; at: number }>();
   const showInDocker = (appID: string) => { setDockerFocus({ project: appProject(appID), at: Date.now() }); openWindow("docker"); };
   const showPhoto = (assetId: string) => { setPhotoFocus({ assetId, at: Date.now() }); openWindow("photos"); };
+  const shortcuts = useAppShortcuts();
   // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
@@ -315,13 +364,16 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
     { id: "download", label: "传输中心", ariaLabel: "打开传输中心", keywords: "传输 上传 下载 进度 续传 transfer upload download", tone: "download", icon: <ArrowDownUp />, active: isOpen("transfers"), onClick: () => openWindow("transfers") },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
     { id: "backup", label: "备份中心", ariaLabel: "打开备份中心", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup", tone: "backup", icon: <BackupCenterGlyph />, active: isOpen("backup"), onClick: () => openWindow("backup") },
-    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <Box />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
+    ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <DockerGlyph />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
-    { id: "vm", label: "虚拟机", ariaLabel: "虚拟机，规划中", tone: "vm", icon: <Monitor />, disabled: true },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
     assistantReady
       ? { id: "ai", label: "AI 助手", ariaLabel: "打开 AI 助手", keywords: "助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <Bot />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
       : { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+    { id: "shares", label: "分享", ariaLabel: "打开分享", keywords: "分享 成员 留言 私聊 收到 发出", tone: "download", icon: <Share2 />, active: isOpen("shares"), onClick: () => openWindow("shares") },
+    // Installed apps open their own web interface; a stopped one shows its
+    // containers in Docker to administrators.
+    ...shortcuts.map((shortcut) => shortcutApp(shortcut, session.user.role === "admin" ? () => showInDocker(shortcut.id) : undefined)),
   ];
   const visible = windows.filter((window) => window.open && !window.minimized);
   const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
@@ -330,18 +382,36 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const [revealed, setRevealed] = useState<WindowID[]>([]);
   const hidden = revealed.filter((id) => windows.some((window) => window.id === id && window.open && window.minimized));
   const desktopView: DesktopView = visible.length ? "windows" : hidden.length ? "revealed" : "clear";
+  const showDesktop = () => {
+    setRevealed(visible.map((window) => window.id));
+    dispatch({ type: "show-desktop" });
+  };
   const toggleDesktop = () => {
-    if (visible.length) {
-      setRevealed(visible.map((window) => window.id));
-      dispatch({ type: "show-desktop" });
-    } else if (hidden.length) {
+    if (visible.length) showDesktop();
+    else if (hidden.length) {
       setRevealed([]);
       dispatch({ type: "restore", ids: hidden });
     }
   };
+  // A click on the bare wallpaper, or between desktop icons, puts the visible
+  // windows away as 显示桌面 does. The press must start there and stay put, so
+  // a window drag or a selection released over the wallpaper keeps the
+  // windows, and the press that closes a rail popover only closes it.
+  const wallpaperPress = useRef<{ x: number; y: number }>(undefined);
+  const pressDesktop = (event: ReactPointerEvent<HTMLElement>) => {
+    const shell = event.currentTarget;
+    const bare = event.target === shell || (event.target instanceof Element && event.target.classList.contains("desktop-grid"));
+    const railPopoverOpen = shell.querySelector('.system-rail [aria-expanded="true"]') !== null;
+    wallpaperPress.current = bare && event.button === 0 && !railPopoverOpen ? { x: event.clientX, y: event.clientY } : undefined;
+  };
+  const clickDesktop = (event: ReactMouseEvent<HTMLElement>) => {
+    const press = wallpaperPress.current;
+    wallpaperPress.current = undefined;
+    if (press && visible.length && Math.hypot(event.clientX - press.x, event.clientY - press.y) < wallpaperClickSlop) showDesktop();
+  };
 
   return (
-    <main className="desktop-shell">
+    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}><main className="desktop-shell" onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
       <div className="wallpaper-glow" />
 
       <SystemRail
@@ -366,10 +436,11 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
           if (!window.open) return null;
           return (
             <AppWindow key={window.id} model={window} dispatch={dispatch}>
-			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
+              {window.id === "shares" && <SharesPanel />}
+			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onUserChange={changeUser} onLogout={onLogout} />}
 			  {window.id === "files" && <FilePanel userID={session.user.id} navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
-			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} focus={photoFocus} onFocusHandled={() => setPhotoFocus(undefined)} />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={displayName(session.user)} isAdmin={session.user.role === "admin"} focus={photoFocus} onFocusHandled={() => setPhotoFocus(undefined)} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
@@ -393,7 +464,7 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
       <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
       <FeedbackChannel />
       <LocalConsoleScreenSaver enabled={isLocalConsole()} />
-    </main>
+    </main></SharesProvider>
   );
 }
 
@@ -507,6 +578,10 @@ interface FilePanelProps {
 }
 
 function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPhotos, onOpenMedia, onOpenMusic }: FilePanelProps) {
+  const shares = useShares();
+	const people = usePeople();
+	// A viewed private space is named by its owner, the way they go by.
+	const ownerName = (space: Space) => { const owner = people.byId(space.ownerUserId); return owner ? displayName(owner) : space.name; };
 	const [spaces, setSpaces] = useState<Space[]>([]);
 	const [spaceID, setSpaceID] = useState("");
 	const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -525,6 +600,8 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 	const [creatingDirectory, setCreatingDirectory] = useState(false);
 	const [renaming, setRenaming] = useState<FileEntry>();
 	const [pendingDelete, setPendingDelete] = useState<FileEntry[]>();
+	// The file whose snapshot versions 历史版本 shows.
+	const [versionsOf, setVersionsOf] = useState<FileEntry>();
 	const [failedPreviewID, setFailedPreviewID] = useState("");
 	// The file the viewer shows; images and PDFs open there instead of downloading.
 	const [viewingID, setViewingID] = useState("");
@@ -628,14 +705,17 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 	const directoryCount = visibleItems.filter((item) => item.kind === "directory").length;
 	const resourceCount = visibleItems.filter((item) => item.kind === "resource").length;
 	const totalSize = visibleItems.reduce((total, item) => total + (item.kind === "file" ? item.sizeBytes : 0), 0);
-	const selectedSpaceLabel = selectedSpace?.kind === "shared" ? "共享空间" : selectedSpace?.viewing ? `只读查看 · ${selectedSpace.name}` : "个人空间";
+	const selectedSpaceLabel = selectedSpace?.kind === "shared" ? "共享空间" : selectedSpace?.viewing ? `只读查看 · ${ownerName(selectedSpace)}` : "个人空间";
 	const capacityBytes = volume?.capacityBytes ?? 0;
 	const usageKnown = capacityBytes > 0 && volume?.availableBytes !== undefined;
 	const availableBytes = usageKnown ? Math.min(capacityBytes, Math.max(0, volume.availableBytes!)) : 0;
 	const usedBytes = usageKnown ? capacityBytes - availableBytes : 0;
 	const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
 	const canMutateSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
+	const canShareSelection = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity);
 	const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
+	// Snapshot versions are for the user's own spaces; viewing a member's is for browsing files.
+	const canShowVersions = selectedEntries.length === 1 && selectedItems.length === 1 && selectedEntry?.kind === "file" && !viewing;
 	const selectedFolders = selectedItems.filter((item) => item.kind === "directory");
 	const canPin = selectedFolders.length > 0 && selectedFolders.length === selectedItems.length && !loading && !activity;
 	const allPinned = selectedFolders.length > 0 && selectedFolders.every((item) => isPinned(item, order));
@@ -862,11 +942,13 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 		finally { setActivity(""); }
 	};
 	const itemIcon = (item: FileBrowserItem) => item.kind === "directory" ? <FolderClosed /> : item.kind === "file" ? <FileText /> : item.resource === "photos" ? <Image /> : item.resource === "music" ? <Music2 /> : <Film />;
-	const itemArtwork = (item: FileBrowserItem) => <>{itemIcon(item)}{item.entry?.kind === "file" && isBrowserPreviewableImage(item.name) && <img src={filePreviewURL(item.entry.id)} alt="" loading="lazy" onError={(event) => { event.currentTarget.hidden = true; }} />}</>;
+	const itemArtwork = (item: FileBrowserItem) => <>{itemIcon(item)}{item.entry?.kind === "file" && (isPreviewableImage(item.name) || isVideoFile(item.name)) && <img key={fileVisualURL(item.entry, "thumbnail")} src={fileVisualURL(item.entry, "thumbnail")} alt="" loading="lazy" onError={(event) => { event.currentTarget.hidden = true; }} />}</>;
 	let inspectorPreview: ReactNode;
-	if (selectedItem?.entry?.kind === "file" && isBrowserPreviewableImage(selectedItem.name) && failedPreviewID !== selectedItem.id) {
+	if (selectedItem?.entry?.kind === "file" && isPreviewableImage(selectedItem.name) && failedPreviewID !== selectedItem.id) {
 		const entry = selectedItem.entry;
-		inspectorPreview = <button type="button" className="file-inspector-zoom" title="点击预览" aria-label={`预览 ${selectedItem.name}`} onClick={() => showViewer(entry)}><img src={filePreviewURL(entry.id)} alt={`${selectedItem.name} 的预览`} onError={() => setFailedPreviewID(selectedItem.id)} /></button>;
+		inspectorPreview = <button type="button" className="file-inspector-zoom" title="点击预览" aria-label={`预览 ${selectedItem.name}`} onClick={() => showViewer(entry)}><img src={fileVisualURL(entry)} alt={`${selectedItem.name} 的预览`} onError={() => setFailedPreviewID(selectedItem.id)} /></button>;
+	} else if (selectedItem?.entry?.kind === "file" && isVideoFile(selectedItem.name) && failedPreviewID !== selectedItem.id) {
+		inspectorPreview = <img src={fileVisualURL(selectedItem.entry)} alt={`${selectedItem.name} 的预览`} onError={() => setFailedPreviewID(selectedItem.id)} />;
 	} else if (selectedItem?.entry?.kind === "file" && isPDFPreviewable(selectedItem.name)) {
 		inspectorPreview = <iframe src={filePreviewURL(selectedItem.entry.id)} title={`${selectedItem.name} 的预览`} />;
 	} else if (selectedItem?.entry?.kind === "file" && isTextPreviewable(selectedItem.name)) {
@@ -882,7 +964,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 			<p className="file-sidebar-label">空间</p>
 			<nav className="file-tree">{spaces.map((space) => {
 				const active = space.id === spaceID; const collapsed = collapsedSpaceIDs.includes(space.id);
-				const label = space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${space.name}` : "个人空间";
+				const label = space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${ownerName(space)}` : "个人空间";
 				return <div className="file-tree-group" key={space.id}>
 					<button className={`file-tree-root ${active ? "active" : ""}`} aria-expanded={active && !collapsed} onClick={() => toggleSpace(space)}>
 						<ChevronDown className={!active || collapsed ? "collapsed" : ""} /><span className={`file-tree-icon ${space.kind}`}>{space.kind === "shared" ? <UsersRound /> : space.viewing ? <ShieldCheck /> : <FolderOpen />}</span><strong>{label}</strong><small>{space.kind === "shared" ? "共享" : space.name}</small>
@@ -911,7 +993,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 					<button className="file-icon-button" aria-label="向上一级" title="向上一级" disabled={!trail.length || loading} onClick={() => navigateTo(trail.length - 1)}><ArrowUp /></button>
 					<button className="file-icon-button" aria-label="刷新文件列表" title="刷新" disabled={!spaceID || loading} onClick={() => { void refresh(spaceID, parentID); void refreshVolume(); }}><RefreshCw className={loading ? "spinning" : ""} /></button>
 				</div>
-				<select className="file-space-select" aria-label="空间" value={spaceID} onChange={(event) => chooseSpace(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${space.name}` : `个人空间 · ${space.name}`}</option>)}</select>
+				<select className="file-space-select" aria-label="空间" value={spaceID} onChange={(event) => chooseSpace(event.target.value)}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${ownerName(space)}` : `个人空间 · ${space.name}`}</option>)}</select>
 				<nav className="file-breadcrumb" aria-label="当前路径"><FolderOpen /><button onClick={() => navigateTo(0)}>{selectedSpaceLabel || "空间"}</button>{trail.map((item, index) => <span key={item.id}><ChevronRight /><button aria-current={index === trail.length - 1 ? "page" : undefined} onClick={() => navigateTo(index + 1)}>{item.name}</button></span>)}</nav>
 				<label className="file-search"><Search /><input type="search" aria-label="搜索当前目录" placeholder={`在${trail.at(-1)?.name ?? selectedSpaceLabel ?? "当前目录"}中搜索`} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
 			</div>
@@ -919,6 +1001,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 			<div className="file-action-bar" aria-label="文件命令">
 				<button className="file-command-button" disabled={!spaceID || Boolean(viewing) || Boolean(activity)} onClick={() => setCreatingDirectory((value) => !value)}><FolderPlus /><span>新建</span></button>
 				<i />
+				<button className="file-command-button" aria-label="分享" title="分享给成员" disabled={!canShareSelection} onClick={() => shares.compose(selectedEntries)}><Share2 /><span>分享</span></button>
 				<button className="file-command-button" aria-label="剪切" title="剪切" disabled={!canMutateSelection} onClick={() => setClipboard({ entries: selectedEntries, mode: "move" })}><Scissors /><span>剪切</span></button>
 				<button className="file-command-button" aria-label="复制" title="复制" disabled={!canMutateSelection} onClick={() => setClipboard({ entries: selectedEntries, mode: "copy" })}><Copy /><span>复制</span></button>
 				<button className="file-command-button" aria-label="粘贴" title="粘贴到当前目录" disabled={!canPaste} onClick={() => void pasteEntry()}><ClipboardPaste /><span>粘贴</span></button>
@@ -986,7 +1069,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 
 		<aside className="file-inspector" aria-label="详细信息">
 			<header>详细信息</header>
-			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isBrowserPreviewableImage(selectedItem.name) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatBytes(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.resource === "movies" && <p className="file-inspector-hint">打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。</p>}{selectedItem.resource === "music" && <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
+			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${(isPreviewableImage(selectedItem.name) || isVideoFile(selectedItem.name)) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatBytes(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.entry?.kind === "file" && !viewing && <button className="file-inspector-action" onClick={() => setVersionsOf(selectedItem.entry)}><History />历史版本</button>}{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.resource === "movies" && <p className="file-inspector-hint">打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。</p>}{selectedItem.resource === "music" && <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
 		</aside>
 
 		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
@@ -995,9 +1078,11 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 				{contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name) && selectedEntries.length <= 1 && <button role="menuitem" onClick={() => { download([contextMenu.item!.entry!]); setContextMenu(undefined); }}><Download /><span>下载</span></button>}
 				{canDownload && archiveDownload && <button role="menuitem" onClick={() => { download(selectedEntries); setContextMenu(undefined); }}><Download /><span>{selectedEntries.length > 1 ? `打包下载 ${selectedEntries.length} 项` : "打包下载"}</span><kbd>ZIP</kbd></button>}
 				<i />
+				<button role="menuitem" disabled={!canShareSelection} onClick={() => { shares.compose(selectedEntries); setContextMenu(undefined); }}><Share2 /><span>分享给成员</span></button>
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "move" }); setContextMenu(undefined); }}><Scissors /><span>剪切</span><kbd>Ctrl+X</kbd></button>
 				<button role="menuitem" disabled={!canMutateSelection} onClick={() => { setClipboard({ entries: selectedEntries, mode: "copy" }); setContextMenu(undefined); }}><Copy /><span>复制</span><kbd>Ctrl+C</kbd></button>
 				<button role="menuitem" disabled={!canRenameSelection} onClick={() => { setRenaming(selectedEntry); setContextMenu(undefined); }}><Pencil /><span>重命名</span></button>
+				{canShowVersions && <button role="menuitem" onClick={() => { setVersionsOf(selectedEntry); setContextMenu(undefined); }}><History /><span>历史版本</span></button>}
 				{selectedFolders.length > 0 && <button role="menuitem" disabled={!canPin} onClick={() => { togglePinned(); setContextMenu(undefined); }}><Pin /><span>{allPinned ? "取消置顶" : "置顶文件夹"}</span></button>}
 				<i />
 				<button className="danger" role="menuitem" disabled={!canMutateSelection} onClick={() => { setPendingDelete(selectedEntries); setContextMenu(undefined); }}><Trash2 /><span>移到回收站</span></button>
@@ -1009,6 +1094,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 			</>}
 		</div>}
 
+		{versionsOf && selectedSpace && <VersionsDialog file={versionsOf} space={selectedSpace} folders={trail.map((item) => item.name)} onClose={() => setVersionsOf(undefined)} onChanged={() => { void refresh(spaceID, parentID); void refreshVolume(); }} />}
 		{viewingIndex >= 0 && <FileViewer entries={viewable} index={viewingIndex} onIndex={(index) => showViewer(viewable[index])} onClose={() => setViewingID("")} onDownload={(entry) => download([entry])} />}
 		{pendingDelete && <div className="file-dialog-backdrop"><section className="file-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="file-delete-title"><span className="file-confirm-icon"><Trash2 /></span><div><h3 id="file-delete-title">移到回收站？</h3><p>{pendingDelete.length === 1 ? `“${pendingDelete[0].name}”` : `选中的 ${pendingDelete.length} 个项目`}将移到回收站，可在 30 天内恢复。</p></div><div className="file-confirm-actions"><button disabled={Boolean(activity)} onClick={() => setPendingDelete(undefined)}>取消</button><button className="danger-button" disabled={Boolean(activity)} onClick={() => void removeEntry()}>{activity ? "正在移动…" : "移到回收站"}</button></div></section></div>}
 		{renaming && <div className="file-dialog-backdrop"><form className="file-rename-dialog" aria-label={`重命名 ${renaming.name}`} onSubmit={(event) => void renameEntry(event)}><span><Pencil /></span><div><h3>重命名</h3><p>为“{renaming.name}”输入新名称。</p><input autoFocus name="name" aria-label="新名称" defaultValue={renaming.name} required /></div><footer><button type="button" disabled={Boolean(activity)} onClick={() => setRenaming(undefined)}>取消</button><button className="primary" disabled={Boolean(activity)}>保存</button></footer></form></div>}
@@ -1016,7 +1102,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 }
 
 function PanelNotice({ error }: { error: string }) { return <div className="status-banner error"><CircleAlert />{error}</div>; }
-function messageOf(error: unknown) { return nameErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
+function messageOf(error: unknown) { return nameErrorText(error) ?? accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败"); }
 
 function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop") return windows.map((window) => window.open ? { ...window, minimized: true } : window);
@@ -1054,7 +1140,7 @@ function formatFileDate(value: string): string {
 
 // isViewable says whether the file manager's viewer can show a file.
 function isViewable(name: string): boolean {
-	return isBrowserPreviewableImage(name) || isPDFPreviewable(name);
+	return isPreviewableImage(name) || isPDFPreviewable(name);
 }
 
 function fileSortLabel(sort: FileSort): string {

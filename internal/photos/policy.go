@@ -8,7 +8,7 @@ import "time"
 // shared library, but only the uploader or an administrator may change a
 // shared photo asset, and only the creator or an administrator may change a
 // shared virtual directory. A member's assistant only reads what the member
-// owns or shares with everyone (ADR 0022).
+// owns or shares with everyone (ADR 0024).
 //
 // Callers turn "cannot view" into ErrNotFound so that private content is not
 // revealed by error codes, and "can view but not change" into ErrForbidden.

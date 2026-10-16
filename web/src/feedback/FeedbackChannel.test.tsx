@@ -3,8 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api";
+import { forgetPeople, rememberPerson } from "../people";
 import { FeedbackChannel } from "./FeedbackChannel";
-import type { FeedbackItem } from "./feedbackApi";
+import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
 import { describeTime } from "./time";
 
 const capture = vi.hoisted(() => ({ result: undefined as Blob | undefined }));
@@ -18,12 +19,16 @@ vi.mock("./capture", async (original) => ({
 
 const upload: FeedbackItem = {
   id: "feedback:upload", text: "上传 2 GB 视频时进度停在 99%", images: [{ id: "feedback-image:shot", contentType: "image/png", sizeBytes: 2048 }],
-  version: 1, createdBy: "lin", createdAt: "2026-10-12T08:00:00Z", resolved: false,
+  version: 1, createdBy: "lin", createdAt: "2026-10-12T08:00:00Z", resolved: false, comments: [],
 };
-const heic: FeedbackItem = { id: "feedback:heic", text: "希望相册支持 HEIC", images: [], version: 3, createdBy: "owner", createdAt: "2026-10-12T07:00:00Z", resolved: false };
+const heic: FeedbackItem = { id: "feedback:heic", text: "希望相册支持 HEIC", images: [], version: 3, createdBy: "owner", createdAt: "2026-10-12T07:00:00Z", resolved: false, comments: [] };
+const reply: FeedbackComment = {
+  id: "feedback-comment:reply", text: "我这边也能复现", images: [{ id: "feedback-image:reply", contentType: "image/png", sizeBytes: 1024 }],
+  version: 1, createdBy: "lin", createdAt: "2026-10-12T06:30:00Z",
+};
 const subtitles: FeedbackItem = {
   id: "feedback:subtitles", text: "全屏字幕偏小", images: [], version: 1, createdBy: "owner", createdAt: "2026-10-11T07:00:00Z",
-  resolved: true, resolvedBy: "lin", resolvedAt: "2026-10-12T06:00:00Z",
+  resolved: true, resolvedBy: "lin", resolvedAt: "2026-10-12T06:00:00Z", comments: [reply],
 };
 
 function json(body: unknown, status = 200) {
@@ -56,14 +61,30 @@ beforeEach(() => {
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => `blob:preview-${++next}`), revokeObjectURL: vi.fn() }));
   capture.result = undefined;
 });
-afterEach(() => { vi.unstubAllGlobals(); setSession(); });
+afterEach(() => { vi.unstubAllGlobals(); setSession(); forgetPeople(); });
 
 async function openPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: /^问题反馈，\d+ 条待处理$/ }));
+  await user.click(await screen.findByRole("button", { name: /^问题反馈(，\d+ 条待处理)?$/ }));
   return screen.getByRole("dialog", { name: "问题反馈" });
 }
 
 describe("问题反馈", () => {
+  it("names authors by nickname next to their avatar", async () => {
+    rememberPerson({ id: "user:lin", username: "lin", nickname: "林老师", avatarVersion: "0123abcd" });
+    serve([upload, heic]);
+    const user = userEvent.setup();
+    render(<FeedbackChannel />);
+    const panel = await openPanel(user);
+    const card = (await within(panel).findByText(upload.text)).closest("li") as HTMLElement;
+    expect(within(card).getByText("林老师")).toBeTruthy();
+    expect(within(card).queryByText("lin")).toBeNull();
+    expect(card.querySelector(".fb-avatar img")?.getAttribute("src")).toBe("/api/v1/users/user%3Alin/avatar?v=0123abcd");
+    // An author without a profile keeps the account name and its initial.
+    const other = (within(panel).getByText(heic.text)).closest("li") as HTMLElement;
+    expect(within(other).getByText("owner")).toBeTruthy();
+    expect(other.querySelector(".fb-avatar")?.textContent).toBe("O");
+  });
+
   it("shows the open count on the edge button and lists open items first", async () => {
     serve([upload, heic, subtitles]);
     const focus = vi.spyOn(HTMLElement.prototype, "focus");
@@ -212,6 +233,101 @@ describe("问题反馈", () => {
   });
 });
 
+describe("问题反馈的评论", () => {
+  it("opens a thread from the comment count and replies with a pasted image", async () => {
+    const answered: FeedbackItem = {
+      ...heic,
+      comments: [{ id: "feedback-comment:new", text: "1.0.2 会支持", images: [{ id: "feedback-image:new", contentType: "image/png", sizeBytes: 4 }], version: 1, createdBy: "owner", createdAt: "2026-10-12T09:00:00Z" }],
+    };
+    const fetchMock = serve([heic, subtitles], (url, init) =>
+      url === "/api/v1/feedback/feedback%3Aheic/comments" && init.method === "POST" ? json(answered, 201) : undefined);
+    const user = userEvent.setup();
+    render(<FeedbackChannel />);
+    const panel = await openPanel(user);
+    await user.click(within(panel).getByRole("tab", { name: "全部2" }));
+
+    // An item with comments shows their count; its thread opens on demand.
+    const handled = within(panel).getByText("全屏字幕偏小").closest("li")!;
+    expect(within(handled).queryByRole("region", { name: "评论" })).toBeNull();
+    await user.click(within(handled).getByRole("button", { name: "1 条评论" }));
+    const thread = within(handled).getByRole("region", { name: "评论" });
+    expect(within(thread).getByText("我这边也能复现")).toBeTruthy();
+    expect(within(thread).getByRole("button", { name: "查看评论附图 1" }).querySelector("img")?.getAttribute("src"))
+      .toBe("/api/v1/feedback/feedback%3Asubtitles/images/feedback-image%3Areply");
+    // The discussion is not struck through with the handled item.
+    expect(within(thread).getByText("我这边也能复现").closest(".fb-strike")).toBeNull();
+
+    // An empty thread opens straight into the comment box.
+    const item = within(panel).getByText("希望相册支持 HEIC").closest("li")!;
+    await user.click(within(item).getByRole("button", { name: "写评论" }));
+    const box = within(item).getByLabelText("写评论内容");
+    expect(document.activeElement).toBe(box);
+    await user.type(box, "1.0.2 会支持");
+    fireEvent.paste(box, { clipboardData: { files: [png()], types: ["Files"] } });
+    // A comment holds at most three images.
+    fireEvent.paste(box, { clipboardData: { files: [png("a.png"), png("b.png"), png("c.png")], types: ["Files"] } });
+    expect(within(item).getByRole("alert").textContent).toBe("最多添加 3 张图片");
+    expect(within(item).getByText("3/3")).toBeTruthy();
+    await user.click(within(item).getByRole("button", { name: "评论" }));
+
+    expect(await within(item).findByText("1.0.2 会支持", { selector: ".fb-comment-text" })).toBeTruthy();
+    expect(within(item).getByRole("button", { name: "1 条评论" })).toBeTruthy();
+    const post = fetchMock.mock.calls.find(([url, init]) => url === "/api/v1/feedback/feedback%3Aheic/comments" && init?.method === "POST");
+    const body = post?.[1]?.body as FormData;
+    expect(body.get("text")).toBe("1.0.2 会支持");
+    expect(body.getAll("image")).toHaveLength(3);
+    expect(new Headers(post?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    expect((within(item).getByLabelText("写评论内容") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("lets anyone edit a comment, saving over a concurrent edit after showing it, and delete one after confirming", async () => {
+    let latest: FeedbackItem = { ...subtitles };
+    let attempts = 0;
+    const fetchMock = serve([subtitles], (url, init) => {
+      if (url === "/api/v1/feedback" && (init.method ?? "GET") === "GET") return json({ items: [latest] });
+      const path = "/api/v1/feedback/feedback%3Asubtitles/comments/feedback-comment%3Areply";
+      if (url === path && init.method === "PUT") {
+        attempts += 1;
+        if (attempts === 1) {
+          latest = { ...subtitles, comments: [{ ...reply, text: "只在全屏时出现", version: 2, updatedBy: "lin", updatedAt: "2026-10-12T09:00:00Z" }] };
+          return json({ error: { code: "comment_changed", message: "feedback comment changed since it was read" } }, 409);
+        }
+        return json({ ...latest, comments: [{ ...reply, text: "已在 1.0.2 修复", images: [], version: 3, updatedBy: "owner", updatedAt: "2026-10-12T09:01:00Z" }] });
+      }
+      if (url === path && init.method === "DELETE") return json({ ...latest, comments: [] });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<FeedbackChannel />);
+    const panel = await openPanel(user);
+    await user.click(within(panel).getByRole("tab", { name: "已处理1" }));
+    const item = within(panel).getByText("全屏字幕偏小").closest("li")!;
+    await user.click(within(item).getByRole("button", { name: "1 条评论" }));
+
+    // The signed-in owner edits lin's comment and drops its image.
+    await user.click(within(item).getByRole("button", { name: "编辑评论" }));
+    const editor = within(item).getByRole("form", { name: "编辑评论" });
+    await user.click(within(editor).getByRole("button", { name: "移除附图 1" }));
+    const field = within(editor).getByLabelText("编辑评论内容");
+    await user.clear(field);
+    await user.type(field, "已在 1.0.2 修复");
+    await user.click(within(editor).getByRole("button", { name: "保存" }));
+    expect(await within(editor).findByText("lin 刚刚修改了这条评论")).toBeTruthy();
+    expect(within(editor).getByText("只在全屏时出现")).toBeTruthy();
+    await user.click(within(editor).getByRole("button", { name: "保存" }));
+    expect(await within(item).findByText("已在 1.0.2 修复", { selector: ".fb-comment-text" })).toBeTruthy();
+    const edits = fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => init?.body as FormData);
+    expect(edits.map((body) => [body.get("version"), body.get("text"), body.getAll("keep")])).toEqual([["1", "已在 1.0.2 修复", []], ["2", "已在 1.0.2 修复", []]]);
+    expect(within(item).getByText("已编辑", { selector: ".fb-comment-head .fb-edited" })).toBeTruthy();
+
+    await user.click(within(item).getByRole("button", { name: "删除评论" }));
+    const confirm = within(item).getByRole("group", { name: "确认删除评论" });
+    await user.click(within(confirm).getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(within(item).queryByText("已在 1.0.2 修复")).toBeNull());
+    expect(within(item).getByRole("button", { name: "写评论" })).toBeTruthy();
+  });
+});
+
 describe("describeTime", () => {
   const now = new Date(2026, 9, 12, 15, 30);
   it("reads like a note list", () => {
@@ -219,7 +335,7 @@ describe("describeTime", () => {
     expect(describeTime(new Date(2026, 9, 12, 15, 5).toISOString(), now)).toBe("25 分钟前");
     expect(describeTime(new Date(2026, 9, 12, 9, 7).toISOString(), now)).toBe("今天 09:07");
     expect(describeTime(new Date(2026, 9, 11, 22, 0).toISOString(), now)).toBe("昨天 22:00");
-    expect(describeTime(new Date(2026, 2, 1, 8, 0).toISOString(), now)).toBe("3月1日 08:00");
+    expect(describeTime(new Date(2026, 2, 1, 8, 0).toISOString(), now)).toBe("3月1日");
     expect(describeTime(new Date(2025, 11, 31, 8, 0).toISOString(), now)).toBe("2025年12月31日");
   });
 });

@@ -425,7 +425,7 @@ func TestRestoreSearchAndDownloadFromSnapshots(t *testing.T) {
 			snapshotFolder = entry
 		}
 	}
-	restored, err := f.files.RestoreSnapshotEntry(ctx, f.admin, a.ID, snapshotFolder.ID, "", "")
+	restored, err := f.files.RestoreSnapshotEntry(ctx, f.admin, a.ID, snapshotFolder.ID, "", "", false)
 	if err != nil {
 		t.Fatalf("RestoreSnapshotEntry(folder) error = %v", err)
 	}
@@ -455,7 +455,7 @@ func TestRestoreSearchAndDownloadFromSnapshots(t *testing.T) {
 			}
 		}
 	}
-	if _, err := f.files.RestoreSnapshotEntry(ctx, f.admin, a.ID, snapshotFolder.ID, "", ""); !errors.Is(err, files.ErrConflict) {
+	if _, err := f.files.RestoreSnapshotEntry(ctx, f.admin, a.ID, snapshotFolder.ID, "", "", false); !errors.Is(err, files.ErrConflict) {
 		t.Fatalf("restoring over an existing folder error = %v, want ErrConflict", err)
 	}
 }

@@ -17,14 +17,17 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
+	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
@@ -38,17 +41,23 @@ type ProductDependencies struct {
 	ProductVersion string
 	Accounts       *accounts.Service
 	Files          *files.Service
+	FilePreviews   *filepreview.Service
 	Storage        *storage.Service
 	Terminal       http.Handler
 	// Containers and Apps serve /api/v1/containers and /api/v1/apps. They
 	// manage Docker, so only administrators reach them (ADR 0008).
 	Containers http.Handler
 	Apps       http.Handler
+	// AppShortcuts serves /api/v1/app-shortcuts, the installed apps every
+	// signed-in user opens from the desktop.
+	AppShortcuts http.Handler
 	// Photos serves /api/v1/photos to every signed-in user and enforces the
 	// photo Policy itself. A *photosapi.Proxy confirms the session in the
 	// photo service; any other handler receives the caller as a
 	// photos.Principal.
 	Photos http.Handler
+	// Shares serves member shares; production independently confirms sessions.
+	Shares http.Handler
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
@@ -81,11 +90,14 @@ type productHandler struct {
 	state      http.Handler
 	accounts   *accounts.Service
 	files      *files.Service
+	previews   *filepreview.Service
 	storage    *storage.Service
 	terminal   http.Handler
 	containers http.Handler
 	apps       http.Handler
+	shortcuts  http.Handler
 	photos     http.Handler
+	shares     http.Handler
 	media      http.Handler
 	music      *music.Service
 	feedback   http.Handler
@@ -106,8 +118,9 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	handler := &productHandler{
 		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
-		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps,
-		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
+		previews: dependencies.FilePreviews,
+		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,
+		shares: dependencies.Shares, photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
 		transfers: dependencies.Transfers, assistant: dependencies.Assistant, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
@@ -122,6 +135,15 @@ func (h *productHandler) routes() {
 			h.mux.Handle(prefix, h.withAdministrator(handler))
 			h.mux.Handle(prefix+"/", h.withAdministrator(handler))
 		}
+	}
+	if h.shortcuts != nil {
+		serve := h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { h.shortcuts.ServeHTTP(w, r) })
+		h.mux.Handle(appstoreapi.ShortcutsPrefix, serve)
+		h.mux.Handle(appstoreapi.ShortcutsPrefix+"/", serve)
+	}
+	if h.shares != nil {
+		h.mux.Handle(sharesapi.PathPrefix, h.withUser(h.shares, sharesapi.WithUser))
+		h.mux.Handle(sharesapi.PathPrefix+"/", h.withUser(h.shares, sharesapi.WithUser))
 	}
 	if h.photos != nil {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
@@ -159,11 +181,21 @@ func (h *productHandler) routes() {
 			h.state.ServeHTTP(w, r)
 		}))
 	}
+	// The task manager is read-only and available to members as well as admins.
+	// Register the path without a method so the state handler returns JSON 405
+	// after authentication instead of falling through the catch-all 404.
+	for _, path := range []string{"/api/v1/task-manager/device", "/api/v1/task-manager/tasks"} {
+		h.mux.HandleFunc(path, h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+			h.state.ServeHTTP(w, r)
+		}))
+	}
 	h.mux.HandleFunc("GET /api/v1/spaces", h.withSession(h.handleSpaces))
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/entries", h.withSession(h.handleEntries))
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/directories", h.withMutation(h.handleCreateDirectory))
 	h.mux.HandleFunc("POST /api/v1/spaces/{spaceID}/uploads", h.withMutation(h.handleUpload))
 	h.mux.HandleFunc("GET /api/v1/files/{fileID}/content", h.withSession(h.handleDownload))
+	h.mux.HandleFunc("GET /api/v1/files/{fileID}/preview", h.withSession(h.handleFilePreview))
+	h.mux.HandleFunc("GET /api/v1/files/{fileID}/versions", h.withSession(h.handleFileVersions))
 	h.mux.HandleFunc("PATCH /api/v1/files/{fileID}", h.withMutation(h.handleMoveFile))
 	h.mux.HandleFunc("POST /api/v1/files/{fileID}/copies", h.withMutation(h.handleCopyFile))
 	h.mux.HandleFunc("DELETE /api/v1/files/{fileID}", h.withMutation(h.handleDeleteFile))
@@ -175,9 +207,11 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshot-schedule", h.withSession(h.handleSnapshotSchedule))
 	h.mux.HandleFunc("PUT /api/v1/spaces/{spaceID}/snapshot-schedule", h.withMutation(h.handleUpdateSnapshotSchedule))
 	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/snapshot-search", h.withSession(h.handleSearchSnapshots))
+	h.mux.HandleFunc("GET /api/v1/spaces/{spaceID}/removed-entries", h.withSession(h.handleRemovedEntries))
 	h.mux.HandleFunc("GET /api/v1/snapshots/{snapshotID}/entries", h.withSession(h.handleSnapshotEntries))
 	h.mux.HandleFunc("GET /api/v1/snapshots/{snapshotID}/entries/{entryID}/content", h.withSession(h.handleSnapshotContent))
 	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/entries/{entryID}/restore", h.withMutation(h.handleRestoreSnapshotEntry))
+	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/restore", h.withMutation(h.handleRestoreSnapshot))
 	h.mux.HandleFunc("POST /api/v1/snapshots/{snapshotID}/keep", h.withMutation(h.handleKeepSnapshot))
 	h.mux.HandleFunc("DELETE /api/v1/snapshots/{snapshotID}", h.withMutation(h.handleDeleteSnapshot))
 	h.mux.HandleFunc("GET /api/v1/users", h.withSession(h.handleUsers))
@@ -193,6 +227,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
 	h.mux.HandleFunc("GET /api/v1/system-logs", h.withSession(h.handleSystemLogs))
 	h.musicRoutes()
+	h.profileRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -224,10 +259,17 @@ func (h *productHandler) handleSetupStatus(w http.ResponseWriter, r *http.Reques
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": required})
+	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": required, "setupAllowed": directLoopback(r)})
 }
 
 func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http.Request) {
+	// Only the device's own screen or an SSH tunnel may claim a device that
+	// is not set up yet, so nobody else on the LAN creates its administrator
+	// first. The LAN entry always adds forwarding headers (ADR 0012).
+	if !directLoopback(r) {
+		writeError(w, http.StatusForbidden, "setup_local_only", "the device can only be set up on its own screen or through an SSH tunnel")
+		return
+	}
 	var request struct {
 		Username     string `json:"username"`
 		Password     string `json:"password"`
@@ -247,7 +289,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 		return
 	}
 	h.setSessionCookie(w, session)
-	writeJSON(w, http.StatusCreated, publicSession(session))
+	writeJSON(w, http.StatusCreated, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +308,7 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.setSessionCookie(w, session)
-	writeJSON(w, http.StatusOK, publicSession(session))
+	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -276,7 +318,7 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 		session.Token = cookie.Value
 		h.setSessionCookie(w, session)
 	}
-	writeJSON(w, http.StatusOK, publicSession(session))
+	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 // authenticate grants a local console session, which never expires on its
@@ -315,12 +357,21 @@ func (h *productHandler) handleSpaces(w http.ResponseWriter, r *http.Request, se
 		h.writeAccountError(w, r, err)
 		return
 	}
-	if spaces == nil {
-		spaces = []accounts.Space{}
+	type visibleSpace struct {
+		accounts.Space
+		Writable bool `json:"writable"`
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": spaces})
+	items := []visibleSpace{}
+	for _, space := range spaces {
+		writable, err := h.accounts.CanAccessSpace(r.Context(), session.User, space.ID, true)
+		if err != nil {
+			h.writeAccountError(w, r, err)
+			return
+		}
+		items = append(items, visibleSpace{Space: space, Writable: writable && space.Viewing == nil})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
-
 func (h *productHandler) handleEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
 		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
@@ -518,18 +569,26 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
+		// Conflict is ask (the default), rename or replace, as for uploads.
+		Conflict files.ConflictPolicy `json:"conflict"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name)
+	switch request.Conflict {
+	case "", files.ConflictAsk, files.ConflictRename, files.ConflictReplace:
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "conflict must be ask, rename or replace")
+		return
+	}
+	restored, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name, request.Conflict)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
 	}
-	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusOK, entry)
+	h.filesChanged(r, session, restored.SpaceID)
+	writeJSON(w, http.StatusOK, restored)
 }
 
 func (h *productHandler) handlePurgeTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -611,6 +670,24 @@ func (h *productHandler) handleSearchSnapshots(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }
 
+func (h *productHandler) handleRemovedEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	items, truncated, err := h.files.RemovedEntries(r.Context(), session.User, r.PathValue("spaceID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
+}
+
+func (h *productHandler) handleFileVersions(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	match, err := h.files.EntryVersions(r.Context(), session.User, r.PathValue("fileID"))
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, match)
+}
+
 func (h *productHandler) handleSnapshotSchedule(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	schedule, err := h.files.SnapshotSchedule(r.Context(), session.User, r.PathValue("spaceID"))
 	if err != nil {
@@ -647,12 +724,32 @@ func (h *productHandler) handleRestoreSnapshotEntry(w http.ResponseWriter, r *ht
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
+		Replace  bool   `json:"replace"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.RestoreSnapshotEntry(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"), request.ParentID, request.Name)
+	entry, err := h.files.RestoreSnapshotEntry(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"),
+		request.ParentID, request.Name, request.Replace)
+	if err != nil {
+		h.writeFileError(w, r, err)
+		return
+	}
+	h.filesChanged(r, session, entry.SpaceID)
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+func (h *productHandler) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	var request struct {
+		ParentID string `json:"parentId"`
+		Name     string `json:"name"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	entry, err := h.files.RestoreSnapshot(r.Context(), session.User, r.PathValue("snapshotID"), request.ParentID, request.Name)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
@@ -1074,10 +1171,16 @@ type sessionResponse struct {
 	CSRFToken string        `json:"csrfToken"`
 	ExpiresAt string        `json:"expiresAt"`
 	User      accounts.User `json:"user"`
+	// CredentialReset is the latest time an administrator chose the user's
+	// password; the user keeps seeing it.
+	CredentialReset *accounts.CredentialReset `json:"credentialReset,omitempty"`
 }
 
-func publicSession(session accounts.Session) sessionResponse {
-	return sessionResponse{CSRFToken: session.CSRFToken, ExpiresAt: session.ExpiresAt.UTC().Format(timeFormat), User: session.User}
+func (h *productHandler) publicSession(ctx context.Context, session accounts.Session) sessionResponse {
+	response := sessionResponse{CSRFToken: session.CSRFToken, ExpiresAt: session.ExpiresAt.UTC().Format(timeFormat), User: session.User}
+	// A failed lookup only hides the notice; it never fails the sign-in.
+	response.CredentialReset, _ = h.accounts.LastCredentialReset(ctx, session.User)
+	return response
 }
 
 const timeFormat = "2006-01-02T15:04:05.999999999Z07:00"
@@ -1100,16 +1203,30 @@ func decodeJSON(r *http.Request, target any) error {
 
 func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrUsernameUnavailable),
-		errors.Is(err, accounts.ErrIdentityConflict), errors.Is(err, accounts.ErrViewingActive):
+	case errors.Is(err, accounts.ErrSetupComplete):
+		writeError(w, http.StatusConflict, "setup_complete", err.Error())
+	case errors.Is(err, accounts.ErrUsernameUnavailable), errors.Is(err, accounts.ErrIdentityConflict):
+		writeError(w, http.StatusConflict, "username_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrViewingActive):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
-	case errors.Is(err, accounts.ErrInvalidUsername), errors.Is(err, accounts.ErrWeakPassword),
-		errors.Is(err, accounts.ErrReasonRequired), errors.Is(err, accounts.ErrPasswordUnchanged):
+	case errors.Is(err, accounts.ErrNicknameUnavailable):
+		writeError(w, http.StatusConflict, "nickname_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrInvalidNickname):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_nickname", err.Error())
+	case errors.Is(err, accounts.ErrInvalidUsername):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_username", err.Error())
+	case errors.Is(err, accounts.ErrInvalidPassword):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_password", err.Error())
+	case errors.Is(err, accounts.ErrPasswordUnchanged):
+		writeError(w, http.StatusUnprocessableEntity, "password_unchanged", err.Error())
+	case errors.Is(err, accounts.ErrReasonRequired):
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, accounts.ErrInvalidCredentials):
 		writeError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")
 	case errors.Is(err, accounts.ErrVolumeUnavailable):
 		writeError(w, http.StatusLocked, "volume_unavailable", err.Error())
+	case errors.Is(err, accounts.ErrSMBDisablePending):
+		writeError(w, http.StatusServiceUnavailable, "smb_disable_pending", err.Error())
 	case errors.Is(err, accounts.ErrCredentialProvision):
 		writeError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):

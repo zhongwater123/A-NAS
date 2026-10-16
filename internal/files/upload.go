@@ -83,6 +83,8 @@ type PendingUpload struct {
 	Conflict ConflictPolicy
 
 	file *os.File
+	// modTime, when set, is the modification time the file is saved with.
+	modTime time.Time
 	// temporary is the temporary's name in the parent folder; path is where
 	// it was when the upload began, which a moved folder makes stale.
 	temporary string
@@ -235,6 +237,7 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 		return CommittedUpload{}, err
 	}
 	temporary := filepath.Join(parentPath, upload.temporary)
+	s.keepModTime(ctx, temporary, upload.modTime)
 	replaced := false
 	if upload.Conflict == ConflictReplace {
 		existing := upload.Name
@@ -436,23 +439,27 @@ func isUploadTemporary(name string) bool {
 	return strings.HasPrefix(path.Base(name), uploadTemporaryPrefix)
 }
 
-// numberedName is name itself for 0 and "name (n).ext" after that. The stem
-// is shortened, at a character boundary, when the number would take the name
-// past the byte limit.
+// numberedName is name itself for 0 and "name (n).ext" after that.
 func numberedName(name string, number int) string {
 	if number == 0 {
 		return name
 	}
-	stem, extension := name, ""
-	if dot := strings.LastIndex(name, "."); dot > 0 {
-		stem, extension = name[:dot], name[dot:]
+	return withSuffix(name, fmt.Sprintf(" (%d)", number), true)
+}
+
+// withSuffix puts suffix at the end of name, before its extension when
+// extension is set. The stem is shortened, at a character boundary, when the
+// suffix would take the name past the byte limit.
+func withSuffix(name, suffix string, extension bool) string {
+	stem, tail := name, ""
+	if dot := strings.LastIndex(name, "."); extension && dot > 0 {
+		stem, tail = name[:dot], name[dot:]
 	}
-	suffix := fmt.Sprintf(" (%d)", number)
-	for len(stem)+len(suffix)+len(extension) > maxNameBytes && stem != "" {
+	for len(stem)+len(suffix)+len(tail) > maxNameBytes && stem != "" {
 		_, size := utf8.DecodeLastRuneInString(stem)
 		stem = stem[:len(stem)-size]
 	}
-	return stem + suffix + extension
+	return stem + suffix + tail
 }
 
 // uploadWriteError names the volume conditions a client can act on.

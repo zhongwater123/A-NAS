@@ -11,9 +11,9 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0005：本地控制台使用单应用 Wayland Kiosk](0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
 - [0006：相册使用受管图库与不可变内容对象](0006-use-a-managed-photo-library.md)
 - [0007：基础存储使用单盘 Btrfs、SQLite 与类型化特权边界](0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
-- [0008：统一 Linux 身份，以文件系统 ACL 作为唯一授权来源](0008-use-unified-linux-identities-and-filesystem-acls.md)
+- [0008：统一 Linux 身份，以文件系统 ACL 作为唯一授权来源](0008-use-unified-linux-identities-and-filesystem-acls.md)（应用容器部分由 0022 修订）
 - [0009：容器使用 Docker Engine 并经专用容器代理访问](0009-use-docker-engine-through-a-dedicated-container-agent.md)
-- [0010：应用中心使用内置审查清单与安装策略](0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)
+- [0010：应用中心使用内置审查清单与安装策略](0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)（运行身份段落已被 0022 取代）
 - [0011：相册以专用服务身份独占受管存储，并在 Catalog 中授权](0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [0012：局域网经 Caddy 以明文 HTTP 开放 Web 桌面（HTTPS 前的过渡）](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)
 - [0013：Docker 网络只从 A-NAS 指定的地址池分配](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
@@ -24,7 +24,11 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0018：音乐原地索引普通文件，经文件代理以成员身份读取](0018-index-music-in-place-through-the-file-broker.md)
 - [0019：上传经 tus 分片到达，写入文件代理以用户身份创建的临时文件](0019-resume-uploads-over-tus-with-broker-held-files.md)（proposed）
 - [0020：系统日志经 Host Agent 的白名单 journal 查询读取](0020-read-service-logs-through-the-host-agent.md)（proposed）
-- [0022：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行](0022-run-a-sandboxed-hermes-agent-per-member.md)（proposed）
+- [0022：应用容器只以应用身份接触共享空间](0022-reach-shared-folders-only-as-the-app-identity.md)（修订 0008 的应用容器实现，取代 0010 的运行身份段落）
+
+- [0023：成员分享的固定副本由独立服务持有](0023-isolate-member-share-copies-in-a-dedicated-service.md)（proposed）
+
+- [0024：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行](0024-run-a-sandboxed-hermes-agent-per-member.md)（proposed）
 
 ## 格式
 

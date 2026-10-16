@@ -7,7 +7,7 @@
 # Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
 # run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
 # broker's product socket; ASSISTANT_GATE=host-agent when the Host Agent's File Broker is the
-# session gate (ADR 0022 decision 10) and the executor of the changes: only root then
+# session gate (ADR 0024 decision 10) and the executor of the changes: only root then
 # connects to the instance sockets, the product service gets no token copies, and the spike's
 # change broker does not run. Without it the product service connects to the sockets itself,
 # gets a copy of each token, and the change broker executes (spike and UI prototype).

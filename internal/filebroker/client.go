@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -32,10 +33,13 @@ type fileOps struct {
 
 func (c *Client) call(ctx context.Context, req request) (response, *os.File, error) {
 	token := accounts.SessionToken(ctx)
-	if token == "" {
+	if token == "" && req.Op != opShareReset && req.Op != opShareFence && req.Op != opShareCheck {
 		return response{}, nil, fmt.Errorf("%w: no session for file operation", files.ErrForbidden)
 	}
 	req.Token = token
+	if publication, ok := ctx.Value(sharePublicationKey{}).(sharePublication); ok {
+		req.ShareEpoch, req.ShareID = publication.epoch, publication.id
+	}
 	var dialer net.Dialer
 	connection, err := dialer.DialContext(ctx, "unix", c.socket)
 	if err != nil {
@@ -138,6 +142,10 @@ func (c *fileOps) Usage(ctx context.Context, path string) (int64, error) {
 	result, file, err := c.call(ctx, request{Op: opUsage, Path: path})
 	closeFile(file)
 	return result.Size, err
+}
+
+func (c *fileOps) SetModTime(ctx context.Context, path string, modTime time.Time) error {
+	return c.simple(ctx, request{Op: opSetModTime, Path: path, ModTime: modTime})
 }
 
 var _ files.FileSystem = (*Client)(nil)

@@ -2,7 +2,7 @@
 
 更新时间：2026-10-15
 
-本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
+本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
 ## 上游事实（2026-10-14 查阅）
 
@@ -382,7 +382,7 @@ Desktop 在远程模式下用 `/api/fs/read-data-url` 读取历史中的图片�
 | 配置、密钥与审批 | `config.set`、`config.get`、`config.show`、`model.*`、`reload.env`、`vault.*`、`connectors.*`、`tools.*`、`toolsets.list` | `/api/config*`、`/api/env*`（`POST /api/env/reveal` 返回明文）、`/api/providers/*`、`/api/credentials/pool`、`/api/model/*`、`/api/tools/*`、`/api/audio/voice-config`（返回语音提供方的密钥）、`/api/memory/*`（`POST /api/memory/reset` 除外，见上文“记忆页”） | 改写或读出 managed scope 之外的设置与密钥；`config.set` 能打开会话级 yolo |
 | 安装代码 | `plugins.*`、`skills.manage`、`skills.reload`、`mcp.*`、`reload.mcp`、`display.install`、`display.switchSandboxImage`；`session.create`/`session.resume` 的 `source: "desktop"`（并入 `manage_catalog` 与 `desktop_ui`） | `/api/dashboard/*`、`/api/skills*`、`/api/mcp/*`（OAuth 回调免鉴权）、`PUT /api/learning/node`（改写技能或记忆）、`/api/curator/paused`、`/api/ops/import*`、`/api/plugins/*`、`/dashboard-plugins/*` | 插件与 MCP 的 stdio 服务器就是代码；技能写入 Hermes 状态目录后进入每次提示 |
 | Profile | `profiles.*`；任何方法的 `profile` 参数 | `/api/profiles*`；任何路由的 `?profile=` | 新建的 profile 可以留下在下次会话中执行的钩子（上一节实测；单元已把 `profiles/` 与 `active_profile` 绑定为只读） |
-| 定时与后台 | `cron.manage`、`delegation.*`、`subagent.*`、`spawn_tree.*`、`wake.*`、`handoff.*` | `/api/cron/*` | 第一版关闭 `cronjob` 与 `delegation`（ADR 0022 决定 8）；回合之外的模型调用不经窗口 |
+| 定时与后台 | `cron.manage`、`delegation.*`、`subagent.*`、`spawn_tree.*`、`wake.*`、`handoff.*` | `/api/cron/*` | 第一版关闭 `cronjob` 与 `delegation`（ADR 0024 决定 8）；回合之外的模型调用不经窗口 |
 | 任意路径 | `image.attach`、`pdf.attach`、`file.attach`（参数是主机路径）、`complete.path`、`session.cwd.set`、`session.workspace.move`、`projects.*`、`rollback.*`、`session.foreign.*`、`session.save` | `/api/fs/*`（读写任意路径，`POST /api/fs/write-text`）、`/api/files*`（默认根为 `$HOME`）、`/api/media`、`/api/chat/image-upload` | 绕过 Hermes 文件工具的写保护；附件以后另行设计（成员上传进助手目录，再按路径引用） |
 | 联网与计费 | `llm.oneshot`、`image.generate`、`billing.*`、`subscription.*`、`free_tier.*`、`shared_metrics.*`、`diagnostics.share_nous`、`groups.*`、`bot_relay.*` | `/api/providers/custom-endpoints/validate`（探测任意 URL）、`/api/skills/hub/*`、`/api/local-models/*`、`/api/messaging/*`、`/api/shared-metrics/consent`、`/api/providers/oauth/*` | 实例没有网络，但这些调用要么花钱、要么绕过模型网关 |
 | 设备与桌面 | `display.*`、`browser.*`、`voice.*`、`pet.*`、`onboarding.*`、`setup.*`、`system.battery`、`machine.facts`、`clipboard.paste`、`input.detect_drop`、`terminal.resize` | `/api/display/ws`、`/api/audio/*`、`/api/system/stats`、`/api/logs`、`/api/host/identity` | 面向单机桌面，与 A-NAS 无关或暴露主机信息 |
@@ -399,7 +399,7 @@ Desktop 在远程模式下用 `/api/fs/read-data-url` 读取历史中的图片�
 - `GET /api/sessions/search`（对话搜索），`PATCH /api/sessions/{id}` 的 `pinned`。
 - `tool.output_risk` 事件：工具输出被判为提示注入或含密钥时发出，可以在卡片上提示成员（Desktop 没有处理它）。
 
-对 ADR 0022 决定 9 的改写：产品服务的 `/api/v1/assistant` 由“转发 API Server 的会话接口”改为一条按上表逐帧过滤的 WebSocket 加 5 条 REST 会话路由；停止用 `session.interrupt`；确认卡片改为审批卡片（下一节）；离开对话后回合继续，前提是产品服务在实例空闲之前保持到它的连接（上文第 5 条）。
+对 ADR 0024 决定 9 的改写：产品服务的 `/api/v1/assistant` 由“转发 API Server 的会话接口”改为一条按上表逐帧过滤的 WebSocket 加 5 条 REST 会话路由；停止用 `session.interrupt`；确认卡片改为审批卡片（下一节）；离开对话后回合继续，前提是产品服务在实例空闲之前保持到它的连接（上文第 5 条）。
 
 ## 回合内审批（#111，2026-10-15，开发机）
 
@@ -478,7 +478,7 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 
 ## 相册只读访问（#113，2026-10-15，开发机）
 
-[#113](https://github.com/zhongwater123/A-NAS/issues/113)：ADR 0022 决定 6 让助手经 MCP 只读工具读相册，规格中“找去年在海边拍的照片”此前没有 spike。本节在相册服务中实现助手身份，在 spike 中加照片工具，并实测模型能不能“看到”照片。
+[#113](https://github.com/zhongwater123/A-NAS/issues/113)：ADR 0024 决定 6 让助手经 MCP 只读工具读相册，规格中“找去年在海边拍的照片”此前没有 spike。本节在相册服务中实现助手身份，在 spike 中加照片工具，并实测模型能不能“看到”照片。
 
 ### 身份：相册服务按对端 UID 认人
 
@@ -490,7 +490,7 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 - 其他成员连不上这个套接字，也进不了别人沙箱的 `/proc/<pid>/root`。同一成员自己的进程（网页终端、以本人身份运行的 Samba 进程）能经 `/proc/<助手进程>/root/…` 进入沙箱的挂载命名空间连上它：读 `/proc/<pid>/root` 只要求与目标同一 UID，Yama 只限制附加，开发机 `ptrace_scope` 为 1 时也连上了（`photos-socket.sh` 实测；实验 NAS 为 0）。它得到的是这个成员自己的照片、只读，与助手看到的相同，不越过任何边界。
 - 套接字只开放助手工具用到的 10 条读取路由；其余一律回答照片 API 格式的 `not_found`（`{"error": {"code": "not_found", …}}`），包括原图、缩略图、AI 状态、操作记录、回收站与一切写入。
 
-剩下的风险在产品服务一侧：它持有每个成员实例的套接字与 `serve` 令牌（上文“沙箱中以 `hermes serve` 代替 API Server”的“鉴权”），被攻破时可以在成员不在线时指挥任何成员的助手调用这 4 个只读工具（它们不需要审批），读到这个人私有图库中照片的名称、拍摄时间、标签与相册，只是拿不到像素；同一条路也能读这个成员个人空间的文件。用户 2026-10-15 [决定](https://github.com/zhongwater123/A-NAS/pull/121#issuecomment-6186654287)加会话闸门：到达成员实例的连接先由一个组件向 Host Agent 核对这个成员的在线会话再转给实例，“提交更改”的确认授权也由执行方凭有效会话登记，在集成时实现并写入 ADR 0022。有了闸门之后，产品服务被攻破只能经正在登录的成员的助手读这些元数据，与 ADR 0011 的威胁模型一致；ADR 0011 已补上这条身份路径。
+剩下的风险在产品服务一侧：它持有每个成员实例的套接字与 `serve` 令牌（上文“沙箱中以 `hermes serve` 代替 API Server”的“鉴权”），被攻破时可以在成员不在线时指挥任何成员的助手调用这 4 个只读工具（它们不需要审批），读到这个人私有图库中照片的名称、拍摄时间、标签与相册，只是拿不到像素；同一条路也能读这个成员个人空间的文件。用户 2026-10-15 [决定](https://github.com/zhongwater123/A-NAS/pull/121#issuecomment-6186654287)加会话闸门：到达成员实例的连接先由一个组件向 Host Agent 核对这个成员的在线会话再转给实例，“提交更改”的确认授权也由执行方凭有效会话登记，在集成时实现并写入 ADR 0024。有了闸门之后，产品服务被攻破只能经正在登录的成员的助手读这些元数据，与 ADR 0011 的威胁模型一致；ADR 0011 已补上这条身份路径。
 
 ### 助手 Principal
 
@@ -535,7 +535,7 @@ Hermes 把 MCP 结果中的图片存进 `$HERMES_HOME/cache/images/`，再决定
 
 - `provider: custom` 默认不被认为支持视觉，所以即使不固定，开发用的 DeepSeek 也只会收到路径、不会报错；但只要有人把模型声明为支持视觉，像素就会发给模型（DeepSeek 实际能看懂，见下文“真实模型”），还会经 `tool.complete` 整个发给窗口。managed scope 因此固定 `agent.image_input_mode: text`（[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)）。
 - 这个图片缓存在 `serve` 下不会清理（只有消息网关的定时任务清理它，`gateway/run.py`），会占用助手目录的容量。
-- 所以照片工具只给文字，不返回图片；助手套接字也不提供缩略图。哪种工具会把像素发出去：返回 `ImageContent`（或带图片的 `EmbeddedResource`）的工具，且仅当模型被判定为支持视觉时。缩略图交给云端模型，与 ADR 0016“照片只在这台设备上分析”的承诺冲突（按 ADR 0022 的约定只在此注明）；接入本地多模态模型时，“把照片给模型看”要另行决定，并处理上面两点：客户端会收到 base64，请求失败时 Hermes 写下的转储文件也会含图（`agent/turn_recovery.py`）。
+- 所以照片工具只给文字，不返回图片；助手套接字也不提供缩略图。哪种工具会把像素发出去：返回 `ImageContent`（或带图片的 `EmbeddedResource`）的工具，且仅当模型被判定为支持视觉时。缩略图交给云端模型，与 ADR 0016“照片只在这台设备上分析”的承诺冲突（按 ADR 0024 的约定只在此注明）；接入本地多模态模型时，“把照片给模型看”要另行决定，并处理上面两点：客户端会收到 base64，请求失败时 Hermes 写下的转储文件也会含图（`agent/turn_recovery.py`）。
 
 ### 结果呈现
 
@@ -578,7 +578,7 @@ Hermes 把 MCP 结果中的图片存进 `$HERMES_HOME/cache/images/`，再决定
 
 ## 记忆与自建技能（#114，2026-10-15，开发机）
 
-规格要求成员能在“记忆”中看到助手记住的内容和它自己创建的技能，逐条删除或全部清除，系统附带的技能不在其中；Hermes 的 `memory` 与 `skill_manage` 也是诱导文字留到以后对话的唯一途径（ADR 0022 后果）。本节按固定提交 `0e427d78` 查阅源码，在 `serve` 沙箱中实测（[#114](https://github.com/zhongwater123/A-NAS/issues/114)）：假模型用 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)（加 `--managed '{logging: {level: INFO}}'` 时按 Hermes 默认的日志级别）、[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh) 与 [`review-defaults.sh`](../../ai/assistant-spike/review-defaults.sh)，DeepSeek flash 用 [`review-scenarios.sh`](../../ai/assistant-spike/review-scenarios.sh)。下文的结果都能用这些脚本重跑。
+规格要求成员能在“记忆”中看到助手记住的内容和它自己创建的技能，逐条删除或全部清除，系统附带的技能不在其中；Hermes 的 `memory` 与 `skill_manage` 也是诱导文字留到以后对话的唯一途径（ADR 0024 后果）。本节按固定提交 `0e427d78` 查阅源码，在 `serve` 沙箱中实测（[#114](https://github.com/zhongwater123/A-NAS/issues/114)）：假模型用 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)（加 `--managed '{logging: {level: INFO}}'` 时按 Hermes 默认的日志级别）、[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh) 与 [`review-defaults.sh`](../../ai/assistant-spike/review-defaults.sh)，DeepSeek flash 用 [`review-scenarios.sh`](../../ai/assistant-spike/review-scenarios.sh)。下文的结果都能用这些脚本重跑。
 
 ### 存放位置
 
@@ -670,7 +670,7 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 
 - 在 `serve` 与现有关闭列表下复盘照常运行。它能写记忆与技能，并且因为上游白名单的缺陷，还能写助手目录、发起“提交更改”的审批；越不出沙箱，执行仍要本人确认。它不经过成员，也不在对话中留下痕迹。产品服务因此拒绝回合结束后到达、对应不到进行中调用的审批（上文白名单一节）。
 - 开销看触发的是哪种：记忆复盘一次 1–2 次请求、约 1–3 万 token；技能复盘 3–9 次请求、7–23 万 token，是它所复盘那一轮的 0.9–2.5 倍，绝大部分是缓存命中。
-- 它会把共享空间里的文字带进以后每个对话的系统提示：E3 两遍中模型都没有执行诱导，但复盘都把诱导内容（以警示的形式）写进了记忆；它也会自己建技能（E5）。这正是 ADR 0022 所说“诱导文字持续生效”的途径，而且没有任何成员操作。
+- 它会把共享空间里的文字带进以后每个对话的系统提示：E3 两遍中模型都没有执行诱导，但复盘都把诱导内容（以警示的形式）写进了记忆；它也会自己建技能（E5）。这正是 ADR 0024 所说“诱导文字持续生效”的途径，而且没有任何成员操作。
 - 它能否跑完取决于时机：下一轮开始就取消；产品服务在回合结束后断开，约 20 秒后会话被回收，复盘随之取消（E6 两遍各一种结果）。产品服务从 `/api/health/idle` 看不到复盘，要让它跑完，只能在回合结束后多保持一会儿连接。
 - 关闭开关有效（E4）；关闭后，助手只在成员明确要求时在前台写记忆或技能，这些都在对话中可见（E1 第 8 轮）。
 
@@ -678,7 +678,7 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 
 ### 用户的决定（2026-10-15）
 
-- **后台复盘保留**（Hermes 默认设置，不关）。对策：成员在“记忆”页能看到并删除复盘写下的记忆与技能；产品服务拒绝回合结束后到达的审批，复盘执行不了“提交更改”。规格与 ADR 0022 如实写明开着复盘时诱导文字可能被写进记忆或技能。白名单的上游缺陷在升级 Hermes 时跟进（上表最后一行）。
+- **后台复盘保留**（Hermes 默认设置，不关）。对策：成员在“记忆”页能看到并删除复盘写下的记忆与技能；产品服务拒绝回合结束后到达的审批，复盘执行不了“提交更改”。规格与 ADR 0024 如实写明开着复盘时诱导文字可能被写进记忆或技能。白名单的上游缺陷在升级 Hermes 时跟进（上表最后一行）。
 - managed scope 设 `logging.level: WARNING`；`skills.ledger` 保持默认；删除的技能留在归档，不另做清理（见“清除能做到什么”）。
 - Curator 保持默认。
 
@@ -729,11 +729,11 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 - Samba 的共享按 `@a-nas-users` 授权；
 - 文件代理给管理员工作进程的附加组是它自己显式设定的（`internal/filebroker/server.go`），不读 `/etc/group`。
 
-用户决定照旧：ADR 0022 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查，以后有人给这个组开权限就会报警。探针对管理员的沙箱以 `getfacl -R` 扫描沙箱中的空间（`/nas`）、Hermes 主目录、`/run`、`/etc/hermes`、`/etc/a-nas-assistant` 与 `/opt/a-nas`，属组、ACL 条目或默认 ACL 条目是 `a-nas-admins` 都算失败；只读的系统目录（`/usr` 等）不在扫描范围内。成员的沙箱仍检查不带这个组。
+用户决定照旧：ADR 0024 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查，以后有人给这个组开权限就会报警。探针对管理员的沙箱以 `getfacl -R` 扫描沙箱中的空间（`/nas`）、Hermes 主目录、`/run`、`/etc/hermes`、`/etc/a-nas-assistant` 与 `/opt/a-nas`，属组、ACL 条目或默认 ACL 条目是 `a-nas-admins` 都算失败；只读的系统目录（`/usr` 等）不在扫描范围内。成员的沙箱仍检查不带这个组。
 
 ### Agent空间
 
-`assistant-layout.sh prepare` 按 ADR 0022 决定 5 建立两层：
+`assistant-layout.sh prepare` 按 ADR 0024 决定 5 建立两层：
 - `共享空间/Agent空间`：`a-nas-users` 只读，默认 ACL 同样只读；
 - 每个账号的子目录：`a-nas-users` 只读，加本人 `rwx`，与 `.a-nas-trash/<账号>` 同一模式。
 
@@ -778,7 +778,7 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 
 ## 集成：会话闸门与产品服务的转发（2026-10-15，开发机）
 
-#109–#115 合并后，按 ADR 0022 决定 9 与决定 10 把它们接到产品服务与窗口上。
+#109–#115 合并后，按 ADR 0024 决定 9 与决定 10 把它们接到产品服务与窗口上。
 
 ### 会话闸门
 
@@ -830,7 +830,7 @@ spike 的 `change_broker.py` 以 Go 重写为 [`internal/assistantchanges`](../.
 
 ## 关联
 
-- 决定：[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)
+- 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
 - Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh) 与 [`review.sh`](../../ai/assistant-spike/review.sh)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
 - Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#113](https://github.com/zhongwater123/A-NAS/issues/113)（“相册只读访问”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）

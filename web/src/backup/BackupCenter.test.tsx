@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, Space } from "../api";
 import { BackupCenter } from "./BackupCenter";
-import type { Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./backupApi";
+import type { RemovedEntry, Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./backupApi";
 
 const owner = "user:owner";
 const personal: Space = { id: "space:personal", kind: "private", name: "owner", ownerUserId: owner, createdAt: "2026-10-01T00:00:00Z" };
@@ -17,7 +17,10 @@ const manual: Snapshot = { id: "snapshot:manual", spaceId: personal.id, name: "�
 const familyShot: Snapshot = { id: "snapshot:family", spaceId: shared.id, name: "整理家庭文件", origin: "manual", createdBy: owner, createdAt: hoursAgo(50), fileCount: 1, sizeBytes: 100 };
 
 function schedule(space: Space, overrides: Partial<SnapshotSchedule> = {}): SnapshotSchedule {
-  return { spaceId: space.id, enabled: false, frequency: "daily", time: "03:00", weekday: 0, keep: 14, canManage: true, ...overrides };
+  return {
+    spaceId: space.id, enabled: false, frequency: "daily", time: "03:00", weekday: 0, keep: 14, retention: "count", tiers: { hourly: 0, daily: 0, weekly: 0, monthly: 0 },
+    canManage: true, ...overrides,
+  };
 }
 
 const folder: SnapshotEntry = { id: "entry:docs", snapshotId: nightly.id, name: "文档", kind: "directory", sizeBytes: 0, modifiedAt: hoursAgo(40) };
@@ -126,13 +129,108 @@ describe("BackupCenter", () => {
     expect(calls.some((call) => call.method === "PUT")).toBe(false);
     await user.click(within(personalCard).getByRole("button", { name: "保存" }));
     await waitFor(() => expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
-      { enabled: true, frequency: "weekly", time: "03:00", weekday: 5, keep: 8 },
+      { enabled: true, frequency: "weekly", time: "03:00", weekday: 5, keep: 8, retention: "count", tiers: { hourly: 0, daily: 0, weekly: 0, monthly: 0 } },
     ]));
     expect(await screen.findByText("个人空间将每周五 03:00拍摄快照")).toBeTruthy();
 
     const sharedCard = screen.getByRole("region", { name: "共享空间的定时快照" });
     expect((within(sharedCard).getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
     expect(within(sharedCard).getByText(/管理员尚未为共享空间开启定时快照/)).toBeTruthy();
+  });
+
+  it("reaches far back with tiered retention, keeping fewer snapshots the older they are", async () => {
+    const calls = serve({ schedules: { [personal.id]: schedule(personal, { enabled: true }), [shared.id]: schedule(shared) } });
+    const user = userEvent.setup();
+    render(<BackupCenter userId={owner} isAdmin />);
+    await user.click(within(await screen.findByRole("navigation", { name: "备份中心导航" })).getByRole("button", { name: "定时快照" }));
+
+    const card = await screen.findByRole("region", { name: "个人空间的定时快照" });
+    expect(within(card).getByRole("img").getAttribute("aria-label")).toBe("保留 14 份定时快照，最早约 14 天前");
+    await user.click(within(card).getByRole("radio", { name: "智能保留" }));
+    const value = (name: string) => (within(card).getByRole("spinbutton", { name }) as HTMLInputElement).value;
+    expect([value("保留最近几天"), value("保留最近几周"), value("保留最近几个月")]).toEqual(["14", "8", "12"]);
+    expect(within(card).queryByRole("spinbutton", { name: "保留最近几小时" })).toBeNull();
+    expect(within(card).getByRole("img").getAttribute("aria-label")).toBe("保留约 31 份定时快照，最早约 1 年前");
+
+    // Hourly snapshots add a day of hours to the suggested tiers.
+    await user.click(within(card).getByRole("radio", { name: "每小时" }));
+    expect(value("保留最近几小时")).toBe("24");
+    await user.click(within(card).getByRole("button", { name: "保留最近几周减一" }));
+    expect(within(card).getByText("越近越密，最远可回到约 12 个月前，最多 57 份")).toBeTruthy();
+    await user.click(within(card).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
+      { enabled: true, frequency: "hourly", time: "03:00", weekday: 0, keep: 24, retention: "tiered", tiers: { hourly: 24, daily: 14, weekly: 7, monthly: 12 } },
+    ]));
+  });
+
+  it("marks what differs from the space now and restores a whole snapshot into a new folder", async () => {
+    const removedFile: SnapshotEntry = { id: "entry:photo", snapshotId: nightly.id, name: "照片.jpg", kind: "file", sizeBytes: 4096, modifiedAt: hoursAgo(60), change: "removed" };
+    const readme: SnapshotEntry = { id: "entry:readme", snapshotId: nightly.id, name: "说明.txt", kind: "file", sizeBytes: 12, modifiedAt: hoursAgo(60) };
+    const calls = serve({
+      routes: [(url, init) => {
+        if (url === `/api/v1/snapshots/${encodeURIComponent(nightly.id)}/entries?parentId=`) return json({ items: [{ ...folder, change: "inside" }, removedFile, readme] });
+        if (url === `/api/v1/snapshots/${encodeURIComponent(nightly.id)}/restore`) {
+          return json({ id: "file:whole", spaceId: personal.id, name: JSON.parse(String(init?.body)).name, kind: "directory", sizeBytes: 0, modifiedAt: hoursAgo(0) }, 201);
+        }
+        return undefined;
+      }],
+    });
+    const user = userEvent.setup();
+    render(<BackupCenter userId={owner} isAdmin />);
+    await user.click(within(await screen.findByRole("navigation", { name: "备份中心导航" })).getByRole("button", { name: "快照" }));
+    const browser = await screen.findByRole("region", { name: `快照 ${nightly.name}` });
+    expect(await within(browser).findByText("内有变化")).toBeTruthy();
+    expect(within(browser).getByText("已不在空间中")).toBeTruthy();
+    expect(within(browser).getByText(/1 项已不在空间中/)).toBeTruthy();
+    await user.click(within(browser).getByRole("radio", { name: /与现在不同/ }));
+    expect(within(browser).queryByText("说明.txt")).toBeNull();
+    expect(within(browser).getByText("照片.jpg")).toBeTruthy();
+
+    await user.click(within(browser).getByRole("button", { name: "全部恢复" }));
+    const dialog = await screen.findByRole("dialog", { name: "恢复整份快照" });
+    const name = within(dialog).getByRole("textbox", { name: "恢复后的名称" }) as HTMLInputElement;
+    expect(name.value).toMatch(/^定时快照 \d\d-\d\d \d\d\.\d\d$/);
+    await user.click(within(dialog).getByRole("button", { name: "恢复" }));
+    expect(await screen.findByText(`已恢复“${name.value}”到 个人空间`)).toBeTruthy();
+    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([{ parentId: "", name: name.value }]);
+  });
+
+  it("lists what is gone from the space before anything is typed", async () => {
+    const contracts: RemovedEntry = {
+      path: "合同", name: "合同", kind: "directory", sizeBytes: 3_145_728, fileCount: 2, snapshotId: nightly.id, snapshotName: nightly.name,
+      origin: "scheduled", entryId: "entry:contracts", lastSeenAt: nightly.createdAt, inTrash: true,
+    };
+    const photo: RemovedEntry = {
+      path: "相片/照片.jpg", name: "照片.jpg", kind: "file", sizeBytes: 4096, fileCount: 1, snapshotId: manual.id, snapshotName: manual.name,
+      origin: "manual", entryId: "entry:photo", lastSeenAt: manual.createdAt, goneBy: nightly.createdAt,
+    };
+    const calls = serve({
+      routes: [(url) => {
+        if (url === `/api/v1/spaces/${encodeURIComponent(personal.id)}/removed-entries`) return json({ items: [contracts, photo], truncated: false });
+        if (url.endsWith(`/entries/${encodeURIComponent(contracts.entryId)}/restore`)) {
+          return json({ id: "file:contracts", spaceId: personal.id, name: "合同", kind: "directory", sizeBytes: 0, modifiedAt: hoursAgo(0) }, 201);
+        }
+        return undefined;
+      }],
+    });
+    const user = userEvent.setup();
+    render(<BackupCenter userId={owner} isAdmin />);
+    await user.click(within(await screen.findByRole("navigation", { name: "备份中心导航" })).getByRole("button", { name: "找回文件" }));
+
+    const list = await screen.findByRole("region", { name: "最近删除或移走" });
+    expect(within(list).getByText("2 个文件 · 3.0 MiB")).toBeTruthy();
+    expect(within(list).getAllByText("在回收站中")).toHaveLength(1);
+    expect(within(list).getByText("个人空间 / 相片")).toBeTruthy();
+    expect(within(list).getByRole("link", { name: "下载 照片.jpg" }).getAttribute("href"))
+      .toBe(`/api/v1/snapshots/${encodeURIComponent(manual.id)}/entries/${encodeURIComponent(photo.entryId)}/content`);
+    await user.click(within(list).getByRole("button", { name: "恢复 合同" }));
+    const dialog = await screen.findByRole("dialog", { name: "恢复文件夹" });
+    await waitFor(() => expect(within(dialog).getByText("原位置")).toBeTruthy());
+    await user.click(within(dialog).getByRole("button", { name: "恢复" }));
+    expect(await screen.findByText("已恢复“合同”到 个人空间")).toBeTruthy();
+    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([{ parentId: "", name: "合同" }]);
+    // The restore reloads the list.
+    await waitFor(() => expect(calls.filter((call) => call.url.endsWith("/removed-entries"))).toHaveLength(2));
   });
 
   it("finds every version of a file and says when it is gone from the space", async () => {

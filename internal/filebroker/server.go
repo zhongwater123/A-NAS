@@ -48,7 +48,7 @@ type Config struct {
 	// connection to an assistant, is verified.
 	TerminalRecheck time.Duration
 	// AssistantSockets holds each member's assistant socket, <username>.sock,
-	// which only root may connect to; empty turns the assistant off (ADR 0022).
+	// which only root may connect to; empty turns the assistant off (ADR 0024).
 	AssistantSockets string
 	// AssistantTokens holds <username>.env with the instance's
 	// HERMES_DASHBOARD_SESSION_TOKEN, readable by root alone.
@@ -71,15 +71,18 @@ type Server struct {
 	// handed out, cut when the broker stops.
 	assistants map[*net.UnixConn]struct{}
 	// changes executes the assistants' changes; nil when off.
-	changes *assistantchanges.Executor
-	closed  bool
+	changes     *assistantchanges.Executor
+	closed      bool
+	shareMu     sync.Mutex
+	shareEpoch  string
+	shareFenced map[string]bool
 }
 
 type workerKey struct {
 	uid  int
 	role accounts.Role
 	// confined workers apply the assistant's changes: Landlock lets them write
-	// only the member's own places (ADR 0022 decision 4).
+	// only the member's own places (ADR 0024 decision 4).
 	confined bool
 }
 
@@ -214,6 +217,18 @@ func (s *Server) handle(conn *net.UnixConn) {
 }
 
 func (s *Server) dispatch(ctx context.Context, req request) (response, *os.File) {
+	// This gate lives with the worker, so a Product Service crash cannot
+	// release a publication that a restarted sharing service has fenced.
+	if req.Op == opShareReset || req.Op == opShareFence || req.Op == opShareCheck {
+		return s.shareControl(req), nil
+	}
+	if req.ShareEpoch != "" || req.ShareID != "" {
+		s.shareMu.Lock()
+		defer s.shareMu.Unlock()
+		if req.ShareEpoch == "" || req.ShareEpoch != s.shareEpoch || req.ShareID == "" || s.shareFenced[req.ShareID] {
+			return response{Error: &wireError{Code: codeForbidden}}, nil
+		}
+	}
 	if !knownOps[req.Op] {
 		return response{Error: &wireError{Code: codeInvalidRequest, Message: "unknown file operation"}}, nil
 	}

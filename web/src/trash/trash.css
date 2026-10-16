@@ -101,6 +101,35 @@ button.tr-origin-path:hover .tr-origin-open, button.tr-origin-path:focus-visible
 .tr-no-match > svg { width: 26px; height: 26px; color: var(--bk-faint); }
 .tr-no-match strong { color: var(--bk-ink); font-size: 14px; }
 
+/* A name taken where an item goes back: two choice cards in the restore
+   dialog, never an overwrite; a selection asks once in its own dialog. */
+.tr-conflict { display: grid; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid rgba(168, 100, 11, .22); border-radius: 14px; background: linear-gradient(180deg, #fffaf1, #fff 70%); animation: bk-pop .18s var(--bk-ease); }
+.tr-conflict-head { display: flex; align-items: flex-start; gap: 10px; }
+.tr-conflict-head > svg { width: 18px; height: 18px; margin-top: 1px; color: var(--bk-warn); }
+.tr-conflict-head p { min-width: 0; display: grid; gap: 2px; }
+.tr-conflict-head strong { overflow: hidden; font-size: 13.5px; white-space: nowrap; text-overflow: ellipsis; }
+.tr-conflict-head span { color: var(--bk-muted); font-size: 12px; }
+.tr-choices { display: grid; gap: 8px; }
+.tr-choice { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--bk-line-2); border-radius: 12px; color: var(--bk-ink); background: #fff; text-align: left; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s, transform .15s; }
+.tr-choice:hover:not(:disabled) { border-color: var(--bk-accent); background: #f6fbfa; box-shadow: 0 4px 12px rgba(14, 143, 134, .12); transform: translateY(-1px); }
+.tr-choice:disabled { opacity: .55; cursor: default; }
+.tr-choice-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; color: var(--bk-accent-strong); background: var(--bk-accent-soft); }
+.tr-choice-icon svg { width: 17px; height: 17px; }
+.tr-choice-text { min-width: 0; display: grid; gap: 2px; }
+.tr-choice-text strong { font-size: 13.5px; }
+.tr-choice-text small { overflow: hidden; color: var(--bk-muted); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.tr-choice.warning .tr-choice-icon { color: var(--bk-warn); background: var(--bk-warn-soft); }
+.tr-choice.warning:hover:not(:disabled) { border-color: rgba(168, 100, 11, .45); background: #fffaf1; box-shadow: 0 4px 12px rgba(168, 100, 11, .12); }
+.tr-conflict-note { color: var(--bk-muted); font-size: 12px; }
+.tr-conflict-rename { justify-self: start; }
+.tr-replace { color: var(--bk-warn); }
+.tr-replace:hover:not(:disabled) { border-color: rgba(168, 100, 11, .4) !important; background: var(--bk-warn-soft) !important; }
+.tr-conflict-list { display: grid; gap: 2px; margin: 12px 0 0; padding: 4px; border: 1px solid var(--bk-line); border-radius: 12px; list-style: none; background: #fafbfc; }
+.tr-conflict-list li { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; }
+.tr-conflict-list li > span { min-width: 0; display: grid; gap: 1px; }
+.tr-conflict-list strong { overflow: hidden; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.tr-conflict-list small { overflow: hidden; color: var(--bk-muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+
 /* A narrow window stacks each item: name and actions, then where it goes
    back to, its size, when it was deleted and how long it stays. */
 @container trashwindow (max-width: 760px) {
@@ -129,5 +158,6 @@ button.tr-origin-path:hover .tr-origin-open, button.tr-origin-path:focus-visible
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tr-spin { animation: none; }
+  .tr-spin, .tr-conflict { animation: none; }
+  .tr-choice:hover:not(:disabled) { transform: none; }
 }

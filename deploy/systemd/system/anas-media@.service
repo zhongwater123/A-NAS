@@ -1,11 +1,10 @@
 [Unit]
-Description=A-NAS media worker (FFmpeg)
+Description=A-NAS media worker (FFmpeg and libheif)
 Documentation=https://github.com/zhongwater123/A-NAS
 
 [Service]
 Type=simple
-# Runs FFmpeg on the one file (a video for the media center, a song for
-# music) the Product Service opened as the signed-in user and passed as a
+# Runs FFmpeg or libheif on the one file (video, song, or HEIF image) the Product Service opened as the signed-in user and passed as a
 # descriptor. It has no network and sees neither the
 # data volume nor the Product Service's state (ADR 0017); the system test
 # proves both. The connection is standard input; logs go to the journal so

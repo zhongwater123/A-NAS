@@ -3,13 +3,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { formatBytes } from "../bytes";
 import { useBackup } from "./BackupCenter";
-import { deleteSnapshot, keepSnapshot, listSnapshotEntries, messageOf, snapshotDownloadURL, type Snapshot, type SnapshotEntry } from "./backupApi";
-import { formatClock, formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
+import { deleteSnapshot, keepSnapshot, listSnapshotEntries, messageOf, snapshotDownloadURL, type Snapshot, type SnapshotChange, type SnapshotEntry } from "./backupApi";
+import { formatClock, formatCount, formatDateTime, formatDay, restoredSnapshotName, spaceLabel } from "./format";
 import { Dialog, EmptyState, EntryIcon, Notice, OriginBadge, SpaceSwitcher, Spinner } from "./parts";
 
 interface Crumb { id: string; name: string }
 
 const twoPaneWidth = 700;
+
+const changeBadge: Record<SnapshotChange, { label: string; title: string }> = {
+  removed: { label: "已不在空间中", title: "现在的空间里没有它：已删除、移走或改了名" },
+  modified: { label: "已修改", title: "现在空间里的这个文件与快照中的不同" },
+  inside: { label: "内有变化", title: "文件夹里有文件已删除或修改" },
+};
 
 // snapshotTitle drops the timestamp a scheduled snapshot's name repeats.
 export const snapshotTitle = (snapshot: Pick<Snapshot, "name" | "origin">) => (snapshot.origin === "scheduled" && snapshot.name.startsWith("定时快照 ") ? "定时快照" : snapshot.name);
@@ -120,7 +126,7 @@ export function SnapshotsPage() {
 }
 
 function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; manage: boolean; onBack?: () => void }) {
-  const { spaces, refresh, restore, toast } = useBackup();
+  const { spaces, refresh, restore, toast, restored } = useBackup();
   const space = spaces.find((item) => item.id === snapshot.spaceId)!;
   const [trail, setTrail] = useState<Crumb[]>([]);
   const [entries, setEntries] = useState<SnapshotEntry[]>();
@@ -128,22 +134,38 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
   const [selected, setSelected] = useState<string>();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [onlyChanged, setOnlyChanged] = useState(false);
   const parentId = trail.at(-1)?.id ?? "";
 
+  useEffect(() => setEntries(undefined), [snapshot.id, parentId]);
+  // A restore changes what differs from the space, so the level reloads.
   useEffect(() => {
     let live = true;
-    setEntries(undefined); setError(""); setSelected(undefined);
+    setError(""); setSelected(undefined);
     listSnapshotEntries(snapshot.id, parentId)
       .then((items) => { if (live) setEntries(items); })
       .catch((caught) => { if (live) setError(messageOf(caught)); });
     return () => { live = false; };
-  }, [snapshot.id, parentId]);
+  }, [snapshot.id, parentId, restored]);
+
+  const changed = entries?.filter((entry) => entry.change) ?? [];
+  const removedCount = changed.filter((entry) => entry.change === "removed").length;
+  const modifiedCount = changed.length - removedCount;
+  const shown = onlyChanged ? changed : entries;
 
   const open = (entry: SnapshotEntry) => { if (entry.kind === "directory") setTrail([...trail, { id: entry.id, name: entry.name }]); };
+  const source = { id: snapshot.id, name: snapshotTitle(snapshot), createdAt: snapshot.createdAt };
   const restoreEntry = (entry: SnapshotEntry) => restore({
-    space, snapshot: { id: snapshot.id, name: snapshotTitle(snapshot), createdAt: snapshot.createdAt },
-    entry: { id: entry.id, name: entry.name, kind: entry.kind }, folders: trail.map((crumb) => crumb.name),
+    space, snapshot: source, entry: { id: entry.id, name: entry.name, kind: entry.kind }, folders: trail.map((crumb) => crumb.name),
   });
+  // At the top level everything comes back in a new folder; inside a folder,
+  // that folder comes back to where it was.
+  const restoreHere = () => {
+    const folder = trail.at(-1);
+    restore(folder
+      ? { space, snapshot: source, entry: { id: folder.id, name: folder.name, kind: "directory" }, folders: trail.slice(0, -1).map((crumb) => crumb.name) }
+      : { space, snapshot: source, entry: { id: "", name: restoredSnapshotName(snapshotTitle(snapshot), snapshot.createdAt), kind: "directory" }, folders: [], whole: true });
+  };
   const keep = async () => {
     setBusy(true);
     try {
@@ -170,25 +192,39 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
           <h3>{snapshot.name}</h3>
           <p>{formatDateTime(snapshot.createdAt)} · <OriginBadge origin={snapshot.origin} /> · {formatCount(snapshot.fileCount)} 个文件 · {formatBytes(snapshot.sizeBytes)}</p>
         </div>
-        {manage && (
-          <div className="bk-browser-actions">
-            {snapshot.origin === "scheduled" && <button type="button" className="bk-secondary small" disabled={busy} title="转为手动快照，不再被定时清理" onClick={() => void keep()}><Pin />保留</button>}
-            <button type="button" className="bk-secondary small danger" disabled={busy} onClick={() => setConfirming(true)}><Trash2 />删除</button>
-          </div>
-        )}
+        <div className="bk-browser-actions">
+          <button type="button" className="bk-secondary small" disabled={busy} onClick={restoreHere}><ArchiveRestore />{trail.length ? "恢复此文件夹" : "全部恢复"}</button>
+          {manage && snapshot.origin === "scheduled" && <button type="button" className="bk-secondary small" disabled={busy} title="转为手动快照，不再被定时清理" onClick={() => void keep()}><Pin />保留</button>}
+          {manage && <button type="button" className="bk-secondary small danger" disabled={busy} onClick={() => setConfirming(true)}><Trash2 />删除</button>}
+        </div>
       </header>
-      <nav className="bk-crumbs" aria-label="快照中的位置">
-        <button type="button" disabled={!trail.length} onClick={() => setTrail([])}><FolderOpen />{spaceLabel(space)}</button>
-        {trail.map((crumb, index) => (
-          <span key={crumb.id}><ChevronRight /><button type="button" disabled={index === trail.length - 1} onClick={() => setTrail(trail.slice(0, index + 1))}>{crumb.name}</button></span>
-        ))}
-      </nav>
+      <div className="bk-browser-bar">
+        <nav className="bk-crumbs" aria-label="快照中的位置">
+          <button type="button" disabled={!trail.length} onClick={() => setTrail([])}><FolderOpen />{spaceLabel(space)}</button>
+          {trail.map((crumb, index) => (
+            <span key={crumb.id}><ChevronRight /><button type="button" disabled={index === trail.length - 1} onClick={() => setTrail(trail.slice(0, index + 1))}>{crumb.name}</button></span>
+          ))}
+        </nav>
+        <div className="bk-segmented small" role="radiogroup" aria-label="显示">
+          <button type="button" role="radio" aria-checked={!onlyChanged} className={onlyChanged ? "" : "active"} onClick={() => setOnlyChanged(false)}>全部</button>
+          <button type="button" role="radio" aria-checked={onlyChanged} className={onlyChanged ? "active" : ""} onClick={() => setOnlyChanged(true)}>与现在不同{entries ? <span className="bk-count">{changed.length}</span> : null}</button>
+        </div>
+      </div>
+      {entries && changed.length > 0 && !onlyChanged && (
+        <p className="bk-diff-summary">
+          与现在的{spaceLabel(space)}相比，这里
+          {removedCount > 0 && <><span className="bk-diff-dot removed" />{removedCount} 项已不在空间中</>}
+          {removedCount > 0 && modifiedCount > 0 && "，"}
+          {modifiedCount > 0 && <><span className="bk-diff-dot modified" />{modifiedCount} 项有改动</>}
+          <button type="button" className="bk-link" onClick={() => setOnlyChanged(true)}>只看这些</button>
+        </p>
+      )}
       <div className="bk-entries" role="grid" aria-label="快照中的文件">
         <div className="bk-entries-head" role="row"><span role="columnheader">名称</span><span role="columnheader">修改时间</span><span role="columnheader">大小</span><span role="columnheader" className="bk-sr">操作</span></div>
         {error ? <Notice tone="danger">{error}</Notice>
-          : !entries ? <div className="bk-loading inline"><Spinner small />正在读取…</div>
-            : entries.length === 0 ? <p className="bk-entries-empty">{trail.length ? "这个文件夹是空的" : "这份快照里没有文件"}</p>
-              : entries.map((entry) => (
+          : !shown ? <div className="bk-loading inline"><Spinner small />正在读取…</div>
+            : shown.length === 0 ? <p className="bk-entries-empty">{onlyChanged ? "这一层与现在的空间相同" : trail.length ? "这个文件夹是空的" : "这份快照里没有文件"}</p>
+              : shown.map((entry) => (
                 <div
                   key={entry.id}
                   role="row"
@@ -202,6 +238,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
                   <span role="gridcell" className="bk-entry-name">
                     <EntryIcon kind={entry.kind} />
                     {entry.kind === "directory" ? <button type="button" className="bk-entry-link" onClick={(event) => { event.stopPropagation(); open(entry); }}>{entry.name}</button> : <span>{entry.name}</span>}
+                    {entry.change && <span className={`bk-change ${entry.change}`} title={changeBadge[entry.change].title}>{changeBadge[entry.change].label}</span>}
                   </span>
                   <span role="gridcell" className="bk-entry-meta">{entry.modifiedAt ? formatDateTime(entry.modifiedAt) : "—"}</span>
                   <span role="gridcell" className="bk-entry-meta">{entry.kind === "file" ? formatBytes(entry.sizeBytes) : "文件夹"}</span>

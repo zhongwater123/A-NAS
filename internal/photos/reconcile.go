@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -31,8 +32,13 @@ type ReconcileReport struct {
 	UnexpectedEntries int `json:"unexpectedEntries"`
 }
 
-// knownDerivations lists every derivation that has files under derived/.
+// knownDerivations lists the derivations whose files under derived/ the
+// media jobs rebuild when they go missing.
 var knownDerivations = []string{thumbnailDerivation}
+
+// sheetDerivations list the scans whose avatar sheets live under derived/; a
+// sheet that went missing is scanned again.
+var sheetDerivations = []string{facesDerivation, petsDerivation}
 
 // Reconcile brings the content store back in line with the Catalog after a
 // crash. It never removes an object that any photo asset references, and it
@@ -62,7 +68,7 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileReport, error) {
 
 	// Rows without assets cannot normally exist, because purge deletes the
 	// row together with its last reference; treat any as orphans as well.
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM objects WHERE NOT EXISTS (SELECT 1 FROM assets WHERE assets.object_id = objects.id)"); err != nil {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM objects WHERE NOT EXISTS (SELECT 1 FROM assets WHERE assets.object_id = objects.id OR assets.motion_object_id = objects.id)"); err != nil {
 		return report, err
 	}
 	referenced := make(map[string]bool)
@@ -162,7 +168,9 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 		return err
 	}
 
-	for _, derivation := range knownDerivations {
+	rescanned := 0
+	for _, derivation := range slices.Concat(knownDerivations, sheetDerivations) {
+		sheet := slices.Contains(sheetDerivations, derivation)
 		rows, err := s.db.QueryContext(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
 		if err != nil {
 			return err
@@ -186,16 +194,29 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 				if _, err := tx.ExecContext(ctx, "DELETE FROM derived_files WHERE object_id = ? AND derivation = ?", objectID, derivation); err != nil {
 					return err
 				}
+				if sheet {
+					now := formatTime(s.now())
+					_, err := tx.ExecContext(ctx, `
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at) VALUES(?, ?, 'pending', ?, ?)
+ON CONFLICT(object_id, derivation) DO NOTHING`, objectID, derivation, now, now)
+					return err
+				}
 				return s.enqueueDerivations(ctx, tx, objectID)
 			})
 			if err != nil {
 				return err
 			}
 			report.DerivedRequeued++
+			if sheet {
+				rescanned++
+			}
 		}
 	}
-	if report.DerivedRequeued > 0 {
+	if report.DerivedRequeued > rescanned {
 		s.wakeMedia()
+	}
+	if rescanned > 0 {
+		s.wakeAI()
 	}
 	return nil
 }
@@ -207,7 +228,7 @@ func (s *Service) isDerivedPath(path string) bool {
 	if !validObjectID(objectID) {
 		return false
 	}
-	for _, derivation := range knownDerivations {
+	for _, derivation := range slices.Concat(knownDerivations, sheetDerivations) {
 		if path == derivedPath(derivation, objectID) {
 			return true
 		}

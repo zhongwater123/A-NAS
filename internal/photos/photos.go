@@ -54,7 +54,7 @@ type Principal struct {
 	// Viewing lists the caller's Administrative Viewing Mode grants for
 	// members' private libraries; each is read-only and expires on its own.
 	Viewing []ViewingGrant
-	// Assistant marks a member's AI assistant (ADR 0022). It sees only the
+	// Assistant marks a member's AI assistant (ADR 0024). It sees only the
 	// member's own private library and the shared library, changes nothing,
 	// and never acts as an administrator or through a viewing grant, even
 	// when the member could.
@@ -83,6 +83,10 @@ type Library struct {
 	// Viewing is set when the caller sees another member's private library
 	// only through Administrative Viewing Mode; access is read-only.
 	Viewing *LibraryViewing `json:"viewing,omitempty"`
+	// People says whether the library recognises people and pets, and
+	// CanSetPeople whether the caller may turn that on or off.
+	People       bool `json:"people"`
+	CanSetPeople bool `json:"canSetPeople"`
 }
 
 type LibraryViewing struct {
@@ -110,15 +114,24 @@ const (
 	DuplicateRepeated DuplicateRole = "duplicate"
 )
 
+type Motion struct {
+	Kind     string  `json:"kind"`
+	Duration float64 `json:"duration"`
+}
+
 type Asset struct {
-	ID          string    `json:"id"`
-	LibraryID   string    `json:"libraryId"`
-	DirectoryID string    `json:"directoryId,omitempty"`
-	Name        string    `json:"name"`
-	MediaType   string    `json:"mediaType"`
-	SizeBytes   int64     `json:"sizeBytes"`
-	UploadedBy  string    `json:"uploadedBy"`
-	ImportedAt  time.Time `json:"importedAt"`
+	Motion *Motion `json:"motion,omitempty"`
+	// LiveVideoMissing marks the still of an Apple Live Photo imported
+	// without its MOV; uploading that MOV later completes it.
+	LiveVideoMissing bool      `json:"liveVideoMissing,omitempty"`
+	ID               string    `json:"id"`
+	LibraryID        string    `json:"libraryId"`
+	DirectoryID      string    `json:"directoryId,omitempty"`
+	Name             string    `json:"name"`
+	MediaType        string    `json:"mediaType"`
+	SizeBytes        int64     `json:"sizeBytes"`
+	UploadedBy       string    `json:"uploadedBy"`
+	ImportedAt       time.Time `json:"importedAt"`
 	// TakenAt is the capture time from the original's EXIF, when recorded.
 	TakenAt *time.Time `json:"takenAt,omitempty"`
 	// Width and Height are the upright display size; zero when unknown.
@@ -135,6 +148,9 @@ type Asset struct {
 	// out. AI clusters are never part of a photo's details.
 	Tags   []string   `json:"tags,omitempty"`
 	Albums []AlbumRef `json:"albums,omitempty"`
+	// People lists the faces and pets in a single photo's details, with
+	// who each is in the photo's library.
+	People []AssetPerson `json:"people,omitempty"`
 }
 
 type TrashState struct {
@@ -156,6 +172,7 @@ type Content struct {
 }
 
 type Options struct {
+	Media  MediaDecoder
 	Now    func() time.Time
 	Random io.Reader
 	// TrashRetention defaults to DefaultTrashRetention.
@@ -174,6 +191,8 @@ type Options struct {
 	Labels *labels.Set
 	// Objects defaults to the built-in calibration of the object detector.
 	Objects *objects.Calibration
+	// People defaults to the built-in calibration of the face models.
+	People []PeopleCalibration
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -181,6 +200,8 @@ type Options struct {
 // owned by the photo service identity; the caller proves the volume is
 // mounted before calling Open.
 type Service struct {
+	media          MediaDecoder
+	decodeSlots    chan struct{}
 	db             *sql.DB
 	root           *os.Root
 	rootPath       string
@@ -204,7 +225,11 @@ type Service struct {
 	aiModelMu      sync.Mutex
 	aiModel        string
 	aiDetector     string
+	aiFaces        string
+	aiAnimals      string
 	detectorLoaded bool
+	// scanned counts face and pet scans stored since people last clustered.
+	scanned int
 	// nextDetection is the next detection job with its input, rendered
 	// while the Worker detected the one before. Only the AI runner uses it.
 	nextDetection *detectionInput
@@ -221,6 +246,8 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
+	// peopleCalibrations say how each kind of occurrence clusters.
+	peopleCalibrations []PeopleCalibration
 
 	// commitMu pairs every change to the set of content object files with the
 	// catalog transaction that references or forgets them, so a purge never
@@ -263,7 +290,7 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root,
+		db: db, root: opened, rootPath: root, media: options.Media, decodeSlots: make(chan struct{}, 2),
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
@@ -290,6 +317,10 @@ func Open(root string, options Options) (*Service, error) {
 	} else if service.objectCalibration, err = objects.V1Calibration(); err != nil {
 		_ = service.Close()
 		return nil, err
+	}
+	service.peopleCalibrations = defaultPeopleCalibrations
+	if options.People != nil {
+		service.peopleCalibrations = options.People
 	}
 	if service.now == nil {
 		service.now = time.Now

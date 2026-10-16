@@ -64,8 +64,9 @@ export interface Home {
   scanning: boolean;
 }
 export interface CollectionRef { id: string; name: string }
-export interface Episode { id: string; season: number; episode: number; title: string; plot?: string; duration?: number; addedAt: string; artwork: Artwork; progress?: Progress }
-export interface ShowDetail extends Title { plot?: string; next?: Episode; seasonList: { number: number; episodes: Episode[] }[]; collections: CollectionRef[] }
+export interface Episode { id: string; season: number; episode: number; title: string; plot?: string; duration?: number; addedAt: string; artwork: Artwork; progress?: Progress; file?: string }
+// folder names the folder the show has to itself; namedByNfo tells that tvshow.nfo, not file names, gives the title.
+export interface ShowDetail extends Title { plot?: string; next?: Episode; seasonList: { number: number; episodes: Episode[] }[]; collections: CollectionRef[]; folder?: string; namedByNfo?: boolean }
 export interface AudioTrack { index: number; label: string; language?: string; codec: string; channels?: number; default?: boolean }
 export interface SubtitleTrack { id: string; label: string; language?: string; external: boolean; default?: boolean }
 export interface VideoDetail extends Title {
@@ -80,6 +81,8 @@ export interface VideoDetail extends Title {
   nextId?: string;
   collections: CollectionRef[];
   collection?: string;
+  // namedByNfo tells that an NFO document, not the file name, gives the title.
+  namedByNfo?: boolean;
 }
 // mime names a converted stream's codecs, so the player can buffer it itself.
 export interface Playback { mode: "direct" | "remux" | "transcode"; url: string; duration?: number; reason?: string; audio: number; quality: Quality; qualities: Quality[]; mime?: string }
@@ -112,6 +115,8 @@ export const getVideo = (videoId: string) => request<VideoDetail>(`${base}/video
 // renameVideoFile renames the 片源, the video's file, with the subtitles, NFO
 // and artwork named after it.
 export const renameVideoFile = (videoId: string, fileName: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`, body("PATCH", { fileName }), true);
+// renameShow renames a show's own folder and the episode files carrying its title.
+export const renameShow = (showId: string, name: string) => request<ShowDetail>(`${base}/shows/${id(showId)}`, body("PATCH", { name }), true);
 export function getPlayback(videoId: string, options: { caps: string; audio?: number; quality?: Quality }) {
   const parameters = new URLSearchParams({ caps: options.caps, audio: String(options.audio ?? -1), quality: options.quality ?? "original" });
   return request<Playback>(`${base}/videos/${id(videoId)}/playback?${parameters}`);

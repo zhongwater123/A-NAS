@@ -8,7 +8,9 @@
 - [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）
 - [Web 桌面宿主机状态](web-desktop-host-state.md)（implemented）
 - [基础存储与共享](basic-storage-and-sharing.md)（implemented）
+- [成员文件分享](member-sharing.md)（开发分支已实现，尚未部署）
 - [相册与本地智能检索](photo-library.md)（M1 切片 1–6 implemented；M2、M3 draft）
+- [动态照片](photo-motion.md)（implemented）
 - [Web 相册界面](photo-gallery-ui.md)（implemented）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
 - [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
@@ -19,6 +21,8 @@
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [任务管理器](task-manager.md)（implemented）
+- [头像与昵称](account-profile.md)（implemented，尚未部署）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
 - [音乐](music.md)（implemented，尚未部署）

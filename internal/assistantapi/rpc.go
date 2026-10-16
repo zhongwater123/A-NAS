@@ -8,7 +8,7 @@ import (
 )
 
 // The JSON-RPC surface of `hermes serve` that the assistant window may use
-// (ADR 0022 decision 9; the allowlist and its reasons are in
+// (ADR 0024 decision 9; the allowlist and its reasons are in
 // docs/research/hermes-agent-runtime.md, "白名单（第一版）"). Everything not
 // listed here is refused by the Product Service, whatever Hermes would do.
 

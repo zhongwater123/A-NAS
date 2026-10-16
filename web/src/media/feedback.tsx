@@ -3,7 +3,8 @@ import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "
 
 import { messageOf } from "./Browse";
 import { episodeCode, heading } from "./format";
-import { addToCollection, createCollection, getVideo, listCollections, renameVideoFile, type Collection, type Title, type VideoDetail } from "./mediaApi";
+import { splitName } from "./EditableName";
+import { addToCollection, createCollection, getShow, getVideo, listCollections, renameShow, renameVideoFile, type Collection, type Title } from "./mediaApi";
 
 type DialogRequest =
   | { kind: "prompt"; title: string; label: string; value: string; confirm: string; maxLength: number; resolve: (value?: string) => void }
@@ -126,68 +127,81 @@ export function CollectionPicker({ title, onClose, onDone }: { title: Title; onC
   );
 }
 
-// RenameDialog renames a video's file, its 片源. Only the name before the
-// extension is edited, so the file stays a video the library reads.
-export function RenameDialog({ title, onClose, onDone }: { title: Title; onClose: () => void; onDone: (detail: VideoDetail) => void }) {
-  const [file, setFile] = useState<VideoDetail["file"]>();
+// RenameDialog renames a video's file, its 片源, or a show's folder. Of a
+// file only the name before the extension is edited, so it stays a video
+// the library reads.
+export function RenameDialog({ title, onClose, onDone }: { title: Title; onClose: () => void; onDone: (message: string) => void }) {
+  const show = title.type === "show";
+  const [source, setSource] = useState<{ name: string; place: string; namedByNfo?: boolean; folder?: boolean }>();
   const [stem, setStem] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     let live = true;
-    getVideo(title.id).then((video) => {
+    const loaded = show
+      ? getShow(title.id).then((detail) => ({ name: detail.folder || detail.title, place: detail.folder ? "剧集文件夹" : "这部剧没有自己的文件夹", namedByNfo: detail.namedByNfo, folder: Boolean(detail.folder) }))
+      : getVideo(title.id).then((video) => ({ name: video.file.name, place: video.file.folder, namedByNfo: video.namedByNfo }));
+    loaded.then((value) => {
       if (!live) return;
-      const dot = video.file.name.lastIndexOf(".");
-      setFile(video.file);
-      setStem(dot > 0 ? video.file.name.slice(0, dot) : video.file.name);
+      setSource(value);
+      setStem(show ? value.name : splitName(value.name).stem);
     }, (caught) => { if (live) setError(messageOf(caught)); });
     return () => { live = false; };
-  }, [title.id]);
-  useEffect(() => { if (file) { input.current?.focus(); input.current?.select(); } }, [file]);
-  const dot = file ? file.name.lastIndexOf(".") : -1;
-  const extension = file && dot > 0 ? file.name.slice(dot) : "";
+  }, [title.id, show]);
+  useEffect(() => { if (source) { input.current?.focus(); input.current?.select(); } }, [source]);
+  const extension = source && !show ? splitName(source.name).extension : "";
   const name = stem.trim();
   const invalid = /[\\/]/.test(name) || name.startsWith(".");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!file || !name || invalid || saving) return;
-    if (name + extension === file.name) { onClose(); return; }
+    if (!source || !name || invalid || saving) return;
+    if (name + extension === source.name) { onClose(); return; }
     setSaving(true);
     setError("");
     try {
-      onDone(await renameVideoFile(title.id, name + extension));
+      if (show) {
+        await renameShow(title.id, name);
+        onDone(`已重命名为“${name}”，正在重新整理剧集`);
+      } else {
+        const detail = await renameVideoFile(title.id, name + extension);
+        onDone(`已重命名为“${detail.file.name}”，正在重新识别片名`);
+      }
     } catch (caught) {
       setError(messageOf(caught));
       setSaving(false);
     }
   };
   const label = title.type === "episode" ? [heading(title), episodeCode(title.season, title.episode)].filter(Boolean).join(" · ") : heading(title);
+  const what = show ? "重命名剧集" : "重命名片源";
+  const hint = show
+    ? source?.folder ? "剧集文件夹和文件名里带剧名的各集一起改名，字幕与海报跟着改；收藏、合集和各集进度都保留。" : "这部剧和别的视频共用文件夹，只改各集文件名里的剧名；收藏、合集和各集进度都保留。"
+    : "同名的字幕、NFO 和海报会一起改名，文件管理和 SMB 中看到的也是新名字。播放进度和收藏都保留，片名会按新文件名重新识别。";
   return (
     <div className="mc-dialog-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
-      <form className="mc-dialog" role="dialog" aria-modal="true" aria-label="重命名片源" onSubmit={(event) => void submit(event)}
+      <form className="mc-dialog" role="dialog" aria-modal="true" aria-label={what} onSubmit={(event) => void submit(event)}
         onKeyDown={(event) => { if (event.key === "Escape" && !saving) { event.stopPropagation(); onClose(); } }}>
-        <h3>重命名片源</h3>
+        <h3>{what}</h3>
         <p className="mc-dialog-sub">{label}</p>
-        {!file ? (!error && <span className="mc-spinner small" />) : (
+        {!source ? (!error && <span className="mc-spinner small" />) : (
           <>
             <label className="mc-field">
-              <span>文件名</span>
+              <span>{show ? "名称" : "文件名"}</span>
               <span className="mc-rename-input">
-                <input ref={input} value={stem} maxLength={240} aria-label="新文件名" onChange={(event) => setStem(event.target.value)} />
+                <input ref={input} value={stem} maxLength={240} aria-label={show ? "新名称" : "新文件名"} onChange={(event) => setStem(event.target.value)} />
                 {extension && <span className="mc-rename-extension">{extension}</span>}
               </span>
             </label>
-            <p className="mc-hint"><FolderOpen />{file.folder}</p>
-            <p className="mc-hint"><Info />同名的字幕、NFO 和海报会一起改名，文件管理和 SMB 中看到的也是新名字。播放进度和收藏都保留，片名会按新文件名重新识别（有 NFO 时以 NFO 为准）。</p>
+            <p className="mc-hint"><FolderOpen />{source.place}</p>
+            <p className="mc-hint"><Info />{hint}{source.namedByNfo ? " 片名来自 NFO 文件，改名不会改变显示的片名。" : ""}</p>
           </>
         )}
-        {invalid && <p className="mc-form-error">文件名不能包含 / 或 \，也不能以 . 开头。</p>}
+        {invalid && <p className="mc-form-error">名称不能包含 / 或 \，也不能以 . 开头。</p>}
         {error && <p className="mc-form-error" role="alert">{error}</p>}
         <footer className="mc-dialog-actions">
           <span />
           <button type="button" className="mc-glass" onClick={onClose} disabled={saving}>取消</button>
-          <button type="submit" className="mc-primary" disabled={!file || !name || invalid || saving}>{saving ? "正在重命名…" : "重命名"}</button>
+          <button type="submit" className="mc-primary" disabled={!source || !name || invalid || saving}>{saving ? "正在重命名…" : "重命名"}</button>
         </footer>
       </form>
     </div>

@@ -112,3 +112,14 @@ func TestAccountLookupIsOffUnlessGiven(t *testing.T) {
 		t.Fatalf("error = %v, want the lookup to be unavailable", err)
 	}
 }
+
+func (s sessions) ActiveProfiles(context.Context) ([]accounts.Profile, error) {
+	return []accounts.Profile{{ID: "user:alice", Username: "alice", Nickname: "Alice"}}, nil
+}
+
+func TestClientListsRecipientProfilesThroughSocket(t *testing.T) {
+	got, err := serve(t, sessions{}, nil).ActiveProfiles(context.Background())
+	if err != nil || len(got) != 1 || got[0].ID != "user:alice" || got[0].Nickname != "Alice" {
+		t.Fatalf("profiles = %+v, %v", got, err)
+	}
+}

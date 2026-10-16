@@ -20,6 +20,17 @@ const (
 	FrequencyWeekly ScheduleFrequency = "weekly"
 )
 
+// RetentionMode decides which scheduled snapshots a schedule keeps.
+type RetentionMode string
+
+const (
+	// RetentionCount keeps the newest Keep scheduled snapshots.
+	RetentionCount RetentionMode = "count"
+	// RetentionTiered keeps the newest snapshot of each of the latest hours,
+	// days, weeks and months, so a frequent schedule still reaches far back.
+	RetentionTiered RetentionMode = "tiered"
+)
+
 type ScheduleRunStatus string
 
 const (
@@ -46,10 +57,29 @@ type SnapshotScheduleSettings struct {
 	Time string `json:"time"`
 	// Weekday is the day of weekly runs, 0 for Sunday through 6 for Saturday.
 	Weekday int `json:"weekday"`
-	// Keep is how many scheduled snapshots stay; older ones are deleted
-	// after each successful run. Manual snapshots are never deleted.
+	// Keep is how many scheduled snapshots stay under RetentionCount; older
+	// ones are deleted after each successful run. Manual snapshots are never
+	// deleted.
 	Keep int `json:"keep"`
+	// Retention is RetentionCount when empty.
+	Retention RetentionMode `json:"retention"`
+	// Tiers apply under RetentionTiered.
+	Tiers RetentionTiers `json:"tiers"`
 }
+
+// RetentionTiers says how many hours, days, weeks and months keep their
+// newest scheduled snapshot. Periods without a snapshot do not count, so a
+// device that was off still keeps as many restore points. A schedule never
+// sets a tier finer than its frequency: daily schedules keep no hours, and
+// weekly ones neither hours nor days.
+type RetentionTiers struct {
+	Hourly  int `json:"hourly"`
+	Daily   int `json:"daily"`
+	Weekly  int `json:"weekly"`
+	Monthly int `json:"monthly"`
+}
+
+func (t RetentionTiers) total() int { return t.Hourly + t.Daily + t.Weekly + t.Monthly }
 
 // SnapshotSchedule is one space's schedule and how it last ran. A space
 // without a stored schedule reports a disabled default.
@@ -88,7 +118,7 @@ type SpaceLookup interface {
 // snapshot at 03:00, keeping the latest 14.
 func defaultSchedule(spaceID string) SnapshotSchedule {
 	return SnapshotSchedule{SpaceID: spaceID, SnapshotScheduleSettings: SnapshotScheduleSettings{
-		Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14,
+		Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14, Retention: RetentionCount,
 	}, minuteOfDay: 3 * 60}
 }
 
@@ -127,18 +157,33 @@ func (s *Service) UpdateSnapshotSchedule(ctx context.Context, actor accounts.Use
 	if err != nil {
 		return SnapshotSchedule{}, err
 	}
+	if settings.Retention == "" {
+		settings.Retention = RetentionCount
+	}
+	if err := settings.checkRetention(); err != nil {
+		return SnapshotSchedule{}, err
+	}
+	tiers := settings.Tiers
 	if _, err := s.store.db.ExecContext(ctx, `
-INSERT INTO snapshot_schedules(space_id, enabled, frequency, minute_of_day, weekday, keep, updated_by, updated_at)
-VALUES(?,?,?,?,?,?,?,?)
+INSERT INTO snapshot_schedules(space_id, enabled, frequency, minute_of_day, weekday, keep, retention,
+    keep_hourly, keep_daily, keep_weekly, keep_monthly, updated_by, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(space_id) DO UPDATE SET enabled = excluded.enabled, frequency = excluded.frequency,
     minute_of_day = excluded.minute_of_day, weekday = excluded.weekday, keep = excluded.keep,
+    retention = excluded.retention, keep_hourly = excluded.keep_hourly, keep_daily = excluded.keep_daily,
+    keep_weekly = excluded.keep_weekly, keep_monthly = excluded.keep_monthly,
     updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-		spaceID, settings.Enabled, settings.Frequency, minuteOfDay, settings.Weekday, settings.Keep, actor.ID, formatTime(s.now())); err != nil {
+		spaceID, settings.Enabled, settings.Frequency, minuteOfDay, settings.Weekday, settings.Keep, settings.Retention,
+		tiers.Hourly, tiers.Daily, tiers.Weekly, tiers.Monthly, actor.ID, formatTime(s.now())); err != nil {
 		return SnapshotSchedule{}, err
 	}
 	detail := "disabled"
 	if settings.Enabled {
 		detail = fmt.Sprintf("%s %s weekday=%d keep=%d", settings.Frequency, settings.Time, settings.Weekday, settings.Keep)
+		if settings.Retention == RetentionTiered {
+			detail = fmt.Sprintf("%s %s weekday=%d tiered hourly=%d daily=%d weekly=%d monthly=%d", settings.Frequency, settings.Time,
+				settings.Weekday, tiers.Hourly, tiers.Daily, tiers.Weekly, tiers.Monthly)
+		}
 	}
 	_ = s.audit(ctx, actor.ID, "snapshot.schedule_updated", spaceID, spaceID, detail)
 	return s.SnapshotSchedule(ctx, actor, spaceID)
@@ -158,6 +203,31 @@ func (settings SnapshotScheduleSettings) minuteOfDay() (int, error) {
 		return 0, ErrInvalidSchedule
 	}
 	return parsed.Hour()*60 + parsed.Minute(), nil
+}
+
+// checkRetention accepts tiers only under RetentionTiered, where at least one
+// tier keeps something, none is finer than the frequency, and together they
+// keep at most MaxScheduledSnapshots.
+func (settings SnapshotScheduleSettings) checkRetention() error {
+	tiers := settings.Tiers
+	switch settings.Retention {
+	case RetentionCount:
+		if tiers != (RetentionTiers{}) {
+			return ErrInvalidSchedule
+		}
+		return nil
+	case RetentionTiered:
+	default:
+		return ErrInvalidSchedule
+	}
+	if tiers.Hourly < 0 || tiers.Daily < 0 || tiers.Weekly < 0 || tiers.Monthly < 0 ||
+		tiers.total() < 1 || tiers.total() > MaxScheduledSnapshots {
+		return ErrInvalidSchedule
+	}
+	if (settings.Frequency != FrequencyHourly && tiers.Hourly > 0) || (settings.Frequency == FrequencyWeekly && tiers.Daily > 0) {
+		return ErrInvalidSchedule
+	}
+	return nil
 }
 
 // visibleSpace authorizes reading a space's catalog records, which live on the
@@ -184,7 +254,8 @@ func (s *Service) visibleSpace(ctx context.Context, actor accounts.User, spaceID
 
 func (s *Service) loadSchedules(ctx context.Context, where string, args ...any) ([]SnapshotSchedule, error) {
 	rows, err := s.store.db.QueryContext(ctx, `
-SELECT space_id, enabled, frequency, minute_of_day, weekday, keep, updated_at, last_run_at, last_status, last_error, last_snapshot_id
+SELECT space_id, enabled, frequency, minute_of_day, weekday, keep, retention, keep_hourly, keep_daily, keep_weekly, keep_monthly,
+    updated_at, last_run_at, last_status, last_error, last_snapshot_id
 FROM snapshot_schedules `+where+` ORDER BY space_id`, args...)
 	if err != nil {
 		return nil, err
@@ -194,8 +265,10 @@ FROM snapshot_schedules `+where+` ORDER BY space_id`, args...)
 	for rows.Next() {
 		var schedule SnapshotSchedule
 		var updatedAt, lastRunAt, lastStatus, lastError, lastSnapshotID string
+		tiers := &schedule.Tiers
 		if err := rows.Scan(&schedule.SpaceID, &schedule.Enabled, &schedule.Frequency, &schedule.minuteOfDay, &schedule.Weekday,
-			&schedule.Keep, &updatedAt, &lastRunAt, &lastStatus, &lastError, &lastSnapshotID); err != nil {
+			&schedule.Keep, &schedule.Retention, &tiers.Hourly, &tiers.Daily, &tiers.Weekly, &tiers.Monthly,
+			&updatedAt, &lastRunAt, &lastStatus, &lastError, &lastSnapshotID); err != nil {
 			return nil, err
 		}
 		schedule.Time = fmt.Sprintf("%02d:%02d", schedule.minuteOfDay/60, schedule.minuteOfDay%60)
@@ -362,7 +435,7 @@ func (s *Service) runSchedule(ctx context.Context, spaces SpaceLookup, schedule 
 		return err
 	}
 	if err == nil {
-		if err := s.expireScheduledSnapshots(ctx, schedule.SpaceID, schedule.Keep); err != nil {
+		if err := s.expireScheduledSnapshots(ctx, schedule); err != nil {
 			logger.ErrorContext(ctx, "expiring scheduled snapshots failed", "space_id", schedule.SpaceID, "error", err)
 		}
 	}
@@ -392,15 +465,19 @@ func (s *Service) takeScheduledSnapshot(ctx context.Context, spaces SpaceLookup,
 	return snapshot, err
 }
 
-// expireScheduledSnapshots deletes a space's scheduled snapshots beyond the
-// newest keep. Manual snapshots are never expired.
-func (s *Service) expireScheduledSnapshots(ctx context.Context, spaceID string, keep int) error {
-	snapshots, err := s.spaceSnapshots(ctx, spaceID, SnapshotOriginScheduled)
-	if err != nil || len(snapshots) <= keep {
+// expireScheduledSnapshots deletes the scheduled snapshots of a space that
+// its retention no longer keeps. Manual snapshots are never expired.
+func (s *Service) expireScheduledSnapshots(ctx context.Context, schedule SnapshotSchedule) error {
+	snapshots, err := s.spaceSnapshots(ctx, schedule.SpaceID, SnapshotOriginScheduled)
+	if err != nil {
 		return err
 	}
+	kept := schedule.retained(snapshots, s.location)
 	var failures []error
-	for _, snapshot := range snapshots[keep:] {
+	for _, snapshot := range snapshots {
+		if kept[snapshot.ID] {
+			continue
+		}
 		if err := s.deleteSnapshot(ctx, snapshot); err != nil {
 			failures = append(failures, fmt.Errorf("expire snapshot %s: %w", snapshot.ID, err))
 			continue
@@ -408,6 +485,45 @@ func (s *Service) expireScheduledSnapshots(ctx context.Context, spaceID string, 
 		_ = s.audit(ctx, systemActor, "snapshot.expired", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 	}
 	return errors.Join(failures...)
+}
+
+// retained names the scheduled snapshots, given newest first, that the
+// schedule's retention keeps.
+func (s SnapshotSchedule) retained(snapshots []Snapshot, location *time.Location) map[string]bool {
+	kept := map[string]bool{}
+	if s.Retention != RetentionTiered {
+		for index, snapshot := range snapshots {
+			if index < s.Keep {
+				kept[snapshot.ID] = true
+			}
+		}
+		return kept
+	}
+	for _, tier := range []struct {
+		count  int
+		period func(time.Time) string
+	}{
+		{s.Tiers.Hourly, func(at time.Time) string { return at.Format("2006-01-02 15") }},
+		{s.Tiers.Daily, func(at time.Time) string { return at.Format("2006-01-02") }},
+		{s.Tiers.Weekly, func(at time.Time) string { year, week := at.ISOWeek(); return fmt.Sprintf("%d-W%02d", year, week) }},
+		{s.Tiers.Monthly, func(at time.Time) string { return at.Format("2006-01") }},
+	} {
+		// The newest snapshot of each period stands for it.
+		periods, last := 0, ""
+		for _, snapshot := range snapshots {
+			if periods == tier.count {
+				break
+			}
+			period := tier.period(snapshot.CreatedAt.In(location))
+			if period == last {
+				continue
+			}
+			last = period
+			periods++
+			kept[snapshot.ID] = true
+		}
+	}
+	return kept
 }
 
 func scheduleErrorCode(err error) string {

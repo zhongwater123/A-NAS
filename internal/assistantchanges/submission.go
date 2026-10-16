@@ -1,5 +1,5 @@
 // Package assistantchanges executes 提交更改, the only way a member's AI
-// assistant changes the member's own files (ADR 0022 decision 4).
+// assistant changes the member's own files (ADR 0024 decision 4).
 //
 // The assistant stages new contents in its own directory and submits a list
 // of operations. Preparing a submission checks it against what the member's

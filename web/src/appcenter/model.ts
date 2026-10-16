@@ -1,7 +1,7 @@
 import { Activity, BookOpen, Download, FolderSync, Images, type LucideIcon, Music, NotebookPen, Router, Shapes, Workflow, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AppsAPIError, CatalogApp, InstallPlan } from "../appsApi";
+import { AppsAPIError, CatalogApp, InstallPlan, ServiceRuntime } from "../appsApi";
 
 export interface Category {
   id: string;
@@ -37,6 +37,36 @@ export const mountLabels: Record<InstallPlan["mounts"][number]["kind"], string> 
   system: "系统只读",
 };
 
+export const runAsLabels: Record<ServiceRuntime["runAs"], string> = {
+  app: "应用账号",
+  "app-after-init": "初始化后降权",
+  image: "镜像自带身份",
+};
+
+// One line on how the app runs, from its services; an older container agent sends none.
+export function runtimeSummary(plan: InstallPlan): string {
+  const services = plan.services ?? [];
+  const account = plan.identity.username;
+  if (services.length === 0) return `账号 ${account}`;
+  if (services.every((service) => service.runAs === "image")) return "以镜像自带的身份运行，可能是 root";
+  if (services.some((service) => service.runAs === "image")) return `部分服务以镜像自带的身份运行，其余以 ${account} 运行`;
+  if (services.some((service) => service.runAs === "app-after-init")) return `以 root 初始化后，以独立账号 ${account} 运行`;
+  return `以独立账号 ${account} 运行`;
+}
+
+// What one service is allowed, in the words of the install plan.
+export function serviceText(service: ServiceRuntime, plan: InstallPlan): string {
+  const shared = service.shared === "write" ? "，经 a-nas-users 读写共享空间" : service.shared === "read" ? "，经 a-nas-users 只读访问共享空间" : "";
+  switch (service.runAs) {
+    case "app":
+      return `UID ${plan.identity.uid}，没有特权能力${shared}`;
+    case "app-after-init":
+      return `入口程序以 root 准备后，以 UID ${plan.identity.uid} 运行${shared}`;
+    default:
+      return "可能是 root，只能访问自己的应用数据";
+  }
+}
+
 export const isBusy = (app: CatalogApp) => app.state === "installing" || app.state === "uninstalling";
 export const installFailed = (app: CatalogApp) => app.state === "available" && app.job?.action === "install" && app.job.state === "failed";
 
@@ -54,7 +84,7 @@ export function stateText(app: CatalogApp): string {
 }
 
 // The app's web interface on the address this desktop was opened from.
-export function appURL(app: CatalogApp, location: Location = window.location): string | undefined {
+export function appURL(app: Pick<CatalogApp, "webPort" | "scheme" | "path">, location: Location = window.location): string | undefined {
   if (!app.webPort) return undefined;
   const url = new URL(location.href);
   url.protocol = `${app.scheme || "http"}:`;
@@ -65,7 +95,7 @@ export function appURL(app: CatalogApp, location: Location = window.location): s
   return url.toString();
 }
 
-export function openApp(app: CatalogApp) {
+export function openApp(app: Pick<CatalogApp, "webPort" | "scheme" | "path">) {
   const url = appURL(app);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 }

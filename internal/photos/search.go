@@ -30,6 +30,11 @@ import (
 // detector score to the similarity, weighted by how much of the query they
 // make up, and a query about things the detector finds reliably puts the
 // photos it found them in first, so that search can say when there are none.
+//
+// People are named by members, so their names are user data and take part in
+// search (docs/architecture/photo-people.md#搜索): a query that contains the
+// full name of a person in its scope keeps to that person's photos, and the
+// rest of the query ranks them as usual; a name alone lists them newest first.
 
 var ErrInvalidQuery = errors.New("invalid photo search query")
 
@@ -80,6 +85,8 @@ type SearchPage struct {
 	// Objects is set when the query is about things the detector finds
 	// reliably.
 	Objects *ObjectsFound
+	// People are the names in the query whose photos the results keep to.
+	People []string
 }
 
 // ObjectsFound is what the detector found for a query about things.
@@ -99,8 +106,9 @@ type searchHit struct {
 	score float64
 }
 
-// A candidate's tags are its user tags joined by unit separators.
-type candidate struct{ id, objectID, name, tags string }
+// A candidate's tags are its user tags joined by unit separators; when is its
+// capture time, or its import time without one.
+type candidate struct{ id, objectID, libraryID, name, tags, when string }
 
 // Search returns photos matching the query by name or meaning. Trashed photos
 // are never included.
@@ -129,8 +137,27 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		return SearchPage{}, err
 	}
 	page := SearchPage{Assets: []Asset{}}
-	hits, err := s.queryHits(ctx, query, candidates, &page)
+	rest, names, of, err := s.peopleInQuery(ctx, query, args)
 	if err != nil {
+		return SearchPage{}, err
+	}
+	var hits []searchHit
+	if len(names) > 0 {
+		page.People = names
+		candidates = slices.DeleteFunc(candidates, func(c candidate) bool {
+			for _, photos := range of {
+				if !photos[c.libraryID+"\x00"+c.objectID] {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	if len(names) > 0 && rest == "" {
+		hits = newestHits(candidates)
+		page.Semantic = true
+		page.Closest = len(hits)
+	} else if hits, err = s.queryHits(ctx, cmp.Or(rest, query), candidates, &page); err != nil {
 		return SearchPage{}, err
 	}
 	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
@@ -143,7 +170,8 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 // searchCandidates lists the untrashed photos of the libraries in scope with
 // their user tags.
 func (s *Service) searchCandidates(ctx context.Context, scope []any) ([]candidate, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.name, IFNULL(group_concat(t.name, char(31)), '')
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.library_id, a.name, IFNULL(group_concat(t.name, char(31)), ''),
+  IFNULL(a.taken_at, a.imported_at)
 FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
 WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
 GROUP BY a.id`, scope...)
@@ -153,7 +181,7 @@ GROUP BY a.id`, scope...)
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.objectID, &c.name, &c.tags); err != nil {
+		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -280,6 +308,70 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 		page.Objects = &ObjectsFound{Words: words, Detected: len(detected), Undetected: undetected}
 	}
 	return append(append(named, detected...), similar...), nil
+}
+
+// peopleInQuery finds the full names of named people in the search's scope
+// that the query contains, longest first so that a longer name is not taken
+// for a shorter one inside it. It returns the query without them, the names,
+// and for each name the photos of every person by that name, keyed by
+// library and content object.
+func (s *Service) peopleInQuery(ctx context.Context, query string, scope []any) (string, []string, []map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT pe.name, po.library_id || char(0) || o.object_id FROM people pe
+JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.library_id
+JOIN occurrences o ON o.id = po.occurrence_id
+WHERE pe.name <> '' AND pe.library_id IN (`+placeholders(len(scope))+`)
+  AND pe.library_id IN (SELECT id FROM libraries WHERE people = 1)`, scope...)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer rows.Close()
+	photosOf := make(map[string]map[string]bool)
+	for rows.Next() {
+		var name, photo string
+		if err := rows.Scan(&name, &photo); err != nil {
+			return "", nil, nil, err
+		}
+		if photosOf[name] == nil {
+			photosOf[name] = make(map[string]bool)
+		}
+		photosOf[name][photo] = true
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, nil, err
+	}
+	known := make([]string, 0, len(photosOf))
+	for name := range photosOf {
+		known = append(known, name)
+	}
+	slices.SortFunc(known, func(a, b string) int {
+		return cmp.Or(cmp.Compare(utf8.RuneCountInString(b), utf8.RuneCountInString(a)), strings.Compare(a, b))
+	})
+	rest := query
+	var names []string
+	var of []map[string]bool
+	for _, name := range known {
+		if strings.Contains(rest, name) {
+			rest = strings.ReplaceAll(rest, name, " ")
+			names = append(names, name)
+			of = append(of, photosOf[name])
+		}
+	}
+	return strings.Join(strings.Fields(rest), " "), names, of, nil
+}
+
+// newestHits ranks candidates by when they were taken, newest first, in the
+// name band.
+func newestHits(candidates []candidate) []searchHit {
+	ordered := slices.Clone(candidates)
+	slices.SortFunc(ordered, func(a, b candidate) int {
+		return cmp.Or(strings.Compare(b.when, a.when), strings.Compare(b.id, a.id))
+	})
+	hits := make([]searchHit, len(ordered))
+	for i, c := range ordered {
+		hits[i] = searchHit{c.id, nameBand + 1 - float64(i)/float64(len(ordered)+1)}
+	}
+	return hits
 }
 
 // mentionScore is the detector's score for a photo with these best scores per

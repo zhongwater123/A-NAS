@@ -17,9 +17,11 @@ var ErrInvalidCursor = errors.New("invalid photo timeline cursor")
 type ImportRequest struct {
 	LibraryID string
 	// DirectoryID is the target virtual directory; empty means the library root.
-	DirectoryID string
-	Name        string
-	Content     io.Reader
+	DirectoryID   string
+	Name          string
+	Content       io.Reader
+	MotionContent io.Reader
+	MotionName    string
 }
 
 // Import persists one original and creates its photo asset. It returns only
@@ -45,12 +47,33 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		return Asset{}, err
 	}
 	defer s.discardStaging(staged.name)
+	companion, err := s.prepareMotion(ctx, staged, request)
+	if err != nil {
+		return Asset{}, err
+	}
+	liveID, err := s.stillLiveID(staged.name)
+	if err != nil {
+		return Asset{}, err
+	}
+	if companion != nil {
+		defer s.discardStaging(companion.object.name)
+	}
 
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
 	created, err := s.publish(staged)
 	if err != nil {
 		return Asset{}, err
+	}
+	motionCreated := false
+	if companion != nil {
+		motionCreated, err = s.publish(companion.object)
+		if err != nil {
+			if created {
+				_ = s.removeObject(staged.id)
+			}
+			return Asset{}, err
+		}
 	}
 	assetID := s.randomID("photo")
 	var imported assetRecord
@@ -62,9 +85,9 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		now := formatTime(s.now())
 		metadata := staged.metadata
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO objects(id, size_bytes, media_type, width, height, orientation, created_at)
-			 VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-			staged.id, staged.size, staged.mediaType, metadata.width, metadata.height, metadata.orientation, now); err != nil {
+			`INSERT INTO objects(id, size_bytes, media_type, width, height, orientation, created_at, live_id)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET live_id = IFNULL(objects.live_id, excluded.live_id)`,
+			staged.id, staged.size, staged.mediaType, metadata.width, metadata.height, metadata.orientation, now, liveID); err != nil {
 			return err
 		}
 		var takenAt any
@@ -77,7 +100,15 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 			assetID, lib.id, request.DirectoryID, staged.id, name, p.UserID, now, takenAt); err != nil {
 			return err
 		}
+		if companion != nil {
+			if err := s.insertMotion(ctx, tx, assetID, companion); err != nil {
+				return err
+			}
+		}
 		if err := s.enqueueDerivations(ctx, tx, staged.id); err != nil {
+			return err
+		}
+		if err := s.enqueuePeopleScans(ctx, tx, staged.id); err != nil {
 			return err
 		}
 		record, err := s.assetByID(ctx, tx, assetID)
@@ -88,6 +119,9 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		return s.audit(ctx, tx, p.UserID, "photo.imported", assetID, name)
 	})
 	if err != nil {
+		if motionCreated {
+			_ = s.removeObject(companion.object.id)
+		}
 		if created {
 			_ = s.removeObject(staged.id)
 		}
@@ -124,6 +158,9 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 		return Asset{}, err
 	}
 	if asset.Albums, err = s.albumsOf(ctx, asset.ID); err != nil {
+		return Asset{}, err
+	}
+	if asset.People, err = s.peopleOf(ctx, record); err != nil {
 		return Asset{}, err
 	}
 	return asset, nil
@@ -460,8 +497,8 @@ func checkCopySource(p Principal, source assetRecord) error {
 func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, source assetRecord, target library, directoryID string) (assetRecord, error) {
 	id := s.randomID("photo")
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at, taken_at)
-		 SELECT ?, ?, NULLIF(?, ''), object_id, name, ?, ?, taken_at FROM assets WHERE id = ?`,
+		`INSERT INTO assets(id, library_id, directory_id, object_id, name, uploaded_by, imported_at, taken_at, motion_object_id, motion_name, motion_kind, motion_duration)
+		 SELECT ?, ?, NULLIF(?, ''), object_id, name, ?, ?, taken_at, motion_object_id, motion_name, motion_kind, motion_duration FROM assets WHERE id = ?`,
 		id, target.id, directoryID, p.UserID, formatTime(s.now()), source.ID); err != nil {
 		return assetRecord{}, err
 	}
@@ -478,6 +515,9 @@ func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, sourc
 	}
 	record, err := s.assetByID(ctx, tx, id)
 	if err != nil {
+		return assetRecord{}, err
+	}
+	if err := s.enqueuePeopleScans(ctx, tx, record.objectID); err != nil {
 		return assetRecord{}, err
 	}
 	return record, s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)
@@ -585,20 +625,25 @@ func (s *Service) purge(ctx context.Context, actorID, action string, records []a
 				continue
 			}
 			purged++
-			var referenced bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE object_id = ?)", record.objectID).Scan(&referenced); err != nil {
-				return err
-			}
-			if !referenced {
-				derivations, err := derivationsOf(ctx, tx, record.objectID)
-				if err != nil {
+			for _, objectID := range []string{record.objectID, record.motionObjectID} {
+				if objectID == "" {
+					continue
+				}
+				var referenced bool
+				if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE object_id = ? OR motion_object_id = ?)", objectID, objectID).Scan(&referenced); err != nil {
 					return err
 				}
-				if _, err := tx.ExecContext(ctx, "DELETE FROM objects WHERE id = ?", record.objectID); err != nil {
-					return err
+				if !referenced {
+					derivations, err := derivationsOf(ctx, tx, objectID)
+					if err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(ctx, "DELETE FROM objects WHERE id = ?", objectID); err != nil {
+						return err
+					}
+					orphaned = append(orphaned, objectID)
+					derived[objectID] = derivations
 				}
-				orphaned = append(orphaned, record.objectID)
-				derived[record.objectID] = derivations
 			}
 			if err := s.audit(ctx, tx, actorID, action, record.ID, record.Name); err != nil {
 				return err

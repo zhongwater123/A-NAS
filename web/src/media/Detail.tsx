@@ -1,11 +1,32 @@
-import { Check, FileVideo, Heart, Languages, ListPlus, PenLine, Play, RotateCcw, Star, Subtitles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, FileVideo, Heart, Languages, ListPlus, Play, RotateCcw, Star, Subtitles } from "lucide-react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 
 import { formatBytes } from "../bytes";
 import { Empty, Loading, messageOf } from "./Browse";
-import { Artwork, useMediaActions } from "./Cards";
+import { Artwork, useMediaActions, type MediaActions } from "./Cards";
+import { EditableName, splitName } from "./EditableName";
 import { episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
-import { getShow, getVideo, type Episode, type ShowDetail, type Title, type VideoDetail } from "./mediaApi";
+import { getShow, getVideo, renameShow, renameVideoFile, type Episode, type ShowDetail, type Title, type VideoDetail } from "./mediaApi";
+
+const nfoNote = "片名来自 NFO 文件，改名不会改变显示的片名";
+
+// FileName is a video's name that a double-click renames: what shows is the
+// title or the file name, what is edited is the file name, its 片源.
+function FileName({ as, text, videoId, file, namedByNfo, actions, onRenamed }: {
+  as: "h1" | "p" | "strong" | "span"; text: ReactNode; videoId: string; file: string; namedByNfo?: boolean;
+  actions: MediaActions; onRenamed?: (detail: VideoDetail) => void;
+}) {
+  const { stem, extension } = splitName(file);
+  return (
+    <EditableName as={as} text={text} value={stem} suffix={extension} label="重命名片源"
+      hint={namedByNfo ? `改的是片源文件名；${nfoNote}` : "改的是片源文件名，片名会按新名字重新识别"}
+      onSave={async (name) => {
+        const detail = await renameVideoFile(videoId, name + extension);
+        onRenamed?.(detail);
+        actions.renamed(`已重命名为“${detail.file.name}”，正在重新识别片名`);
+      }} />
+  );
+}
 
 function Meta({ title, extra = [] }: { title: Title; extra?: (string | undefined)[] }) {
   const parts = [
@@ -53,8 +74,13 @@ export function VideoPage({ id, refreshKey, onBack, onError }: { id: string; ref
         {detail.type !== "other" && <div className="mc-detail-poster"><Artwork title={detail} kind="poster" fallback="thumb" eager /></div>}
         <div className="mc-detail-info">
           {detail.originalTitle && detail.originalTitle !== detail.title && <p className="mc-detail-original">{detail.originalTitle}</p>}
-          <h1>{detail.type === "episode" && detail.showTitle ? detail.showTitle : detail.title}</h1>
-          {detail.type === "episode" && <p className="mc-detail-episode">{episodeName({ season: detail.season ?? 0, episode: detail.episode ?? 0, title: detail.title })}</p>}
+          {detail.type === "episode"
+            ? <h1>{detail.showTitle || detail.title}</h1>
+            : <FileName as="h1" text={detail.title} videoId={detail.id} file={detail.file.name} namedByNfo={detail.namedByNfo} actions={actions} onRenamed={setDetail} />}
+          {detail.type === "episode" && (
+            <FileName as="p" text={episodeName({ season: detail.season ?? 0, episode: detail.episode ?? 0, title: detail.title })} videoId={detail.id} file={detail.file.name}
+              actions={actions} onRenamed={setDetail} />
+          )}
           <Meta title={detail} extra={[runtime(detail.duration)]} />
           {resuming && progress && (
             <div className="mc-detail-progress">
@@ -81,9 +107,8 @@ export function VideoPage({ id, refreshKey, onBack, onError }: { id: string; ref
           <dl className="mc-detail-facts">
             <div className="mc-detail-file">
               <dt>片源</dt>
-              <dd title={`${detail.file.folder}/${detail.file.name}`}>
-                <span>{detail.file.name}</span>
-                <button type="button" className="mc-link" onClick={() => actions.rename(detail)} aria-label="重命名片源"><PenLine />重命名</button>
+              <dd>
+                <FileName as="span" text={<span className="mc-editable-text">{detail.file.name}</span>} videoId={detail.id} file={detail.file.name} namedByNfo={detail.namedByNfo} actions={actions} onRenamed={setDetail} />
               </dd>
             </div>
             <div><dt>位置</dt><dd>{detail.file.folder}</dd></div>
@@ -107,6 +132,9 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
   };
   const share = progressShare(episode.progress);
   const watched = Boolean(episode.progress?.watched);
+  const name = episode.title === `第 ${episode.episode} 集`
+    ? <span className="mc-editable-text">{episode.title}</span>
+    : <><span className="mc-episode-number">{episode.episode || "·"}</span><span className="mc-editable-text">{episode.title}</span></>;
   return (
     <li className={`mc-episode ${current ? "current" : ""}`}>
       <button type="button" className="mc-episode-art" onClick={() => actions.play(title)} aria-label={`播放${episodeName(episode)}`}>
@@ -115,13 +143,14 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
         {share > 0 && !watched && <span className="mc-progress"><span style={{ width: `${share * 100}%` }} /></span>}
       </button>
       <div className="mc-episode-text">
-        <strong>{episode.title === `第 ${episode.episode} 集` ? episode.title : <><span className="mc-episode-number">{episode.episode || "·"}</span>{episode.title}</>}</strong>
+        {episode.file
+          ? <FileName as="strong" text={name} videoId={episode.id} file={episode.file} actions={actions} />
+          : <strong>{name}</strong>}
         <small>{[runtime(episode.duration), watched ? "已看完" : episode.progress?.position ? remaining(episode.progress.position, episode.progress.duration) : ""].filter(Boolean).join(" · ")}</small>
         {episode.plot && <p>{episode.plot}</p>}
       </div>
       <button type="button" className={`mc-round small ${watched ? "on" : ""}`} aria-pressed={watched} aria-label={watched ? "标记为未看" : "标记为已看"} title={watched ? "标记为未看" : "标记为已看"}
         onClick={() => actions.setWatched(title, !watched)}><Check /></button>
-      <button type="button" className="mc-round small" aria-label={`重命名${episodeName(episode)}的片源`} title="重命名片源" onClick={() => actions.rename(title)}><PenLine /></button>
     </li>
   );
 }
@@ -159,7 +188,12 @@ export function ShowPage({ id, refreshKey, onBack, onError }: { id: string; refr
         <div className="mc-detail-poster"><Artwork title={detail} kind="poster" fallback="thumb" eager /></div>
         <div className="mc-detail-info">
           {detail.originalTitle && detail.originalTitle !== detail.title && <p className="mc-detail-original">{detail.originalTitle}</p>}
-          <h1>{detail.title}</h1>
+          <EditableName as="h1" text={detail.title} value={detail.folder || detail.title} label="重命名剧集"
+            hint={[detail.folder ? "剧集文件夹和带剧名的各集文件一起改名" : "这部剧没有自己的文件夹，只改各集文件名里的剧名", detail.namedByNfo ? nfoNote : ""].filter(Boolean).join("；")}
+            onSave={async (name) => {
+              setDetail(await renameShow(detail.id, name));
+              actions.renamed(`已重命名为“${name}”，正在重新整理剧集`);
+            }} />
           <Meta title={detail} extra={[`${detail.seasons} 季`, `${detail.episodes} 集`]} />
           <div className="mc-detail-actions">
             <button type="button" className="mc-primary" onClick={playNext} disabled={!next}><Play />{nextLabel}</button>

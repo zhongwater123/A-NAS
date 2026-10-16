@@ -44,9 +44,27 @@ func (e *Executor) EnsurePhotosStore(ctx context.Context) ([]string, error) {
 // one, and never walks the contents. It reports whether an existing store had
 // drifted.
 func (e *Executor) ensurePhotosStore(ctx context.Context) (bool, error) {
-	exists, _, err := e.accountState(ctx, accounts.PhotoServiceUser, accounts.PhotoServiceUID)
+	return e.ensureOwnedStore(ctx, photosDirectory, accounts.PhotoServiceUser, accounts.PhotoServiceUID)
+}
+
+// EnsureSharesStore owns only the immutable sharing copies, outside member spaces.
+func (e *Executor) EnsureSharesStore(ctx context.Context) ([]string, error) {
+	if !e.dataVolumeReady() {
+		return nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	drifted, err := e.ensureOwnedStore(ctx, "shares", accounts.ShareServiceUser, accounts.ShareServiceUID)
+	if drifted {
+		return []string{filepath.Join(e.mountPoint, "shares")}, err
+	}
+	return nil, err
+}
+
+func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceUser string, serviceUID int) (bool, error) {
+	exists, _, err := e.accountState(ctx, serviceUser, serviceUID)
 	if err != nil {
-		return false, fmt.Errorf("photo service identity: %w", err)
+		return false, fmt.Errorf("owned store identity: %w", err)
 	}
 	if !exists {
 		return false, nil
@@ -55,16 +73,16 @@ func (e *Executor) ensurePhotosStore(ctx context.Context) (bool, error) {
 	// neither of which it may list.
 	for _, path := range []string{filepath.Dir(e.mountPoint), e.mountPoint} {
 		if output, err := e.runner.Run(ctx, "setfacl", []string{
-			"--modify", "user:" + accounts.PhotoServiceUser + ":--x", path,
+			"--modify", "user:" + serviceUser + ":--x", path,
 		}, ""); err != nil {
-			return false, commandError("allow the photo service to reach the data volume", err, output)
+			return false, commandError("allow the store service to reach the data volume", err, output)
 		}
 	}
-	photos := filepath.Join(e.mountPoint, photosDirectory)
+	photos := filepath.Join(e.mountPoint, directoryName)
 	created := false
 	if _, err := os.Lstat(photos); errors.Is(err, os.ErrNotExist) {
 		if output, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "create", photos}, ""); err != nil {
-			return false, commandError("create photos subvolume", err, output)
+			return false, commandError("create owned subvolume", err, output)
 		}
 		created = true
 	} else if err != nil {
@@ -82,14 +100,14 @@ func (e *Executor) ensurePhotosStore(ctx context.Context) (bool, error) {
 	target := openedPath(directory)
 	current, err := e.runner.Run(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
 	if err != nil {
-		return false, commandError("read photos ACL", err, current)
+		return false, commandError("read owned store ACL", err, current)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if ok && stat.Uid == accounts.PhotoServiceUID && stat.Gid == accounts.PhotoServiceUID &&
+	if ok && stat.Uid == uint32(serviceUID) && stat.Gid == uint32(serviceUID) &&
 		info.Mode().Perm() == 0o700 && info.Mode()&(os.ModeSetgid|os.ModeSetuid|os.ModeSticky) == 0 && sameACL(string(current), photosACL) {
 		return false, nil
 	}
-	owner := strconv.Itoa(accounts.PhotoServiceUID)
+	owner := strconv.Itoa(serviceUID)
 	for _, command := range []struct {
 		name string
 		args []string

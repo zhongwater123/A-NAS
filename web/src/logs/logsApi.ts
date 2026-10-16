@@ -2,7 +2,8 @@ import { request } from "../api";
 
 export type ActivityCategory = "session" | "account" | "file" | "storage" | "photo";
 
-export interface ActivityAccount { id: string; username: string }
+// nickname is the account's current nickname, shown instead of username.
+export interface ActivityAccount { id: string; username: string; nickname?: string }
 
 export interface ActivityEvent {
   id: string;
@@ -57,13 +58,14 @@ export function listActivity(filters: ActivityFilters, before?: string, limit = 
   return request<ActivityPage>(`/api/v1/activity?${params}`, { signal });
 }
 
-export type SystemLogService = "api" | "host-agent" | "photos" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+export type SystemLogService = "api" | "host-agent" | "photos" | "shares" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
 export type LogLevel = "error" | "warning" | "info" | "debug";
 
 export const systemLogServices: Array<{ id: SystemLogService; label: string; unit: string }> = [
   { id: "api", label: "产品服务", unit: "anas-api" },
   { id: "host-agent", label: "Host Agent", unit: "anas-host-agent" },
   { id: "photos", label: "相册服务", unit: "anas-photos" },
+  { id: "shares", label: "分享服务", unit: "anas-shares" },
   { id: "containers", label: "容器代理", unit: "anas-container-agent" },
   { id: "ai", label: "本地 AI", unit: "anas-ai" },
   { id: "media", label: "媒体 Worker", unit: "anas-media@" },

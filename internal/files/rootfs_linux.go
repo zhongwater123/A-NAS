@@ -149,9 +149,31 @@ func (r *RootFileSystem) Scan(ctx context.Context, name string, skip ScanSkip) (
 func scanDirectory(ctx context.Context, fd int, prefix string, skip ScanSkip, entries *[]ScanEntry) error {
 	directory := os.NewFile(uintptr(fd), prefix)
 	defer directory.Close()
-	names, err := directory.Readdirnames(-1)
-	if err != nil {
-		return err
+	var names []string
+	var err error
+	if skip.Strict && skip.Limit > 0 {
+		for {
+			batch, readErr := directory.Readdirnames(128)
+			for _, name := range batch {
+				if !skip.matches(name) {
+					names = append(names, name)
+				}
+			}
+			if len(names)+len(*entries) > skip.Limit {
+				return ErrInvalidSelection
+			}
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			if readErr != nil {
+				return readErr
+			}
+		}
+	} else {
+		names, err = directory.Readdirnames(-1)
+		if err != nil {
+			return err
+		}
 	}
 	slices.Sort(names)
 	for _, child := range names {
@@ -162,18 +184,21 @@ func scanDirectory(ctx context.Context, fd int, prefix string, skip ScanSkip, en
 			continue
 		}
 		var stat unix.Stat_t
-		if err := unix.Fstatat(fd, child, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		if err := unix.Fstatat(fd, child, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) && !skip.Strict {
 			continue
 		} else if err != nil {
 			return &fs.PathError{Op: "lstat", Path: prefix + child, Err: err}
 		}
 		entry := ScanEntry{Path: prefix + child, Info: infoFromStat(child, &stat)}
 		*entries = append(*entries, entry)
+		if skip.Limit > 0 && len(*entries) > skip.Limit {
+			return ErrInvalidSelection
+		}
 		if entry.Info.Kind != KindDirectory {
 			continue
 		}
 		childFD, err := unix.Openat(fd, child, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		if errors.Is(err, unix.EACCES) || errors.Is(err, unix.ENOENT) {
+		if !skip.Strict && (errors.Is(err, unix.EACCES) || errors.Is(err, unix.ENOENT)) {
 			continue
 		}
 		if err != nil {
@@ -321,6 +346,26 @@ func removeAllAt(ctx context.Context, dir int, name string) error {
 		return err
 	}
 	return unix.Unlinkat(dir, name, unix.AT_REMOVEDIR)
+}
+
+func (r *RootFileSystem) SetModTime(_ context.Context, name string, modTime time.Time) error {
+	dir, last, relative, err := r.parent(name)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dir)
+	var stat unix.Stat_t
+	if err := unix.Fstatat(dir, last, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &fs.PathError{Op: "lstat", Path: relative, Err: err}
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return ErrUnsupportedType
+	}
+	times := []unix.Timespec{{Nsec: unix.UTIME_OMIT}, unix.NsecToTimespec(modTime.UnixNano())}
+	if err := unix.UtimesNanoAt(dir, last, times, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &fs.PathError{Op: "chtimes", Path: relative, Err: err}
+	}
+	return nil
 }
 
 func (r *RootFileSystem) Open(_ context.Context, name string) (*os.File, error) {

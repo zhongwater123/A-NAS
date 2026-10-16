@@ -33,6 +33,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
@@ -69,6 +70,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "share-service" {
+		if err := runShareService(logger); err != nil {
+			logger.Error("A-NAS share service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == photoServiceCommand {
 		if err := runPhotoService(logger); err != nil {
 			logger.Error("A-NAS photo service stopped", "error", err)
@@ -93,7 +101,7 @@ func runMediaWorker() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"})
+	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", HEIFThumbnailer: "/usr/bin/heif-thumbnailer"})
 }
 
 func runPhotoService(logger *slog.Logger) error {
@@ -117,7 +125,7 @@ func runPhotoService(logger *slog.Logger) error {
 		Root:       environment("ANAS_PHOTOS_ROOT", "/srv/a-nas/data/photos"),
 		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
 		Sessions:   lookup,
-		// The AI assistant is not shipped yet (ADR 0022), so its socket is off
+		// The AI assistant is not shipped yet (ADR 0024), so its socket is off
 		// unless named. A socket unit may hold it (FileDescriptorName=assistant)
 		// so that it outlives restarts of this service.
 		AssistantSocketPath: os.Getenv("ANAS_PHOTOS_ASSISTANT_SOCKET"),
@@ -126,10 +134,13 @@ func runPhotoService(logger *slog.Logger) error {
 		// Without the AI component the socket is absent and photos wait for it.
 		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
 		AIQuietPeriod: quiet,
+		Photos:        photos.Options{Media: mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}},
 	})
 }
 
 func run(logger *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	address := environment("ANAS_HTTP_ADDR", "127.0.0.1:8080")
 	stateDirectory, err := stateDirectory()
 	if err != nil {
@@ -180,12 +191,11 @@ func run(logger *slog.Logger) error {
 	terminalConfig := terminal.Config{}
 	var broker *filebroker.Client
 	if live {
-		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
-			volumes, err := storageService.ListVolumes(ctx)
-			if err != nil || len(volumes) != 1 || volumes[0].State != storage.VolumeStateAvailable {
-				return "", err
-			}
-			return volumes[0].FilesystemUUID, nil
+		// The guard runs before every file request, so the expected UUID
+		// comes from the stored volume, not from a Host Agent disk read; the
+		// guard itself proves the mounted volume carries it.
+		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(context.Context) (string, error) {
+			return storageService.DataVolumeFilesystemUUID(), nil
 		}}}
 		fileOptions.SnapshotBackend = operations
 		brokerSocket, err := fileBrokerSocket()
@@ -223,7 +233,7 @@ func run(logger *slog.Logger) error {
 	var photoAPI http.Handler = photosapi.NewProxy(environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"), logger)
 	if !live {
 		photoAI = developmentAI()
-		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{AI: photoAI})
+		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{AI: photoAI, Media: mediaWorker})
 		if err != nil {
 			return err
 		}
@@ -238,6 +248,11 @@ func run(logger *slog.Logger) error {
 	var processor media.Processor
 	if mediaWorker != nil {
 		processor = media.WorkerProcessor{Worker: mediaWorker}
+	}
+	previewService, err := filepreview.NewWithCache(fileService, mediaWorker, filepath.Join(stateDirectory, "file-previews"))
+	if err != nil {
+		logger.Warn("file preview disk cache unavailable; using memory cache", "error", err)
+		previewService = filepreview.New(fileService, mediaWorker)
 	}
 	mediaService, err := media.NewService(mediaStore, media.Options{
 		Files: fileService, Spaces: accountService, Sessions: accountService.RememberedSessions,
@@ -286,19 +301,27 @@ func run(logger *slog.Logger) error {
 		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, false) }
 	}
 
+	shareAPI, closeShares, err := configuredShares(ctx, live, volumeRoot, accountService, fileService, mediaWorker, logger)
+	if err != nil {
+		return err
+	}
+	defer closeShares()
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService,
-		Terminal:   terminals,
-		Containers: containersapi.New(containerManager, containerSource, logger),
-		Apps:       appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
-		Photos:     photoAPI,
-		Media:      mediaapi.New(mediaService, logger),
-		Music:      musicService,
-		Feedback:   feedbackapi.New(feedbackStore, logger),
-		Transfers:  transferAPI,
-		Assistant:  assistantAPI(logger, broker),
-		SystemLogs: systemLogs,
+		Terminal:     terminals,
+		Containers:   containersapi.New(containerManager, containerSource, logger),
+		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
+		AppShortcuts: appstoreapi.NewShortcuts(appStore),
+		Photos:       photoAPI,
+		Shares:       shareAPI,
+		Media:        mediaapi.New(mediaService, logger),
+		Music:        musicService,
+		FilePreviews: previewService,
+		Feedback:     feedbackapi.New(feedbackStore, logger),
+		Transfers:    transferAPI,
+		Assistant:    assistantAPI(logger, broker),
+		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
@@ -314,8 +337,6 @@ func run(logger *slog.Logger) error {
 		Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	// The Host Agent takes scheduled snapshots, so they need no session.
@@ -574,7 +595,7 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 	}
 }
 
-// assistantAPI configures the AI assistant (ADR 0022). Without
+// assistantAPI configures the AI assistant (ADR 0024). Without
 // ANAS_ASSISTANT_SOCKET_DIR it answers assistant_unavailable and the desktop
 // keeps the assistant as planned. With the File Broker every connection to a
 // member's instance goes through it, the session gate (decision 10); without
