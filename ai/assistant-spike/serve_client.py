@@ -9,9 +9,13 @@ authenticated with the instance's session token as `?token=` (Hermes's loopback 
   serve_client.py USER calls FILE            the same with the lines of FILE (in /spike)
   serve_client.py USER resume ID TEXT...     continue the stored session ID, one turn per TEXT
   serve_client.py USER rpc METHOD [JSON]     one raw call; prints the result or the error
+
+With SERVE_CLIENT_APPROVALS=once or deny it says it answers the server's requests, as the
+product service does, and answers every approval Hermes asks for that way (approval.respond).
 """
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -44,6 +48,7 @@ class Gateway:
         self.token = session_token(user) if token is None else token
         self.next_id, self.pending, self.events = 0, {}, asyncio.Queue()
         self.ready_payload = None
+        self.approvals = os.environ.get("SERVE_CLIENT_APPROVALS", "")
 
     async def __aenter__(self):
         self.ws = await unix_connect(f"/run/a-nas-assistant/{self.user}.sock",
@@ -54,6 +59,8 @@ class Gateway:
             frame = await asyncio.wait_for(self.events.get(), self.timeout)
             if frame.get("type") == "gateway.ready":
                 self.ready_payload = frame.get("payload")
+                if self.approvals:
+                    await self.call("client.capabilities", {"server_requests": True})
                 return self
 
     async def __aexit__(self, *exc):
@@ -71,8 +78,16 @@ class Gateway:
                 elif "id" in msg and msg["id"] in self.pending and "method" not in msg:
                     self.pending.pop(msg["id"]).set_result(msg)
                 else:
-                    # A request from the server (approval, clarify, ...): record it unanswered.
-                    await self.events.put({"type": "server.request", "payload": msg})
+                    # A request from the server (approval, clarify, ...): record it, and answer
+                    # approvals when asked to.
+                    answered = self.approvals if msg.get("method") == "approval" else ""
+                    if answered:
+                        asyncio.get_running_loop().create_task(self._approve(msg.get("params") or {}))
+                    await self.events.put({"type": "server.request", "payload": msg, "answered": answered})
+
+    async def _approve(self, params: dict):
+        await self.call("approval.respond", {"session_id": params.get("session_id"),
+                                             "request_id": params.get("request_id"), "choice": self.approvals})
 
     async def call(self, method: str, params: dict | None = None):
         self.next_id += 1
@@ -104,7 +119,7 @@ class Gateway:
             if kind == "tool.start":
                 tools.append(payload.get("name"))
             elif kind == "server.request":
-                requests.append(payload)
+                requests.append((payload, frame.get("answered") or ""))
             elif kind == "message.complete":
                 answer = payload.get("text")
                 status = payload.get("status")
@@ -125,8 +140,9 @@ async def chat(user: str, lines: list[str], resume: str | None = None):
             result = await gw.turn(sid, said)
             print(f"> {short(said, 110)}\n< {short(result['answer'])}")
             print(f"  tools started: {result['tools'] or '-'}; status {result['status']}; {result['seconds']} s")
-            for request in result["requests"]:
-                print(f"  unanswered server request: {short(request, 300)}")
+            for request, answered in result["requests"]:
+                state = f"answered {answered}" if answered else "unanswered"
+                print(f"  {state} server request: {short(request, 300)}")
             print()
 
 

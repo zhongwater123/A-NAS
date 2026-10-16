@@ -95,6 +95,7 @@ func New(options Options) http.Handler {
 		"GET /approvals":               h.listApprovals,
 		"POST /approvals/{id}/confirm": h.decideApproval(true),
 		"POST /approvals/{id}/reject":  h.decideApproval(false),
+		"POST /approvals/{id}/answer":  h.answerApproval,
 		"GET /memory":                  h.getMemory,
 		"GET /memory/items/{id}":       h.getMemoryItem,
 		"DELETE /memory/items/{id}":    h.deleteMemoryItem,
@@ -273,25 +274,59 @@ func (h *handler) decideApproval(confirm bool) func(http.ResponseWriter, *http.R
 			writeError(w, http.StatusBadRequest, "invalid_approval", "invalid approval id")
 			return
 		}
+		// A command may be allowed for the rest of its conversation.
+		var body struct {
+			ForSession bool `json:"forSession"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 		defer cancel()
-		c, err := h.decide(ctx, h.member(account), id, confirm)
-		switch {
-		case errors.Is(err, ErrChangeNotFound):
-			writeError(w, http.StatusNotFound, "approval_not_found", "no such approval")
-		case errors.Is(err, ErrChangeDecided):
-			writeError(w, http.StatusConflict, "approval_decided", "this change was already decided")
-		case errors.Is(err, errApprovalGone):
-			writeError(w, http.StatusConflict, "approval_expired", "the assistant no longer waits for this answer")
-		case errors.Is(err, ErrChangeSession):
-			writeError(w, http.StatusUnauthorized, "authentication_required", "sign in again to answer")
-		case err != nil:
-			h.logger.Warn("assistant approval not decided", "account", account, "confirm", confirm, "error", err)
-			writeError(w, http.StatusBadGateway, "changes_unavailable", "the change could not be decided")
-		default:
-			h.logger.Info("assistant change decided", "account", account, "confirm", confirm)
-			writeJSON(w, http.StatusOK, map[string]any{"approval": c})
-		}
+		c, err := h.decide(ctx, h.member(account), id, confirm, body.ForSession)
+		h.decided(w, account, c, err)
+	}
+}
+
+// answerApproval answers a question card; no answers skips the questions.
+func (h *handler) answerApproval(w http.ResponseWriter, r *http.Request, account string) {
+	id := r.PathValue("id")
+	if !requestIDPattern.MatchString(id) {
+		writeError(w, http.StatusBadRequest, "invalid_approval", "invalid approval id")
+		return
+	}
+	var body struct {
+		Answers map[string]*string `json:"answers"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.Answers == nil {
+		body.Answers = map[string]*string{}
+	}
+	c, err := h.answerQuestion(h.member(account), id, body.Answers)
+	h.decided(w, account, c, err)
+}
+
+// decided answers a decision on a card.
+func (h *handler) decided(w http.ResponseWriter, account string, c card, err error) {
+	switch {
+	case errors.Is(err, ErrChangeNotFound):
+		writeError(w, http.StatusNotFound, "approval_not_found", "no such approval")
+	case errors.Is(err, ErrChangeDecided):
+		writeError(w, http.StatusConflict, "approval_decided", "this change was already decided")
+	case errors.Is(err, errApprovalGone):
+		writeError(w, http.StatusConflict, "approval_expired", "the assistant no longer waits for this answer")
+	case errors.Is(err, ErrChangeSession):
+		writeError(w, http.StatusUnauthorized, "authentication_required", "sign in again to answer")
+	case errors.Is(err, errNotAnApproval), errors.Is(err, errNotAQuestion), errors.Is(err, errInvalidAnswer):
+		writeError(w, http.StatusBadRequest, "invalid_answer", err.Error())
+	case err != nil:
+		h.logger.Warn("assistant card not decided", "account", account, "error", err)
+		writeError(w, http.StatusBadGateway, "changes_unavailable", "the change could not be decided")
+	default:
+		h.logger.Info("assistant card decided", "account", account, "kind", c.Kind, "status", c.Status)
+		writeJSON(w, http.StatusOK, map[string]any{"approval": c})
 	}
 }
 

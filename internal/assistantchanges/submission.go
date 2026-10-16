@@ -1,8 +1,8 @@
 // Package assistantchanges executes 提交更改, the only way a member's AI
 // assistant changes the member's own files (ADR 0024 decision 4).
 //
-// The assistant stages new contents in its own directory and submits a list
-// of operations. Preparing a submission checks it against what the member's
+// The assistant stages new contents in its own directory, or names a file it
+// reads to copy, and submits a list of operations. Preparing a submission checks it against what the member's
 // paths hold now and copies what it would write, which is what the member's
 // confirmation card shows. The member's confirmation, from their own
 // signed-in session, records a one-time grant. When the assistant's MCP tool
@@ -136,6 +136,21 @@ func volumePath(account, sandboxPath string, target bool) (string, error) {
 		return "", fmt.Errorf("%s：只能更改 /nas/个人空间 或 /nas/共享空间/Agent空间/%s 中的文件", sandboxPath, account)
 	}
 	return "", fmt.Errorf("%s：source 必须是 %s 中已写好的文件", sandboxPath, StagingDir)
+}
+
+// sourcePath is where a file to copy is, relative to the data volume: anywhere
+// the assistant reads as the member, besides its own folder.
+func sourcePath(account, sandboxPath string) (string, error) {
+	for _, a := range []area{
+		{"/nas/个人空间", "spaces/private/" + account, false},
+		{"/nas/共享空间", "spaces/shared", false},
+		{"/nas/助手", "assistant/" + account + "/files", false},
+	} {
+		if strings.HasPrefix(sandboxPath, a.sandbox+"/") {
+			return a.volume + "/" + strings.TrimPrefix(sandboxPath, a.sandbox+"/"), nil
+		}
+	}
+	return "", fmt.Errorf("%s：只能复制个人空间、共享空间或 /nas/助手 中的文件", sandboxPath)
 }
 
 // trashFor is the folder Samba's recycle (keeptree) would move a path into:

@@ -17,15 +17,16 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
-  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
+  ArrowUp, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
+  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
+  Trash2, Users, Video, Wrench, X,
 } from "lucide-react";
 import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { AssistantGlyph } from "../AssistantGlyph";
 import {
-  type Approval, type AssistantSession, type ChangeOperation,
-  decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
+  type Approval, type AssistantQuestion, type AssistantSession, type ChangeOperation,
+  answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
 } from "./assistantApi";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
@@ -144,9 +145,18 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     if (updated) setSessions((list) => list.map((item) => (item.id === updated.id ? { ...item, title: updated.title } : item)));
   };
 
-  const decide = async (approval: Approval, confirm: boolean) => {
+  const decide = async (approval: Approval, confirm: boolean, forSession = false) => {
     try {
-      keep(await decideApproval(approval.requestId, confirm));
+      keep(await decideApproval(approval.requestId, confirm, forSession));
+    } catch (reason) {
+      setNotice(failureText(reason));
+      reloadApprovals();
+    }
+  };
+
+  const answer = async (approval: Approval, answers: Record<string, string | null>) => {
+    try {
+      keep(await answerQuestions(approval.requestId, answers));
     } catch (reason) {
       setNotice(failureText(reason));
       reloadApprovals();
@@ -214,8 +224,12 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
             </ThreadPrimitive.Viewport>
 
             {here.length > 0 && (
-              <section className="as-changes" aria-label="本对话中等你确认的更改">
-                {here.map((approval) => (
+              <section className="as-changes" aria-label="本对话中等你确认或回答的事">
+                {here.map((approval) => approval.kind === "command" ? (
+                  <CommandCard key={approval.requestId} approval={approval} onDecide={(confirm, forSession) => decide(approval, confirm, forSession)} />
+                ) : approval.kind === "question" ? (
+                  <QuestionCard key={approval.requestId} approval={approval} onAnswer={(answers) => answer(approval, answers)} onSkip={() => decide(approval, false)} />
+                ) : (
                   <ApprovalCard key={approval.requestId} approval={approval} onDecide={(confirm) => decide(approval, confirm)} />
                 ))}
               </section>
@@ -289,7 +303,7 @@ function SessionRow({ session, active, waiting, running, onOpen, onRename, onDel
 // runs on this device, because during development it does not.
 const TRUST: { icon: ReactNode; title: string; text: string }[] = [
   { icon: <ShieldCheck />, title: "安全", text: "它只看得到你的文件和照片，以及家里共享的内容；看不到家人的私人文件，也碰不到系统设置。" },
-  { icon: <Hand />, title: "可控", text: "改动你的文件前，它会先把要改的地方给你看，你点“确认更改”才生效；被替换或删除的旧文件会放进回收站，可以找回。" },
+  { icon: <Hand />, title: "可控", text: "改动你的文件前，它会先把要改的地方给你看，你点“确认更改”才生效；运行有风险的命令也要先问你。被替换或删除的旧文件会放进回收站，可以找回。" },
   { icon: <LockKeyhole />, title: "隐私", text: "每位家人的 VNAS 各自独立。你和它的对话、它记住的事，家里其他人都看不到，管理员也不行；在“记忆”里可以随时删掉。" },
 ];
 
@@ -435,6 +449,13 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "write_file": return { icon: <FilePen />, label: "写入草稿", detail: path };
     case "patch": return { icon: <FilePen />, label: "修改草稿", detail: path };
     case "mcp__anas__submit_changes": return { icon: <Send />, label: "提交更改", detail: typeof args.summary === "string" ? args.summary : "等你确认" };
+    case "terminal": return { icon: <SquareTerminal />, label: "运行命令", detail: typeof args.command === "string" ? short(args.command) : "" };
+    case "process_manage": return { icon: <SquareTerminal />, label: "管理后台命令", detail: "" };
+    case "execute_code": return { icon: <Code />, label: "运行代码", detail: "" };
+    case "delegate_task": return { icon: <Users />, label: "分派子任务", detail: typeof args.goal === "string" ? short(args.goal) : "" };
+    case "clarify": return { icon: <CircleHelp />, label: "问你", detail: "" };
+    case "vision_analyze": return { icon: <ImageIcon />, label: "看图", detail: typeof args.image_url === "string" ? friendlyPath(args.image_url) : "" };
+    case "video_analyze": return { icon: <Video />, label: "看视频", detail: typeof args.video_url === "string" ? friendlyPath(args.video_url) : "" };
     case "memory": return { icon: <Brain />, label: "记住", detail: "" };
     case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
     case "skill_view": case "skills_list": case "skill_manage": return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
@@ -468,6 +489,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
   };
   const { change, status } = approval;
   const open = status === "awaiting" || status === "deciding";
+  if (!change) return null;
   return (
     <article className={`as-change ${status}`}>
       <header>
@@ -491,11 +513,170 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
 }
 
 const CARD_MARKS: Record<Approval["status"], ReactNode> = {
-  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, applied: <Check />,
+  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, answered: <Check />, applied: <Check />,
   failed: <CircleAlert />, rejected: <X />, expired: <Clock />, stopped: <Square />,
 };
 
+// Hermes names why it asks in English; the common reasons, in the member's words.
+const COMMAND_REASONS: Record<string, string> = {
+  "recursive delete": "会删除整个文件夹",
+  "delete in root path": "会删除文件",
+  "overwrite file": "会覆盖文件",
+  "kill process": "会结束进程",
+};
+
+export function CommandCard({ approval, onDecide }: { approval: Approval; onDecide(confirm: boolean, forSession: boolean): Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const choose = (confirm: boolean, forSession = false) => {
+    setBusy(true);
+    void onDecide(confirm, forSession).finally(() => setBusy(false));
+  };
+  const { command, status } = approval;
+  const open = status === "awaiting" || status === "deciding";
+  const script = Boolean(command?.script);
+  const reason = command?.description ? COMMAND_REASONS[command.description] ?? command.description : "";
+  const shown = script ? (command?.text ?? "").replace(/^execute_code <<'PY'\n/, "").replace(/\nPY$/, "") : command?.text ?? "";
+  return (
+    <article className={`as-change as-command ${status === "approved" ? "allowed" : status}`}>
+      <header>
+        <span className="as-change-mark">{status === "approved" ? <Check /> : script ? <Code /> : <SquareTerminal />}</span>
+        <div>
+          <strong>{script ? "VNAS 想运行一段代码" : `VNAS 想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
+          <small>{commandStatus(approval)}</small>
+        </div>
+      </header>
+      {open && <pre className="as-command-text">{shown}</pre>}
+      {open && (
+        <footer>
+          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
+          {command?.forSession && (
+            <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(true, true)}>本对话中都允许</button>
+          )}
+          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
+            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}允许
+          </button>
+        </footer>
+      )}
+    </article>
+  );
+}
+
+function commandStatus({ status, command }: Approval) {
+  const what = command?.script ? "代码" : "命令";
+  switch (status) {
+    case "approved": return `已允许，${what}在 VNAS 自己的文件夹里运行`;
+    case "rejected": return `你拒绝了，${what}没有运行`;
+    case "expired": return `等待确认超时，${what}没有运行`;
+    case "stopped": return `这一轮已停止，${what}没有运行`;
+    default: return `只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动`;
+  }
+}
+
+export function QuestionCard({ approval, onAnswer, onSkip }: {
+  approval: Approval; onAnswer(answers: Record<string, string | null>): Promise<void>; onSkip(): Promise<void>;
+}) {
+  const questions = approval.questions ?? [];
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [written, setWritten] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const { status } = approval;
+  const open = status === "awaiting" || status === "deciding";
+  // The answer Hermes Desktop sends for a question (clarify/pending.tsx stagedAnswer): one
+  // choice or the text, which replace each other; for several choices a JSON list of them
+  // with the text as one more.
+  const answerOf = (question: AssistantQuestion) => {
+    const chosen = (picked[question.id] ?? []).map(plainChoice);
+    const draft = (written[question.id] ?? "").trim();
+    if (question.multiSelect) {
+      const all = [...chosen, ...(draft ? [draft] : [])];
+      return all.length ? JSON.stringify(all) : null;
+    }
+    return chosen[0] ?? (draft || null);
+  };
+  const anything = questions.some((question) => answerOf(question) !== null);
+  const pick = (question: AssistantQuestion, choice: string) => {
+    setPicked((all) => {
+      const current = all[question.id] ?? [];
+      const next = !question.multiSelect ? [choice] : current.includes(choice) ? current.filter((item) => item !== choice) : [...current, choice];
+      return { ...all, [question.id]: next };
+    });
+    if (!question.multiSelect) setWritten((all) => ({ ...all, [question.id]: "" }));
+  };
+  const write = (question: AssistantQuestion, value: string) => {
+    setWritten((all) => ({ ...all, [question.id]: value }));
+    if (!question.multiSelect) setPicked((all) => ({ ...all, [question.id]: [] }));
+  };
+  const run = (work: () => Promise<void>) => {
+    setBusy(true);
+    void work().finally(() => setBusy(false));
+  };
+  return (
+    <article className={`as-change as-question ${status}`}>
+      <header>
+        <span className="as-change-mark">{status === "answered" ? <Check /> : <CircleHelp />}</span>
+        <div>
+          <strong>VNAS 想问你</strong>
+          <small>{questionStatus(approval)}</small>
+        </div>
+      </header>
+      <div className="as-questions">
+        {questions.map((question) => (
+          <div key={question.id} className="as-question-item">
+            <p>{question.text}</p>
+            {open ? (
+              <>
+                {question.choices?.length ? (
+                  <div className="as-choices" role="group" aria-label={question.text}>
+                    {question.choices.map((choice) => (
+                      <button key={choice} type="button" aria-pressed={(picked[question.id] ?? []).includes(choice)} disabled={busy}
+                        onClick={() => pick(question, choice)}>
+                        {plainChoice(choice)}
+                        {RECOMMENDED.test(choice) && <small>推荐</small>}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <input className="as-answer-input" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
+                  value={written[question.id] ?? ""} disabled={busy} maxLength={4000}
+                  onChange={(event) => write(question, event.target.value)} />
+              </>
+            ) : status === "answered" ? (
+              <span className="as-answered">{plainChoice(approval.answers?.[question.id] ?? "没有回答")}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {open && (
+        <footer>
+          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => run(onSkip)}>跳过</button>
+          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting" || !anything}
+            onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))}>
+            {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
+          </button>
+        </footer>
+      )}
+    </article>
+  );
+}
+
+// Hermes marks the choice it recommends by appending this to its text (clarify_tool.py
+// mark_recommended); as in Hermes Desktop (store/clarify.ts bareChoice) the card shows it as
+// a badge and answers with the bare choice.
+const RECOMMENDED = /\s*\(Recommended\)$/;
+const plainChoice = (choice: string) => choice.replace(RECOMMENDED, "");
+
+function questionStatus({ status, questions }: Approval) {
+  switch (status) {
+    case "answered": return "已回答";
+    case "rejected": return "你跳过了这些问题";
+    case "expired": return "等待回答超时";
+    case "stopped": return "这一轮已停止";
+    default: return `${questions?.length ?? 0} 个问题 · 回答后 VNAS 接着做`;
+  }
+}
+
 function statusText({ status, change }: Approval) {
+  if (!change) return "";
   switch (status) {
     case "approved": return "已确认，正在执行";
     case "applied": return "已按你的确认完成；被替换或删除的旧文件在回收站";
@@ -515,6 +696,17 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
       <li>
         <div className="as-op-title"><FilePen /><span>{created ? "新建" : "修改"}</span><code>{target}</code></div>
         <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
+      </li>
+    );
+  }
+  if (operation.op === "copy") {
+    return (
+      <li>
+        <div className="as-op-title"><Copy /><span>{operation.exists ? "复制并替换" : "复制"}</span>
+          <code>{friendlyPath(operation.from ?? "")}</code><MoveRight /><code>{target}</code>
+          {operation.size !== undefined && <small>{operation.folder ? "文件夹，" : ""}{formatBytes(operation.size)}</small>}
+        </div>
+        {operation.exists && <p className="as-op-note">原来的文件会移到回收站</p>}
       </li>
     );
   }
@@ -545,6 +737,23 @@ const MARKDOWN_COMPONENTS = { a: MarkdownLink };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
+
+// Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
+function formatBytes(bytes: number) {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+function short(text: string) {
+  const line = text.split("\n")[0];
+  return line.length > 60 ? `${line.slice(0, 60)}…` : line;
+}
 
 function friendlyPath(path: string) {
   return path.replace(/^\/nas\//, "").replace(/^助手\/待确认\//, "草稿/");

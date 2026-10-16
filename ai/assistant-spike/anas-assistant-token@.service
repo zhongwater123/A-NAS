@@ -1,0 +1,9 @@
+[Unit]
+Description=Session token for the A-NAS assistant of %i (spike)
+# anas-assistant@%i.service binds the file this writes and its start script reads it
+# once. It runs as root before the instance's sandbox is set up, which needs the file
+# to exist; the instance empties it once serve listens and removes it when it stops.
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'umask 077 && install -d -m 0700 /run/a-nas-assistant-start && sed -n "s/^HERMES_DASHBOARD_SESSION_TOKEN=//p" /etc/a-nas-assistant/tokens/%i.env > /run/a-nas-assistant-start/%i.token && chown %i /run/a-nas-assistant-start/%i.token'

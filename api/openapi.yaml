@@ -2424,9 +2424,18 @@ paths:
     parameters: [{ $ref: "#/components/parameters/AssistantRequestID" }]
     post:
       operationId: confirmAssistantApproval
-      summary: "Confirm a card: the executor records the member's one-time grant against this session, then the assistant is told yes and applies the change as the member"
-      description: "approval_expired when the assistant no longer waits (the time ran out or the turn was stopped); the grant is then void."
+      summary: "Confirm a card: for a change the executor records the member's one-time grant against this session, then the assistant is told yes and applies it as the member; a command runs in the sandbox"
+      description: "approval_expired when the assistant no longer waits (the time ran out or the turn was stopped); the grant is then void. A question is answered with /answer instead (invalid_answer)."
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                forSession: { type: boolean, description: "Allow a command (with forSession) for the rest of its conversation." }
       responses:
         "200": { description: The card, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantApprovalEnvelope" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
@@ -2439,7 +2448,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/AssistantRequestID" }]
     post:
       operationId: rejectAssistantApproval
-      summary: Refuse a card; no file changes and the assistant is told no
+      summary: Refuse a card; nothing changes and the assistant is told no (a question is skipped)
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200": { description: The card, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantApprovalEnvelope" } } } }
@@ -2448,6 +2457,33 @@ paths:
         "404": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
         "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/approvals/{requestId}/answer:
+    parameters: [{ $ref: "#/components/parameters/AssistantRequestID" }]
+    post:
+      operationId: answerAssistantQuestion
+      summary: "Answer a question card: the answers go back to the assistant as the reply to its question"
+      description: "invalid_answer when the card is not a question or an answer names no question of it or is over 4,000 characters; approval_expired when the assistant no longer waits."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [answers]
+              properties:
+                answers:
+                  type: object
+                  description: "Answer by question id; null leaves a question out."
+                  additionalProperties: { type: [string, "null"], maxLength: 4000 }
+      responses:
+        "200": { description: The card, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantApprovalEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/shares:
     get:
@@ -4773,15 +4809,45 @@ components:
         approval: { $ref: "#/components/schemas/AssistantApproval" }
     AssistantApproval:
       type: object
+      description: "One thing the assistant asked the member in a running turn (ADR 0024 decisions 3 and 4)."
       additionalProperties: false
-      required: [requestId, sessionId, status, change, createdAt]
+      required: [requestId, kind, sessionId, status, createdAt]
       properties:
         requestId: { type: string }
+        kind:
+          type: string
+          enum: [change, command, question]
+          description: "change: a call of 提交更改 the executor carries out as the member (change). command: a dangerous command or a script the assistant runs in its sandbox, which reaches nothing outside its own folder (command). question: the clarify tool's questions (questions), answered with /answer."
         sessionId: { type: string, description: "The live conversation (Hermes's runtime id) it was asked in." }
         storedSessionId: { type: string, description: "The stored conversation, when known." }
-        status: { type: string, enum: [awaiting, deciding, approved, applied, failed, rejected, expired, stopped], description: "Only awaiting can be confirmed or rejected." }
+        status: { type: string, enum: [awaiting, deciding, approved, answered, applied, failed, rejected, expired, stopped], description: "Only awaiting can be confirmed, rejected or answered; a rejected question was skipped." }
         createdAt: { type: integer, description: Unix seconds. }
         change: { $ref: "#/components/schemas/AssistantChange" }
+        command:
+          type: object
+          additionalProperties: false
+          required: [text]
+          properties:
+            text: { type: string, description: "The command, or the whole script, as it will run." }
+            description: { type: string, description: "Why Hermes asks, as it names the pattern." }
+            script: { type: boolean, description: "An execute_code script, approved as a whole." }
+            forSession: { type: boolean, description: "It may be allowed for the rest of the conversation." }
+        questions:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, text]
+            properties:
+              id: { type: string }
+              text: { type: string }
+              choices: { type: array, items: { type: string } }
+              multiSelect: { type: boolean }
+        answers:
+          type: object
+          description: "The member's answers by question id; null for one left out."
+          additionalProperties: { type: [string, "null"] }
     AssistantChange:
       type: object
       description: "The change as the executor prepared it: each operation, with the text before and after each write."
@@ -4799,9 +4865,12 @@ components:
             additionalProperties: false
             required: [op, path]
             properties:
-              op: { type: string, enum: [write, delete, move, mkdir] }
+              op: { type: string, enum: [write, copy, delete, move, mkdir] }
               path: { type: string, description: "Path as the assistant sees it, under /nas." }
               to: { type: string, description: Destination of a move. }
+              from: { type: string, description: "What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder)." }
+              size: { type: integer, description: "Bytes a copy copies; a folder's files together." }
+              folder: { type: boolean, description: A copy of a whole folder. }
               exists: { type: boolean, description: The target existed when the card was made. }
               before: { type: string, description: "Text of a written file when the card was made; absent when it is new or not text." }
               after: { type: string, description: "Text the write leaves; absent when it is not text." }

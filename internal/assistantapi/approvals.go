@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
@@ -24,23 +27,44 @@ const approvalWait = 24 * time.Hour
 // staleCard is beyond approvalWait.
 const staleCard = approvalWait + time.Hour
 
+// Card kinds: what Hermes asks the member (ADR 0024 decisions 3 and 4).
+const (
+	// kindChange is a call of 提交更改: the executor changes the member's files.
+	kindChange = "change"
+	// kindCommand is a dangerous command or a script Hermes runs in the
+	// sandbox, which touches nothing outside the assistant's own folder.
+	kindCommand = "command"
+	// kindQuestion is the clarify tool's questions.
+	kindQuestion = "question"
+)
+
+// maxCommand bounds the command or script a card shows: the member must see
+// all of what they allow.
+const maxCommand = 256 << 10
+
 // Card statuses. awaiting is the only one the member can act on.
 const (
 	cardAwaiting = "awaiting"
 	cardApproved = "approved"
+	cardAnswered = "answered"
 	cardRejected = "rejected"
 	cardExpired  = "expired"
 	cardStopped  = "stopped"
 )
 
-// card is one approval Hermes asked for, paired with the call of 提交更改 it
-// is about (ADR 0024 decision 4).
+// card is one thing Hermes asked the member in a running turn: an approval
+// paired with the call of 提交更改 it is about, an approval of a command or a
+// script, or the clarify tool's questions.
 type card struct {
 	RequestID       string          `json:"requestId"`
+	Kind            string          `json:"kind"`
 	SessionID       string          `json:"sessionId"`
 	StoredSessionID string          `json:"storedSessionId,omitempty"`
 	Status          string          `json:"status"`
-	Change          json.RawMessage `json:"change"`
+	Change          json.RawMessage `json:"change,omitempty"`
+	Command         *commandRequest `json:"command,omitempty"`
+	Questions       []question      `json:"questions,omitempty"`
+	Answers         map[string]any  `json:"answers,omitempty"`
 	CreatedAt       int64           `json:"createdAt"`
 
 	changeID string
@@ -48,9 +72,29 @@ type card struct {
 	// confirming is set when the member confirmed: only then can the call's
 	// completion make the card applied or failed.
 	confirming bool
-	// owner is the connection Hermes asked on; any connection can answer.
+	// owner is the connection Hermes asked on; any connection can answer an
+	// approval, a question only the one it came on.
 	owner   *upstream
 	decided time.Time
+}
+
+// commandRequest is a command or script Hermes asks to run, as its approval
+// shows it.
+type commandRequest struct {
+	Text        string `json:"text"`
+	Description string `json:"description,omitempty"`
+	// Script marks an execute_code script, approved as a whole.
+	Script bool `json:"script,omitempty"`
+	// ForSession says the member may allow it for the rest of the conversation.
+	ForSession bool `json:"forSession,omitempty"`
+}
+
+// question is one of the clarify tool's questions.
+type question struct {
+	ID          string   `json:"id"`
+	Text        string   `json:"text"`
+	Choices     []string `json:"choices,omitempty"`
+	MultiSelect bool     `json:"multiSelect,omitempty"`
 }
 
 // liveSession is what the Product Service follows of one runtime session:
@@ -145,6 +189,17 @@ func (m *member) busy(u *upstream) bool {
 	return false
 }
 
+// running reports a session with a turn under way, and its stored id.
+func (m *member) running(session string) (bool, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.sessions[session]
+	if s == nil {
+		return false, ""
+	}
+	return s.turn, s.stored
+}
+
 // observe follows a turn through Hermes's events: when it runs, the call of
 // 提交更改 under way, and when it ends. It returns the cards that changed.
 func (h *handler) observe(m *member, u *upstream, ev event) {
@@ -183,14 +238,15 @@ func (h *handler) observe(m *member, u *upstream, ev event) {
 			for _, c := range m.cards {
 				// Hermes may finish the call before the member's request has
 				// recorded the card as approved.
-				if c.SessionID == ev.SessionID && c.toolID == payload.ToolID && c.confirming && (c.Status == cardApproved || c.Status == "deciding") {
+				if c.Kind == kindChange && c.SessionID == ev.SessionID && c.toolID == payload.ToolID && c.confirming &&
+					(c.Status == cardApproved || c.Status == "deciding") {
 					completed = c
 				}
 			}
 		}
 	case "message.complete":
 		if s != nil {
-			// The turn is over: nothing it asked for can be approved any more,
+			// The turn is over: nothing it asked for can be answered any more,
 			// and an approval arriving now (the background review) is refused.
 			status := cardExpired
 			if s.stopping {
@@ -243,26 +299,30 @@ func (m *member) endCards(match func(*card) bool, status string) []*card {
 	return ended
 }
 
-// approval handles Hermes asking whether a tool may run. Only an approval
-// that pairs with the call of 提交更改 under way in a running turn of the
-// same session becomes a card; every other approval is denied without being
-// shown, so the member's confirmation only ever means "change my files".
+// approval handles Hermes asking whether a tool may run. An approval that
+// pairs with the call of 提交更改 under way in a running turn of the same
+// session becomes a change card; one for a dangerous command or a script in a
+// running turn becomes a command card showing it. Every other approval (the
+// background review's) is denied without being shown.
 func (h *handler) approval(m *member, u *upstream, request frame) {
 	var params struct {
-		SessionID   string   `json:"session_id"`
-		RequestID   string   `json:"request_id"`
-		PatternKey  string   `json:"pattern_key"`
-		PatternKeys []string `json:"pattern_keys"`
+		SessionID    string   `json:"session_id"`
+		RequestID    string   `json:"request_id"`
+		PatternKey   string   `json:"pattern_key"`
+		PatternKeys  []string `json:"pattern_keys"`
+		Command      string   `json:"command"`
+		Description  string   `json:"description"`
+		Choices      []string `json:"choices"`
+		AllowSession *bool    `json:"allow_session"`
 	}
 	_ = json.Unmarshal(request.Params, &params)
-	elicitation := params.PatternKey == "mcp_elicitation"
-	for _, key := range params.PatternKeys {
-		elicitation = elicitation || key == "mcp_elicitation"
-	}
+	elicitation := params.PatternKey == "mcp_elicitation" || slices.Contains(params.PatternKeys, "mcp_elicitation")
+	valid := requestIDPattern.MatchString(params.RequestID)
 	m.mu.Lock()
 	s := m.sessions[params.SessionID]
+	running := s != nil && s.turn
 	var call *startedCall
-	if s != nil && s.turn && s.submit != nil && elicitation && requestIDPattern.MatchString(params.RequestID) {
+	if running && s.submit != nil && elicitation && valid {
 		call, s.submit = s.submit, nil
 	}
 	var stored string
@@ -270,8 +330,17 @@ func (h *handler) approval(m *member, u *upstream, request frame) {
 		stored = s.stored
 	}
 	m.mu.Unlock()
+	if call == nil && running && !elicitation && valid && params.Command != "" &&
+		len(params.Command) <= maxCommand && utf8.ValidString(params.Command) {
+		forSession := slices.Contains(params.Choices, "session") || (params.Choices == nil && (params.AllowSession == nil || *params.AllowSession))
+		u.rememberServerRequest(params.RequestID, request.ID)
+		h.raise(m, &card{RequestID: params.RequestID, Kind: kindCommand, SessionID: params.SessionID, StoredSessionID: stored,
+			Command: &commandRequest{Text: params.Command, Description: params.Description,
+				Script: params.PatternKey == "execute_code", ForSession: forSession}, owner: u})
+		return
+	}
 	if call == nil {
-		h.logger.Warn("assistant approval refused: not a call of 提交更改 in a running turn",
+		h.logger.Warn("assistant approval refused: not asked in a running turn",
 			"account", m.account, "session", params.SessionID, "pattern", params.PatternKey)
 		u.answer(request.ID, "deny")
 		return
@@ -292,26 +361,80 @@ func (h *handler) approval(m *member, u *upstream, request frame) {
 			u.answer(request.ID, "deny")
 			return
 		}
-		c := &card{RequestID: params.RequestID, SessionID: params.SessionID, StoredSessionID: stored, Status: cardAwaiting,
-			Change: change.Raw, CreatedAt: time.Now().Unix(), changeID: change.ID, toolID: call.toolID, owner: u}
-		m.mu.Lock()
-		m.prune()
-		m.cards[c.RequestID] = c
-		m.mu.Unlock()
-		h.broadcast(m, c)
+		h.raise(m, &card{RequestID: params.RequestID, Kind: kindChange, SessionID: params.SessionID, StoredSessionID: stored,
+			Change: change.Raw, changeID: change.ID, toolID: call.toolID, owner: u})
 	}()
 }
 
-// decide carries out the member's answer to a card, from their own signed-in
-// request: the executor records the grant against that session before Hermes
-// hears "once", and Hermes's own approval executes nothing.
-func (h *handler) decide(ctx context.Context, m *member, requestID string, confirm bool) (card, error) {
+// question passes the clarify tool's questions in a running turn on as a
+// card; the member's answers go back as the reply to Hermes's request.
+func (h *handler) question(m *member, u *upstream, request frame) {
+	var params struct {
+		SessionID string `json:"session_id"`
+		Questions []struct {
+			QID         string   `json:"qid"`
+			Question    string   `json:"question"`
+			Choices     []string `json:"choices"`
+			MultiSelect bool     `json:"multi_select"`
+		} `json:"questions"`
+	}
+	srq := unquote(request.ID)
+	valid := json.Unmarshal(request.Params, &params) == nil && len(params.Questions) > 0 && len(params.Questions) <= 5 &&
+		len(request.Params) <= maxCommand
+	questions := make([]question, 0, len(params.Questions))
+	for _, q := range params.Questions {
+		valid = valid && requestIDPattern.MatchString(q.QID) && q.Question != "" && utf8.ValidString(q.Question)
+		questions = append(questions, question{ID: q.QID, Text: q.Question, Choices: q.Choices, MultiSelect: q.MultiSelect})
+	}
+	running, stored := m.running(params.SessionID)
+	if !valid || !running {
+		// Hermes takes an error as "nobody answered": the tool tells the
+		// assistant at once instead of waiting out its timeout.
+		_ = u.send(rpcError(request.ID, codeMethodNotFound, "not available in A-NAS"))
+		return
+	}
+	u.rememberServerRequest(srq, request.ID)
+	h.raise(m, &card{RequestID: srq, Kind: kindQuestion, SessionID: params.SessionID, StoredSessionID: stored,
+		Questions: questions, owner: u})
+}
+
+// raise keeps a new card and shows it to every window of the account.
+func (h *handler) raise(m *member, c *card) {
+	c.Status, c.CreatedAt = cardAwaiting, time.Now().Unix()
+	m.mu.Lock()
+	m.prune()
+	m.cards[c.RequestID] = c
+	m.mu.Unlock()
+	h.broadcast(m, c)
+}
+
+// errNotAnApproval and errNotAQuestion name an answer of the wrong kind.
+var (
+	errNotAnApproval = errors.New("this card is a question, to be answered")
+	errNotAQuestion  = errors.New("this card is not a question")
+	errInvalidAnswer = errors.New("the answers do not fit the questions")
+)
+
+// decide carries out the member's answer to a change or command card, from
+// their own signed-in request. For a change the executor records the grant
+// against that session before Hermes hears "once", and Hermes's own approval
+// executes nothing; a command runs in the sandbox once Hermes hears "once",
+// or "session" when the member allows it for the rest of the conversation.
+// Rejecting a question skips it.
+func (h *handler) decide(ctx context.Context, m *member, requestID string, confirm, forSession bool) (card, error) {
 	m.mu.Lock()
 	m.prune()
 	c, ok := m.cards[requestID]
 	if !ok {
 		m.mu.Unlock()
 		return card{}, ErrChangeNotFound
+	}
+	if c.Kind == kindQuestion {
+		m.mu.Unlock()
+		if confirm {
+			return card{}, errNotAnApproval
+		}
+		return h.answerQuestion(m, requestID, nil)
 	}
 	if c.Status != cardAwaiting {
 		view := *c
@@ -323,16 +446,23 @@ func (h *handler) decide(ctx context.Context, m *member, requestID string, confi
 	decision, choice, status := Reject, "deny", cardRejected
 	if confirm {
 		decision, choice, status = Approve, "once", cardApproved
-	}
-	change, err := h.options.Changes.Decide(ctx, m.account, c.changeID, decision)
-	if err != nil {
-		m.mu.Lock()
-		if c.Status == "deciding" {
-			c.Status = cardAwaiting
+		if forSession && c.Kind == kindCommand && c.Command.ForSession {
+			choice = "session"
 		}
-		view := *c
-		m.mu.Unlock()
-		return view, err
+	}
+	var change Change
+	if c.Kind == kindChange {
+		var err error
+		change, err = h.options.Changes.Decide(ctx, m.account, c.changeID, decision)
+		if err != nil {
+			m.mu.Lock()
+			if c.Status == "deciding" {
+				c.Status = cardAwaiting
+			}
+			view := *c
+			m.mu.Unlock()
+			return view, err
+		}
 	}
 	resolved, err := h.respond(ctx, m, c, choice)
 	// Hermes no longer waits (timed out or stopped): the grant must not outlive
@@ -340,14 +470,16 @@ func (h *handler) decide(ctx context.Context, m *member, requestID string, confi
 	gone := err != nil || !resolved
 	m.mu.Lock()
 	c.decided = time.Now()
-	c.Change = change.Raw
+	if c.Kind == kindChange {
+		c.Change = change.Raw
+	}
 	if gone {
 		c.Status = cardExpired
 	} else if c.Status == "deciding" {
 		c.Status = status
 	}
 	m.mu.Unlock()
-	if gone && confirm {
+	if gone && confirm && c.Kind == kindChange {
 		if change, expireErr := h.options.Changes.Decide(ctx, m.account, c.changeID, Expire); expireErr == nil {
 			m.mu.Lock()
 			c.Change = change.Raw
@@ -365,6 +497,73 @@ func (h *handler) decide(ctx context.Context, m *member, requestID string, confi
 }
 
 var errApprovalGone = errors.New("the assistant no longer waits for this approval")
+
+// maxAnswer bounds one answer the member writes.
+const maxAnswer = 4000
+
+// answerQuestion replies to a question card's request on the connection
+// Hermes asked on: the member's answers by question, or none to skip them.
+func (h *handler) answerQuestion(m *member, requestID string, answers map[string]*string) (card, error) {
+	m.mu.Lock()
+	m.prune()
+	c, ok := m.cards[requestID]
+	if !ok {
+		m.mu.Unlock()
+		return card{}, ErrChangeNotFound
+	}
+	if c.Kind != kindQuestion {
+		m.mu.Unlock()
+		return card{}, errNotAQuestion
+	}
+	if c.Status != cardAwaiting {
+		view := *c
+		m.mu.Unlock()
+		return view, ErrChangeDecided
+	}
+	for id, answer := range answers {
+		known := slices.ContainsFunc(c.Questions, func(q question) bool { return q.ID == id })
+		if !known || (answer != nil && (utf8.RuneCountInString(*answer) > maxAnswer || !utf8.ValidString(*answer))) {
+			m.mu.Unlock()
+			return card{}, errInvalidAnswer
+		}
+	}
+	c.Status = "deciding"
+	owner := c.owner
+	m.mu.Unlock()
+	result := map[string]any{}
+	if answers != nil {
+		result["answers"] = answers
+	}
+	var err error = errApprovalGone
+	if owner != nil && !owner.isClosed() {
+		err = owner.send(rpcResult(json.RawMessage(strconv.Quote(owner.serverRequestOf(requestID))), result))
+	}
+	m.mu.Lock()
+	c.decided = time.Now()
+	switch {
+	case err != nil:
+		c.Status = cardExpired
+	case answers == nil:
+		c.Status = cardRejected
+	default:
+		c.Status = cardAnswered
+		c.Answers = map[string]any{}
+		for id, answer := range answers {
+			if answer != nil {
+				c.Answers[id] = *answer
+			} else {
+				c.Answers[id] = nil
+			}
+		}
+	}
+	view := *c
+	m.mu.Unlock()
+	h.broadcast(m, c)
+	if err != nil {
+		return view, errApprovalGone
+	}
+	return view, nil
+}
 
 // respond answers Hermes with approval.respond on the connection the approval
 // came on, or any other of the account's: Hermes takes it from any.
@@ -399,8 +598,12 @@ func (h *handler) respond(ctx context.Context, m *member, c *card, choice string
 	return false, lastErr
 }
 
-// expire ends a change the executor still holds for a card Hermes withdrew.
+// expire ends what a card Hermes withdrew still holds: the executor's change.
 func (h *handler) expire(m *member, u *upstream, c *card) {
+	if c.Kind != kindChange {
+		h.broadcast(m, c)
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(accounts.WithSessionToken(context.Background(), u.session), requestTimeout)
 		defer cancel()

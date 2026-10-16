@@ -19,9 +19,13 @@ export interface AssistantSession {
 }
 
 export interface ChangeOperation {
-  op: "write" | "delete" | "move" | "mkdir";
+  op: "write" | "copy" | "delete" | "move" | "mkdir";
   path: string;
   to?: string;
+  /** What a copy copies, its size in bytes, and whether it is a folder. */
+  from?: string;
+  size?: number;
+  folder?: boolean;
   exists?: boolean;
   before?: string;
   after?: string;
@@ -36,17 +40,41 @@ export interface AssistantChange {
   operations: ChangeOperation[];
 }
 
-export type ApprovalStatus = "awaiting" | "deciding" | "approved" | "applied" | "failed" | "rejected" | "expired" | "stopped";
+export type ApprovalStatus = "awaiting" | "deciding" | "approved" | "answered" | "applied" | "failed" | "rejected" | "expired" | "stopped";
 
-/** One call of 提交更改 waiting for, or answered by, the member. */
+/** What the assistant asks: to change files, to run a command or script in its sandbox, or questions. */
+export type ApprovalKind = "change" | "command" | "question";
+
+/** A dangerous command, or a script as a whole, the assistant asks to run in its sandbox. */
+export interface CommandRequest {
+  text: string;
+  description?: string;
+  script?: boolean;
+  /** It may be allowed for the rest of the conversation. */
+  forSession?: boolean;
+}
+
+/** One question of the assistant's clarify tool. */
+export interface AssistantQuestion {
+  id: string;
+  text: string;
+  choices?: string[];
+  multiSelect?: boolean;
+}
+
+/** Something the assistant asked the member in a running turn, waiting for or given an answer. */
 export interface Approval {
   requestId: string;
+  kind: ApprovalKind;
   /** The live conversation (Hermes's runtime id) it was asked in. */
   sessionId: string;
   storedSessionId?: string;
   status: ApprovalStatus;
   createdAt: number;
-  change: AssistantChange;
+  change?: AssistantChange;
+  command?: CommandRequest;
+  questions?: AssistantQuestion[];
+  answers?: Record<string, string | null>;
 }
 
 const base = "/api/v1/assistant";
@@ -58,8 +86,11 @@ export const renameSession = (id: string, title: string) => request<{ id: string
 export const deleteSession = (id: string) => request<void>(`${base}/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
 export const sessionMessages = (id: string) => request<{ messages: SessionMessage[] }>(`${base}/sessions/${encodeURIComponent(id)}/messages`).then((body) => body.messages);
 export const listApprovals = () => request<{ approvals: Approval[] }>(`${base}/approvals`).then((body) => body.approvals);
-export const decideApproval = (requestId: string, confirm: boolean) =>
-  request<{ approval: Approval }>(`${base}/approvals/${encodeURIComponent(requestId)}/${confirm ? "confirm" : "reject"}`, { method: "POST" }, true).then((body) => body.approval);
+export const decideApproval = (requestId: string, confirm: boolean, forSession = false) =>
+  request<{ approval: Approval }>(`${base}/approvals/${encodeURIComponent(requestId)}/${confirm ? "confirm" : "reject"}`,
+    forSession ? json("POST", { forSession: true }) : { method: "POST" }, true).then((body) => body.approval);
+export const answerQuestions = (requestId: string, answers: Record<string, string | null>) =>
+  request<{ approval: Approval }>(`${base}/approvals/${encodeURIComponent(requestId)}/answer`, json("POST", { answers }), true).then((body) => body.approval);
 
 /** One entry of the assistant's memory: its notes, or what it noted about the member. */
 export interface MemoryItem {
@@ -114,7 +145,8 @@ export function failureText(reason: unknown): string {
     case "changes_unavailable": return "暂时无法处理这项更改，请稍后再试";
     case "approval_not_found": return "这项更改已经不存在";
     case "approval_decided": return "这项更改已经处理过了";
-    case "approval_expired": return "VNAS 已经不再等这项确认，文件没有变化";
+    case "approval_expired": return "VNAS 已经不再等这项确认，什么都没有变";
+    case "invalid_answer": return "回答没能交给 VNAS，请重试";
     case "authentication_required": return "登录已过期，请重新登录";
     case "memory_changed": return "VNAS 的记忆刚刚有变化，请再试一次";
     case "memory_not_found": return "这一条已经不在了";
