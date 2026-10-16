@@ -39,6 +39,10 @@ func TestTurningPeopleOffClearsWhatWasRecognisedAndKeepsNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	organise(t, service, worker)
+	before, err := service.Get(ctx, alice, byName["a.png"].ID)
+	if err != nil || len(before.People) != 1 {
+		t.Fatalf("a.png's people = %+v, %v", before.People, err)
+	}
 
 	// Only the owner of a private library, and an administrator for the
 	// shared one, may turn people off.
@@ -71,11 +75,15 @@ func TestTurningPeopleOffClearsWhatWasRecognisedAndKeepsNames(t *testing.T) {
 	if err != nil || len(sheets) != 1 {
 		t.Fatalf("face sheets = %v, %v; want only the shared copy's", sheets, err)
 	}
-	if details, err := service.Get(ctx, alice, copied.ID); err != nil || len(details.People) != 1 {
-		t.Fatalf("the shared copy's people = %+v, %v", details, err)
+	kept, err := service.Get(ctx, alice, copied.ID)
+	if err != nil || len(kept.People) != 1 {
+		t.Fatalf("the shared copy's people = %+v, %v", kept.People, err)
 	}
-	if _, err := service.OccurrenceAvatar(ctx, alice, red.CoverID); !errors.Is(err, photos.ErrNotFound) && red.CoverID != details.People[0].OccurrenceID {
-		t.Fatalf("OccurrenceAvatar() of a cleared face error = %v", err)
+	if _, err := service.OccurrenceAvatar(ctx, alice, kept.People[0].OccurrenceID); err != nil {
+		t.Fatalf("OccurrenceAvatar() of the shared copy's face error = %v", err)
+	}
+	if _, err := service.OccurrenceAvatar(ctx, alice, before.People[0].OccurrenceID); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("OccurrenceAvatar() of a cleared face error = %v, want not found", err)
 	}
 	// Nothing is scanned for it any more, and its photos count as organised.
 	scanned := len(worker.faceInputs)
