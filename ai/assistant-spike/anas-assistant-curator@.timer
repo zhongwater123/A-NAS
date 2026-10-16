@@ -1,0 +1,15 @@
+[Unit]
+Description=Weekly skill curation for the A-NAS assistant of %i (spike)
+# Hermes's curator runs once an interval (a week by default) after the agent has
+# been idle two hours; an instance exits within a minute of its last connection,
+# so it never gets there by itself. This runs Hermes's own `hermes curator run`
+# in the same sandbox at night instead (anas-assistant-curator@.service, which
+# assistant-install.sh makes from anas-assistant@.service).
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

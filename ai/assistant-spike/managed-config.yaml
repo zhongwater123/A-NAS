@@ -94,3 +94,6 @@ logging:
 # summary among it (locales/zh.yaml).
 display:
   language: zh
+# The curator keeps its defaults (prune unused agent-made skills, no model call);
+# an instance never stays idle the two hours it waits for, so a weekly timer
+# runs it instead (anas-assistant-curator@.timer).

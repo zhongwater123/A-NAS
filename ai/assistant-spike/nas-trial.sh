@@ -30,7 +30,7 @@ key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
 env_line=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
-units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
+units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
@@ -159,6 +159,7 @@ verify() {
   check_one "instance socket for $first" systemctl is-active "anas-assistant-api@$first.socket"
   check_one "instance sockets are root's alone" test "$(stat -c '%a %U' "/run/a-nas-assistant/$first.sock")" = "600 root"
   check_one "gateway log is root's alone" test "$(stat -c '%a' /var/log/anas-assistant-gateway)" = 700
+  check_one "weekly curator for $first" systemctl is-enabled "anas-assistant-curator@$first.timer"
   ((ok)) || fail "see the FAIL lines; remove undoes the install"
   say "installed: open AI 助手 on the desktop (members of a-nas-users)"
 }

@@ -142,6 +142,9 @@ case $cmd in
       if [[ -f /etc/systemd/system/anas-assistant-api@.socket ]]; then
         systemctl enable --now --quiet "anas-assistant-api@$account.socket"
       fi
+      if [[ -f /etc/systemd/system/anas-assistant-curator@.timer ]]; then
+        systemctl enable --now --quiet "anas-assistant-curator@$account.timer"
+      fi
     done
     ;;
   quota)
@@ -151,7 +154,7 @@ case $cmd in
     ;;
   remove)
     account=${1:?account}
-    systemctl disable --now --quiet "anas-assistant-api@$account.socket" 2>/dev/null || true
+    systemctl disable --now --quiet "anas-assistant-api@$account.socket" "anas-assistant-curator@$account.timer" 2>/dev/null || true
     systemctl stop "anas-assistant-api@$account.service" "anas-assistant@$account.service" 2>/dev/null || true
     rm -f "/etc/a-nas-assistant/tokens/$account.env" "$product_tokens/$account.token"
     rm -rf "/etc/a-nas-assistant/members/$account"
