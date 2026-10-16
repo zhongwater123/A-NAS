@@ -1048,6 +1048,125 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/people:
+    get:
+      operationId: listPhotoPeople
+      summary: List the people and pets of the caller's private and the shared library, named ones first, then by photos; someone seen in fewer than two photos is listed once named
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list its people as well (read-only).", schema: { type: string } }
+        - { name: hidden, in: query, description: "1 to include people the members hid.", schema: { type: string, enum: ["1"] } }
+      responses:
+        "200": { description: People, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoPeople" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/people/{personId}:
+    patch:
+      operationId: changePhotoPerson
+      summary: Name, hide or show a person, or choose the face that stands for them; the owner of a private library and every member in the shared library may
+      parameters: [{ $ref: "#/components/parameters/PhotoPersonID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, maxLength: 160, description: "At most 40 characters; empty clears the name." }
+                hidden: { type: boolean }
+                coverId: { type: string, description: "One of the person's occurrences." }
+      responses:
+        "200": { description: The person, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoPerson" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/people/{personId}/assets:
+    get:
+      operationId: listPhotoPersonPhotos
+      summary: List the untrashed photos of a person, newest first
+      parameters:
+        - { $ref: "#/components/parameters/PhotoPersonID" }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of the person's photos, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/people/{personId}/merge:
+    post:
+      operationId: mergePhotoPeople
+      summary: Move every face of a person into another person of the same library and kind; the merged person is gone afterwards
+      parameters: [{ $ref: "#/components/parameters/PhotoPersonID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [into], properties: { into: { type: string } } } } }
+      responses:
+        "200": { description: The person the faces moved into, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoPerson" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/people/{personId}/assets/{assetId}:
+    delete:
+      operationId: removePhotoFromPerson
+      summary: Take a photo out of a person; clustering never gives it back to that person
+      parameters: [{ $ref: "#/components/parameters/PhotoPersonID" }, { $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Taken out }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/people/{occurrenceId}:
+    put:
+      operationId: assignPhotoFace
+      summary: Say who a face or pet in a photo is, an existing person of the photo's library or a new one by name; clustering never changes it
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/PhotoOccurrenceID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                personId: { type: string }
+                name: { type: string, maxLength: 160, description: "A new person's name when personId is absent." }
+      responses:
+        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/occurrences/{occurrenceId}/avatar:
+    get:
+      operationId: getPhotoOccurrenceAvatar
+      summary: The square crop of a face or pet in a photo the caller can see; the ID changes whenever the photo is scanned again
+      parameters: [{ $ref: "#/components/parameters/PhotoOccurrenceID" }]
+      responses:
+        "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}:
+    patch:
+      operationId: changePhotoLibrary
+      summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [people]
+              properties:
+                people: { type: boolean }
+      responses:
+        "200": { description: The library, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLibrary" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/albums:
     get:
       operationId: listPhotoAlbums
@@ -2635,6 +2754,8 @@ components:
     PhotoDirectoryID: { name: directoryId, in: path, required: true, schema: { type: string } }
     PhotoAssetID: { name: assetId, in: path, required: true, schema: { type: string } }
     PhotoAlbumID: { name: albumId, in: path, required: true, schema: { type: string } }
+    PhotoPersonID: { name: personId, in: path, required: true, schema: { type: string } }
+    PhotoOccurrenceID: { name: occurrenceId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
     MediaLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
     MediaVideoID: { name: videoId, in: path, required: true, schema: { type: string } }
@@ -4073,6 +4194,8 @@ components:
         ownerUserId: { type: string }
         ownerName: { type: string }
         createdAt: { type: string, format: date-time }
+        people: { type: boolean, description: Whether the library recognises people and pets. }
+        canSetPeople: { type: boolean, description: "Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library." }
         viewing:
           description: Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only.
           type: object
@@ -4138,6 +4261,18 @@ components:
           description: Albums the photo is in; only a single photo's details carry them.
           type: array
           items: { type: object, additionalProperties: false, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+        people:
+          description: The faces and pets in the photo with who each is in the photo's library; only a single photo's details carry them.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [occurrenceId, kind]
+            properties:
+              occurrenceId: { type: string, description: "Its avatar is at occurrences/{occurrenceId}/avatar." }
+              kind: { type: string, enum: [face, cat, dog] }
+              personId: { type: string, description: "Absent while the face is nobody yet." }
+              name: { type: string }
     PhotoTimeline:
       type: object
       additionalProperties: false
@@ -4177,6 +4312,25 @@ components:
               photos: { type: integer, minimum: 1 }
               coverId: { type: string, description: The photo that matches the label most clearly. }
         ready: { type: boolean, description: "False while AI clusters are not available; there are no items then." }
+    PhotoPerson:
+      type: object
+      additionalProperties: false
+      required: [id, libraryId, kind, name, hidden, photos, coverId, canChange]
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        kind: { type: string, enum: [person, cat, dog] }
+        name: { type: string, description: "Empty until a member names the person." }
+        hidden: { type: boolean }
+        photos: { type: integer, minimum: 0, description: "Untrashed photos of the person." }
+        coverId: { type: string, description: "The occurrence whose avatar stands for the person; empty when none is left." }
+        canChange: { type: boolean, description: "Whether the caller may name, merge, hide and correct the person." }
+    PhotoPeople:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PhotoPerson" } }
     PhotoTagCounts:
       type: object
       additionalProperties: false
@@ -4231,6 +4385,10 @@ components:
             words: { type: array, items: { type: string }, description: The query's class words. }
             detected: { type: integer, minimum: 0, description: Photos over all pages in which the detector found them. }
             undetected: { type: integer, minimum: 0, description: Photos in the search's scope the detector has not processed yet. }
+        people:
+          type: array
+          items: { type: string }
+          description: "Full names of people in the search's scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first."
     PhotoSimilarResults:
       type: object
       additionalProperties: false
@@ -4254,6 +4412,8 @@ components:
         reason: { type: string, description: "Why work is paused, such as foreground or cpu_pressure." }
         model: { type: string }
         objectModel: { type: string, description: The object detector's model while the AI Worker has one. }
+        faceModel: { type: string, description: "The face models while the AI Worker has them; a photo then also counts as ready once its faces are scanned." }
+        animalModel: { type: string, description: "The animal model while the AI Worker has it; a photo with a dog then also counts as ready once its dogs are scanned." }
         ready: { type: integer, minimum: 0, description: "Originals with a vector of the current pipeline and, while the AI Worker has a detector, its detection." }
         pending: { type: integer, minimum: 0 }
         failed: { type: integer, minimum: 0 }

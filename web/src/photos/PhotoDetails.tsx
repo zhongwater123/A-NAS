@@ -2,7 +2,8 @@ import { CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react
 import { FormEvent, useState } from "react";
 
 import { formatBytes } from "../bytes";
-import { type Caller, canChange, formatDateTime, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, sharedLibrary } from "./model";
+import { type Caller, canChange, canChangePeople, formatDateTime, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, sharedLibrary } from "./model";
+import { PhotoFaces } from "./People";
 import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
 
 export interface DetailsActions {
@@ -11,6 +12,10 @@ export interface DetailsActions {
   addToAlbum: (assets: PhotoAsset[]) => void;
   openAlbum: (album: Pick<PhotoAlbum, "id" | "name" | "libraryId">) => void;
   openTag: (tag: string) => void;
+  // Opens a person's photos.
+  openPerson: (personId: string) => void;
+  // The member library the viewer was opened from, if being viewed.
+  viewing: string;
   // Uploads the MOV a Live Photo still came without.
   attachLiveVideo: (asset: PhotoAsset, file: File) => Promise<void>;
   error: (message: string) => void;
@@ -27,8 +32,8 @@ interface Props {
   onChanged: (asset: PhotoAsset) => void;
 }
 
-// PhotoDetails is the viewer's side panel: when and what the photo is, its
-// tags and its albums.
+// PhotoDetails is the viewer's side panel: when and what the photo is, who is
+// in it, its tags and its albums.
 export function PhotoDetails({ asset, details, caller, actions, onChanged }: Props) {
   const [tag, setTag] = useState("");
   const [attaching, setAttaching] = useState(false);
@@ -87,6 +92,9 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
           {editable && <button type="button" disabled={attaching} onClick={pickLiveVideo}>{attaching ? <span className="ph-spinner" /> : <Film />}{attaching ? "正在上传视频" : "上传视频"}</button>}
         </section>
       )}
+
+      <PhotoFaces asset={current} faces={details?.people ?? []} editable={canChangePeople(caller, asset.libraryId)} viewing={actions.viewing}
+        onChanged={onChanged} onOpenPerson={actions.openPerson} onError={actions.error} />
 
       <section aria-label="标签">
         <h4>标签</h4>

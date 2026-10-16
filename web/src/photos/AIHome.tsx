@@ -3,7 +3,8 @@ import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from
 
 import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
 import { categoryNames, messageOf } from "./model";
-import { listPhotoLabels, listTagGroups, thumbnailURL, type PhotoAIStatus, type PhotoLabelCount, type PhotoTagCount } from "./photosApi";
+import { PeopleRow, personGap, personWidth } from "./People";
+import { listPeople, listPhotoLabels, listTagGroups, thumbnailURL, type PhotoAIStatus, type PhotoLabelCount, type PhotoPerson, type PhotoTagCount } from "./photosApi";
 
 // AIHomeSnapshot is how AI 聚合 looked when one of its groups opened, so that
 // going back lands on the same spot instead of the top.
@@ -11,6 +12,9 @@ export interface AIHomeSnapshot {
   viewing: string;
   scrollTop: number;
   clusters?: { items: PhotoLabelCount[]; ready: boolean };
+  people?: PhotoPerson[];
+  peopleExpanded: boolean;
+  showHidden: boolean;
   tags: PhotoTagCount[];
   open: string[];
   allTags: boolean;
@@ -32,22 +36,31 @@ interface Props {
   onForget: () => void;
   onOpenCluster: (label: PhotoLabelCount, snapshot: AIHomeSnapshot) => void;
   onOpenTag: (tag: PhotoTagCount, snapshot: AIHomeSnapshot) => void;
+  onOpenPerson: (person: PhotoPerson, snapshot: AIHomeSnapshot) => void;
+  // Opens the people and pets switches of the caller's libraries.
+  onPeopleSettings: () => void;
   onError: (message: string) => void;
 }
 
 // Cluster cards are at least this wide; a collapsed group shows one row.
 const cardWidth = 124;
 const cardGap = 14;
+// The AI group of cats (internal/photos/labels/v1.json).
+const catLabel = "cat";
 
-// AIHome is AI 聚合: a sentence finds photos by meaning; below, the photos
-// local AI has grouped by what they show, then the groups people made with
-// their own tags. An AI group holds only the photos the model is sure of; it
-// opens on its own and never filters a search.
-export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, recent, onSearch, image, onForget, onOpenCluster, onOpenTag, onError }: Props) {
+// AIHome is AI 聚合: a sentence finds photos by meaning; below, the people
+// and pets local AI keeps finding, the photos it has grouped by what they
+// show, then the groups people made with their own tags. An AI group holds
+// only the photos the model is sure of; it opens on its own and never filters
+// a search. People are named by members, so their names do find photos.
+export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, recent, onSearch, image, onForget, onOpenCluster, onOpenTag, onOpenPerson, onPeopleSettings, onError }: Props) {
   const back = snapshot?.viewing === viewing ? snapshot : undefined;
   const [query, setQuery] = useState("");
   const [clusters, setClusters] = useState(back?.clusters);
   const [tags, setTags] = useState<PhotoTagCount[]>(back?.tags ?? []);
+  const [people, setPeople] = useState<PhotoPerson[] | undefined>(back?.people);
+  const [peopleExpanded, setPeopleExpanded] = useState(back?.peopleExpanded ?? false);
+  const [showHidden, setShowHidden] = useState(back?.showHidden ?? false);
   const [allTags, setAllTags] = useState(back?.allTags ?? false);
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(back?.open));
   // Local AI has settled once the groups are ready and no photo waits for
@@ -62,9 +75,14 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
     if (ai) wasSettled.current = settled;
     if (settled && (was === false || (clusters && !clusters.ready))) setReload((value) => value + 1);
   }, [settled, clusters]);
+  // Cats are not told apart (docs/research/photo-people-evaluation.md), so
+  // their group stands among the people and pets rather than under 动物.
+  const cats = clusters?.items.find((label) => label.id === catLabel);
   const groups = useMemo(() => {
     const byCategory = new Map<string, PhotoLabelCount[]>();
-    for (const label of clusters?.items ?? []) byCategory.set(label.category, [...byCategory.get(label.category) ?? [], label]);
+    for (const label of clusters?.items ?? []) {
+      if (label.id !== catLabel) byCategory.set(label.category, [...byCategory.get(label.category) ?? [], label]);
+    }
     const order = Object.keys(categoryNames);
     return [...byCategory].sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   }, [clusters]);
@@ -72,14 +90,17 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
   const waiting = !!clusters && !groups.length && !!ai?.clusters && ai.state !== "unavailable" && !(settled && clusters.ready);
   const scroller = useRef<HTMLDivElement>(null);
   const [perRow, setPerRow] = useState(back?.perRow ?? 6);
-  const shown = (clusters === undefined ? "" : groups.length ? "groups" : waiting ? "waiting" : "") + (tags.length ? ":tags" : "");
+  const [peoplePerRow, setPeoplePerRow] = useState(7);
+  const shown = (clusters === undefined ? "" : groups.length ? "groups" : waiting ? "waiting" : "") + (tags.length ? ":tags" : "") + (people?.length || cats ? ":people" : "");
   // A row holds as many cards as the first group section has room for.
   useLayoutEffect(() => {
     const element = scroller.current;
     if (!element) return;
     const measure = () => {
       const section = element.querySelector<HTMLElement>(".ph-browse");
-      if (section) setPerRow(Math.max(2, Math.floor(((section.clientWidth || 900) + cardGap) / (cardWidth + cardGap))));
+      if (!section) return;
+      setPerRow(Math.max(2, Math.floor(((section.clientWidth || 900) + cardGap) / (cardWidth + cardGap))));
+      setPeoplePerRow(Math.max(2, Math.floor(((section.clientWidth || 900) + personGap) / (personWidth + personGap))));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -93,7 +114,7 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
     if (back && scroller.current) scroller.current.scrollTop = back.scrollTop;
   }, []);
   const remember = (): AIHomeSnapshot => ({
-    viewing, scrollTop: scroller.current?.scrollTop ?? 0, clusters, tags, open: [...open], allTags, perRow,
+    viewing, scrollTop: scroller.current?.scrollTop ?? 0, clusters, people, peopleExpanded, showHidden, tags, open: [...open], allTags, perRow,
   });
   useEffect(() => {
     let live = true;
@@ -105,6 +126,13 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
     listTagGroups(viewing).then((value) => { if (live) setTags(value); }, (caught) => { if (live) onError(messageOf(caught)); });
     return () => { live = false; };
   }, [viewing, refreshKey]);
+  // People come with the photos local AI has organised, so they load again
+  // when it settles, as the groups do.
+  useEffect(() => {
+    let live = true;
+    listPeople(viewing, true).then((value) => { if (live) setPeople(value); }, (caught) => { if (live) { setPeople([]); onError(messageOf(caught)); } });
+    return () => { live = false; };
+  }, [viewing, refreshKey, reload]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (query.trim()) onSearch(query.trim());
@@ -128,8 +156,17 @@ export function AIHome({ viewing, userName, snapshot, refreshKey, topInset, ai, 
             <button type="button" className="ph-hero-forget" aria-label="清除最近搜索" title="清除最近搜索" onClick={onForget}><X /></button>
           </div>
         )}
-        <p className="ph-hero-note"><ShieldCheck />照片在这台 NAS 上由本地 AI 识别，不会离开设备{status ? ` · ${status}` : ""}</p>
+        <p className="ph-hero-note">
+          <ShieldCheck />照片和人脸都在这台 NAS 上由本地 AI 识别，不会离开设备{status ? ` · ${status}` : ""}
+          <button type="button" className="ph-hero-link" onClick={onPeopleSettings}>人物与宠物设置</button>
+        </p>
       </section>
+
+      {people?.length || cats ? (
+        <PeopleRow people={people ?? []} perRow={peoplePerRow} expanded={peopleExpanded} showHidden={showHidden}
+          onExpand={setPeopleExpanded} onShowHidden={setShowHidden} onOpen={(person) => onOpenPerson(person, remember())}
+          cats={cats} onOpenCats={(group) => onOpenCluster(group, remember())} />
+      ) : null}
 
       {clusters === undefined ? <div className="ph-loading"><span className="ph-spinner" /></div> : groups.length ? (
         <section className="ph-browse" aria-label="按内容聚合">

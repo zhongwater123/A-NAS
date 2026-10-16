@@ -1,0 +1,10 @@
+{
+  "name": "dinov2-small",
+  "kind": "dinov2",
+  "source": "https://huggingface.co/onnx-community/dinov2-small",
+  "revision": "8b1f705a3a7f6f062f6bdd21986c1583d3ef105d",
+  "file": "model.onnx",
+  "sizeBytes": 88532934,
+  "sha256": "f22797eabf810a75e41de68d378541ebea372122b25c4ce3ef25ff618250c20a",
+  "license": "Apache-2.0 (facebook/dinov2-small, revision ed25f3a31f01632728cabb09d1542f84ab7b0056). onnx-community's export of those weights to ONNX in float32; the export repository names facebook/dinov2-small as its base model and states no licence of its own."
+}

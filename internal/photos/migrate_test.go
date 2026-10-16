@@ -82,7 +82,7 @@ func TestMigrationQueuesVectorsForExistingThumbnails(t *testing.T) {
 	}
 }
 
-func TestMigrationQueuesDetectionsForExistingThumbnails(t *testing.T) {
+func TestMigrationQueuesDetectionsAndFaceScansForExistingThumbnails(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "photos")
 	db, err := sql.Open("sqlite3", filepath.Join(mustMkdir(t, root), catalogFile)+"?_foreign_keys=on")
@@ -108,9 +108,12 @@ func TestMigrationQueuesDetectionsForExistingThumbnails(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer service.Close()
-	var derivation string
-	if err := service.db.QueryRowContext(ctx, "SELECT derivation FROM jobs WHERE object_id = ?", zeroObjectID).Scan(&derivation); err != nil || derivation != detectionDerivation {
-		t.Fatalf("queued job = %q, %v; want %s", derivation, err, detectionDerivation)
+	var queued string
+	err = service.db.QueryRowContext(ctx,
+		"SELECT group_concat(derivation, ' ') FROM (SELECT derivation FROM jobs WHERE object_id = ? ORDER BY derivation)",
+		zeroObjectID).Scan(&queued)
+	if want := facesDerivation + " " + detectionDerivation; err != nil || queued != want {
+		t.Fatalf("queued jobs = %q, %v; want %s", queued, err, want)
 	}
 }
 

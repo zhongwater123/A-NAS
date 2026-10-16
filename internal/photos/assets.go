@@ -108,6 +108,9 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		if err := s.enqueueDerivations(ctx, tx, staged.id); err != nil {
 			return err
 		}
+		if err := s.enqueuePeopleScans(ctx, tx, staged.id); err != nil {
+			return err
+		}
 		record, err := s.assetByID(ctx, tx, assetID)
 		if err != nil {
 			return err
@@ -155,6 +158,9 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 		return Asset{}, err
 	}
 	if asset.Albums, err = s.albumsOf(ctx, asset.ID); err != nil {
+		return Asset{}, err
+	}
+	if asset.People, err = s.peopleOf(ctx, record); err != nil {
 		return Asset{}, err
 	}
 	return asset, nil
@@ -505,6 +511,9 @@ func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, sourc
 	}
 	record, err := s.assetByID(ctx, tx, id)
 	if err != nil {
+		return assetRecord{}, err
+	}
+	if err := s.enqueuePeopleScans(ctx, tx, record.objectID); err != nil {
 		return assetRecord{}, err
 	}
 	return record, s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)

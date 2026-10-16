@@ -118,6 +118,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
 	h.metadataRoutes()
+	h.peopleRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -144,6 +145,9 @@ type searchResponse struct {
 	// Objects is set when the query is about things the detector finds
 	// reliably: the closest group is then the photos it found them in.
 	Objects *objectsFound `json:"objects,omitempty"`
+	// People are the person names in the query; the results keep to their
+	// photos.
+	People []string `json:"people,omitempty"`
 }
 
 type objectsFound struct {
@@ -290,7 +294,8 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest}
+	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest,
+		People: page.People}
 	if page.Objects != nil {
 		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
 	}

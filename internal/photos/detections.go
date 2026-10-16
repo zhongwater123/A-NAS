@@ -207,6 +207,9 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, boxes =
 			job.objectID, job.derivation, model, encodeBoxes(boxes), formatTime(s.now())); err != nil {
 			return err
 		}
+		if err := s.enqueuePets(ctx, tx, job.objectID, model, boxes); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
 		stored = err == nil
 		return err
