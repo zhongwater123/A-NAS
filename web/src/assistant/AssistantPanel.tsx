@@ -333,7 +333,7 @@ function Welcome({ username, onPick }: { username: string; onPick(text: string):
     <div className="as-welcome">
       <span className="as-welcome-mark"><AssistantGlyph /></span>
       <h3>你好，{username}</h3>
-      <p>我能读你的个人空间和共享空间，帮你查找、总结和整理文件。<br />要改动文件时，我会先把改动交给你确认。</p>
+      <p>我是您的私人 NAS 助理，需要我做什么？</p>
       <div className="as-suggestions">
         {SUGGESTIONS.map((text) => <button type="button" key={text} onClick={() => onPick(text)}>{text}<ChevronRight /></button>)}
       </div>
