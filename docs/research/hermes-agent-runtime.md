@@ -540,7 +540,7 @@ Hermes 把 MCP 结果中的图片存进 `$HERMES_HOME/cache/images/`，再决定
 ### 结果呈现
 
 - 工具结果里的照片编号就够了：窗口从 `tool.complete` 的 `payload.result.result`（那段 JSON 文本），或 REST 历史中工具那一行的内容里取出编号，再用成员自己的 A-NAS 会话请求 `/api/v1/photos/assets/{id}/thumbnail`。缩略图不经 Hermes，也不进对话记录。
-- 助手在回复中提到某张照片时，按工具说明写成一个以照片名称为文字、以照片编号为地址的 Markdown 链接（编号本身以 `photo:` 开头），窗口把这种链接显示成缩略图，点开进入相册。相册窗口现在只能整体打开（`openWindow("photos")`），要补一个按照片打开的入口。
+- 助手在回复中提到某张照片时，按工具说明写成一个以照片名称为文字、以照片编号为地址的 Markdown 链接（编号本身以 `photo:` 开头），窗口把这种链接显示成缩略图，点开进入相册。2026-10-16 已实现：Markdown 净化只保留网页协议，窗口先把这种链接改写成相对地址再渲染（[`photoLinks.ts`](../../web/src/assistant/photoLinks.ts)），模型多写一次 `photo:` 也认得；点开时桌面让相册窗口单独显示这张照片（相册的 `focus`，与“在文件管理中显示”同一做法）。工具说明改为“id 原样照抄”，原先的“photo:照片id”容易让模型把前缀写两遍。
 - Hermes 白名单不用改：`tool.complete` 与 REST 历史已经放行；缩略图走的是 A-NAS 自己的相册接口（见上文“`hermes serve` 的接口面与产品服务白名单”）。
 
 ### 真实模型
