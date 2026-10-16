@@ -1,23 +1,24 @@
 // Package assistantapi exposes the AI assistant under /api/v1/assistant: the
-// signed-in member's conversations with their own Hermes instance, and the
-// pending changes it submitted (ADR 0022).
+// signed-in member's own Hermes instance, as Hermes Desktop uses it (ADR 0022
+// decision 9). A WebSocket carries the allowed part of `hermes serve`'s
+// JSON-RPC; REST routes list, read, rename and delete conversations; and the
+// confirmation cards for 提交更改 are answered here, never by the window
+// answering Hermes itself.
 //
 // It does not authenticate: the Product Service wraps it so every request
-// carries the signed-in user (WithUser) and writes have passed CSRF checks. It
-// never decides what the assistant may read or write; the instance's sandbox
-// and the pending-change store do. It only reaches the caller's own instance,
-// through that account's Unix socket.
+// carries the signed-in user (WithUser) and its session, and writes have passed
+// CSRF checks. It never decides what the assistant may read or write; the
+// instance's sandbox and the executor of changes do. It reaches only the
+// caller's own instance, through the session gate (decision 10).
 package assistantapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,43 +38,23 @@ const (
 	// real limit, this only keeps a request from being unbounded.
 	maxInputBytes = 64 << 10
 	// requestTimeout covers a cold start of the instance (seconds) plus the
-	// call; streamed turns are bounded by the client instead.
+	// call.
 	requestTimeout = 90 * time.Second
 	sessionLimit   = 100
 	// maxTitleRunes is Hermes's own title limit (hermes_state MAX_TITLE_LENGTH).
 	maxTitleRunes = 100
 )
 
-var (
-	sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
-	changeIDPattern  = regexp.MustCompile(`^[0-9]{1,18}$`)
-	accountPattern   = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-)
-
-// ChangeStore keeps what an assistant submitted for its member to confirm.
-// In A-NAS the Product Service owns it and the File Broker applies a
-// confirmed change; the UI prototype uses the spike's change broker.
-type ChangeStore interface {
-	List(ctx context.Context, account string) (json.RawMessage, error)
-	Decide(ctx context.Context, account, id string, confirm bool) (json.RawMessage, error)
-	// Attach records the conversation a submission was made in: the newest
-	// change of the account with exactly this summary and these operations
-	// and no conversation yet. ErrChangeNotFound when none matches, as when
-	// the submission was refused.
-	Attach(ctx context.Context, account, session string, submission json.RawMessage) error
-}
-
-// ErrChangeNotFound and ErrChangeDecided are returned by a ChangeStore.
-var (
-	ErrChangeNotFound = errors.New("change not found")
-	ErrChangeDecided  = errors.New("change already decided")
-)
+var accountPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 type Options struct {
-	// SocketDir holds <account>.sock, each member's assistant API socket.
+	// Connector reaches the signed-in member's instance; nil leaves the
+	// assistant off and the desktop keeps it as planned.
+	Connector Connector
+	// SocketDir holds <account>.sock, each member's instance socket; it only
+	// tells the status whether the account has an assistant.
 	SocketDir string
-	// KeyDir holds <account>.key, each instance's API Server key.
-	KeyDir  string
+	// Changes executes 提交更改; without it every approval is denied.
 	Changes ChangeStore
 	Logger  *slog.Logger
 }
@@ -86,31 +67,34 @@ func WithUser(ctx context.Context, user accounts.User) context.Context {
 }
 
 type handler struct {
-	options Options
-	logger  *slog.Logger
-	mux     *http.ServeMux
-	clients sync.Map // account -> *http.Client
+	options   Options
+	logger    *slog.Logger
+	mux       *http.ServeMux
+	ctx       context.Context
+	membersMu sync.Mutex
+	members   map[string]*member
 }
 
-// New returns the assistant API. An empty SocketDir answers 503
-// assistant_unavailable, so the desktop keeps the assistant as planned.
+// New returns the assistant API.
 func New(options Options) http.Handler {
 	logger := options.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{options: options, logger: logger, mux: http.NewServeMux()}
+	if options.Changes == nil {
+		options.Changes = noChanges{}
+	}
+	h := &handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: context.Background(), members: map[string]*member{}}
 	routes := map[string]func(http.ResponseWriter, *http.Request, string){
-		"GET /status":                 h.status,
-		"GET /sessions":               h.listSessions,
-		"POST /sessions":              h.createSession,
-		"PATCH /sessions/{id}":        h.renameSession,
-		"DELETE /sessions/{id}":       h.deleteSession,
-		"GET /sessions/{id}/messages": h.messages,
-		"POST /sessions/{id}/chat":    h.chat,
-		"GET /changes":                h.listChanges,
-		"POST /changes/{id}/confirm":  h.decide(true),
-		"POST /changes/{id}/reject":   h.decide(false),
+		"GET /status":                  h.status,
+		"GET /ws":                      h.gateway,
+		"GET /sessions":                h.listSessions,
+		"PATCH /sessions/{id}":         h.renameSession,
+		"DELETE /sessions/{id}":        h.deleteSession,
+		"GET /sessions/{id}/messages":  h.messages,
+		"GET /approvals":               h.listApprovals,
+		"POST /approvals/{id}/confirm": h.decideApproval(true),
+		"POST /approvals/{id}/reject":  h.decideApproval(false),
 	}
 	for pattern, route := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -123,7 +107,7 @@ func New(options Options) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.options.SocketDir == "" {
+	if h.options.Connector == nil {
 		writeError(w, http.StatusServiceUnavailable, "assistant_unavailable", "the assistant is not enabled on this device")
 		return
 	}
@@ -146,11 +130,15 @@ func (h *handler) withAccount(next func(http.ResponseWriter, *http.Request, stri
 }
 
 func (h *handler) status(w http.ResponseWriter, _ *http.Request, account string) {
-	_, err := os.Stat(filepath.Join(h.options.SocketDir, account+".sock"))
-	writeJSON(w, http.StatusOK, map[string]any{"available": err == nil, "changes": h.options.Changes != nil})
+	available := true
+	if h.options.SocketDir != "" {
+		_, err := os.Stat(filepath.Join(h.options.SocketDir, account+".sock"))
+		available = err == nil
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"available": available})
 }
 
-// session is what the desktop needs of a Hermes session.
+// session is what the desktop needs of a stored Hermes session.
 type session struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
@@ -167,7 +155,22 @@ type hermesSession struct {
 	StartedAt    float64  `json:"started_at"`
 	LastActive   *float64 `json:"last_active"`
 	MessageCount int      `json:"message_count"`
-	Hidden       bool     `json:"hidden"`
+	Hidden       flag     `json:"hidden"`
+}
+
+// flag is a session flag as Hermes lists it: SQLite's 0 or 1, or a boolean.
+type flag bool
+
+func (f *flag) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case "true", "1":
+		*f = true
+	case "false", "0", "null":
+		*f = false
+	default:
+		return fmt.Errorf("session flag %s is neither 0, 1 nor a boolean", data)
+	}
+	return nil
 }
 
 func (s hermesSession) view() session {
@@ -183,41 +186,21 @@ func (s hermesSession) view() session {
 
 func (h *handler) listSessions(w http.ResponseWriter, r *http.Request, account string) {
 	var page struct {
-		Data []hermesSession `json:"data"`
+		Sessions []hermesSession `json:"sessions"`
 	}
-	query := url.Values{"limit": {fmt.Sprint(sessionLimit)}, "source": {"api_server"}}
+	// Conversations show once they have a message: Hermes stores a new one at
+	// its first prompt.
+	query := url.Values{"limit": {fmt.Sprint(sessionLimit)}, "order": {"recent"}, "archived": {"exclude"}, "min_messages": {"1"}}
 	if !h.call(w, r, account, http.MethodGet, "/api/sessions?"+query.Encode(), nil, &page) {
 		return
 	}
-	sessions := make([]session, 0, len(page.Data))
-	for _, item := range page.Data {
-		if !item.Hidden {
+	sessions := make([]session, 0, len(page.Sessions))
+	for _, item := range page.Sessions {
+		if !bool(item.Hidden) && storedIDPattern.MatchString(item.ID) {
 			sessions = append(sessions, item.view())
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
-}
-
-func (h *handler) createSession(w http.ResponseWriter, r *http.Request, account string) {
-	var body struct {
-		Title string `json:"title"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	title := strings.TrimSpace(body.Title)
-	if len([]rune(title)) > maxTitleRunes {
-		writeError(w, http.StatusBadRequest, "invalid_title", "a title has at most 100 characters")
-		return
-	}
-	var created struct {
-		Session hermesSession `json:"session"`
-	}
-	payload, _ := json.Marshal(map[string]string{"title": title})
-	if !h.call(w, r, account, http.MethodPost, "/api/sessions", payload, &created) {
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"session": created.Session.view()})
 }
 
 func (h *handler) renameSession(w http.ResponseWriter, r *http.Request, account string) {
@@ -238,12 +221,12 @@ func (h *handler) renameSession(w http.ResponseWriter, r *http.Request, account 
 	}
 	payload, _ := json.Marshal(map[string]string{"title": title})
 	var updated struct {
-		Session hermesSession `json:"session"`
+		Title string `json:"title"`
 	}
 	if !h.call(w, r, account, http.MethodPatch, "/api/sessions/"+id, payload, &updated) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"session": updated.Session.view()})
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "title": updated.Title})
 }
 
 func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request, account string) {
@@ -264,182 +247,46 @@ func (h *handler) messages(w http.ResponseWriter, r *http.Request, account strin
 		return
 	}
 	var page struct {
-		Data json.RawMessage `json:"data"`
+		Messages json.RawMessage `json:"messages"`
 	}
 	if !h.call(w, r, account, http.MethodGet, "/api/sessions/"+id+"/messages?inline_images=false", nil, &page) {
 		return
 	}
-	if len(page.Data) == 0 {
-		page.Data = json.RawMessage("[]")
+	if len(page.Messages) == 0 {
+		page.Messages = json.RawMessage("[]")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": page.Data})
+	writeJSON(w, http.StatusOK, map[string]any{"messages": page.Messages})
 }
 
-// chat runs one turn and relays Hermes's server-sent events as they come.
-func (h *handler) chat(w http.ResponseWriter, r *http.Request, account string) {
-	id, ok := sessionID(w, r)
-	if !ok {
-		return
-	}
-	var body struct {
-		Input string `json:"input"`
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxInputBytes)
-	if !readJSON(w, r, &body) {
-		return
-	}
-	input := strings.TrimSpace(body.Input)
-	if input == "" {
-		writeError(w, http.StatusBadRequest, "invalid_input", "the message is empty")
-		return
-	}
-	payload, _ := json.Marshal(map[string]string{"input": input})
-	upstream, err := h.request(r.Context(), account, http.MethodPost, "/api/sessions/"+id+"/chat/stream", payload)
-	if err != nil {
-		h.unavailable(w, account, err)
-		return
-	}
-	response, err := h.client(account).Do(upstream)
-	if err != nil {
-		h.unavailable(w, account, err)
-		return
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		h.relayError(w, response)
-		return
-	}
-	flusher, _ := w.(http.Flusher)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	var watcher submissionWatcher
-	// After the turn the submission has been recorded; the member's stop
-	// cancels the request, so the attaching uses its own deadline.
-	defer h.attach(account, r.PathValue("id"), &watcher)
-	buffer := make([]byte, 16<<10)
-	for {
-		n, readErr := response.Body.Read(buffer)
-		if n > 0 {
-			watcher.observe(buffer[:n])
-			if _, err := w.Write(buffer[:n]); err != nil {
-				return
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) && r.Context().Err() == nil {
-				h.logger.Warn("assistant stream ended early", "account", account, "error", readErr)
-			}
-			return
-		}
-	}
+func (h *handler) listApprovals(w http.ResponseWriter, _ *http.Request, account string) {
+	writeJSON(w, http.StatusOK, map[string]any{"approvals": h.member(account).list()})
 }
 
-// submitTool is the A-NAS MCP tool "提交更改" as Hermes names it.
-const submitTool = "mcp__anas__submit_changes"
-
-// submissionWatcher reads the relayed events for the assistant's calls to
-// 提交更改: tool.started carries the call's arguments, the summary and the
-// operations the change store recorded.
-type submissionWatcher struct {
-	pending     []byte
-	submissions []json.RawMessage
-}
-
-func (s *submissionWatcher) observe(chunk []byte) {
-	s.pending = append(s.pending, chunk...)
-	for {
-		end := bytes.Index(s.pending, []byte("\n\n"))
-		if end < 0 {
-			break
-		}
-		s.event(s.pending[:end])
-		s.pending = s.pending[end+2:]
-	}
-	if len(s.pending) > maxInputBytes<<4 {
-		s.pending = nil
-	}
-}
-
-func (s *submissionWatcher) event(block []byte) {
-	var name string
-	var data []byte
-	for _, line := range bytes.Split(block, []byte("\n")) {
-		if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
-			name = string(bytes.TrimSpace(value))
-		} else if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
-			data = append(data, bytes.TrimSpace(value)...)
-		}
-	}
-	if name != "tool.started" {
-		return
-	}
-	var started struct {
-		ToolName string          `json:"tool_name"`
-		Args     json.RawMessage `json:"args"`
-	}
-	if json.Unmarshal(data, &started) == nil && started.ToolName == submitTool && len(started.Args) > 0 && string(started.Args) != "null" {
-		s.submissions = append(s.submissions, started.Args)
-	}
-}
-
-// attach records the conversation of each change submitted in the turn, so
-// its card shows in that conversation only.
-func (h *handler) attach(account, session string, watcher *submissionWatcher) {
-	if h.options.Changes == nil || len(watcher.submissions) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	for _, submission := range watcher.submissions {
-		err := h.options.Changes.Attach(ctx, account, session, submission)
-		if err != nil && !errors.Is(err, ErrChangeNotFound) {
-			h.logger.Warn("attach pending change to conversation", "account", account, "session", session, "error", err)
-		}
-	}
-}
-
-func (h *handler) listChanges(w http.ResponseWriter, r *http.Request, account string) {
-	if h.options.Changes == nil {
-		writeError(w, http.StatusServiceUnavailable, "changes_unavailable", "pending changes are unavailable")
-		return
-	}
-	changes, err := h.options.Changes.List(r.Context(), account)
-	if err != nil {
-		h.logger.Warn("list pending changes", "account", account, "error", err)
-		writeError(w, http.StatusBadGateway, "changes_unavailable", "pending changes could not be read")
-		return
-	}
-	writeRaw(w, http.StatusOK, changes)
-}
-
-func (h *handler) decide(confirm bool) func(http.ResponseWriter, *http.Request, string) {
+func (h *handler) decideApproval(confirm bool) func(http.ResponseWriter, *http.Request, string) {
 	return func(w http.ResponseWriter, r *http.Request, account string) {
-		if h.options.Changes == nil {
-			writeError(w, http.StatusServiceUnavailable, "changes_unavailable", "pending changes are unavailable")
-			return
-		}
 		id := r.PathValue("id")
-		if !changeIDPattern.MatchString(id) {
-			writeError(w, http.StatusBadRequest, "invalid_change", "invalid change id")
+		if !requestIDPattern.MatchString(id) {
+			writeError(w, http.StatusBadRequest, "invalid_approval", "invalid approval id")
 			return
 		}
-		change, err := h.options.Changes.Decide(r.Context(), account, id, confirm)
+		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		defer cancel()
+		c, err := h.decide(ctx, h.member(account), id, confirm)
 		switch {
 		case errors.Is(err, ErrChangeNotFound):
-			writeError(w, http.StatusNotFound, "change_not_found", "no such change")
+			writeError(w, http.StatusNotFound, "approval_not_found", "no such approval")
 		case errors.Is(err, ErrChangeDecided):
-			writeError(w, http.StatusConflict, "change_decided", "this change was already confirmed or rejected")
+			writeError(w, http.StatusConflict, "approval_decided", "this change was already decided")
+		case errors.Is(err, errApprovalGone):
+			writeError(w, http.StatusConflict, "approval_expired", "the assistant no longer waits for this answer")
+		case errors.Is(err, ErrChangeSession):
+			writeError(w, http.StatusUnauthorized, "authentication_required", "sign in again to answer")
 		case err != nil:
-			h.logger.Warn("decide pending change", "account", account, "change", id, "confirm", confirm, "error", err)
+			h.logger.Warn("assistant approval not decided", "account", account, "confirm", confirm, "error", err)
 			writeError(w, http.StatusBadGateway, "changes_unavailable", "the change could not be decided")
 		default:
-			h.logger.Info("pending change decided", "account", account, "change", id, "confirm", confirm)
-			writeRaw(w, http.StatusOK, change)
+			h.logger.Info("assistant change decided", "account", account, "confirm", confirm)
+			writeJSON(w, http.StatusOK, map[string]any{"approval": c})
 		}
 	}
 }
@@ -449,105 +296,63 @@ func (h *handler) decide(confirm bool) func(http.ResponseWriter, *http.Request, 
 func (h *handler) call(w http.ResponseWriter, r *http.Request, account, method, path string, body []byte, into any) bool {
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
-	request, err := h.request(ctx, account, method, path, body)
+	status, data, err := h.rest(ctx, account, method, path, body)
 	if err != nil {
 		h.unavailable(w, account, err)
 		return false
 	}
-	response, err := h.client(account).Do(request)
-	if err != nil {
-		h.unavailable(w, account, err)
-		return false
-	}
-	defer response.Body.Close()
-	if response.StatusCode >= 300 {
-		h.relayError(w, response)
+	if status >= 300 {
+		h.relayError(w, status, data)
 		return false
 	}
 	if into == nil {
 		return true
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 32<<20)).Decode(into); err != nil {
-		h.logger.Warn("assistant reply undecodable", "account", account, "path", path, "error", err)
+	if err := json.Unmarshal(data, into); err != nil {
+		h.logger.Warn("assistant reply undecodable", "account", account, "error", err)
 		writeError(w, http.StatusBadGateway, "assistant_unavailable", "the assistant answered unexpectedly")
 		return false
 	}
 	return true
 }
 
-func (h *handler) request(ctx context.Context, account, method, path string, body []byte) (*http.Request, error) {
-	key, err := os.ReadFile(filepath.Join(h.options.KeyDir, account+".key"))
-	if err != nil {
-		return nil, fmt.Errorf("read instance key: %w", err)
-	}
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	request, err := http.NewRequestWithContext(ctx, method, "http://assistant"+path, reader)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(key)))
-	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	return request, nil
-}
-
-func (h *handler) client(account string) *http.Client {
-	if client, ok := h.clients.Load(account); ok {
-		return client.(*http.Client)
-	}
-	socket := filepath.Join(h.options.SocketDir, account+".sock")
-	client := &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, "unix", socket)
-		},
-		MaxIdleConns:    2,
-		IdleConnTimeout: 30 * time.Second,
-	}}
-	actual, _ := h.clients.LoadOrStore(account, client)
-	return actual.(*http.Client)
-}
-
 func (h *handler) unavailable(w http.ResponseWriter, account string, err error) {
-	h.logger.Warn("assistant unreachable", "account", account, "error", err)
+	if errors.Is(err, ErrSessionRejected) {
+		writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+		return
+	}
+	if !errors.Is(err, ErrNoAssistant) {
+		h.logger.Warn("assistant unreachable", "account", account, "error", err)
+	}
 	writeError(w, http.StatusServiceUnavailable, "assistant_unavailable", "the assistant is not reachable")
 }
 
 // relayError turns an instance error into ours; a missing session stays 404.
-func (h *handler) relayError(w http.ResponseWriter, response *http.Response) {
-	detail, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+func (h *handler) relayError(w http.ResponseWriter, status int, detail []byte) {
 	var failure struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
+		Detail string `json:"detail"`
 	}
 	_ = json.Unmarshal(detail, &failure)
 	switch {
-	case response.StatusCode == http.StatusNotFound:
+	case status == http.StatusNotFound:
 		writeError(w, http.StatusNotFound, "session_not_found", "no such conversation")
-	case failure.Error.Code == "invalid_title":
-		// Length is checked here first, so what Hermes still refuses is a
-		// title another conversation of this member already has.
+	case status == http.StatusBadRequest && strings.Contains(failure.Detail, "already in use"):
 		writeError(w, http.StatusConflict, "title_in_use", "another conversation already has this title")
-	case response.StatusCode == http.StatusTooManyRequests:
-		writeError(w, http.StatusTooManyRequests, "assistant_busy", "the assistant is busy, try again shortly")
+	case status == http.StatusConflict, status == http.StatusTooManyRequests, status == http.StatusServiceUnavailable:
+		writeError(w, http.StatusServiceUnavailable, "assistant_busy", "the assistant is busy, try again shortly")
 	default:
-		h.logger.Warn("assistant request failed", "status", response.StatusCode, "detail", strings.TrimSpace(string(detail)))
+		h.logger.Warn("assistant request failed", "status", status, "detail", strings.TrimSpace(truncate(detail)))
 		writeError(w, http.StatusBadGateway, "assistant_failed", "the assistant could not complete the request")
 	}
 }
 
 func sessionID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := r.PathValue("id")
-	if !sessionIDPattern.MatchString(id) {
+	if !storedIDPattern.MatchString(id) {
 		writeError(w, http.StatusBadRequest, "invalid_session", "invalid conversation id")
 		return "", false
 	}
-	return url.PathEscape(id), true
+	return id, true
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, into any) bool {
@@ -581,3 +386,17 @@ func writeRaw(w http.ResponseWriter, status int, data []byte) {
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
+
+// noChanges stands in when no executor is configured: nothing can be
+// prepared, so every approval is denied.
+type noChanges struct{}
+
+var errNoExecutor = errors.New("no executor of changes is configured")
+
+func (noChanges) Prepare(context.Context, string, Submission) (Change, error) {
+	return Change{}, errNoExecutor
+}
+func (noChanges) Decide(context.Context, string, string, Decision) (Change, error) {
+	return Change{}, errNoExecutor
+}
+func (noChanges) Get(context.Context, string, string) (Change, error) { return Change{}, errNoExecutor }

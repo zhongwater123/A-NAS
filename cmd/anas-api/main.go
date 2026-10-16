@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -172,6 +174,7 @@ func run(logger *slog.Logger) error {
 	}
 	fileOptions := files.Options{AllowUnverifiedVolume: !live}
 	terminalConfig := terminal.Config{}
+	var broker *filebroker.Client
 	if live {
 		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(ctx context.Context) (string, error) {
 			volumes, err := storageService.ListVolumes(ctx)
@@ -185,7 +188,7 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		broker := filebroker.NewClient(brokerSocket)
+		broker = filebroker.NewClient(brokerSocket)
 		fileOptions.FileSystem = broker
 		// Terminal shells run as the signed-in administrator, not as a-nas.
 		terminalConfig.Spawner = broker
@@ -290,7 +293,7 @@ func run(logger *slog.Logger) error {
 		Music:      musicService,
 		Feedback:   feedbackapi.New(feedbackStore, logger),
 		Transfers:  transferAPI,
-		Assistant:  assistantAPI(logger),
+		Assistant:  assistantAPI(logger, broker),
 		SystemLogs: systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -569,16 +572,44 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 
 // assistantAPI configures the AI assistant (ADR 0022). Without
 // ANAS_ASSISTANT_SOCKET_DIR it answers assistant_unavailable and the desktop
-// keeps the assistant as planned. ANAS_ASSISTANT_CHANGES_SOCKET points at the
-// spike's change broker and is only for the UI prototype.
-func assistantAPI(logger *slog.Logger) http.Handler {
-	options := assistantapi.Options{
-		SocketDir: os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"),
-		KeyDir:    os.Getenv("ANAS_ASSISTANT_KEY_DIR"),
-		Logger:    logger,
+// keeps the assistant as planned. With the File Broker every connection to a
+// member's instance goes through it, the session gate (decision 10); without
+// it, in development only, the sockets are dialled directly with the tokens in
+// ANAS_ASSISTANT_TOKEN_DIR. ANAS_ASSISTANT_CHANGES_SOCKET points at the
+// spike's change broker, which stands in for the File Broker's executor.
+func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
+	sockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
+	options := assistantapi.Options{SocketDir: sockets, Logger: logger}
+	switch {
+	case sockets == "":
+	case broker != nil:
+		options.Connector = gatedAssistant{broker}
+	default:
+		options.Connector = assistantapi.SocketConnector{SocketDir: sockets, TokenDir: os.Getenv("ANAS_ASSISTANT_TOKEN_DIR")}
 	}
 	if socket := os.Getenv("ANAS_ASSISTANT_CHANGES_SOCKET"); socket != "" {
 		options.Changes = assistantapi.BrokerChanges(socket)
 	}
 	return assistantapi.New(options)
+}
+
+// gatedAssistant reaches a member's assistant through the File Broker, which
+// checks the session itself and cuts the connection when it ends.
+type gatedAssistant struct{ broker *filebroker.Client }
+
+func (g gatedAssistant) Connect(ctx context.Context, account string) (net.Conn, string, error) {
+	conn, err := g.broker.ConnectAssistant(ctx)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, "", assistantapi.ErrNoAssistant
+	case errors.Is(err, files.ErrForbidden):
+		return nil, "", assistantapi.ErrSessionRejected
+	case err != nil:
+		return nil, "", err
+	}
+	if conn.Username != account {
+		_ = conn.Close()
+		return nil, "", assistantapi.ErrSessionRejected
+	}
+	return conn, conn.Token, nil
 }
