@@ -4,6 +4,7 @@ import type { FileEntry } from "../api";
 import { errorText, listShareNotifications, type ShareNotification } from "./api";
 import { ShareComposer } from "./ShareComposer";
 import "./shares.css";
+import "./share-workspace.css";
 
 interface Focus { id: string; recipientId?: string }
 interface SharesContext { userId: string; active: boolean; focus?: Focus; revision: number; open: (id: string, recipientId?: string) => void; compose: (entries: FileEntry[]) => void; refresh: () => void; thread: (focus?: Focus) => void }

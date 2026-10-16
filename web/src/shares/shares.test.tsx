@@ -356,3 +356,51 @@ it("keeps selected recipients when searching by nickname or account", async () =
   await waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0].recipientIds).toEqual(["bob", "carol"]);
 });
+
+it("keeps a reply draft while chat is collapsed and marks new messages read only after reopening", async () => {
+  vi.useFakeTimers();
+  let sequence = 1;
+  const reads: number[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    const path = String(url);
+    if (path.endsWith("/read")) { reads.push(JSON.parse(init.body).through); return new Response(null, { status: 204 }); }
+    if (path.includes("/messages?")) return json({ items: [{ id: sequence, sender: share.sender, text: `消息${sequence}`, createdAt: share.createdAt }] });
+    if (path.endsWith("/s1") || path.endsWith("/view")) return json(share);
+    if (path.includes("direction=received")) return json({ items: [share] });
+    return json({ items: [] });
+  }));
+  render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  fireEvent.click(screen.getByRole("button", { name: /计划.txt/ }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  fireEvent.change(screen.getByLabelText("回复"), { target: { value: "还没发出的草稿" } });
+  fireEvent.click(screen.getByRole("button", { name: "收起私聊" }));
+  sequence = 2;
+  await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+  expect(reads).not.toContain(2);
+  expect(screen.queryByRole("textbox", { name: "回复" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "展开私聊" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect((screen.getByLabelText("回复") as HTMLTextAreaElement).value).toBe("还没发出的草稿");
+  expect(reads).toContain(2);
+});
+
+it("saves all top-level entries without requiring manual selection", async () => {
+  const requests: { entryIds: string[] }[] = [];
+  const tree = { ...share, entries: [{ id: "dir", path: "资料", isDir: true, size: 0 }, { id: "child", path: "资料/计划.txt", isDir: false, size: 2 }, { id: "other", path: "其他.txt", isDir: false, size: 5 }] };
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    const path = String(url);
+    if (path.endsWith("/save")) { requests.push(JSON.parse(init.body)); return json({ id: "job", status: "running", bytesDone: 0, bytesTotal: 7 }); }
+    if (path === "/api/v1/spaces") return json({ items: [{ id: "mine", name: "我的空间", kind: "private", writable: true }] });
+    if (path.endsWith("/s1") || path.endsWith("/view")) return json(tree);
+    if (path.includes("direction=received")) return json({ items: [tree] });
+    return json({ items: [] });
+  }));
+  const user = userEvent.setup();
+  render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
+  await user.click(await screen.findByRole("button", { name: /资料、其他.txt/ }));
+  await user.click(await screen.findByRole("button", { name: "保存全部" }));
+  await user.click(await screen.findByRole("button", { name: "保存到此文件夹" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0].entryIds).toEqual(["dir", "other"]);
+});

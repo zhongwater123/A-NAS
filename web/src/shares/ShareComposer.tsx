@@ -75,7 +75,7 @@ export function ShareComposer({ entries, onClose, onCreated }: {
       }}>
       <header className="share-compose-header">
         <span className="share-compose-mark"><Share2 /></span>
-        <div><h2>分享给成员</h2><p>把文件分享给 NAS 上的家人和伙伴</p></div>
+        <div><h2>分享给成员</h2></div>
         <button type="button" className="share-icon-button" aria-label="关闭分享" disabled={busy} onClick={onClose}><X /></button>
       </header>
       <div className="share-compose-body">
