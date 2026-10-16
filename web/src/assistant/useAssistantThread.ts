@@ -1,32 +1,50 @@
-// The connection layer: keeps one conversation as Hermes Desktop chat messages.
-// History comes from the member's Hermes session and is folded by Desktop's own
-// transcript model (toChatMessages); a running turn is built from the stream
-// with the same helpers Desktop uses, then replaced by the stored transcript.
+// The connection layer for one conversation, on the gateway (useAssistantGateway)
+// as Hermes Desktop drives `hermes serve`: session.create or session.resume give the
+// live session, prompt.submit runs a turn whose events build the reply with
+// Desktop's own helpers, and session.interrupt stops it. Stored history comes over
+// REST and is folded by Desktop's transcript model (toChatMessages). Leaving a
+// conversation does not stop its turn: Hermes keeps it running and the product
+// service keeps the instance up until it ends.
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { failureText, sessionMessages, streamChat } from "./assistantApi";
+import { failureText, sessionMessages } from "./assistantApi";
 import { toChatMessages } from "./hermes/lib/chat-messages/hydration";
-import { appendAssistantTextPart, textPart } from "./hermes/lib/chat-messages/parts";
+import { appendAssistantTextPart, appendReasoningPart, textPart } from "./hermes/lib/chat-messages/parts";
 import { upsertToolPart } from "./hermes/lib/chat-messages/tool-parts";
 import type { ChatMessage, ChatMessagePart, GatewayEventPayload } from "./hermes/lib/chat-messages/types";
+import type { SessionCreateResult, SessionResumeResult } from "./hermes/shared/gateway-contract.generated";
 import type { SessionMessage } from "./hermes/types/hermes";
+import type { AssistantGateway } from "./useAssistantGateway";
 
 export interface AssistantThread {
   messages: ChatMessage[];
   loading: boolean;
   running: boolean;
   error: string;
+  /** The live session (Hermes's runtime id) of the conversation on screen. */
+  liveId?: string;
   send(text: string): Promise<void>;
   cancel(): void;
 }
 
+interface Callbacks {
+  /** A conversation started here got its stored id. */
+  onCreated(storedId: string): void;
+  /** A turn ended, or the assistant renamed the conversation. */
+  onChanged(): void;
+}
+
+const COLS = 100;
+// How long a message waits for the instance to start (a cold start takes seconds,
+// a first start with Hermes setting itself up longer).
+const START_WAIT_MS = 180_000;
 const now = () => Date.now() / 1000;
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
-// Hermes's API Server leaves a stopped turn without a closing answer: it ends in
-// tool calls, an empty message, or the "Operation interrupted: …" sentinel that
-// Hermes's own TUI treats as cancellation metadata rather than prose. Such a turn
-// gets the interrupted flag Hermes Desktop's model uses for a stopped reply.
+// A stopped turn can end without a closing answer: in tool calls, an empty
+// message, or the "Operation interrupted: …" sentinel that Hermes's own TUI treats
+// as cancellation metadata rather than prose. Such a turn gets the interrupted
+// flag Hermes Desktop's model uses for a stopped reply.
 const isStopNotice = (part: ChatMessagePart) => part.type === "text" && part.text.trim().startsWith("Operation interrupted");
 const answered = (message: ChatMessage) => {
   const lastTool = message.parts.findLastIndex((part) => part.type === "tool-call");
@@ -49,98 +67,181 @@ function fromTranscript(stored: SessionMessage[]): ChatMessage[] {
   return result;
 }
 
-export function useAssistantThread(sessionId: string | undefined, onTurnFinished: () => void): AssistantThread {
+export function useAssistantThread(gateway: AssistantGateway, storedId: string | undefined, callbacks: Callbacks): AssistantThread {
+  const { client, generation, ready } = gateway;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // The conversation whose stored history has arrived; until it matches,
-  // the thread is loading and a message waits rather than racing the load.
+  // The conversation whose stored history has arrived; until it matches, the
+  // thread is loading.
   const [loadedFor, setLoadedFor] = useState<string>();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const abort = useRef<AbortController | undefined>(undefined);
-  // The conversation on screen; a turn that was left behind must not load its
-  // transcript into the one opened since.
-  const shown = useRef(sessionId);
-  const finished = useRef(onTurnFinished);
-  finished.current = onTurnFinished;
+  const [liveId, setLiveId] = useState<string>();
+  // The conversation on screen and its live session; events and late replies of
+  // any other conversation are ignored.
+  const shown = useRef(storedId);
+  const live = useRef<string | undefined>(undefined);
+  // A conversation this hook started: it already holds its live session and messages.
+  const created = useRef<string | undefined>(undefined);
+  const resumed = useRef<{ stored?: string; generation: number }>({ generation: -1 });
+  const replyId = useRef<string | undefined>(undefined);
+  const notify = useRef(callbacks);
+  notify.current = callbacks;
+
+  const adopt = (id: string | undefined) => {
+    live.current = id;
+    setLiveId(id);
+  };
 
   const reload = useCallback(async (id: string) => {
     const stored = await sessionMessages(id);
     if (shown.current === id) setMessages(fromTranscript(stored));
   }, []);
 
+  // The reply being built from the turn's events, added when the first one arrives.
+  const updateReply = useCallback((update: (message: ChatMessage) => ChatMessage) => {
+    setMessages((list) => {
+      const id = replyId.current;
+      if (id && list.some((message) => message.id === id)) return list.map((message) => (message.id === id ? update(message) : message));
+      const fresh = `live-${Date.now()}`;
+      replyId.current = fresh;
+      return [...list, update({ id: fresh, role: "assistant", parts: [], pending: true, timestamp: now() })];
+    });
+  }, []);
+
+  // A conversation opened from the list: its history now, its live session when connected.
   useEffect(() => {
-    shown.current = sessionId;
-    // Leaving a conversation stops its turn: Hermes interrupts a run whose stream closes.
-    abort.current?.abort();
+    shown.current = storedId;
+    if (storedId && storedId === created.current) {
+      created.current = undefined;
+      resumed.current = { stored: storedId, generation };
+      setLoadedFor(storedId);
+      return;
+    }
+    adopt(undefined);
+    replyId.current = undefined;
     setMessages([]);
     setError("");
     setRunning(false);
-    if (!sessionId) return;
+    resumed.current = { generation: -1 };
+    if (!storedId) return;
     let current = true;
-    reload(sessionId)
+    reload(storedId)
       .catch((reason) => current && setError(failureText(reason)))
-      .finally(() => current && setLoadedFor(sessionId));
+      .finally(() => current && setLoadedFor(storedId));
     return () => { current = false; };
-  }, [sessionId, reload]);
-  const loading = Boolean(sessionId) && loadedFor !== sessionId;
+    // generation only records which connection the new conversation began on;
+    // a reconnection resumes it below, without reloading.
+  }, [storedId, reload]);
+
+  // Resume the conversation on screen on each (re)connection, which also brings
+  // its events to this connection; a turn still running shows as running.
+  useEffect(() => {
+    if (!ready || !storedId) return;
+    if (resumed.current.stored === storedId && resumed.current.generation === generation) return;
+    resumed.current = { stored: storedId, generation };
+    client.request<SessionResumeResult>("session.resume", { session_id: storedId, cols: COLS, omit_messages: true })
+      .then((result) => {
+        if (shown.current !== storedId) return;
+        adopt(result.session_id);
+        if (result.running) {
+          setRunning(true);
+          updateReply((message) => message);
+        }
+      })
+      .catch(() => {
+        // Not resumable now; the history stays readable and sending tries again.
+        resumed.current = { generation: -1 };
+      });
+  }, [client, ready, generation, storedId, updateReply]);
+
+  const finishTurn = useCallback((status: string, failure: boolean) => {
+    updateReply((message) => ({ ...message, pending: false, interrupted: status === "interrupted" }));
+    replyId.current = undefined;
+    setRunning(false);
+    if (failure) setError("助手没能完成这次回答，请重试");
+    const id = shown.current;
+    if (id) void reload(id).catch(() => undefined);
+    notify.current.onChanged();
+  }, [reload, updateReply]);
+
+  // The turn's events, for the live session on screen only.
+  useEffect(() => client.onEvent((event) => {
+    if (!event.session_id || event.session_id !== live.current) return;
+    const payload = (event.payload ?? {}) as GatewayEventPayload;
+    const at = typeof payload.timestamp === "number" ? payload.timestamp : now();
+    switch (event.type) {
+      case "message.start":
+        setRunning(true);
+        updateReply((message) => message);
+        break;
+      case "message.delta":
+        updateReply((message) => ({ ...message, parts: appendAssistantTextPart(message.parts, text(payload.text), at) }));
+        break;
+      case "reasoning.delta":
+        updateReply((message) => ({ ...message, parts: appendReasoningPart(message.parts, text(payload.text), at) }));
+        break;
+      case "tool.start":
+      case "tool.complete": {
+        const name = text(payload.name);
+        // Hermes reports its own bookkeeping as tools named with a leading underscore.
+        if (!name || name.startsWith("_")) break;
+        updateReply((message) => ({ ...message, parts: upsertToolPart(message.parts, payload, event.type === "tool.start" ? "running" : "complete", at) }));
+        break;
+      }
+      case "message.complete":
+        // Hermes's error text is provider detail in English; it stays in the instance's log.
+        finishTurn(text(payload.status), payload.status === "error");
+        break;
+      case "session.title":
+        notify.current.onChanged();
+        break;
+    }
+  }), [client, finishTurn, updateReply]);
+
+  const connected = useRef(ready);
+  connected.current = ready;
 
   const send = useCallback(async (input: string) => {
-    if (!sessionId || !input.trim()) return;
-    const controller = new AbortController();
-    abort.current = controller;
-    const liveId = `live-${Date.now()}`;
-    const live = (update: (message: ChatMessage) => ChatMessage) =>
-      setMessages((list) => list.map((message) => (message.id === liveId ? update(message) : message)));
+    if (!input.trim()) return;
     setError("");
+    setMessages((list) => [...list, { id: `local-${Date.now()}`, role: "user", parts: [textPart(input)], timestamp: now() }]);
+    replyId.current = undefined;
+    updateReply((message) => message);
     setRunning(true);
-    setMessages((list) => [
-      ...list,
-      { id: `local-${Date.now()}`, role: "user", parts: [textPart(input)], timestamp: now() },
-      { id: liveId, role: "assistant", parts: [], pending: true, timestamp: now() },
-    ]);
     try {
-      for await (const { event, data } of streamChat(sessionId, input, controller.signal)) {
-        const at = typeof data.ts === "number" ? data.ts : now();
-        switch (event) {
-          case "assistant.delta":
-            live((message) => ({ ...message, parts: appendAssistantTextPart(message.parts, text(data.delta), at) }));
-            break;
-          case "tool.started":
-          case "tool.completed":
-          case "tool.failed": {
-            const name = text(data.tool_name);
-            // Hermes reports its own bookkeeping (a thinking preview) as tools named with a leading underscore.
-            if (!name || name.startsWith("_")) break;
-            const payload: GatewayEventPayload = { name, preview: text(data.preview) || undefined, args: data.args ?? undefined };
-            if (event === "tool.failed") payload.error = text(data.error) || true;
-            live((message) => ({ ...message, parts: upsertToolPart(message.parts, payload, event === "tool.started" ? "running" : "complete", at) }));
-            break;
-          }
-          case "run.failed":
-            // Hermes's error is provider detail in English; it stays in the instance's log.
-            setError("助手没能完成这次回答，请重试");
-            break;
-        }
+      // A message sent while the instance still starts waits for it.
+      if (!connected.current) {
+        await new Promise<void>((resolve) => {
+          const off = client.on("gateway.ready", () => { off(); window.clearTimeout(timer); resolve(); });
+          const timer = window.setTimeout(() => { off(); resolve(); }, START_WAIT_MS);
+        });
       }
-      await reload(sessionId);
-    } catch (reason) {
-      const stopped = controller.signal.aborted;
-      if (!stopped) setError(failureText(reason));
-      live((message) => ({ ...message, pending: false, interrupted: stopped }));
-      await reload(sessionId).catch(() => undefined);
-      // Hermes finishes the tool calls already under way before a stop lands
-      // and stores them afterwards; look again once it has.
-      if (stopped) window.setTimeout(() => { if (!abort.current) void reload(sessionId).catch(() => undefined); }, 4000);
-    } finally {
-      if (abort.current === controller) {
-        abort.current = undefined;
-        setRunning(false);
+      let id = live.current;
+      if (!id && shown.current) {
+        id = (await client.request<SessionResumeResult>("session.resume", { session_id: shown.current, cols: COLS, omit_messages: true })).session_id;
+        adopt(id);
       }
-      finished.current();
+      if (!id) {
+        const session = await client.request<SessionCreateResult>("session.create", { cols: COLS });
+        id = session.session_id;
+        adopt(id);
+        created.current = session.stored_session_id;
+        shown.current = session.stored_session_id;
+        notify.current.onCreated(session.stored_session_id);
+      }
+      await client.request("prompt.submit", { session_id: id, text: input });
+    } catch {
+      setError("助手暂时没有响应，请稍后再试");
+      updateReply((message) => ({ ...message, pending: false }));
+      replyId.current = undefined;
+      setRunning(false);
     }
-  }, [sessionId, reload]);
+  }, [client, updateReply]);
 
-  const cancel = useCallback(() => abort.current?.abort(), []);
+  const cancel = useCallback(() => {
+    if (live.current) void client.request("session.interrupt", { session_id: live.current }).catch(() => undefined);
+  }, [client]);
 
-  return { messages, loading, running, error, send, cancel };
+  const loading = Boolean(storedId) && loadedFor !== storedId;
+  return { messages, loading, running, error, liveId, send, cancel };
 }

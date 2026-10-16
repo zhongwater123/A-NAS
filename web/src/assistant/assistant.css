@@ -55,6 +55,7 @@
 .as-session-open strong { display: block; overflow: hidden; font-weight: 550; white-space: nowrap; text-overflow: ellipsis; }
 .as-session-line { display: flex; align-items: center; gap: 6px; }
 .as-session-line strong { flex: 1; min-width: 0; }
+.as-session-running { flex: none; width: 14px; height: 14px; color: var(--as-accent-ink); animation: as-spin 1s linear infinite; }
 .as-session-badge { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; color: var(--as-warning); background: var(--as-warning-soft); box-shadow: inset 0 0 0 1px rgba(176, 106, 16, .22); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .as-session-open small em { color: var(--as-warning); font-style: normal; }
 .as-session.active .as-session-open strong { color: var(--as-accent-ink); }
@@ -73,28 +74,11 @@
 .as-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--as-surface); }
 .as-head { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px; border-bottom: 1px solid var(--as-line); }
 .as-head h2 { flex: 1; min-width: 0; margin: 0; overflow: hidden; font-size: 14.5px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
-.as-working, .as-pending-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+.as-working { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
 .as-working { color: var(--as-accent-ink); background: var(--as-accent-soft); }
 .as-working svg { width: 13px; height: 13px; animation: as-spin 1s linear infinite; }
-.as-pending-pill { border: 0; color: var(--as-warning); background: var(--as-warning-soft); font-family: inherit; cursor: pointer; transition: background .15s; }
-.as-pending-pill:hover, .as-pending-pill[aria-expanded="true"] { background: #fae6bf; }
-.as-pending-pill svg { width: 13px; height: 13px; margin-right: -3px; transition: transform .15s var(--as-ease); }
-.as-pending-pill[aria-expanded="true"] svg { transform: rotate(180deg); }
 
 /* Every pending change of the member, under the header pill. */
-.as-inbox-anchor { position: relative; }
-.as-inbox { position: absolute; top: calc(100% + 8px); right: -8px; z-index: 30; width: min(520px, calc(100vw - 48px)); max-height: min(560px, 72vh); display: flex; flex-direction: column; border: 1px solid var(--as-line-strong); border-radius: 14px; background: var(--as-surface); box-shadow: 0 22px 56px rgba(22, 26, 40, .2), 0 2px 6px rgba(22, 26, 40, .06); animation: as-rise .18s var(--as-ease); }
-.as-inbox > header { display: flex; align-items: baseline; gap: 8px; padding: 13px 16px 11px; border-bottom: 1px solid var(--as-line); }
-.as-inbox > header strong { font-size: 13.5px; font-weight: 650; }
-.as-inbox > header small { color: var(--as-muted); font-size: 12px; }
-.as-inbox-list { display: grid; gap: 16px; min-height: 0; padding: 12px 12px 14px; overflow: auto; }
-.as-inbox-source { display: flex; align-items: center; gap: 6px; min-height: 24px; margin: 0 2px 6px; color: var(--as-ink-2); font-size: 12px; }
-.as-inbox-source > svg { width: 13px; height: 13px; flex: none; color: var(--as-muted); }
-.as-inbox-source span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.as-inbox-source button { display: inline-flex; align-items: center; gap: 1px; flex: none; height: 24px; padding: 0 4px 0 8px; border: 0; border-radius: 6px; color: var(--as-accent-ink); background: none; font: inherit; font-weight: 600; cursor: pointer; }
-.as-inbox-source button:hover { background: var(--as-accent-soft); }
-.as-inbox-source button svg { width: 13px; height: 13px; }
-.as-inbox .as-change { box-shadow: none; animation: none; }
 
 .as-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .as-viewport { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 0 8px; scroll-behavior: smooth; }
@@ -196,10 +180,9 @@
 .as-change.rejected .as-change-mark { color: var(--as-muted); background: #efeff4; }
 .as-change.failed { border-color: rgba(210, 59, 72, .3); background: #fffafa; }
 .as-change.failed .as-change-mark { color: var(--as-danger); background: var(--as-danger-soft); }
-.as-change.stale { border-color: var(--as-line-strong); background: #fafafc; box-shadow: none; }
-.as-change.stale .as-change-mark { color: var(--as-muted); background: #efeff4; }
-.as-op-problem { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; color: var(--as-warning); background: var(--as-warning-soft); font-size: 12px; }
-.as-op-problem svg { width: 13px; height: 13px; flex: none; }
+.as-change.expired, .as-change.stopped { border-color: var(--as-line-strong); background: #fafafc; box-shadow: none; }
+.as-change.expired .as-change-mark, .as-change.stopped .as-change-mark { color: var(--as-muted); background: #efeff4; }
+.as-change.approved .as-change-mark svg { animation: as-spin 1s linear infinite; }
 .as-change-ops { display: grid; gap: 8px; margin: 0; padding: 0 14px 4px; list-style: none; }
 .as-op-title { display: flex; align-items: center; gap: 7px; color: var(--as-ink-2); font-size: 12.5px; }
 .as-op-title svg { width: 14px; height: 14px; color: var(--as-muted); }

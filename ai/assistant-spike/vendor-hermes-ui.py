@@ -1,6 +1,7 @@
 """Vendors the parts of Hermes Desktop's chat layer the A-NAS assistant window
 reuses: the transcript model (lib/chat-messages) with the small libraries it
-needs, the assistant-ui runtime adapter, and the generated gateway types.
+needs, the assistant-ui runtime adapter, the generated gateway types, and the
+JSON-RPC client Desktop and the web dashboard share (apps/shared).
 
 Run on the development machine:
     python3 ai/assistant-spike/vendor-hermes-ui.py <hermes-agent checkout> web/src/assistant/hermes
@@ -31,7 +32,8 @@ COPY = [
     "components/assistant-ui/reference-kinds.ts",
     "types/hermes.ts",
 ]
-SHARED = ["gateway-contract.generated.ts", "skill-scaffold.ts"]
+SHARED = ["gateway-contract.generated.ts", "skill-scaffold.ts", "gateway-events.ts", "json-rpc-channel.ts",
+          "json-rpc-gateway.ts", "reconnect-backoff.ts"]
 SHIMS = Path(__file__).with_name("hermes-ui-shims")
 
 if target.exists():

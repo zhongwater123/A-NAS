@@ -1,6 +1,7 @@
 // AI 助手 window (ADR 0022 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
-// model; the conversation list, pending-change cards and styling are A-NAS's.
+// model over its own JSON-RPC client; the conversation list, confirmation cards
+// and styling are A-NAS's.
 import {
   AssistantRuntimeProvider,
   ChainOfThoughtPrimitive,
@@ -16,16 +17,18 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Bot, Brain, Check, ChevronDown, ChevronRight, CircleAlert, FilePen, FileSearch, FileText, FolderPlus, History,
-  ListChecks, LoaderCircle, MessageSquare, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
+  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, History,
+  ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  type AssistantSession, type ChangeOperation, type PendingChange,
-  assistantStatus, createSession, decideChange, deleteSession, failureText, listChanges, listSessions, renameSession,
+  type Approval, type AssistantSession, type ChangeOperation,
+  decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
 } from "./assistantApi";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
+import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
+import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import "./assistant.css";
 
@@ -36,76 +39,93 @@ const SUGGESTIONS = [
 ];
 
 export function AssistantPanel({ username }: { username: string }) {
+  const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string>();
-  const [queued, setQueued] = useState<string>();
-  const [changes, setChanges] = useState<PendingChange[]>([]);
-  const [changesEnabled, setChangesEnabled] = useState(false);
-  const [inboxOpen, setInboxOpen] = useState(false);
+  const [approvals, setApprovals] = useState<Map<string, Approval>>(new Map());
+  // Stored conversations with a turn running in the instance, wherever it was started.
+  const [busy, setBusy] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState("");
 
+  // A list that failed while the instance was still starting says so until a
+  // later load succeeds.
+  const listFailure = useRef("");
   const refreshSessions = useCallback(() => listSessions()
-    .then((list) => { setSessions(list); setSessionsLoaded(true); })
-    .catch((reason) => setNotice(failureText(reason))), []);
-  const refreshChanges = useCallback(() => {
-    if (changesEnabled) listChanges().then(setChanges).catch(() => undefined);
-  }, [changesEnabled]);
+    .then((list) => {
+      setSessions(list);
+      setSessionsLoaded(true);
+      const failure = listFailure.current;
+      listFailure.current = "";
+      if (failure) setNotice((current) => (current === failure ? "" : current));
+    })
+    .catch((reason) => {
+      listFailure.current = failureText(reason);
+      setNotice(listFailure.current);
+    }), []);
+  const refreshBusy = useCallback(() => {
+    if (!gateway.ready) return;
+    gateway.client.request<SessionActiveListResult>("session.active_list")
+      .then((result) => setBusy(new Set(result.sessions.filter((item) => item.status !== "idle").map((item) => item.session_key))))
+      .catch(() => undefined);
+  }, [gateway.client, gateway.ready]);
+  const keep = useCallback((approval: Approval) => setApprovals((all) => new Map(all).set(approval.requestId, approval)), []);
+  const reloadApprovals = useCallback(() => {
+    listApprovals().then((list) => setApprovals(new Map(list.map((approval) => [approval.requestId, approval])))).catch(() => undefined);
+  }, []);
 
+  useEffect(() => { void refreshSessions(); }, [refreshSessions]);
+  // Conversations, cards and running turns, again on every (re)connection.
   useEffect(() => {
-    assistantStatus().then((status) => setChangesEnabled(status.changes)).catch(() => undefined);
+    if (!gateway.ready) return;
     void refreshSessions();
-  }, [refreshSessions]);
-  useEffect(refreshChanges, [refreshChanges]);
+    reloadApprovals();
+    refreshBusy();
+  }, [gateway.ready, gateway.generation, refreshSessions, reloadApprovals, refreshBusy]);
+  // The product service tells every window of the member how each card stands;
+  // a card from a conversation this window has not listed yet, or Hermes saying
+  // the conversations changed, brings the list up to date.
+  const known = useRef(new Set<string>());
+  known.current = new Set(sessions.map((session) => session.id));
+  useEffect(() => gateway.client.onEvent((event) => {
+    const type = event.type as string;
+    if (type === "anas.approval" && event.payload) {
+      const approval = event.payload as unknown as Approval;
+      keep(approval);
+      if (approval.storedSessionId && !known.current.has(approval.storedSessionId)) void refreshSessions();
+    }
+    if (type === "sessions.changed" || type === "session.title") void refreshSessions();
+    if (type === "sessions.changed" || type === "message.complete") refreshBusy();
+  }), [gateway.client, keep, refreshBusy, refreshSessions]);
 
-  const afterTurn = useCallback(() => {
-    refreshChanges();
+  const changed = useCallback(() => {
     void refreshSessions();
+    refreshBusy();
     // Hermes names a new conversation in the background after its first turn.
     window.setTimeout(() => void refreshSessions(), 4000);
-  }, [refreshChanges, refreshSessions]);
-
-  const thread = useAssistantThread(activeId, afterTurn);
+  }, [refreshSessions, refreshBusy]);
+  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed });
   const { send, cancel } = thread;
-
-  // A message typed before any conversation exists starts one, then is sent
-  // once that conversation has loaded.
-  useEffect(() => {
-    if (queued && activeId && !thread.loading) {
-      setQueued(undefined);
-      void send(queued);
-    }
-  }, [queued, activeId, thread.loading, send]);
-
-  const submit = useCallback(async (text: string) => {
-    const input = text.trim();
-    if (!input) return;
-    if (activeId) return send(input);
-    try {
-      const session = await createSession();
-      setSessions((list) => [session, ...list]);
-      setActiveId(session.id);
-      setQueued(input);
-    } catch (reason) {
-      setNotice(failureText(reason));
-    }
-  }, [activeId, send]);
 
   // assistant-ui re-reads its store whenever the adapter changes, so it only
   // changes with the messages or the running state.
   const visible = useMemo(() => thread.messages.filter((message) => !message.hidden), [thread.messages]);
-  const running = thread.running || Boolean(queued);
   const adapter = useMemo(() => ({
     messages: visible,
-    isRunning: running,
+    isRunning: thread.running,
     convertMessage: toThreadMessage,
-    onNew: async (message: AppendMessage) => submit(message.content.map((part) => (part.type === "text" ? part.text : "")).join("")),
+    onNew: async (message: AppendMessage) => send(message.content.map((part) => (part.type === "text" ? part.text : "")).join("")),
     onCancel: async () => cancel(),
-  }), [visible, running, submit, cancel]);
+  }), [visible, thread.running, send, cancel]);
   const runtime = useExternalStoreRuntime<ChatMessage>(adapter);
 
   const remove = async (session: AssistantSession) => {
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
+    // As Hermes Desktop does: stop and close the live session before deleting it.
+    if (session.id === activeId && thread.liveId) {
+      await gateway.client.request("session.interrupt", { session_id: thread.liveId }).catch(() => undefined);
+      await gateway.client.request("session.close", { session_id: thread.liveId }).catch(() => undefined);
+    }
     await deleteSession(session.id).catch((reason) => setNotice(failureText(reason)));
     if (session.id === activeId) setActiveId(undefined);
     void refreshSessions();
@@ -116,31 +136,27 @@ export function AssistantPanel({ username }: { username: string }) {
     if (updated) setSessions((list) => list.map((item) => (item.id === updated.id ? { ...item, title: updated.title } : item)));
   };
 
-  const decide = async (change: PendingChange, confirm: boolean) => {
+  const decide = async (approval: Approval, confirm: boolean) => {
     try {
-      const decided = await decideChange(change.id, confirm);
-      setChanges((list) => list.map((item) => (item.id === decided.id ? decided : item)));
+      keep(await decideApproval(approval.requestId, confirm));
     } catch (reason) {
       setNotice(failureText(reason));
-      refreshChanges();
+      reloadApprovals();
     }
   };
 
-  const openSession = (id: string | undefined) => {
-    setActiveId(id);
-    setInboxOpen(false);
-  };
-  const closeInbox = useCallback(() => setInboxOpen(false), []);
-
-  // A change belongs to the conversation it was submitted in and shows only
-  // there; the header lists every pending change of the member.
+  // A card belongs to the conversation it was asked in and shows only there; the
+  // list marks the conversations waiting for an answer.
   const active = sessions.find((session) => session.id === activeId);
-  const pending = changes.filter((change) => change.status === "pending");
   const waiting = new Map<string, number>();
-  for (const change of pending) if (change.sessionId) waiting.set(change.sessionId, (waiting.get(change.sessionId) ?? 0) + 1);
-  const here = activeId ? changes.filter((change) => change.sessionId === activeId) : [];
-  const herePending = here.filter((change) => change.status === "pending");
-  const hereRecent = here.filter((change) => change.status !== "pending" && change.decidedAt && Date.now() / 1000 - change.decidedAt < 600);
+  for (const approval of approvals.values()) {
+    if (approval.status === "awaiting" && approval.storedSessionId) waiting.set(approval.storedSessionId, (waiting.get(approval.storedSessionId) ?? 0) + 1);
+  }
+  const here = [...approvals.values()]
+    .filter((approval) => (activeId && approval.storedSessionId === activeId) || (thread.liveId && approval.sessionId === thread.liveId))
+    .filter((approval) => approval.status === "awaiting" || approval.status === "deciding" || Date.now() / 1000 - approval.createdAt < 600)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const unreachable = !gateway.ready && gateway.problem;
 
   return (
     <div className="as-app">
@@ -149,12 +165,13 @@ export function AssistantPanel({ username }: { username: string }) {
           <span className="as-brand-mark"><Bot /></span>
           <div><strong>AI 助手</strong><small>{username} 的助手</small></div>
         </div>
-        <button type="button" className="as-new" onClick={() => openSession(undefined)}><MessageSquarePlus />新对话</button>
+        <button type="button" className="as-new" onClick={() => setActiveId(undefined)}><MessageSquarePlus />新对话</button>
         <div className="as-side-label"><History />对话</div>
         <ul className="as-sessions">
           {sessions.map((session) => (
             <SessionRow key={session.id} session={session} active={session.id === activeId} waiting={waiting.get(session.id) ?? 0}
-              onOpen={() => openSession(session.id)} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
+              running={busy.has(session.id)}
+              onOpen={() => setActiveId(session.id)} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
           ))}
           {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动助手…</>}</li>}
         </ul>
@@ -165,46 +182,39 @@ export function AssistantPanel({ username }: { username: string }) {
         <header className="as-head">
           <h2>{active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
           {thread.running && <span className="as-working"><LoaderCircle />正在处理</span>}
-          {pending.length > 0 && (
-            <div className="as-inbox-anchor">
-              <button type="button" className="as-pending-pill" aria-expanded={inboxOpen} aria-haspopup="dialog"
-                onClick={() => { setInboxOpen((open) => !open); refreshChanges(); }}>
-                {pending.length} 项待确认<ChevronDown />
-              </button>
-              {inboxOpen && (
-                <Inbox changes={pending} sessions={sessions} activeId={activeId} onOpen={openSession} onClose={closeInbox}
-                  onDecide={(change, confirm) => decide(change, confirm)} />
-              )}
-            </div>
-          )}
+          {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接助手</span>}
         </header>
 
         <AssistantRuntimeProvider runtime={runtime}>
           <ThreadPrimitive.Root className="as-thread">
             <ThreadPrimitive.Viewport className="as-viewport" autoScroll={Boolean(activeId)}>
-              {!activeId && !queued ? (
-                <Welcome username={username} onPick={(text) => void submit(text)} />
+              {!activeId && !thread.messages.length ? (
+                <Welcome username={username} onPick={(text) => void send(text)} />
               ) : thread.loading && !thread.messages.length ? (
                 <div className="as-loading"><LoaderCircle />正在打开对话…</div>
               ) : (
                 <ThreadPrimitive.Messages components={THREAD_COMPONENTS} />
               )}
-              {(thread.error || notice) && (
-                <div className="as-error" role="alert"><CircleAlert /><span>{thread.error || notice}</span>{notice && <button type="button" aria-label="关闭" onClick={() => setNotice("")}><X /></button>}</div>
+              {(thread.error || notice || unreachable) && (
+                <div className="as-error" role="alert">
+                  <CircleAlert /><span>{thread.error || notice || unreachable}</span>
+                  {notice && <button type="button" aria-label="关闭" onClick={() => setNotice("")}><X /></button>}
+                </div>
               )}
               <div className="as-viewport-spacer" />
             </ThreadPrimitive.Viewport>
 
-            {(herePending.length > 0 || hereRecent.length > 0) && (
-              <section className="as-changes" aria-label="本对话中待确认的更改">
-                {herePending.map((change) => <ChangeCard key={change.id} change={change} onDecide={(confirm) => decide(change, confirm)} />)}
-                {hereRecent.map((change) => <ChangeCard key={change.id} change={change} />)}
+            {here.length > 0 && (
+              <section className="as-changes" aria-label="本对话中等你确认的更改">
+                {here.map((approval) => (
+                  <ApprovalCard key={approval.requestId} approval={approval} onDecide={(confirm) => decide(approval, confirm)} />
+                ))}
               </section>
             )}
 
             <ComposerPrimitive.Root className="as-composer">
               <ComposerPrimitive.Input className="as-input" placeholder="让助手帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
-              {running
+              {thread.running
                 ? <ComposerPrimitive.Cancel className="as-send stop" aria-label="停止"><Square /></ComposerPrimitive.Cancel>
                 : <ComposerPrimitive.Send className="as-send" aria-label="发送"><ArrowUp /></ComposerPrimitive.Send>}
             </ComposerPrimitive.Root>
@@ -230,7 +240,9 @@ function toThreadMessage(message: ChatMessage): ThreadMessageLike {
   } as ThreadMessageLike;
 }
 
-function SessionRow({ session, active, waiting, onOpen, onRename, onDelete }: { session: AssistantSession; active: boolean; waiting: number; onOpen(): void; onRename(title: string): void; onDelete(): void }) {
+function SessionRow({ session, active, waiting, running, onOpen, onRename, onDelete }: {
+  session: AssistantSession; active: boolean; waiting: number; running: boolean; onOpen(): void; onRename(title: string): void; onDelete(): void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title);
   const finish = () => {
@@ -246,9 +258,10 @@ function SessionRow({ session, active, waiting, onOpen, onRename, onDelete }: { 
         <button type="button" className="as-session-open" onClick={onOpen}>
           <span className="as-session-line">
             <strong>{session.title || session.preview || "新对话"}</strong>
-            {waiting > 0 && <span className="as-session-badge" title={`${waiting} 项更改待确认`}>{waiting}</span>}
+            {waiting > 0 ? <span className="as-session-badge" title={`${waiting} 项更改等你确认`}>{waiting}</span>
+              : running && <LoaderCircle className="as-session-running" aria-label="正在回答" />}
           </span>
-          <small>{relativeTime(session.lastActive ?? session.startedAt)}{waiting > 0 && <em> · 待确认</em>}</small>
+          <small>{relativeTime(session.lastActive ?? session.startedAt)}{waiting > 0 ? <em> · 等你确认</em> : running && " · 正在回答"}</small>
         </button>
       )}
       {!editing && (
@@ -377,91 +390,52 @@ const ToolActivity: ToolCallMessagePartComponent = ({ toolName, args, result, st
   );
 };
 
-// Every pending change of the member, from whichever conversation; each can
-// be decided here or opened in its conversation.
-function Inbox({ changes, sessions, activeId, onOpen, onClose, onDecide }: {
-  changes: PendingChange[]; sessions: AssistantSession[]; activeId?: string;
-  onOpen(id: string): void; onClose(): void; onDecide(change: PendingChange, confirm: boolean): Promise<void>;
-}) {
-  const panel = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    // The pill toggles the panel itself, so a press on it is not "outside".
-    const press = (event: PointerEvent) => { if (!panel.current?.parentElement?.contains(event.target as Node)) onClose(); };
-    document.addEventListener("keydown", key);
-    document.addEventListener("pointerdown", press);
-    return () => {
-      document.removeEventListener("keydown", key);
-      document.removeEventListener("pointerdown", press);
-    };
-  }, [onClose]);
-  return (
-    <div className="as-inbox" role="dialog" aria-label="待确认的更改" ref={panel}>
-      <header><strong>待确认的更改</strong><small>确认前文件不会变化</small></header>
-      <div className="as-inbox-list">
-        {changes.map((change) => {
-          const session = sessions.find((item) => item.id === change.sessionId);
-          return (
-            <section key={change.id}>
-              <div className="as-inbox-source">
-                <MessageSquare />
-                {change.sessionId === undefined ? <span>来源对话未知</span>
-                  : change.sessionId === activeId ? <span>来自当前对话</span>
-                  : session ? (
-                    <>
-                      <span>来自“{session.title || session.preview || "新对话"}”</span>
-                      <button type="button" onClick={() => onOpen(session.id)}>打开对话<ChevronRight /></button>
-                    </>
-                  ) : <span>来自一个已删除的对话</span>}
-              </div>
-              <ChangeCard change={change} onDecide={(confirm) => onDecide(change, confirm)} />
-            </section>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ChangeCard({ change, onDecide }: { change: PendingChange; onDecide?(confirm: boolean): Promise<void> }) {
+function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(confirm: boolean): Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const choose = (confirm: boolean) => {
     setBusy(true);
-    void onDecide?.(confirm).finally(() => setBusy(false));
+    void onDecide(confirm).finally(() => setBusy(false));
   };
-  const decided = change.status !== "pending";
+  const { change, status } = approval;
+  const open = status === "awaiting" || status === "deciding";
   return (
-    <article className={`as-change ${change.status}${!decided && stale(change) ? " stale" : ""}`}>
+    <article className={`as-change ${status}`}>
       <header>
-        <span className="as-change-mark">{change.status === "applied" ? <Check /> : change.status === "rejected" ? <X /> : change.status === "failed" ? <CircleAlert /> : <ShieldCheck />}</span>
+        <span className="as-change-mark">{CARD_MARKS[status]}</span>
         <div>
           <strong>{change.summary || "助手提交的更改"}</strong>
-          <small>{statusText(change)}</small>
+          <small>{statusText(approval)}</small>
         </div>
       </header>
-      {!decided && <ul className="as-change-ops">{change.operations.map((operation, index) => <OperationRow key={index} operation={operation} />)}</ul>}
-      {!decided && onDecide && (
+      {open && <ul className="as-change-ops">{change.operations.map((operation, index) => <OperationRow key={index} operation={operation} />)}</ul>}
+      {open && (
         <footer>
-          <button type="button" className="as-reject" disabled={busy} onClick={() => choose(false)}>拒绝</button>
-          <button type="button" className="as-confirm" disabled={busy || stale(change)} onClick={() => choose(true)}>{busy ? <LoaderCircle /> : <Check />}确认更改</button>
+          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
+          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
+            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
+          </button>
         </footer>
       )}
     </article>
   );
 }
 
-function statusText(change: PendingChange) {
-  switch (change.status) {
+const CARD_MARKS: Record<Approval["status"], ReactNode> = {
+  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, applied: <Check />,
+  failed: <CircleAlert />, rejected: <X />, expired: <Clock />, stopped: <Square />,
+};
+
+function statusText({ status, change }: Approval) {
+  switch (status) {
+    case "approved": return "已确认，正在执行";
     case "applied": return "已按你的确认完成；被替换或删除的旧文件在回收站";
-    case "rejected": return "你拒绝了这项更改，文件没有变化";
     case "failed": return `没有完成：${change.error ?? "未知原因"}`;
-    default: return stale(change) ? "内容已变化，请让助手重新提交" : `${change.operations.length} 项操作 · 确认前文件不会变化`;
+    case "rejected": return "你拒绝了这项更改，文件没有变化";
+    case "expired": return "等待确认超时，文件没有变化";
+    case "stopped": return "这一轮已停止，文件没有变化";
+    default: return `${change.operations.length} 项操作 · 确认前文件不会变化`;
   }
 }
-
-// An operation the store can no longer preview, as when a later draft replaced
-// the submitted one; confirming it would be refused.
-const stale = (change: PendingChange) => change.operations.some((operation) => operation.problem);
 
 function OperationRow({ operation }: { operation: ChangeOperation }) {
   const target = friendlyPath(operation.path);
@@ -470,9 +444,7 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
     return (
       <li>
         <div className="as-op-title"><FilePen /><span>{created ? "新建" : "修改"}</span><code>{target}</code></div>
-        {operation.problem
-          ? <p className="as-op-problem"><CircleAlert />{operation.problem}，确认会被拒绝</p>
-          : <Diff before={operation.before ?? ""} after={operation.after ?? ""} />}
+        <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
       </li>
     );
   }
