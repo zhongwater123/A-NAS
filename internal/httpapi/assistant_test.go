@@ -145,6 +145,8 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	}
 	asAlice.do(http.MethodPost, "/api/v1/assistant/approvals/req-1/confirm", "", nil, http.StatusNotFound)
 	asAlice.do(http.MethodPost, "/api/v1/assistant/approvals/req-1/reject", "", nil, http.StatusNotFound)
+	asAlice.do(http.MethodPost, "/api/v1/assistant/approvals/req-1/confirm", `{"forSession":true}`, nil, http.StatusNotFound)
+	asAlice.do(http.MethodPost, "/api/v1/assistant/approvals/srq-00000000000b/answer", `{"answers":{"q1":"照片"}}`, nil, http.StatusNotFound)
 	if body := asAlice.do(http.MethodGet, "/api/v1/assistant/memory", "", nil, http.StatusOK).Body.String(); !strings.Contains(body, "简短的回答") {
 		t.Fatalf("memory = %s", body)
 	}

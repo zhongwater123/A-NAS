@@ -17,14 +17,15 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, History,
-  Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
+  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, FilePen, FileSearch, FileText, FolderPlus, History,
+  Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
+  Trash2, Users, Video, Wrench, X,
 } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type Approval, type AssistantSession, type ChangeOperation,
-  decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
+  answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
 } from "./assistantApi";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
@@ -143,9 +144,18 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     if (updated) setSessions((list) => list.map((item) => (item.id === updated.id ? { ...item, title: updated.title } : item)));
   };
 
-  const decide = async (approval: Approval, confirm: boolean) => {
+  const decide = async (approval: Approval, confirm: boolean, forSession = false) => {
     try {
-      keep(await decideApproval(approval.requestId, confirm));
+      keep(await decideApproval(approval.requestId, confirm, forSession));
+    } catch (reason) {
+      setNotice(failureText(reason));
+      reloadApprovals();
+    }
+  };
+
+  const answer = async (approval: Approval, answers: Record<string, string | null>) => {
+    try {
+      keep(await answerQuestions(approval.requestId, answers));
     } catch (reason) {
       setNotice(failureText(reason));
       reloadApprovals();
@@ -186,7 +196,7 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
           ))}
           {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动助手…</>}</li>}
         </ul>
-        <div className="as-side-foot"><ShieldCheck /><span>助手只能读你的个人空间和共享空间；改动文件都要你确认。</span></div>
+        <div className="as-side-foot"><ShieldCheck /><span>助手只能读你的个人空间和共享空间；改动文件、运行有风险的命令都要你确认。</span></div>
       </aside>
 
       <main className="as-main">
@@ -217,8 +227,12 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
             </ThreadPrimitive.Viewport>
 
             {here.length > 0 && (
-              <section className="as-changes" aria-label="本对话中等你确认的更改">
-                {here.map((approval) => (
+              <section className="as-changes" aria-label="本对话中等你确认或回答的事">
+                {here.map((approval) => approval.kind === "command" ? (
+                  <CommandCard key={approval.requestId} approval={approval} onDecide={(confirm, forSession) => decide(approval, confirm, forSession)} />
+                ) : approval.kind === "question" ? (
+                  <QuestionCard key={approval.requestId} approval={approval} onAnswer={(answers) => answer(approval, answers)} onSkip={() => decide(approval, false)} />
+                ) : (
                   <ApprovalCard key={approval.requestId} approval={approval} onDecide={(confirm) => decide(approval, confirm)} />
                 ))}
               </section>
@@ -394,6 +408,13 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "write_file": return { icon: <FilePen />, label: "写入草稿", detail: path };
     case "patch": return { icon: <FilePen />, label: "修改草稿", detail: path };
     case "mcp__anas__submit_changes": return { icon: <Send />, label: "提交更改", detail: typeof args.summary === "string" ? args.summary : "等你确认" };
+    case "terminal": return { icon: <SquareTerminal />, label: "运行命令", detail: typeof args.command === "string" ? short(args.command) : "" };
+    case "process_manage": return { icon: <SquareTerminal />, label: "管理后台命令", detail: "" };
+    case "execute_code": return { icon: <Code />, label: "运行代码", detail: "" };
+    case "delegate_task": return { icon: <Users />, label: "分派子任务", detail: typeof args.goal === "string" ? short(args.goal) : "" };
+    case "clarify": return { icon: <CircleHelp />, label: "问你", detail: "" };
+    case "vision_analyze": return { icon: <ImageIcon />, label: "看图", detail: typeof args.image_url === "string" ? friendlyPath(args.image_url) : "" };
+    case "video_analyze": return { icon: <Video />, label: "看视频", detail: typeof args.video_url === "string" ? friendlyPath(args.video_url) : "" };
     case "memory": return { icon: <Brain />, label: "记住", detail: "" };
     case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
     case "skill_view": case "skills_list": case "skill_manage": return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
@@ -427,6 +448,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
   };
   const { change, status } = approval;
   const open = status === "awaiting" || status === "deciding";
+  if (!change) return null;
   return (
     <article className={`as-change ${status}`}>
       <header>
@@ -450,11 +472,146 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
 }
 
 const CARD_MARKS: Record<Approval["status"], ReactNode> = {
-  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, applied: <Check />,
+  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, answered: <Check />, applied: <Check />,
   failed: <CircleAlert />, rejected: <X />, expired: <Clock />, stopped: <Square />,
 };
 
+// Hermes names why it asks in English; the common reasons, in the member's words.
+const COMMAND_REASONS: Record<string, string> = {
+  "recursive delete": "会删除整个文件夹",
+  "delete in root path": "会删除文件",
+  "overwrite file": "会覆盖文件",
+  "kill process": "会结束进程",
+};
+
+export function CommandCard({ approval, onDecide }: { approval: Approval; onDecide(confirm: boolean, forSession: boolean): Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const choose = (confirm: boolean, forSession = false) => {
+    setBusy(true);
+    void onDecide(confirm, forSession).finally(() => setBusy(false));
+  };
+  const { command, status } = approval;
+  const open = status === "awaiting" || status === "deciding";
+  const script = Boolean(command?.script);
+  const reason = command?.description ? COMMAND_REASONS[command.description] ?? command.description : "";
+  const shown = script ? (command?.text ?? "").replace(/^execute_code <<'PY'\n/, "").replace(/\nPY$/, "") : command?.text ?? "";
+  return (
+    <article className={`as-change as-command ${status === "approved" ? "allowed" : status}`}>
+      <header>
+        <span className="as-change-mark">{status === "approved" ? <Check /> : script ? <Code /> : <SquareTerminal />}</span>
+        <div>
+          <strong>{script ? "助手想运行一段代码" : `助手想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
+          <small>{commandStatus(approval)}</small>
+        </div>
+      </header>
+      {open && <pre className="as-command-text">{shown}</pre>}
+      {open && (
+        <footer>
+          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
+          {command?.forSession && (
+            <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(true, true)}>本对话中都允许</button>
+          )}
+          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
+            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}允许
+          </button>
+        </footer>
+      )}
+    </article>
+  );
+}
+
+function commandStatus({ status, command }: Approval) {
+  const what = command?.script ? "代码" : "命令";
+  switch (status) {
+    case "approved": return `已允许，${what}在助手自己的文件夹里运行`;
+    case "rejected": return `你拒绝了，${what}没有运行`;
+    case "expired": return `等待确认超时，${what}没有运行`;
+    case "stopped": return `这一轮已停止，${what}没有运行`;
+    default: return `只影响助手自己的文件夹和对话记录；你的个人空间与共享空间不会被改动`;
+  }
+}
+
+export function QuestionCard({ approval, onAnswer, onSkip }: {
+  approval: Approval; onAnswer(answers: Record<string, string | null>): Promise<void>; onSkip(): Promise<void>;
+}) {
+  const questions = approval.questions ?? [];
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [written, setWritten] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const { status } = approval;
+  const open = status === "awaiting" || status === "deciding";
+  const answerOf = (id: string) => {
+    const parts = [...(picked[id] ?? []), (written[id] ?? "").trim()].filter(Boolean);
+    return parts.length ? parts.join("，") : null;
+  };
+  const anything = questions.some((question) => answerOf(question.id) !== null);
+  const pick = (id: string, choice: string, multi: boolean) => setPicked((all) => {
+    const current = all[id] ?? [];
+    const next = current.includes(choice) ? current.filter((item) => item !== choice) : multi ? [...current, choice] : [choice];
+    return { ...all, [id]: next };
+  });
+  const run = (work: () => Promise<void>) => {
+    setBusy(true);
+    void work().finally(() => setBusy(false));
+  };
+  return (
+    <article className={`as-change as-question ${status}`}>
+      <header>
+        <span className="as-change-mark">{status === "answered" ? <Check /> : <CircleHelp />}</span>
+        <div>
+          <strong>助手想问你</strong>
+          <small>{questionStatus(approval)}</small>
+        </div>
+      </header>
+      <div className="as-questions">
+        {questions.map((question) => (
+          <div key={question.id} className="as-question-item">
+            <p>{question.text}</p>
+            {open ? (
+              <>
+                {question.choices?.length ? (
+                  <div className="as-choices" role="group" aria-label={question.text}>
+                    {question.choices.map((choice) => (
+                      <button key={choice} type="button" aria-pressed={(picked[question.id] ?? []).includes(choice)} disabled={busy}
+                        onClick={() => pick(question.id, choice, Boolean(question.multiSelect))}>{choice}</button>
+                    ))}
+                  </div>
+                ) : null}
+                <input className="as-answer" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
+                  value={written[question.id] ?? ""} disabled={busy} maxLength={4000}
+                  onChange={(event) => setWritten((all) => ({ ...all, [question.id]: event.target.value }))} />
+              </>
+            ) : status === "answered" ? (
+              <span className="as-answered">{approval.answers?.[question.id] ?? "没有回答"}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {open && (
+        <footer>
+          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => run(onSkip)}>跳过</button>
+          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting" || !anything}
+            onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question.id)]))))}>
+            {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
+          </button>
+        </footer>
+      )}
+    </article>
+  );
+}
+
+function questionStatus({ status, questions }: Approval) {
+  switch (status) {
+    case "answered": return "已回答";
+    case "rejected": return "你跳过了这些问题";
+    case "expired": return "等待回答超时";
+    case "stopped": return "这一轮已停止";
+    default: return `${questions?.length ?? 0} 个问题 · 回答后助手接着做`;
+  }
+}
+
 function statusText({ status, change }: Approval) {
+  if (!change) return "";
   switch (status) {
     case "approved": return "已确认，正在执行";
     case "applied": return "已按你的确认完成；被替换或删除的旧文件在回收站";
@@ -504,6 +661,11 @@ const MARKDOWN_COMPONENTS = { a: MarkdownLink };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
+
+function short(text: string) {
+  const line = text.split("\n")[0];
+  return line.length > 60 ? `${line.slice(0, 60)}…` : line;
+}
 
 function friendlyPath(path: string) {
   return path.replace(/^\/nas\//, "").replace(/^助手\/待确认\//, "草稿/");

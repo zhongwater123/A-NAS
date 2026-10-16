@@ -35,6 +35,7 @@ type fakeServe struct {
 	methods  []string
 	rest     []string
 	answers  []string // choices received, from response frames or approval.respond
+	replies  []string // results of the response frames received, as sent
 	resolved bool     // approval.respond answers resolved: 1 while true
 	conns    int
 	conn     *websocket.Conn
@@ -208,6 +209,9 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 				Choice string `json:"choice"`
 			}
 			_ = json.Unmarshal(msg.Result, &answer)
+			f.mu.Lock()
+			f.replies = append(f.replies, string(msg.Result)+string(msg.Error))
+			f.mu.Unlock()
 			f.record(answer.Choice)
 			continue
 		}
@@ -268,6 +272,26 @@ func (f *fakeServe) turn(conn *websocket.Conn, said string) {
 	case "review":
 		f.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
 		f.request(conn, "srq-ba9876543210", "approval", `{"session_id":"`+fakeRuntime+`","request_id":"req-2","pattern_key":"mcp_elicitation"}`)
+	case "rm", "script":
+		// A dangerous command, or a script, waits for an approval as Hermes asks
+		// for one: the command itself, no request to pair with a call of 提交更改.
+		command, key := `rm -rf /nas/助手/旧草稿`, "recursive delete"
+		if said == "script" {
+			command, key = `execute_code <<'PY'\nprint(1)\nPY`, "execute_code"
+		}
+		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t2","name":"terminal","args":{}}`)
+		f.request(conn, "srq-00000000000a", "approval", `{"session_id":"`+fakeRuntime+`","request_id":"req-3","command":"`+command+
+			`","pattern_key":"`+key+`","pattern_keys":["`+key+`"],"description":"`+key+`","choices":["once","session","always","deny"]}`)
+		choice := <-f.answered
+		f.event(conn, "tool.complete", fakeRuntime, `{"tool_id":"t2","name":"terminal","result_text":"`+choice+`"}`)
+		f.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	case "ask":
+		// The clarify tool: questions as a request from the server.
+		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t3","name":"clarify","args":{}}`)
+		f.request(conn, "srq-00000000000b", "clarify", `{"session_id":"`+fakeRuntime+
+			`","questions":[{"qid":"q1","question":"放到哪个文件夹？","choices":["照片","文档"]},{"qid":"q2","question":"改个名字吗？"}]}`)
+		<-f.answered
+		f.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
 	case "long":
 		f.event(conn, "message.delta", fakeRuntime, `{"text":"thinking…"}`)
 	default:
@@ -315,6 +339,15 @@ func (f *fakeServe) firstAnswer() string {
 		return ""
 	}
 	return f.answers[0]
+}
+
+func (f *fakeServe) lastReply() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.replies) == 0 {
+		return ""
+	}
+	return f.replies[len(f.replies)-1]
 }
 
 func (f *fakeServe) received() []string {

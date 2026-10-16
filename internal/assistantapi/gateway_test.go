@@ -144,6 +144,16 @@ func (h *harness) post(path string) *http.Response {
 	return response
 }
 
+func (h *harness) postJSON(path, body string) *http.Response {
+	h.t.Helper()
+	response, err := http.Post(h.server.URL+PathPrefix+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { _ = response.Body.Close() })
+	return response
+}
+
 func TestGatewayPassesOnlyTheAllowedSurface(t *testing.T) {
 	h := newHarness(t)
 	w := h.open()
@@ -281,6 +291,78 @@ func TestApprovalAfterTheTurnIsDeniedUnseen(t *testing.T) {
 	}
 	if calls, _ := h.changes.recorded(); len(calls) != 0 {
 		t.Fatalf("executor calls = %v, want none", calls)
+	}
+}
+
+func TestADangerousCommandBecomesACardShowingIt(t *testing.T) {
+	h := newHarness(t)
+	w := h.open()
+	w.call("session.create", `{"cols":80}`)
+	w.send("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"rm"}`)
+	awaiting := cardOf(w.waitFor(cardIs(cardAwaiting)))
+	if awaiting.Kind != kindCommand || awaiting.Command == nil || awaiting.Command.Text != "rm -rf /nas/助手/旧草稿" ||
+		!awaiting.Command.ForSession || awaiting.Command.Script || awaiting.StoredSessionID != fakeStored {
+		t.Fatalf("card = %+v %+v", awaiting, awaiting.Command)
+	}
+	if calls, _ := h.changes.recorded(); len(calls) != 0 {
+		t.Fatalf("executor calls = %v, want none for a command", calls)
+	}
+	if response := h.postJSON("/approvals/req-3/confirm", `{"forSession":true}`); response.StatusCode != http.StatusOK {
+		t.Fatalf("confirm = %d", response.StatusCode)
+	}
+	w.waitFor(cardIs(cardApproved))
+	if h.serve.firstAnswer() != "session" {
+		t.Fatalf("Hermes heard %v, want the command allowed for the conversation", h.serve.answers)
+	}
+}
+
+func TestRejectingAScriptAnswersDeny(t *testing.T) {
+	h := newHarness(t)
+	w := h.open()
+	w.call("session.create", `{"cols":80}`)
+	w.send("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"script"}`)
+	awaiting := cardOf(w.waitFor(cardIs(cardAwaiting)))
+	if awaiting.Kind != kindCommand || awaiting.Command == nil || !awaiting.Command.Script {
+		t.Fatalf("card = %+v", awaiting)
+	}
+	if response := h.post("/approvals/req-3/reject"); response.StatusCode != http.StatusOK {
+		t.Fatalf("reject = %d", response.StatusCode)
+	}
+	w.waitFor(cardIs(cardRejected))
+	if h.serve.firstAnswer() != "deny" {
+		t.Fatalf("Hermes heard %v", h.serve.answers)
+	}
+}
+
+func TestQuestionsAreAnsweredAsTheReplyToHermes(t *testing.T) {
+	h := newHarness(t)
+	w := h.open()
+	w.call("session.create", `{"cols":80}`)
+	w.send("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"ask"}`)
+	awaiting := cardOf(w.waitFor(cardIs(cardAwaiting)))
+	if awaiting.Kind != kindQuestion || len(awaiting.Questions) != 2 || awaiting.Questions[0].ID != "q1" ||
+		len(awaiting.Questions[0].Choices) != 2 || awaiting.RequestID != "srq-00000000000b" {
+		t.Fatalf("card = %+v", awaiting)
+	}
+	if response := h.post("/approvals/srq-00000000000b/confirm"); response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirming a question = %d, want 400", response.StatusCode)
+	}
+	if response := h.postJSON("/approvals/srq-00000000000b/answer", `{"answers":{"q9":"x"}}`); response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("answering an unknown question = %d, want 400", response.StatusCode)
+	}
+	if response := h.postJSON("/approvals/srq-00000000000b/answer", `{"answers":{"q1":"照片","q2":null}}`); response.StatusCode != http.StatusOK {
+		t.Fatalf("answer = %d", response.StatusCode)
+	}
+	answered := cardOf(w.waitFor(cardIs(cardAnswered)))
+	if answered.Answers["q1"] != "照片" {
+		t.Fatalf("answered card = %+v", answered)
+	}
+	select {
+	case <-h.serve.answered:
+	case <-time.After(5 * time.Second):
+	}
+	if reply := h.serve.lastReply(); reply != `{"answers":{"q1":"照片","q2":null}}` {
+		t.Fatalf("Hermes was answered %s", reply)
 	}
 }
 

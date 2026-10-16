@@ -325,9 +325,14 @@ func (u *upstream) readHermes() {
 		case f.isEvent():
 			u.hermesEvent(f)
 		case f.isServerRequest():
-			if f.Method == "approval" && serverIDPattern.MatchString(unquote(f.ID)) {
+			switch {
+			case !serverIDPattern.MatchString(unquote(f.ID)):
+				_ = u.send(rpcError(f.ID, codeMethodNotFound, "not available in A-NAS"))
+			case f.Method == "approval":
 				u.h.approval(u.m, u, f)
-			} else {
+			case f.Method == "clarify":
+				u.h.question(u.m, u, f)
+			default:
 				// Hermes takes an error as "nobody answered": the tool fails
 				// at once instead of waiting out its timeout.
 				_ = u.send(rpcError(f.ID, codeMethodNotFound, "not available in A-NAS"))
