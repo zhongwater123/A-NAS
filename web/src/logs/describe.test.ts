@@ -69,6 +69,9 @@ describe("activity sentences", () => {
     const replaced = event({ actor: alice, detail: "行程单.xlsx (replaced)", space: { id: "space:shared", kind: "shared" } });
     expect(sentence(replaced)).toBe("alice 上传了 行程单.xlsx");
     expect(describeActivity(replaced, owner.id).meta).toEqual(["共享空间", "替换了同名文件"]);
+    const restored = event({ action: "file.restored", actor: alice, detail: "计划.docx (replaced)", space: { id: "space:shared", kind: "shared" } });
+    expect(sentence(restored)).toBe("alice 从回收站恢复了 计划.docx");
+    expect(describeActivity(restored, owner.id).meta).toEqual(["共享空间", "替换了同名文件"]);
     expect(sentence(event({ category: "photo", action: "photo.ai_label_hidden", actor: alice, detail: "cat" }), alice.id)).toBe("你 从 AI 聚合中移出了 1 张照片");
   });
 

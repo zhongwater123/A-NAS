@@ -199,7 +199,16 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	if err := json.Unmarshal(deleted.Body.Bytes(), &trash); err != nil {
 		t.Fatalf("decode trash item: %v", err)
 	}
-	restoreRequest := httptest.NewRequest(http.MethodPost, "/api/v1/trash/"+trash.ID+"/restore", bytes.NewBufferString(`{"parentId":"`+directory.ID+`","name":"restored.txt"}`))
+	overwrite := httptest.NewRequest(http.MethodPost, "/api/v1/trash/"+trash.ID+"/restore", bytes.NewBufferString(`{"name":"restored.txt","conflict":"overwrite"}`))
+	overwrite.Header.Set("Content-Type", "application/json")
+	overwrite.Header.Set("X-CSRF-Token", session.CSRFToken)
+	overwrite.AddCookie(responseCookies[0])
+	refused := httptest.NewRecorder()
+	handler.ServeHTTP(refused, overwrite)
+	if got, want := refused.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("restore with an unknown conflict status = %d, want %d; body=%s", got, want, refused.Body.String())
+	}
+	restoreRequest := httptest.NewRequest(http.MethodPost, "/api/v1/trash/"+trash.ID+"/restore", bytes.NewBufferString(`{"parentId":"`+directory.ID+`","name":"restored.txt","conflict":"rename"}`))
 	restoreRequest.Header.Set("Content-Type", "application/json")
 	restoreRequest.Header.Set("X-CSRF-Token", session.CSRFToken)
 	restoreRequest.AddCookie(responseCookies[0])

@@ -1,4 +1,4 @@
-import { APIError, type Space, type TrashItem } from "../api";
+import { APIError, type RestoreConflict, type RestoredEntry, type Space, type TrashItem } from "../api";
 import { formatDay } from "../backup/format";
 import { nameNotPortableText, nameTooLongText } from "../fileNames";
 
@@ -73,15 +73,32 @@ export function matches(item: TrashItem, spaceId: string, query: string): boolea
   return !needle || item.name.toLocaleLowerCase("zh-CN").includes(needle);
 }
 
-export interface BatchOutcome { done: TrashItem[]; conflicts: TrashItem[]; gone: TrashItem[]; failed: string[] }
+// BatchOutcome is what restoring a selection did. renamed and replaced count
+// the restored items that came back beside, or in place of, one of their
+// name; skipped ones stay in the recycle bin.
+export interface BatchOutcome { done: TrashItem[]; renamed: number; replaced: number; skipped: TrashItem[]; gone: TrashItem[]; failed: string[] }
+
+export const emptyOutcome = (): BatchOutcome => ({ done: [], renamed: 0, replaced: 0, skipped: [], gone: [], failed: [] });
 
 // restoreSummary words what restoring several items did.
 export function restoreSummary(outcome: BatchOutcome): { text: string; tone: "success" | "error" } {
-  const parts = [outcome.done.length ? `已恢复 ${outcome.done.length} 项` : "没有恢复任何项目"];
-  if (outcome.conflicts.length) parts.push(`${outcome.conflicts.length} 项的原位置已有同名项目，仍留在回收站并保持选中，可逐个改名恢复`);
+  let restored = outcome.done.length ? `已恢复 ${outcome.done.length} 项` : "没有恢复任何项目";
+  const how = [];
+  if (outcome.renamed) how.push(`${outcome.renamed} 项改用了新名称`);
+  if (outcome.replaced) how.push(`${outcome.replaced} 项替换了同名文件，原来的文件已移到回收站`);
+  if (how.length) restored += `，其中 ${how.join("、")}`;
+  const parts = [restored];
+  if (outcome.skipped.length) parts.push(`跳过 ${outcome.skipped.length} 项，仍在回收站中`);
   if (outcome.gone.length) parts.push(`${outcome.gone.length} 项已不在回收站`);
   if (outcome.failed.length) parts.push(`${outcome.failed.length} 项失败：${outcome.failed[0]}`);
-  return { text: parts.join("；"), tone: outcome.conflicts.length || outcome.failed.length ? "error" : "success" };
+  return { text: parts.join("；"), tone: outcome.failed.length ? "error" : "success" };
+}
+
+// restoredText words where a single restored item went and under what name.
+export function restoredText(restored: Pick<RestoredEntry, "name" | "replaced">, asked: string, location: string, choice: RestoreConflict): string {
+  if (restored.replaced) return `已恢复“${restored.name}”到 ${location}，原来的同名文件已移到回收站`;
+  if (choice === "replace" && restored.name !== asked) return `那里的“${asked}”是文件夹，不会被替换；已恢复为“${restored.name}”`;
+  return `已恢复“${restored.name}”到 ${location}`;
 }
 
 export function messageOf(error: unknown): string {

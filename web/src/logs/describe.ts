@@ -144,7 +144,8 @@ function hiddenIn(event: ActivityEvent, what: string): Part[] {
   return owner.id === event.actor?.id ? [`在个人空间${what}`] : ["在", name(owner.nickname || owner.username), `的个人空间${what}`];
 }
 
-// An upload that replaced a file of the same name says so after the name.
+// An upload or a restore that replaced a file of the same name says so after
+// the name.
 const replacedSuffix = " (replaced)";
 
 function itemName(event: ActivityEvent): string | undefined {

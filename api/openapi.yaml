@@ -427,12 +427,14 @@ paths:
   /api/v1/trash/{trashId}/restore:
     post:
       operationId: restoreTrash
-      summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. A taken name answers 409 name_conflict and never overwrites.
+      summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. What happens to a taken name is the request's conflict; nothing is overwritten.
       parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/TrashRestore" } } } }
       responses:
-        "200": { description: Restored entry, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "200": { description: Restored entry, content: { application/json: { schema: { $ref: "#/components/schemas/RestoredEntry" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/trash/{trashId}:
     delete:
       operationId: purgeTrash
@@ -3373,6 +3375,31 @@ components:
             How the space differs now at the entry's path: removed (deleted, moved or renamed), modified (a file of
             another size or modification time), or inside (a folder still there with something below it removed or
             modified). Absent when the path holds the same thing.
+    TrashRestore:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        parentId: { type: string }
+        name: { type: string, minLength: 1 }
+        conflict:
+          type: string
+          enum: [ask, rename, replace]
+          default: ask
+          description: "When the name is taken: ask answers 409 name_conflict; rename keeps both, the item taking the first free \"name (恢复).ext\", \"name (恢复 2).ext\"…; replace, for a file only (422 otherwise), sends the file of that name to the recycle bin and puts the item in its place. A folder in the way is never replaced: the file then comes back beside it."
+    RestoredEntry:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, name, kind, sizeBytes, modifiedAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        parentId: { type: string }
+        name: { type: string, description: The name the item came back under. }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        modifiedAt: { type: string, format: date-time }
+        replaced: { type: boolean, description: "The item took the place of a file of its name, which went to the recycle bin." }
     SnapshotRestore:
       type: object
       additionalProperties: false

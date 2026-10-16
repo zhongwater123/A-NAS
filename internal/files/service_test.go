@@ -139,7 +139,7 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("deleted entry remained visible: %#v", entries)
 	}
-	restored, err := service.Restore(ctx, alice, trashed.ID, directory.ID, "恢复.txt")
+	restored, err := service.Restore(ctx, alice, trashed.ID, directory.ID, "恢复.txt", files.ConflictAsk)
 	if err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
@@ -300,7 +300,7 @@ func TestSambaRecycleItemIsImportedAndCanBeRestored(t *testing.T) {
 	if len(items) != 1 || items[0].DeletedBy != admin.ID {
 		t.Fatalf("Samba trash items = %#v", items)
 	}
-	restored, err := service.Restore(ctx, admin, items[0].ID, "", "restored-from-smb.txt")
+	restored, err := service.Restore(ctx, admin, items[0].ID, "", "restored-from-smb.txt", files.ConflictAsk)
 	if err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
