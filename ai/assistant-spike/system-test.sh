@@ -30,9 +30,11 @@ for _ in $(seq 1 100); do [[ -d "$data/spaces/private/bob/.a-nas-trash/bob" ]] &
 check "the Host Agent made bob's space and recycle bins" \
   test -d "$data/spaces/private/bob/.a-nas-trash/bob" -a -d "$data/spaces/shared/.a-nas-trash/bob"
 
-# --- Installed beside the real accounts; only the Product Service account reaches the
-# instance sockets, the broker's product socket and the copies of the session tokens.
-if PRODUCT_USER=a-nas bash /spike/assistant-install.sh owner alice bob >/tmp/assistant-install.log 2>&1; then
+# --- Installed beside the real accounts, with the Host Agent's File Broker as the session
+# gate (ADR 0022 decision 10): only root reaches the instance sockets and the session tokens;
+# the Product Service reaches a member's instance through the broker, with that member's live
+# session, and alone reaches the change broker's product socket, again only with the session.
+if ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-install.sh owner alice bob >/tmp/assistant-install.log 2>&1; then
   check "the assistant installs beside the real accounts" true
 else
   check "the assistant installs beside the real accounts" false
@@ -43,13 +45,35 @@ check "the members write the probe's files into their spaces" quiet bash /spike/
 curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
   -d '{"name":"assistant-probe"}' "$api/api/v1/spaces/$alice_private/snapshots" || true
 check "a snapshot of alice's space exists on the volume" test -n "$(ls -A "$data/.a-nas-snapshots" 2>/dev/null)"
-check "only the Product Service account owns an instance socket" \
-  test "$(stat -c '%a %U' /run/a-nas-assistant/alice.sock 2>/dev/null)" = "600 a-nas"
-check "a member cannot connect to an instance socket" denied as alice python3 -c \
-  'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-assistant/alice.sock")'
+check "only root may connect to an instance socket" \
+  test "$(stat -c '%a %U' /run/a-nas-assistant/alice.sock 2>/dev/null)" = "600 root"
+connect_alice='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-assistant/alice.sock")'
+check "a member cannot connect to an instance socket" denied as alice python3 -c "$connect_alice"
+check "the Product Service cannot connect to one directly" denied as a-nas python3 -c "$connect_alice"
 check "session tokens are root's alone" test "$(stat -c '%a %U' /etc/a-nas-assistant/tokens/alice.env 2>/dev/null)" = "600 root"
-check "the Product Service holds its own copy of each token" \
-  test "$(stat -c '%a %U' /run/anas-spike-tokens/alice.token 2>/dev/null)" = "600 a-nas"
+check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spike-tokens/alice.token
+# The gate on, and the assistant's API in the Product Service (both off by default).
+printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/host-agent.env
+printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\nANAS_ASSISTANT_CHANGES_SOCKET=/run/anas-spike-broker/broker.sock\n' \
+  >> /etc/a-nas/anas-api.env
+systemctl restart anas-host-agent && systemctl restart anas-api || true
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
+bob_csrf=$(login bob "$bob_password" /tmp/bob.jar || true)
+session_of() { awk '$6 == "anas_session" {print $7}' "$1"; }
+check "alice's assistant is available through the Product Service" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available)" = true
+# The change broker stands in for the File Broker's executor: it prepares and grants only with
+# the member's own live session, which it checks with the Host Agent.
+broker_status() { # SESSION: the status of preparing an empty change for alice with SESSION
+  BROKER_SESSION=$1 python3 /spike/broker_client.py product POST '/changes/prepare?account=alice' \
+    '{"summary":"x","operations":[]}' | cut -d' ' -f1
+}
+check "the change broker refuses the Product Service without a session" test "$(broker_status '')" = 401
+check "and with another member's session" test "$(broker_status "$(session_of /tmp/bob.jar)")" = 401
+check "and accepts alice's own" test "$(broker_status "$(session_of /tmp/alice.jar)")" != 401
+export BROKER_SESSION
+BROKER_SESSION=$(session_of /tmp/alice.jar)
 
 # --- probe.sh in the members' own sandboxes; its lines count as this test's.
 # fold LABEL: the PASS/FAIL/INFO lines on stdin become this test's; folded counts the passes.
@@ -169,7 +193,7 @@ if [[ -d "$agent_space" ]]; then as bob mv -T "$agent_space" "$data/spaces/share
 as bob mkdir -p "$agent_space/alice" || true
 check "after a rename, another member can make an Agent空间 with a folder for alice" \
   test "$(stat -c %U "$agent_space/alice" 2>/dev/null)" = bob
-PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" owner alice bob >/dev/null 2>&1 || true
+ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" owner alice bob >/dev/null 2>&1 || true
 check "the repair moves the impostor aside with what was made inside it" \
   test -n "$(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间.displaced-*' -user bob)"
 check "and puts Agent空间 and her folder back as root's" \
@@ -204,6 +228,32 @@ if [[ -x "$assistant_python" ]]; then
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
   check "the first model request offers the A-NAS MCP tool" \
     bash -c "grep -m 1 -F '\"tools\": [\"' /var/log/fake-model.jsonl | grep -q mcp__anas__submit_changes"
+  # The window's way in: the Product Service, then the gate, then alice's instance.
+  listed_at=$(date '+%Y-%m-%d %H:%M:%S')
+  listed=$(curl -s -o /tmp/gate-sessions.json -w '%{http_code}' -b /tmp/alice.jar "$api/api/v1/assistant/sessions" || true)
+  check "alice lists her conversations through the gate" test "$listed" = 200
+  if [[ "$listed" != 200 ]]; then
+    echo "INFO assistant gate: sessions answered $listed $(head -c 300 /tmp/gate-sessions.json)"
+    journalctl -u anas-api -u anas-host-agent --since "$listed_at" -o cat --no-pager | grep -i assistant | tail -n 5 |
+      sed 's/^/INFO assistant gate: /' || true
+  fi
+  gate_session=$(curl -fsS -c /tmp/alice-gate.jar -H 'Content-Type: application/json' \
+    -d "{\"username\":\"alice\",\"password\":\"$new_password\"}" "$api/api/v1/session" | jq -r .csrfToken || true)
+  "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice-gate.jar)" 90 \
+    >/tmp/gate.out 2>&1 &
+  gate_pid=$!
+  for _ in $(seq 1 300); do grep -q 'session created' /tmp/gate.out 2>/dev/null && break; sleep 0.5; done
+  check "the window's gateway reaches alice's instance" grep -q '^ready after' /tmp/gate.out
+  check "it refuses a method outside the allowlist" grep -qx 'shell.exec error -32601' /tmp/gate.out
+  check "and a profile parameter" grep -qx 'profile error -32602' /tmp/gate.out
+  check "a new conversation comes back without the system prompt" grep -qx 'session created True; system prompt shown False' /tmp/gate.out
+  # Signing out ends the session; the gate cuts the connection at its next check.
+  check "she signs out" test "$(status_of -b /tmp/alice-gate.jar -H "X-CSRF-Token: $gate_session" -X DELETE "$api/api/v1/session")" = 204
+  wait "$gate_pid" || true
+  # The File Broker checks the session every 30 seconds.
+  check "signing out cuts the window's connection to the instance" \
+    test "$(sed -n 's/^closed after \([0-9]*\) s.*/\1/p' /tmp/gate.out)" -le 40
+  echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate.out)"
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).

@@ -24,14 +24,18 @@
 #                                                 assistant directory
 #   assistant-layout.sh remove  DATA ACCOUNT      what deleting the account removes
 #
-# PRODUCT_USER (default a-nas) owns the instance sockets and the product service's copy of
-# each session token in PRODUCT_TOKENS (default /run/anas-spike-tokens, which run.sh shares with
-# the host in product mode).
+# With ASSISTANT_GATE=host-agent the Host Agent's File Broker is the session gate (ADR 0022
+# decision 10): the instance sockets stay root's and the product service gets no token, the
+# broker hands both out per session. Otherwise (the spike, and the local UI prototype whose
+# product service runs without a File Broker) PRODUCT_USER (default a-nas) owns the instance
+# sockets and gets a copy of each session token in PRODUCT_TOKENS (default
+# /run/anas-spike-tokens, which run.sh shares with the host in product mode).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 users=a-nas-users
 product_user=${PRODUCT_USER:-a-nas}
 product_tokens=${PRODUCT_TOKENS:-/run/anas-spike-tokens}
+gate=${ASSISTANT_GATE:-}
 
 # acl.go: inheritedACL, containerACL, trashRootACL.
 inherited() {
@@ -120,7 +124,7 @@ case $cmd in
         (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')" \
           > "/etc/a-nas-assistant/tokens/$account.env")
       fi
-      if getent passwd "$product_user" >/dev/null; then
+      if [[ "$gate" != host-agent ]] && getent passwd "$product_user" >/dev/null; then
         install -d -m 0700 -o "$product_user" "$product_tokens"
         (umask 077; sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$account.env" \
           > "$product_tokens/$account.token")

@@ -5,9 +5,12 @@
   broker_client.py agent METHOD PATH [JSON]     as a member's assistant (the agent socket;
                                                 run it as the member, the broker reads the UID)
 
-Prints the HTTP status, a space, and the response body.
+Prints the HTTP status, a space, and the response body. A product call carries the member's
+session from BROKER_SESSION when it is set, as the product service does (the broker checks it
+with the Host Agent when it runs as the session gate's executor).
 """
 import http.client
+import os
 import socket
 import sys
 
@@ -24,6 +27,9 @@ class UDS(http.client.HTTPConnection):
 
 
 conn = UDS("uds")
-conn.request(method, path, body, {"Content-Type": "application/json"})
+headers = {"Content-Type": "application/json"}
+if side == "product" and os.environ.get("BROKER_SESSION"):
+    headers["X-A-NAS-Session"] = os.environ["BROKER_SESSION"]
+conn.request(method, path, body, headers)
 reply = conn.getresponse()
 print(reply.status, reply.read().decode())

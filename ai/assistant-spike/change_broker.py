@@ -8,7 +8,11 @@ Runs as root in the spike container with two Unix sockets:
   prepares the change from the call's arguments: the broker checks the
   targets, copies the staged files into its own state and returns a preview.
   The member's own click then approves or rejects it; anything left
-  unanswered is expired.
+  unanswered is expired. With SPIKE_SESSION_LOOKUP naming the Host Agent's
+  session lookup socket, every product request must carry the member's live
+  session (X-A-NAS-Session) and the broker asks the Host Agent whose it is,
+  as the File Broker does (ADR 0022 decision 10): the product service cannot
+  prepare or grant anything for a member who is not signed in.
 - the agent socket (argv[2]), bound into every assistant sandbox. The account
   is the caller's UID (SO_PEERCRED). The MCP tool asks it to apply a
   submission; it applies only a change the member approved with exactly
@@ -26,6 +30,7 @@ here, the call changes nothing.
 import base64
 import grp
 import hashlib
+import http.client
 import json
 import os
 import pwd
@@ -42,6 +47,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urlparse
 
 PRODUCT_SOCK, AGENT_SOCK = sys.argv[1], sys.argv[2]
+SESSION_LOOKUP = os.environ.get("SPIKE_SESSION_LOOKUP", "")
 DATA = Path("/srv/a-nas/data")
 STATE = Path("/var/lib/anas-spike/changes")
 PREVIEW_LIMIT = 64 * 1024
@@ -478,17 +484,42 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
 
 
+def session_user(token: str) -> str | None:
+    """The member signed in on a session token, from the Host Agent's lookup."""
+    if not token:
+        return None
+    conn = http.client.HTTPConnection("host-agent", timeout=5)
+    conn.sock = socket.socket(socket.AF_UNIX)
+    conn.sock.settimeout(5)
+    conn.sock.connect(SESSION_LOOKUP)
+    conn.request("POST", "/v1/sessions/resolve", json.dumps({"token": token}), {"Content-Type": "application/json"})
+    reply = conn.getresponse()
+    body = json.loads(reply.read() or b"{}")
+    return body.get("username") if reply.status == 200 else None
+
+
 class ProductHandler(Handler):
-    def account(self) -> str | None:
+    def account(self) -> str | bool | None:
+        """The member named in the request; False when their session was refused (answered)."""
         account = parse_qs(urlparse(self.path).query).get("account", [""])[0]
         try:
             pwd.getpwnam(account)
-            return account
         except KeyError:
             return None
+        if SESSION_LOOKUP:
+            try:
+                signed_in = session_user(self.headers.get("X-A-NAS-Session", ""))
+            except OSError:
+                signed_in = None
+            if signed_in != account:
+                self.reply(401, {"error": "the member's session was not accepted"})
+                return False
+        return account
 
     def do_GET(self):
         account, parts = self.account(), urlparse(self.path).path.strip("/").split("/")
+        if account is False:
+            return
         if account and parts == ["changes"]:
             items = sorted(load(account).values(), key=lambda c: c["createdAt"], reverse=True)
             return self.reply(200, {"changes": [preview(account, c) for c in items]})
@@ -498,6 +529,8 @@ class ProductHandler(Handler):
 
     def do_POST(self):
         account, parts = self.account(), urlparse(self.path).path.strip("/").split("/")
+        if account is False:
+            return
         if account and parts == ["changes", "prepare"]:
             return self.reply(*prepare(account, self.body()))
         if account and len(parts) == 3 and parts[0] == "changes" and parts[2] in ("approve", "reject", "expire"):

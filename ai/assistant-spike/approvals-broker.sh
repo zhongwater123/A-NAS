@@ -23,7 +23,9 @@ class UDS(http.client.HTTPConnection):
 
 def product(method, path, body=None):
     conn = UDS("/run/anas-spike-broker/broker.sock")
-    conn.request(method, path + ("&" if "?" in path else "?") + "account=alice", json.dumps(body or {}, ensure_ascii=False).encode())
+    # The member's session, when the broker checks it (the system test's session gate).
+    headers = {"X-A-NAS-Session": os.environ["BROKER_SESSION"]} if os.environ.get("BROKER_SESSION") else {}
+    conn.request(method, path + ("&" if "?" in path else "?") + "account=alice", json.dumps(body or {}, ensure_ascii=False).encode(), headers)
     resp = conn.getresponse()
     return resp.status, json.loads(resp.read() or b"{}")
 
