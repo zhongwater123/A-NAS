@@ -298,7 +298,10 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
   const showInFiles = (location: TransferLocation) => { setFileNavigation(location); openWindow("files"); };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   const [dockerFocus, setDockerFocus] = useState<DockerFocus>();
+  // A photo another window asks the photo app to show, such as one the assistant named.
+  const [photoFocus, setPhotoFocus] = useState<{ assetId: string; at: number }>();
   const showInDocker = (appID: string) => { setDockerFocus({ project: appProject(appID), at: Date.now() }); openWindow("docker"); };
+  const showPhoto = (assetId: string) => { setPhotoFocus({ assetId, at: Date.now() }); openWindow("photos"); };
   // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
     { id: "files", label: "文件管理", ariaLabel: "打开文件管理", keywords: "文件 共享 上传 shared", tone: "files", icon: <FolderClosed />, active: isOpen("files"), onClick: () => openWindow("files") },
@@ -366,14 +369,14 @@ function Desktop({ session, onLogout }: { session: Session; onLogout: () => void
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onLogout={onLogout} />}
 			  {window.id === "files" && <FilePanel userID={session.user.id} navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
-			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={session.user.username} isAdmin={session.user.role === "admin"} focus={photoFocus} onFocusHandled={() => setPhotoFocus(undefined)} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
-			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} /></Suspense>}
+			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} onShowPhoto={showPhoto} /></Suspense>}
             </AppWindow>
           );
         })}

@@ -214,6 +214,14 @@
 .as-send.stop { background: #2a2d38; }
 .as-send.stop svg { width: 12px; height: 12px; fill: currentColor; }
 
+/* A photo the assistant names: its thumbnail, opening the photo app. */
+.as-photo { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: 2px 4px 2px 0; padding: 3px 11px 3px 3px; border: 1px solid var(--as-line-strong); border-radius: 10px; color: var(--as-ink); background: var(--as-surface); font: inherit; font-size: 12.5px; line-height: 1.4; vertical-align: middle; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s var(--as-ease); }
+.as-photo:hover:not(:disabled) { border-color: rgba(106, 88, 224, .45); box-shadow: 0 2px 10px rgba(85, 68, 196, .12); transform: translateY(-1px); }
+.as-photo:disabled { cursor: default; }
+.as-photo img, .as-photo-none { width: 44px; height: 44px; flex: none; border-radius: 7px; object-fit: cover; background: var(--as-bg); }
+.as-photo-none { display: grid; place-items: center; color: var(--as-muted); }
+.as-photo > span:last-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
 /* ── 记忆 ───────────────────────────────────────────────── */
 .as-nav { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 0; border-radius: 9px; color: var(--as-ink-2); background: none; font: inherit; font-weight: 550; text-align: left; cursor: pointer; transition: background .15s, color .15s; }
 .as-nav:hover { color: var(--as-ink); background: var(--as-hover); }

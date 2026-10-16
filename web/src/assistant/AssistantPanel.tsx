@@ -18,9 +18,9 @@ import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
   ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, History,
-  ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
+  Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type Approval, type AssistantSession, type ChangeOperation,
@@ -29,6 +29,7 @@ import {
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
+import { linkPhotos, photoOf } from "./photoLinks";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import "./assistant.css";
@@ -39,7 +40,10 @@ const SUGGESTIONS = [
   "我之前删掉过一个文件，帮我在回收站找找",
 ];
 
-export function AssistantPanel({ username }: { username: string }) {
+// Opens a photo the assistant named in the photo app, from the desktop.
+const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
+
+export function AssistantPanel({ username, onShowPhoto }: { username: string; onShowPhoto?(assetId: string): void }) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -162,6 +166,7 @@ export function AssistantPanel({ username }: { username: string }) {
   const unreachable = !gateway.ready && gateway.problem;
 
   return (
+    <PhotoOpener.Provider value={onShowPhoto}>
     <div className="as-app">
       <aside className="as-side">
         <div className="as-brand">
@@ -229,6 +234,7 @@ export function AssistantPanel({ username }: { username: string }) {
         </AssistantRuntimeProvider>
       </main>
     </div>
+    </PhotoOpener.Provider>
   );
 }
 
@@ -238,7 +244,7 @@ function toThreadMessage(message: ChatMessage): ThreadMessageLike {
   return {
     id: message.id,
     role: message.role === "system" ? "system" : "assistant",
-    content: message.parts,
+    content: message.parts.map((part) => (part.type === "text" ? { ...part, text: linkPhotos(part.text) } : part)),
     createdAt,
     status: message.pending ? { type: "running" }
       : message.interrupted ? { type: "incomplete", reason: "cancelled" }
@@ -322,7 +328,23 @@ function Outcome() {
   return null;
 }
 
-const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" />;
+const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} />;
+
+// A photo the assistant names shows as its thumbnail and opens in the photo
+// app; other links open in a new tab.
+function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  const open = useContext(PhotoOpener);
+  const [broken, setBroken] = useState(false);
+  const photo = photoOf(href);
+  if (!photo) return <a href={href} target="_blank" rel="noreferrer" {...rest}>{children}</a>;
+  return (
+    <button type="button" className="as-photo" title="在相册中打开" disabled={!open} onClick={() => open?.(photo)}>
+      {broken ? <span className="as-photo-none"><ImageIcon /></span>
+        : <img src={`/api/v1/photos/assets/${encodeURIComponent(photo)}/thumbnail`} alt="" loading="lazy" onError={() => setBroken(true)} />}
+      <span>{children}</span>
+    </button>
+  );
+}
 
 // One folded row per run of reasoning and tool calls, like Hermes Desktop's
 // run summary: the member sees what the assistant did without the noise.
@@ -478,6 +500,7 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
+const MARKDOWN_COMPONENTS = { a: MarkdownLink };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };

@@ -152,7 +152,7 @@ def failed(error: PhotoError) -> CallToolResult:
 
 PHOTO_NOTE = ("只读。你看不到照片画面，只有名称、拍摄时间（taken）、所在图库（我的／共享）、"
               "本人加的标签与相册；没有拍摄地点，也认不出照片里是谁。回答中提到某张照片时写成 "
-              "[名称](photo:照片id)，窗口会显示它的缩略图。")
+              "[名称](照片的 id)，id 原样照抄（它本身以 photo: 开头），窗口会显示它的缩略图。")
 
 
 @server.tool(annotations=READ_ONLY, structured_output=False, description=(
