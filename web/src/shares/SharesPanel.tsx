@@ -43,7 +43,7 @@ export function SharesPanel() {
     return () => { stopped = true; clearInterval(timer); };
   }, [direction, revision, pageCount]);
   if (selected) return <ShareDetail key={selected} id={selected} preferredRecipient={focus?.id === selected ? focus.recipientId : undefined} onBack={() => setSelected(undefined)} />;
-  return <section className="shares-panel"><header className="share-panel-header"><div><h2><Share2 />成员分享</h2><p>文件副本、保存进度和私聊都在这里。</p></div></header><nav className="share-tabs" aria-label="分享分类"><button aria-pressed={direction === "received"} onClick={() => { setDirection("received"); setPageCount(1); }}>收到的分享</button><button aria-pressed={direction === "sent"} onClick={() => { setDirection("sent"); setPageCount(1); }}>我发出的分享</button></nav>{error && <p role="alert" className="share-error">{error}</p>}<div className="share-records" aria-busy={loading}>{items.map((share) => {
+  return <section className="shares-panel"><header className="share-panel-header"><div><h2><Share2 />成员分享</h2><p>查看收到和发出的文件，保存或回复分享。</p></div></header><nav className="share-tabs" aria-label="分享分类"><button aria-pressed={direction === "received"} onClick={() => { setDirection("received"); setPageCount(1); }}>收到的分享</button><button aria-pressed={direction === "sent"} onClick={() => { setDirection("sent"); setPageCount(1); }}>我发出的分享</button></nav>{error && <p role="alert" className="share-error">{error}</p>}<div className="share-records" aria-busy={loading}>{items.map((share) => {
     const unread = share.recipients.some((recipient) => (share.sender.id !== userId && !recipient.viewedAt) || recipient.lastMessage > (share.sender.id === userId ? recipient.senderReadThrough : recipient.readThrough));
     const roots = share.entries.filter((entry) => !parent(entry.path));
     return <button className="share-record" key={share.id} onClick={() => open(share.id)}><span className="share-record-icon"><Share2 /></span><span><strong>{roots.length ? roots.map((entry) => leaf(entry.path)).join("、") : "正在准备文件副本"}</strong><small>{direction === "received" ? `来自 ${share.sender.username}` : `${share.recipients.length} 名接收者`} · {date(share.createdAt)}</small>{share.error && <small className="share-error">{share.error}</small>}</span><span className="share-record-status">{unread && <b>未读</b>}{statusLabel(share)}</span></button>;
@@ -153,9 +153,10 @@ function Discussion({ share, recipientId, visible }: { share: Share; recipientId
   }, [active, messages, share.id, recipientId]);
   const send = async () => {
     if (busy || !text.trim()) return;
-    if (attempt.current?.text !== text) attempt.current = { text, key: requestKey() };
     setBusy(true); setError("");
-    try { await sendMessage(share.id, { recipientId, requestId: attempt.current.key, text }); setText(""); attempt.current = undefined; setRefresh((value) => value + 1); context.refresh(); }
+    try {
+      if (attempt.current?.text !== text) attempt.current = { text, key: requestKey() };
+      await sendMessage(share.id, { recipientId, requestId: attempt.current.key, text }); setText(""); attempt.current = undefined; setRefresh((value) => value + 1); context.refresh(); }
     catch (error) { setError(errorText(error)); } finally { setBusy(false); }
   };
   const recipient = share.recipients.find((item) => item.userId === recipientId);
@@ -183,9 +184,10 @@ function SaveTarget({ shareId, entryIds, onClose, onSaved }: { shareId: string; 
     if (busy || loading || !spaceId) return;
     const target = { rootId: spaceId, parentId };
     const signature = JSON.stringify({ entryIds, target });
-    if (attempt.current?.signature !== signature) attempt.current = { signature, key: requestKey() };
     setBusy(true); setError("");
-    try { onSaved(await saveShare(shareId, { requestId: attempt.current.key, entryIds, target })); }
+    try {
+      if (attempt.current?.signature !== signature) attempt.current = { signature, key: requestKey() };
+      onSaved(await saveShare(shareId, { requestId: attempt.current.key, entryIds, target })); }
     catch (error) { setError(errorText(error)); } finally { setBusy(false); }
   };
   return <div className="share-modal-backdrop"><section className="share-modal" role="dialog" aria-modal="true" aria-label="保存到我的空间"><header><h2>保存到我的空间</h2><button aria-label="关闭保存位置" onClick={onClose}><X /></button></header><label>目标空间<select aria-label="目标空间" disabled={busy} value={spaceId} onChange={(event) => { setSpaceId(event.target.value); setTrail([]); }}>{spaces.map((space) => <option key={space.id} value={space.id}>{space.kind === "private" ? "个人空间" : space.name}</option>)}</select></label><p>保存到：{spaces.find((space) => space.id === spaceId)?.name} / {trail.map((entry) => entry.name).join(" / ")}</p><button disabled={!trail.length || busy} onClick={() => setTrail((previous) => previous.slice(0, -1))}><ArrowLeft />上一级</button><div className="share-target-folders">{loading ? <p>正在读取文件夹…</p> : !spaces.length ? <p>没有可写的个人空间或共享文件夹。</p> : entries.map((entry) => <button key={entry.id} disabled={busy} onClick={() => setTrail((previous) => [...previous, entry])}><Folder />{entry.name}</button>)}</div><p className="share-muted">同名文件自动改名，保留两份。目标权限将在保存时再次检查。</p>{error && <p role="alert" className="share-error">{error}</p>}<footer><button disabled={busy || loading || !spaceId} className="primary" onClick={() => void save()}>{busy ? "正在创建任务…" : "保存到此文件夹"}</button></footer></section></div>;

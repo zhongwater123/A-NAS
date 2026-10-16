@@ -1,13 +1,16 @@
 import { useEffect } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SharesProvider, useShares } from "./SharesProvider";
 import { SharesPanel } from "./SharesPanel";
 
 const file = { id: "source", spaceId: "space", name: "计划.txt", kind: "file" as const, sizeBytes: 2, modifiedAt: "2026-10-15T00:00:00Z" };
 const share = { id: "s1", sender: { id: "alice", username: "Alice" }, status: "active", createdAt: "2026-10-15T00:00:00Z", expiresAt: "2099-01-01T00:00:00Z", entries: [{ id: "e1", path: "计划.txt", isDir: false, size: 2 }], recipients: [{ userId: "bob", readThrough: 0, senderReadThrough: 0, lastMessage: 1, saved: false, savedFiles: 0 }], preparedBytes: 2 };
 const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+// The NAS LAN entry is HTTP: getRandomValues exists, randomUUID does not.
+const getRandomValues = crypto.getRandomValues.bind(crypto);
+beforeEach(() => vi.stubGlobal("crypto", { getRandomValues }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); });
 function Launcher() { const shares = useShares(); return <button onClick={() => shares.compose([file])}>新分享</button>; }
 
@@ -291,4 +294,65 @@ it("shows uncertain save results separately from confirmed saved file counts", a
   await user.click(await screen.findByRole("button", { name: /计划.txt/ }));
   expect(await screen.findByText(/保存结果待确认/)).toBeTruthy();
   expect(screen.getByText(/曾成功保存 1 个文件/)).toBeTruthy();
+});
+
+it("sends a private reply over LAN HTTP without randomUUID", async () => {
+  const replies: { recipientId: string; text: string; requestId: string }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    const path = String(url);
+    if (path.endsWith("/messages") && init?.method === "POST") {
+      const body = JSON.parse(init.body); replies.push(body);
+      return json({ id: 2, sender: { id: "bob", username: "Bob" }, text: body.text, createdAt: share.createdAt });
+    }
+    if (path.includes("/messages?")) return json({ items: [] });
+    if (path.endsWith("/s1") || path.endsWith("/view")) return json(share);
+    if (path.includes("direction=received")) return json({ items: [share] });
+    return json({ items: [] });
+  }));
+  const user = userEvent.setup();
+  render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
+  await user.click(await screen.findByRole("button", { name: /计划.txt/ }));
+  await user.type(await screen.findByLabelText("回复"), "收到 👍");
+  await user.click(screen.getByRole("button", { name: "发送回复" }));
+  await waitFor(() => expect(replies).toHaveLength(1));
+  expect(replies[0]).toMatchObject({ recipientId: "bob", text: "收到 👍" });
+  expect(replies[0].requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect((screen.getByLabelText("回复") as HTMLTextAreaElement).value).toBe("");
+});
+
+it("shows request-key failures instead of silently ignoring Send", async () => {
+  vi.stubGlobal("crypto", {});
+  const posted = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    if (String(url).endsWith("/members")) return json({ items: [{ id: "bob", username: "Bob" }] });
+    if (init?.method === "POST") posted();
+    return json({ items: [] });
+  }));
+  const user = userEvent.setup();
+  render(<SharesProvider userId="alice" active={false} onOpen={() => undefined}><Launcher /></SharesProvider>);
+  await user.click(screen.getByText("新分享"));
+  await user.click(await screen.findByLabelText("Bob"));
+  await user.click(screen.getByRole("button", { name: "发送分享" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("浏览器无法生成请求标识");
+  expect(posted).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "发送分享" }).hasAttribute("disabled")).toBe(false);
+});
+
+it("keeps selected recipients when searching by nickname or account", async () => {
+  const sent: { recipientIds: string[] }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    if (String(url).endsWith("/members")) return json({ items: [{ id: "bob", username: "bob", nickname: "小明" }, { id: "carol", username: "carol", nickname: "小红" }] });
+    if (init?.method === "POST") { sent.push(JSON.parse(init.body)); return json(share); }
+    return json({ items: [] });
+  }));
+  const user = userEvent.setup();
+  render(<SharesProvider userId="alice" active={false} onOpen={() => undefined}><Launcher /></SharesProvider>);
+  await user.click(screen.getByText("新分享"));
+  await user.click(await screen.findByLabelText("小明"));
+  await user.type(screen.getByRole("searchbox", { name: "搜索成员" }), "carol");
+  expect(screen.queryByLabelText("小明")).toBeNull();
+  await user.click(screen.getByLabelText("小红"));
+  await user.click(screen.getByRole("button", { name: "发送分享" }));
+  await waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0].recipientIds).toEqual(["bob", "carol"]);
 });

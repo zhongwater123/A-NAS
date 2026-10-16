@@ -55,11 +55,15 @@ const session = {
 };
 
 describe("member sharing in the file manager", () => {
-  it("offers the desktop entry and shares ordinary files from a read-only shared space", async () => {
+  it("opens sharing from the rail instead of the desktop and shares read-only files", async () => {
     installAPI({ spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }], entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }] });
     const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    expect(within(desktop).getByRole("button", { name: "打开分享" }).hasAttribute("disabled")).toBe(false);
+    expect(within(desktop).queryByRole("button", { name: "打开分享" })).toBeNull();
+    const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
+    await user.click(within(rail).getByRole("button", { name: "打开分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "关闭分享" }));
     await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     await user.click(await within(dialog).findByRole("row", { name: /分享计划.txt/ }));
@@ -800,7 +804,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
     const buttons = within(rail).getAllByRole("button");
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["显示桌面", "全部应用", "打开设置", "账号（owner）"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["显示桌面", "全部应用", "打开分享", "打开设置", "账号（owner）"]);
     expect(buttons.some((button) => button.hasAttribute("disabled"))).toBe(false);
     expect(within(rail).getByRole("button", { name: "显示桌面" }).getAttribute("aria-pressed")).toBe("true");
   });
