@@ -17,9 +17,12 @@ const submitTool = "mcp__anas__submit_changes"
 // still shows how it ended.
 const keepCards = time.Hour
 
-// staleCard is far beyond the approvals.timeout the managed policy sets
-// (Hermes's default is 300 seconds).
-const staleCard = 15 * time.Minute
+// approvalWait is the approvals.timeout the managed policy sets: how long
+// Hermes waits for the member to answer a card.
+const approvalWait = 24 * time.Hour
+
+// staleCard is beyond approvalWait.
+const staleCard = approvalWait + time.Hour
 
 // Card statuses. awaiting is the only one the member can act on.
 const (

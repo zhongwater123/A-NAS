@@ -53,8 +53,10 @@ tools:
     enabled: "off"
 approvals:
   mode: manual
-  # setup.sh replaces it with SPIKE_APPROVAL_TIMEOUT when set.
-  timeout: 300
+  # A card waits for the member up to a day (user decision, 2026-10-16); the
+  # session gate ends it sooner when the member's session ends. setup.sh
+  # replaces it with SPIKE_APPROVAL_TIMEOUT when set.
+  timeout: 86400
 security:
   allow_lazy_installs: false
   allow_private_urls: false

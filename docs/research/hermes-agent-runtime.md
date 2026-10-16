@@ -767,7 +767,7 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 | 操作 | 参数 | 做什么 | 幂等与漂移 | 失败与回滚 |
 |---|---|---|---|---|
 | 开启卷配额 | 数据卷 | `btrfs quota enable --simple`，在卷初始化或升级时执行一次 | 已开启则跳过 | 不支持的内核拒绝并报告；关闭配额会丢掉全部限额，不做自动回滚 |
-| 建立助手目录 | 账号、容量上限 | 容器 `assistant`（`a-nas-users` 仅穿过）；子卷 `assistant/<账号>`（本人仅穿过）；`files/` 与 `hermes/`（本人 `rwx` 并继承）；`hermes/` 中的挂载点（`config.yaml`、`.env`、`SOUL.md`、`active_profile` 与 `hooks/`、`plugins/`、`profiles/`）；qgroup 上限 | 存在则只对齐属主与 ACL；挂载点位置上是别的东西就挪开重建 | 新建的子卷在后续步骤失败时删除 |
+| 建立助手目录 | 账号、容量上限（10 GiB） | 容器 `assistant`（`a-nas-users` 仅穿过）；子卷 `assistant/<账号>`（本人仅穿过）；`files/` 与 `hermes/`（本人 `rwx` 并继承）；`hermes/` 中的挂载点（`config.yaml`、`.env`、`SOUL.md`、`active_profile` 与 `hooks/`、`plugins/`、`profiles/`）；qgroup 上限 | 存在则只对齐属主与 ACL；挂载点位置上是别的东西就挪开重建 | 新建的子卷在后续步骤失败时删除 |
 | 建立 Agent空间 | 全部账号 | `共享空间/Agent空间` 与每个账号的子目录（见上文） | 保留名：缺失时重建；位置上是不归 root 所有的目录或非目录时，连同其中内容挪开再重建，不原地接管 | 只增不删；挪开的内容保留，不删除 |
 | 写成员配置 | 账号 | `/etc/a-nas-assistant/members/<账号>/config.yaml`（`skills.external_dirs` 与 `mcp_servers`）与 `anas-member` 技能 | 原子替换 | 写临时文件，成功后改名 |
 | 会话令牌 | 账号；轮换（spike 未实现） | `/etc/a-nas-assistant/tokens/<账号>.env`（root `0600`），已存在则保留；轮换时换新令牌并重启实例 | 已存在不覆盖 | 令牌不交给产品服务保存：文件代理随每条连接交出（会话闸门）；Host Agent 不以 root 写进产品服务的目录（闸门之前的 spike 这样做，只适合一次性容器） |

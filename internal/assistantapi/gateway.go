@@ -24,8 +24,9 @@ const (
 	// long conversation returns its messages.
 	maxUpstreamBytes = 64 << 20
 	// lingerLimit bounds how long a connection stays open for a turn after
-	// its window left; Hermes itself interrupts a turn idle for 10 minutes.
-	lingerLimit = 2 * time.Hour
+	// its window left. Hermes itself interrupts a turn idle for 10 minutes,
+	// but a turn waiting for the member's answer to a card is not idle.
+	lingerLimit = approvalWait + time.Hour
 )
 
 // lingerCheck is how often a connection kept for a turn looks whether the

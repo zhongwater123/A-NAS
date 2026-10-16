@@ -33,7 +33,7 @@ else
   install -m 0644 /dev/null /etc/a-nas-assistant/SOUL.md  # no runtime: only the probe runs
 fi
 cp -r "$here/skills/." /opt/a-nas/assistant-skills/ && chown -R root:root /opt/a-nas/assistant-skills && chmod -R u=rwX,go=rX /opt/a-nas/assistant-skills
-sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 300$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-300}/" \
+sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 86400$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-86400}/" \
   "$here/managed-config.yaml" > /etc/hermes/config.yaml
 chmod 0644 /etc/hermes/config.yaml
 
