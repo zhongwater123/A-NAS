@@ -17,10 +17,10 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, History,
-  Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
+  ArrowUp, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
+  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
 } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { AssistantGlyph } from "../AssistantGlyph";
 import {
@@ -183,7 +183,7 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
           ))}
           {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动 VNAS…</>}</li>}
         </ul>
-        <div className="as-side-foot"><ShieldCheck /><span>VNAS 只能读你的个人空间和共享空间；改动文件都要你确认。</span></div>
+        <TrustNote />
       </aside>
 
       <main className="as-main">
@@ -281,6 +281,50 @@ function SessionRow({ session, active, waiting, running, onOpen, onRename, onDel
         </span>
       )}
     </li>
+  );
+}
+
+// What makes VNAS the member's own, said for someone who has never heard of
+// an agent. Each line holds only what ADR 0024 enforces; none says the model
+// runs on this device, because during development it does not.
+const TRUST: { icon: ReactNode; title: string; text: string }[] = [
+  { icon: <ShieldCheck />, title: "安全", text: "它只看得到你的文件和照片，以及家里共享的内容；看不到家人的私人文件，也碰不到系统设置。" },
+  { icon: <Hand />, title: "可控", text: "改动你的文件前，它会先把要改的地方给你看，你点“确认更改”才生效；被替换或删除的旧文件会放进回收站，可以找回。" },
+  { icon: <LockKeyhole />, title: "隐私", text: "每位家人的 VNAS 各自独立。你和它的对话、它记住的事，家里其他人都看不到，管理员也不行；在“记忆”里可以随时删掉。" },
+];
+
+// The sidebar's one line about trust. Pointing at it or focusing it with the
+// keyboard shows why; a tap pins it open for touch screens, and a tap
+// elsewhere or Esc closes it again.
+function TrustNote() {
+  const [pinned, setPinned] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const id = useId();
+  useEffect(() => {
+    if (!pinned) return;
+    const away = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setPinned(false); };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [pinned]);
+  const escape = (event: ReactKeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    setPinned(false);
+    (document.activeElement as HTMLElement | null)?.blur();
+  };
+  return (
+    <div ref={root} className={`as-trust${pinned ? " open" : ""}`} onKeyDown={escape}>
+      <button type="button" className="as-trust-button" aria-describedby={id} aria-expanded={pinned} onClick={() => setPinned((open) => !open)}>
+        <ShieldCheck /><span>你的私人 Agent</span><Info className="as-trust-hint" />
+      </button>
+      <div id={id} role="tooltip" className="as-trust-pop">
+        <strong>为什么可以放心用</strong>
+        <ul>
+          {TRUST.map((item) => (
+            <li key={item.title}><span className="as-trust-icon">{item.icon}</span><div><b>{item.title}</b><p>{item.text}</p></div></li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 
