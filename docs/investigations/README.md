@@ -34,6 +34,8 @@
 
 - [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed locally；系统回归通过）
 
+- [2026-10-16：局域网 HTTP 点击发送分享无反应](2026-10-16-member-sharing-http-send.md)（fixed locally；待部署验收）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

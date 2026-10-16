@@ -44,4 +44,15 @@ export async function readText(id: string, entry: ShareEntry, signal: AbortSigna
 export const isActive = (share: Share) => ["published", "active"].includes(share.status) && (!share.expiresAt || new Date(share.expiresAt).getTime() > Date.now());
 export const statusLabel = (share: Share) => ({ preparing: "正在准备副本", published: "分享中", active: "分享中", revoked: "已撤回", failed: "准备失败", expired: "已到期" }[share.status] ?? share.status);
 export const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请重试";
-export const requestKey = () => crypto.randomUUID();
+// LAN HTTP is a supported entry: randomUUID is restricted to secure contexts,
+// but getRandomValues remains available. These IDs deduplicate requests only.
+export function requestKey(): string {
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new Error("浏览器无法生成请求标识，请更新浏览器后重试。");
+  }
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
