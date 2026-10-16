@@ -54,9 +54,20 @@ case "${1:-}" in
     fi
     git -C "$work/src/hermes-agent" fetch -q --depth 1 origin "$commit"
     git -C "$work/src/hermes-agent" checkout -q FETCH_HEAD
+    # The pinned commit with the fixes A-NAS carries until upstream has them (hermes-patches/,
+    # each says why), in a tree of its own so the checkout stays upstream's.
+    patched=$(mktemp -d)
+    mkdir -p "$patched/hermes-agent"
+    git -C "$work/src/hermes-agent" archive FETCH_HEAD | tar -C "$patched/hermes-agent" -xf -
+    for p in "$here"/hermes-patches/*.patch; do
+      [[ -e $p ]] || continue
+      (cd "$patched/hermes-agent" && git apply "$p") || { echo "cannot apply $(basename "$p")" >&2; exit 1; }
+      basename "$p" >> "$patched/hermes-agent/A-NAS-PATCHES"
+    done
     docker run --rm -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-      -v "$work/src:/src:ro" -v "$work/out:/out" -v "$here:/spike:ro" \
+      -v "$patched:/src:ro" -v "$work/out:/out" -v "$here:/spike:ro" \
       anas-ai-dev:trixie bash /spike/build-runtime.sh 2>&1 | tee "$work/out/build.log"
+    rm -rf -- "$patched"
     ;;
   sandbox)
     # SPIKE_MODEL=<name> (with SPIKE_KEY_FILE and optionally SPIKE_UPSTREAM) uses a real

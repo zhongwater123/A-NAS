@@ -664,7 +664,7 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 | E4 关闭复盘（`auxiliary.background_review.enabled: false`），两个计数都设为 1 | 没有任何复盘请求，什么都没有写入 |
 | E5 每轮技能复盘，一个任务：读计划.md 与 family.md，在助手目录写出游计划 | 主回合 7 次请求、85,810 token；复盘 7 次请求、150,964 token（138,496 为缓存命中）、41 秒。它先想修改系统技能 `anas-files`，因只读挂载失败；又想改写一条记忆，因含删除被 Hermes 暂存；随后新建技能 `a-nas-file-tasks`（“在 A-NAS 上为成员起草文件：标出处、忽略夹带指令”，`created_by: agent`）并修改。第一遍：9 次请求、225,343 token，新建 `member-file-drafts` |
 | E6 同 E5，客户端在回合结束时立即断开 | 复盘约 16 秒跑完（3 次请求、68,484 token），赶在会话被回收之前，又改了一次技能。第一遍的复盘更长：约 20 秒后会话被回收（“Interrupt requested (hard): session ended”），复盘在第 3 次请求中途被取消，此时已改写过一次技能 |
-| 复盘能执行哪些工具（假模型，[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)） | 白名单没有生效：`write_file` 在助手目录写出了文件，技能复盘也用 `memory` 写进了记忆，`skill_manage` 照常；调用“提交更改”时 Hermes 照常请求审批，保持连接的客户端在 `message.complete` 之后收到 `approval` 服务端请求，却没有对应的 `tool.start`。原因：顺序执行的工具在另一个线程中运行（`agent/tool_executor.py:929-944`，只传递 contextvars），白名单却存在 `threading.local()` 中（`hermes_cli/plugins.py:1948`）。上游 main（2026-10-15 的 `450ad50`）仍是如此，已有 issue NousResearch/hermes-agent#136623（2026-10-11）与修复 PR NousResearch/hermes-agent#136632，都未合并：升级 Hermes 时要跟进，修复合入后复盘只能写记忆与技能 |
+| 复盘能执行哪些工具（假模型，[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)） | 白名单没有生效：`write_file` 在助手目录写出了文件，技能复盘也用 `memory` 写进了记忆，`skill_manage` 照常；调用“提交更改”时 Hermes 照常请求审批，保持连接的客户端在 `message.complete` 之后收到 `approval` 服务端请求，却没有对应的 `tool.start`。原因：顺序执行的工具在另一个线程中运行（`agent/tool_executor.py:929-944`，只传递 contextvars），白名单却存在 `threading.local()` 中（`hermes_cli/plugins.py:1948`）。上游 main（2026-10-15 的 `450ad50`）仍是如此，已有 issue NousResearch/hermes-agent#136623（2026-10-11）与修复 PR NousResearch/hermes-agent#136632，都未合并：升级 Hermes 时要跟进，修复合入后复盘只能写记忆与技能。2026-10-16 起运行环境带上这个修复（[后台复盘与闲时整理](#后台复盘与闲时整理2026-10-16开发机)） |
 
 结论：
 
@@ -674,7 +674,7 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 - 它能否跑完取决于时机：下一轮开始就取消；产品服务在回合结束后断开，约 20 秒后会话被回收，复盘随之取消（E6 两遍各一种结果）。产品服务从 `/api/health/idle` 看不到复盘，要让它跑完，只能在回合结束后多保持一会儿连接。
 - 关闭开关有效（E4）；关闭后，助手只在成员明确要求时在前台写记忆或技能，这些都在对话中可见（E1 第 8 轮）。
 
-**Curator（源码，未实测）**：管理 Agent 建的技能（`agent/curator.py`）：第一次只记下开始时间、推迟一个周期（默认 7 天）；之后只在 Hermes 闲置满 2 小时、且距上次满一个周期时运行，14 天没用的标为 stale，30 天没用的移入 `.archive`。默认不做合并（`curator.consolidate: false`），不调用模型；自带技能与 `external_dirs` 中的技能都不动。在 `serve` 中它由 `_auto_archive_ticker_loop` 驱动：进程启动 90 秒后第一次检查，之后每小时一次，闲置时间从进程启动算起（`hermes_cli/web_server_sessions.py:285-322`）；会话开始时运行是 CLI 的做法。A-NAS 的实例在最后一个连接断开约 45 秒后就退出，所以它几乎不会运行，不常用的技能也就不会自动归档。保持默认无害。
+**Curator（源码，未实测）**：管理 Agent 建的技能（`agent/curator.py`）：第一次只记下开始时间、推迟一个周期（默认 7 天）；之后只在 Hermes 闲置满 2 小时、且距上次满一个周期时运行，14 天没用的标为 stale，30 天没用的移入 `.archive`。默认不做合并（`curator.consolidate: false`），不调用模型；自带技能与 `external_dirs` 中的技能都不动。在 `serve` 中它由 `_auto_archive_ticker_loop` 驱动：进程启动 90 秒后第一次检查，之后每小时一次，闲置时间从进程启动算起（`hermes_cli/web_server_sessions.py:285-322`）；会话开始时运行是 CLI 的做法。A-NAS 的实例在最后一个连接断开约 45 秒后就退出，所以它几乎不会运行，不常用的技能也就不会自动归档。保持默认无害。2026-10-16 起改由每周的定时器运行（[后台复盘与闲时整理](#后台复盘与闲时整理2026-10-16开发机)）。
 
 ### 用户的决定（2026-10-15）
 
@@ -882,11 +882,54 @@ managed scope 另外固定 `terminal.cwd: /nas/助手` 与 `agent.clarify_timeou
 - 系统测试（真实安装器，带 Hermes 运行环境）258 项通过，会话闸门与“卡片 → 确认 → 文件代理执行”的完整链路照常。
 - 试用脚本在系统测试的容器中预演：安装（令牌由新单元交接，冷启动 6 秒、195 MB）、`update`（成员助手目录中的文件保留）、`remove` 保留密钥、不重输密钥再次安装、`remove --purge-key`；以及在 `c6f6993` 的旧试用上直接 `update`：令牌换成十六进制，成员的文件保留，没有进程的环境中有令牌（以 root 读也没有）。
 
+## 后台复盘与闲时整理（2026-10-16，开发机）
+
+用户问 Hermes 的后台复盘与闲时整理（curator）能否正常运行。对照上文的[后台复盘](#后台复盘)与开放工具后的实例，有四处不行：
+
+| 问题 | 原因 | 处理 |
+|---|---|---|
+| 复盘能用主 Agent 的全部工具 | 上游白名单的缺陷（上文表格最后一行）；工具开放后，它连终端、代码与子代理也能用 | 运行环境带上上游尚未合并的修复，见下文 |
+| 复盘大多跑不完 | 产品服务在回合结束后就放开到实例的连接，约 20 秒后会话被回收，复盘随之取消（E6） | 产品服务在回合结束后继续保持连接，直到 Hermes 报告这一轮的复盘（`review.summary`）、新一轮开始，或满 2 分钟（`reviewWait`）。Hermes 只在复盘改了记忆或技能时报告，什么都没改的复盘就保持满 2 分钟；技能复盘最长的一次用了 41 秒（E5） |
+| 成员不知道复盘改了什么 | 白名单不转发 `review.summary` | 转发；窗口在这一轮下方显示 Hermes 的说明与“查看记忆”，新一轮开始时消失 |
+| 闲时整理从不运行 | Curator 要 Hermes 闲置满 2 小时才运行，实例却在最后一个连接断开约 45 秒后退出 | 每周一次的 systemd 定时器在同一沙箱中运行 Hermes 自己的 `hermes curator run`，实例在运行时跳过 |
+
+managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带的中文（`locales/zh.yaml`，`agent/i18n.py` 经 `load_config_readonly` 读取，managed scope 有效），复盘的说明为“💾 自我改进回顾：记忆已更新”“💾 自我改进回顾：技能 'review-made' 已创建”。
+
+### 白名单的修复
+
+上游的 issue NousResearch/hermes-agent#136623 与修复 PR NousResearch/hermes-agent#136632 仍未合并（2026-10-16 查看，PR 的提交 `6e17391`）。修复在 `threading.local()` 之外把白名单再存一份到 ContextVar，`propagate_context_to_thread` 会把它带进执行工具的线程。这个 PR 不需改动就能打在固定提交 `0e427d78` 上，A-NAS 原样带上它（连同上游的测试），不另写一份：`run.sh build` 从固定提交导出源码，按文件名顺序对 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch) 中的补丁执行 `git apply`，记入运行环境的 `src/A-NAS-PATCHES`，构建日志列出打上的补丁。升级 Hermes 时，修复已合入就删掉这个补丁。
+
+[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh) 改为逐项判定：假模型让复盘尝试指定的调用，再看 Hermes 给它的结果。
+
+| | 修复前（`0e427d78` 原样） | 修复后 |
+|---|---|---|
+| 记忆复盘调用 `write_file`、`terminal` | 都执行了，助手目录里留下两个文件 | 拒绝（“Background review denied non-whitelisted tool”），没有文件 |
+| 记忆复盘调用 `execute_code`、“提交更改” | 都在等审批（保持连接的客户端在 `message.complete` 之后收到 `approval` 请求） | 拒绝，不再有审批请求 |
+| 记忆复盘调用 `delegate_task` | 在后台派出了子代理 | 拒绝 |
+| 技能复盘调用 `memory`、`terminal` | 都执行了 | 拒绝 |
+| 记忆复盘写记忆、读文件；技能复盘建技能 | 照常 | 照常 |
+
+修复后 15 项全部通过，包括复盘写下记忆后报告中文的 `review.summary`。产品服务拒绝回合结束后到达的审批这一条保留，作为第二道保护。
+
+### 定时的闲时整理
+
+`assistant-install.sh` 由实例单元生成 `anas-assistant-curator@.service`：同样的沙箱、身份与挂载，`ExecStart` 换成 `tini` 下的 `hermes curator run`，不要会话令牌与它的根单元；`ExecCondition=+` 在实例运行时让这一次跳过（“Skipped due to 'exec-condition'”），所以不会与成员的对话同时改技能。`anas-assistant-curator@.timer` 在每周日 03:30 后的 30 分钟内运行，`Persistent=true` 让关机错过的一次在开机后补上；`assistant-layout.sh members` 为每个账号启用它，`remove` 停用它。`hermes curator run` 不看 Hermes 自己的闲置与周期条件，`curator.consolidate` 保持默认的 `false`，不调用模型，只把 14 天没用的技能标为 stale、30 天没用的移入归档，自带技能与 `external_dirs` 中的不动（上文“Curator”）。
+
+[`curator.sh`](../../ai/assistant-spike/curator.sh) 6 项通过：定时器已启用；实例未运行时运行成功（`auto: checked=1 stale=0 archived=0`，0.15 秒，内存峰值 63 MB），Hermes 在 `skills/.curator_state` 记下这次运行，实例仍未启动；实例运行时被跳过，实例不受影响。
+
+### 验证
+
+- [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh) 15 项、[`curator.sh`](../../ai/assistant-spike/curator.sh) 6 项、[`serve-terminal.sh`](../../ai/assistant-spike/serve-terminal.sh) 15 项在新容器中用重新构建的运行环境通过（假模型）。
+- Go：回合结束后连接一直保持到 `review.summary` 到达，到达后 2 秒内断开（`TestTheConnectionWaitsForTheReviewOfATurn`，`internal/assistantapi`）。
+- 浏览器（本地原型，假模型，记忆复盘设为每轮一次）：一轮结束后回答下方出现“自我改进回顾：记忆已更新”与“查看记忆”，点开后“记忆”页列出复盘写下的那一条。
+- 系统测试（真实安装器）：每个成员的定时器已启用，Hermes 的 curator 在 alice 的沙箱中运行成功，删除 bob 的助手后他的定时器关闭。
+- 未查明：在新容器中依次运行三个脚本时，有一次 `serve-terminal.sh` 读令牌的那条命令被 Hermes 中断（`[Command interrupted]`，退出码 130），同一轮的其余命令照常；单独重跑与按同样顺序再跑一遍都通过。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
-- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh) 与 [`review.sh`](../../ai/assistant-spike/review.sh)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
 - Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#113](https://github.com/zhongwater123/A-NAS/issues/113)（“相册只读访问”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)、[系统测试](../../scripts/system-test.sh)与其中助手一节 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)、Host Agent 的替身 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)

@@ -57,6 +57,9 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
   // Stored conversations with a turn running in the instance, wherever it was started.
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState("");
+  // What Hermes's background review of a conversation's last turn changed, in
+  // its own words, by live conversation; a new turn clears it.
+  const [reviews, setReviews] = useState<Map<string, string>>(new Map());
 
   // A list that failed while the instance was still starting says so until a
   // later load succeeds.
@@ -103,6 +106,20 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
       const approval = event.payload as unknown as Approval;
       keep(approval);
       if (approval.storedSessionId && !known.current.has(approval.storedSessionId)) void refreshSessions();
+    }
+    const session = typeof event.session_id === "string" ? event.session_id : "";
+    if (type === "review.summary" && session) {
+      // Hermes leads with 💾; the notice has its own icon.
+      const text = String((event.payload as { text?: unknown } | undefined)?.text ?? "").replace(/^\p{Extended_Pictographic}️?\s*/u, "").trim();
+      if (text) setReviews((all) => new Map(all).set(session, text));
+    }
+    if (type === "message.start" && session) {
+      setReviews((all) => {
+        if (!all.has(session)) return all;
+        const next = new Map(all);
+        next.delete(session);
+        return next;
+      });
     }
     if (type === "sessions.changed" || type === "session.title") void refreshSessions();
     if (type === "sessions.changed" || type === "message.complete") refreshBusy();
@@ -219,6 +236,14 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
                 <div className="as-error" role="alert">
                   <CircleAlert /><span>{thread.error || notice || unreachable}</span>
                   {notice && <button type="button" aria-label="关闭" onClick={() => setNotice("")}><X /></button>}
+                </div>
+              )}
+              {thread.liveId && reviews.get(thread.liveId) && (
+                <div className="as-review" role="status">
+                  <div className="as-review-note">
+                    <Brain /><span>{reviews.get(thread.liveId)}</span>
+                    <button type="button" onClick={() => setView("memory")}>查看记忆</button>
+                  </div>
                 </div>
               )}
               <div className="as-viewport-spacer" />

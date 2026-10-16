@@ -233,6 +233,14 @@
 .as-confirm svg { width: 15px; height: 15px; }
 .as-confirm:disabled svg { animation: as-spin 1s linear infinite; }
 
+/* What the background review noted after a turn, under the reply's text (avatar 28px + gap 12px). */
+.as-review { margin-top: 12px; padding-left: 66px; }
+.as-review-note { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; padding: 6px 8px 6px 11px; border-radius: 10px; color: var(--as-ink-2); background: var(--as-accent-soft); font-size: 12.5px; animation: as-rise .25s var(--as-ease); }
+.as-review svg { width: 14px; height: 14px; flex: none; color: var(--as-accent-ink); }
+.as-review span { min-width: 0; overflow-wrap: anywhere; }
+.as-review button { flex: none; height: 24px; padding: 0 9px; border: 0; border-radius: 7px; color: var(--as-accent-ink); background: var(--as-surface); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.as-review button:hover { filter: brightness(.97); }
+
 /* A command or script the assistant asks to run, and its questions. */
 .as-command .as-change-mark { color: var(--as-accent-ink); background: var(--as-accent-soft); }
 .as-command.allowed { border-color: rgba(27, 148, 89, .28); background: #fbfefc; box-shadow: none; }

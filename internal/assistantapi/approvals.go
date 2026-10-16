@@ -102,6 +102,9 @@ type question struct {
 type liveSession struct {
 	stored string
 	turn   bool
+	// ended is when its last turn ended, until Hermes reports that turn's
+	// background review (review.summary) or a new turn starts.
+	ended time.Time
 	// submit is the arguments of the call of 提交更改 that started and has
 	// neither completed nor been paired with an approval.
 	submit   *startedCall
@@ -189,6 +192,25 @@ func (m *member) busy(u *upstream) bool {
 	return false
 }
 
+// reviewWait bounds how long a connection stays open after a turn ended,
+// while Hermes may still review it in the background: the review stops when
+// its session is released, and Hermes reports one only when it changed
+// memory or skills. Tests shorten it.
+var reviewWait = 2 * time.Minute
+
+// settling reports whether a session whose events come to u ended a turn
+// less than reviewWait ago and its review may still run.
+func (m *member) settling(u *upstream) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.sessions {
+		if s.owner == u && !s.ended.IsZero() && time.Since(s.ended) < reviewWait {
+			return true
+		}
+	}
+	return false
+}
+
 // running reports a session with a turn under way, and its stored id.
 func (m *member) running(session string) (bool, string) {
 	m.mu.Lock()
@@ -224,7 +246,11 @@ func (h *handler) observe(m *member, u *upstream, ev event) {
 	switch ev.Type {
 	case "message.start":
 		if s != nil {
-			s.turn = true
+			s.turn, s.ended = true, time.Time{}
+		}
+	case "review.summary":
+		if s != nil {
+			s.ended = time.Time{}
 		}
 	case "tool.start":
 		if s != nil && s.turn && payload.Name == submitTool && len(payload.Args) > 0 && string(payload.Args) != "null" {
@@ -252,7 +278,7 @@ func (h *handler) observe(m *member, u *upstream, ev event) {
 			if s.stopping {
 				status = cardStopped
 			}
-			s.turn, s.submit, s.stopping = false, nil, false
+			s.turn, s.submit, s.stopping, s.ended = false, nil, false, time.Now()
 			ended = m.endCards(func(c *card) bool { return c.SessionID == ev.SessionID }, status)
 		}
 	case "request.cancel":
