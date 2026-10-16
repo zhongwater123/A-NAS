@@ -80,6 +80,11 @@ type step struct {
 	Trash      string      `json:"trash"`
 	Before     fingerprint `json:"before"`
 	BeforeText *string     `json:"beforeText,omitempty"`
+	// A copy's source, and what it was when the card was made.
+	Source       string       `json:"source,omitempty"`
+	SourceRel    string       `json:"sourceRel,omitempty"`
+	SourceBefore *fingerprint `json:"sourceBefore,omitempty"`
+	SourceSize   int64        `json:"sourceSize,omitempty"`
 }
 
 type change struct {
@@ -327,7 +332,7 @@ func (e *Executor) check(ctx context.Context, account string, member files.FileS
 
 func (e *Executor) plan(ctx context.Context, account string, member files.FileSystem, op Operation) (step, []byte, string) {
 	switch op.Op {
-	case "write", "delete", "move", "mkdir":
+	case "write", "copy", "delete", "move", "mkdir":
 	default:
 		return step{}, nil, fmt.Sprintf("未知操作 %q", op.Op)
 	}
@@ -348,7 +353,7 @@ func (e *Executor) plan(ctx context.Context, account string, member files.FileSy
 	if (op.Op == "delete" || op.Op == "move") && !s.Before.Exists {
 		return step{}, nil, target + " 不存在"
 	}
-	if op.Op == "write" && s.Before.Exists && s.Before.Kind != files.KindFile {
+	if (op.Op == "write" || op.Op == "copy") && s.Before.Exists && s.Before.Kind != files.KindFile {
 		return step{}, nil, target + " 不是普通文件"
 	}
 	if head != nil {
@@ -369,6 +374,32 @@ func (e *Executor) plan(ctx context.Context, account string, member files.FileSy
 		}
 		if to.Exists {
 			return step{}, nil, s.To + " 已经存在"
+		}
+	case "copy":
+		// Copied as the member when applied, from wherever the assistant reads;
+		// nothing is staged, so a file of any size can be copied.
+		if s.Source, err = clean(op.Source); err != nil {
+			return step{}, nil, err.Error()
+		}
+		if s.SourceRel, err = sourcePath(account, s.Source); err != nil {
+			return step{}, nil, err.Error()
+		}
+		from, _, err := e.fingerprint(ctx, member, s.SourceRel)
+		switch {
+		case err != nil:
+			return step{}, nil, describe(err, s.Source)
+		case !from.Exists:
+			return step{}, nil, s.Source + " 不存在"
+		case from.Kind != files.KindFile && from.Kind != files.KindDirectory:
+			return step{}, nil, s.Source + " 不能复制"
+		case from.Kind == files.KindDirectory && s.Before.Exists:
+			return step{}, nil, target + " 已经存在"
+		}
+		s.SourceBefore, s.SourceSize = &from, from.Size
+		if from.Kind == files.KindDirectory {
+			if s.SourceSize, err = member.Usage(ctx, e.abs(s.SourceRel)); err != nil {
+				return step{}, nil, describe(err, s.Source)
+			}
 		}
 	case "write":
 		source, err := clean(op.Source)
@@ -442,6 +473,11 @@ func (e *Executor) apply(ctx context.Context, account string, member files.FileS
 		if now != s.Before {
 			return 0, s.Path + " 在用户确认前后被改动过，请重新提交"
 		}
+		if s.SourceBefore != nil {
+			if now, _, err = e.fingerprint(ctx, member, s.SourceRel); err != nil || now != *s.SourceBefore {
+				return 0, s.Source + " 在用户确认前后被改动过，请重新提交"
+			}
+		}
 	}
 	dir := filepath.Join(e.Root, account, c.ID)
 	for n, s := range c.Steps {
@@ -460,6 +496,8 @@ func (e *Executor) apply(ctx context.Context, account string, member files.FileS
 			if content, err = os.ReadFile(filepath.Join(dir, fmt.Sprint(n))); err == nil {
 				err = e.write(ctx, member, s, content)
 			}
+		case "copy":
+			err = e.copy(ctx, member, s)
 		}
 		if err != nil {
 			return n, describe(err, s.Path)
@@ -489,6 +527,31 @@ func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, c
 	}
 	if err != nil {
 		_ = member.Remove(ctx, temp)
+	}
+	return err
+}
+
+// copy copies the source next to the target under a name of its own, moves a
+// file the target replaces into the recycle bin, and puts the copy in place.
+func (e *Executor) copy(ctx context.Context, member files.FileSystem, s step) error {
+	parent := path.Dir(s.Rel)
+	if err := member.MkdirAll(ctx, e.abs(parent)); err != nil {
+		return err
+	}
+	id, err := newID()
+	if err != nil {
+		return err
+	}
+	temp := e.abs(parent + "/.a-nas-assistant-copy-" + id)
+	err = member.Copy(ctx, e.abs(s.SourceRel), temp)
+	if err == nil && s.Before.Exists {
+		err = e.toTrash(ctx, member, s)
+	}
+	if err == nil {
+		err = member.Rename(ctx, temp, e.abs(s.Rel))
+	}
+	if err != nil {
+		_ = member.RemoveAll(ctx, temp)
 	}
 	return err
 }
@@ -552,6 +615,9 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 		Op     string  `json:"op"`
 		Path   string  `json:"path"`
 		To     string  `json:"to,omitempty"`
+		From   string  `json:"from,omitempty"`
+		Size   *int64  `json:"size,omitempty"`
+		Folder bool    `json:"folder,omitempty"`
 		Exists bool    `json:"exists"`
 		Before *string `json:"before,omitempty"`
 		After  *string `json:"after,omitempty"`
@@ -559,6 +625,10 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 	ops := make([]operation, 0, len(c.Steps))
 	for n, s := range c.Steps {
 		op := operation{Op: s.Op, Path: s.Path, To: s.To, Exists: s.Before.Exists}
+		if s.Op == "copy" && s.SourceBefore != nil {
+			size := s.SourceSize
+			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == files.KindDirectory
+		}
 		if s.Op == "write" {
 			op.Before = s.BeforeText
 			if data, err := readHead(filepath.Join(e.Root, account, c.ID, fmt.Sprint(n)), previewLimit); err == nil {

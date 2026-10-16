@@ -2,6 +2,8 @@
 Description=A-NAS assistant for %i (spike)
 # Started by anas-assistant-api@%i.service, stopped when that proxy exits idle.
 StopWhenUnneeded=yes
+Requires=anas-assistant-token@%i.service
+After=anas-assistant-token@%i.service
 
 [Service]
 Type=simple
@@ -10,14 +12,21 @@ Group=%i
 SupplementaryGroups=a-nas-users
 Environment=HOME=/nas/助手 HERMES_HOME=/var/lib/hermes-home HERMES_MANAGED_DIR=/etc/hermes
 Environment=HERMES_WRITE_SAFE_ROOT=/nas/助手 PYTHONDONTWRITEBYTECODE=1
-# HERMES_DASHBOARD_SESSION_TOKEN for `hermes serve`, one per instance. systemd
-# reads this root-only file before dropping privileges; the product service
-# holds the only other copy. The api-server-channel/ drop-ins switch back to
-# the API Server.
-EnvironmentFile=/etc/a-nas-assistant/tokens/%i.env
+# HERMES_DASHBOARD_SESSION_TOKEN for `hermes serve`, one per instance, from
+# the root-only /etc/a-nas-assistant/tokens/%i.env, which only the Host Agent
+# reads besides. It is not given as the environment: tini and the start script
+# would carry it in /proc/<pid>/environ, which the member's own processes in the
+# sandbox (the terminal tool) can read. anas-assistant-token@%i.service stages it
+# in a directory only root may enter, the unit binds that one file in,
+# assistant-start.sh hands it to serve alone (non-dumpable, serve_nondumpable.py),
+# and once serve listens root empties the file. The api-server-channel/ drop-ins
+# switch back to the API Server.
+BindReadOnlyPaths=/run/a-nas-assistant-start/%i.token:/run/anas-assistant-start/token
 WorkingDirectory=/nas/助手
 ExecStart=/usr/bin/tini -- /bin/bash /spike/assistant-start.sh
 ExecStartPost=/bin/bash /spike/wait-port.sh 9119
+ExecStartPost=+/bin/sh -c ': > /run/a-nas-assistant-start/%i.token'
+ExecStopPost=+/bin/rm -f /run/a-nas-assistant-start/%i.token
 TimeoutStartSec=120
 # serve flushes its transcripts on SIGTERM and then dies of it; that is a clean stop.
 SuccessExitStatus=143

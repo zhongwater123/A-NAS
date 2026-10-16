@@ -186,6 +186,8 @@
 .as-op-title { display: flex; align-items: center; gap: 7px; color: var(--as-ink-2); font-size: 12.5px; }
 .as-op-title svg { width: 14px; height: 14px; color: var(--as-muted); }
 .as-op-title span { font-weight: 600; color: var(--as-ink); }
+.as-op-title small { margin-left: auto; color: var(--as-muted); font-size: 11.5px; }
+.as-op-note { margin: 4px 0 0 21px; color: var(--as-muted); font-size: 12px; }
 .as-op-title code { padding: 1px 6px; border-radius: 5px; background: #f1f1f6; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .as-diff { max-height: 180px; margin: 6px 0 0; padding: 8px 0; overflow: auto; border: 1px solid var(--as-line); border-radius: 8px; background: #fcfcfe; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.6; }
 .as-diff span { display: grid; grid-template-columns: 22px minmax(0, 1fr); padding: 0 12px 0 0; white-space: pre-wrap; }
@@ -202,6 +204,26 @@
 .as-confirm:hover:not(:disabled) { filter: brightness(1.05); }
 .as-confirm svg { width: 15px; height: 15px; }
 .as-confirm:disabled svg { animation: as-spin 1s linear infinite; }
+
+/* A command or script the assistant asks to run, and its questions. */
+.as-command .as-change-mark { color: var(--as-accent-ink); background: var(--as-accent-soft); }
+.as-command.allowed { border-color: rgba(27, 148, 89, .28); background: #fbfefc; box-shadow: none; }
+.as-command.allowed .as-change-mark { color: var(--as-success); background: var(--as-success-soft); }
+.as-command-text { max-height: 220px; margin: 0 14px; padding: 10px 12px; overflow: auto; border-radius: 8px; color: #e9e9f2; background: #23252f; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.as-question .as-change-mark { color: var(--as-accent-ink); background: var(--as-accent-soft); }
+.as-question.answered { border-color: rgba(27, 148, 89, .28); background: #fbfefc; box-shadow: none; }
+.as-question.answered .as-change-mark { color: var(--as-success); background: var(--as-success-soft); }
+.as-questions { display: grid; gap: 12px; padding: 0 14px 4px; }
+.as-question-item p { margin: 0 0 7px; color: var(--as-ink); font-size: 13px; font-weight: 550; line-height: 1.55; }
+.as-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+.as-choices button { height: 30px; padding: 0 12px; border: 1px solid var(--as-line-strong); border-radius: 999px; color: var(--as-ink-2); background: var(--as-surface); font: inherit; font-size: 12.5px; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+.as-choices button:hover:not(:disabled) { border-color: rgba(106, 88, 224, .45); color: var(--as-ink); }
+.as-choices button small { margin-left: 6px; padding: 1px 6px; border-radius: 999px; color: var(--as-accent-ink); background: var(--as-accent-soft); font-size: 10.5px; }
+.as-choices button[aria-pressed="true"] small { color: #fff; background: rgba(255, 255, 255, .2); }
+.as-choices button[aria-pressed="true"] { border-color: transparent; color: #fff; background: linear-gradient(160deg, #7a69ec, #5d4bd6); }
+.as-answer-input { width: 100%; height: 34px; padding: 0 11px; border: 1px solid var(--as-line-strong); border-radius: 8px; outline: none; color: var(--as-ink); background: var(--as-surface); font: inherit; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
+.as-answer-input:focus { border-color: rgba(106, 88, 224, .55); box-shadow: 0 0 0 3px var(--as-accent-soft); }
+.as-answered { display: inline-block; padding: 3px 10px; border-radius: 7px; color: var(--as-ink-2); background: #f1f1f6; font-size: 12.5px; }
 
 /* ── Composer ────────────────────────────────────────────── */
 .as-composer { display: flex; align-items: flex-end; gap: 8px; width: calc(100% - 52px); max-width: 708px; margin: 0 auto 18px; padding: 8px 8px 8px 16px; border: 1px solid var(--as-line-strong); border-radius: 16px; background: var(--as-surface); box-shadow: 0 6px 22px rgba(22, 26, 40, .07); transition: border-color .15s, box-shadow .15s; }

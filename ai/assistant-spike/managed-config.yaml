@@ -10,20 +10,27 @@ model:
   api_key: spike-not-a-secret
   context_length: 128000
 # `hermes serve` builds every session's agent from the cli entry (tui_gateway
-# server._load_enabled_toolsets); api_server is the API Server channel.
+# server._load_enabled_toolsets); api_server is the API Server channel. Hermes's
+# own tools are on wherever the sandbox already stops what they could break
+# (ADR 0024 decision 3): the terminal and code run as the member, with the
+# personal space and Shared read-only, no network and nothing of anyone else;
+# dangerous commands wait for the member's approval like 提交更改. vision and
+# video send images and frames to the model: for testing only, until a local
+# model (decision 7).
 platform_toolsets:
-  cli: [file, memory, session_search, skills, todo, anas]
-  api_server: [file, memory, session_search, skills, todo, anas]
+  cli: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, anas]
+  api_server: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, anas]
 agent:
-  # Every toolset at the pinned commit except the five above, including the ones tool
-  # modules and plugins register at runtime (a2a, browser-cdp, browser-use). The platform
+  # Every toolset at the pinned commit except the ones above, including the ones tool
+  # modules and plugins register at runtime (a2a, browser-cdp, browser-use): what needs the
+  # network the sandbox does not have, a desktop, accounts elsewhere, or installs code. The platform
   # lists only cover the platforms named there, and serve also builds agents for others (a
   # triggered cron job got connections and vision); this list applies to all. Composites
   # (debugging, safe) stay out: a disabled toolset removes every tool it resolves to, and
   # debugging includes the file tools. toolsets-check.py (run by probe.sh) checks all this.
-  disabled_toolsets: [web, search, x_search, vision, video, image_gen, video_gen, computer_use, terminal,
+  disabled_toolsets: [web, search, x_search, image_gen, video_gen, computer_use,
     browser, cronjob, tts, context_engine, connections, project, bot_room, desktop_ui, onboarding, catalog,
-    clarify, code_execution, delegation, kanban, discord, discord_admin, yuanbao, feishu_doc, feishu_drive, coding,
+    kanban, discord, discord_admin, yuanbao, feishu_doc, feishu_drive, coding,
     a2a, browser-cdp, browser-use]
   # Never switch to the coding posture (its own toolset and prompt) in a git workspace.
   coding_context: "off"
@@ -31,6 +38,12 @@ agent:
   # as vision-capable: Hermes keeps them as a file path (photos-vision.sh, #113). Showing
   # photos to a local multimodal model is a decision of its own (ADR 0024 decision 7).
   image_input_mode: text
+  # A question the assistant asks waits as long as a confirmation.
+  clarify_timeout: 86400
+# Commands start in the assistant's own folder.
+terminal:
+  backend: local
+  cwd: /nas/助手
 # How long a session's first agent build waits for MCP discovery (default 1.5 s);
 # serve starts discovery when the first /api/ws client connects.
 mcp_discovery_timeout: 20

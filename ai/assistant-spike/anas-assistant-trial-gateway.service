@@ -1,0 +1,34 @@
+[Unit]
+Description=A-NAS assistant model gateway (trial on the Experimental NAS)
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/runbooks/try-ai-assistant-on-experimental-nas.md
+After=network-online.target systemd-tmpfiles-setup.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Holds the cloud model's key, which no sandbox can read, and forwards the
+# assistants' requests. The requests carry members' files: the log keeps
+# token usage and tool names, not messages, and only root reads it.
+Environment=GATEWAY_LOG_MESSAGES=0
+ExecStart=/usr/bin/python3 /spike/gateway.py /run/anas-assistant-gw/model.sock /var/log/anas-assistant-gateway/requests.jsonl @UPSTREAM@ /etc/anas-spike/model.key
+LogsDirectory=anas-assistant-gateway
+LogsDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+# The socket's directory comes from tmpfiles, not RuntimeDirectory=, so it
+# survives restarts of this service: every sandbox binds that directory.
+ReadWritePaths=/run/anas-assistant-gw
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

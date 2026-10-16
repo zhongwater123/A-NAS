@@ -17,6 +17,7 @@
 - [启用局域网 Web 访问](enable-lan-web-access.md)（verified）
 - [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
 - [验收相册 M1](accept-photo-library-m1.md)（draft；切片 7 实机闸门）
+- [在实验 NAS 上试用 AI 助手](try-ai-assistant-on-experimental-nas.md)（draft；云端模型，仅开发测试）
 
 ## 使用方式
 
