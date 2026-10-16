@@ -17,11 +17,12 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, History,
+  ArrowUp, Brain, Check, ChevronRight, CircleAlert, Clock, FilePen, FileSearch, FileText, FolderPlus, History,
   Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, Trash2, Wrench, X,
 } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
+import { AssistantGlyph } from "../AssistantGlyph";
 import {
   type Approval, type AssistantSession, type ChangeOperation,
   decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
@@ -170,7 +171,7 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     <div className="as-app">
       <aside className="as-side">
         <div className="as-brand">
-          <span className="as-brand-mark"><Bot /></span>
+          <span className="as-brand-mark"><AssistantGlyph /></span>
           <div><strong>AI 助手</strong><small>{username} 的助手</small></div>
         </div>
         <button type="button" className="as-new" onClick={() => { setActiveId(undefined); setView("chat"); }}><MessageSquarePlus />新对话</button>
@@ -290,7 +291,7 @@ function SessionRow({ session, active, waiting, running, onOpen, onRename, onDel
 function Welcome({ username, onPick }: { username: string; onPick(text: string): void }) {
   return (
     <div className="as-welcome">
-      <span className="as-welcome-mark"><Bot /></span>
+      <span className="as-welcome-mark"><AssistantGlyph /></span>
       <h3>你好，{username}</h3>
       <p>我能读你的个人空间和共享空间，帮你查找、总结和整理文件。<br />要改动文件时，我会先把改动交给你确认。</p>
       <div className="as-suggestions">
@@ -311,7 +312,7 @@ function UserMessage() {
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="as-msg assistant">
-      <span className="as-avatar"><Bot /></span>
+      <span className="as-avatar"><AssistantGlyph /></span>
       <div className="as-answer">
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
         <Outcome />

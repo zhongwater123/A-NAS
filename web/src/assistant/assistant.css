@@ -1,5 +1,5 @@
-/* AI 助手 window. A quiet conversation list beside a reading-width thread;
-   the accent follows the desktop icon's violet. */
+/* AI 助手 window. A quiet conversation list beside a reading-width thread,
+   with a violet accent; the assistant's portrait marks its own place. */
 .window-content-assistant { overflow: hidden; background: #f6f6fa; container: assistantwindow / inline-size; }
 
 .as-app {
@@ -36,8 +36,7 @@
 /* ── Sidebar ─────────────────────────────────────────────── */
 .as-side { min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 16px 10px 12px; border-right: 1px solid var(--as-line); background: var(--as-side); }
 .as-brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px 10px; }
-.as-brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; color: #fff; background: linear-gradient(155deg, #8c7cff, #5544c4); box-shadow: 0 6px 16px rgba(85, 68, 196, .28); }
-.as-brand-mark svg { width: 19px; height: 19px; }
+.as-brand-mark { width: 34px; height: 34px; flex: none; border-radius: 10px; background: #fff; box-shadow: 0 4px 12px rgba(22, 26, 40, .12); }
 .as-brand strong { display: block; font-size: 14px; font-weight: 650; letter-spacing: .01em; }
 .as-brand small { display: block; margin-top: 1px; color: var(--as-muted); font-size: 11.5px; }
 .as-new { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 1px solid var(--as-line-strong); border-radius: 9px; color: var(--as-ink); background: var(--as-surface); font: inherit; font-weight: 600; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
@@ -88,8 +87,7 @@
 
 /* Welcome */
 .as-welcome { display: flex; flex-direction: column; align-items: center; padding-top: 48px !important; text-align: center; }
-.as-welcome-mark { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 16px; color: #fff; background: linear-gradient(155deg, #8c7cff, #5544c4); box-shadow: 0 14px 32px rgba(85, 68, 196, .3); }
-.as-welcome-mark svg { width: 28px; height: 28px; }
+.as-welcome-mark { width: 64px; height: 64px; border-radius: 18px; background: #fff; box-shadow: 0 12px 30px rgba(22, 26, 40, .14); }
 .as-welcome h3 { margin: 18px 0 8px; font-size: 21px; font-weight: 680; letter-spacing: .01em; }
 .as-welcome p { margin: 0; color: var(--as-ink-2); font-size: 13.5px; line-height: 1.75; }
 .as-suggestions { display: grid; gap: 8px; width: min(440px, 100%); margin-top: 26px; }
@@ -101,8 +99,10 @@
 .as-msg { display: flex; gap: 12px; margin-top: 18px; }
 .as-msg.user { justify-content: flex-end; }
 .as-bubble { max-width: 78%; padding: 10px 14px; border-radius: 16px 16px 4px 16px; color: #fff; background: linear-gradient(160deg, #7a69ec, #5d4bd6); font-size: 13.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: 0 4px 14px rgba(85, 68, 196, .18); }
-.as-avatar { width: 28px; height: 28px; display: grid; place-items: center; flex: none; margin-top: 2px; border-radius: 9px; color: var(--as-accent); background: var(--as-accent-soft); }
-.as-avatar svg { width: 16px; height: 16px; }
+.as-avatar { width: 28px; height: 28px; flex: none; margin-top: 2px; border-radius: 9px; background: #fff; }
+/* The portrait is drawn on white: it fills each mark, and a hairline keeps
+   the white edge off the light window. */
+.as-app .assistant-glyph { display: block; width: 100%; height: 100%; border-radius: inherit; outline: 1px solid var(--as-line); outline-offset: -1px; }
 .as-answer { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
 
 .as-markdown { color: var(--as-ink); font-size: 13.5px; line-height: 1.75; overflow-wrap: anywhere; }
