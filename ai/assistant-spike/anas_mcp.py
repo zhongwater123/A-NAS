@@ -60,6 +60,7 @@ def submit_changes(summary: str, operations: list[dict]) -> str:
     summary: 用一句话告诉用户这批更改做什么。
     operations: 按顺序执行的操作，每项为一个对象：
       {"op": "write", "path": 目标文件, "source": 暂存区 /nas/助手/待确认/ 中写好完整新内容的文件}
+      {"op": "copy", "path": 目标, "source": 个人空间、共享空间或 /nas/助手 中要复制的文件或文件夹}（图片、视频等任意文件，不需要暂存）
       {"op": "delete", "path": 要删除的文件或文件夹（进入回收站）}
       {"op": "move", "path": 原路径, "to": 新路径}（移动或改名）
       {"op": "mkdir", "path": 新文件夹}

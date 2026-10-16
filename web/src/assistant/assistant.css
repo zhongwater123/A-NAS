@@ -186,6 +186,8 @@
 .as-op-title { display: flex; align-items: center; gap: 7px; color: var(--as-ink-2); font-size: 12.5px; }
 .as-op-title svg { width: 14px; height: 14px; color: var(--as-muted); }
 .as-op-title span { font-weight: 600; color: var(--as-ink); }
+.as-op-title small { margin-left: auto; color: var(--as-muted); font-size: 11.5px; }
+.as-op-note { margin: 4px 0 0 21px; color: var(--as-muted); font-size: 12px; }
 .as-op-title code { padding: 1px 6px; border-radius: 5px; background: #f1f1f6; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .as-diff { max-height: 180px; margin: 6px 0 0; padding: 8px 0; overflow: auto; border: 1px solid var(--as-line); border-radius: 8px; background: #fcfcfe; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.6; }
 .as-diff span { display: grid; grid-template-columns: 22px minmax(0, 1fr); padding: 0 12px 0 0; white-space: pre-wrap; }

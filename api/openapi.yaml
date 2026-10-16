@@ -4865,9 +4865,12 @@ components:
             additionalProperties: false
             required: [op, path]
             properties:
-              op: { type: string, enum: [write, delete, move, mkdir] }
+              op: { type: string, enum: [write, copy, delete, move, mkdir] }
               path: { type: string, description: "Path as the assistant sees it, under /nas." }
               to: { type: string, description: Destination of a move. }
+              from: { type: string, description: "What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder)." }
+              size: { type: integer, description: "Bytes a copy copies; a folder's files together." }
+              folder: { type: boolean, description: A copy of a whole folder. }
               exists: { type: boolean, description: The target existed when the card was made. }
               before: { type: string, description: "Text of a written file when the card was made; absent when it is new or not text." }
               after: { type: string, description: "Text the write leaves; absent when it is not text." }

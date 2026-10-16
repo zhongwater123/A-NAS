@@ -299,3 +299,95 @@ func TestDigestsIgnoreWhatTheToolDoesNotUse(t *testing.T) {
 		t.Fatal("different calls share a digest")
 	}
 }
+
+func TestACopyReachesThePersonalSpaceFromWhereTheAssistantReads(t *testing.T) {
+	f := newFixture(t)
+	png := "\x89PNG\r\n\x1a\n\x00\x00binary"
+	f.put("spaces/shared/头像.png", png)
+	f.put("spaces/private/alice/头像.png", "旧头像")
+	copyAvatar := `{"summary":"复制头像","operations":[{"op":"copy","path":"/nas/个人空间/头像.png","source":"/nas/共享空间/头像.png"}]}`
+	card, err := f.prepare(copyAvatar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := card["operations"].([]any)[0].(map[string]any)
+	if op["op"] != "copy" || op["from"] != "/nas/共享空间/头像.png" || op["size"] != float64(len(png)) || op["exists"] != true {
+		t.Fatalf("card = %v", card)
+	}
+	if _, err := f.exec.Decide("alice", card["id"].(string), "approve"); err != nil {
+		t.Fatal(err)
+	}
+	if result := f.exec.Apply(context.Background(), "alice", f.member, []byte(copyAvatar)); !strings.Contains(result, "1 项更改已执行") {
+		t.Fatalf("apply = %s", result)
+	}
+	if got := f.get("spaces/private/alice/头像.png"); got != png {
+		t.Fatalf("copy = %q", got)
+	}
+	if got := f.get("spaces/shared/头像.png"); got != png {
+		t.Fatalf("the source changed: %q", got)
+	}
+	if got := f.get("spaces/private/alice/.a-nas-trash/alice/头像.png"); got != "旧头像" {
+		t.Fatalf("replaced file in the recycle bin = %q", got)
+	}
+}
+
+func TestAFolderCopiesWholeAndNeverOverAnotherFolder(t *testing.T) {
+	f := newFixture(t)
+	f.put("spaces/shared/旅行/1.jpg", "one")
+	f.put("spaces/shared/旅行/行程/2.txt", "two!")
+	copyTrip := `{"summary":"复制旅行","operations":[{"op":"copy","path":"/nas/个人空间/旅行","source":"/nas/共享空间/旅行"}]}`
+	card, err := f.prepare(copyTrip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := card["operations"].([]any)[0].(map[string]any)
+	if op["folder"] != true || op["size"] != float64(7) {
+		t.Fatalf("card = %v", card)
+	}
+	if _, err := f.exec.Decide("alice", card["id"].(string), "approve"); err != nil {
+		t.Fatal(err)
+	}
+	if result := f.exec.Apply(context.Background(), "alice", f.member, []byte(copyTrip)); !strings.Contains(result, "已执行") {
+		t.Fatalf("apply = %s", result)
+	}
+	if f.get("spaces/private/alice/旅行/行程/2.txt") != "two!" || f.get("spaces/private/alice/旅行/1.jpg") != "one" {
+		t.Fatal("the folder was not copied whole")
+	}
+	if _, err := f.prepare(copyTrip); err == nil || !strings.Contains(err.Error(), "不是普通文件") {
+		t.Fatalf("a folder over a folder: %v", err)
+	}
+}
+
+func TestACopyWhoseSourceChangedAfterTheCardIsNotMade(t *testing.T) {
+	f := newFixture(t)
+	f.put("spaces/shared/通知.md", "原文\n")
+	copyNote := `{"summary":"复制通知","operations":[{"op":"copy","path":"/nas/个人空间/通知.md","source":"/nas/共享空间/通知.md"}]}`
+	f.approve(copyNote)
+	time.Sleep(10 * time.Millisecond)
+	f.put("spaces/shared/通知.md", "别人改过了\n")
+	if result := f.exec.Apply(context.Background(), "alice", f.member, []byte(copyNote)); !strings.Contains(result, "被改动过") {
+		t.Fatalf("apply = %s", result)
+	}
+	if got := f.get("spaces/private/alice/通知.md"); !strings.HasPrefix(got, "<") {
+		t.Fatalf("copied anyway: %q", got)
+	}
+}
+
+func TestCopiesComeOnlyFromWhatTheAssistantReads(t *testing.T) {
+	f := newFixture(t)
+	f.put("spaces/private/bob/私密.md", "bob\n")
+	for source, want := range map[string]string{
+		"/etc/passwd": "只能复制",
+		"/nas/其他/x":   "只能复制",
+		"/nas/共享空间/../../private/bob/私密.md": "..",
+		"/nas/共享空间/不存在.md":                  "不存在",
+	} {
+		submission := `{"summary":"x","operations":[{"op":"copy","path":"/nas/个人空间/x.md","source":"` + source + `"}]}`
+		if _, err := f.prepare(submission); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("copy from %s: %v, want %q", source, err, want)
+		}
+	}
+	if _, err := f.prepare(`{"summary":"x","operations":[{"op":"copy","path":"/nas/共享空间/x.md","source":"/nas/个人空间/计划.md"}]}`); err == nil {
+		t.Fatal("a copy into Shared was accepted")
+	}
+}

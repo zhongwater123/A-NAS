@@ -19,9 +19,13 @@ export interface AssistantSession {
 }
 
 export interface ChangeOperation {
-  op: "write" | "delete" | "move" | "mkdir";
+  op: "write" | "copy" | "delete" | "move" | "mkdir";
   path: string;
   to?: string;
+  /** What a copy copies, its size in bytes, and whether it is a folder. */
+  from?: string;
+  size?: number;
+  folder?: boolean;
   exists?: boolean;
   before?: string;
   after?: string;

@@ -17,7 +17,7 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, FilePen, FileSearch, FileText, FolderPlus, History,
+  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, History,
   Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
   Trash2, Users, Video, Wrench, X,
 } from "lucide-react";
@@ -634,6 +634,17 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
       </li>
     );
   }
+  if (operation.op === "copy") {
+    return (
+      <li>
+        <div className="as-op-title"><Copy /><span>{operation.exists ? "复制并替换" : "复制"}</span>
+          <code>{friendlyPath(operation.from ?? "")}</code><MoveRight /><code>{target}</code>
+          {operation.size !== undefined && <small>{operation.folder ? "文件夹，" : ""}{formatBytes(operation.size)}</small>}
+        </div>
+        {operation.exists && <p className="as-op-note">原来的文件会移到回收站</p>}
+      </li>
+    );
+  }
   const verb = operation.op === "delete" ? "删除（移入回收站）" : operation.op === "move" ? "移动" : "新建文件夹";
   const icon = operation.op === "delete" ? <Trash2 /> : operation.op === "move" ? <MoveRight /> : <FolderPlus />;
   return (
@@ -661,6 +672,18 @@ const MARKDOWN_COMPONENTS = { a: MarkdownLink };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
+
+// Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
+function formatBytes(bytes: number) {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
 
 function short(text: string) {
   const line = text.split("\n")[0];
