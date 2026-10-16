@@ -285,6 +285,11 @@ ON CONFLICT(object_id, derivation) DO NOTHING;
 	// 11: whether a library recognises people and pets; on by default
 	// (docs/architecture/photo-people.md#关闭与清除).
 	`ALTER TABLE libraries ADD COLUMN people INTEGER NOT NULL DEFAULT 1;`,
+	// 12: pet scans told only dogs apart; cats are pets too now. Without
+	// their scans, every photo with a cat or a dog is scanned again when the
+	// service first sees the animal model; the dogs found keep what members
+	// decided, by the place they were found in.
+	`DELETE FROM scans WHERE derivation = 'pets/v1';`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

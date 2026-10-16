@@ -535,11 +535,9 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     await user.click(screen.getByRole("button", { name: "AI 聚合" }));
     expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
     expect(within(screen.getByLabelText("最近搜索")).getByRole("button", { name: "海边的日落" })).toBeTruthy();
-    // Cats are not told apart: their group stands among the pets, not under 动物.
-    expect(within(await screen.findByLabelText("人物与宠物")).getByRole("button", { name: "打开 猫" })).toBeTruthy();
-    expect(within(screen.getByRole("button", { name: "打开 猫" })).getByText("2 张")).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: /^动物/ })).toBeNull();
-    expect(within(screen.getByRole("region", { name: "按内容聚合" })).getByRole("button", { name: "打开 海" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /^动物/ })).toBeTruthy();
+    expect(within(await screen.findByRole("button", { name: "打开 猫" })).getByText("2 张")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开 海" })).toBeTruthy();
 
     // A search stays a search: it never goes through the clusters.
     await user.type(screen.getByRole("searchbox", { name: "用一句话搜索照片" }), "猫{Enter}");
@@ -685,12 +683,13 @@ describe("PhotosPanel people and pets", () => {
   const ming = { id: "person:ming", libraryId: "library:mine", kind: "person", name: "小明", hidden: false, photos: 3, coverId: "face:ming", canChange: true };
   const nameless = { id: "person:new", libraryId: "library:mine", kind: "person", name: "", hidden: false, photos: 2, coverId: "face:new", canChange: true };
   const dog = { id: "person:dog", libraryId: "library:shared", kind: "dog", name: "", hidden: true, photos: 4, coverId: "face:dog", canChange: true };
+  const cat = { id: "person:cat", libraryId: "library:mine", kind: "cat", name: "咪咪", hidden: false, photos: 5, coverId: "face:cat", canChange: true };
 
   it("lists people and pets on AI 聚合, names a person and takes a wrong photo out", async () => {
     let named = "";
     let removed = false;
     const fetchMock = serve((url, init) => {
-      if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, { ...nameless, name: named }, dog] });
+      if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, cat, { ...nameless, name: named }, dog] });
       if (url === "/api/v1/photos/people/person%3Anew" && init?.method === "PATCH") {
         named = JSON.parse(String(init.body)).name;
         return json({ ...nameless, name: named });
@@ -703,9 +702,10 @@ describe("PhotosPanel people and pets", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
     const row = await screen.findByLabelText("人物与宠物");
-    // Named people first; a nameless one invites a name; hidden ones wait.
+    // Named people and pets first, cats as one by one as dogs; a nameless one
+    // invites a name; hidden ones wait.
     const cards = within(row).getAllByRole("button", { name: /^打开 / });
-    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["打开 小明", "打开 未命名"]);
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["打开 小明", "打开 咪咪", "打开 未命名"]);
     expect(within(row).getByText("添加名字")).toBeTruthy();
     expect(screen.getByText(/照片和人脸都在这台 NAS 上由本地 AI 识别/)).toBeTruthy();
     await user.click(within(row).getByRole("button", { name: "已隐藏 1 位" }));

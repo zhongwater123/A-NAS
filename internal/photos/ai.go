@@ -415,7 +415,7 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 		ahead <- next
 	}()
 	var model, faceModel, petModel string
-	var boxes, dogs []Box
+	var boxes, pets []Box
 	var faces []Face
 	var petVectors [][]float32
 	var detectErr, faceErr, petErr error
@@ -431,20 +431,20 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 		}
 	}
 	if petsJob != nil && detectCtx.Err() == nil {
-		// The dogs come from this round's detection, or else the stored one.
+		// The pets come from this round's detection, or else the stored one.
 		switch {
 		case objectsJob != nil && detectErr != nil:
 			petErr = detectErr
 		case objectsJob != nil:
-			dogs = s.dogsIn(model, boxes)
+			pets = s.petsIn(model, boxes)
 		default:
-			dogs, petErr = s.storedDogs(ctx, petsJob.objectID)
+			pets, petErr = s.storedPets(ctx, petsJob.objectID)
 		}
 		petModel = info.Animals
-		if petErr == nil && len(dogs) > 0 {
-			corners := make([][4]float32, len(dogs))
-			for i, dog := range dogs {
-				corners[i] = [4]float32{dog.X0, dog.Y0, dog.X1, dog.Y1}
+		if petErr == nil && len(pets) > 0 {
+			corners := make([][4]float32, len(pets))
+			for i, pet := range pets {
+				corners[i] = [4]float32{pet.X0, pet.Y0, pet.X1, pet.Y1}
 			}
 			if _, err := input.file.Seek(0, io.SeekStart); err != nil {
 				petErr = err
@@ -509,7 +509,7 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 		}
 	}
 	if petsJob != nil {
-		err = errors.Join(err, s.finishPets(ctx, *petsJob, petModel, dogs, petVectors, petErr, input.file))
+		err = errors.Join(err, s.finishPets(ctx, *petsJob, petModel, pets, petVectors, petErr, input.file))
 	}
 	return carryOn(err)
 }

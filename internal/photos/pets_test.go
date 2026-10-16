@@ -17,7 +17,7 @@ import (
 
 // pettingEmbedder is a fake AI Worker whose detector finds an animal in each
 // painted band of a people photo: red and green are two dogs, blue a dog the
-// detector is not sure of, yellow a cat. Its animal model tells the dogs
+// detector is not sure of, yellow a cat. Its animal model tells the pets
 // apart by colour, and it can lose sight of dogs or have no animal model.
 type pettingEmbedder struct {
 	*fakeEmbedder
@@ -96,10 +96,11 @@ func (p *pettingEmbedder) EmbedAnimals(_ context.Context, input *os.File, boxes 
 
 var petCalibration = []photos.PeopleCalibration{
 	{Kind: photos.OccurrenceDog, Model: "animals-1", Threshold: 0.9, MinCore: 3, Rule: photos.RuleCentroid},
+	{Kind: photos.OccurrenceCat, Model: "animals-1", Threshold: 0.9, MinCore: 3, Rule: photos.RuleCentroid},
 }
 
 // openPetService opens the photo service with a detection calibration for
-// detector, which says from which score a box is a dog.
+// detector, which says from which score a box is a cat or a dog.
 func openPetService(t *testing.T, root, detector string) *photos.Service {
 	t.Helper()
 	calibration, err := objects.ParseCalibration([]byte(`{"model": "` + detector + `", "weight": 0.2, "tierCoverage": 0.6,
@@ -120,43 +121,48 @@ func importPetPhotos(t *testing.T, service *photos.Service) {
 	t.Helper()
 	private, _ := libraries(t, service, alice)
 	// Red is in four photos and green in four; blue is never sure enough to
-	// be a dog, and the cat in yellow is never told apart.
-	for i, painted := range [][]int{{0}, {0, 1}, {1, -1, 0}, {0, 1, 2}, {3, 1}, {2, 3}} {
+	// be a dog; the cat in yellow is in three.
+	for i, painted := range [][]int{{0}, {0, 1}, {1, -1, 0}, {0, 1, 2}, {3, 1}, {2, 3}, {-1, 3}} {
 		importPhoto(t, service, alice, private.ID, "", string(rune('1'+i))+".png", peoplePhoto(t, uint8(i), painted...))
 	}
 }
 
-func dogs(t *testing.T, service *photos.Service) []photos.Person {
+// pets lists alice's pets by kind: they are all dogs or cats, never people.
+func pets(t *testing.T, service *photos.Service) (dogs, cats []photos.Person) {
 	t.Helper()
-	var found []photos.Person
 	for _, person := range people(t, service, alice, true) {
-		if person.Kind != photos.PersonKindDog {
-			t.Fatalf("People() has %+v; only dogs are told apart", person)
+		switch person.Kind {
+		case photos.PersonKindDog:
+			dogs = append(dogs, person)
+		case photos.PersonKindCat:
+			cats = append(cats, person)
+		default:
+			t.Fatalf("People() has %+v; the pet photos hold no people", person)
 		}
-		found = append(found, person)
 	}
-	return found
+	return dogs, cats
 }
 
-func TestDogsClusterIntoPetsAndCatsDoNot(t *testing.T) {
+func TestCatsAndDogsClusterIntoPetsAlike(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "photos")
 	service := openPetService(t, root, "detector-1")
 	worker := newPettingEmbedder()
 	importPetPhotos(t, service)
 	organise(t, service, worker)
 
-	// Only the five photos with a sure dog are embedded, and only their dogs.
-	if len(worker.embedded) != 8 {
-		t.Fatalf("embedded %d animals, want the 8 sure dogs", len(worker.embedded))
+	// The photos with a sure pet are embedded, and only their sure pets: the
+	// 8 dogs and the 3 cats.
+	if len(worker.embedded) != 11 {
+		t.Fatalf("embedded %d animals, want the 11 sure pets", len(worker.embedded))
 	}
-	found := dogs(t, service)
-	if len(found) != 2 || found[0].Photos != 4 || found[1].Photos != 4 {
-		t.Fatalf("People() = %+v; want red and green, in four photos each", found)
+	dogs, cats := pets(t, service)
+	if len(dogs) != 2 || dogs[0].Photos != 4 || dogs[1].Photos != 4 || len(cats) != 1 || cats[0].Photos != 3 {
+		t.Fatalf("People() = dogs %+v, cats %+v; want red and green in four photos each, yellow in three", dogs, cats)
 	}
 	var names [][]string
-	for _, dog := range found {
-		names = append(names, personPhotos(t, service, alice, dog.ID))
-		avatar, err := service.OccurrenceAvatar(context.Background(), alice, dog.CoverID)
+	for _, pet := range append(dogs, cats...) {
+		names = append(names, personPhotos(t, service, alice, pet.ID))
+		avatar, err := service.OccurrenceAvatar(context.Background(), alice, pet.CoverID)
 		if err != nil {
 			t.Fatalf("OccurrenceAvatar() error = %v", err)
 		}
@@ -165,34 +171,36 @@ func TestDogsClusterIntoPetsAndCatsDoNot(t *testing.T) {
 		}
 	}
 	slices.SortFunc(names, slices.Compare)
-	if want := [][]string{{"1.png", "2.png", "3.png", "4.png"}, {"2.png", "3.png", "4.png", "5.png"}}; !slices.EqualFunc(names, want, slices.Equal) {
-		t.Fatalf("the dogs' photos = %v, want %v", names, want)
+	want := [][]string{{"1.png", "2.png", "3.png", "4.png"}, {"2.png", "3.png", "4.png", "5.png"}, {"5.png", "6.png", "7.png"}}
+	if !slices.EqualFunc(names, want, slices.Equal) {
+		t.Fatalf("the pets' photos = %v, want %v", names, want)
 	}
 	status, err := service.AIStatus(context.Background(), alice)
-	if err != nil || status.AnimalModel != "animals-1" || status.Ready != 6 || status.Pending != 0 {
+	if err != nil || status.AnimalModel != "animals-1" || status.Ready != 7 || status.Pending != 0 {
 		t.Fatalf("AIStatus() = %+v, %v; want every photo ready", status, err)
 	}
 
-	// A detection that no longer finds the dogs takes them out again.
+	// A detection that no longer finds the dogs takes them out again; the
+	// cat stays.
 	worker.mu.Lock()
 	worker.detector, worker.blind = "detector-2", true
 	worker.mu.Unlock()
 	service = openPetService(t, root, "detector-2")
 	organise(t, service, worker)
-	if found := dogs(t, service); len(found) != 0 {
-		t.Fatalf("People() = %+v after the dogs left every photo", found)
+	if dogs, cats := pets(t, service); len(dogs) != 0 || len(cats) != 1 || cats[0].Photos != 3 {
+		t.Fatalf("People() = dogs %+v, cats %+v after the dogs left every photo", dogs, cats)
 	}
 }
 
-func TestDogsDetectedBeforeTheAnimalModelAreScannedOnceItArrives(t *testing.T) {
+func TestPetsDetectedBeforeTheAnimalModelAreScannedOnceItArrives(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "photos")
 	service := openPetService(t, root, "detector-1")
 	worker := newPettingEmbedder()
 	worker.animalModel = ""
 	importPetPhotos(t, service)
 	organise(t, service, worker)
-	if found := dogs(t, service); len(found) != 0 || len(worker.embedded) != 0 {
-		t.Fatalf("People() = %+v with no animal model", found)
+	if dogs, cats := pets(t, service); len(dogs)+len(cats) != 0 || len(worker.embedded) != 0 {
+		t.Fatalf("People() = %+v %+v with no animal model", dogs, cats)
 	}
 	detections := worker.detections
 
@@ -200,11 +208,11 @@ func TestDogsDetectedBeforeTheAnimalModelAreScannedOnceItArrives(t *testing.T) {
 	worker.animalModel = "animals-1"
 	service = openPetService(t, root, "detector-1")
 	organise(t, service, worker)
-	if found := dogs(t, service); len(found) != 2 {
-		t.Fatalf("People() = %+v; want red and green", found)
+	if dogs, cats := pets(t, service); len(dogs) != 2 || len(cats) != 1 {
+		t.Fatalf("People() = dogs %+v, cats %+v; want red, green and yellow", dogs, cats)
 	}
-	if worker.detections != detections || len(worker.embedded) != 8 {
-		t.Fatalf("detected %d more times and embedded %d animals; want no detection again and the 8 sure dogs",
+	if worker.detections != detections || len(worker.embedded) != 11 {
+		t.Fatalf("detected %d more times and embedded %d animals; want no detection again and the 11 sure pets",
 			worker.detections-detections, len(worker.embedded))
 	}
 }
@@ -216,8 +224,8 @@ func TestReconcileRescansAMissingAvatarSheetAndRemovesAStrayOne(t *testing.T) {
 	importPetPhotos(t, service)
 	organise(t, service, worker)
 	sheets, err := filepath.Glob(filepath.Join(root, "derived", "pets-v1", "*", "*.jpg"))
-	if err != nil || len(sheets) != 5 {
-		t.Fatalf("pet sheets = %v, %v; want one per photo with a dog", sheets, err)
+	if err != nil || len(sheets) != 7 {
+		t.Fatalf("pet sheets = %v, %v; want one per photo with a pet", sheets, err)
 	}
 	if err := os.Remove(sheets[0]); err != nil {
 		t.Fatal(err)
@@ -237,8 +245,8 @@ func TestReconcileRescansAMissingAvatarSheetAndRemovesAStrayOne(t *testing.T) {
 	if _, err := os.Stat(sheets[0]); err != nil || len(worker.embedded) == embedded {
 		t.Fatalf("missing sheet not rescanned: %v", err)
 	}
-	if found := dogs(t, service); len(found) != 2 || found[0].Photos != 4 || found[1].Photos != 4 {
-		t.Fatalf("People() = %+v after the rescan; want red and green unchanged", found)
+	if dogs, cats := pets(t, service); len(dogs) != 2 || dogs[0].Photos != 4 || dogs[1].Photos != 4 || len(cats) != 1 || cats[0].Photos != 3 {
+		t.Fatalf("People() = dogs %+v, cats %+v after the rescan; want the three pets unchanged", dogs, cats)
 	}
 }
 
