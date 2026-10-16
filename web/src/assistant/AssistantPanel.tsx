@@ -390,18 +390,21 @@ function Outcome() {
 export const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} controls={false} />;
 
 // A code block's header: its language, and a copy that works on the LAN's
-// plain HTTP, where the Clipboard API is unavailable.
-function CodeHeader({ language, code }: CodeHeaderProps) {
+// plain HTTP, where the Clipboard API is unavailable. The props are typed as
+// unknown because StreamdownTextComponents' index signature, meant for HTML
+// elements, applies to CodeHeader too; the adapter passes CodeHeaderProps.
+function CodeHeader({ language, code }: { [K in keyof CodeHeaderProps]?: unknown }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(false), 1600);
     return () => window.clearTimeout(timer);
   }, [copied]);
+  const text = typeof code === "string" ? code.replace(/\n$/, "") : "";
   return (
     <div className="as-code-head">
-      <span>{language || "文本"}</span>
-      <button type="button" className={copied ? "copied" : undefined} aria-label={copied ? "已复制" : "复制代码"} onClick={() => setCopied(copyText(code.replace(/\n$/, "")))}>
+      <span>{typeof language === "string" && language ? language : "文本"}</span>
+      <button type="button" className={copied ? "copied" : undefined} aria-label={copied ? "已复制" : "复制代码"} onClick={() => setCopied(copyText(text))}>
         {copied ? <Check /> : <Copy />}{copied ? "已复制" : "复制"}
       </button>
     </div>
