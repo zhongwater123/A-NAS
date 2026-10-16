@@ -54,8 +54,11 @@ func derivedPath(derivation, objectID string) string {
 }
 
 // Thumbnail opens an asset's grid thumbnail. Callers fall back to the
-// original while the thumbnail is pending or failed.
+// original while the thumbnail is pending or failed. An assistant gets none.
 func (s *Service) Thumbnail(ctx context.Context, p Principal, assetID string) (Content, error) {
+	if p.Assistant {
+		return Content{}, ErrForbidden
+	}
 	record, err := s.visibleAsset(ctx, s.db, p, assetID)
 	if err != nil {
 		return Content{}, err

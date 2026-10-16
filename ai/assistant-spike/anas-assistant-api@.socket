@@ -1,0 +1,11 @@
+[Unit]
+Description=A-NAS assistant API socket for %i (spike)
+
+[Socket]
+ListenStream=/run/a-nas-assistant/%i.sock
+SocketMode=0600
+# Disabling an account's assistant leaves no socket behind.
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

@@ -10,11 +10,13 @@ import (
 	"os/exec"
 	"os/user"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 )
 
 // SessionResolver verifies a session token and returns its Linux identity.
@@ -42,17 +44,34 @@ type Config struct {
 	// ShellCommand builds the administrator's terminal shell; the default is
 	// a login bash, or sh where bash is missing.
 	ShellCommand func() *exec.Cmd
-	// TerminalRecheck is how often a running terminal's session is verified.
+	// TerminalRecheck is how often a running terminal's session, or an open
+	// connection to an assistant, is verified.
 	TerminalRecheck time.Duration
+	// AssistantSockets holds each member's assistant socket, <username>.sock,
+	// which only root may connect to; empty turns the assistant off (ADR 0024).
+	AssistantSockets string
+	// AssistantTokens holds <username>.env with the instance's
+	// HERMES_DASHBOARD_SESSION_TOKEN, readable by root alone.
+	AssistantTokens string
+	// AssistantChanges holds what the executor of the assistants' changes
+	// keeps, readable by root alone; empty turns the executor off.
+	AssistantChanges string
+	// Accounts names the account behind an assistant's UID.
+	Accounts AccountResolver
 
 	// skipCredentials lets unprivileged tests run workers as the test user.
 	skipCredentials bool
 }
 
 type Server struct {
-	config      Config
-	mu          sync.Mutex
-	workers     map[workerKey]*worker
+	config  Config
+	mu      sync.Mutex
+	workers map[workerKey]*worker
+	// assistants are the broker's copies of the assistant connections it
+	// handed out, cut when the broker stops.
+	assistants map[*net.UnixConn]struct{}
+	// changes executes the assistants' changes; nil when off.
+	changes     *assistantchanges.Executor
 	closed      bool
 	shareMu     sync.Mutex
 	shareEpoch  string
@@ -62,6 +81,9 @@ type Server struct {
 type workerKey struct {
 	uid  int
 	role accounts.Role
+	// confined workers apply the assistant's changes: Landlock lets them write
+	// only the member's own places (ADR 0024 decision 4).
+	confined bool
 }
 
 type worker struct {
@@ -117,7 +139,11 @@ func NewServer(config Config) (*Server, error) {
 			return strconv.Atoi(account.Uid)
 		}
 	}
-	return &Server{config: config, workers: make(map[workerKey]*worker)}, nil
+	server := &Server{config: config, workers: make(map[workerKey]*worker), assistants: make(map[*net.UnixConn]struct{})}
+	if config.AssistantChanges != "" {
+		server.changes = &assistantchanges.Executor{Root: config.AssistantChanges, Volume: config.VolumeRoot}
+	}
+	return server, nil
 }
 
 // Serve accepts Product Service connections until the listener closes.
@@ -142,15 +168,20 @@ func (s *Server) Serve(listener net.Listener) error {
 	}
 }
 
-// Close stops every worker.
+// Close stops every worker and cuts every assistant connection.
 func (s *Server) Close() {
 	s.mu.Lock()
 	s.closed = true
 	workers := s.workers
 	s.workers = make(map[workerKey]*worker)
+	assistants := s.assistants
+	s.assistants = make(map[*net.UnixConn]struct{})
 	s.mu.Unlock()
 	for _, w := range workers {
 		w.stop()
+	}
+	for instance := range assistants {
+		cut(instance)
 	}
 }
 
@@ -164,8 +195,18 @@ func (s *Server) handle(conn *net.UnixConn) {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
-	if req.Op == opTerminal {
+	switch req.Op {
+	case opTerminal:
 		s.serveTerminal(conn, req)
+		return
+	case opAssistant:
+		s.serveAssistant(conn, req)
+		return
+	case opChangePrepare, opChangeDecide, opChangeGet:
+		result := s.serveChange(req)
+		if err := writeMessage(conn, result, nil); err != nil {
+			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
+		}
 		return
 	}
 	result, file := s.dispatch(context.Background(), req)
@@ -214,7 +255,10 @@ func (s *Server) dispatch(ctx context.Context, req request) (response, *os.File)
 }
 
 func (s *Server) worker(identity accounts.Identity) (*worker, error) {
-	key := workerKey{uid: identity.UID, role: identity.Role}
+	return s.workerFor(workerKey{uid: identity.UID, role: identity.Role}, identity)
+}
+
+func (s *Server) workerFor(key workerKey, identity accounts.Identity) (*worker, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -232,7 +276,11 @@ func (s *Server) worker(identity accounts.Identity) (*worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	w, err := s.spawn(key, credential)
+	var env []string
+	if key.confined {
+		env = []string{ConfineVariable + "=" + strings.Join(s.writablePlaces(identity.Username), ":")}
+	}
+	w, err := s.spawn(key, credential, env)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +306,7 @@ func (s *Server) credential(identity accounts.Identity) (*syscall.Credential, er
 	return &syscall.Credential{Uid: uint32(identity.UID), Gid: uint32(identity.UID), Groups: groups}, nil
 }
 
-func (s *Server) spawn(key workerKey, credential *syscall.Credential) (*worker, error) {
+func (s *Server) spawn(key workerKey, credential *syscall.Credential, env []string) (*worker, error) {
 	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
@@ -268,7 +316,7 @@ func (s *Server) spawn(key workerKey, credential *syscall.Credential) (*worker, 
 	defer child.Close()
 	cmd := s.config.Command(s.config.VolumeRoot)
 	cmd.ExtraFiles = []*os.File{child}
-	cmd.Env = []string{}
+	cmd.Env = append([]string{}, env...)
 	cmd.Dir = "/"
 	cmd.Stderr = os.Stderr
 	if s.config.skipCredentials {

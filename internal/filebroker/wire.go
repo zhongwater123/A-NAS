@@ -51,6 +51,7 @@ func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
 	header := make([]byte, 4)
 	rights := make([]byte, syscall.CmsgSpace(4*4))
 	count, rightsCount, _, _, err := conn.ReadMsgUnix(header, rights)
+	// A connection closed under the read reports -1, not 0.
 	if count <= 0 && err != nil {
 		return nil, err
 	}

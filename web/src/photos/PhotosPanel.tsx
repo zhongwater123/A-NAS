@@ -24,7 +24,7 @@ import { Avatar, PeopleSettings, PersonPicker, personName } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
 import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
-  addPhotoTag, addToAlbum, attachLiveVideo, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
+  addPhotoTag, addToAlbum, attachLiveVideo, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, getPhoto, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
   listPeople, listPersonPhotos, listPhotoTrash, listSimilarPhotos, downloadURL, mergePeople, purgePhoto, removeFromAlbum, removeFromPerson, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
   setLibraryPeople, updatePerson, type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoPerson, type PhotoSearchPage, type PhotoSimilarPage,
 } from "./photosApi";
@@ -38,7 +38,14 @@ import { DropOverlay, type UploadSummary, type UploadTarget, UploadTray, useUplo
 import { Viewer, type ViewerActions } from "./Viewer";
 import "./photos.css";
 
-interface Props { userId: string; userName: string; isAdmin: boolean }
+interface Props {
+  userId: string;
+  userName: string;
+  isAdmin: boolean;
+  /** A photo to show on its own, asked for by another window; onFocusHandled clears it. */
+  focus?: { assetId: string; at: number };
+  onFocusHandled?(): void;
+}
 
 const aiPollInterval = 15_000;
 const narrowWidth = 720;
@@ -73,7 +80,7 @@ const placeKey = (place: Place) => {
 // PhotosPanel is the photos window: libraries and albums on the side, photos
 // filling the rest, a viewer over everything. The photo service decides
 // every permission; the panel only leaves out what it would refuse.
-export function PhotosPanel({ userId, userName, isAdmin }: Props) {
+export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }: Props) {
   const [libraries, setLibraries] = useState<PhotoLibrary[]>();
   const [failure, setFailure] = useState("");
   const [place, setPlaceState] = useState<Place>();
@@ -92,6 +99,8 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
   const selection = useSelection(viewAssets);
   const [count, setCount] = useState<number>();
   const [viewer, setViewer] = useState<{ id: string; origin?: DOMRect }>();
+  // One photo another window asked to show, viewed on its own over the current place.
+  const [focused, setFocused] = useState<PhotoAsset>();
   // The photo a full-screen slideshow started from.
   const [slideshow, setSlideshow] = useState<string>();
   const [refreshKey, setRefreshKey] = useState(0);
@@ -521,6 +530,22 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
     },
     error: reportError,
   };
+  useEffect(() => {
+    if (!focus) return;
+    let current = true;
+    getPhoto(focus.assetId)
+      .then((asset) => { if (current) { setViewer(undefined); setFocused(asset); } })
+      .catch((reason) => { if (current) reportError(reason); })
+      .finally(() => onFocusHandled?.());
+    return () => { current = false; };
+    // Runs once per focus; the callbacks it uses do not decide what to show.
+  }, [focus]);
+  const focusedActions: ViewerActions = {
+    ...viewerActions,
+    trash: (asset) => { setFocused(undefined); void trash([asset]); },
+    openTag: (tag) => { setFocused(undefined); viewerActions.openTag(tag); },
+    findSimilar: (asset) => { setFocused(undefined); viewerActions.findSimilar(asset); },
+  };
   const closeViewer = useCallback(() => {
     setViewer(undefined);
     if (renamed.current) { renamed.current = false; setRefreshKey((value) => value + 1); }
@@ -893,6 +918,20 @@ export function PhotosPanel({ userId, userName, isAdmin }: Props) {
           onInfo={setInfo}
           onChanged={() => undefined}
           actions={viewerActions}
+        />
+      )}
+      {focused && !viewer && (
+        <Viewer
+          assets={[focused]}
+          index={0}
+          onIndex={() => undefined}
+          onClose={() => { setFocused(undefined); root.current?.focus(); }}
+          returnRect={() => Promise.resolve(undefined)}
+          caller={caller}
+          info={info}
+          onInfo={setInfo}
+          onChanged={() => undefined}
+          actions={focusedActions}
         />
       )}
       {slideshow && (

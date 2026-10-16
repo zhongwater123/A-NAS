@@ -7,7 +7,8 @@ import "time"
 // unexpired, read-only viewing grant. Every member sees and may add to the
 // shared library, but only the uploader or an administrator may change a
 // shared photo asset, and only the creator or an administrator may change a
-// shared virtual directory.
+// shared virtual directory. A member's assistant only reads what the member
+// owns or shares with everyone (ADR 0024).
 //
 // Callers turn "cannot view" into ErrNotFound so that private content is not
 // revealed by error codes, and "can view but not change" into ErrForbidden.
@@ -15,8 +16,11 @@ import "time"
 func (p Principal) valid() bool { return p.UserID != "" }
 
 // viewing returns the caller's unexpired grant on a member's private library
-// that lasts longest.
+// that lasts longest. An assistant never views through a grant.
 func (p Principal) viewing(ownerUserID string, now time.Time) (ViewingGrant, bool) {
+	if p.Assistant {
+		return ViewingGrant{}, false
+	}
 	var found ViewingGrant
 	for _, grant := range p.Viewing {
 		if grant.OwnerUserID == ownerUserID && grant.ExpiresAt.After(now) && grant.ExpiresAt.After(found.ExpiresAt) {
@@ -45,6 +49,9 @@ func viewingOnly(p Principal, lib library) bool {
 
 // canAdd covers importing into, copying into and creating directories in lib.
 func canAdd(p Principal, lib library) bool {
+	if p.Assistant {
+		return false
+	}
 	if lib.kind == LibraryKindShared {
 		return true
 	}
@@ -54,6 +61,9 @@ func canAdd(p Principal, lib library) bool {
 // canChange covers renaming, moving, trashing, restoring and purging an item
 // that createdBy uploaded or created in lib.
 func canChange(p Principal, lib library, createdBy string) bool {
+	if p.Assistant {
+		return false
+	}
 	if lib.kind == LibraryKindShared {
 		return p.Admin || createdBy == p.UserID
 	}

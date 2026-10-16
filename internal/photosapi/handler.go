@@ -46,6 +46,13 @@ func NewPrincipal(userID, username string, admin bool, viewings []accounts.Libra
 	return principal
 }
 
+// NewAssistantPrincipal builds the photo Principal for a member's AI
+// assistant (ADR 0024): it reads as the member, never as an administrator or
+// through a viewing grant, and changes nothing.
+func NewAssistantPrincipal(userID, username string) photos.Principal {
+	return photos.Principal{UserID: userID, Username: username, Assistant: true}
+}
+
 func principalFrom(r *http.Request) (photos.Principal, bool) {
 	principal, ok := r.Context().Value(principalKey{}).(photos.Principal)
 	return principal, ok && principal.UserID != ""
@@ -74,8 +81,15 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 		return
 	}
-	if _, ok := principalFrom(r); !ok {
+	principal, ok := principalFrom(r)
+	if !ok {
 		WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+		return
+	}
+	// The photo Policy already refuses an assistant every change; refusing
+	// all but reads here also keeps it from searching by an uploaded image.
+	if principal.Assistant && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		WriteError(w, http.StatusForbidden, "assistant_read_only", "the assistant can only read the photo library")
 		return
 	}
 	h.mux.ServeHTTP(w, r)

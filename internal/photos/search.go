@@ -438,11 +438,14 @@ func (s *Service) searchScope(ctx context.Context, p Principal, viewing string) 
 	if !p.valid() {
 		return nil, ErrForbidden
 	}
-	own, err := s.ensurePrivateLibrary(ctx, p)
+	own, hasOwn, err := s.ownLibrary(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	scope := []any{own.id, s.sharedLibraryID}
+	scope := []any{s.sharedLibraryID}
+	if hasOwn {
+		scope = []any{own.id, s.sharedLibraryID}
+	}
 	if viewing == "" {
 		return scope, nil
 	}

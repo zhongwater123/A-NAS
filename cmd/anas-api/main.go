@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,6 +24,8 @@ import (
 	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -114,11 +120,17 @@ func runPhotoService(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	lookup := sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock"))
 	return photoservice.Run(ctx, photoservice.Config{
 		Root:       environment("ANAS_PHOTOS_ROOT", "/srv/a-nas/data/photos"),
 		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
-		Sessions:   sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")),
-		Logger:     logger,
+		Sessions:   lookup,
+		// The AI assistant is not shipped yet (ADR 0024), so its socket is off
+		// unless named. A socket unit may hold it (FileDescriptorName=assistant)
+		// so that it outlives restarts of this service.
+		AssistantSocketPath: os.Getenv("ANAS_PHOTOS_ASSISTANT_SOCKET"),
+		Accounts:            lookup,
+		Logger:              logger,
 		// Without the AI component the socket is absent and photos wait for it.
 		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
 		AIQuietPeriod: quiet,
@@ -177,6 +189,7 @@ func run(logger *slog.Logger) error {
 	}
 	fileOptions := files.Options{AllowUnverifiedVolume: !live}
 	terminalConfig := terminal.Config{}
+	var broker *filebroker.Client
 	if live {
 		// The guard runs before every file request, so the expected UUID
 		// comes from the stored volume, not from a Host Agent disk read; the
@@ -189,7 +202,7 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		broker := filebroker.NewClient(brokerSocket)
+		broker = filebroker.NewClient(brokerSocket)
 		fileOptions.FileSystem = broker
 		// Terminal shells run as the signed-in administrator, not as a-nas.
 		terminalConfig.Spawner = broker
@@ -307,6 +320,7 @@ func run(logger *slog.Logger) error {
 		FilePreviews: previewService,
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
+		Assistant:    assistantAPI(logger, broker),
 		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -579,4 +593,89 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 	default:
 		return nil, nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
 	}
+}
+
+// assistantAPI configures the AI assistant (ADR 0024). Without
+// ANAS_ASSISTANT_SOCKET_DIR it answers assistant_unavailable and the desktop
+// keeps the assistant as planned. With the File Broker every connection to a
+// member's instance goes through it, the session gate (decision 10); without
+// it, in development only, the sockets are dialled directly with the tokens in
+// ANAS_ASSISTANT_TOKEN_DIR. The File Broker also executes the assistant's
+// changes; ANAS_ASSISTANT_CHANGES_SOCKET points at the spike's change broker
+// instead, which stands in for it where there is no File Broker.
+func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
+	sockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
+	options := assistantapi.Options{SocketDir: sockets, Logger: logger}
+	switch {
+	case sockets == "":
+	case broker != nil:
+		options.Connector = gatedAssistant{broker}
+	default:
+		options.Connector = assistantapi.SocketConnector{SocketDir: sockets, TokenDir: os.Getenv("ANAS_ASSISTANT_TOKEN_DIR")}
+	}
+	if socket := os.Getenv("ANAS_ASSISTANT_CHANGES_SOCKET"); socket != "" {
+		options.Changes = assistantapi.BrokerChanges(socket)
+	} else if broker != nil {
+		options.Changes = executedChanges{broker}
+	}
+	return assistantapi.New(options)
+}
+
+// executedChanges is the File Broker's executor of the assistant's changes. It
+// acts for the member whose session the request carries, whatever account
+// the caller names.
+type executedChanges struct{ broker *filebroker.Client }
+
+func (e executedChanges) Prepare(ctx context.Context, _ string, submission assistantapi.Submission) (assistantapi.Change, error) {
+	return asChange(e.broker.PrepareChange(ctx, submission.SessionID, submission.RequestID, submission.Args))
+}
+
+func (e executedChanges) Decide(ctx context.Context, _, id string, decision assistantapi.Decision) (assistantapi.Change, error) {
+	return asChange(e.broker.DecideChange(ctx, id, string(decision)))
+}
+
+func (e executedChanges) Get(ctx context.Context, _, id string) (assistantapi.Change, error) {
+	return asChange(e.broker.GetChange(ctx, id))
+}
+
+func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
+	switch {
+	case errors.Is(err, assistantchanges.ErrInvalid):
+		return assistantapi.Change{}, fmt.Errorf("%w: %v", assistantapi.ErrInvalidSubmission, err)
+	case errors.Is(err, assistantchanges.ErrDecided):
+		return assistantapi.Change{}, assistantapi.ErrChangeDecided
+	case errors.Is(err, assistantchanges.ErrNotFound):
+		return assistantapi.Change{}, assistantapi.ErrChangeNotFound
+	case errors.Is(err, files.ErrForbidden):
+		return assistantapi.Change{}, assistantapi.ErrChangeSession
+	case err != nil:
+		return assistantapi.Change{}, err
+	}
+	var change assistantapi.Change
+	if err := json.Unmarshal(raw, &change); err != nil || change.ID == "" {
+		return assistantapi.Change{}, errors.New("the executor answered without a change")
+	}
+	change.Raw = raw
+	return change, nil
+}
+
+// gatedAssistant reaches a member's assistant through the File Broker, which
+// checks the session itself and cuts the connection when it ends.
+type gatedAssistant struct{ broker *filebroker.Client }
+
+func (g gatedAssistant) Connect(ctx context.Context, account string) (net.Conn, string, error) {
+	conn, err := g.broker.ConnectAssistant(ctx)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, "", assistantapi.ErrNoAssistant
+	case errors.Is(err, files.ErrForbidden):
+		return nil, "", assistantapi.ErrSessionRejected
+	case err != nil:
+		return nil, "", err
+	}
+	if conn.Username != account {
+		_ = conn.Close()
+		return nil, "", assistantapi.ErrSessionRejected
+	}
+	return conn, conn.Token, nil
 }

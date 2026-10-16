@@ -28,6 +28,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 
 - [0023：成员分享的固定副本由独立服务持有](0023-isolate-member-share-copies-in-a-dedicated-service.md)（proposed）
 
+- [0024：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行](0024-run-a-sandboxed-hermes-agent-per-member.md)（proposed）
+
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。

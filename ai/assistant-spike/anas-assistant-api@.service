@@ -1,0 +1,12 @@
+[Unit]
+Description=A-NAS assistant API bridge for %i (spike)
+Requires=anas-assistant@%i.service anas-assistant-api@%i.socket
+After=anas-assistant@%i.service anas-assistant-api@%i.socket
+# Enters the assistant's private network namespace, so 127.0.0.1:9119 is its
+# `hermes serve`; the listening socket is the per-member Unix socket above.
+JoinsNamespaceOf=anas-assistant@%i.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=45s 127.0.0.1:9119
+PrivateNetwork=true
+DynamicUser=true

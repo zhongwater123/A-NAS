@@ -1,5 +1,7 @@
 GO ?= go
 SYSTEM_TEST_IMAGE ?= anas-systemd:trixie
+# The AI assistant's part of the system test and the scripts it runs from the spike.
+ASSISTANT_SYSTEM_TEST = $(addprefix ai/assistant-spike/,system-test.sh assistant-install.sh assistant-layout.sh seed.sh layout-acl.sh)
 NPM ?= npm
 BUILD_DIR ?= build
 VERSION ?= dev
@@ -36,8 +38,8 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh
-	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh
+	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST)
+	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST)
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service

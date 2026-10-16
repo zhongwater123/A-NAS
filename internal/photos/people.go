@@ -115,7 +115,7 @@ var personKinds = map[string]string{
 // shared library (2026-10-15 decision); an administrator who only views a
 // private library cannot.
 func canChangePeople(p Principal, lib library) bool {
-	if !p.valid() {
+	if !p.valid() || p.Assistant {
 		return false
 	}
 	return lib.kind == LibraryKindShared || lib.ownerUserID == p.UserID

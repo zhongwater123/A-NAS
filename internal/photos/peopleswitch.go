@@ -29,7 +29,7 @@ func inPeopleLibrary(object string) string {
 // canSetPeople: the owner of a private library; an administrator for the
 // shared library, like its other AI switches. Viewing grants are read-only.
 func canSetPeople(p Principal, lib library) bool {
-	if !p.valid() {
+	if !p.valid() || p.Assistant {
 		return false
 	}
 	if lib.kind == LibraryKindShared {

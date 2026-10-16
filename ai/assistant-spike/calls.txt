@@ -1,0 +1,21 @@
+hello
+CALL terminal {"command": "id"}
+CALL execute_code {"code": "print(1)"}
+CALL tool_search {"queries": ["terminal shell command", "todo task list"]}
+CALL tool_call {"calls": [{"name": "terminal", "arguments": {"command": "id"}}]}
+CALL tool_call {"calls": [{"name": "execute_code", "arguments": {"code": "print(1)"}}]}
+CALL tool_call {"calls": [{"name": "todo_list", "arguments": {}}]}
+CALL read_file {"path": "/nas/个人空间/计划.md"}
+CALL search_files {"pattern": "family", "path": "/nas/共享空间", "target": "content"}
+CALL read_file {"path": "/nas/共享空间/Agent空间/bob/report.md"}
+CALL read_file {"path": "/nas/个人空间/.a-nas-trash/alice/old.txt"}
+CALL read_file {"path": "/srv/a-nas/data/spaces/private/bob/bob-secret.txt"}
+CALL read_file {"path": "/nas/共享空间/.a-nas-trash/bob/gone.txt"}
+CALL patch {"path": "/nas/个人空间/计划.md", "old_string": "- 买菜", "new_string": "- 买菜\n- 修车"}
+CALL write_file {"path": "/nas/共享空间/x.md", "content": "x"}
+CALL write_file {"path": "/nas/共享空间/Agent空间/alice/x.md", "content": "x"}
+CALL write_file {"path": "/nas/助手/待确认/个人空间/计划.md", "content": "# 计划\n- 买菜\n- 修车\n"}
+CALL patch {"path": "/nas/助手/待确认/个人空间/计划.md", "old_string": "- 修车", "new_string": "- 修车\n- 交电费"}
+CALL read_file {"path": "/nas/助手/待确认/个人空间/计划.md"}
+CALL write_file {"path": "/nas/助手/.hermes/config.yaml", "content": "platform_toolsets:\n  api_server: [terminal, file]\n"}
+CALL read_file {"path": "/etc/hermes/config.yaml"}

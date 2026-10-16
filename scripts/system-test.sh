@@ -13,6 +13,10 @@
 #        scripts/system-test.sh [IMAGE]
 # Prints PASS/FAIL lines and exits non-zero on any failure.
 #
+# The AI assistant's sandbox (ai/assistant-spike/system-test.sh) runs without
+# Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the spike's runtime.tar.gz
+# adds its policy check and a real assistant against a scripted model.
+#
 # Local AI runs on a stand-in model, detector and runtime with the Worker's
 # fake providers. With ANAS_SYSTEM_TEST_AI=real, after
 # scripts/build-ai-runtime.sh and with ANAS_AI_MODEL and ANAS_AI_DETECTOR
@@ -38,9 +42,14 @@ if [[ "${1:-}" != --inside ]]; then
     real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
       -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro")
   fi
+  assistant=()
+  if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
+    [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
+    assistant=(-v "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:/assistant-runtime.tar.gz:ro")
+  fi
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "$image" >/dev/null
+    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "${assistant[@]}" "$image" >/dev/null
   trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT
   for _ in $(seq 1 60); do
     state=$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)
@@ -861,6 +870,10 @@ check "the Product Service reads the current pool" \
   grep -Fqx "ANAS_SCREENSAVER_DIRECTORY=$pools/current" /etc/a-nas/anas-api.env
 video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
 check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
+
+# --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
+# shellcheck disable=SC1091 # sourced from the mounted checkout
+. /src/ai/assistant-spike/system-test.sh
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

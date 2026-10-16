@@ -299,6 +299,20 @@ describe("PhotosPanel viewer", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("shows a photo another window asks for, such as one the assistant named", async () => {
+    serve(
+      (url) => url === "/api/v1/photos/assets/photo%3Az" ? json(asset("photo:z", { takenAt: "2025-08-02T09:00:00Z" })) : undefined,
+      timeline(privateLibrary.id, () => [asset("photo:a")]),
+    );
+    const handled = vi.fn();
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} focus={{ assetId: "photo:z", at: 1 }} onFocusHandled={handled} />);
+    expect(await screen.findByRole("dialog", { name: "查看 photo:z.jpg" })).toBeTruthy();
+    expect(handled).toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("moves a photo to the trash and undoes it", async () => {
     let trashed = false;
     const fetchMock = serve(

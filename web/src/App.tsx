@@ -54,6 +54,7 @@ import {
   setSession, setupAdministrator,
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
+import { assistantStatus } from "./assistant/assistantApi";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
 import { BackupCenter } from "./backup/BackupCenter";
 import { VersionsDialog } from "./backup/VersionsDialog";
@@ -91,11 +92,13 @@ import { SharesProvider, useShares } from "./shares/SharesProvider";
 import { SharesPanel } from "./shares/SharesPanel";
 import "./styles.css";
 
+// The assistant window, with its chat libraries, loads when first opened.
+const AssistantPanel = lazy(() => import("./assistant/AssistantPanel").then((module) => ({ default: module.AssistantPanel })));
 // The transfer center loads when first opened; the desktop only needs its
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
 
-type WindowID = "shares" | "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store";
+type WindowID = "shares" | "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store" | "assistant";
 
 interface WindowModel {
   id: WindowID;
@@ -135,6 +138,7 @@ const initialWindows: WindowModel[] = [
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 960, height: 660, z: 0, opened: 0 },
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
+  { id: "assistant", title: "AI 助手", open: false, minimized: false, maximized: false, x: 260, y: 54, width: 1040, height: 700, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, AppGlyph> = {
@@ -149,6 +153,7 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   settings: Settings,
   docker: DockerGlyph,
   store: ShoppingBag,
+  assistant: Bot,
 };
 // A press on the wallpaper that moves this many pixels or more is a drag, not a click.
 const wallpaperClickSlop = 6;
@@ -167,6 +172,7 @@ const windowTones: Record<WindowID, string> = {
   settings: "settings",
   docker: "docker",
   store: "store",
+  assistant: "ai",
 };
 
 export default function App() {
@@ -332,12 +338,18 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
   useEffect(() => { transferStore.attach(session.user.id); }, [session.user.id]);
+  // The assistant opens only when this device runs one for this account (ADR 0024).
+  const [assistantReady, setAssistantReady] = useState(false);
+  useEffect(() => { void assistantStatus().then((status) => setAssistantReady(status.available)).catch(() => setAssistantReady(false)); }, [session.user.id]);
   // A folder the transfer center asks the file manager to show.
   const [fileNavigation, setFileNavigation] = useState<TransferLocation>();
   const showInFiles = (location: TransferLocation) => { setFileNavigation(location); openWindow("files"); };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   const [dockerFocus, setDockerFocus] = useState<DockerFocus>();
+  // A photo another window asks the photo app to show, such as one the assistant named.
+  const [photoFocus, setPhotoFocus] = useState<{ assetId: string; at: number }>();
   const showInDocker = (appID: string) => { setDockerFocus({ project: appProject(appID), at: Date.now() }); openWindow("docker"); };
+  const showPhoto = (assetId: string) => { setPhotoFocus({ assetId, at: Date.now() }); openWindow("photos"); };
   const shortcuts = useAppShortcuts();
   // Keywords let the launcher find an app by what it holds, not only by its name.
   const desktopApps: DesktopApp[] = [
@@ -355,7 +367,9 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <DockerGlyph />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
-    { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+    assistantReady
+      ? { id: "ai", label: "AI 助手", ariaLabel: "打开 AI 助手", keywords: "助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <Bot />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
+      : { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
     // Installed apps open their own web interface; a stopped one shows its
     // containers in Docker to administrators.
     ...shortcuts.map((shortcut) => shortcutApp(shortcut, session.user.role === "admin" ? () => showInDocker(shortcut.id) : undefined)),
@@ -427,13 +441,14 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
 			  {window.id === "settings" && <SettingsPanel session={session} host={host} section={settingsSection} onSectionChange={setSettingsSection} storagePlan={storagePlan} onUserChange={changeUser} onLogout={onLogout} />}
 			  {window.id === "files" && <FilePanel userID={session.user.id} navigation={fileNavigation} onNavigated={() => setFileNavigation(undefined)} onOpenTransfers={() => openWindow("transfers")} onOpenPhotos={() => dispatch({ type: "open", id: "photos" })} onOpenMedia={() => dispatch({ type: "open", id: "media" })} onOpenMusic={() => dispatch({ type: "open", id: "music" })} />}
 			  {window.id === "transfers" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><TransferCenter onOpenFiles={() => openWindow("files")} onOpenLocation={showInFiles} /></Suspense>}
-			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={displayName(session.user)} isAdmin={session.user.role === "admin"} />}
+			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={displayName(session.user)} isAdmin={session.user.role === "admin"} focus={photoFocus} onFocusHandled={() => setPhotoFocus(undefined)} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
+			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} onShowPhoto={showPhoto} /></Suspense>}
             </AppWindow>
           );
         })}

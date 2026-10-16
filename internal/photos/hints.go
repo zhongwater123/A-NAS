@@ -12,8 +12,12 @@ const hintBatch = 500
 // private library with the names of other members whose private libraries
 // hold the same original. The hint reveals the name only: no asset, path,
 // metadata or count from the other library, and never to an administrator
-// viewing someone else's library or for the shared library.
+// viewing someone else's library, for the shared library or to an assistant,
+// which has no use for other members' names.
 func (s *Service) addDuplicateHints(ctx context.Context, q queryer, p Principal, records []assetRecord) error {
+	if p.Assistant {
+		return nil
+	}
 	positions := make(map[string][]int)
 	var objects []string
 	for i, record := range records {

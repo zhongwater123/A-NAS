@@ -18,7 +18,7 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 	if !p.valid() {
 		return nil, ErrForbidden
 	}
-	own, err := s.ensurePrivateLibrary(ctx, p)
+	own, hasOwn, err := s.ownLibrary(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -27,11 +27,16 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 		return nil, err
 	}
 	now := s.now()
-	libraries := []Library{publicLibrary(p, own, now), publicLibrary(p, shared, now)}
-	if !p.Admin {
-		return s.withPeople(ctx, p, libraries, map[string]library{own.id: own, shared.id: shared})
+	var libraries []Library
+	read := map[string]library{shared.id: shared}
+	if hasOwn {
+		libraries = append(libraries, publicLibrary(p, own, now))
+		read[own.id] = own
 	}
-	read := map[string]library{own.id: own, shared.id: shared}
+	libraries = append(libraries, publicLibrary(p, shared, now))
+	if !p.Admin || p.Assistant {
+		return s.withPeople(ctx, p, libraries, read)
+	}
 	seen := map[string]bool{p.UserID: true}
 	for _, grant := range p.Viewing {
 		if seen[grant.OwnerUserID] || !grant.ExpiresAt.After(now) {
