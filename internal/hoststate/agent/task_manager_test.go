@@ -95,3 +95,28 @@ func TestTaskManagerOldObserverIsExplicitlyUnavailable(t *testing.T) {
 		}
 	}
 }
+
+type iconTaskReader struct{ *fake.Reader }
+
+func (r iconTaskReader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error) {
+	s, err := r.Reader.ReadTasks(ctx)
+	id, src := taskmanager.NormalizeIcon([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 0h16v16z" fill="#369"/></svg>`))
+	s.Icons = map[string]string{id: src}
+	s.Processes.Items[0].IconID = id
+	return s, err
+}
+func TestTaskIconsSurviveIPCAndRejectRemoteImages(t *testing.T) {
+	source := iconTaskReader{fake.NewHealthy()}
+	expected, _ := source.ReadTasks(context.Background())
+	client := agent.NewClient(serve(t, agent.NewHandler(source, discardLogger())))
+	actual, err := client.ReadTasks(context.Background())
+	id := expected.Processes.Items[0].IconID
+	if err != nil || id == "" || actual.Icons[id] != expected.Icons[id] || actual.Processes.Items[0].IconID != id {
+		t.Fatalf("icon round trip: %v", err)
+	}
+	expected.Icons[id] = "https://example.invalid/icon.png"
+	bad := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(expected) })))
+	if _, err := bad.ReadTasks(context.Background()); err == nil {
+		t.Fatal("remote icon accepted")
+	}
+}

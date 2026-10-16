@@ -1,4 +1,4 @@
-import { Clock3, Grid2X2, Home, LogOut, Monitor, Search, Settings, UserRound } from "lucide-react";
+import { Clock3, Grid2X2, Home, LogOut, Monitor, Search, Settings, Share2, UserRound } from "lucide-react";
 import { KeyboardEvent, ReactNode, RefObject, useEffect, useId, useRef, useState } from "react";
 
 import type { Session, User } from "./api";
@@ -18,12 +18,14 @@ interface SystemRailProps {
   session: Session;
   desktopView: DesktopView;
   settingsFocused: boolean;
+  sharesFocused: boolean;
+  onOpenShares: () => void;
   onToggleDesktop: () => void;
   onOpenSettings: (section?: "account") => void;
   onLogout: () => void;
 }
 
-export function SystemRail({ apps, session, desktopView, settingsFocused, onToggleDesktop, onOpenSettings, onLogout }: SystemRailProps) {
+export function SystemRail({ apps, session, desktopView, settingsFocused, sharesFocused, onOpenShares, onToggleDesktop, onOpenSettings, onLogout }: SystemRailProps) {
   const [popover, setPopover] = useState<Popover>();
   const launcherButton = useRef<HTMLButtonElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
@@ -55,6 +57,7 @@ export function SystemRail({ apps, session, desktopView, settingsFocused, onTogg
           popup={{ kind: "dialog", id: launcherID, expanded: popover === "launcher" }}
           onClick={() => toggle("launcher")}
         ><Grid2X2 /></RailButton>
+        <RailButton label="打开分享" tip="分享" on={sharesFocused} onClick={() => { setPopover(undefined); onOpenShares(); }}><Share2 /></RailButton>
       </div>
       <div className="rail-spacer" />
       <div className="rail-group">

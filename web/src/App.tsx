@@ -370,7 +370,6 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
     assistantReady
       ? { id: "ai", label: "AI 助手", ariaLabel: "打开 AI 助手", keywords: "助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <Bot />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
       : { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
-    { id: "shares", label: "分享", ariaLabel: "打开分享", keywords: "分享 成员 留言 私聊 收到 发出", tone: "download", icon: <Share2 />, active: isOpen("shares"), onClick: () => openWindow("shares") },
     // Installed apps open their own web interface; a stopped one shows its
     // containers in Docker to administrators.
     ...shortcuts.map((shortcut) => shortcutApp(shortcut, session.user.role === "admin" ? () => showInDocker(shortcut.id) : undefined)),
@@ -419,6 +418,8 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
         session={session}
         desktopView={desktopView}
         settingsFocused={focusedID === "settings"}
+        sharesFocused={focusedID === "shares"}
+        onOpenShares={() => openWindow("shares")}
         onToggleDesktop={toggleDesktop}
         onOpenSettings={openSettings}
         onLogout={onLogout}

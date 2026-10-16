@@ -92,10 +92,11 @@ type Accelerator struct {
 }
 
 type TaskSnapshot struct {
-	ObservedAt    time.Time `json:"observedAt"`
-	SampleSeconds float64   `json:"sampleSeconds"`
-	Processes     TaskGroup `json:"processes"`
-	Services      TaskGroup `json:"services"`
+	Icons         map[string]string `json:"icons,omitempty"`
+	ObservedAt    time.Time         `json:"observedAt"`
+	SampleSeconds float64           `json:"sampleSeconds"`
+	Processes     TaskGroup         `json:"processes"`
+	Services      TaskGroup         `json:"services"`
 }
 
 type TaskGroup struct {
@@ -104,6 +105,7 @@ type TaskGroup struct {
 }
 
 type Task struct {
+	IconID              string   `json:"iconId,omitempty"`
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	PID                 int      `json:"pid"`

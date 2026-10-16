@@ -36,7 +36,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it("lets a member navigate every device page and view services and processes", async () => {
   api(); render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
-  expect(await screen.findByText("模拟数据")).toBeTruthy();
+  expect(await screen.findByRole("img", { name: /CPU 使用率，最近/ })).toBeTruthy();
   for (const tab of ["CPU", "GPU", "NPU", "内存", "网络", "硬盘", "总览"]) {
     fireEvent.click(screen.getByRole("button", { name: tab }));
     expect(screen.getByRole("button", { name: tab }).getAttribute("aria-pressed")).toBe("true");
@@ -84,27 +84,27 @@ it("offers first-load retry and uses the existing expired-session handler", asyn
   expect(await screen.findByRole("button", { name: "重试" })).toBeTruthy();
   expect(ended).toHaveBeenCalledOnce();
   api(); fireEvent.click(screen.getByRole("button", { name: "重试" }));
-  expect(await screen.findByText("模拟数据")).toBeTruthy(); unsubscribe();
+  expect(await screen.findByRole("img", { name: /CPU 使用率，最近/ })).toBeTruthy(); unsubscribe();
 });
 
-it("keeps last observed device data and a visible observation time after disconnect", async () => {
+it("keeps last observed device data and an error after disconnect", async () => {
   vi.useFakeTimers();
   const fetcher = api(); render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   await act(async () => {});
-  expect(screen.getByText("模拟数据")).toBeTruthy();
+  expect(screen.queryByText("模拟数据")).toBeNull();
   fetcher.mockRejectedValue(new Error("offline"));
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(screen.getByRole("alert").textContent).toContain("连接中断");
   expect(screen.getAllByText("25.0%")).toHaveLength(2);
-  expect(screen.getByText(/观测于/)).toBeTruthy();
+  expect(screen.queryByText(/观测于/)).toBeNull();
 });
 it("shows empty hardware groups explicitly and labels partial network totals", async () => {
   const options = { device: { ...device, network: { status: "partial", items: device.network.items }, disks: { status: "available", items: [] } } };
   api(options); render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
-  await screen.findByText("模拟数据");
-  expect(screen.getAllByText("物理网卡优先汇总 · 数据不完整")).toHaveLength(2);
+  await screen.findByRole("img", { name: /CPU 使用率，最近/ });
+  expect(screen.getAllByText("数据不完整")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "硬盘" }));
   expect(screen.getByText("未检测到硬盘")).toBeTruthy();
 });
@@ -123,8 +123,18 @@ it.each([["unsupported", "当前驱动不提供此指标"], ["unavailable", "暂
   api({device:{...device,gpu:{status:"partial",items:[{...device.gpu.items[0],status:"partial",usageStatus,memoryUsedStatus:"available",memoryTotalStatus:"available",memoryUsedBytes:1024,memoryTotalBytes:4096}]}}});
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", {name:"任务管理器"}));
-  await screen.findByText("模拟数据");
+  await screen.findByRole("img", { name: /CPU 使用率，最近/ });
   fireEvent.click(screen.getByRole("button", {name:"GPU"}));
   expect(screen.getByText(reason)).toBeTruthy();
   expect(screen.queryByText("暂无采样数据")).toBeNull();
+});
+
+it.each(["live", "simulated"])("omits the data source and update row for %s observations", async dataSource => {
+  api({ device: { ...device, dataSource } }); render(<Panel />);
+  fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
+  await screen.findByRole("img", { name: /CPU 使用率，最近/ });
+  expect(screen.queryByText(/模拟数据|实时数据|观测于|每 2 秒/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "服务与进程" }));
+  await screen.findByText("a-nas.service");
+  expect(screen.queryByText(/模拟数据|实时数据|观测于|每 2 秒/)).toBeNull();
 });

@@ -16,6 +16,7 @@ import (
 )
 
 type taskUsage struct {
+	mainPID          int
 	row              taskmanager.Task
 	identity         string
 	cpu, read, write *uint64
@@ -27,6 +28,7 @@ type workloadTaskSample struct {
 	processStatus, serviceStatus taskmanager.Status
 }
 type workloadTaskSampler struct {
+	icons    taskIconCache
 	gate     taskGate
 	previous *workloadTaskSample
 	cached   taskmanager.TaskSnapshot
@@ -93,6 +95,7 @@ func (r *Reader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error
 	}
 	sort.Slice(result.Processes.Items, func(i, j int) bool { return result.Processes.Items[i].PID < result.Processes.Items[j].PID })
 	sort.Slice(result.Services.Items, func(i, j int) bool { return result.Services.Items[i].Name < result.Services.Items[j].Name })
+	r.attachTaskIcons(ctx, &result, current.services)
 	s.previous = current
 	s.cached = result
 	return result, nil
@@ -274,6 +277,9 @@ func (r *Reader) readTaskServices(ctx context.Context) (map[string]taskUsage, ta
 			break
 		}
 		usage := taskUsage{row: taskmanager.Task{ID: "service:" + name, Name: name, State: "running"}, identity: values["InvocationID"]}
+		if pid, err := strconv.Atoi(values["MainPID"]); err == nil && pid > 0 {
+			usage.mainPID = pid
+		}
 		group := strings.TrimPrefix(values["ControlGroup"], "/")
 		if group == "" || !fs.ValidPath(group) || controllersErr != nil {
 			status = taskmanager.Partial

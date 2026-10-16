@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-15
+更新时间：2026-10-16
 
 ## 当前阶段
 
@@ -52,7 +52,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 ## 下一步
 
-- [成员文件分享](../specs/member-sharing.md)在 [PR #123](https://github.com/zhongwater123/A-NAS/pull/123) 的同一分支实现：固定副本、多成员分别私聊、表情、桌面通知与收发列表、选取保存、七天有效期，以及撤回停止/自然到期允许已有保存完成。独立分享进程和 Host Agent 发布栅栏见[技术设计](../architecture/member-sharing.md)及 [ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)。尚未合并、未部署；本地全量检查、可丢弃 Btrfs/权限验证、生产 systemd 容器联调及真实浏览器验收已通过，详见技术设计的验证记录。下一步为同一 PR 的合并评审，实机验收与部署另行安排。
+- [成员文件分享](../specs/member-sharing.md)在 [PR #123](https://github.com/zhongwater123/A-NAS/pull/123) 的同一分支实现：固定副本、多成员分别私聊、表情、桌面通知与收发列表、选取保存、七天有效期，以及撤回停止/自然到期允许已有保存完成。独立分享进程和 Host Agent 发布栅栏见[技术设计](../architecture/member-sharing.md)及 [ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)。PR #123 已合并，用户于 2026-10-16 报告已部署。局域网 HTTP 页面点击发送无反应已复现为安全上下文 API 使用错误，修复和边栏入口已在 [PR #135](https://github.com/zhongwater123/A-NAS/pull/135) 中通过 CI；接收界面已按用户反馈改为文件为主、私聊可收起，表情选择器增加分类/搜索/最近使用，发送标题下的说明已移除；见[调查记录](../investigations/2026-10-16-member-sharing-http-send.md)。下一步为修复版本评审、恢复开发 SSH 授权后的宿主机核验与部署；不可把此前 localhost 验收视为局域网浏览器验收。
 
 1. 在 Web 中验收 PR #50 的文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口和资源文件夹跳转，再打开个人空间与 Shared 并上传、删除、恢复，完成 [issue #38](https://github.com/zhongwater123/A-NAS/issues/38) 修复的实机验收；修复已随 `9923c5987c0b` 部署且 Host Agent 启动自检通过，见[调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
 2. 验证会话处理：本机屏幕退出并重新登录一次以取得本机会话（部署前登录的仍为 12 小时会话），之后跨夜和重启仍保持登录；局域网或 SSH 隧道浏览器登录满 12 小时后回到登录页并提示“登录已过期”，不再显示“连接中断”或需要重启，见[调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)。

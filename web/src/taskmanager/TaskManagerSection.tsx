@@ -1,9 +1,10 @@
-import { Activity, ArrowDown, ArrowUp, Cpu, HardDrive, MemoryStick, Network as NetworkIcon, Search } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Activity, ArrowDown, ArrowUp, Cpu, HardDrive, MemoryStick, Network as NetworkIcon, Search, Layers, CircuitBoard } from "lucide-react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { formatBytes, formatRate } from "../bytes";
-import { Banner, PageHeader, Pill } from "../settings/parts";
-import { readDevice, readTasks, type Availability, type DeviceSnapshot, type Group, type Observation, type Task } from "./api";
+import { Banner } from "../settings/parts";
+import { readDevice, readTasks, type Availability, type DeviceSnapshot, type Group, type Task } from "./api";
 import { useSnapshot, type SnapshotView } from "./useSnapshot";
+import { TaskIcon } from "./TaskIcon";
 import "./taskmanager.css";
 
 const deviceTabs = ["总览", "CPU", "GPU", "NPU", "内存", "网络", "硬盘"] as const;
@@ -19,7 +20,7 @@ const availabilityText: Record<Exclude<Availability, "available">, string> = {
 export function TaskManagerSection() {
   const [section, setSection] = useState("设备运行状态");
   return <>
-    <PageHeader title="任务管理器" subtitle="查看设备资源与正在运行的服务、进程" action={<Pill>只读</Pill>} />
+    <header className="set-header"><h2>任务管理器</h2></header>
     <Choices label="任务管理器板块" items={["设备运行状态", "服务与进程"]} value={section} onChange={setSection} />
     {section === "设备运行状态" ? <DevicePanel /> : <TasksPanel />}
   </>;
@@ -31,14 +32,8 @@ function Choices<T extends string>({ label, items, value, onChange }: { label: s
 function Pending({ error, retry }: { error: string; retry: () => void }) {
   return <div className="set-card set-state" role="status">{error ? <><Activity /><h4>暂时无法读取</h4><p>{error}</p><button className="set-btn primary" onClick={retry}>重试</button></> : <><span className="loader" /><p>正在读取运行状态…</p></>}</div>;
 }
-function ObservationStatus({ data, error, retry }: { data: Observation; error: string; retry: () => void }) {
-  return <>
-    {error && <Banner tone="error">连接中断，正在显示上次成功读取的数据 <button className="set-btn" onClick={retry}>重试</button></Banner>}
-    <div className="tm-observation"><Pill tone={data.dataSource === "live" ? "success" : "warning"}>{data.dataSource === "live" ? "实时数据" : "模拟数据"}</Pill>
-      <span>观测于 <time dateTime={data.observedAt}>{new Date(data.observedAt).toLocaleString("zh-CN", { hour12: false })}</time></span>
-      <span>采样窗口 {data.sampleSeconds.toFixed(1)} 秒 · 每 2 秒刷新</span>
-    </div>
-  </>;
+function ReadError({ error, retry }: { error: string; retry: () => void }) {
+  return error ? <Banner tone="error">连接中断，正在显示上次成功读取的数据 <button className="set-btn" onClick={retry}>重试</button></Banner> : null;
 }
 function AvailabilityNote({ status }: { status: Availability }) {
   return status === "available" ? null : <p className="tm-availability" role="status">{availabilityText[status]}</p>;
@@ -48,7 +43,7 @@ function DevicePanel() {
   const [tab, setTab] = useState<DeviceTab>("总览");
   return <section className="tm-panel" aria-label="设备运行状态">
     <Choices label="设备资源" items={deviceTabs} value={tab} onChange={setTab} />
-    {!view.data ? <Pending {...view} /> : <><ObservationStatus data={view.data} error={view.error} retry={view.retry} /><DeviceDetails tab={tab} view={view as SnapshotView<DeviceSnapshot> & { data: DeviceSnapshot }} /></>}
+    {!view.data ? <Pending {...view} /> : <><ReadError error={view.error} retry={view.retry} /><DeviceDetails tab={tab} view={view as SnapshotView<DeviceSnapshot> & { data: DeviceSnapshot }} /></>}
   </section>;
 }
 
@@ -65,12 +60,13 @@ function aggregate(data: DeviceSnapshot, kind: "receive" | "transmit" | "read" |
 }
 function DeviceDetails({ tab, view: { data, history } }: { tab: DeviceTab; view: SnapshotView<DeviceSnapshot> & { data: DeviceSnapshot } }) {
   const cpu = <Metric title="CPU 使用率" value={percent(data.cpu.usagePercent)} times={history.map(point => Date.parse(point.observedAt))} values={history.map(point => point.cpu.usagePercent)} max={100} icon={<Cpu />} detail={`${data.cpu.logicalCores} 个逻辑核心`} />;
-  const memory = <Metric title="内存使用率" value={percent(memoryPercent(data))} times={history.map(point => Date.parse(point.observedAt))} values={history.map(memoryPercent)} max={100} icon={<MemoryStick />} detail={`${size(data.memory.usedBytes)} / ${size(data.memory.totalBytes)}`} />;
+  const memory = <Metric title="内存使用率" tone="violet" value={percent(memoryPercent(data))} times={history.map(point => Date.parse(point.observedAt))} values={history.map(memoryPercent)} max={100} icon={<MemoryStick />} detail={`${size(data.memory.usedBytes)} / ${size(data.memory.totalBytes)}`} />;
   if (tab === "总览") return <>
-    <div className="tm-grid">{cpu}{memory}
-      {(["receive", "transmit", "read", "write"] as const).map(kind => <Metric key={kind} title={{ receive: "网络接收", transmit: "网络发送", read: "硬盘读取", write: "硬盘写入" }[kind]} value={rate(aggregate(data, kind))} times={history.map(point => Date.parse(point.observedAt))} values={history.map(point => aggregate(point, kind))} icon={kind === "receive" || kind === "transmit" ? <NetworkIcon /> : <HardDrive />} detail={(kind === "receive" || kind === "transmit" ? "物理网卡优先汇总" : "物理硬盘汇总") + ((kind === "receive" || kind === "transmit" ? data.network.status : data.disks.status) === "partial" ? " · 数据不完整" : "")} />)}
+    <div className="tm-grid tm-overview-grid">{cpu}{memory}
+      <Metric title="网络" value={rate(aggregate(data, "receive"))} valueLabel="接收" secondary={{label:"发送", value:rate(aggregate(data,"transmit")), values:history.map(point=>aggregate(point,"transmit"))}} times={history.map(point => Date.parse(point.observedAt))} values={history.map(point=>aggregate(point,"receive"))} icon={<NetworkIcon />} tone="teal" detail={data.network.status === "partial" ? "数据不完整" : undefined} />
+      <Metric title="硬盘" value={rate(aggregate(data, "read"))} valueLabel="读取" secondary={{label:"写入", value:rate(aggregate(data,"write")), values:history.map(point=>aggregate(point,"write"))}} times={history.map(point => Date.parse(point.observedAt))} values={history.map(point=>aggregate(point,"read"))} icon={<HardDrive />} tone="amber" detail={data.disks.status === "partial" ? "数据不完整" : undefined} />
     </div>
-    <div className="tm-grid">{(["gpu", "npu"] as const).map(kind => <div key={kind} className="set-card tm-hardware"><h3>{kind.toUpperCase()}</h3><AvailabilityNote status={data[kind].status} />{data[kind].items.map(item => <p key={item.id}><strong>{item.name}</strong> · {item.usagePercent === null ? acceleratorMissing(item.usageStatus) : percent(item.usagePercent)}</p>)}</div>)}</div>
+    <div className="tm-hardware-strip">{(["gpu", "npu"] as const).map(kind => <div key={kind} className="tm-hardware"><CircuitBoard /><div><h3>{kind.toUpperCase()}</h3><AvailabilityNote status={data[kind].status} />{data[kind].items.map(item => <p key={item.id}><strong>{item.name}</strong> · {item.usagePercent === null ? acceleratorMissing(item.usageStatus) : percent(item.usagePercent)}</p>)}</div></div>)}</div>
     {(data.network.status !== "available" || data.disks.status !== "available") && <div className="tm-notes">{data.network.status !== "available" && <div>网络<AvailabilityNote status={data.network.status} /></div>}{data.disks.status !== "available" && <div>硬盘<AvailabilityNote status={data.disks.status} /></div>}</div>}
   </>;
   if (tab === "CPU") return <><ResourceTitle title={data.cpu.model || "CPU"} detail={`${data.cpu.logicalCores} 个逻辑核心 · 整机总容量为 100%`} />{cpu}</>;
@@ -97,22 +93,36 @@ function Accelerators({ kind, data, history }: { kind: "gpu" | "npu"; data: Devi
   </section>)}</>;
 }
 
-function Metric({ title, value, detail, values, times, max, icon }: { title: string; value: string; detail?: string; values: Array<number | null>; times: number[]; max?: number; icon?: ReactNode }) {
+function Metric({ title, value, detail, values, times, max, icon, tone = "blue", valueLabel, secondary }: { title: string; value: string; detail?: string; values: Array<number | null>; times: number[]; max?: number; icon?: ReactNode; tone?: string; valueLabel?: string; secondary?: { label: string; value: string; values: Array<number | null> } }) {
+  const gradient = useId();
+  const ceiling = max ?? Math.max(1, ...values.map(point => point ?? 0), ...(secondary?.values ?? []).map(point => point ?? 0));
   const points = values.slice(-60);
   const timestamps = times.slice(-60);
-  const ceiling = max ?? Math.max(1, ...points.map(point => point ?? 0));
-  let continuing = false;
-  const path = points.map((point, index) => {
-    if (point === null || !Number.isFinite(point)) { continuing = false; return ""; }
-    if (index > 0 && timestamps[index] - timestamps[index - 1] > 3000) continuing = false;
-    const command = continuing ? "L" : "M"; continuing = true;
-    return `${command}${((60 - points.length + index) / 59 * 300).toFixed(2)},${(70 - Math.min(1, Math.max(0, point) / ceiling) * 64).toFixed(2)}`;
-  }).join(" ");
-  const last = points.at(-1);
-  return <article className="set-card tm-metric"><header><span>{icon}{title}</span><strong>{value}</strong></header>
+  function paths(series: Array<number | null>) {
+    const result: string[] = [];
+    let current = "";
+    series.slice(-60).forEach((point, index) => {
+      if (point === null || !Number.isFinite(point)) { if(current) result.push(current); current = ""; return; }
+      if (index > 0 && timestamps[index] - timestamps[index - 1] > 3000) { if(current) result.push(current); current = ""; }
+      current += `${current ? " L" : "M"}${((60 - points.length + index) / 59 * 600).toFixed(2)},${(100 - Math.min(1, Math.max(0, point) / ceiling) * 94).toFixed(2)}`;
+    });
+    if(current) result.push(current);
+    return result;
+  }
+  const lines = paths(values);
+  const fills = lines.map(path => `${path} L${path.match(/([\d.]+),[\d.]+$/)?.[1]},100 L${path.match(/^M([\d.]+)/)?.[1]},100 Z`).join(" ");
+  return <article className={`tm-metric tm-tone-${tone}`}><header><span>{icon}{title}</span>{max && <span className="tm-chart-scale">0–100%</span>}</header>
+    <div className="tm-values"><div>{valueLabel && <span><i />{valueLabel}</span>}<strong>{value}</strong></div>{secondary && <div className="tm-secondary-value"><span><i />{secondary.label}</span><strong>{secondary.value}</strong></div>}</div>
     {detail && <p>{detail}</p>}
-    <svg viewBox="0 0 304 78" role="img" aria-label={`${title}，最近 ${points.length} 个采样的趋势`} preserveAspectRatio="none"><path className="tm-gridline" d="M0 6H304 M0 38H304 M0 70H304" /><path className="tm-trend" d={path} />{last !== null && last !== undefined && <circle cx="300" cy={70 - Math.min(1, Math.max(0, last) / ceiling) * 64} r="2.5" />}</svg>
-    <footer><span>{points.filter(point => point !== null).length < 2 ? "等待更多有效采样" : "最近 60 次采样"}</span><span>现在</span></footer>
+    <svg viewBox="0 0 604 106" role="img" aria-label={`${title}，最近 ${points.length} 个采样的趋势`} preserveAspectRatio="none">
+      <defs><linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="currentColor" stopOpacity=".13" /><stop offset="100%" stopColor="currentColor" stopOpacity=".01" /></linearGradient></defs>
+      <path className="tm-gridline" d="M0 6H604 M0 53H604 M0 100H604" />
+      <path d={fills} fill={`url(#${gradient})`} />
+      <path className="tm-trend" d={lines.join(" ")} />
+      {points.at(-1) != null && <circle cx="600" cy={100 - Math.min(1, Math.max(0, points.at(-1)!) / ceiling) * 94} r="2" fill="currentColor" />}
+      {secondary && <path className="tm-trend tm-secondary-trend" d={paths(secondary.values).join(" ")} />}
+    </svg>
+    <footer><span>{points.filter(point => point !== null).length < 2 ? "等待更多有效采样" : `最近 ${points.length} 次采样`}</span><span>现在</span></footer>
   </article>;
 }
 
@@ -126,15 +136,13 @@ function TasksPanel() {
   const [kind, setKind] = useState("运行中的服务");
   return <section className="tm-panel" aria-label="服务与进程">
     {!view.data ? <Pending {...view} /> : <>
-      <ObservationStatus data={view.data} error={view.error} retry={view.retry} />
-      <div className="set-card tm-service-count"><Activity /><div><strong>{view.data.services.status === "available" ? view.data.services.items.length : view.data.services.status === "partial" ? `至少 ${view.data.services.items.length}` : "—"}</strong><span>运行中的系统服务</span></div></div>
-      <Choices label="任务列表" items={["运行中的服务", "进程"]} value={kind} onChange={setKind} />
-      <TaskTable key={kind} group={kind === "进程" ? view.data.processes : view.data.services} processes={kind === "进程"} />
-      <p className="set-footnote">CPU 以整机逻辑核心总容量为 100%。服务包含所属进程的用量，两个视图分别统计，不相加。缺失指标显示为 —。</p>
+      <ReadError error={view.error} retry={view.retry} />
+      <div className="tm-workload-summary"><div className="tm-service-count"><Activity /><div><strong>{view.data.services.status === "available" ? view.data.services.items.length : view.data.services.status === "partial" ? `至少 ${view.data.services.items.length}` : "—"}</strong><span>运行中的系统服务</span></div></div><div className="tm-service-count"><Layers /><div><strong>{view.data.processes.status === "available" ? view.data.processes.items.length : view.data.processes.status === "partial" ? `至少 ${view.data.processes.items.length}` : "—"}</strong><span>进程</span></div></div></div>
+      <TaskTable icons={view.data.icons} navigation={<Choices label="任务列表" items={["运行中的服务", "进程"]} value={kind} onChange={setKind} />} key={kind} group={kind === "进程" ? view.data.processes : view.data.services} processes={kind === "进程"} />
     </>}
   </section>;
 }
-function TaskTable({ group, processes }: { group: Group<Task>; processes: boolean }) {
+function TaskTable({ group, processes, navigation, icons }: { group: Group<Task>; processes: boolean; navigation: ReactNode; icons?: Record<string, string> }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: "cpuPercent", descending: true });
   const needle = query.trim().toLocaleLowerCase();
@@ -146,9 +154,9 @@ function TaskTable({ group, processes }: { group: Group<Task>; processes: boolea
   });
   const readable = group.status === "available" || group.status === "partial";
   return <>
-    <div className="tm-toolbar"><label className="tm-search"><Search /><input type="search" aria-label={processes ? "搜索进程名称或 PID" : "搜索服务名称"} placeholder={processes ? "搜索名称或 PID" : "搜索服务名称"} value={query} onChange={event => setQuery(event.target.value)} /></label><span>{readable ? `${rows.length} / ${group.items.length} 项` : "数量不可用"}</span></div>
+    <div className="tm-toolbar">{navigation}<label className="tm-search"><Search /><input type="search" aria-label={processes ? "搜索进程名称或 PID" : "搜索服务名称"} placeholder={processes ? "搜索名称或 PID" : "搜索服务名称"} value={query} onChange={event => setQuery(event.target.value)} /></label><span>{readable ? `${rows.length} / ${group.items.length} 项` : "数量不可用"}</span></div>
     <AvailabilityNote status={group.status} />
-    {(readable || rows.length > 0) && <div className="set-card tm-table-scroll" tabIndex={0} role="region" aria-label={processes ? "进程资源用量" : "服务资源用量"}><table className="tm-table"><thead><tr><th scope="col">名称</th><th scope="col">{processes ? "PID" : "运行状态"}</th>{columns.map(column => <th scope="col" key={column.key} aria-sort={sort.key === column.key ? sort.descending ? "descending" : "ascending" : "none"}><button onClick={() => setSort(previous => ({ key: column.key, descending: previous.key === column.key ? !previous.descending : true }))}>{column.label}{sort.key === column.key && (sort.descending ? <ArrowDown /> : <ArrowUp />)}</button></th>)}</tr></thead><tbody>{rows.map(item => <tr key={item.id}><td title={item.name}>{item.name}</td><td>{processes ? item.pid : item.state === "running" ? "运行中" : item.state}</td>{columns.map(column => <td key={column.key}>{column.format(item[column.key])}</td>)}</tr>)}</tbody></table>
+    {(readable || rows.length > 0) && <div className="set-card tm-table-scroll" tabIndex={0} role="region" aria-label={processes ? "进程资源用量" : "服务资源用量"}><table className="tm-table"><thead><tr><th scope="col">名称</th><th scope="col">{processes ? "PID" : "运行状态"}</th>{columns.map(column => <th scope="col" key={column.key} aria-sort={sort.key === column.key ? sort.descending ? "descending" : "ascending" : "none"}><button title={column.key === "cpuPercent" ? "以整机 CPU 总容量为 100%" : undefined} onClick={() => setSort(previous => ({ key: column.key, descending: previous.key === column.key ? !previous.descending : true }))}>{column.label}{sort.key === column.key && (sort.descending ? <ArrowDown /> : <ArrowUp />)}</button></th>)}</tr></thead><tbody>{rows.map(item => <tr key={item.id}><td title={item.name}><span className="tm-task-name"><TaskIcon task={item} icons={icons} processes={processes} />{item.name}</span></td><td>{processes ? item.pid : <span className={item.state === "running" ? "tm-running" : ""}>{item.state === "running" ? "运行中" : item.state}</span>}</td>{columns.map(column => <td key={column.key}><span className={column.key === "cpuPercent" ? "tm-cpu-cell" : ""} style={column.key === "cpuPercent" ? { "--usage": `${Math.min(100, Math.max(0, item.cpuPercent ?? 0))}%` } as CSSProperties : undefined}>{column.format(item[column.key])}</span></td>)}</tr>)}</tbody></table>
       {rows.length === 0 && <p className="tm-empty">{needle ? processes ? "没有匹配的进程" : "没有匹配的服务" : group.status === "partial" ? "当前未获取到列表，数据不完整" : processes ? "没有可显示的进程" : "没有运行中的服务"}</p>}
     </div>}
   </>;
