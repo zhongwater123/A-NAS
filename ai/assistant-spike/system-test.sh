@@ -55,7 +55,7 @@ check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spik
 # The gate on, and the assistant's API in the Product Service (both off by default).
 printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/host-agent.env
 printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/anas-api.env
-systemctl restart anas-host-agent && systemctl restart anas-api || true
+{ systemctl restart anas-host-agent && systemctl restart anas-api; } || true
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 changes_socket='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas/assistant-changes.sock")'
 check "the executor's assistant socket is out of a member's reach outside the sandbox" denied as alice python3 -c "$changes_socket"
