@@ -519,7 +519,7 @@ spike 中 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 从本仓库编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面内容的替身 AI Worker，以及 18 张种子照片（alice 私有 13 张，含一个“2025 夏天 青岛”相册与“青岛”标签；bob 私有 2 张；共享 3 张）。结果：
 
 - 探针增加 3 项，变基到集成分支后共 42 项通过。
-- [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh) 19 项通过：两个成员的助手各自只看到本人与共享的图库和照片；拿着 bob 照片的编号也打不开；随请求带上会话令牌没有作用；缩略图与改名得到 JSON 的 `not_found`；沙箱里连不到相册服务自己的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员也进不了 alice 的 `/proc/<pid>/root`；对端是 root 时得到 503；相册服务重启后，正在运行的助手连接被拒绝，照片工具告诉模型“相册暂时连不上”，助手实例重启后恢复。
+- [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh) 23 项通过：两个成员的助手各自只看到本人与共享的图库和照片；拿着 bob 照片的编号也打不开；随请求带上会话令牌没有作用；缩略图与改名得到 JSON 的 `not_found`；沙箱里连不到相册服务自己的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员也进不了 alice 的 `/proc/<pid>/root`；对端是 root 时得到 503；套接字由 systemd 的 socket 单元持有（见下文运维注意），相册服务重启后正在运行的助手照常读相册、实例没有重启，服务停止时一次连接就把它重新拉起；只有 socket 单元本身停止时，照片工具告诉模型“相册暂时连不上”，助手实例重启后恢复。
 - [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)（假模型）：4 个工具都正常返回，没有一个请求审批；同一会话中的“提交更改”照常请求审批。
 - 替身 Worker 的局限：查询里没有它认识的内容词时（如“青岛”“去年夏天”），所有照片同样相似，`closest` 为全部照片；按名称和标签匹配的照片仍排在最前。真实的向量检索会给出有高有低的相似度。
 
@@ -572,7 +572,7 @@ Hermes 把 MCP 结果中的图片存进 `$HERMES_HOME/cache/images/`，再决定
 
 ### 运维注意
 
-- 相册服务重启后，正在运行的助手实例里绑定的仍是旧的套接字，连接被拒绝，要等实例重启才能再读相册（`photos-socket.sh` 实测）。正式实现应由 systemd 的 socket 单元持有这个套接字、相册服务经套接字激活接收它，这样它跨服务重启不变。
+- 助手的单元把这个套接字文件本身绑进沙箱，绑定的是启动那一刻的套接字。由相册服务自己创建时，服务重启后正在运行的实例连接被拒绝，要等实例重启（2026-10-15 实测）。现在由 systemd 的 socket 单元持有它（`FileDescriptorName=assistant`，`SocketMode=0666`，目录 `0700`），相册服务经套接字激活接收（[`photoservice.go`](../../internal/photoservice/photoservice.go) 用 go-systemd 的 `activation`），套接字跨服务重启不变；服务刚启动、存储还没打开的片刻回答 `photos_unavailable`，与它自己的套接字一样。没有 socket 单元时服务照旧自己创建。spike 的相册服务据此改为 socket 与 service 两个单元（[`setup.sh`](../../ai/assistant-spike/setup.sh)）。随助手发布时，产品的 `anas-photos.service` 要配一个这样的 socket 单元；只有停止或重装这个 socket 单元本身，才需要重启正在运行的助手实例。
 - 助手的请求和成员自己的一样，会让后台 AI 任务继续等待（`gate.Touch`）。
 - 搜索要靠设备上的 AI Worker 把查询编码成向量；Worker 不可用时只按名称与标签匹配，工具在结果中注明。
 
