@@ -12,7 +12,7 @@ describe("cards for what the assistant asks", () => {
     const approval: Approval = { ...base, kind: "command", status: "awaiting",
       command: { text: "rm -rf /nas/助手/旧草稿", description: "recursive delete", forSession: true } };
     render(<CommandCard approval={approval} onDecide={onDecide} />);
-    expect(screen.getByText("助手想运行一条命令：会删除整个文件夹")).toBeTruthy();
+    expect(screen.getByText("VNAS 想运行一条命令：会删除整个文件夹")).toBeTruthy();
     expect(screen.getByText("rm -rf /nas/助手/旧草稿")).toBeTruthy();
     expect(screen.getByText(/个人空间与共享空间不会被改动/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "本对话中都允许" }));
@@ -24,7 +24,7 @@ describe("cards for what the assistant asks", () => {
     const approval: Approval = { ...base, kind: "command", status: "awaiting",
       command: { text: "execute_code <<'PY'\nprint(1)\nPY", script: true } };
     render(<CommandCard approval={approval} onDecide={onDecide} />);
-    expect(screen.getByText("助手想运行一段代码")).toBeTruthy();
+    expect(screen.getByText("VNAS 想运行一段代码")).toBeTruthy();
     expect(screen.getByText("print(1)")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "本对话中都允许" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "拒绝" }));

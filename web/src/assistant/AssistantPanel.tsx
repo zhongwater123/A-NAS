@@ -1,4 +1,4 @@
-// AI 助手 window (ADR 0024 decision 9). The thread is assistant-ui — the chat
+// AI 助手 window, named VNAS on the desktop (ADR 0024 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
 // model over its own JSON-RPC client; the conversation list, confirmation cards
 // and styling are A-NAS's.
@@ -14,15 +14,17 @@ import {
   type ThreadMessageLike,
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
-import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
+import { type CodeHeaderProps, type StreamdownTextComponents, StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Bot, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, History,
-  Image as ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
+  ArrowUp, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
+  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
   Trash2, Users, Video, Wrench, X,
 } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
+import { AssistantGlyph } from "../AssistantGlyph";
+import { copyText } from "../clipboard";
 import {
   type Approval, type AssistantQuestion, type AssistantSession, type ChangeOperation,
   answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
@@ -179,13 +181,9 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     <PhotoOpener.Provider value={onShowPhoto}>
     <div className="as-app">
       <aside className="as-side">
-        <div className="as-brand">
-          <span className="as-brand-mark"><Bot /></span>
-          <div><strong>AI 助手</strong><small>{username} 的助手</small></div>
-        </div>
         <button type="button" className="as-new" onClick={() => { setActiveId(undefined); setView("chat"); }}><MessageSquarePlus />新对话</button>
         <button type="button" className={`as-nav${view === "memory" ? " active" : ""}`} aria-pressed={view === "memory"} onClick={() => setView("memory")}>
-          <Brain />记忆<small>助手记住的内容</small>
+          <Brain />记忆<small>VNAS 记住的内容</small>
         </button>
         <div className="as-side-label"><History />对话</div>
         <ul className="as-sessions">
@@ -194,16 +192,16 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
               running={busy.has(session.id)}
               onOpen={() => { setActiveId(session.id); setView("chat"); }} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
           ))}
-          {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动助手…</>}</li>}
+          {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动 VNAS…</>}</li>}
         </ul>
-        <div className="as-side-foot"><ShieldCheck /><span>助手只能读你的个人空间和共享空间；改动文件、运行有风险的命令都要你确认。</span></div>
+        <TrustNote />
       </aside>
 
       <main className="as-main">
         <header className="as-head">
           <h2>{view === "memory" ? "记忆" : active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
           {thread.running && <span className="as-working"><LoaderCircle />正在处理</span>}
-          {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接助手</span>}
+          {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接 VNAS</span>}
         </header>
 
         {view === "memory" && <MemoryView onConversationsDeleted={() => { setActiveId(undefined); void refreshSessions(); }} />}
@@ -239,7 +237,7 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
             )}
 
             <ComposerPrimitive.Root className="as-composer">
-              <ComposerPrimitive.Input className="as-input" placeholder="让助手帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
+              <ComposerPrimitive.Input className="as-input" placeholder="让 VNAS 帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
               {thread.running
                 ? <ComposerPrimitive.Cancel className="as-send stop" aria-label="停止"><Square /></ComposerPrimitive.Cancel>
                 : <ComposerPrimitive.Send className="as-send" aria-label="发送"><ArrowUp /></ComposerPrimitive.Send>}
@@ -301,12 +299,56 @@ function SessionRow({ session, active, waiting, running, onOpen, onRename, onDel
   );
 }
 
+// What makes VNAS the member's own, said for someone who has never heard of
+// an agent. Each line holds only what ADR 0024 enforces; none says the model
+// runs on this device, because during development it does not.
+const TRUST: { icon: ReactNode; title: string; text: string }[] = [
+  { icon: <ShieldCheck />, title: "安全", text: "它只看得到你的文件和照片，以及家里共享的内容；看不到家人的私人文件，也碰不到系统设置。" },
+  { icon: <Hand />, title: "可控", text: "改动你的文件前，它会先把要改的地方给你看，你点“确认更改”才生效；运行有风险的命令也要先问你。被替换或删除的旧文件会放进回收站，可以找回。" },
+  { icon: <LockKeyhole />, title: "隐私", text: "每位家人的 VNAS 各自独立。你和它的对话、它记住的事，家里其他人都看不到，管理员也不行；在“记忆”里可以随时删掉。" },
+];
+
+// The sidebar's one line about trust. Pointing at it or focusing it with the
+// keyboard shows why; a tap pins it open for touch screens, and a tap
+// elsewhere or Esc closes it again.
+function TrustNote() {
+  const [pinned, setPinned] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const id = useId();
+  useEffect(() => {
+    if (!pinned) return;
+    const away = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setPinned(false); };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [pinned]);
+  const escape = (event: ReactKeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    setPinned(false);
+    (document.activeElement as HTMLElement | null)?.blur();
+  };
+  return (
+    <div ref={root} className={`as-trust${pinned ? " open" : ""}`} onKeyDown={escape}>
+      <button type="button" className="as-trust-button" aria-describedby={id} aria-expanded={pinned} onClick={() => setPinned((open) => !open)}>
+        <ShieldCheck /><span>你的私人 Agent</span><Info className="as-trust-hint" />
+      </button>
+      <div id={id} role="tooltip" className="as-trust-pop">
+        <strong>为什么可以放心用</strong>
+        <ul>
+          {TRUST.map((item) => (
+            <li key={item.title}><span className="as-trust-icon">{item.icon}</span><div><b>{item.title}</b><p>{item.text}</p></div></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 function Welcome({ username, onPick }: { username: string; onPick(text: string): void }) {
   return (
     <div className="as-welcome">
-      <span className="as-welcome-mark"><Bot /></span>
+      <span className="as-welcome-mark"><AssistantGlyph /></span>
       <h3>你好，{username}</h3>
-      <p>我能读你的个人空间和共享空间，帮你查找、总结和整理文件。<br />要改动文件时，我会先把改动交给你确认。</p>
+      <p>我是你的私人 NAS 助理，需要我做什么？</p>
       <div className="as-suggestions">
         {SUGGESTIONS.map((text) => <button type="button" key={text} onClick={() => onPick(text)}>{text}<ChevronRight /></button>)}
       </div>
@@ -325,7 +367,7 @@ function UserMessage() {
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="as-msg assistant">
-      <span className="as-avatar"><Bot /></span>
+      <span className="as-avatar"><AssistantGlyph /></span>
       <div className="as-answer">
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
         <Outcome />
@@ -342,7 +384,32 @@ function Outcome() {
   return null;
 }
 
-const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} />;
+// Streamdown's own code, table, diagram and image buttons are styled with
+// Tailwind, which A-NAS does not load, so they are off; code blocks get the
+// window's own header with a copy button instead.
+export const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} controls={false} />;
+
+// A code block's header: its language, and a copy that works on the LAN's
+// plain HTTP, where the Clipboard API is unavailable. The props are typed as
+// unknown because StreamdownTextComponents' index signature, meant for HTML
+// elements, applies to CodeHeader too; the adapter passes CodeHeaderProps.
+function CodeHeader({ language, code }: { [K in keyof CodeHeaderProps]?: unknown }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const text = typeof code === "string" ? code.replace(/\n$/, "") : "";
+  return (
+    <div className="as-code-head">
+      <span>{typeof language === "string" && language ? language : "文本"}</span>
+      <button type="button" className={copied ? "copied" : undefined} aria-label={copied ? "已复制" : "复制代码"} onClick={() => setCopied(copyText(text))}>
+        {copied ? <Check /> : <Copy />}{copied ? "已复制" : "复制"}
+      </button>
+    </div>
+  );
+}
 
 // A photo the assistant names shows as its thumbnail and opens in the photo
 // app; other links open in a new tab.
@@ -454,7 +521,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
       <header>
         <span className="as-change-mark">{CARD_MARKS[status]}</span>
         <div>
-          <strong>{change.summary || "助手提交的更改"}</strong>
+          <strong>{change.summary || "VNAS 提交的更改"}</strong>
           <small>{statusText(approval)}</small>
         </div>
       </header>
@@ -500,7 +567,7 @@ export function CommandCard({ approval, onDecide }: { approval: Approval; onDeci
       <header>
         <span className="as-change-mark">{status === "approved" ? <Check /> : script ? <Code /> : <SquareTerminal />}</span>
         <div>
-          <strong>{script ? "助手想运行一段代码" : `助手想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
+          <strong>{script ? "VNAS 想运行一段代码" : `VNAS 想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
           <small>{commandStatus(approval)}</small>
         </div>
       </header>
@@ -523,11 +590,11 @@ export function CommandCard({ approval, onDecide }: { approval: Approval; onDeci
 function commandStatus({ status, command }: Approval) {
   const what = command?.script ? "代码" : "命令";
   switch (status) {
-    case "approved": return `已允许，${what}在助手自己的文件夹里运行`;
+    case "approved": return `已允许，${what}在 VNAS 自己的文件夹里运行`;
     case "rejected": return `你拒绝了，${what}没有运行`;
     case "expired": return `等待确认超时，${what}没有运行`;
     case "stopped": return `这一轮已停止，${what}没有运行`;
-    default: return `只影响助手自己的文件夹和对话记录；你的个人空间与共享空间不会被改动`;
+    default: return `只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动`;
   }
 }
 
@@ -574,7 +641,7 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
       <header>
         <span className="as-change-mark">{status === "answered" ? <Check /> : <CircleHelp />}</span>
         <div>
-          <strong>助手想问你</strong>
+          <strong>VNAS 想问你</strong>
           <small>{questionStatus(approval)}</small>
         </div>
       </header>
@@ -630,7 +697,7 @@ function questionStatus({ status, questions }: Approval) {
     case "rejected": return "你跳过了这些问题";
     case "expired": return "等待回答超时";
     case "stopped": return "这一轮已停止";
-    default: return `${questions?.length ?? 0} 个问题 · 回答后助手接着做`;
+    default: return `${questions?.length ?? 0} 个问题 · 回答后 VNAS 接着做`;
   }
 }
 
@@ -692,7 +759,7 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS = { a: MarkdownLink };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, CodeHeader };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };

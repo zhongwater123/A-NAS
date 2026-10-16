@@ -2,6 +2,7 @@ import { Check, Copy, Eye, EyeOff, Loader, TriangleAlert } from "lucide-react";
 import { CSSProperties, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { AppCredential, AppJob, CatalogApp, iconURL } from "../appsApi";
+import { copyText } from "../clipboard";
 import { appURL, openApp } from "./model";
 
 // The Markdown renderer is its own chunk. Once loaded it renders synchronously
@@ -125,28 +126,6 @@ function Login({ credential }: { credential: AppCredential }) {
       </div>
     </dl>
   );
-}
-
-// copyText puts text on the clipboard. The Clipboard API needs a secure
-// context and the desktop is plain HTTP on the LAN, so this copies a
-// selected, unseen text field instead, then gives focus back.
-function copyText(text: string): boolean {
-  const focused = document.activeElement as HTMLElement | null;
-  const field = document.createElement("textarea");
-  field.value = text;
-  field.readOnly = true;
-  field.style.position = "fixed";
-  field.style.opacity = "0";
-  document.body.append(field);
-  field.select();
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    field.remove();
-    focused?.focus();
-  }
 }
 
 export function Progress() {

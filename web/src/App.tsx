@@ -5,7 +5,6 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowUpDown,
-  Bot,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -55,6 +54,7 @@ import {
 } from "./api";
 import { AppCenterPanel } from "./appcenter/AppCenterPanel";
 import { assistantStatus } from "./assistant/assistantApi";
+import { AssistantGlyph } from "./AssistantGlyph";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
 import { BackupCenter } from "./backup/BackupCenter";
 import { VersionsDialog } from "./backup/VersionsDialog";
@@ -138,7 +138,7 @@ const initialWindows: WindowModel[] = [
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
   { id: "docker", title: "Docker", open: false, minimized: false, maximized: false, x: 300, y: 70, width: 960, height: 660, z: 0, opened: 0 },
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
-  { id: "assistant", title: "AI 助手", open: false, minimized: false, maximized: false, x: 260, y: 54, width: 1040, height: 700, z: 0, opened: 0 },
+  { id: "assistant", title: "VNAS", open: false, minimized: false, maximized: false, x: 260, y: 54, width: 1040, height: 700, z: 0, opened: 0 },
 ];
 
 const windowIcons: Record<WindowID, AppGlyph> = {
@@ -153,12 +153,12 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   settings: Settings,
   docker: DockerGlyph,
   store: ShoppingBag,
-  assistant: Bot,
+  assistant: AssistantGlyph,
 };
 // A press on the wallpaper that moves this many pixels or more is a drag, not a click.
 const wallpaperClickSlop = 6;
-// Apps on a white tile (相册) keep it in their window's title bar too.
-const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos"]);
+// Apps on a white tile (相册, VNAS) keep it in their window's title bar too.
+const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos", "assistant"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
   shares: "download",
@@ -368,8 +368,8 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
     assistantReady
-      ? { id: "ai", label: "AI 助手", ariaLabel: "打开 AI 助手", keywords: "助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <Bot />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
-      : { id: "ai", label: "AI 助手", ariaLabel: "AI 助手，规划中", tone: "ai", icon: <Bot />, disabled: true },
+      ? { id: "ai", label: "VNAS", ariaLabel: "打开 VNAS", keywords: "vnas 助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <AssistantGlyph />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
+      : { id: "ai", label: "VNAS", ariaLabel: "VNAS，规划中", tone: "ai", icon: <AssistantGlyph />, disabled: true },
     // Installed apps open their own web interface; a stopped one shows its
     // containers in Docker to administrators.
     ...shortcuts.map((shortcut) => shortcutApp(shortcut, session.user.role === "admin" ? () => showInDocker(shortcut.id) : undefined)),

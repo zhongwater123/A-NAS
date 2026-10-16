@@ -59,24 +59,24 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
       <section className="as-memory-intro">
         <span className="as-memory-mark"><Brain /></span>
         <div>
-          <h3>助手记住的内容</h3>
-          <p>每个新对话开始时，助手都会带上这里的记忆和它学会的技能。删除后，新对话不再带入。</p>
+          <h3>VNAS 记住的内容</h3>
+          <p>每个新对话开始时，VNAS 都会带上这里的记忆和它学会的技能。删除后，新对话不再带入。</p>
         </div>
       </section>
       <p className="as-memory-note">
         <Info />
-        <span>继续以前的对话时，那个对话开始时的记忆仍在其中，助手也能从以前的对话里查到相关内容。只有连同全部对话一起清除，才算彻底。</span>
+        <span>继续以前的对话时，那个对话开始时的记忆仍在其中，VNAS 也能从以前的对话里查到相关内容。只有连同全部对话一起清除，才算彻底。</span>
       </p>
       {notice && (
         <div className="as-memory-notice" role="status"><span>{notice}</span><button type="button" aria-label="关闭" onClick={() => setNotice("")}><X /></button></div>
       )}
 
       {empty ? (
-        <div className="as-memory-empty"><Brain /><strong>助手还没有记住任何内容</strong><span>它记下的笔记、对你的了解和学会的技能会出现在这里。</span></div>
+        <div className="as-memory-empty"><Brain /><strong>VNAS 还没有记住任何内容</strong><span>它记下的笔记、对你的了解和学会的技能会出现在这里。</span></div>
       ) : (
         <>
-          <MemoryGroup title="关于你" hint="助手对你的了解" icon={<UserRound />} items={aboutYou} onForget={forget} />
-          <MemoryGroup title="助手的笔记" hint="它为以后的对话记下的事" icon={<BookOpen />} items={notes} onForget={forget} />
+          <MemoryGroup title="关于你" hint="VNAS 对你的了解" icon={<UserRound />} items={aboutYou} onForget={forget} />
+          <MemoryGroup title="VNAS 的笔记" hint="它为以后的对话记下的事" icon={<BookOpen />} items={notes} onForget={forget} />
           {memory.skills.length > 0 && (
             <section className="as-memory-group">
               <header><Sparkles /><h4>学会的技能</h4><span className="as-memory-count">{memory.skills.length}</span><small>删除的技能移进归档，新对话不再使用</small></header>
@@ -123,7 +123,7 @@ function SkillRow({ skill, onForget }: { skill: LearnedSkill; onForget(): Promis
     setOpen((value) => !value);
     if (content === undefined) memoryItem(skill.id).then((detail) => setContent(detail.content)).catch((reason) => setError(failureText(reason)));
   };
-  const origin = skill.createdBy === "learn" ? "按你的要求学会" : skill.createdBy === "agent" ? "助手自己总结" : `用过 ${skill.useCount} 次`;
+  const origin = skill.createdBy === "learn" ? "按你的要求学会" : skill.createdBy === "agent" ? "VNAS 自己总结" : `用过 ${skill.useCount} 次`;
   return (
     <li className="as-memory-item skill">
       <div className="as-skill-line">
@@ -171,7 +171,7 @@ function ClearAll({ onClear }: { onClear(conversations: boolean): Promise<void> 
       ) : (
         <>
           <div>
-            <strong>清除助手记住的全部内容？</strong>
+            <strong>清除 VNAS 记住的全部内容？</strong>
             <label><input type="checkbox" checked={conversations} onChange={(event) => setConversations(event.target.checked)} />同时删除全部对话（这样才彻底，删除后无法恢复）</label>
           </div>
           <span className="as-memory-clear-actions">

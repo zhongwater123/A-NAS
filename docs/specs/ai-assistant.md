@@ -1,7 +1,7 @@
 # AI 助手
 
 状态：draft（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；窗口经产品服务与会话闸门使用 `hermes serve`，对话、回合内审批卡片与多窗口已在开发机原型上跑通；待评审）
-更新时间：2026-10-15
+更新时间：2026-10-16
 
 ## 目标
 
@@ -28,13 +28,21 @@
 | 快照、其他成员的个人空间、私有图库与回收站（包括管理员已获查看授权的） | 不可以 | 不可以 |
 | 系统设置、应用、宿主机、局域网与外网 | 不可以 | 不可以 |
 
+## 名称与外观
+
+- 名称（2026-10-16 用户决定）：产品界面中称为“VNAS”，包括桌面、启动器、程序坞、窗口标题与窗口中的全部文案；文档与代码中仍称“AI 助手”（assistant）。尚未改名、留待另行安排的两处：模型回答时还不知道自己叫 VNAS（人设随 Hermes 的 `SOUL.md` 决定，尚未确定）；沙箱中的工作目录仍是 `/nas/助手`，展开“处理过程”时的路径里可见。
+- 图标：用户指定的 logo（白底黑白线稿的短发女孩肖像，原图 1254 px）是 VNAS 的应用图标，也是它在窗口里的形象：桌面、启动器、程序坞、窗口标题栏、欢迎页和每条回复旁的头像都用这一张图，回复旁的头像左右镜像，让她面向文字；侧栏不放标识与标题。图铺满白色圆角底板、不加光泽，放在浅色表面上时加一圈细边。随前端发布的是缩到 192 px 的 WebP（约 9 KB），为最大显示尺寸（欢迎页 64 px）的三倍。
+- 安全说明（2026-10-16 用户决定）：侧栏底部只写“你的私人 Agent”，鼠标指向、键盘聚焦或点按时弹出说明，分“安全、可控、隐私”三点，用不懂技术的家人能看懂的话写。说明只写本规格与 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 实际保证的事：看得到哪些文件、改动文件前要本人确认、有风险的命令要本人允许、旧文件进回收站、家里其他人与管理员看不到对话和记忆；在本地模型接入前不写“数据不出设备”一类的话。
+- 回复中的代码块（2026-10-16 用户反馈 Streamdown 自带的下载、复制按钮“格格不入”）：顶部一条窗口自己的标题栏，左边是语言，右边是“复制”，局域网明文 HTTP 下也能复制；Streamdown 给代码块、表格、图表与图片自带的按钮全部关闭，代码块不再提供下载。
+- 配色：窗口与线稿一样是黑白的。对话区是白底点阵（dot grid），侧栏是浅灰纯色，“新对话”、用户的消息、发送与确认按钮和待确认卡片用黑色；彩色只留给结果：失败与删除用红色，已执行的更改用绿色，差异对比保留红绿。
+
 ## 场景
 
 ### 设备未开启助手
 
 - Given：设备的 root 没有在配置中填写模型网关的上游地址与密钥。
 - When：成员查看桌面。
-- Then：“AI 助手”保持“规划中”的禁用状态，不创建任何实例、目录或套接字。
+- Then：桌面上的“VNAS”保持“规划中”的禁用状态，不创建任何实例、目录或套接字。
 
 ### 首次打开
 
@@ -191,5 +199,5 @@
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
-- 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
+- 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 - 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)

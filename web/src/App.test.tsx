@@ -885,7 +885,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const search = within(launcher).getByRole("searchbox", { name: "搜索应用" });
     expect(document.activeElement).toBe(search);
     expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toContain("打开相册");
-    expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("AI 助手");
+    expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("VNAS");
 
     expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).not.toContain("日志");
     await user.type(search, "日志");
