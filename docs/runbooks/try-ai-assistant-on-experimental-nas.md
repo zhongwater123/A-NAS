@@ -56,7 +56,7 @@
    ```bash
    bash /root/assistant-trial-<提交>/spike/nas-trial.sh install
    ```
-   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate，最后 7 行 `PASS` 与 `installed`。
+   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate，最后 8 行 `PASS` 与 `installed`。
    - 完成标准：没有 `STOP` 或 `FAIL`。
 5. NAS（root，可选）：测冷启动，不调用模型。
    ```bash
@@ -73,8 +73,9 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 ```
 
 - 换上新的脚本、单元、Hermes 策略与运行环境，重新生成会话令牌与成员配置（都在 root 自己的 `/etc` 中），停止正在运行的实例；成员的助手目录、对话与记忆保留，成员可写的文件夹不碰。
-- 完成标准：最后 7 行 `PASS`。安装之后才加入的成员不在其中，`update` 会列出；要包括他们，`remove` 后重新 `install`。
+- 完成标准：最后 8 行 `PASS`。安装之后才加入的成员不在其中，`update` 会列出；要包括他们，`remove` 后重新 `install`。
 - 已装早先试用（bundle `c6f6993`）的设备同样直接 `update`：会话令牌按新格式重新生成，成员的助手目录保留（2026-10-16 在系统测试容器中预演）。
+- 2026-10-16 之后的 bundle 带上了后台复盘工具白名单的上游修复，并为每个账号启用每周的闲时整理（`anas-assistant-curator@<账号>.timer`，`check` 的最后一行 `PASS weekly curator`）；`update` 一并换上（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理2026-10-16开发机)）。
 
 ## 验证
 
@@ -86,6 +87,8 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 - 打开两个窗口，卡片在两个窗口都出现，在任一窗口确认即可。
 - 退出登录后 30 秒内，助手窗口的连接断开。
 - “记忆”页能打开，删除一条后不再出现。
+- 后台复盘改了记忆或技能时，那一轮回答下方出现“自我改进回顾：……”与“查看记忆”（Hermes 默认每 10 条消息复盘一次记忆）。
+- 闲时整理：`systemctl list-timers 'anas-assistant-curator@*'` 列出每个账号下一次运行的时间；运行过后 `journalctl -u anas-assistant-curator@<账号>.service` 有一行 `auto: checked=…`。
 - 资源：`systemctl status 'anas-assistant@*'` 看实例内存；`/var/log/anas-assistant-gateway/requests.jsonl` 每次请求一行，记用时、工具名与 token 用量。结果写进[研究文档](../research/hermes-agent-runtime.md)与 #116。
 
 ## 回滚或恢复

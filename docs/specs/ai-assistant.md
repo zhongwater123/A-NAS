@@ -167,6 +167,12 @@
 - When：产品服务在成员没有有效登录会话时（例如被攻破后）要连到这位成员的助手、为卡片读取文件或登记确认。
 - Then：文件代理与执行方各自核对会话，全部拒绝：产品服务自己连不到任何成员的实例，只有凭这位成员正在登录的会话才能连到这位成员的，确认也只能凭这个会话登记（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10）。
 
+### 助手在回答之后记下的内容
+
+- Given：Hermes 的后台复盘在一轮回答之后改了助手的记忆或技能。
+- When：成员的窗口还开着，或已经关闭。
+- Then：窗口开着时，这一轮下方显示 Hermes 的说明（例如“自我改进回顾：记忆已更新”）和“查看记忆”，新一轮开始时消失；窗口已关闭时复盘照常跑完，产品服务为此最多再保持 2 分钟连接，改动在“记忆”中可见。复盘只能写记忆与技能、读文件，不能运行命令、写文件或提交更改（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理2026-10-16开发机)）。每周一次，在助手未运行时，Hermes 把 30 天没用的自建技能移入归档，与删除的技能一样不再进入对话。
+
 ## 边界与失败
 
 - 实例只看得到三处挂载：个人空间（只读）、共享空间（只读）、助手目录（读写）；没有网络，只经 Unix 套接字访问产品服务的模型网关与 MCP 端点，以及相册服务只读的助手套接字。这个套接字由 systemd 持有，相册服务重启不影响正在运行的实例。
@@ -186,7 +192,7 @@
 - 执行进程的 Landlock 测试：对个人空间与 `Agent空间/<本人>` 之外的写入返回拒绝（[`internal/filebroker/changes_test.go`](../../internal/filebroker/changes_test.go)，内核 ACL 允许写的位置也被拒绝）。执行方本身的规则（只执行本人授权过且参数相同的更改、一次、写卡片中的副本、目标变化即拒绝、不经过任何链接）见 [`internal/assistantchanges/executor_test.go`](../../internal/assistantchanges/executor_test.go)。
 - 工具测试：模型只被提供 managed scope 启用的工具集，其余每个工具集都在关闭清单中（探针中的 `toolsets-check.py`）；终端以本人身份在助手目录中运行，能把共享空间的图片复制进助手目录与暂存区，写不进个人空间与共享空间，没有名字解析与外连，任何进程的环境中都没有会话令牌；危险命令与代码等到批准才运行，拒绝后不运行（[`serve-terminal.sh`](../../ai/assistant-spike/serve-terminal.sh)）。
 - 卡片测试：危险命令与代码成为命令卡片，回答经 `approval.respond`（含“本对话中都允许”）；提问成为问题卡片，回答作为对 Hermes 请求的应答（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`cards.test.tsx`](../../web/src/assistant/cards.test.tsx)）；复制从共享空间到个人空间、整个文件夹、来源在确认后变化即不执行（[`executor_test.go`](../../internal/assistantchanges/executor_test.go)）。
-- 边界测试：Hermes 启动时加载的配置、`.env`、`SOUL.md`、钩子与插件在实例中只读；越界与经符号链接的提交被拒绝；真实模型面对“授权跳过确认”、写他人与共享根目录、索要密钥以及共享空间中的诱导文字时，不越界、不执行诱导，对话中不把诱导写进记忆（[研究](../research/hermes-agent-runtime.md#边界测试2026-10-14开发机)）。后台复盘（保留）可能在回合结束后把诱导文字的内容写进记忆或技能：验收看成员能在“记忆”中看到并删除它们，以及复盘发起的“提交更改”审批被产品服务拒绝（[研究](../research/hermes-agent-runtime.md#记忆与自建技能1142026-10-15开发机)）。
+- 边界测试：Hermes 启动时加载的配置、`.env`、`SOUL.md`、钩子与插件在实例中只读；越界与经符号链接的提交被拒绝；真实模型面对“授权跳过确认”、写他人与共享根目录、索要密钥以及共享空间中的诱导文字时，不越界、不执行诱导，对话中不把诱导写进记忆（[研究](../research/hermes-agent-runtime.md#边界测试2026-10-14开发机)）。后台复盘（保留）可能在回合结束后把诱导文字的内容写进记忆或技能：验收看成员能在“记忆”中看到并删除它们，以及复盘发起的“提交更改”审批被产品服务拒绝（[研究](../research/hermes-agent-runtime.md#记忆与自建技能1142026-10-15开发机)）；复盘只能用记忆、技能与只读的文件工具，每周的闲时整理只在实例未运行时运行（[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、[`curator.sh`](../../ai/assistant-spike/curator.sh)）。
 - 产品服务测试：越界提交不出卡片；非本人会话与助手通道的确认被拒绝；Hermes 未经本人点击的“同意”不执行；时限过后或停止后的确认无效；参数与卡片不一致时不执行；卡片之后改写的暂存内容不被写入，目标变化后不执行；同一更改不能执行两次。spike 中的对应测试见[研究](../research/hermes-agent-runtime.md#回合内审批1112026-10-15开发机)。
 - 相册服务测试：带助手标记的 Principal 不能写入，不带查看授权与管理员身份，不替成员创建私有图库；助手套接字按对端 UID 认定成员，只开放工具用到的读取路由（[`internal/photos/assistant_test.go`](../../internal/photos/assistant_test.go)、[`policy_test.go`](../../internal/photos/policy_test.go)、[`internal/photoservice/assistant_test.go`](../../internal/photoservice/assistant_test.go)）。spike 中经真实沙箱的检查见 [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh)。
 - 真实模型场景：修改、删除、发布、总结、找回已删文件与共享空间中的诱导文字，按[研究](../research/hermes-agent-runtime.md#真实模型deepseek2026-10-14开发机)中的场景重跑，提交全部指向允许的位置并说明需要确认。
