@@ -24,7 +24,7 @@ import {
 import { type ComponentPropsWithoutRef, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  type Approval, type AssistantSession, type ChangeOperation,
+  type Approval, type AssistantQuestion, type AssistantSession, type ChangeOperation,
   answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
 } from "./assistantApi";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
@@ -540,16 +540,31 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
   const [busy, setBusy] = useState(false);
   const { status } = approval;
   const open = status === "awaiting" || status === "deciding";
-  const answerOf = (id: string) => {
-    const parts = [...(picked[id] ?? []), (written[id] ?? "").trim()].filter(Boolean);
-    return parts.length ? parts.join("，") : null;
+  // The answer Hermes Desktop sends for a question (clarify/pending.tsx stagedAnswer): one
+  // choice or the text, which replace each other; for several choices a JSON list of them
+  // with the text as one more.
+  const answerOf = (question: AssistantQuestion) => {
+    const chosen = (picked[question.id] ?? []).map(plainChoice);
+    const draft = (written[question.id] ?? "").trim();
+    if (question.multiSelect) {
+      const all = [...chosen, ...(draft ? [draft] : [])];
+      return all.length ? JSON.stringify(all) : null;
+    }
+    return chosen[0] ?? (draft || null);
   };
-  const anything = questions.some((question) => answerOf(question.id) !== null);
-  const pick = (id: string, choice: string, multi: boolean) => setPicked((all) => {
-    const current = all[id] ?? [];
-    const next = current.includes(choice) ? current.filter((item) => item !== choice) : multi ? [...current, choice] : [choice];
-    return { ...all, [id]: next };
-  });
+  const anything = questions.some((question) => answerOf(question) !== null);
+  const pick = (question: AssistantQuestion, choice: string) => {
+    setPicked((all) => {
+      const current = all[question.id] ?? [];
+      const next = !question.multiSelect ? [choice] : current.includes(choice) ? current.filter((item) => item !== choice) : [...current, choice];
+      return { ...all, [question.id]: next };
+    });
+    if (!question.multiSelect) setWritten((all) => ({ ...all, [question.id]: "" }));
+  };
+  const write = (question: AssistantQuestion, value: string) => {
+    setWritten((all) => ({ ...all, [question.id]: value }));
+    if (!question.multiSelect) setPicked((all) => ({ ...all, [question.id]: [] }));
+  };
   const run = (work: () => Promise<void>) => {
     setBusy(true);
     void work().finally(() => setBusy(false));
@@ -573,16 +588,19 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
                   <div className="as-choices" role="group" aria-label={question.text}>
                     {question.choices.map((choice) => (
                       <button key={choice} type="button" aria-pressed={(picked[question.id] ?? []).includes(choice)} disabled={busy}
-                        onClick={() => pick(question.id, choice, Boolean(question.multiSelect))}>{choice}</button>
+                        onClick={() => pick(question, choice)}>
+                        {plainChoice(choice)}
+                        {RECOMMENDED.test(choice) && <small>推荐</small>}
+                      </button>
                     ))}
                   </div>
                 ) : null}
-                <input className="as-answer" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
+                <input className="as-answer-input" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
                   value={written[question.id] ?? ""} disabled={busy} maxLength={4000}
-                  onChange={(event) => setWritten((all) => ({ ...all, [question.id]: event.target.value }))} />
+                  onChange={(event) => write(question, event.target.value)} />
               </>
             ) : status === "answered" ? (
-              <span className="as-answered">{approval.answers?.[question.id] ?? "没有回答"}</span>
+              <span className="as-answered">{plainChoice(approval.answers?.[question.id] ?? "没有回答")}</span>
             ) : null}
           </div>
         ))}
@@ -591,7 +609,7 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
         <footer>
           <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => run(onSkip)}>跳过</button>
           <button type="button" className="as-confirm" disabled={busy || status !== "awaiting" || !anything}
-            onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question.id)]))))}>
+            onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))}>
             {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
           </button>
         </footer>
@@ -599,6 +617,12 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
     </article>
   );
 }
+
+// Hermes marks the choice it recommends by appending this to its text (clarify_tool.py
+// mark_recommended); as in Hermes Desktop (store/clarify.ts bareChoice) the card shows it as
+// a badge and answers with the bare choice.
+const RECOMMENDED = /\s*\(Recommended\)$/;
+const plainChoice = (choice: string) => choice.replace(RECOMMENDED, "");
 
 function questionStatus({ status, questions }: Approval) {
   switch (status) {

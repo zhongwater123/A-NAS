@@ -34,14 +34,32 @@ describe("cards for what the assistant asks", () => {
   it("collects an answer from a choice and from what the member writes", () => {
     const onAnswer = vi.fn(() => Promise.resolve());
     const approval: Approval = { ...base, requestId: "srq-00000000000b", kind: "question", status: "awaiting",
-      questions: [{ id: "q1", text: "放到哪个文件夹？", choices: ["照片", "文档"] }, { id: "q2", text: "改个名字吗？" }] };
+      questions: [{ id: "q1", text: "放到哪个文件夹？", choices: ["照片 (Recommended)", "文档"] }, { id: "q2", text: "改个名字吗？" }] };
     render(<QuestionCard approval={approval} onAnswer={onAnswer} onSkip={() => Promise.resolve()} />);
     const send = screen.getByRole("button", { name: "回答" }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "照片" }));
+    // Hermes's own mark shows as a badge, not in the choice.
+    expect(screen.queryByText(/Recommended/)).toBeNull();
+    expect(screen.getByText("推荐")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^照片/ }));
     fireEvent.change(screen.getByLabelText("回答：改个名字吗？"), { target: { value: "爱弥斯头像.png" } });
     fireEvent.click(send);
     expect(onAnswer).toHaveBeenCalledWith({ q1: "照片", q2: "爱弥斯头像.png" });
+  });
+
+  it("answers as Hermes Desktop does: a choice or the text, and a list for several choices", () => {
+    const onAnswer = vi.fn(() => Promise.resolve());
+    const approval: Approval = { ...base, requestId: "srq-00000000000c", kind: "question", status: "awaiting",
+      questions: [{ id: "q1", text: "放到哪里？", choices: ["照片", "文档"] }, { id: "q2", text: "哪些？", choices: ["猫", "狗"], multiSelect: true }] };
+    render(<QuestionCard approval={approval} onAnswer={onAnswer} onSkip={() => Promise.resolve()} />);
+    fireEvent.click(screen.getByRole("button", { name: "照片" }));
+    fireEvent.change(screen.getByLabelText("回答：放到哪里？"), { target: { value: "桌面" } });
+    fireEvent.click(screen.getByRole("button", { name: "猫" }));
+    fireEvent.click(screen.getByRole("button", { name: "狗" }));
+    fireEvent.change(screen.getByLabelText("回答：哪些？"), { target: { value: "兔子" } });
+    expect(screen.getByRole("button", { name: "照片" }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "回答" }));
+    expect(onAnswer).toHaveBeenCalledWith({ q1: "桌面", q2: JSON.stringify(["猫", "狗", "兔子"]) });
   });
 
   it("shows what was answered once the question is closed", () => {

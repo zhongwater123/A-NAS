@@ -218,9 +218,11 @@
 .as-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
 .as-choices button { height: 30px; padding: 0 12px; border: 1px solid var(--as-line-strong); border-radius: 999px; color: var(--as-ink-2); background: var(--as-surface); font: inherit; font-size: 12.5px; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
 .as-choices button:hover:not(:disabled) { border-color: rgba(106, 88, 224, .45); color: var(--as-ink); }
+.as-choices button small { margin-left: 6px; padding: 1px 6px; border-radius: 999px; color: var(--as-accent-ink); background: var(--as-accent-soft); font-size: 10.5px; }
+.as-choices button[aria-pressed="true"] small { color: #fff; background: rgba(255, 255, 255, .2); }
 .as-choices button[aria-pressed="true"] { border-color: transparent; color: #fff; background: linear-gradient(160deg, #7a69ec, #5d4bd6); }
-.as-answer { width: 100%; height: 34px; padding: 0 11px; border: 1px solid var(--as-line-strong); border-radius: 8px; outline: none; color: var(--as-ink); background: var(--as-surface); font: inherit; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
-.as-answer:focus { border-color: rgba(106, 88, 224, .55); box-shadow: 0 0 0 3px var(--as-accent-soft); }
+.as-answer-input { width: 100%; height: 34px; padding: 0 11px; border: 1px solid var(--as-line-strong); border-radius: 8px; outline: none; color: var(--as-ink); background: var(--as-surface); font: inherit; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
+.as-answer-input:focus { border-color: rgba(106, 88, 224, .55); box-shadow: 0 0 0 3px var(--as-accent-soft); }
 .as-answered { display: inline-block; padding: 3px 10px; border-radius: 7px; color: var(--as-ink-2); background: #f1f1f6; font-size: 12.5px; }
 
 /* ── Composer ────────────────────────────────────────────── */
