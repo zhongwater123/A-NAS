@@ -828,6 +828,57 @@ spike 的 `change_broker.py` 以 Go 重写为 [`internal/assistantchanges`](../.
 - 冷启动：在负载约 10 的开发机上，实例冷启动要 100 秒（空闲时 5–11 秒），超过了产品服务 90 秒的请求时限，窗口先报“助手暂时没有响应”；窗口因此在每次连上后重新载入对话列表并清掉这条提示，启动期间发出的消息等到连上再发送（最多 3 分钟）。
 - 仍未解决：系统技能写明窗口里没有斜杠命令后，DeepSeek flash 仍在回答末尾提到“输入 `/help`”，并主动提出整理用户档案。前者来自 `tui` 会话的平台说明，后者来自 Hermes 的引导；要去掉需另定 A-NAS 的 `SOUL.md` 或会话平台。
 
+## 开放 Hermes 自带的工具（2026-10-16，开发机）
+
+实验 NAS 上试用时，助手复制不了共享空间里的一张图片：Hermes 的文件工具只读写文字，“提交更改”只写暂存区里写好的内容，上游复制二进制文件靠终端，而终端是关着的。用户决定：只拦能做出破坏性操作的，其余工具尽量让助手用（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8 已改写）。
+
+### 工具清单与处理
+
+固定提交 `0e427d78` 的工具集（`toolsets.py` 定义 40 个，运行时注册的连同平台工具集共 62 个，由 `toolsets-check.py` 逐一核对）：
+
+| 工具集 | 工具 | 处理 | 为什么 |
+|---|---|---|---|
+| file、memory、session_search、skills、todo | `read_file`、`write_file`、`patch`、`search_files`、`memory`、`session_search`、`skills_list`、`skill_view`、`skill_manage`、`todo_list` | 开（原来就开） | 只写助手目录与 Hermes 状态 |
+| terminal | `terminal`、`process_manage` | 开 | 以成员身份在沙箱中运行：个人空间与共享空间是只读挂载，没有网络，看不到他人与系统；危险命令经命令卡片 |
+| code_execution | `execute_code` | 开 | 同上；每段代码经命令卡片 |
+| delegation | `delegate_task` | 开 | 子代理在同一沙箱中，沿用父代理的模型 |
+| clarify | `clarify` | 开 | 问题经问题卡片 |
+| vision、video | `vision_analyze`、`video_analyze` | 开，只用于测试 | 图片与画面发给模型（决定 7）；`video_analyze` 把整段视频作为 `video_url` 发出，DeepSeek 不收，会报错 |
+| web、search、x_search、browser、tts、image_gen、video_gen、connections、a2a、browser-cdp、browser-use | 搜索、抓取、14 个 `browser_*`、语音、生成、远程连接 | 关 | 要网络，沙箱没有；另做（经网关按域名放行，还要搜索服务的密钥） |
+| cronjob | `cronjob_manage` | 关 | 实例闲置退出后不触发，要 A-NAS 的调度唤醒 |
+| computer_use、desktop_ui、project、onboarding、bot_room、kanban、catalog、discord、discord_admin、yuanbao、feishu_doc、feishu_drive、context_engine、coding | 桌面操作、Desktop 界面、消息平台等 | 关 | 要桌面或别处的账号，不适用；`catalog` 安装第三方插件与技能，即运行别人的代码 |
+
+managed scope 另外固定 `terminal.cwd: /nas/助手` 与 `agent.clarify_timeout: 86400`（与 `approvals.timeout` 相同），`agent.image_input_mode` 仍为 `text`：图片只经 `vision_analyze` 发给模型，工具结果里的图片不直接进主对话。
+
+### 终端读得到会话令牌
+
+终端以成员的 UID 运行，而同一 UID 的进程能读彼此的 `/proc/<pid>/environ`。原来令牌由单元的 `EnvironmentFile=` 给出，`tini`、启动脚本与 `serve` 的环境中都有它；只从 `serve` 的环境里拿走也不够：Hermes 给它启动的 shell 与 MCP 子进程去掉了令牌，但 MCP 的看护进程 `tools/mcp_death_supervisor.py` 是按原样继承环境启动的（`tools/mcp_tool.py`，`Popen` 未给 `env`），里面仍有令牌。拿到令牌就能经沙箱内的 `127.0.0.1:9119` 直接驱动自己的 `serve`，包括批准自己的危险命令。
+
+改用 Hermes Desktop 经 SSH 把令牌交给后端的做法：`hermes serve --ssh-session-token-file <路径>` 从 `$HOME/.hermes/desktop-ssh/<32 位十六进制>/<16 位十六进制>.token` 读令牌，不跟随链接，要求目录 `0700`、文件 `0600` 且属于本人、内容恰好 64 个十六进制字符，读后删除（`hermes_cli/main_dashboard.py`）。带这个参数的 `serve` 还按“固定身份”处理，不读 `active_profile`。
+
+- 根单元 `anas-assistant-token@<账号>.service` 在沙箱建立之前把令牌写到只有 root 能进的目录，实例单元把这一个文件只读绑定进来；systemd 在运行哪怕带 `+` 的 `ExecStartPre=` 之前就建好挂载，所以这一步不能放在实例单元里。
+- 启动脚本读出令牌，写成上面的文件后以参数交给 `serve`；助手目录的默认 ACL 会把新建的目录与文件放宽成 `0770`/`0660`，要再 `chmod` 回 `0700`/`0600`，否则 `serve` 拒绝。`serve` 开始监听后，根单元把暂存的文件清空。令牌改为 32 字节的十六进制。
+- `serve` 内存里仍有令牌，而实验 NAS 的 Yama `ptrace_scope` 为 0，同一 UID 能读 `/proc/<pid>/mem`：`serve_nondumpable.py` 在 Hermes 启动前把进程设为不可转储（`PR_SET_DUMPABLE`），它的 `/proc` 文件就归 root。
+- `execute_code` 的环境中有 `HERMES_RPC_TOKEN`：这是 Hermes 给每段代码的工具调用令牌，调用工具时仍受同样的审批，不是会话令牌。
+
+### Hermes 的审批
+
+- **危险命令**：`approvals.mode: manual` 下，命令匹配 Hermes 的危险命令清单（`tools/approval_detection.py` 的 `DANGEROUS_PATTERNS`）就请求审批，请求带完整命令、`pattern_key`（如 `recursive delete`）、说明与可选项（`once`、`session`、`always`、`deny`）。清单按命令文本匹配：`rm -rf` 会问，`python -c` 里调用的删除不会，所以它挡的是失误；个人空间与共享空间靠只读挂载。
+- **代码**：在 `hermes serve` 的会话中，每段 `execute_code` 代码都整体审批一次（`check_execute_code_guard`：脚本可以直接调用 `subprocess`，绕过逐条命令的检查）；`session` 让这个对话里之后的代码不再问。
+- **提问**：`clarify` 是服务端请求，参数为 `session_id` 与最多 5 个问题（`qid`、`question`、可选的 `choices` 与 `multi_select`），应答 `{answers: {qid: 文字或 null}}`，不带 `answers` 即全部跳过；等待时限读 `agent.clarify_timeout`，默认 3600 秒。
+- 产品服务把危险命令与代码显示为命令卡片（“允许”“本对话中都允许”“拒绝”，不提供 `always`，因为它会写成永久规则），回答经 `approval.respond`；问题显示为问题卡片，回答作为对 Hermes 请求的应答，只能在请求到达的那条连接上发回。不在进行中的回合里的审批与提问照旧拒绝（后台复盘）。
+- 问题卡片的回答照 Hermes Desktop 的做法（`apps/desktop/src/components/assistant-ui/clarify/pending.tsx` 的 `stagedAnswer`）：单选时选项与自填互相取代，回答为去掉推荐标记的选项（`store/clarify.ts` 的 `bareChoice`）或所填文字；多选时为这些选项加所填文字组成的 JSON 列表。Hermes 在推荐的选项后自己加上 “(Recommended)”，卡片把它显示为“推荐”。Desktop 的卡片组件本身没有复制进来：它们建立在 Desktop 的 Tailwind、radix、motion 与 nanostores 状态之上，A-NAS 的 Web 不用这一套，复制就等于再引入一套界面框架；复制的是 Desktop 的会话记录模型与 JSON-RPC 客户端（决定 9），卡片按 A-NAS 的样式写。
+
+### “提交更改”的复制
+
+图片、视频经终端 `cp` 进暂存区后已能用 `write` 提交，但受 64 MiB 的暂存上限，内容还要复制一份到执行方的状态目录。新的 `copy` 操作直接从助手能读的地方（个人空间、共享空间、助手目录）复制文件或整个文件夹到个人空间或 `Agent空间/<本人>`：卡片写明来源、目标与大小（文件夹为其中文件的总和）；执行时来源或目标与生成卡片时不同就拒绝，以成员身份复制到目标旁的临时名，目标有同名文件时旧文件进回收站，再改名到位；文件夹不覆盖已有的文件夹。
+
+### 验证
+
+- 沙箱探针全部通过，`toolsets-check.py`：62 个工具集，开 11 个（17 个工具），关 26 个，其余为组合与平台工具集。
+- [`serve-terminal.sh`](../../ai/assistant-spike/serve-terminal.sh) 15 项通过（假模型）：命令以本人身份在 `/nas/助手` 运行；共享空间的二进制文件能复制进助手目录与暂存区；个人空间与共享空间只读；没有名字解析与外连；没有进程的环境中有会话令牌，暂存的令牌文件在 `serve` 监听后为空，root 的暂存目录进不去，`serve` 读后删掉了交给它的文件；代码与 `rm -rf` 各请求一次审批，批准后运行，拒绝后不运行；模型从未收到令牌。
+- Go：命令卡片（含“本对话中都允许”）、代码卡片的拒绝、问题卡片的回答与校验（`internal/assistantapi`）；复制的二进制文件、替换、整个文件夹、来源变化与越界来源（`internal/assistantchanges`）；Web 卡片组件测试。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
