@@ -120,9 +120,11 @@ case $cmd in
       sed "s/{{member}}/$account/g" "$here/member-skill.md" > "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
       chmod 0644 "/etc/a-nas-assistant/members/$account/config.yaml" "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
       # The session token: created once, root-only; the product service gets its own copy.
+      # 64 hex characters, as `hermes serve --ssh-session-token-file` takes it; one made
+      # in another form before is replaced.
       install -d -m 0700 /etc/a-nas-assistant/tokens
-      if [[ ! -s "/etc/a-nas-assistant/tokens/$account.env" ]]; then
-        (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')" \
+      if ! grep -qxE 'HERMES_DASHBOARD_SESSION_TOKEN=[0-9a-f]{64}' "/etc/a-nas-assistant/tokens/$account.env" 2>/dev/null; then
+        (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" \
           > "/etc/a-nas-assistant/tokens/$account.env")
       fi
       if [[ "$gate" != host-agent ]] && getent passwd "$product_user" >/dev/null; then

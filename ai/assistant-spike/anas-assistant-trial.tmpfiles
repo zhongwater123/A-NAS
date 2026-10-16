@@ -1,6 +1,9 @@
 # The trial of the AI assistant on the Experimental NAS (nas-trial.sh): what the
 # sandboxes bind under /run, made again at every boot.
 d /run/a-nas-assistant 0755 root root -
+d /run/a-nas-assistant-start 0700 root root -
+d /run/anas-assistant-start 0755 root root -
+f /run/anas-assistant-start/token 0644 root root -
 d /run/anas-assistant-gw 0755 root root -
 d /run/anas-assistant-photos 0755 root root -
 f /run/anas-assistant-photos/photos.sock 0644 root root -

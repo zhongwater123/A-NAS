@@ -25,7 +25,7 @@ key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
 env_line=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
-units=(anas-assistant@.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
+units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
@@ -203,7 +203,8 @@ remove_trial() {
   drop /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d \
     /etc/systemd/system/anas-assistant-api@.socket.d /etc/tmpfiles.d/anas-assistant-trial.conf
   systemctl daemon-reload
-  drop /run/a-nas-assistant /run/anas-assistant-gw /run/anas-assistant-photos /run/anas-change-agent /run/anas-spike-broker \
+  drop /run/a-nas-assistant /run/a-nas-assistant-start /run/anas-assistant-start /run/anas-assistant-gw /run/anas-assistant-photos \
+    /run/anas-change-agent /run/anas-spike-broker \
     /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills "$runtimes/spike" "$trial"
   rmdir "$runtimes" 2>/dev/null || true
   if [[ -L /spike ]]; then rm -f /spike; fi

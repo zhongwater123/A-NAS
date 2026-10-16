@@ -42,7 +42,12 @@ chmod 0644 /etc/hermes/config.yaml
 # Mount point for the photo service's assistant socket (#113): an empty file on the host,
 # the socket itself inside each sandbox (anas-assistant@.service).
 install -d -m 0755 /run/anas-assistant-photos && : > /run/anas-assistant-photos/photos.sock
-install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-api@.service" "$here/anas-assistant-api@.socket" /etc/systemd/system/
+# Mount point for the serve token the unit stages (anas-assistant@.service), and the
+# root-only directory it stages it in.
+install -d -m 0755 /run/anas-assistant-start && : > /run/anas-assistant-start/token
+install -d -m 0700 /run/a-nas-assistant-start
+install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-token@.service" "$here/anas-assistant-api@.service" \
+  "$here/anas-assistant-api@.socket" /etc/systemd/system/
 if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -d /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d
   install -m 0644 "$here/api-server-channel/anas-assistant.conf" /etc/systemd/system/anas-assistant@.service.d/channel.conf
