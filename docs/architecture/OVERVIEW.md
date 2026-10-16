@@ -31,7 +31,8 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                     ├── 类型化身份、ACL、卷、Samba 与 Btrfs 快照操作
                     ├── 白名单服务日志查询（固定参数的 journalctl，只读；ADR 0020）
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
-                    │        └── 助手连接：核对会话后以 root 连接本人的实例套接字并交回，会话失效即切断（ADR 0022）
+                    │        ├── 助手连接：核对会话后以 root 连接本人的实例套接字并交回，会话失效即切断（ADR 0022）
+                    │        └── 助手更改的执行方：凭会话生成卡片与登记授权；助手套接字上按对端 UID 执行，Landlock 限制写入位置
                     └── 会话与账号查询（供相册服务确认会话，或助手套接字对端 UID 的账号）
 
 Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内核 POSIX ACL → 个人空间或 Shared → Btrfs 数据卷
@@ -78,6 +79,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染、Compose 执行任务、`/api/v1/apps` | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
+| `internal/assistantchanges` | AI 助手“提交更改”的执行方：检查提交、为卡片复制暂存内容、登记本人的一次性授权、以本人身份经文件代理的受限工作进程执行（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 4） | 单元测试与系统测试；随助手默认关闭 |
 | `internal/assistantapi` | AI 助手的产品接口：经会话闸门按白名单转发成员实例上 `hermes serve` 的 JSON-RPC 与对话 REST，把 Hermes 的审批对应到“提交更改”并生成确认卡片（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md)） | 开发机原型与系统测试；默认关闭（`ANAS_ASSISTANT_SOCKET_DIR`），见 [AI 助手规格](../specs/ai-assistant.md) |
 | `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
 | `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
@@ -85,7 +87,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
 | `internal/hoststate` | 只读宿主机状态与 CPU/内存/网速指标接口、Fake Adapter 与 Debian Linux Adapter | 状态已通过本地及实验 NAS 测试；指标采样见[状态栏规格](../specs/host-metrics-status-bar.md) |
 | `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性，文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
-| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话（[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
+| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话，并执行助手的更改（`internal/assistantchanges`，Landlock 限制的工作进程；[ADR 0022](../adr/0022-run-a-sandboxed-hermes-agent-per-member.md) 决定 4 与 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |

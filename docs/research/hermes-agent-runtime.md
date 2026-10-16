@@ -805,10 +805,25 @@ Host Agent 还没有的部分由 [`assistant-layout.sh`](../../ai/assistant-spik
 
 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx) 改用 Desktop 与网页控制台共用的 JSON-RPC 客户端（`apps/shared` 的 `json-rpc-channel`、`json-rpc-gateway`、`reconnect-backoff`，由 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py) 复制）：新对话 `session.create`，打开旧对话 `session.resume`，发送 `prompt.submit`，停止 `session.interrupt`；回复用 Desktop 的 `appendAssistantTextPart`、`appendReasoningPart` 与 `upsertToolPart` 按事件逐步构建，回合结束后换成 REST 中存储的记录。切换对话不再停止回合。原型中标题栏汇总全部待确认更改的入口与规格“没有汇总列表”不符，已去掉；侧栏标出“等你确认”与“正在回答”（`session.active_list`）的对话。
 
+### 执行方移入文件代理
+
+spike 的 `change_broker.py` 以 Go 重写为 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go)，由文件代理运行（[`internal/filebroker/changes.go`](../../internal/filebroker/changes.go)）；`change_broker.py` 只留给没有文件代理的 spike 与本地原型：
+
+- **产品一侧**走现有的 `file-broker.sock`：生成卡片、登记授权（批准、拒绝、作废）与查看都带成员的会话令牌，文件代理自行核对。请求里没有账号参数，所以另一成员的会话看不到也批准不了这张卡片。
+- **助手一侧**是 `/run/a-nas/assistant-changes.sock`。它在成员进不去的 `/run/a-nas` 中，由单元绑定到沙箱里 MCP 服务器原来用的路径；文件代理取对端 UID，只认 A-NAS 范围内的在用账号。接口与 spike 相同（`POST /apply`、`GET /recent`），沙箱中的 MCP 服务器不用改。
+- **读写**都交给以成员身份运行的工作进程，用的是 Web 文件同一套 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)`，root 不打开成员一侧的任何路径。这个工作进程单独启动，不与 Web 共用，启动时用 Landlock 限制自己（[go-landlock](https://github.com/landlock-lsm/go-landlock) v0.10.1，Landlock 项目的官方库，在 cgo 的 Host Agent 中经 libpsx 作用于全部线程）：数据卷整体只读，只能写本人的个人空间（含回收站）、`Agent空间/<本人>` 与共享空间中本人的回收站；移进回收站是跨目录改名，需要 refer 权限。内核不支持 Landlock ABI 3（Linux 6.2）时直接失败，不会不受限地运行。实验 NAS 的内核 6.12 是 ABI 6，开发机与系统测试容器是 ABI 7。
+- **卡片中的副本与状态**放在数据卷上的 `assistant/.changes/<账号>/`（root `0700`），产品服务碰不到，避免它在成员确认后换掉副本。
+- **与 spike 的差异**：
+  - 判断目标在卡片之后是否变化，改用大小、inode 与修改时间，不再计算整个文件的 SHA-256：成员在 Web 上的保存是换新文件，这几项都会变；
+  - 写入先写临时文件，再把旧版本移进回收站并改名到位；
+  - 路径中任何以 `.a-nas-` 开头的名称（回收站、快照）都不能作为目标；
+  - 单个暂存文件上限 64 MiB。
+- 执行方直接在磁盘上写，不经产品服务的文件索引，所以 #115 记下的问题仍在：执行方新建的文件夹中被替换的文件，Web 回收站恢复时会回到空间根目录。
+
 ### 验证
 
 - 单元测试：文件代理（[`assistant_test.go`](../../internal/filebroker/assistant_test.go)）：伪造的、缺少的会话被拒绝，管理员连不到别人的助手，会话失效与文件代理停止时产品服务手里的连接被切断，经交出的连接能走 HTTP。产品服务（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)，对着模拟 `hermes serve` 的 [`fakeserve_test.go`](../../internal/assistantapi/fakeserve_test.go)）：白名单外的方法与参数到不了 Hermes，信息被去掉；审批成为卡片，窗口自己的应答到不了 Hermes，确认时执行方带着成员会话先登记授权；拒绝应答 `deny`；Hermes 已不再等待时确认作废授权；回合结束后的审批被拒绝；窗口离开后回合期间保持连接，回合结束或没有回合时断开。
-- 系统测试（真实安装器、Host Agent 与产品服务，`ASSISTANT_GATE=host-agent`）：实例套接字只有 root 能连，产品服务不保存令牌；change broker 拒绝没有会话与他人会话的产品请求；经产品服务与闸门打开的网关到得了 alice 的实例，`shell.exec` 得到 -32601，`session.create` 带 `profile` 得到 -32602，新对话的结果中没有系统提示；alice 退出登录后，网关在 30 秒时以 1013 关闭。第一次运行发现 `hermes serve` 的对话列表中 `hidden` 是 SQLite 的 0/1，不是布尔值，产品服务解码失败；已修正，测试中的模拟数据也改成与 Hermes 一致。
+- 系统测试（真实安装器、Host Agent 与产品服务，`ASSISTANT_GATE=host-agent`）：实例套接字只有 root 能连，产品服务不保存令牌；change broker 拒绝没有会话与他人会话的产品请求；经产品服务与闸门打开的网关到得了 alice 的实例，`shell.exec` 得到 -32601，`session.create` 带 `profile` 得到 -32602，新对话的结果中没有系统提示；alice 退出登录后，网关在 30 秒时以 1013 关闭。执行方移入文件代理后（下文），系统测试走完整条链路：假模型在回合中调用“提交更改”，窗口收到卡片，alice 以本人会话确认，文件代理的执行方以 alice 身份写入、旧版本进回收站，助手在同一回合得到“1 项更改已执行”；原来针对 spike broker 的 15 项执行层检查改为针对文件代理（`EXECUTOR=host-agent`），另查执行方只认会话所属的成员、副本目录为 root `0700`，共 240 项通过。第一次运行发现 `hermes serve` 的对话列表中 `hidden` 是 SQLite 的 0/1，不是布尔值，产品服务解码失败；已修正，测试中的模拟数据也改成与 Hermes 一致。
 - 浏览器（本地原型：产品服务以开发模式直连沙箱中的实例，DeepSeek flash，`approvals.timeout` 120 秒）：窗口 A 请助手在 `计划.md` 加一项，卡片在 A 的对话中出现，显示差异，侧栏标“等你确认”；alice 另一次登录的窗口 B 侧栏出现同一对话的标记，打开后看到同一张卡片并确认，两个窗口的卡片都变为“已按你的确认完成”，A 也收到这一轮的回答（经产品服务转发给打开同一对话的窗口），文件已修改，旧版本在回收站。不确认时卡片在 120 秒后变为“等待确认超时”，助手说明文件没有变化。
 - 冷启动：在负载约 10 的开发机上，实例冷启动要 100 秒（空闲时 5–11 秒），超过了产品服务 90 秒的请求时限，窗口先报“助手暂时没有响应”；窗口因此在每次连上后重新载入对话列表并清掉这条提示，启动期间发出的消息等到连上再发送（最多 3 分钟）。
 - 仍未解决：系统技能写明窗口里没有斜杠命令后，DeepSeek flash 仍在回答末尾提到“输入 `/help`”，并主动提出整理用户档案。前者来自 `tui` 会话的平台说明，后者来自 Hermes 的引导；要去掉需另定 A-NAS 的 `SOUL.md` 或会话平台。
