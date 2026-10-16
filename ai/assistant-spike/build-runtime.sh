@@ -2,7 +2,8 @@
 # Runs inside anas-ai-dev:trixie with network: builds the Hermes runtime the way
 # ADR 0016 builds the AI runtime, plus a standalone CPython 3.14 because Hermes
 # only installs its dependencies on 3.14. Hermes refuses wheel builds, so the
-# pinned source lives inside the runtime and is installed editable.
+# pinned source lives inside the runtime and is installed editable. run.sh
+# applies hermes-patches/ to it first; src/A-NAS-PATCHES lists them.
 set -euo pipefail
 rt=/opt/a-nas/assistant-runtimes/spike
 python3 -m venv /tmp/uvenv
@@ -20,6 +21,7 @@ grep -c '^[a-z0-9]' /out/requirements.txt | sed 's/^/pinned packages: /'
 $uv venv --quiet --python 3.14 $rt/venv
 VIRTUAL_ENV=$rt/venv $uv pip install --quiet --require-hashes -r /out/requirements.txt
 VIRTUAL_ENV=$rt/venv $uv pip install --quiet --no-deps --editable $rt/src
+echo "patches: $(tr '\n' ' ' < $rt/src/A-NAS-PATCHES 2>/dev/null || echo none)"
 $rt/venv/bin/python --version
 $rt/venv/bin/hermes --version 2>&1 | head -5 || true
 du -sh $rt/python $rt/venv $rt/src $rt | sed 's/^/size /'
