@@ -68,19 +68,37 @@ pid=$(pgrep -u alice -f 'hermes serve' | head -1)
 echo "INFO ptrace_scope $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo unknown); alice's own process through /proc/$pid/root: $(host alice python3 "$peer" "/proc/$pid/root$bound" libraries 2>&1 | head -c 120)"
 
 echo "--- the photo service restarts while an assistant runs"
-# A long turn keeps alice's assistant running across the restart (the fake model sleeps).
+# systemd holds the assistant socket, so the copy bound into the running sandbox is the
+# same socket the restarted service answers on. A long turn keeps alice's assistant
+# running throughout (the fake model sleeps). A service that has just started answers
+# photos_unavailable until its store is open, as on its own socket.
 "$py" /spike/serve_client.py alice chat "SLEEP 120" >/dev/null 2>&1 &
 holder=$!
 sleep 5
+answered() { for _ in $(seq 1 30); do inside alice python3 "$peer" "$bound" libraries >/dev/null 2>&1 && return; sleep 1; done; }
+pid=$(pgrep -u alice -f 'hermes serve' | head -1)
 systemctl restart photos-spike
-for _ in $(seq 1 60); do [[ -S $hidden ]] && python3 "$peer" "$hidden" libraries 2>/dev/null | grep -q '^401' && break; sleep 1; done
-check "the running sandbox still holds the old socket" unreachable "Connection refused" -- inside alice python3 "$peer" "$bound" libraries
-check "the photo tools tell the model in words" ok "相册暂时连不上" -- inside alice "$py" -c \
+answered
+check "alice's running assistant reaches the restarted service" ok "private:user:alice" -- inside alice python3 "$peer" "$bound" libraries
+check "its photo tools still answer" ok "IMG_3101" -- inside alice "$py" -c \
+  'import sys; sys.path.insert(0, "/spike"); import anas_mcp; print(anas_mcp.search_photos("海边").content[0].text)'
+check "the assistant was not restarted for it" ok "^$pid\$" -- pgrep -u alice -f 'hermes serve'
+systemctl stop photos-spike
+inside alice python3 "$peer" "$bound" libraries >/dev/null 2>&1
+check "a connection while the service is stopped starts it again" ok "^active" -- systemctl is-active photos-spike
+answered
+check "and it answers once its store is open" ok "private:user:alice" -- inside alice python3 "$peer" "$bound" libraries
+# Only stopping the socket itself (uninstalling, upgrading the unit) leaves the sandbox
+# with a dead socket; the photo tools then say so in words.
+systemctl stop photos-spike-assistant.socket photos-spike.service
+check "with the socket gone, the photo tools tell the model in words" ok "相册暂时连不上" -- inside alice "$py" -c \
   'import sys; sys.path.insert(0, "/spike"); import anas_mcp; print(anas_mcp.search_photos("海边").content[0].text)'
 kill "$holder" 2>/dev/null
+systemctl start photos-spike-assistant.socket photos-spike.service
 systemctl stop anas-assistant@alice.service
 "$py" /spike/serve_client.py alice ready >/dev/null
-check "a restarted assistant reaches the new one" ok "private:user:alice" -- inside alice python3 "$peer" "$bound" libraries
+answered
+check "a restarted assistant reaches the new socket" ok "private:user:alice" -- inside alice python3 "$peer" "$bound" libraries
 
 echo "photos-socket: $pass passed, $fail failed"
 ((fail == 0))

@@ -38,10 +38,32 @@ fi
 if [[ -x /spike-photos/photos-spike ]]; then
   # The photo service as its own identity (ADR 0011) with its assistant socket (#113),
   # seeded with photos for alice, bob and the shared library. Its socket directories are
-  # private to it; the assistant's unit binds the socket itself into the sandbox.
+  # private to it; the assistant's unit binds the socket itself into the sandbox. systemd
+  # holds the assistant socket, so it outlives restarts of the photo service and the
+  # copies bound into running sandboxes keep working.
   useradd -r -u 31000 -U -M -d /nonexistent -s /usr/sbin/nologin a-nas-photos
   install -d -o a-nas-photos -g a-nas-photos -m 0700 /var/lib/photos-spike /run/a-nas-photos /run/a-nas-photos-assistant
-  systemd-run --unit photos-spike --quiet -p User=a-nas-photos -p Group=a-nas-photos /spike-photos/photos-spike     /var/lib/photos-spike /run/a-nas-photos/photos.sock /run/a-nas-photos-assistant/assistant.sock
+  cat >/etc/systemd/system/photos-spike-assistant.socket <<'UNIT'
+[Socket]
+ListenStream=/run/a-nas-photos-assistant/assistant.sock
+SocketMode=0666
+DirectoryMode=0700
+FileDescriptorName=assistant
+Service=photos-spike.service
+UNIT
+  cat >/etc/systemd/system/photos-spike.service <<'UNIT'
+[Unit]
+Requires=photos-spike-assistant.socket
+After=photos-spike-assistant.socket
+
+[Service]
+User=a-nas-photos
+Group=a-nas-photos
+Sockets=photos-spike-assistant.socket
+ExecStart=/spike-photos/photos-spike /var/lib/photos-spike /run/a-nas-photos/photos.sock /run/a-nas-photos-assistant/assistant.sock
+UNIT
+  systemctl daemon-reload
+  systemctl start photos-spike-assistant.socket photos-spike.service
   for _ in $(seq 1 240); do
     journalctl -u photos-spike -o cat --no-pager | grep -q photos-ready && break
     systemctl is-active -q photos-spike || { journalctl -u photos-spike -o cat --no-pager | tail -5; exit 1; }

@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/activation"
 	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -116,14 +117,9 @@ func Run(parent context.Context, config Config) error {
 		return err
 	}
 	var assistantListener net.Listener
+	inherited := false
 	if config.AssistantSocketPath != "" {
-		// Any member's assistant connects; the peer's UID says which member. The
-		// socket is open to every UID, so its directory must keep out all but the
-		// sandboxes systemd binds the socket into.
-		err = requirePrivateDirectory(filepath.Dir(config.AssistantSocketPath))
-		if err == nil {
-			assistantListener, err = listen(config.AssistantSocketPath, 0o666)
-		}
+		assistantListener, inherited, err = assistantSocket(config.AssistantSocketPath)
 		if err != nil {
 			_ = listener.Close()
 			return err
@@ -186,7 +182,9 @@ func Run(parent context.Context, config Config) error {
 	var shutdownErr error
 	if assistantServer != nil {
 		shutdownErr = assistantServer.Shutdown(shutdown)
-		_ = os.Remove(config.AssistantSocketPath)
+		if !inherited {
+			_ = os.Remove(config.AssistantSocketPath)
+		}
 	}
 	shutdownErr = errors.Join(shutdownErr, server.Shutdown(shutdown))
 	_ = os.Remove(config.SocketPath)
@@ -370,6 +368,23 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 // listen opens an API socket. The Product Service's socket is 0660, for its
 // user is a member of this service's group; the runtime directory keeps
 // everyone else out.
+// assistantSocket is where members' assistants connect; the peer's UID says
+// which member. When systemd holds the socket (a socket unit naming it
+// "assistant"), it outlives restarts of this service, so the socket bound into
+// running sandboxes keeps working; the unit keeps its directory private.
+// Otherwise the service makes it, open to every UID, in a directory that must
+// keep out all but the sandboxes systemd binds the socket into.
+func assistantSocket(socketPath string) (net.Listener, bool, error) {
+	if listeners, err := activation.ListenersWithNames(); err == nil && len(listeners["assistant"]) > 0 {
+		return listeners["assistant"][0], true, nil
+	}
+	if err := requirePrivateDirectory(filepath.Dir(socketPath)); err != nil {
+		return nil, false, err
+	}
+	listener, err := listen(socketPath, 0o666)
+	return listener, false, err
+}
+
 func listen(socketPath string, mode os.FileMode) (net.Listener, error) {
 	if info, err := os.Lstat(socketPath); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {

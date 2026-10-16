@@ -118,7 +118,8 @@ func runPhotoService(logger *slog.Logger) error {
 		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
 		Sessions:   lookup,
 		// The AI assistant is not shipped yet (ADR 0022), so its socket is off
-		// unless named.
+		// unless named. A socket unit may hold it (FileDescriptorName=assistant)
+		// so that it outlives restarts of this service.
 		AssistantSocketPath: os.Getenv("ANAS_PHOTOS_ASSISTANT_SOCKET"),
 		Accounts:            lookup,
 		Logger:              logger,
