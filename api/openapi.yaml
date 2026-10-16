@@ -2945,6 +2945,10 @@ components:
       additionalProperties: false
       required: [id, name, pid, state, cpuPercent, memoryBytes, readBytesPerSecond, writeBytesPerSecond]
       properties:
+        iconId:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+          description: Content hash referencing an optional installed icon in the snapshot.
         id: { $ref: "#/components/schemas/TaskManagerID" }
         name: { type: string, minLength: 1 }
         pid:
@@ -3028,6 +3032,14 @@ components:
       additionalProperties: false
       required: [observedAt, sampleSeconds, dataSource, processes, services]
       properties:
+        icons:
+          type: object
+          maxProperties: 64
+          description: Deduplicated installed artwork; bounded to 1 MiB total. No host paths or remote URLs.
+          additionalProperties:
+            type: string
+            maxLength: 24576
+            pattern: '^data:image/(png|svg\+xml);base64,[A-Za-z0-9+/]+=*$'
         observedAt: { type: string, format: date-time }
         sampleSeconds:
           type: number

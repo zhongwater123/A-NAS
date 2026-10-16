@@ -11,8 +11,8 @@ export interface DeviceSnapshot extends Observation {
   memory: { totalBytes: number; usedBytes: number };
   network: Group<Network>; disks: Group<Disk>; gpu: Group<Accelerator>; npu: Group<Accelerator>;
 }
-export interface Task { id: string; name: string; pid: number; state: string; cpuPercent: number | null; memoryBytes: number | null; readBytesPerSecond: number | null; writeBytesPerSecond: number | null }
-export interface TaskSnapshot extends Observation { processes: Group<Task>; services: Group<Task> }
+export interface Task { iconId?: string; id: string; name: string; pid: number; state: string; cpuPercent: number | null; memoryBytes: number | null; readBytesPerSecond: number | null; writeBytesPerSecond: number | null }
+export interface TaskSnapshot extends Observation { icons?: Record<string, string>; processes: Group<Task>; services: Group<Task> }
 
 async function read<T>(part: "device" | "tasks", signal: AbortSignal): Promise<T> {
   const response = await apiFetch(`/api/v1/task-manager/${part}`, { method: "GET", headers: { Accept: "application/json" }, credentials: "same-origin", signal });
