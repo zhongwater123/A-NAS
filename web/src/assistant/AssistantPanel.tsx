@@ -14,7 +14,7 @@ import {
   type ThreadMessageLike,
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
-import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
+import { type CodeHeaderProps, type StreamdownTextComponents, StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
   ArrowUp, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
@@ -24,6 +24,7 @@ import {
 import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { AssistantGlyph } from "../AssistantGlyph";
+import { copyText } from "../clipboard";
 import {
   type Approval, type AssistantQuestion, type AssistantSession, type ChangeOperation,
   answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
@@ -383,7 +384,29 @@ function Outcome() {
   return null;
 }
 
-const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} />;
+// Streamdown's own code, table, diagram and image buttons are styled with
+// Tailwind, which A-NAS does not load, so they are off; code blocks get the
+// window's own header with a copy button instead.
+export const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} controls={false} />;
+
+// A code block's header: its language, and a copy that works on the LAN's
+// plain HTTP, where the Clipboard API is unavailable.
+function CodeHeader({ language, code }: CodeHeaderProps) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  return (
+    <div className="as-code-head">
+      <span>{language || "文本"}</span>
+      <button type="button" className={copied ? "copied" : undefined} aria-label={copied ? "已复制" : "复制代码"} onClick={() => setCopied(copyText(code.replace(/\n$/, "")))}>
+        {copied ? <Check /> : <Copy />}{copied ? "已复制" : "复制"}
+      </button>
+    </div>
+  );
+}
 
 // A photo the assistant names shows as its thumbnail and opens in the photo
 // app; other links open in a new tab.
@@ -733,7 +756,7 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS = { a: MarkdownLink };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, CodeHeader };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
