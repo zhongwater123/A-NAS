@@ -53,6 +53,14 @@ func serveAssistantInstance(t *testing.T, dir string) {
 			_, _ = io.WriteString(w, `{"ok":true,"title":"周末"}`)
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/"+assistantStored:
 			_, _ = io.WriteString(w, `{"ok":true}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/learning/graph":
+			_, _ = io.WriteString(w, `{"nodes":[{"id":"family-trip","kind":"skill","category":"travel","createdBy":"learn","useCount":2,"timestamp":1800000000},
+				{"id":"memory:memory:0:ab12","kind":"memory","memorySource":"memory","timestamp":1800000001}],
+				"memory":[{"source":"memory","title":"简短","body":"alice 喜欢简短的回答","fingerprint":"ab12"}],"edges":[],"stats":{}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/learning/node":
+			_, _ = io.WriteString(w, `{"ok":true,"kind":"skill","id":"family-trip","content":"# 出游计划"}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/learning/node":
+			_, _ = io.WriteString(w, `{"ok":true}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/"+assistantStored+"/messages":
 			_, _ = io.WriteString(w, `{"session_id":"`+assistantStored+`","messages":[
 				{"id":1,"role":"user","content":"计划里加一项","timestamp":11},
@@ -137,6 +145,14 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	}
 	asAlice.do(http.MethodPost, "/api/v1/assistant/approvals/req-1/confirm", "", nil, http.StatusNotFound)
 	asAlice.do(http.MethodPost, "/api/v1/assistant/approvals/req-1/reject", "", nil, http.StatusNotFound)
+	if body := asAlice.do(http.MethodGet, "/api/v1/assistant/memory", "", nil, http.StatusOK).Body.String(); !strings.Contains(body, "简短的回答") {
+		t.Fatalf("memory = %s", body)
+	}
+	asAlice.do(http.MethodGet, "/api/v1/assistant/memory/items/family-trip", "", nil, http.StatusOK)
+	asAlice.do(http.MethodDelete, "/api/v1/assistant/memory/items/family-trip", "", nil, http.StatusNoContent)
+	asAlice.do(http.MethodDelete, "/api/v1/assistant/memory/items/not-learned", "", nil, http.StatusNotFound)
+	asAlice.do(http.MethodPost, "/api/v1/assistant/memory/clear", `{"conversations":false}`, nil, http.StatusOK)
+
 	// The gateway is a WebSocket; a plain request is told so.
 	asAlice.do(http.MethodGet, "/api/v1/assistant/ws", "", nil, http.StatusUpgradeRequired)
 

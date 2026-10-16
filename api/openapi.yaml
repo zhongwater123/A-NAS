@@ -1857,6 +1857,46 @@ paths:
         "404": { $ref: "#/components/responses/ProductError" }
         "502": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/memory:
+    get:
+      operationId: getAssistantMemory
+      summary: "What the member's assistant remembers and the skills it made, from Hermes's learning graph; A-NAS's own skills are left out"
+      responses:
+        "200": { description: The memory, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantMemory" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/memory/items/{memoryId}:
+    parameters: [{ $ref: "#/components/parameters/AssistantMemoryID" }]
+    get:
+      operationId: getAssistantMemoryItem
+      summary: "The whole text of one memory or skill (its SKILL.md)"
+      responses:
+        "200": { description: The text, content: { application/json: { schema: { type: object, additionalProperties: false, required: [id, kind, content], properties: { id: { type: string }, kind: { type: string, enum: [memory, skill] }, content: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteAssistantMemoryItem
+      summary: "Forget one memory, or move one skill into Hermes's archive; new conversations no longer carry it"
+      description: "memory_changed when the memory changed since it was read; read it again."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Forgotten }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/memory/clear:
+    post:
+      operationId: clearAssistantMemory
+      summary: "Forget every memory and skill; with conversations, also delete every conversation, which is the only way to clear it for good"
+      description: "A conversation with a turn running is kept and counted as busy."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: false, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { conversations: { type: boolean } } } } } }
+      responses:
+        "200": { description: What was cleared, content: { application/json: { schema: { type: object, additionalProperties: false, required: [memories, skills, conversations, busy], properties: { memories: { type: integer }, skills: { type: integer }, conversations: { type: integer }, busy: { type: integer } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/assistant/approvals:
     get:
       operationId: listAssistantApprovals
@@ -1922,6 +1962,7 @@ components:
     FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
     AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id.", schema: { type: string, pattern: "^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$" } }
+    AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
     AssistantRequestID: { name: requestId, in: path, required: true, description: "The approval's request id from Hermes.", schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" } }
     TusResumable: { name: Tus-Resumable, in: header, required: true, schema: { type: string, enum: ["1.0.0"] } }
     AppId:
@@ -3308,6 +3349,34 @@ components:
         role: { type: string, enum: [user, assistant, tool, system] }
         content: {}
       additionalProperties: true
+    AssistantMemory:
+      type: object
+      additionalProperties: false
+      required: [memories, skills]
+      properties:
+        memories:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, store, text]
+            properties:
+              id: { type: string }
+              store: { type: string, enum: [memory, profile], description: "memory for the assistant's notes, profile for what it noted about the member." }
+              text: { type: string, description: "The memory, at most its first 1,200 characters." }
+              updatedAt: { type: integer, description: Unix seconds. }
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, useCount]
+            properties:
+              id: { type: string, description: "The skill's name." }
+              category: { type: string }
+              createdBy: { type: string, description: "learn when the member asked for it, agent when the assistant made it itself; absent when it only used it." }
+              useCount: { type: integer, minimum: 0 }
+              updatedAt: { type: integer, description: Unix seconds. }
     AssistantApprovalEnvelope:
       type: object
       additionalProperties: false

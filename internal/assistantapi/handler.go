@@ -95,6 +95,10 @@ func New(options Options) http.Handler {
 		"GET /approvals":               h.listApprovals,
 		"POST /approvals/{id}/confirm": h.decideApproval(true),
 		"POST /approvals/{id}/reject":  h.decideApproval(false),
+		"GET /memory":                  h.getMemory,
+		"GET /memory/items/{id}":       h.getMemoryItem,
+		"DELETE /memory/items/{id}":    h.deleteMemoryItem,
+		"POST /memory/clear":           h.clearMemory,
 	}
 	for pattern, route := range routes {
 		method, path, _ := strings.Cut(pattern, " ")

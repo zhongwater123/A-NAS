@@ -28,6 +28,7 @@ import {
 } from "./assistantApi";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
+import { MemoryView } from "./MemoryView";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import "./assistant.css";
@@ -43,6 +44,8 @@ export function AssistantPanel({ username }: { username: string }) {
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string>();
+  // The window shows a conversation, or what the assistant remembers.
+  const [view, setView] = useState<"chat" | "memory">("chat");
   const [approvals, setApprovals] = useState<Map<string, Approval>>(new Map());
   // Stored conversations with a turn running in the instance, wherever it was started.
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -165,13 +168,16 @@ export function AssistantPanel({ username }: { username: string }) {
           <span className="as-brand-mark"><Bot /></span>
           <div><strong>AI 助手</strong><small>{username} 的助手</small></div>
         </div>
-        <button type="button" className="as-new" onClick={() => setActiveId(undefined)}><MessageSquarePlus />新对话</button>
+        <button type="button" className="as-new" onClick={() => { setActiveId(undefined); setView("chat"); }}><MessageSquarePlus />新对话</button>
+        <button type="button" className={`as-nav${view === "memory" ? " active" : ""}`} aria-pressed={view === "memory"} onClick={() => setView("memory")}>
+          <Brain />记忆<small>助手记住的内容</small>
+        </button>
         <div className="as-side-label"><History />对话</div>
         <ul className="as-sessions">
           {sessions.map((session) => (
             <SessionRow key={session.id} session={session} active={session.id === activeId} waiting={waiting.get(session.id) ?? 0}
               running={busy.has(session.id)}
-              onOpen={() => setActiveId(session.id)} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
+              onOpen={() => { setActiveId(session.id); setView("chat"); }} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
           ))}
           {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动助手…</>}</li>}
         </ul>
@@ -180,13 +186,14 @@ export function AssistantPanel({ username }: { username: string }) {
 
       <main className="as-main">
         <header className="as-head">
-          <h2>{active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
+          <h2>{view === "memory" ? "记忆" : active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
           {thread.running && <span className="as-working"><LoaderCircle />正在处理</span>}
           {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接助手</span>}
         </header>
 
+        {view === "memory" && <MemoryView onConversationsDeleted={() => { setActiveId(undefined); void refreshSessions(); }} />}
         <AssistantRuntimeProvider runtime={runtime}>
-          <ThreadPrimitive.Root className="as-thread">
+          <ThreadPrimitive.Root className="as-thread" hidden={view !== "chat"}>
             <ThreadPrimitive.Viewport className="as-viewport" autoScroll={Boolean(activeId)}>
               {!activeId && !thread.messages.length ? (
                 <Welcome username={username} onPick={(text) => void send(text)} />

@@ -3,6 +3,7 @@ package assistantapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -39,6 +40,9 @@ type fakeServe struct {
 	conn     *websocket.Conn
 	closed   chan struct{}
 	answered chan string
+	// The learning graph: alice's memories (store, text) and skills.
+	memories [][2]string
+	skills   []string
 }
 
 func newFakeServe(t *testing.T) *fakeServe {
@@ -51,7 +55,9 @@ func newFakeServe(t *testing.T) *fakeServe {
 	if err := os.WriteFile(filepath.Join(dir, "alice.token"), []byte(fakeToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8)}
+	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8),
+		memories: [][2]string{{"memory", "alice 喜欢简短的回答"}, {"profile", "alice 每周日大扫除"}},
+		skills:   []string{"family-trip", "anas-files"}}
 	listener, err := net.Listen("unix", filepath.Join(dir, "alice.sock"))
 	if err != nil {
 		t.Fatal(err)
@@ -96,14 +102,82 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = io.WriteString(w, `{"ok":true,"title":"周末"}`)
-	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/"+fakeStored:
+	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/20261015_130000_aaaaaa":
+		// A turn is writing to it.
+		http.Error(w, `{"detail":"session has an active writer"}`, http.StatusConflict)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/sessions/"):
 		_, _ = io.WriteString(w, `{"ok":true}`)
+	case r.URL.Path == "/api/learning/graph" || r.URL.Path == "/api/learning/node":
+		f.learning(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/"+fakeStored+"/messages":
 		_, _ = io.WriteString(w, `{"session_id":"`+fakeStored+`","messages":[
 			{"id":1,"role":"user","content":"计划里加一项","timestamp":11},
 			{"id":4,"role":"assistant","content":"已提交，等你确认。","finish_reason":"stop"}],"pagination":{}}`)
 	default:
 		http.Error(w, `{"detail":"Not found"}`, http.StatusNotFound)
+	}
+}
+
+// learning serves Hermes's learning graph routes over the fake's memories and
+// skills; memory ids are memory:<store>:<n>:<fingerprint>, the fingerprint
+// being the text's length here.
+func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	memoryID := func(n int) string {
+		return fmt.Sprintf("memory:%s:%d:%d", f.memories[n][0], n, len(f.memories[n][1]))
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if r.URL.Path == "/api/learning/node" {
+			id := r.URL.Query().Get("id")
+			for _, skill := range f.skills {
+				if skill == id {
+					_, _ = fmt.Fprintf(w, `{"ok":true,"kind":"skill","id":%q,"content":"---\nname: %s\n---\n# 出游计划"}`, id, id)
+					return
+				}
+			}
+			http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)
+			return
+		}
+		var nodes, cards []string
+		for _, skill := range f.skills {
+			nodes = append(nodes, fmt.Sprintf(`{"id":%q,"kind":"skill","category":"travel","createdBy":"learn","useCount":2,"timestamp":1800000000}`, skill))
+		}
+		for n, memory := range f.memories {
+			nodes = append(nodes, fmt.Sprintf(`{"id":%q,"kind":"memory","memorySource":%q,"category":"memory","timestamp":1800000001}`, memoryID(n), memory[0]))
+			cards = append(cards, fmt.Sprintf(`{"source":%q,"title":%q,"body":%q,"fingerprint":"%d"}`, memory[0], memory[1], memory[1], len(memory[1])))
+		}
+		_, _ = fmt.Fprintf(w, `{"nodes":[%s],"edges":[],"clusters":[],"memory":[%s],"stats":{}}`, strings.Join(nodes, ","), strings.Join(cards, ","))
+	case http.MethodDelete:
+		var body struct {
+			ID      string `json:"id"`
+			Profile string `json:"profile"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Profile != "" {
+			http.Error(w, `{"detail":"a profile reached Hermes"}`, http.StatusTeapot)
+			return
+		}
+		if strings.HasPrefix(body.ID, "anas-") {
+			http.Error(w, `{"detail":"external skills are read-only to the curator"}`, http.StatusBadRequest)
+			return
+		}
+		for n := range f.memories {
+			if memoryID(n) == body.ID {
+				f.memories = append(f.memories[:n], f.memories[n+1:]...)
+				_, _ = io.WriteString(w, `{"ok":true}`)
+				return
+			}
+		}
+		for n, skill := range f.skills {
+			if skill == body.ID {
+				f.skills = append(f.skills[:n], f.skills[n+1:]...)
+				_, _ = io.WriteString(w, `{"ok":true}`)
+				return
+			}
+		}
+		http.Error(w, `{"detail":"memory changed — stale, refresh the graph"}`, http.StatusBadRequest)
 	}
 }
 
