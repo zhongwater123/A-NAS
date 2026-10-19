@@ -32,7 +32,7 @@ import {
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
-import { linkPhotos, photoOf } from "./photoLinks";
+import { type NamedPhoto, linkPhotos, photoOf, photosIn } from "./photoLinks";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import "./assistant.css";
@@ -395,6 +395,7 @@ function AssistantMessage() {
       <span className="as-avatar"><AssistantGlyph /></span>
       <div className="as-answer">
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+        <AnswerPhotos />
         <Outcome />
       </div>
     </MessagePrimitive.Root>
@@ -436,18 +437,51 @@ function CodeHeader({ language, code }: { [K in keyof CodeHeaderProps]?: unknown
   );
 }
 
-// A photo the assistant names shows as its thumbnail and opens in the photo
-// app; other links open in a new tab.
+// A photo the assistant names is a link to it in the text (the picture itself
+// shows under the answer) and opens in the photo app; other links open in a
+// new tab.
 function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
   const open = useContext(PhotoOpener);
-  const [broken, setBroken] = useState(false);
   const photo = photoOf(href);
   if (!photo) return <a href={href} target="_blank" rel="noreferrer" {...rest}>{children}</a>;
   return (
-    <button type="button" className="as-photo" title="在相册中打开" disabled={!open} onClick={() => open?.(photo)}>
-      {broken ? <span className="as-photo-none"><ImageIcon /></span>
-        : <img src={`/api/v1/photos/assets/${encodeURIComponent(photo)}/thumbnail`} alt="" loading="lazy" onError={() => setBroken(true)} />}
-      <span>{children}</span>
+    <button type="button" className="as-photo-ref" title="在相册中打开" disabled={!open} onClick={() => open?.(photo)}>
+      <ImageIcon />{children}
+    </button>
+  );
+}
+
+// More than this many photos show as the first ones and a count.
+const ANSWER_PHOTOS = 12;
+
+// The photos an answer names, under it as the pictures themselves, the way a
+// chat shows photos sent in it: one large, several as tiles. They load with
+// the member's own session; a click opens the photo in the photo app.
+function AnswerPhotos() {
+  const text = useAuiState((state) => state.message.content.map((part) => (part.type === "text" ? part.text : "")).join("\n"));
+  const photos = useMemo(() => photosIn(text), [text]);
+  if (!photos.length) return null;
+  const shown = photos.slice(0, ANSWER_PHOTOS);
+  return (
+    <div className={`as-gallery${shown.length === 1 ? " one" : ""}`}>
+      {shown.map((photo) => <AnswerPhoto key={photo.id} photo={photo} />)}
+      {photos.length > shown.length && <p className="as-gallery-more">另有 {photos.length - shown.length} 张，点上文的名称查看</p>}
+    </div>
+  );
+}
+
+function AnswerPhoto({ photo }: { photo: NamedPhoto }) {
+  const open = useContext(PhotoOpener);
+  const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
+  return (
+    <button type="button" className={`as-gallery-item ${state}`} aria-label={`${photo.name}，在相册中打开`} title="在相册中打开"
+      disabled={!open} onClick={() => open?.(photo.id)}>
+      <span className="as-gallery-frame">
+        {state === "missing" ? <ImageIcon />
+          : <img src={`/api/v1/photos/assets/${encodeURIComponent(photo.id)}/thumbnail`} alt="" loading="lazy"
+            onLoad={() => setState("ready")} onError={() => setState("missing")} />}
+      </span>
+      <span className="as-gallery-name">{state === "missing" ? `${photo.name}（打不开）` : photo.name}</span>
     </button>
   );
 }
