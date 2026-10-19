@@ -17,7 +17,12 @@ func Admits(path string, incoming int64) (bool, error) {
 	return admits(uint64(stats.Blocks)*uint64(stats.Bsize), uint64(stats.Bavail)*uint64(stats.Bsize), uint64(max(incoming, 0))), nil
 }
 
+// Reserve is the space writers leave free on a volume of total bytes: 5%,
+// and at least MinimumReserve.
+func Reserve(total uint64) uint64 {
+	return max(total/20, MinimumReserve)
+}
+
 func admits(total, available, incoming uint64) bool {
-	reserve := max(total/20, MinimumReserve)
-	return incoming < available && available-incoming >= reserve
+	return incoming < available && available-incoming >= Reserve(total)
 }

@@ -103,12 +103,12 @@ func TestReaderReturnsOneDebianObservation(t *testing.T) {
 
 func TestObserveDataVolumeUsageReportsFilesystemCapacity(t *testing.T) {
 	disks := []hoststate.Disk{{Role: hoststate.DiskRoleData}}
-	observeDataVolumeUsage(disks, func(path string) (uint64, uint64, error) {
+	observeDataVolume(disks, func(path string) (filesystemUsage, error) {
 		if path != "/srv/a-nas/data" {
 			t.Fatalf("usage path = %q", path)
 		}
-		return 500_107_862_016, 482_000_000_000, nil
-	})
+		return filesystemUsage{total: 500_107_862_016, available: 482_000_000_000}, nil
+	}, nil)
 
 	if disks[0].FilesystemCapacityBytes == nil || *disks[0].FilesystemCapacityBytes != 500_107_862_016 {
 		t.Fatalf("filesystem capacity = %v", disks[0].FilesystemCapacityBytes)

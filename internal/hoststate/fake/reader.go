@@ -127,6 +127,10 @@ func cloneState(state hoststate.State) hoststate.State {
 			value := *disk.FilesystemAvailableBytes
 			cloned.Disks[i].FilesystemAvailableBytes = &value
 		}
+		if disk.FilesystemErrors != nil {
+			value := *disk.FilesystemErrors
+			cloned.Disks[i].FilesystemErrors = &value
+		}
 		cloned.Disks[i].Filesystems = append([]string(nil), disk.Filesystems...)
 	}
 	return cloned

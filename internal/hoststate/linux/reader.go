@@ -13,7 +13,9 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +28,7 @@ import (
 const (
 	hostIdentityDomain = "a-nas:host:v1"
 	diskIdentityDomain = "a-nas:disk:v1"
+	dataMountPoint     = "/srv/a-nas/data"
 )
 
 type dependencies struct {
@@ -35,7 +38,7 @@ type dependencies struct {
 	now                   func() time.Time
 	readBlockDevices      func(context.Context) ([]byte, error)
 	readSMART             func(context.Context, string) ([]byte, error)
-	readFilesystemUsage   func(string) (uint64, uint64, error)
+	readFilesystemUsage   func(string) (filesystemUsage, error)
 	sleep                 func(context.Context, time.Duration) error
 	readTaskServices      func(context.Context) ([]byte, error)
 	readTaskBlockDevices  func(context.Context) ([]byte, error)
@@ -84,13 +87,17 @@ func New() *Reader {
 			).Output()
 		},
 		readSMART: readSMARTCommand,
-		readFilesystemUsage: func(path string) (uint64, uint64, error) {
+		readFilesystemUsage: func(path string) (filesystemUsage, error) {
 			var stats syscall.Statfs_t
 			if err := syscall.Statfs(path, &stats); err != nil {
-				return 0, 0, err
+				return filesystemUsage{}, err
 			}
 			blockSize := uint64(stats.Bsize)
-			return uint64(stats.Blocks) * blockSize, uint64(stats.Bavail) * blockSize, nil
+			return filesystemUsage{
+				total:     uint64(stats.Blocks) * blockSize,
+				available: uint64(stats.Bavail) * blockSize,
+				readOnly:  stats.Flags&stRDOnly != 0,
+			}, nil
 		},
 	})
 }
@@ -141,7 +148,9 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
 	r.refreshSMARTInBackground(smartTargets)
-	observeDataVolumeUsage(disks, r.dependencies.readFilesystemUsage)
+	observeDataVolume(disks, r.dependencies.readFilesystemUsage, func() *uint64 {
+		return readBtrfsErrors(r.dependencies.root, mountedDevices(blockDevices, dataMountPoint))
+	})
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
 	if err != nil {
@@ -162,22 +171,105 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	}, nil
 }
 
-func observeDataVolumeUsage(disks []hoststate.Disk, readUsage func(string) (uint64, uint64, error)) {
-	if readUsage == nil {
-		return
-	}
+// stRDOnly is ST_RDONLY in statfs flags: the filesystem is mounted read-only.
+const stRDOnly = 0x1
+
+type filesystemUsage struct {
+	total, available uint64
+	readOnly         bool
+}
+
+// observeDataVolume adds the mounted data volume's size, free space,
+// read-only state and Btrfs error count to the data disk.
+func observeDataVolume(disks []hoststate.Disk, readUsage func(string) (filesystemUsage, error), readErrors func() *uint64) {
 	for index := range disks {
 		if disks[index].Role != hoststate.DiskRoleData {
 			continue
 		}
-		total, available, err := readUsage("/srv/a-nas/data")
-		if err != nil || total == 0 || available > total {
+		if readErrors != nil {
+			disks[index].FilesystemErrors = readErrors()
+		}
+		if readUsage == nil {
 			return
 		}
-		disks[index].FilesystemCapacityBytes = &total
-		disks[index].FilesystemAvailableBytes = &available
+		usage, err := readUsage(dataMountPoint)
+		if err != nil || usage.total == 0 || usage.available > usage.total {
+			return
+		}
+		disks[index].FilesystemCapacityBytes = &usage.total
+		disks[index].FilesystemAvailableBytes = &usage.available
+		disks[index].FilesystemReadOnly = usage.readOnly
 		return
 	}
+}
+
+// readBtrfsErrors sums the write, read, flush, checksum and generation
+// errors Linux has counted for every device of the Btrfs filesystem on one
+// of devices (sysfs devinfo/*/error_stats, Linux 5.14 and later). The counts
+// live in the filesystem and grow until reset with "btrfs device stats -z".
+// It is nil when the filesystem is not found there.
+func readBtrfsErrors(root fs.FS, devices []string) *uint64 {
+	if root == nil || len(devices) == 0 {
+		return nil
+	}
+	members, err := fs.Glob(root, "sys/fs/btrfs/*/devices/*")
+	if err != nil {
+		return nil
+	}
+	for _, member := range members {
+		if !slices.Contains(devices, path.Base(member)) {
+			continue
+		}
+		stats, err := fs.Glob(root, path.Dir(path.Dir(member))+"/devinfo/*/error_stats")
+		if err != nil || len(stats) == 0 {
+			return nil
+		}
+		var total uint64
+		for _, file := range stats {
+			contents, err := fs.ReadFile(root, file)
+			if err != nil {
+				return nil
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) != 2 {
+					return nil
+				}
+				count, err := strconv.ParseUint(fields[1], 10, 64)
+				if err != nil {
+					return nil
+				}
+				total += count
+			}
+		}
+		return &total
+	}
+	return nil
+}
+
+// mountedDevices names the block devices lsblk shows mounted at mountpoint.
+func mountedDevices(contents []byte, mountpoint string) []string {
+	var document blockDeviceDocument
+	if json.Unmarshal(contents, &document) != nil {
+		return nil
+	}
+	var names []string
+	var visit func(blockDevice)
+	visit = func(device blockDevice) {
+		for _, candidate := range device.Mountpoints {
+			if candidate != nil && *candidate == mountpoint && device.Name != "" {
+				names = append(names, device.Name)
+				break
+			}
+		}
+		for _, child := range device.Children {
+			visit(child)
+		}
+	}
+	for _, device := range document.BlockDevices {
+		visit(device)
+	}
+	return names
 }
 
 // ResolveDevice maps an opaque disk ID to a current kernel device path for the
@@ -351,7 +443,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 		if containsMountpoint(device, "/") {
 			role = hoststate.DiskRoleSystem
 			systemDisks++
-		} else if containsMountpoint(device, "/srv/a-nas/data") {
+		} else if containsMountpoint(device, dataMountPoint) {
 			role = hoststate.DiskRoleData
 		}
 		smartStatus := hoststate.HealthUnknown

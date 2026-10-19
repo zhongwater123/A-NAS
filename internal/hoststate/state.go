@@ -82,6 +82,12 @@ type Disk struct {
 	Health                   Health
 	SMARTStatus              Health
 	TemperatureCelsius       *int
+	// FilesystemReadOnly and FilesystemErrors describe the data volume on a
+	// data disk: whether it is mounted read-only, as Btrfs does after an
+	// error, and the read, write, flush, checksum and generation errors
+	// Btrfs has counted on it since it was created; nil when not observed.
+	FilesystemReadOnly bool
+	FilesystemErrors   *uint64
 }
 
 type State struct {
