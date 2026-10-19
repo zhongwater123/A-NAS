@@ -293,6 +293,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 		return
 	}
 	h.setSessionCookie(w, session)
+	h.keepAssistant(session.User, session.Token)
 	writeJSON(w, http.StatusCreated, h.publicSession(r.Context(), session))
 }
 
@@ -312,17 +313,32 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.setSessionCookie(w, session)
+	h.keepAssistant(session.User, session.Token)
 	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	// The page reads its session on every load; renewing the cookie here keeps
 	// a local console signed in past the browser's cookie lifetime cap.
-	if cookie, err := r.Cookie(sessionCookieName); err == nil && session.LocalConsole() {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil && session.LocalConsole() {
 		session.Token = cookie.Value
 		h.setSessionCookie(w, session)
 	}
+	if err == nil {
+		// Also after the Product Service restarted, which forgets kept instances.
+		h.keepAssistant(session.User, cookie.Value)
+	}
 	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
+}
+
+// keepAssistant has the member's assistant started in the background and kept
+// running while this session lasts, so that opening it does not wait for a
+// cold start (ADR 0024).
+func (h *productHandler) keepAssistant(user accounts.User, sessionToken string) {
+	if keeper, ok := h.assistant.(assistantapi.Keeper); ok {
+		keeper.Keep(user, sessionToken)
+	}
 }
 
 // authenticate grants a local console session, which never expires on its
@@ -350,6 +366,9 @@ func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Requ
 	cookie, _ := r.Cookie(sessionCookieName)
 	if cookie != nil {
 		_ = h.accounts.EndSession(withClientOrigin(r), cookie.Value)
+		if keeper, ok := h.assistant.(assistantapi.Keeper); ok {
+			keeper.Forget(cookie.Value)
+		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)

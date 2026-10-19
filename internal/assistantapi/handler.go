@@ -73,6 +73,9 @@ type handler struct {
 	ctx       context.Context
 	membersMu sync.Mutex
 	members   map[string]*member
+	// keeps holds the instances kept running for signed-in members, by account.
+	keepsMu sync.Mutex
+	keeps   map[string]*keep
 }
 
 // New returns the assistant API.
@@ -84,7 +87,7 @@ func New(options Options) http.Handler {
 	if options.Changes == nil {
 		options.Changes = noChanges{}
 	}
-	h := &handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: context.Background(), members: map[string]*member{}}
+	h := &handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: context.Background(), members: map[string]*member{}, keeps: map[string]*keep{}}
 	routes := map[string]func(http.ResponseWriter, *http.Request, string){
 		"GET /status":                  h.status,
 		"GET /ws":                      h.gateway,
