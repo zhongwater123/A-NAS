@@ -16,6 +16,9 @@ type handler struct {
 	dataSource     DataSource
 	productVersion string
 	logger         *slog.Logger
+	// dataVolumeExpected says a data volume was created, so the health
+	// assessment can tell an offline volume from none; nil means none.
+	dataVolumeExpected func() bool
 }
 
 type DataSource string
@@ -26,6 +29,10 @@ const (
 )
 
 func New(reader hoststate.Observer, dataSource DataSource, productVersion string, logger *slog.Logger) http.Handler {
+	return newStateHandler(reader, dataSource, productVersion, logger)
+}
+
+func newStateHandler(reader hoststate.Observer, dataSource DataSource, productVersion string, logger *slog.Logger) *handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -35,6 +42,22 @@ func New(reader hoststate.Observer, dataSource DataSource, productVersion string
 		productVersion: productVersion,
 		logger:         logger,
 	}
+}
+
+// assess rates the observed system (docs/specs/system-health.md).
+func (h *handler) assess(state hoststate.State) systemHealth {
+	expected := hoststate.Expectations{DataVolume: h.dataVolumeExpected != nil && h.dataVolumeExpected()}
+	health, findings := hoststate.Assess(state, expected)
+	items := make([]healthFindingResponse, len(findings))
+	for i, finding := range findings {
+		items[i] = healthFindingResponse{Code: finding.Code, Severity: finding.Severity, DiskID: finding.DiskID.String(), Value: finding.Value}
+	}
+	return systemHealth{health: health, findings: items}
+}
+
+type systemHealth struct {
+	health   hoststate.Health
+	findings []healthFindingResponse
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +87,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeStateUnavailable(w, r, err)
 			return
 		}
+		assessed := h.assess(state)
 		writeJSON(w, http.StatusOK, systemResponse{
 			ID:       state.System.ID.String(),
 			Hostname: state.System.Hostname,
@@ -73,7 +97,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 			Architecture:   state.System.Architecture,
 			UptimeSeconds:  state.System.UptimeSeconds,
-			Health:         state.System.Health,
+			Health:         assessed.health,
+			HealthFindings: assessed.findings,
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
 		})
@@ -127,7 +152,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			DataSource:     h.dataSource,
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
-			System:         mapSystem(state.System),
+			System:         mapSystem(state.System, h.assess(state)),
 			Disks:          mapDisks(state.Disks),
 		})
 		return
@@ -151,6 +176,7 @@ type systemResponse struct {
 	Architecture    string                  `json:"architecture"`
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
+	HealthFindings  []healthFindingResponse `json:"healthFindings"`
 	ProductVersion  string                  `json:"productVersion"`
 	ObservedAt      string                  `json:"observedAt"`
 }
@@ -162,6 +188,15 @@ type systemStateResponse struct {
 	Architecture    string                  `json:"architecture"`
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
+	HealthFindings  []healthFindingResponse `json:"healthFindings"`
+}
+
+// healthFindingResponse is one reason the system is not plainly healthy.
+type healthFindingResponse struct {
+	Code     hoststate.FindingCode `json:"code"`
+	Severity hoststate.Health      `json:"severity"`
+	DiskID   string                `json:"diskId,omitempty"`
+	Value    *int64                `json:"value,omitempty"`
 }
 
 type diskResponse struct {
@@ -217,7 +252,7 @@ type networkMetricsResponse struct {
 	TransmitBytesPerSecond uint64 `json:"transmitBytesPerSecond"`
 }
 
-func mapSystem(system hoststate.System) systemStateResponse {
+func mapSystem(system hoststate.System, assessed systemHealth) systemStateResponse {
 	return systemStateResponse{
 		ID:       system.ID.String(),
 		Hostname: system.Hostname,
@@ -225,9 +260,10 @@ func mapSystem(system hoststate.System) systemStateResponse {
 			Name:    system.OperatingSystem.Name,
 			Version: system.OperatingSystem.Version,
 		},
-		Architecture:  system.Architecture,
-		UptimeSeconds: system.UptimeSeconds,
-		Health:        system.Health,
+		Architecture:   system.Architecture,
+		UptimeSeconds:  system.UptimeSeconds,
+		Health:         assessed.health,
+		HealthFindings: assessed.findings,
 	}
 }
 

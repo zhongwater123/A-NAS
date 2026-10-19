@@ -115,8 +115,12 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	state := newStateHandler(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger)
+	if volumes := dependencies.Storage; volumes != nil {
+		state.dataVolumeExpected = func() bool { return volumes.DataVolumeFilesystemUUID() != "" }
+	}
 	handler := &productHandler{
-		state:    New(dependencies.Reader, dependencies.DataSource, dependencies.ProductVersion, logger),
+		state:    state,
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		previews: dependencies.FilePreviews,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,

@@ -42,7 +42,7 @@ func TestSystemEndpointReturnsObservedHostState(t *testing.T) {
 	if got, want := recorder.Header().Get("Content-Type"), "application/json"; got != want {
 		t.Fatalf("Content-Type = %q, want %q", got, want)
 	}
-	const want = "{\"id\":\"host:fake-01\",\"hostname\":\"anas-fake\",\"operatingSystem\":{\"name\":\"Debian\",\"version\":\"13\"},\"architecture\":\"amd64\",\"uptimeSeconds\":3600,\"health\":\"healthy\",\"productVersion\":\"test-version\",\"observedAt\":\"2026-10-06T00:00:00Z\"}\n"
+	const want = "{\"id\":\"host:fake-01\",\"hostname\":\"anas-fake\",\"operatingSystem\":{\"name\":\"Debian\",\"version\":\"13\"},\"architecture\":\"amd64\",\"uptimeSeconds\":3600,\"health\":\"healthy\",\"healthFindings\":[],\"productVersion\":\"test-version\",\"observedAt\":\"2026-10-06T00:00:00Z\"}\n"
 	if got := recorder.Body.String(); got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
@@ -74,7 +74,7 @@ func TestHostStateEndpointReturnsOneObservedSnapshot(t *testing.T) {
 	if got, want := recorder.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d; body = %s", got, want, recorder.Body.String())
 	}
-	const want = "{\"dataSource\":\"simulated\",\"productVersion\":\"test-version\",\"observedAt\":\"2026-10-06T00:00:00Z\",\"system\":{\"id\":\"host:fake-01\",\"hostname\":\"anas-fake\",\"operatingSystem\":{\"name\":\"Debian\",\"version\":\"13\"},\"architecture\":\"amd64\",\"uptimeSeconds\":3600,\"health\":\"healthy\"},\"disks\":[{\"id\":\"disk:fake-data-01\",\"model\":\"A-NAS Fake HDD\",\"transport\":\"sata\",\"capacityBytes\":512000000000,\"rotational\":true,\"removable\":false,\"inUse\":false,\"filesystems\":[],\"role\":\"unassigned\",\"health\":\"healthy\",\"smartStatus\":\"healthy\",\"eligibleForDataVolume\":true,\"ineligibleReasons\":[],\"temperatureCelsius\":31},{\"id\":\"disk:fake-system-01\",\"model\":\"A-NAS Fake SSD\",\"transport\":\"nvme\",\"capacityBytes\":125000000000,\"rotational\":false,\"removable\":false,\"inUse\":true,\"filesystems\":[\"ext4\"],\"role\":\"system\",\"health\":\"healthy\",\"smartStatus\":\"healthy\",\"eligibleForDataVolume\":false,\"ineligibleReasons\":[\"system_disk\",\"in_use\"],\"temperatureCelsius\":36}]}\n"
+	const want = "{\"dataSource\":\"simulated\",\"productVersion\":\"test-version\",\"observedAt\":\"2026-10-06T00:00:00Z\",\"system\":{\"id\":\"host:fake-01\",\"hostname\":\"anas-fake\",\"operatingSystem\":{\"name\":\"Debian\",\"version\":\"13\"},\"architecture\":\"amd64\",\"uptimeSeconds\":3600,\"health\":\"healthy\",\"healthFindings\":[]},\"disks\":[{\"id\":\"disk:fake-data-01\",\"model\":\"A-NAS Fake HDD\",\"transport\":\"sata\",\"capacityBytes\":512000000000,\"rotational\":true,\"removable\":false,\"inUse\":false,\"filesystems\":[],\"role\":\"unassigned\",\"health\":\"healthy\",\"smartStatus\":\"healthy\",\"eligibleForDataVolume\":true,\"ineligibleReasons\":[],\"temperatureCelsius\":31},{\"id\":\"disk:fake-system-01\",\"model\":\"A-NAS Fake SSD\",\"transport\":\"nvme\",\"capacityBytes\":125000000000,\"rotational\":false,\"removable\":false,\"inUse\":true,\"filesystems\":[\"ext4\"],\"role\":\"system\",\"health\":\"healthy\",\"smartStatus\":\"healthy\",\"eligibleForDataVolume\":false,\"ineligibleReasons\":[\"system_disk\",\"in_use\"],\"temperatureCelsius\":36}]}\n"
 	if got := recorder.Body.String(); got != want {
 		t.Fatalf("body = %s, want %s", got, want)
 	}
