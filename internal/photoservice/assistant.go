@@ -25,8 +25,10 @@ type AccountResolver interface {
 }
 
 // assistantRoutes are the reads the assistant's photo tools use. Originals,
-// thumbnails, the AI status, the activity log and uploads stay out of reach:
-// no pixels leave through the assistant, and nothing changes.
+// thumbnails, the AI status, the activity log and uploads stay out of reach,
+// and nothing changes; a photo's pixels leave only as its view (a 1600-pixel
+// JPEG without the original's metadata), for the model to look at when the
+// member asks it to.
 var assistantRoutes = []string{
 	"/libraries",
 	"/libraries/{libraryID}/timeline",
@@ -36,6 +38,7 @@ var assistantRoutes = []string{
 	"/search",
 	"/assets/{assetID}",
 	"/assets/{assetID}/similar",
+	"/assets/{assetID}/view",
 	"/tags",
 	"/tags/{name}/assets",
 }
