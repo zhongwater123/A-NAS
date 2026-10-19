@@ -103,13 +103,50 @@ export function formatDateTime(value: string) {
   return new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// countLabel says how many photos and videos there are: 3 张照片, 2 个视频,
+// 3 张照片和 2 个视频, or with another join in a heading.
+export function countLabel(total: number, videos = 0, join = "和") {
+  const photos = total - videos;
+  if (!videos) return `${total} 张照片`;
+  if (!photos) return `${videos} 个视频`;
+  return join === "和" ? `${photos} 张照片和 ${videos} 个视频` : `${photos} 张照片${join}${videos} 个视频`;
+}
+export const assetsLabel = (assets: PhotoAsset[]) => countLabel(assets.length, assets.filter((asset) => asset.video).length);
+
+// clock writes a video position the way players do: 0:42, 12:05, 1:02:05.
+export function clock(seconds: number) {
+  const whole = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor(whole / 60) % 60;
+  const rest = String(whole % 60).padStart(2, "0");
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
+}
+
+// durationLabel says how long a video plays: 42 秒, 3 分 05 秒, 1 小时 2 分;
+// whole seconds, as the player's clock counts them.
+export function durationLabel(seconds: number) {
+  const whole = Math.max(1, Math.floor(seconds));
+  if (whole < 60) return `${whole} 秒`;
+  if (whole < 3600) return `${Math.floor(whole / 60)} 分 ${String(whole % 60).padStart(2, "0")} 秒`;
+  return `${Math.floor(whole / 3600)} 小时 ${Math.floor(whole / 60) % 60} 分`;
+}
+
+// videoLines names a video's resolution by its shorter side: 1080p, 4K.
+export function videoLines(width: number, height: number) {
+  const lines = Math.min(width, height);
+  if (lines >= 2160) return "4K";
+  return lines > 0 ? `${lines}p` : "";
+}
+
 export function daysLeft(until: string, now = Date.now()) {
   return Math.max(0, Math.ceil((new Date(until).getTime() - now) / 86_400_000));
 }
 
 const photoErrors: Record<string, string> = {
-  unsupported_media_type: "只支持 JPEG 和 PNG 照片",
-  too_large: "照片超过导入大小上限",
+  unsupported_media_type: "支持 JPEG、PNG、HEIC 照片与 MP4、MOV 等常见视频",
+  too_large: "文件超过导入大小上限：照片 256 MiB，视频 4 GiB",
+  media_unavailable: "设备的媒体解码服务暂不可用，请稍后重试",
+  media_busy: "设备正在同时转换太多视频，请稍后再试",
   insufficient_storage: "数据卷剩余空间不足",
   forbidden: "你不能修改这张照片",
   conflict: "名称已存在，或照片状态已经变化",

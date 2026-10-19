@@ -16,10 +16,11 @@ export const sizes = { month: 64, day: 44, heading: 52, divider: 92, more: 72, e
 export interface Box<T> { item: T; left: number; width: number; height: number }
 
 // A pending upload shows in the grid before the photo service has it.
-export interface PendingPhoto { key: string; name: string; url: string; aspect: number; progress: number; state: "waiting" | "uploading" | "done" | "failed"; error?: string }
+// A photo or video being uploaded, shown from the file itself.
+export interface PendingPhoto { key: string; name: string; url: string; aspect: number; progress: number; state: "waiting" | "uploading" | "done" | "failed"; error?: string; video?: boolean }
 
 export type Entry =
-  | { kind: "month"; key: string; size: number; label: string; month: string; photos: number }
+  | { kind: "month"; key: string; size: number; label: string; month: string; photos: number; videos: number }
   | { kind: "day"; key: string; size: number; label: string; ids: string[] }
   | { kind: "heading"; key: string; size: number; label: string; detail?: string }
   | { kind: "divider"; key: string; size: number; label: string; title: string; text: string }
@@ -93,8 +94,9 @@ export function timelineEntries(months: PhotoMonth[], loaded: Map<string, MonthS
     const state = loaded.get(month.month);
     const label = fullMonthLabel(month.month);
     const photos = state?.assets ? state.assets.length : month.photos;
+    const videos = state?.assets ? state.assets.filter((asset) => asset.video).length : month.videos ?? 0;
     if (state?.assets && !photos) continue;
-    entries.push({ kind: "month", key: `month:${month.month}`, size: sizes.month, label, month: month.month, photos });
+    entries.push({ kind: "month", key: `month:${month.month}`, size: sizes.month, label, month: month.month, photos, videos });
     if (!state?.assets) {
       entries.push({ kind: "placeholder", key: `placeholder:${month.month}`, size: Math.round(estimateMonth(month.photos, width, rowHeight)), label, month: month.month, photos: month.photos, failed: Boolean(state?.failed) });
       continue;

@@ -1,10 +1,14 @@
 // Pair only an unambiguous same-directory basename in one selection. The
 // server additionally checks original Apple identifiers when they exist. A
-// MOV on its own is a Live Photo video whose still came earlier without it;
-// the server completes that still by Apple's identifier.
+// video on its own, a MOV among them, is uploaded as it is: the server
+// completes the stills in the library still waiting for that Live Photo
+// video, by Apple's identifier, and keeps any other video as a video.
 export interface UploadGroup { file: File; motion?: File; video?: boolean; error?: string }
 
 const ambiguousName = "同名文件不唯一，请分开选择每组 Live Photo 原件";
+const videoName = /\.(mp4|m4v|mov|qt|3gp|3g2|mkv|webm|avi|mts|m2ts)$/i;
+
+export const isVideoFile = (file: File) => file.type.startsWith("video/") || videoName.test(file.name);
 
 export function groupPhotoUploads(files: File[]): UploadGroup[] {
   const key = (file: File) => (file.webkitRelativePath || file.name).replace(/\.[^.]+$/, "").toLowerCase();
@@ -14,7 +18,7 @@ export function groupPhotoUploads(files: File[]): UploadGroup[] {
   const ambiguous = new Set<File>();
   const groups: UploadGroup[] = [];
   for (const file of files) {
-    if (isMovie(file)) continue;
+    if (isVideoFile(file)) continue;
     const movies = isStill(file) ? files.filter((candidate) => isMovie(candidate) && key(candidate) === key(file)) : [];
     const stills = files.filter((candidate) => isStill(candidate) && key(candidate) === key(file));
     if (movies.length && (movies.length !== 1 || stills.length !== 1)) {
@@ -26,6 +30,6 @@ export function groupPhotoUploads(files: File[]): UploadGroup[] {
       groups.push({ file, motion });
     }
   }
-  for (const file of files) if (isMovie(file) && !consumed.has(file)) groups.push(ambiguous.has(file) ? { file, error: ambiguousName } : { file, video: true });
+  for (const file of files) if (isVideoFile(file) && !consumed.has(file)) groups.push(ambiguous.has(file) ? { file, error: ambiguousName } : { file, video: true });
   return groups;
 }

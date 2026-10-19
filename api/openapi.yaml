@@ -4580,10 +4580,11 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [month, photos]
+            required: [month, photos, videos]
             properties:
               month: { type: string, description: "YYYY-MM in the device's time zone." }
-              photos: { type: integer, minimum: 1 }
+              photos: { type: integer, minimum: 1, description: "Photo assets of the month, videos included." }
+              videos: { type: integer, minimum: 0, description: The videos among them. }
     PhotoLabelCounts:
       type: object
       additionalProperties: false

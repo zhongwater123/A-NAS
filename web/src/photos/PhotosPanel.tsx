@@ -17,8 +17,8 @@ import {
 } from "./imageSearch";
 import { clampRowHeight, defaultRowHeight, maxRowHeight, minRowHeight } from "./layout";
 import {
-  type Caller, canChange, canEditAlbum, daysLeft, isUnavailable, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, type Place, placeLibrary, placeViewing,
-  runEach, sharedLibrary,
+  assetsLabel, type Caller, canChange, canEditAlbum, countLabel, daysLeft, isUnavailable, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, type Place, placeLibrary,
+  placeViewing, runEach, sharedLibrary,
 } from "./model";
 import { Avatar, PeopleSettings, PersonPicker, personName } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
@@ -98,6 +98,8 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const [viewAssets, setViewAssets] = useState<PhotoAsset[]>([]);
   const selection = useSelection(viewAssets);
   const [count, setCount] = useState<number>();
+  // The videos among count, where the view knows them: the timeline.
+  const [videoCount, setVideoCount] = useState(0);
   const [viewer, setViewer] = useState<{ id: string; origin?: DOMRect }>();
   // One photo another window asked to show, viewed on its own over the current place.
   const [focused, setFocused] = useState<PhotoAsset>();
@@ -241,11 +243,12 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     return { libraryId: library.id, label: libraryName(caller, library) };
   }, [place, caller, mine, viewingLibrary]);
 
-  const uploads = useUploads(useCallback(({ targets, photos, completed, liveStills }: UploadSummary) => {
+  const uploads = useUploads(useCallback(({ targets, photos, videos, completed, liveStills }: UploadSummary) => {
     setRefreshKey((value) => value + 1);
     setAlbumsKey((value) => value + 1);
+    const kept = photos && videos ? "照片和视频" : videos ? "视频" : "照片";
     const done = [
-      photos ? `照片已保存到${targets.map((target) => target.label).join("、")}` : "",
+      photos || videos ? `${kept}已保存到${targets.map((target) => target.label).join("、")}` : "",
       completed ? `已为 ${completed} 张照片补上实况视频` : "",
     ].filter(Boolean).join("；");
     // A Mac often hands over a Live Photo's still alone; say so, and how to
@@ -253,15 +256,14 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     if (liveStills) toast({ text: `${done}；其中 ${liveStills} 张实况照片只收到了静态画面`, details: [liveVideoHint], detailsLabel: "怎么补上" });
     else if (done) toast({ text: done });
   }, [toast]));
-  // Uploading photos show in the timeline at once; a Live Photo video only
-  // completes photos already there.
-  const pending = useMemo(() => place?.kind === "timeline" ? uploads.items.filter((item) => item.target.libraryId === place.libraryId && !item.target.albumId && !item.rejected && !item.video) : [], [uploads.items, place]);
+  // Uploading photos and videos show in the timeline at once.
+  const pending = useMemo(() => place?.kind === "timeline" ? uploads.items.filter((item) => item.target.libraryId === place.libraryId && !item.target.albumId && !item.rejected) : [], [uploads.items, place]);
   // Previews of finished uploads stay until the timeline shows the photos.
   useEffect(() => { if (place?.kind !== "timeline" && uploads.items.some((item) => item.state === "done")) uploads.prune(); }, [uploads.items, place]);
   const pickFiles = () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,.mov";
+    input.accept = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,video/*,.mov,.mp4,.m4v,.3gp,.mkv,.webm,.avi,.mts,.m2ts";
     input.multiple = true;
     input.onchange = () => { if (uploadTarget && input.files?.length) uploads.add(Array.from(input.files), uploadTarget); };
     input.click();
@@ -288,7 +290,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     const result = await batch("正在恢复", assets, (asset) => restorePhoto(asset.id));
     const ids = result.succeeded.map((entry) => entry.item.id);
     if (fromTrash) hide(ids); else unhide(ids);
-    report(`已恢复 ${ids.length} 张照片`, result.details);
+    report(`已恢复 ${assetsLabel(result.succeeded.map((entry) => entry.item))}`, result.details);
   };
   const trash = async (assets: PhotoAsset[]) => {
     const result = await batch("正在移到回收站", assets, (asset) => trashPhoto(asset.id));
@@ -411,7 +413,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     });
   };
   const purge = async (assets: PhotoAsset[]) => {
-    if (!await dialogs.confirm({ title: `永久删除 ${assets.length} 张照片？`, message: "永久删除后无法恢复，照片会从所有相册中移除。", confirm: "永久删除", danger: true })) return;
+    if (!await dialogs.confirm({ title: `永久删除 ${assetsLabel(assets)}？`, message: "永久删除后无法恢复，照片会从所有相册中移除。", confirm: "永久删除", danger: true })) return;
     const result = await batch("正在永久删除", assets, (asset) => purgePhoto(asset.id));
     hide(result.succeeded.map((entry) => entry.item.id));
     selection.clear();
@@ -658,7 +660,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const scope = place.kind === "search" && searchLibraries(caller, place.viewing).some((library) => library.id === searchLibrary) ? searchLibrary : "";
   const title = (() => {
     switch (place.kind) {
-      case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : `${count} 张照片` };
+      case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : countLabel(count, videoCount, " · ") };
       case "albums": return { text: "相册", detail: libraryName(caller, sideLibrary) };
       case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
       case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
@@ -742,11 +744,11 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   // ---- Main area ----
   const emptyTimeline = readOnlyPlace
     ? <Empty icon={<Images />} title="还没有照片" text="这个图库里还没有照片。" />
-    : <Empty icon={<ImagePlus />} title="把照片拖到这里" text="支持 JPEG、PNG、HEIC 和安卓动态照片。iPhone Live Photo 请选择未修改的照片与同名 MOV。本地 AI 在空闲时分析主照片。" action={uploadTarget && <button type="button" className="ph-button primary" onClick={pickFiles}><ImagePlus />选择照片</button>} />;
+    : <Empty icon={<ImagePlus />} title="把照片拖到这里" text="支持 JPEG、PNG、HEIC、安卓动态照片，以及 MP4、MOV 等常见视频。iPhone Live Photo 请选择未修改的照片与同名 MOV。本地 AI 在空闲时分析照片，不分析视频。" action={uploadTarget && <button type="button" className="ph-button primary" onClick={pickFiles}><ImagePlus />选择照片</button>} />;
   const main = (() => {
     switch (place.kind) {
       case "timeline":
-        return <Timeline key={place.libraryId} {...grid} libraryId={place.libraryId} pending={pending} onRetryUpload={uploads.retry} onReloaded={uploads.prune} onCount={setCount} onError={reportError} empty={emptyTimeline} />;
+        return <Timeline key={place.libraryId} {...grid} libraryId={place.libraryId} pending={pending} onRetryUpload={uploads.retry} onReloaded={uploads.prune} onCount={(total, videos) => { setCount(total); setVideoCount(videos ?? 0); }} onError={reportError} empty={emptyTimeline} />;
       case "album":
         return <AssetGrid key={place.album.id} {...grid} listKey={place.album.id} load={(cursor) => listAlbumPhotos(place.album.id, cursor)} onCount={setCount} onError={reportError}
           empty={<Empty icon={<Images />} title="相册是空的" text="把照片从时间线拖到侧栏的这个相册，或者点“添加照片”。" action={canEditAlbum(caller, place.album) && <button type="button" className="ph-button primary" onClick={() => setPhotoPicker(place.album)}><ImagePlus />添加照片</button>} />} />;

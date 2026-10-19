@@ -325,6 +325,8 @@ type TimelineMonth struct {
 	// Month is YYYY-MM in the device's time zone.
 	Month  string `json:"month"`
 	Photos int    `json:"photos"`
+	// Videos counts the videos among them.
+	Videos int `json:"videos"`
 }
 
 // TimelineMonths counts a library's available assets by month, newest first,
@@ -334,26 +336,34 @@ func (s *Service) TimelineMonths(ctx context.Context, p Principal, libraryID str
 	if err != nil {
 		return nil, err
 	}
-	keys, err := s.strings(ctx, `SELECT IFNULL(taken_at, imported_at) FROM assets
+	rows, err := s.db.QueryContext(ctx, `SELECT IFNULL(taken_at, imported_at), NOT `+notVideo("assets.object_id")+` FROM assets
 WHERE library_id = ? AND trashed_at IS NULL`+hiddenVideos(p, "assets.object_id")+` ORDER BY IFNULL(taken_at, imported_at) DESC`, lib.id)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	months := []TimelineMonth{}
-	for _, key := range keys {
+	for rows.Next() {
+		var key string
+		var video bool
+		if err := rows.Scan(&key, &video); err != nil {
+			return nil, err
+		}
 		at, err := parseTime(key)
 		if err != nil {
 			return nil, err
 		}
 		// Local months follow the UTC order, so equal months are adjacent.
 		month := at.In(s.location).Format(monthLayout)
-		if last := len(months) - 1; last >= 0 && months[last].Month == month {
-			months[last].Photos++
-		} else {
-			months = append(months, TimelineMonth{Month: month, Photos: 1})
+		if last := len(months) - 1; last < 0 || months[last].Month != month {
+			months = append(months, TimelineMonth{Month: month})
+		}
+		months[len(months)-1].Photos++
+		if video {
+			months[len(months)-1].Videos++
 		}
 	}
-	return months, nil
+	return months, rows.Err()
 }
 
 // TimelineInMonth pages through one month (YYYY-MM) of a library's timeline

@@ -300,7 +300,7 @@ func TestTheAssistantDoesNotSeeVideos(t *testing.T) {
 		t.Fatalf("assistant tags = %+v, %v", tags, err)
 	}
 	// The member sees both.
-	if months, err := s.TimelineMonths(ctx, alice, private.ID); err != nil || len(months) != 2 {
+	if months, err := s.TimelineMonths(ctx, alice, private.ID); err != nil || len(months) != 2 || months[0].Videos != 0 || months[1].Videos != 1 {
 		t.Fatalf("member months = %+v, %v; want the photo's and the video's", months, err)
 	}
 }

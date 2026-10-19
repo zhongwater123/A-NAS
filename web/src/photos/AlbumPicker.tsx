@@ -1,7 +1,7 @@
 import { FolderPlus, Images, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
-import { type Caller, canEditAlbum, libraryName, ownLibrary, sharedLibrary } from "./model";
+import { assetsLabel, type Caller, canEditAlbum, libraryName, ownLibrary, sharedLibrary } from "./model";
 import { listAlbums, thumbnailURL, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
 
 interface Props {
@@ -38,7 +38,7 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
       <div className="ph-dialog ph-picker" role="dialog" aria-modal="true" aria-label="加入相册" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
         <header>
           <h3>加入相册</h3>
-          <small>{assets.length} 张照片</small>
+          <small>{assetsLabel(assets)}</small>
           <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}><X /></button>
         </header>
         {albums === undefined ? <div className="ph-loading"><span className="ph-spinner" /></div> : (
