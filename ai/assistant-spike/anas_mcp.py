@@ -151,8 +151,8 @@ def failed(error: PhotoError) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=f"相册：{error}")], is_error=True)
 
 
-PHOTO_NOTE = ("只读。你看不到照片画面，只有名称、拍摄时间（taken）、所在图库（我的／共享）、"
-              "本人加的标签与相册；没有拍摄地点，也认不出照片里是谁。回答中提到某张照片时写成 "
+PHOTO_NOTE = ("只读。结果里没有照片画面，只有名称、拍摄时间（taken）、所在图库（我的／共享）、"
+              "本人加的标签与相册；没有拍摄地点，也认不出照片里是谁。要看画面用 look_at_photo。回答中提到某张照片时写成 "
               "[名称](照片的 id)，id 原样照抄（它本身以 photo: 开头），窗口会显示它的缩略图。")
 
 
@@ -229,6 +229,42 @@ def similar_photos(photo_id: str, page: str = ""):
         return paged(page_of, libraries())
     except PhotoError as error:
         return failed(error)
+
+
+def photo_view(photo_id: str) -> bytes:
+    """A photo's view from the photo service: a JPEG of at most 1600 pixels without the
+    original's metadata (ADR 0024 decision 6)."""
+    conn = UnixHTTP(PHOTOS)
+    try:
+        conn.request("GET", f"/api/v1/photos/assets/{urllib.parse.quote(photo_id, safe='')}/view")
+        response = conn.getresponse()
+        raw = response.read()
+    except OSError:
+        raise PhotoError("相册暂时连不上，请稍后再试") from None
+    finally:
+        conn.close()
+    if response.status != 200:
+        try:
+            message = (json.loads(raw).get("error") or {}).get("message")
+        except ValueError:
+            message = None
+        raise PhotoError(message or f"相册返回 {response.status}")
+    return raw
+
+
+@server.tool(annotations=READ_ONLY, structured_output=False, description=(
+    "取出一张照片的画面，好看清里面有什么：成员要你看照片，或问到名称、时间、标签回答不了的画面内容时用。"
+    "返回一张图片（最长边不超过 1600 像素，不带拍摄地点等原图信息）；结果里有它的路径，用 vision_analyze "
+    "读这个路径并写清要看什么，才能看到画面。一次一张，只取需要的几张；视频没有画面可取。photo_id：照片的 id。"))
+def look_at_photo(photo_id: str):
+    try:
+        data = photo_view(photo_id)
+    except PhotoError as error:
+        return failed(error)
+    return CallToolResult(content=[
+        TextContent(type="text", text=f"照片 {photo_id} 的画面如下；用 vision_analyze 看它。"),
+        ImageContent(type="image", data=base64.b64encode(data).decode(), mime_type="image/jpeg"),
+    ])
 
 
 if os.environ.get("ANAS_SPIKE_PHOTO_PIXELS"):

@@ -539,7 +539,15 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "execute_code": return { icon: <Code />, label: "运行代码", detail: "" };
     case "delegate_task": return { icon: <Users />, label: "分派子任务", detail: typeof args.goal === "string" ? short(args.goal) : "" };
     case "clarify": return { icon: <CircleHelp />, label: "问你", detail: "" };
-    case "vision_analyze": return { icon: <ImageIcon />, label: "看图", detail: typeof args.image_url === "string" ? friendlyPath(args.image_url) : "" };
+    case "mcp__anas__recent_changes": return { icon: <History />, label: "查看最近的更改", detail: "" };
+    case "mcp__anas__search_photos": return { icon: <Search />, label: "搜索照片", detail: typeof args.query === "string" ? `“${args.query}”` : "" };
+    case "mcp__anas__browse_photos": return { icon: <ImageIcon />, label: "浏览照片", detail: typeof args.month === "string" ? args.month : "" };
+    case "mcp__anas__photo_details": return { icon: <ImageIcon />, label: "查看照片信息", detail: "" };
+    case "mcp__anas__similar_photos": return { icon: <ImageIcon />, label: "找相似的照片", detail: "" };
+    case "mcp__anas__look_at_photo": return { icon: <ImageIcon />, label: "取出照片画面", detail: "" };
+    // A photo's view lands in Hermes's image cache; the question says more than that path.
+    case "vision_analyze": return { icon: <ImageIcon />, label: "看图",
+      detail: typeof args.question === "string" && args.question ? short(args.question) : typeof args.image_url === "string" ? friendlyPath(args.image_url) : "" };
     case "video_analyze": return { icon: <Video />, label: "看视频", detail: typeof args.video_url === "string" ? friendlyPath(args.video_url) : "" };
     case "memory": return { icon: <Brain />, label: "记住", detail: "" };
     case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
