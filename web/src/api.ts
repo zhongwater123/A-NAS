@@ -2,6 +2,12 @@ export type Health = "healthy" | "warning" | "critical" | "unknown";
 export type DiskRole = "system" | "data" | "unassigned";
 export type Transport = "nvme" | "sata" | "usb" | "unknown";
 export type DataSource = "simulated" | "live";
+export type HealthFindingCode =
+  | "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot"
+  | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors";
+// HealthFinding is one reason the system is not plainly healthy; value is the
+// temperature, percentage used or error count its code describes.
+export interface HealthFinding { code: HealthFindingCode; severity: "warning" | "critical"; diskId?: string; value?: number }
 
 export interface HostState {
   dataSource: DataSource;
@@ -14,6 +20,8 @@ export interface HostState {
     architecture: string;
     uptimeSeconds: number;
     health: Health;
+    // healthFindings say why, most severe first; empty when healthy.
+    healthFindings: HealthFinding[];
   };
   disks: Array<{
     id: string;
@@ -82,6 +90,8 @@ export async function readHostState(signal?: AbortSignal): Promise<HostState> {
   if (!isHostState(value)) {
     throw new HostStateError();
   }
+  // A Product Service from before the assessment sends no findings.
+  (value.system as { healthFindings?: HealthFinding[] }).healthFindings ??= [];
   return value;
 }
 
@@ -96,6 +106,7 @@ function isHostState(value: unknown): value is HostState {
     typeof system.architecture !== "string" ||
     typeof system.uptimeSeconds !== "number" ||
     !isHealth(system.health) ||
+    !(system.healthFindings === undefined || (Array.isArray(system.healthFindings) && system.healthFindings.every(isHealthFinding))) ||
     !isRecord(system.operatingSystem) ||
     typeof system.operatingSystem.name !== "string" ||
     typeof system.operatingSystem.version !== "string"
@@ -124,6 +135,11 @@ function isHostState(value: unknown): value is HostState {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isHealthFinding(value: unknown): value is HealthFinding {
+  return isRecord(value) && typeof value.code === "string" && ["warning", "critical"].includes(String(value.severity)) &&
+    (value.diskId === undefined || typeof value.diskId === "string") && (value.value === undefined || typeof value.value === "number");
 }
 
 function isHealth(value: unknown): value is Health {

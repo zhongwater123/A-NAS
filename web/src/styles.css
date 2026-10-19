@@ -974,6 +974,12 @@ button.ov-stat { cursor: pointer; transition: border-color .15s, box-shadow .15s
 button.ov-stat:hover { border-color: rgba(47, 111, 228, .35); box-shadow: 0 6px 18px rgba(47, 111, 228, .1); }
 .ov-stat .ov-stat-go { margin-left: auto; color: var(--set-faint); }
 .ov-stat-bar { height: 4px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: #e8ecf1; }
+/* 健康检查: one row per finding, the detail wraps under the title. */
+.health-row { align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
+.health-row .set-row-text > small { display: block; line-height: 1.55; }
+button.health-go { width: 100%; min-height: 42px; justify-content: center; gap: 2px; border: 0; color: var(--set-accent); background: transparent; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; }
+button.health-go:hover { background: #f5f8fe; }
+button.health-go svg { width: 15px; height: 15px; }
 .ov-stat-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22b3a4, #2f6fe4); }
 
 /* Storage */

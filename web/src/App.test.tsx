@@ -1198,7 +1198,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[] } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[]; hostState?: unknown } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
@@ -1215,7 +1215,7 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
-    if (path === "/api/v1/host-state") return ok(healthyState);
+    if (path === "/api/v1/host-state") return ok(options.hostState ?? healthyState);
     if (path === "/api/v1/metrics") return ok(metricsState);
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
@@ -1604,6 +1604,35 @@ describe("Settings", () => {
     expect((within(settings).getByLabelText(/输入确认短语/) as HTMLInputElement).value).toBe("ERASE");
     expect(within(settings).getByRole("button", { name: "确认计划" }).hasAttribute("disabled")).toBe(true);
     expect(within(settings).queryByRole("button", { name: "生成格式化计划" })).toBeNull();
+  });
+
+  it("says why the system is rated as it is and leads to storage", async () => {
+    installAPI({ hostState: { ...healthyState, system: { ...healthyState.system, health: "critical", healthFindings: [
+      { code: "volume_read_only", severity: "critical", diskId: "disk:fake-data-01" },
+      { code: "disk_hot", severity: "warning", diskId: "disk:fake-data-01", value: 57 },
+    ] } } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "概览");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("严重故障")).toBeTruthy();
+    expect(within(settings).getByText("2 项需要处理")).toBeTruthy();
+    expect(within(settings).getByText("数据卷变成了只读")).toBeTruthy();
+    expect(within(settings).getByText("A-NAS Fake HDD 温度 57 °C，偏高")).toBeTruthy();
+    expect(within(settings).queryByText("健康未评估")).toBeNull();
+    await user.click(within(settings).getByRole("button", { name: "在存储中查看磁盘与数据卷" }));
+    expect(within(settings).getByRole("button", { name: "存储" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("says what was checked when nothing is wrong", async () => {
+    installAPI();
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "概览");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("运行正常")).toBeTruthy();
+    expect(within(settings).getByText("未发现问题")).toBeTruthy();
+    expect(within(settings).queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
   });
 
   it("reports unknown data volume usage instead of a full volume", async () => {
