@@ -954,6 +954,29 @@ managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带
   - 打不开的照片是占位，一张时也只有网格格子大小；
   - 点开照片打开相册窗口。
 
+## 让模型看照片的画面（2026-10-19，开发机）
+
+用户问助手检索出来的照片能不能交给配置的大模型去看。原来不能，是有意的：相册服务不给助手原图与缩略图，工具只给名称、时间、标签与相册（[相册只读访问](#相册只读访问1132026-10-15开发机)）。用户决定试用期间打开，并且不要 512 像素的缩略图（“压缩太猛了”）。
+
+**照 Hermes 自己的做法**：MCP 工具返回的图片，Hermes 存进 `$HERMES_HOME/cache/images/`，在结果里给出 `MEDIA:` 路径；`agent.image_input_mode: text` 时不把像素塞进对话，由模型自己用 `vision_analyze` 读这个路径（`tools/mcp_tool_content.py`：“the MEDIA: path still carries the rest (vision_analyze can read it)”）。`vision_analyze` 再把图片交给配置的模型（我们的模型网关，试用期间是 DeepSeek），只把文字描述留在对话里，之后的每一轮不再重发图片。本地终端后端下它能读任意路径，包括这个缓存。
+
+**改了什么**：
+- 相册服务：`View` 把一张可见照片画成最长边 1600 像素、方向摆正的 JPEG（85 质量），从像素重新编码，不带原图的元数据（包括拍摄地点）；视频没有视图（`no_view`）。路由 `GET /assets/{id}/view`，加进助手套接字的白名单；原图与缩略图仍不对助手开放。1600 是因为 Hermes 嵌入图片的上限是最长边 1568 像素（`_EMBED_MAX_DIMENSION`），各家模型也把更大的图缩到这个尺寸。
+- MCP：新工具 `look_at_photo(photo_id)` 返回这张图片，说明里要求只在成员要看画面时用、一次一张，并用 `vision_analyze` 读结果中的路径。其余照片工具的说明改为“要看画面用 look_at_photo”。
+- 缓存：Hermes 的消息网关每小时把媒体缓存清到一天以内（`gateway/run.py` 的 `_housekeeping_media_caches`），`hermes serve` 没有这件事，看过的照片会一直留在成员的助手目录里。每周的闲时整理之后，[`media-cache.py`](../../ai/assistant-spike/media-cache.py) 用 Hermes 自己的 `cleanup_image_cache` 清掉一天以前的图片。
+- 窗口：处理过程里照片工具显示为“搜索照片”“取出照片画面”等，`vision_analyze` 显示它问模型的问题。
+
+**真实模型**（DeepSeek flash，spike 的相册服务）：
+- 请它“找海边的照片，看看画面里实际有什么”。它依次调用 `search_photos`、`look_at_photo` 与 `vision_analyze`，如实说出 spike 的种子照片是一整块蓝色（种子就是纯色图），没有把它说成海滩。
+- 在 alice 的图库里放两张画出来的钓鱼图后，请它“找我钓鱼的照片，看看照片里都有什么”。它准确描述了两张：一张是“木质栈桥伸进水面，一个人以剪影站在码头边举竿，橙色太阳低垂”，另一张是“绿色水面、远山，没有人，只有一条灰色的鱼和一条斜下来的钓线”，还看出它们是插画而不是实拍。
+- 一轮里它看了 6 张（包括去核对那些纯色的种子照片），每看一张就多一次识图请求。
+
+### 验证
+
+- Go：助手经视图拿到方向摆正、缩到 800×1600 的 JPEG，里面没有 EXIF；共享图库的照片也能看，另一个成员私有图库的照片拿不到，原图仍被拒绝（`internal/photos/view_test.go`）。助手套接字给出视图，缩略图与原图仍是 404（`internal/photoservice/assistant_test.go`）。
+- spike：`photos-socket.sh` 25 项（含本人照片的视图是 JPEG、bob 的照片的视图拿不到），`curator.sh` 7 项（含清掉一天以前的缓存图片、保留当天的），探针 42 项。
+- 真实模型：上面两轮。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
