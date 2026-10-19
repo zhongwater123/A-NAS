@@ -925,6 +925,35 @@ managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带
 - 系统测试（真实安装器）：每个成员的定时器已启用，Hermes 的 curator 在 alice 的沙箱中运行成功，删除 bob 的助手后他的定时器关闭。
 - 未查明：在新容器中依次运行三个脚本时，有一次 `serve-terminal.sh` 读令牌的那条命令被 Hermes 中断（`[Command interrupted]`，退出码 130），同一轮的其余命令照常；单独重跑与按同样顺序再跑一遍都通过。
 
+## 相册接入试用与回复中的照片（2026-10-19，开发机）
+
+用户要助手能检索相册：例如说“找到我捕鱼的照片”，助手把它找出来，在助手窗口里把照片发给成员。照片工具（`search_photos` 等，[相册只读访问](#相册只读访问1132026-10-15开发机)）与相册服务的助手套接字早已实现，但只在 spike 中接上：真实安装器与实验 NAS 的试用都没有打开它，NAS 上没有 `/run/a-nas-photos-assistant`，助手一问照片就是“相册暂时连不上”。窗口里的照片也只是文中 44 像素的小缩略图。
+
+**接上**：[`product-settings.sh`](../../ai/assistant-spike/product-settings.sh) 把助手在 A-NAS 自己服务中需要打开的设置写成 systemd drop-in。
+- Host Agent：会话闸门，以及按 UID 查成员（`ANAS_PHOTO_ASSISTANT_LOOKUP=1`）。
+- 产品服务：会话闸门。
+- 相册服务：用 [`anas-photos-assistant.socket`](../../ai/assistant-spike/anas-photos-assistant.socket) 交来的助手套接字（`Sockets=`，`FileDescriptorName=assistant`）。这个套接字由 systemd 持有，目录只有 root 能进，只绑定进每个助手的沙箱。
+
+试用的 `install`、`update` 与系统测试都用这个脚本。之所以用 drop-in：实验 NAS 上的正式部署每次都重写 `/etc/a-nas/*.env`，原来写在那里的会话闸门每次部署后都要重新加；drop-in 不受影响，`update` 会删掉旧的那一行。
+
+两处坑：
+- systemd 拒绝在服务已经运行时启动交给它的套接字（“Socket service … already active, refusing”），所以要先停相册服务、启动套接字，再启动相册服务。
+- 自从会话令牌改由 `serve_nondumpable.py` 交给 `serve`，进程的命令行里没有 `hermes serve`，按它找进程的检查都找不到实例。进入沙箱改用单元的 `MainPID`（`tini`，与 `serve` 同一个挂载命名空间）；spike 的 `photos-socket.sh` 与 `serve-environ.sh` 改按 `serve_nondumpable` 找。
+
+**窗口**：回复中提到的照片仍是文中可点的名称，回复下方另外显示照片本身，像聊天里收到的图片：一张时是 4:3 的大图（最宽 360 像素），几张时是正方形网格，最多 12 张，其余提示在文中可点。缩略图是相册的 `thumbnail`（最长边 512 像素），由成员本人的会话加载，助手拿不到它们；打不开的照片（已删除，或成员看不到）显示为占位与“（打不开）”。点开在相册中打开。
+
+### 验证
+
+- 系统测试（真实安装器、真实相册服务、Hermes 运行环境）：
+  - 设置生效；
+  - 在 alice 助手的沙箱中以她的身份经绑定进来的套接字列出她的私有图库与共享图库，搜到她上传的照片，改名被拒绝；
+  - Hermes 的 `search_photos` 工具（假模型）返回这张照片。
+- 试用预演（系统测试的容器）：`install`、`update`、`remove` 与在 `c6f6993` 的旧试用上直接 `update`；`smoke alice photo` 从她的沙箱里列出两个图库并搜到照片；`update` 后环境文件里不再有会话闸门的那一行，`remove` 后 drop-in 与套接字都不在，相册服务照常运行。
+- 浏览器（本地原型，假模型的 `SAY` 写出回复，截图脚本拦下缩略图请求，送回本地的示例图）：
+  - 四张照片排成网格，一张时是大图；
+  - 打不开的照片是占位，一张时也只有网格格子大小；
+  - 点开照片打开相册窗口。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
