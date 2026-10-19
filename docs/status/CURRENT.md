@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-16
+更新时间：2026-10-19
 
 ## 当前阶段
 
@@ -16,6 +16,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)、[存储架构](../architecture/storage-and-files.md)、[ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)和 [v1.0.1 发布记录](../releases/v1.0.1.md)已建立。
 - 磁盘状态包含稳定 ID、removable/in-use、文件系统、SMART、温度、数据卷资格及拒绝原因；公开接口不返回设备路径。
+- 设置“概览”此前一直显示“健康未评估”：Linux 读取器把系统健康固定为未知，SMART 加入后没有人把它汇总起来。现在产品服务按[系统健康](../specs/system-health.md)从磁盘 SMART 与温度、数据卷挂载、只读状态、剩余空间和 Btrfs 错误计数评估，概览的“健康检查”列出每项原因与处理办法；Host Agent 为数据盘新增只读状态与错误计数。尚未合并、未部署，部署后在实验 NAS 的概览核对结果。
 - 2026-10-15 问题反馈中 Host Agent 读硬盘信息间歇超时被杀（24 小时 49 次、每次约 1 秒）：每个状态请求都同步运行每块盘的 smartctl，文件服务在每个文件请求前确认数据卷时也读一次，调用方 3 秒超时即杀掉 smartctl，文件请求随之报告数据卷不可用（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。修复让 SMART 由 Host Agent 在后台每 10 分钟至多读一次、只读健康与温度、不唤醒待机的硬盘，数据卷确认改用已初始化卷的记录，尚未合并、未部署；部署后核对日志中被杀与超时的条数、大文件夹的加载耗时，以及数据盘能否待机。
 - 存储计划持久化于 SQLite，支持十分钟过期、确认短语、执行前身份复核、幂等成功结果和中断后 `needs_attention`。
 - Linux 执行器使用固定命令创建 GPT、单盘 Btrfs、UUID mount unit、空间子卷和卷身份标记；文件服务在缺少真实 Btrfs/标记时拒绝写入。

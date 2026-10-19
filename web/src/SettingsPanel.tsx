@@ -15,6 +15,7 @@ import { isLocalConsole } from "./LocalConsoleScreenSaver";
 import { LogsSection, type LogsPreset } from "./logs/LogsSection";
 import { displayName, fullName, usePeople } from "./people";
 import { AvatarDialog } from "./settings/AvatarDialog";
+import { describeFinding } from "./settings/health";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
 import { TerminalSection } from "./settings/TerminalSection";
 import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
@@ -331,6 +332,7 @@ function OverviewSection({ host, volumes, isAdmin, onOpenStorage }: { host: Host
                 : <><strong>{volumeState(volume.state).label}</strong><small>已用空间未知</small></>}
         </button>
       </div>
+      <HealthChecks snapshot={snapshot} onOpenStorage={onOpenStorage} />
       <Group title="关于本机">
         <InfoRow label="产品版本" value={snapshot.productVersion} />
         <InfoRow label="操作系统" value={`${snapshot.system.operatingSystem.name} ${snapshot.system.operatingSystem.version}`} />
@@ -339,6 +341,50 @@ function OverviewSection({ host, volumes, isAdmin, onOpenStorage }: { host: Host
         <InfoRow label="最近观测" value={formatTime(snapshot.observedAt)} />
       </Group>
     </>
+  );
+}
+
+// HealthChecks says why the system is rated as it is: each finding with what
+// to do about it, or what was checked when nothing is wrong
+// (docs/specs/system-health.md).
+function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpenStorage: () => void }) {
+  const findings = snapshot.system.healthFindings;
+  if (snapshot.system.health === "unknown") {
+    return (
+      <Group title="健康检查">
+        <div className="set-row health-row">
+          <IconTile tone="overview" icon={ShieldCheck} size="lg" />
+          <div className="set-row-text"><span><strong>还没有可以检查的磁盘</strong></span><small>读到磁盘后会检查硬盘健康、温度和数据卷。</small></div>
+        </div>
+      </Group>
+    );
+  }
+  return (
+    <Group title="健康检查" aside={findings.length ? `${findings.length} 项需要处理` : undefined}>
+      {findings.length === 0 ? (
+        <div className="set-row health-row">
+          <IconTile tone="security" icon={ShieldCheck} size="lg" />
+          <div className="set-row-text"><span><strong>未发现问题</strong></span><small>已检查硬盘健康（SMART）与温度，以及数据卷的挂载、读写、剩余空间和错误记录。</small></div>
+        </div>
+      ) : (
+        <>
+          {findings.map((finding, index) => {
+            const described = describeFinding(finding, snapshot.disks);
+            const critical = finding.severity === "critical";
+            return (
+              <div key={`${finding.code}:${finding.diskId ?? ""}:${index}`} className="set-row health-row">
+                <IconTile tone={critical ? "danger" : "warning"} icon={described.icon} size="lg" />
+                <div className="set-row-text">
+                  <span><strong>{described.title}</strong><Pill tone={critical ? "danger" : "warning"}>{critical ? "严重" : "注意"}</Pill></span>
+                  <small>{described.detail}</small>
+                </div>
+              </div>
+            );
+          })}
+          <button className="set-row health-go" onClick={onOpenStorage}>在存储中查看磁盘与数据卷<ChevronRight /></button>
+        </>
+      )}
+    </Group>
   );
 }
 

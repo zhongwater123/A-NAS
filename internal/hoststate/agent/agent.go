@@ -730,6 +730,8 @@ type diskDocument struct {
 	Health                   hoststate.Health    `json:"health"`
 	SMARTStatus              hoststate.Health    `json:"smartStatus"`
 	TemperatureCelsius       *int                `json:"temperatureCelsius,omitempty"`
+	FilesystemReadOnly       bool                `json:"filesystemReadOnly,omitempty"`
+	FilesystemErrors         *uint64             `json:"filesystemErrors,omitempty"`
 }
 
 func documentFromDomain(state hoststate.State) stateDocument {
@@ -750,6 +752,8 @@ func documentFromDomain(state hoststate.State) stateDocument {
 			Health:                   disk.Health,
 			SMARTStatus:              disk.SMARTStatus,
 			TemperatureCelsius:       disk.TemperatureCelsius,
+			FilesystemReadOnly:       disk.FilesystemReadOnly,
+			FilesystemErrors:         disk.FilesystemErrors,
 		}
 	}
 	return stateDocument{
@@ -808,6 +812,9 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 		if disk.FilesystemCapacityBytes != nil && (disk.Role != hoststate.DiskRoleData || *disk.FilesystemCapacityBytes == 0 || *disk.FilesystemAvailableBytes > *disk.FilesystemCapacityBytes) {
 			return hoststate.State{}, errors.New("invalid filesystem usage")
 		}
+		if (disk.FilesystemReadOnly || disk.FilesystemErrors != nil) && disk.Role != hoststate.DiskRoleData {
+			return hoststate.State{}, errors.New("data volume facts on a disk without the data volume")
+		}
 		for _, filesystem := range disk.Filesystems {
 			if strings.TrimSpace(filesystem) == "" {
 				return hoststate.State{}, errors.New("invalid disk filesystem evidence")
@@ -828,6 +835,8 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			Health:                   disk.Health,
 			SMARTStatus:              disk.SMARTStatus,
 			TemperatureCelsius:       disk.TemperatureCelsius,
+			FilesystemReadOnly:       disk.FilesystemReadOnly,
+			FilesystemErrors:         disk.FilesystemErrors,
 		}
 	}
 	return hoststate.State{

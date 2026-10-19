@@ -3282,6 +3282,7 @@ components:
         - architecture
         - uptimeSeconds
         - health
+        - healthFindings
         - productVersion
         - observedAt
       properties:
@@ -3301,6 +3302,8 @@ components:
           minimum: 0
         health:
           $ref: "#/components/schemas/Health"
+        healthFindings:
+          $ref: "#/components/schemas/HealthFindings"
         productVersion:
           type: string
           minLength: 1
@@ -3317,6 +3320,7 @@ components:
         - architecture
         - uptimeSeconds
         - health
+        - healthFindings
       properties:
         id:
           $ref: "#/components/schemas/StableResourceID"
@@ -3334,6 +3338,30 @@ components:
           minimum: 0
         health:
           $ref: "#/components/schemas/Health"
+        healthFindings:
+          $ref: "#/components/schemas/HealthFindings"
+    HealthFindings:
+      type: array
+      description: "Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md)."
+      items:
+        $ref: "#/components/schemas/HealthFinding"
+    HealthFinding:
+      type: object
+      additionalProperties: false
+      required: [code, severity]
+      properties:
+        code:
+          type: string
+          enum: [disk_failing, disk_warning, disk_health_unknown, disk_hot, volume_offline, volume_read_only, volume_full, volume_nearly_full, volume_errors]
+        severity:
+          type: string
+          enum: [warning, critical]
+        diskId:
+          $ref: "#/components/schemas/StableResourceID"
+        value:
+          type: integer
+          format: int64
+          description: "disk_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted."
     Disk:
       type: object
       additionalProperties: false

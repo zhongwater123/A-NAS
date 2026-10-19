@@ -1,7 +1,7 @@
 # Debian 只读宿主机状态
 
 状态：implemented
-更新时间：2026-10-06
+更新时间：2026-10-19
 
 ## 目标
 
@@ -34,11 +34,11 @@ Host Agent 内的 Linux Adapter 在 Debian 13 上通过既有 `hoststate.Reader`
 - When：分别读取两次状态。
 - Then：公开磁盘 ID 保持一致，且不包含 WWN、序列号、`/dev` 路径或内核设备名。
 
-### 健康信息尚未评估
+### 读取器不评估系统健康
 
-- Given：本轮不执行 SMART 或设备温度探测。
-- When：返回系统和磁盘状态。
-- Then：健康状态为 `unknown`，磁盘温度为空，不把“读取成功”误报为“设备健康”。
+- Given：读取器读到系统和磁盘状态。
+- When：返回状态。
+- Then：系统健康为 `unknown`，由产品服务按[系统健康](system-health.md)评估；磁盘健康与温度只来自 SMART，读不到时为 `unknown` 与空值，不把“读取成功”误报为“设备健康”。（本规格最初的一轮不执行 SMART，SMART 后来随 v1.0.1 加入。）
 
 ### 拒绝不稳定或矛盾的输入
 
