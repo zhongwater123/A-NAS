@@ -52,6 +52,7 @@ check "a member cannot connect to an instance socket" denied as alice python3 -c
 check "the Product Service cannot connect to one directly" denied as a-nas python3 -c "$connect_alice"
 check "session tokens are root's alone" test "$(stat -c '%a %U' /etc/a-nas-assistant/tokens/alice.env 2>/dev/null)" = "600 root"
 check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spike-tokens/alice.token
+check "each member's weekly curator is enabled" systemctl is-enabled --quiet anas-assistant-curator@alice.timer anas-assistant-curator@bob.timer
 # The gate on, and the assistant's API in the Product Service (both off by default).
 printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/host-agent.env
 printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/anas-api.env
@@ -279,6 +280,13 @@ if [[ -x "$assistant_python" ]]; then
   check "signing out cuts the window's connection to the instance" \
     test "$(sed -n 's/^closed after \([0-9]*\) s.*/\1/p' /tmp/gate.out)" -le 40
   echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate.out)"
+  # Hermes's curator as the weekly timer starts it: in alice's sandbox, only while her
+  # assistant is not running.
+  systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
+  systemctl start anas-assistant-curator@alice.service || true
+  check "Hermes's curator runs in her sandbox while her assistant is stopped" \
+    test "$(systemctl show -p Result --value anas-assistant-curator@alice.service)" = success -a -s "$data/assistant/alice/hermes/skills/.curator_state"
+  echo "INFO assistant curator: $(journalctl -u anas-assistant-curator@alice.service -o cat --no-pager | grep -m 1 '^auto:' || true)"
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).
@@ -289,3 +297,4 @@ PRODUCT_USER=a-nas bash /spike/assistant-layout.sh remove "$data" bob || true
 check "removing bob's assistant leaves no token, config, socket or directory" \
   test ! -e /etc/a-nas-assistant/tokens/bob.env -a ! -e /run/anas-spike-tokens/bob.token -a ! -e /etc/a-nas-assistant/members/bob \
   -a ! -e /run/a-nas-assistant/bob.sock -a ! -e "$data/assistant/bob"
+check "and his curator timer is off" test "$(systemctl is-enabled anas-assistant-curator@bob.timer 2>/dev/null || true)" != enabled

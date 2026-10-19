@@ -9,6 +9,8 @@
 *.json text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+# git apply needs the hunks exactly as written.
+*.patch text eol=lf
 
 *.png binary
 *.jpg binary

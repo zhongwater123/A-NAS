@@ -7,7 +7,7 @@
 
 在实验 NAS 上为 `a-nas-users` 的全部成员开启 AI 助手，用云端 OpenAI 兼容模型（默认 DeepSeek `deepseek-flash`）验证它在设备上的可用性与资源占用（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）。只用于开发测试，结束后按“回滚或恢复”移除。
 
-成功结果：成员在桌面打开“AI 助手”，能对话、读取本人个人空间与 Shared，在自己的目录里运行命令与代码；请它改文件或复制图片时出现确认卡片，确认后由文件代理执行，旧版本进回收站；有风险的命令与每段代码先出命令卡片。
+成功结果：成员在桌面打开“VNAS”（AI 助手），能对话、读取本人个人空间与 Shared，在自己的目录里运行命令与代码；请它改文件或复制图片时出现确认卡片，确认后由文件代理执行，旧版本进回收站；有风险的命令与每段代码先出命令卡片。
 
 正式产品中这些由 Host Agent 的类型化操作与安装器完成（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)），尚未实现；本手册用 spike 的脚本代替，限制见下。
 
@@ -56,7 +56,7 @@
    ```bash
    bash /root/assistant-trial-<提交>/spike/nas-trial.sh install
    ```
-   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate，最后 7 行 `PASS` 与 `installed`。
+   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate，最后 8 行 `PASS` 与 `installed`。
    - 完成标准：没有 `STOP` 或 `FAIL`。
 5. NAS（root，可选）：测冷启动，不调用模型。
    ```bash
@@ -73,12 +73,13 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 ```
 
 - 换上新的脚本、单元、Hermes 策略与运行环境，重新生成会话令牌与成员配置（都在 root 自己的 `/etc` 中），停止正在运行的实例；成员的助手目录、对话与记忆保留，成员可写的文件夹不碰。
-- 完成标准：最后 7 行 `PASS`。安装之后才加入的成员不在其中，`update` 会列出；要包括他们，`remove` 后重新 `install`。
+- 完成标准：最后 8 行 `PASS`。安装之后才加入的成员不在其中，`update` 会列出；要包括他们，`remove` 后重新 `install`。
 - 已装早先试用（bundle `c6f6993`）的设备同样直接 `update`：会话令牌按新格式重新生成，成员的助手目录保留（2026-10-16 在系统测试容器中预演）。
+- 2026-10-16 之后的 bundle 带上了后台复盘工具白名单的上游修复，并为每个账号启用每周的闲时整理（`anas-assistant-curator@<账号>.timer`，`check` 的最后一行 `PASS weekly curator`）；`update` 一并换上（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理2026-10-16开发机)）。
 
 ## 验证
 
-- 用自己的账号登录 Web，桌面的“AI 助手”可以打开，不再是“规划中”。
+- 用自己的账号登录 Web，桌面的“VNAS”可以打开，不再是“规划中”。
 - 问“我的个人空间里有哪些文件？”，助手列出文件。
 - 请它在个人空间新建或改写一个文件：出现确认卡片；确认后文件出现或改变，被改写的旧版本在回收站中；拒绝后什么都不变。
 - 请它把共享空间里的一张图片复制到个人空间：卡片写明来源、目标与大小，确认后图片出现在个人空间。
@@ -86,6 +87,8 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 - 打开两个窗口，卡片在两个窗口都出现，在任一窗口确认即可。
 - 退出登录后 30 秒内，助手窗口的连接断开。
 - “记忆”页能打开，删除一条后不再出现。
+- 后台复盘改了记忆或技能时，那一轮回答下方出现“自我改进回顾：……”与“查看记忆”（Hermes 默认每 10 条消息复盘一次记忆）。
+- 闲时整理：`systemctl list-timers 'anas-assistant-curator@*'` 列出每个账号下一次运行的时间；运行过后 `journalctl -u anas-assistant-curator@<账号>.service` 有一行 `auto: checked=…`。
 - 资源：`systemctl status 'anas-assistant@*'` 看实例内存；`/var/log/anas-assistant-gateway/requests.jsonl` 每次请求一行，记用时、工具名与 token 用量。结果写进[研究文档](../research/hermes-agent-runtime.md)与 #116。
 
 ## 回滚或恢复

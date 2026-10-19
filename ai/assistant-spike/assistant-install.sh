@@ -54,6 +54,15 @@ if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -m 0644 "$here/api-server-channel/anas-assistant.conf" /etc/systemd/system/anas-assistant@.service.d/channel.conf
   install -m 0644 "$here/api-server-channel/anas-assistant-api.conf" /etc/systemd/system/anas-assistant-api@.service.d/channel.conf
 fi
+# Hermes's curator, weekly, in the same sandbox, while the member's assistant is not
+# running (anas-assistant-curator@.timer). It needs neither the session token nor the model.
+sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i (spike)#' \
+  -e 's#^ExecStart=.*#ExecStart=/usr/bin/tini -- /opt/a-nas/assistant-runtimes/spike/venv/bin/hermes curator run#' \
+  -e '/^ExecStartPost=/d' -e '/^ExecStopPost=/d' -e '/^StopWhenUnneeded/d' -e '/anas-assistant-token@/d' \
+  -e '/^BindReadOnlyPaths=\/run\/a-nas-assistant-start/d' -e 's/^Type=.*/Type=oneshot/' \
+  -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
+  "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-curator@.service
+install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
 # The same sandbox with probe.sh in place of Hermes.
 sed -e 's#^ExecStart=.*#ExecStart=/bin/bash /spike/probe.sh#' -e '/^ExecStartPost=/d' -e 's/^Type=.*/Type=oneshot/' -e '/^StopWhenUnneeded/d' \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-probe@.service
