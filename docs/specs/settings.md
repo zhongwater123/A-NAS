@@ -1,7 +1,7 @@
 # 设置
 
 状态：implemented
-更新时间：2026-10-14
+更新时间：2026-10-19
 
 ## 目标
 
@@ -20,7 +20,7 @@
 | 分区 | 成员 | 管理员 | 内容 |
 |---|---|---|---|
 | 我的账号 | 可用 | 可用 | 头像、昵称与账号名（见[头像与昵称](account-profile.md)）、角色与状态、修改密码（同步 SMB 凭据）、本次登录方式与有效期、退出登录 |
-| 概览 | 可用 | 可用 | 设备名、系统健康、数据来源、运行时间、磁盘数量与总容量、数据卷用量（点击进入“存储”）、产品版本、操作系统、架构、设备标识与观测时间 |
+| 概览 | 可用 | 可用 | 设备名、系统健康、数据来源、运行时间、磁盘数量与总容量、数据卷用量（点击进入“存储”）、健康检查（每项原因、处理办法与“查看存储”，见[系统健康](system-health.md)）、产品版本、操作系统、架构、设备标识与观测时间 |
 | 任务管理器 | 只读 | 只读 | 设备运行状态（总览、CPU、GPU、NPU、内存、网络、硬盘）与服务、进程资源用量，见[任务管理器](task-manager.md) |
 | 存储 | 只读 | 可用 | 数据卷状态与容量、磁盘列表；尚无数据卷时管理员可初始化数据卷 |
 | 用户与权限 | 不显示 | 可用 | 账号列表、添加成员；每个成员的“更多操作”菜单提供重置密码、只读查看个人空间或私有图库、禁用 |
@@ -106,7 +106,7 @@
 
 ## 关联
 
-- 规格：[头像与昵称](account-profile.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)
+- 规格：[头像与昵称](account-profile.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[系统健康](system-health.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
 - 代码：[设置窗口](../../web/src/SettingsPanel.tsx)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[日志分区](../../web/src/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[桌面](../../web/src/App.tsx)
