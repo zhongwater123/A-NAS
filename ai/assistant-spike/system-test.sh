@@ -280,18 +280,20 @@ if [[ -x "$assistant_python" ]]; then
   check "signing out cuts the window's connection to the instance" \
     test "$(sed -n 's/^closed after \([0-9]*\) s.*/\1/p' /tmp/gate.out)" -le 40
   echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate.out)"
-  # Signing in starts her assistant in the background, with no window open, and the Product
-  # Service keeps it running through the gate while she is signed in; once she signs out it
-  # exits idle like before.
-  systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
+  # The Product Service keeps a member's assistant running while they are signed in: alice is
+  # still signed in with /tmp/alice.jar (above). Once she signs out everywhere it exits idle;
+  # signing in starts it in the background, with no window open, and keeps it running.
+  check "she signs out of her last session" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/session")" = 204
+  for _ in $(seq 1 180); do systemctl is-active --quiet anas-assistant@alice.service || break; sleep 0.5; done
+  check "once she is signed out everywhere her assistant exits idle" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
   keep_csrf=$(login alice "$new_password" /tmp/alice-keep.jar || true)
   for _ in $(seq 1 120); do systemctl is-active --quiet anas-assistant@alice.service && break; sleep 0.5; done
   check "signing in starts her assistant with no window open" systemctl is-active --quiet anas-assistant@alice.service
   sleep 50
   check "it keeps running while she is signed in, past the idle exit" systemctl is-active --quiet anas-assistant@alice.service
-  check "she signs out again" test "$(status_of -b /tmp/alice-keep.jar -H "X-CSRF-Token: $keep_csrf" -X DELETE "$api/api/v1/session")" = 204
-  for _ in $(seq 1 180); do systemctl is-active --quiet anas-assistant@alice.service || break; sleep 0.5; done
-  check "after signing out her assistant exits idle" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
+  check "she signs out again" \
+    test "$(status_of -b /tmp/alice-keep.jar -H "X-CSRF-Token: $keep_csrf" -X DELETE "$api/api/v1/session")" = 204
   # Hermes's curator as the weekly timer starts it: in alice's sandbox, only while her
   # assistant is not running.
   systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
@@ -299,6 +301,8 @@ if [[ -x "$assistant_python" ]]; then
   check "Hermes's curator runs in her sandbox while her assistant is stopped" \
     test "$(systemctl show -p Result --value anas-assistant-curator@alice.service)" = success -a -s "$data/assistant/alice/hermes/skills/.curator_state"
   echo "INFO assistant curator: $(journalctl -u anas-assistant-curator@alice.service -o cat --no-pager | grep -m 1 '^auto:' || true)"
+  # The system test's last check uses /tmp/alice.jar.
+  alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).
