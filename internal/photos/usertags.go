@@ -89,7 +89,7 @@ func (s *Service) TagCounts(ctx context.Context, p Principal, viewing string) ([
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT t.name, t.asset_id FROM user_tags t JOIN assets a ON a.id = t.asset_id
-WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)`+hiddenVideos(p, "a.object_id")+`
 ORDER BY t.created_at DESC, t.asset_id DESC`, scope...)
 	if err != nil {
 		return nil, err

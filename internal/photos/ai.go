@@ -750,9 +750,9 @@ func (s *Service) enqueueEmbedding(ctx context.Context, tx *sql.Tx, objectID str
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
-WHERE NOT EXISTS (SELECT 1 FROM embeddings WHERE object_id = ? AND derivation = ?)
+WHERE NOT EXISTS (SELECT 1 FROM embeddings WHERE object_id = ? AND derivation = ?) AND `+notVideo("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
-		objectID, embeddingDerivation, now, now, objectID, embeddingDerivation)
+		objectID, embeddingDerivation, now, now, objectID, embeddingDerivation, objectID)
 	return err
 }
 
@@ -764,7 +764,8 @@ func (s *Service) wakeAI() {
 }
 
 // AIStatus reports what local AI is doing and how far it has come with the
-// photos p can see. Counts never include libraries p cannot view.
+// photos p can see. Counts never include libraries p cannot view, nor
+// videos, which local AI leaves alone.
 func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	libraries, err := s.Libraries(ctx, p)
 	if err != nil {
@@ -798,7 +799,8 @@ FROM (
          IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed') OR (? AND g.state = 'failed')
            OR (? AND p.state = 'failed'), 0) AS failed
   FROM (SELECT v.object_id, `+inPeopleLibrary("v.object_id")+` AS people FROM (SELECT DISTINCT object_id FROM assets
-        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)) v) a
+        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)
+          AND `+notVideo("assets.object_id")+`) v) a
   LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
   LEFT JOIN detections d ON d.object_id = a.object_id AND d.derivation = ?
   LEFT JOIN scans f ON f.object_id = a.object_id AND f.derivation = ?

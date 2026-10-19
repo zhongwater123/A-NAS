@@ -133,6 +133,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
 	h.metadataRoutes()
 	h.peopleRoutes()
+	h.videoRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -440,7 +441,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 			}
 			directoryID = string(value)
 		case "file":
-			asset, err := h.service.Import(r.Context(), principal, photos.ImportRequest{
+			result, err := h.service.Upload(r.Context(), principal, photos.ImportRequest{
 				LibraryID: r.PathValue("libraryID"), DirectoryID: directoryID, Name: part.FileName(), Content: part,
 			})
 			_ = part.Close()
@@ -448,7 +449,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 				h.fail(w, r, err)
 				return
 			}
-			writeJSON(w, http.StatusCreated, asset)
+			h.uploadResult(w, result)
 			return
 		default:
 			_ = part.Close()
@@ -658,6 +659,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusRequestEntityTooLarge, "too_large", photos.ErrTooLarge.Error())
 	case errors.Is(err, photos.ErrNotFound):
 		WriteError(w, http.StatusNotFound, "not_found", "photo library item was not found")
+	case errors.Is(err, photos.ErrNotVideo):
+		WriteError(w, http.StatusNotFound, "not_video", "this photo library item is not a video")
+	case errors.Is(err, photos.ErrInvalidStart):
+		WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	case errors.Is(err, photos.ErrMediaBusy):
+		WriteError(w, http.StatusServiceUnavailable, "media_busy", "正在同时转换播放的视频太多，请稍后再试")
 	case errors.Is(err, photos.ErrThumbnailUnavailable):
 		WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
 	case errors.Is(err, photos.ErrForbidden):
@@ -681,7 +688,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, mediaworker.ErrUnreadable):
 		WriteError(w, http.StatusUnprocessableEntity, "unreadable_media", "动态片段无法读取，请选择未修改的原件")
 	case errors.Is(err, photos.ErrUnsupportedType):
-		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "支持 JPEG、PNG 和 HEIC 照片；Live Photo 请同时选择照片与同名 MOV")
+		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "支持 JPEG、PNG、HEIC 照片与 MP4、MOV 等常见视频；Live Photo 请同时选择照片与同名 MOV")
 	case errors.Is(err, photos.ErrTooLarge):
 		WriteError(w, http.StatusRequestEntityTooLarge, "too_large", err.Error())
 	case errors.Is(err, photos.ErrInsufficientSpace):

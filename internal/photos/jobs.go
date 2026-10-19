@@ -130,6 +130,9 @@ type claimedJob struct {
 	derivation  string
 	attempts    int
 	orientation int
+	// video is set for a video original, with how long it plays.
+	video    bool
+	duration float64
 }
 
 // ProcessMediaJob runs one ready media job and reports whether there was one.
@@ -171,12 +174,12 @@ WHERE derivation = ? AND state = 'running' AND lease_until <= ? AND attempts >= 
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
 		if err := tx.QueryRowContext(ctx, `
-SELECT j.object_id, j.derivation, j.attempts, o.orientation
-FROM jobs j JOIN objects o ON o.id = j.object_id
+SELECT j.object_id, j.derivation, j.attempts, o.orientation, v.object_id IS NOT NULL, IFNULL(v.duration, 0)
+FROM jobs j JOIN objects o ON o.id = j.object_id LEFT JOIN videos v ON v.object_id = j.object_id
 WHERE j.derivation = ? AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
   AND (? = '' OR j.object_id = ?)
 ORDER BY j.not_before, j.object_id
-LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation); err != nil {
+LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation, &job.video, &job.duration); err != nil {
 			return err
 		}
 		job.attempts++
@@ -204,7 +207,11 @@ func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []by
 		return nil, 0, 0, jobErrorIO
 	}
 	defer original.Close()
-	thumbnail, width, height, err = s.renderPhoto(ctx, original, job.orientation, thumbnailEdge, thumbnailQuality)
+	if job.video {
+		thumbnail, width, height, err = s.renderVideoFrame(ctx, original, job.duration, thumbnailEdge, thumbnailQuality)
+	} else {
+		thumbnail, width, height, err = s.renderPhoto(ctx, original, job.orientation, thumbnailEdge, thumbnailQuality)
+	}
 	if err != nil {
 		if errors.Is(err, mediaworker.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return nil, 0, 0, jobErrorIO
@@ -243,7 +250,8 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			return err
 		}
 		// The thumbnail is the vector's input and proves the original
-		// decodes for the detector and the face models.
+		// decodes for the detector and the face models. A video's queues
+		// none of them.
 		if err := s.enqueueEmbedding(ctx, tx, job.objectID); err != nil {
 			return err
 		}

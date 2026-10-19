@@ -27,6 +27,9 @@ func (motionMedia) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
 func (motionMedia) Image(context.Context, *os.File, int) ([]byte, error) {
 	return nil, mediaworker.ErrUnreadable
 }
+func (motionMedia) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	return nil, mediaworker.ErrUnreadable
+}
 func (motionMedia) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("mp4"))), nil
 }

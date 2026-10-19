@@ -340,8 +340,9 @@ func maintain(ctx context.Context, service *photos.Service, logger *slog.Logger)
 
 // authenticate turns the forwarded session token into the caller's
 // Principal. It trusts the Host Agent's answer, never the Product Service.
-// Each request by a signed-in person keeps background AI work waiting,
-// except reading the AI status, which a window may poll while left open.
+// Each request by a signed-in person keeps background AI work waiting until
+// it is served, such as a video playing or a long upload, except reading the
+// AI status, which a window may poll while left open.
 func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, err := sessions.ResolveSessionUser(r.Context(), r.Header.Get(photosapi.SessionHeader))
@@ -358,7 +359,8 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 			return
 		}
 		if r.URL.Path != photosapi.AIStatusPath {
-			gate.Touch()
+			done := gate.Use()
+			defer done()
 		}
 		principal := photosapi.NewPrincipal(user.UserID, user.Username, user.Role == accounts.RoleAdmin, user.Viewing)
 		next.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))

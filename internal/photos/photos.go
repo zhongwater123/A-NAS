@@ -38,6 +38,9 @@ const (
 	// DefaultMaxImportBytes caps one original until the product freezes a
 	// per-file limit.
 	DefaultMaxImportBytes = 256 << 20
+	// DefaultMaxVideoBytes caps one video original
+	// (docs/specs/photo-video.md).
+	DefaultMaxVideoBytes = 4 << 30
 	// maxImagePixels rejects decompression bombs before anything decodes the
 	// full image.
 	maxImagePixels = 1 << 28
@@ -119,8 +122,15 @@ type Motion struct {
 	Duration float64 `json:"duration"`
 }
 
+// Video marks an asset that is a video; it plays in the viewer and takes no
+// part in local AI (docs/specs/photo-video.md).
+type Video struct {
+	Duration float64 `json:"duration"`
+}
+
 type Asset struct {
 	Motion *Motion `json:"motion,omitempty"`
+	Video  *Video  `json:"video,omitempty"`
 	// LiveVideoMissing marks the still of an Apple Live Photo imported
 	// without its MOV; uploading that MOV later completes it.
 	LiveVideoMissing bool      `json:"liveVideoMissing,omitempty"`
@@ -179,6 +189,8 @@ type Options struct {
 	TrashRetention time.Duration
 	// MaxImportBytes defaults to DefaultMaxImportBytes.
 	MaxImportBytes int64
+	// MaxVideoBytes defaults to DefaultMaxVideoBytes.
+	MaxVideoBytes int64
 	// DisableCapacityReserve skips the data-volume reserve check; only tests
 	// on ordinary temporary directories may set it.
 	DisableCapacityReserve bool
@@ -209,6 +221,11 @@ type Service struct {
 	random         io.Reader
 	trashRetention time.Duration
 	maxImportBytes int64
+	maxVideoBytes  int64
+	// streamSlots bounds the videos converting for playback at once, and
+	// streamWait is how long a conversion waits for a slot.
+	streamSlots chan struct{}
+	streamWait  time.Duration
 	// admits reports whether incoming bytes still leave the data-volume
 	// reserve free.
 	admits          func(path string, incoming int64) (bool, error)
@@ -291,8 +308,9 @@ func Open(root string, options Options) (*Service, error) {
 	}
 	service := &Service{
 		db: db, root: opened, rootPath: root, media: options.Media, decodeSlots: make(chan struct{}, 2),
+		streamSlots: make(chan struct{}, maxVideoStreams), streamWait: videoStreamWait,
 		now: options.Now, random: options.Random,
-		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
+		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
@@ -336,6 +354,9 @@ func Open(root string, options Options) (*Service, error) {
 	}
 	if service.maxImportBytes <= 0 {
 		service.maxImportBytes = DefaultMaxImportBytes
+	}
+	if service.maxVideoBytes <= 0 {
+		service.maxVideoBytes = DefaultMaxVideoBytes
 	}
 	if err := service.ensureSharedLibrary(); err != nil {
 		_ = service.Close()

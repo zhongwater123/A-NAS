@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Content objects are immutable originals stored once per SHA-256 under
@@ -26,35 +27,82 @@ type stagedObject struct {
 	size      int64
 	mediaType string
 	metadata  photoMetadata
+	// video is what the Media Worker read from a video original.
+	video *videoFacts
 }
 
 var (
 	jpegSignature = []byte{0xff, 0xd8, 0xff}
 	pngSignature  = []byte("\x89PNG\r\n\x1a\n")
+	ebmlSignature = []byte{0x1a, 0x45, 0xdf, 0xa3}
 )
 
+// sniffHeader is how much of an original the formats are told apart by:
+// an MPEG transport stream shows itself only by its second packet.
+const sniffHeader = 512
+
+// sniffMediaType names the format an original's first bytes declare.
+// Videos are only candidates here; the Media Worker decides whether they
+// hold a video at all (docs/specs/photo-video.md).
 func sniffMediaType(header []byte) string {
+	box, brand := "", ""
+	if len(header) >= 8 {
+		box = string(header[4:8])
+	}
+	if len(header) >= 12 {
+		brand = string(header[8:12])
+	}
 	switch {
 	case bytes.HasPrefix(header, jpegSignature):
 		return "image/jpeg"
 	case bytes.HasPrefix(header, pngSignature):
 		return "image/png"
-	case len(header) >= 12 && string(header[4:8]) == "ftyp" && (string(header[8:12]) == "heic" || string(header[8:12]) == "heix" || string(header[8:12]) == "mif1"):
+	case box == "ftyp" && (brand == "heic" || brand == "heix" || brand == "mif1"):
 		return "image/heic"
+	// AVIF, HEIF image sequences and Canon CR3 raw photos are not videos.
+	case box == "ftyp" && (brand == "" || brand == "avif" || brand == "avis" || brand == "msf1" || brand == "crx "):
+		return ""
+	case box == "ftyp" && brand == "qt  ":
+		return "video/quicktime"
+	case box == "ftyp" && strings.HasPrefix(brand, "3g"):
+		return "video/3gpp"
+	case box == "ftyp":
+		return "video/mp4"
+	// QuickTime files from before the ftyp box start with one of these.
+	case box == "moov" || box == "mdat" || box == "wide" || box == "free" || box == "skip" || box == "pnot":
+		return "video/quicktime"
+	case bytes.HasPrefix(header, ebmlSignature):
+		if bytes.Contains(header[:min(len(header), 64)], []byte("webm")) {
+			return "video/webm"
+		}
+		return "video/x-matroska"
+	case len(header) >= 12 && string(header[0:4]) == "RIFF" && string(header[8:12]) == "AVI ":
+		return "video/x-msvideo"
+	// A transport stream syncs every 188 bytes; a camcorder's M2TS puts a
+	// 4-byte timecode before each packet.
+	case len(header) > 188 && header[0] == 0x47 && header[188] == 0x47,
+		len(header) > 196 && header[4] == 0x47 && header[196] == 0x47:
+		return "video/mp2t"
 	default:
 		return ""
 	}
 }
 
+func isVideoType(mediaType string) bool { return strings.HasPrefix(mediaType, "video/") }
+
 func objectPath(id string) string { return filepath.Join(objectsDir, id[0:2], id[2:4], id) }
 
-// stage streams content into a new staging file, hashing it and enforcing the
-// size limit, capacity reserve and supported formats on the way.
+// stage streams an original, a photo or a video, into a new staging file,
+// hashing it and enforcing the size limits, capacity reserve and supported
+// formats on the way.
 func (s *Service) stage(content io.Reader) (stagedObject, error) {
 	return s.stageContent(content, false)
 }
 
-func (s *Service) stageContent(content io.Reader, video bool) (staged stagedObject, err error) {
+// stageContent stages an original or, with clip, the video of a Live Photo
+// or motion photo, which must be a QuickTime or MP4 file within the photo
+// limit.
+func (s *Service) stageContent(content io.Reader, clip bool) (staged stagedObject, err error) {
 	name := filepath.Join(stagingDir, s.randomHex()+".part")
 	s.stagingMu.Lock()
 	s.staging[name] = struct{}{}
@@ -72,29 +120,26 @@ func (s *Service) stageContent(content io.Reader, video bool) (staged stagedObje
 	}()
 	staged.name = name
 	hash := sha256.New()
-	header := make([]byte, 0, 32)
+	header := make([]byte, 0, sniffHeader)
 	buffer := make([]byte, 1<<20)
+	limit := s.maxImportBytes
 	for {
 		n, readErr := content.Read(buffer)
 		if n > 0 {
 			chunk := buffer[:n]
-			if staged.size += int64(n); staged.size > s.maxImportBytes {
-				return stagedObject{}, ErrTooLarge
-			}
 			if staged.mediaType == "" {
 				header = append(header, chunk[:min(n, cap(header)-len(header))]...)
 				if len(header) == cap(header) {
-					staged.mediaType = sniffMediaType(header)
-					if video && (len(header) < 12 || string(header[4:8]) != "ftyp") {
-						return stagedObject{}, ErrInvalidMotion
+					if staged.mediaType, err = classify(header, clip); err != nil {
+						return stagedObject{}, err
 					}
-					if video && len(header) >= 12 && string(header[4:8]) == "ftyp" {
-						staged.mediaType = "video/quicktime"
-					}
-					if staged.mediaType == "" || (!video && staged.mediaType == "video/quicktime") {
-						return stagedObject{}, ErrUnsupportedType
+					if isVideoType(staged.mediaType) && !clip {
+						limit = s.maxVideoBytes
 					}
 				}
+			}
+			if staged.size += int64(n); staged.size > limit {
+				return stagedObject{}, ErrTooLarge
 			}
 			if err := s.ensureCapacity(int64(n)); err != nil {
 				return stagedObject{}, err
@@ -112,7 +157,10 @@ func (s *Service) stageContent(content io.Reader, video bool) (staged stagedObje
 		}
 	}
 	if staged.mediaType == "" {
-		return stagedObject{}, ErrUnsupportedType
+		// Shorter than the header formats are told apart by.
+		if staged.mediaType, err = classify(header, clip); err != nil {
+			return stagedObject{}, err
+		}
 	}
 	if err := file.Sync(); err != nil {
 		return stagedObject{}, err
@@ -120,7 +168,7 @@ func (s *Service) stageContent(content io.Reader, video bool) (staged stagedObje
 	if err := file.Close(); err != nil {
 		return stagedObject{}, err
 	}
-	if !video {
+	if !isVideoType(staged.mediaType) {
 		staged.metadata, err = s.readMetadata(staged)
 	}
 	if err != nil {
@@ -128,6 +176,23 @@ func (s *Service) stageContent(content io.Reader, video bool) (staged stagedObje
 	}
 	staged.id = hex.EncodeToString(hash.Sum(nil))
 	return staged, nil
+}
+
+// classify names the format of an original, or of a clip, from its first
+// bytes. A clip is always a QuickTime or MP4 file; the Media Worker reads
+// it before it is accepted.
+func classify(header []byte, clip bool) (string, error) {
+	if clip {
+		if len(header) < 12 || string(header[4:8]) != "ftyp" {
+			return "", ErrInvalidMotion
+		}
+		return "video/quicktime", nil
+	}
+	mediaType := sniffMediaType(header)
+	if mediaType == "" {
+		return "", ErrUnsupportedType
+	}
+	return mediaType, nil
 }
 
 // readMetadata reads only the image header and EXIF: it proves the bytes are

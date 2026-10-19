@@ -290,6 +290,17 @@ ON CONFLICT(object_id, derivation) DO NOTHING;
 	// service first sees the animal model; the dogs found keep what members
 	// decided, by the place they were found in.
 	`DELETE FROM scans WHERE derivation = 'pets/v1';`,
+	// 13: videos (docs/specs/photo-video.md). A content object that is a
+	// video original keeps how long it plays and what the Media Worker read
+	// from it, so the timeline and the decision how a browser plays it need
+	// no decoder. Videos take no part in local AI.
+	`
+CREATE TABLE videos (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    duration REAL NOT NULL,
+    info TEXT NOT NULL
+);
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
@@ -479,10 +490,12 @@ SELECT a.id, a.library_id, IFNULL(a.directory_id, ''), a.name, o.media_type, o.s
          ELSE 'first'
        END,
        a.object_id, IFNULL(a.motion_object_id, ''), a.motion_name, a.motion_kind, a.motion_duration,
-       a.motion_object_id IS NULL AND IFNULL(o.live_id, '') <> '', l.kind, IFNULL(l.owner_user_id, ''), l.created_at
+       a.motion_object_id IS NULL AND IFNULL(o.live_id, '') <> '', IFNULL(v.duration, -1),
+       l.kind, IFNULL(l.owner_user_id, ''), l.created_at
 FROM assets a
 JOIN objects o ON o.id = a.object_id
-JOIN libraries l ON l.id = a.library_id`
+JOIN libraries l ON l.id = a.library_id
+LEFT JOIN videos v ON v.object_id = a.object_id`
 
 type assetRecord struct {
 	Asset
@@ -498,11 +511,12 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	var duplicate, thumbnail string
 	var metadata photoMetadata
 	var motion Motion
+	var video Video
 	if err := row.Scan(&record.ID, &record.LibraryID, &record.DirectoryID, &record.Name, &record.MediaType,
 		&record.SizeBytes, &record.UploadedBy, &importedAt, &trashedAt, &trashedBy, &purgeAfter,
 		&takenAt, &metadata.width, &metadata.height, &metadata.orientation, &thumbnail, &duplicate,
 		&record.objectID, &record.motionObjectID, &record.motionName, &motion.Kind, &motion.Duration,
-		&record.LiveVideoMissing, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
+		&record.LiveVideoMissing, &video.Duration, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return assetRecord{}, ErrNotFound
 		}
@@ -510,6 +524,9 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	}
 	if record.motionObjectID != "" {
 		record.Motion = &motion
+	}
+	if video.Duration >= 0 {
+		record.Video = &video
 	}
 	record.Duplicate = DuplicateRole(duplicate)
 	record.Thumbnail = ThumbnailState(thumbnail)

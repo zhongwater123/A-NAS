@@ -186,9 +186,9 @@ func (s *Service) enqueueDetection(ctx context.Context, tx *sql.Tx, objectID str
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
-WHERE NOT EXISTS (SELECT 1 FROM detections WHERE object_id = ? AND derivation = ?)
+WHERE NOT EXISTS (SELECT 1 FROM detections WHERE object_id = ? AND derivation = ?) AND `+notVideo("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
-		objectID, detectionDerivation, now, now, objectID, detectionDerivation)
+		objectID, detectionDerivation, now, now, objectID, detectionDerivation, objectID)
 	return err
 }
 

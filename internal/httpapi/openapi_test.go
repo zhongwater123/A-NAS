@@ -75,6 +75,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	commentStale, commentStaleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	searchImage, searchImageType := imageSearchForm(t)
 	liveVideo, liveVideoType := multipartFile(t, "IMG_1.MOV", []byte("\x00\x00\x00\x18ftypqt  "))
+	video, videoType := multipartFile(t, "beach.mp4", []byte("\x00\x00\x00\x18ftypisom"))
 	tests := []struct {
 		name        string
 		method      string
@@ -116,6 +117,10 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo similar missing", path: "/api/v1/photos/assets/photo:missing/similar", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo image search without local AI", method: http.MethodPost, body: searchImage, contentType: searchImageType, path: "/api/v1/photos/image-searches", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "photo live video without media", method: http.MethodPost, body: liveVideo, contentType: liveVideoType, path: "/api/v1/photos/libraries/" + photoLibraryID + "/live-videos", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo video without media", method: http.MethodPost, body: video, contentType: videoType, path: "/api/v1/photos/libraries/" + photoLibraryID + "/uploads", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo video playback of a photo", path: "/api/v1/photos/assets/" + photoAssetID + "/video/playback?caps=hevc,webm", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo video original of a photo", path: "/api/v1/photos/assets/" + photoAssetID + "/video/original", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo video stream of a photo", path: "/api/v1/photos/assets/" + photoAssetID + "/video/stream?start=1", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo image search expired", path: "/api/v1/photos/image-searches/0123/assets?limit=2", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},

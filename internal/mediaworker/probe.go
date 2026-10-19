@@ -3,6 +3,7 @@ package mediaworker
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -42,6 +43,10 @@ type ProbeStream struct {
 	Forced      bool
 	AttachedPic bool
 	Tags        map[string]string
+	// Rotation is how far a player turns the picture, in degrees
+	// counterclockwise, from the display matrix or an older rotate tag.
+	// FFmpeg's own decoding turns frames upright already.
+	Rotation int
 }
 
 type ffprobeOutput struct {
@@ -61,7 +66,8 @@ type ffprobeOutput struct {
 		BaseRate         string `json:"r_frame_rate"`
 		ColorTransfer    string `json:"color_transfer"`
 		SideData         []struct {
-			Type string `json:"side_data_type"`
+			Type     string  `json:"side_data_type"`
+			Rotation float64 `json:"rotation"`
 		} `json:"side_data_list"`
 		Disposition struct {
 			Default     int `json:"default"`
@@ -105,6 +111,13 @@ func ParseProbe(data []byte) (Probe, error) {
 		parsed.Bits, _ = strconv.Atoi(stream.BitsPerRawSample)
 		for _, side := range stream.SideData {
 			parsed.SideData = append(parsed.SideData, side.Type)
+			if side.Type == "Display Matrix" {
+				parsed.Rotation = int(math.Round(side.Rotation))
+			}
+		}
+		if rotate, err := strconv.Atoi(stream.Tags["rotate"]); err == nil && parsed.Rotation == 0 {
+			// The tag turns clockwise.
+			parsed.Rotation = -rotate
 		}
 		probe.Streams = append(probe.Streams, parsed)
 	}

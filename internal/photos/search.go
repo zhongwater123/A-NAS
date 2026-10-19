@@ -107,8 +107,12 @@ type searchHit struct {
 }
 
 // A candidate's tags are its user tags joined by unit separators; when is its
-// capture time, or its import time without one.
-type candidate struct{ id, objectID, libraryID, name, tags, when string }
+// capture time, or its import time without one. A video takes no part in
+// AI and is matched by name and user tags only.
+type candidate struct {
+	id, objectID, libraryID, name, tags, when string
+	video                                     bool
+}
 
 // Search returns photos matching the query by name or meaning. Trashed photos
 // are never included.
@@ -135,6 +139,9 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	candidates, err := s.searchCandidates(ctx, args)
 	if err != nil {
 		return SearchPage{}, err
+	}
+	if p.Assistant {
+		candidates = slices.DeleteFunc(candidates, func(c candidate) bool { return c.video })
 	}
 	page := SearchPage{Assets: []Asset{}}
 	rest, names, of, err := s.peopleInQuery(ctx, query, args)
@@ -171,7 +178,7 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 // their user tags.
 func (s *Service) searchCandidates(ctx context.Context, scope []any) ([]candidate, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.library_id, a.name, IFNULL(group_concat(t.name, char(31)), ''),
-  IFNULL(a.taken_at, a.imported_at)
+  IFNULL(a.taken_at, a.imported_at), NOT `+notVideo("a.object_id")+`
 FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
 WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
 GROUP BY a.id`, scope...)
@@ -181,7 +188,7 @@ GROUP BY a.id`, scope...)
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when); err != nil {
+		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when, &c.video); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -258,6 +265,12 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 		}
 		vectorErr = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
 			for _, c := range candidates {
+				if c.video {
+					if strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded) {
+						named = append(named, searchHit{c.id, nameBand})
+					}
+					continue
+				}
 				vector, embedded := vectors[c.objectID]
 				score := 0.0
 				if embedded && queryVector != nil {
