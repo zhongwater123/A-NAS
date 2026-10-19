@@ -101,7 +101,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 | 能力 | 首选基线 | 选择理由 | 冻结条件 |
 |---|---|---|---|
 | 中文语义向量与开放标签 | 已选定 Google EmbeddingGemma 2 全模态 740M 官方 LiteRT 包（2026-10-09 决定） | Google DeepMind 于 2026-10-06 发布、支持 100+ 语言，许可待核对（见 [M2 实施方案](photo-ai.md)）；全模态包约 485 MB，440M 文本+视觉包约 388 MB，官方列出图片检索与图片分类用途；零样本标签依赖图文同一向量空间的相似度，官方未给出中文图文指标 | 作为首个集成目标；中文家庭照片质量、Debian x86 Runtime、RSS、查询延迟与吞吐达标后冻结为发行默认；发布过新必须保留回退 |
-| 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
+| 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO；[实施方案](photo-people.md)改用运行环境已有的 OpenCV 与 ONNX Runtime 运行候选模型（YuNet 检测，SFace 或 AuraFace 向量，由评估决定），本组合降为回退 | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
 | 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
 
 （2026-10-10 起标签只以 AI 聚合呈现、不参与搜索，见 [M2 实施方案“AI 聚合”](photo-ai.md#ai-聚合)。）图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
@@ -117,6 +117,7 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 ## Runtime 与进程边界
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
+- 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）。
 - Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级；现行单元的内存与 CPU 限制见[相册本地 AI](photo-ai.md#ai-workeranas-ai)（切片 18 起 CPU 上限为逻辑核数减 2）。
 - AI 随系统内置安装、默认开启，设备不联网获取模型（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：Worker 的 Python 依赖以锁定哈希的离线 wheel、模型文件连同来源、许可证、SHA-256 与预处理版本清单随发行制品交付，按内容各存一份并由 release 引用。Worker 不可用时基础相册不受影响。
 - EmbeddingGemma 2 的全模态 740M 官方 LiteRT 包经 MediaPipe Universal Embedder 运行（LiteRT-LM 自身的 Python API 没有向量接口，见 [M2 实施方案](photo-ai.md)），并用 Transformers/Sentence Transformers 结果抽样核对量化正确性；人脸模型优先使用 OpenVINO CPU Provider。不做 OCR（2026-10-09 决定）。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
@@ -171,7 +172,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 
 **M3 人物、格式、导入与发布**
 
-13. 人脸 occurrence 与分图库人物库。
+13. 人脸 occurrence 与分图库人物库，猫和狗按个体并入人物库；实施方案见[相册人物与宠物](photo-people.md)（已合并，未部署）。
 14. HEIC 与动态照片的导入、预览、短片播放和静态 AI 输入已实现，见[规格](../specs/photo-motion.md)；GIF、RAW 与普通视频仍待实现。
 15. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
 16. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。

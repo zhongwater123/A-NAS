@@ -80,8 +80,11 @@ func copyTo(ctx context.Context, f policyFixture, p photos.Principal, target fun
 			return err
 		}
 	}
-	return errors.New("no target library")
+	return errNoTarget
 }
+
+// errNoTarget means the caller sees no library to copy into.
+var errNoTarget = errors.New("no target library")
 
 func TestPolicyMatrix(t *testing.T) {
 	now := newClock().Now()
@@ -93,42 +96,50 @@ func TestPolicyMatrix(t *testing.T) {
 	}}
 	// memberViewer shows that a grant means nothing without the admin role.
 	memberViewer := photos.Principal{UserID: bob.UserID, Viewing: viewer.Viewing}
+	// The assistants act for the owner and for the viewing administrator.
+	ownersAssistant := photos.Principal{UserID: alice.UserID, Assistant: true}
+	viewersAssistant := viewer
+	viewersAssistant.Assistant = true
 	principals := []struct {
 		name string
 		p    photos.Principal
 	}{
 		{"owner", alice}, {"member", bob}, {"admin", admin}, {"viewing-admin", viewer},
 		{"expired-viewing-admin", expiredViewer}, {"member-with-grant", memberViewer},
+		{"owners-assistant", ownersAssistant}, {"viewing-admins-assistant", viewersAssistant},
 	}
 
-	ok, notFound, forbidden := error(nil), photos.ErrNotFound, photos.ErrForbidden
+	ok, notFound, forbidden, noTarget := error(nil), photos.ErrNotFound, photos.ErrForbidden, errNoTarget
 	want := map[string]map[string][]error{
 		// Order follows principals: owner, member, admin, viewing admin,
-		// expired viewing admin, member with a grant.
+		// expired viewing admin, member with a grant, owner's assistant,
+		// viewing admin's assistant. An assistant reads no originals at all.
 		"private": {
-			"get":                 {ok, notFound, notFound, ok, notFound, notFound},
-			"open":                {ok, notFound, notFound, ok, notFound, notFound},
-			"timeline":            {ok, notFound, notFound, ok, notFound, notFound},
-			"import":              {ok, notFound, notFound, forbidden, notFound, notFound},
-			"rename":              {ok, notFound, notFound, forbidden, notFound, notFound},
-			"trash":               {ok, notFound, notFound, forbidden, notFound, notFound},
-			"restore":             {ok, notFound, notFound, notFound, notFound, notFound},
-			"purge":               {ok, notFound, notFound, notFound, notFound, notFound},
-			"copy-to-own-library": {ok, notFound, notFound, forbidden, notFound, notFound},
-			"copy-to-shared":      {ok, notFound, notFound, forbidden, notFound, notFound},
+			"get":                 {ok, notFound, notFound, ok, notFound, notFound, ok, notFound},
+			"open":                {ok, notFound, notFound, ok, notFound, notFound, forbidden, forbidden},
+			"timeline":            {ok, notFound, notFound, ok, notFound, notFound, ok, notFound},
+			"import":              {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, notFound},
+			"rename":              {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, notFound},
+			"trash":               {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, notFound},
+			"restore":             {ok, notFound, notFound, notFound, notFound, notFound, notFound, notFound},
+			"purge":               {ok, notFound, notFound, notFound, notFound, notFound, notFound, notFound},
+			"copy-to-own-library": {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, noTarget},
+			"copy-to-shared":      {ok, notFound, notFound, forbidden, notFound, notFound, forbidden, notFound},
 		},
-		// The shared asset was uploaded by the owner principal (alice).
+		// The shared asset was uploaded by the owner principal (alice). The
+		// administrator never opened the photo library, so their assistant,
+		// which creates nothing, has no private library to copy into.
 		"shared": {
-			"get":                 {ok, ok, ok, ok, ok, ok},
-			"open":                {ok, ok, ok, ok, ok, ok},
-			"timeline":            {ok, ok, ok, ok, ok, ok},
-			"import":              {ok, ok, ok, ok, ok, ok},
-			"rename":              {ok, forbidden, ok, ok, ok, forbidden},
-			"trash":               {ok, forbidden, ok, ok, ok, forbidden},
-			"restore":             {ok, notFound, ok, ok, ok, notFound},
-			"purge":               {ok, notFound, ok, ok, ok, notFound},
-			"copy-to-own-library": {ok, ok, ok, ok, ok, ok},
-			"copy-to-shared":      {ok, ok, ok, ok, ok, ok},
+			"get":                 {ok, ok, ok, ok, ok, ok, ok, ok},
+			"open":                {ok, ok, ok, ok, ok, ok, forbidden, forbidden},
+			"timeline":            {ok, ok, ok, ok, ok, ok, ok, ok},
+			"import":              {ok, ok, ok, ok, ok, ok, forbidden, forbidden},
+			"rename":              {ok, forbidden, ok, ok, ok, forbidden, forbidden, forbidden},
+			"trash":               {ok, forbidden, ok, ok, ok, forbidden, forbidden, forbidden},
+			"restore":             {ok, notFound, ok, ok, ok, notFound, notFound, notFound},
+			"purge":               {ok, notFound, ok, ok, ok, notFound, notFound, notFound},
+			"copy-to-own-library": {ok, ok, ok, ok, ok, ok, forbidden, noTarget},
+			"copy-to-shared":      {ok, ok, ok, ok, ok, ok, forbidden, forbidden},
 		},
 	}
 

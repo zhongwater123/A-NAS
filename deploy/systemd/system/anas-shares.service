@@ -1,0 +1,41 @@
+[Unit]
+Description=A-NAS member sharing service
+Documentation=https://github.com/zhongwater123/A-NAS
+After=anas-host-agent.service anas-api.service
+Wants=anas-host-agent.service anas-api.service
+
+[Service]
+Type=simple
+User=a-nas-shares
+Group=a-nas-shares
+# Connects to the media worker; photo content stays private to its owner UID.
+SupplementaryGroups=a-nas-photos
+ExecStart=/opt/a-nas/current/anas-api share-service
+Environment=ANAS_SHARES_ROOT=/srv/a-nas/data/shares
+Environment=ANAS_SHARES_SOCKET=/run/a-nas-shares/shares.sock
+Environment=ANAS_SHARE_FILES_SOCKET=/run/a-nas-share-files/files.sock
+Environment=ANAS_SHARE_SESSION_SOCKET=/run/a-nas-share-sessions/shares.sock
+RuntimeDirectory=a-nas-shares
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# Mounts can appear after startup; only shares/ grants this UID access.
+ReadWritePaths=/srv/a-nas/data
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=1G
+CPUWeight=20
+IOWeight=20
+
+[Install]
+WantedBy=multi-user.target

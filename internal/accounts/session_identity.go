@@ -195,6 +195,35 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&user.UserID, &user.Username, &u
 	return user, nil
 }
 
+// ResolveAccountUID returns the active user who owns the Linux UID, without
+// any viewing grants. A member's AI assistant runs as the member's own UID
+// (ADR 0024), so the photo service learns whom it acts for from the kernel's
+// peer credentials and this lookup, never from the Product Service.
+func (d *SessionDirectory) ResolveAccountUID(ctx context.Context, uid int) (SessionUser, error) {
+	db, err := d.open()
+	if err != nil {
+		return SessionUser{}, err
+	}
+	var user SessionUser
+	var status UserStatus
+	err = db.QueryRowContext(ctx, `
+SELECT u.id, u.username, u.role, u.status, u.must_change_password
+FROM linux_identities l
+JOIN users u ON u.id = l.user_id
+WHERE l.uid = ?`, uid).Scan(&user.UserID, &user.Username, &user.Role, &status, &user.MustChangePassword)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionUser{}, ErrUserNotFound
+	}
+	if err != nil {
+		d.reset()
+		return SessionUser{}, fmt.Errorf("read account directory: %w", err)
+	}
+	if status != UserStatusActive {
+		return SessionUser{}, ErrUserNotFound
+	}
+	return user, nil
+}
+
 // open connects read-only, so the root broker never writes the database or
 // creates SQLite side files owned by root next to the Product Service's.
 func (d *SessionDirectory) open() (*sql.DB, error) {
@@ -224,4 +253,27 @@ func (d *SessionDirectory) reset() {
 func (d *SessionDirectory) Close() error {
 	d.reset()
 	return nil
+}
+
+// ActiveProfiles is the sharing service's recipient directory. The private
+// lookup socket exposes display identities only, never credentials or sessions.
+func (d *SessionDirectory) ActiveProfiles(ctx context.Context) ([]Profile, error) {
+	db, err := d.open()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT id, username, nickname, avatar_version FROM users WHERE status = ? ORDER BY username", UserStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	profiles := []Profile{}
+	for rows.Next() {
+		var profile Profile
+		if err := rows.Scan(&profile.ID, &profile.Username, &profile.Nickname, &profile.AvatarVersion); err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, rows.Err()
 }

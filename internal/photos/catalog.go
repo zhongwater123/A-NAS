@@ -210,6 +210,86 @@ CREATE INDEX assets_by_motion ON assets(motion_object_id);`,
 	// migration), '' when the still has none.
 	`ALTER TABLE objects ADD COLUMN live_id TEXT;
 CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AND live_id <> '';`,
+	// 10: people and pets (docs/architecture/photo-people.md). A scan
+	// records that the face models, or the animal model, looked at a content
+	// object; each face or pet they found is an occurrence, derived data
+	// keyed by the object. People
+	// belong to a library: who is who there, and what the user named,
+	// confirmed, merged or took out, is user data. An occurrence a library
+	// has considered has a row in person_occurrences, with no person while
+	// it is nobody yet; its source says whether clustering put it there, a
+	// member did, or it moved over from a face found by earlier models and
+	// waits to be checked against the new ones. Originals that already have
+	// thumbnails are queued.
+	`
+CREATE TABLE scans (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    derivation TEXT NOT NULL,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, derivation)
+);
+
+CREATE TABLE occurrences (
+    id TEXT PRIMARY KEY,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    derivation TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('face', 'cat', 'dog')),
+    model TEXT NOT NULL,
+    box BLOB NOT NULL,
+    landmarks BLOB,
+    score REAL NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (object_id, derivation, ordinal)
+);
+
+CREATE TABLE people (
+    id TEXT PRIMARY KEY,
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    kind TEXT NOT NULL CHECK (kind IN ('person', 'cat', 'dog')),
+    name TEXT NOT NULL DEFAULT '',
+    hidden INTEGER NOT NULL DEFAULT 0,
+    cover_occurrence_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX people_by_library ON people(library_id, kind);
+
+CREATE TABLE person_occurrences (
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE,
+    person_id TEXT REFERENCES people(id) ON DELETE SET NULL,
+    source TEXT NOT NULL CHECK (source IN ('auto', 'user', 'moved')),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, occurrence_id)
+);
+CREATE INDEX person_occurrences_by_person ON person_occurrences(person_id);
+CREATE INDEX person_occurrences_by_occurrence ON person_occurrences(occurrence_id);
+
+CREATE TABLE occurrence_rejections (
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE,
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, occurrence_id, person_id)
+);
+CREATE INDEX occurrence_rejections_by_occurrence ON occurrence_rejections(occurrence_id);
+
+INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+SELECT object_id, 'faces/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
+ON CONFLICT(object_id, derivation) DO NOTHING;
+`,
+	// 11: whether a library recognises people and pets; on by default
+	// (docs/architecture/photo-people.md#关闭与清除).
+	`ALTER TABLE libraries ADD COLUMN people INTEGER NOT NULL DEFAULT 1;`,
+	// 12: pet scans told only dogs apart; cats are pets too now. Without
+	// their scans, every photo with a cat or a dog is scanned again when the
+	// service first sees the animal model; the dogs found keep what members
+	// decided, by the place they were found in.
+	`DELETE FROM scans WHERE derivation = 'pets/v1';`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
@@ -324,6 +404,21 @@ func (s *Service) ensurePrivateLibrary(ctx context.Context, p Principal) (librar
 	}
 	lib.ownerName = p.Username
 	return lib, nil
+}
+
+// ownLibrary returns the caller's private library and whether it has one. A
+// member's own request creates it on first use; the member's assistant only
+// reads, so until the member has opened the photo library it has none.
+func (s *Service) ownLibrary(ctx context.Context, p Principal) (library, bool, error) {
+	if !p.Assistant {
+		lib, err := s.ensurePrivateLibrary(ctx, p)
+		return lib, err == nil, err
+	}
+	lib, err := s.privateLibrary(ctx, s.db, p.UserID)
+	if errors.Is(err, ErrNotFound) {
+		return library{}, false, nil
+	}
+	return lib, err == nil, err
 }
 
 type library struct {

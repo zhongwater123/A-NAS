@@ -2,12 +2,14 @@ package filebroker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
@@ -35,6 +37,8 @@ var knownOps = map[string]bool{
 }
 
 type request struct {
+	ShareEpoch string `json:"shareEpoch,omitempty"`
+	ShareID    string `json:"shareId,omitempty"`
 	// Token is sent by the Product Service and removed before the request
 	// reaches a worker.
 	Token  string         `json:"token,omitempty"`
@@ -47,6 +51,17 @@ type request struct {
 	ModTime time.Time `json:"modTime,omitzero"`
 	Cols    uint16    `json:"cols,omitempty"`
 	Rows    uint16    `json:"rows,omitempty"`
+	// Change carries an operation on the assistant's changes.
+	Change *changeRequest `json:"change,omitempty"`
+}
+
+type changeRequest struct {
+	ID        string `json:"id,omitempty"`
+	Decision  string `json:"decision,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+	// Arguments are the call of 提交更改 as Hermes reported it starting.
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 type response struct {
@@ -57,6 +72,16 @@ type response struct {
 	Size    int64             `json:"size,omitempty"`
 	// ExitCode ends a terminal session.
 	ExitCode *int `json:"exitCode,omitempty"`
+	// Assistant comes with a connection to the member's assistant.
+	Assistant *assistantGrant `json:"assistant,omitempty"`
+	// Change is a change of the assistant's as its card shows it.
+	Change json.RawMessage `json:"changeCard,omitempty"`
+}
+
+type assistantGrant struct {
+	Username string `json:"username"`
+	// Token is the instance's `hermes serve` session token.
+	Token string `json:"token"`
 }
 
 const (
@@ -73,6 +98,9 @@ const (
 	codeUnavailable       = "unavailable"
 	codeInvalidRequest    = "invalid_request"
 	codeFailed            = "failed"
+	// codeChangeInvalid says why a submission of the assistant cannot be applied.
+	codeChangeInvalid = "change_invalid"
+	codeChangeDecided = "change_decided"
 )
 
 type wireError struct {
@@ -92,7 +120,11 @@ func (e *wireError) Error() string {
 func (e *wireError) Is(target error) bool {
 	switch e.Code {
 	case codeNotFound:
-		return target == fs.ErrNotExist
+		return target == fs.ErrNotExist || target == assistantchanges.ErrNotFound
+	case codeChangeInvalid:
+		return target == assistantchanges.ErrInvalid
+	case codeChangeDecided:
+		return target == assistantchanges.ErrDecided
 	case codeExists:
 		return target == fs.ErrExist
 	case codePermission:

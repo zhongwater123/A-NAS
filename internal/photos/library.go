@@ -18,7 +18,7 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 	if !p.valid() {
 		return nil, ErrForbidden
 	}
-	own, err := s.ensurePrivateLibrary(ctx, p)
+	own, hasOwn, err := s.ownLibrary(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -27,9 +27,15 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 		return nil, err
 	}
 	now := s.now()
-	libraries := []Library{publicLibrary(p, own, now), publicLibrary(p, shared, now)}
-	if !p.Admin {
-		return libraries, nil
+	var libraries []Library
+	read := map[string]library{shared.id: shared}
+	if hasOwn {
+		libraries = append(libraries, publicLibrary(p, own, now))
+		read[own.id] = own
+	}
+	libraries = append(libraries, publicLibrary(p, shared, now))
+	if !p.Admin || p.Assistant {
+		return s.withPeople(ctx, p, libraries, read)
 	}
 	seen := map[string]bool{p.UserID: true}
 	for _, grant := range p.Viewing {
@@ -45,6 +51,19 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 			return nil, err
 		}
 		libraries = append(libraries, publicLibrary(p, viewed, now))
+		read[viewed.id] = viewed
+	}
+	return s.withPeople(ctx, p, libraries, read)
+}
+
+// withPeople fills in each library's people switch and whether p may set it.
+func (s *Service) withPeople(ctx context.Context, p Principal, libraries []Library, read map[string]library) ([]Library, error) {
+	for i := range libraries {
+		on, err := peopleOn(ctx, s.db, libraries[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		libraries[i].People, libraries[i].CanSetPeople = on, canSetPeople(p, read[libraries[i].ID])
 	}
 	return libraries, nil
 }

@@ -108,6 +108,9 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		if err := s.enqueueDerivations(ctx, tx, staged.id); err != nil {
 			return err
 		}
+		if err := s.enqueuePeopleScans(ctx, tx, staged.id); err != nil {
+			return err
+		}
 		record, err := s.assetByID(ctx, tx, assetID)
 		if err != nil {
 			return err
@@ -157,6 +160,9 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 	if asset.Albums, err = s.albumsOf(ctx, asset.ID); err != nil {
 		return Asset{}, err
 	}
+	if asset.People, err = s.peopleOf(ctx, record); err != nil {
+		return Asset{}, err
+	}
 	return asset, nil
 }
 
@@ -178,7 +184,11 @@ func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, asse
 }
 
 // Open returns the original read-only. The caller must close Content.Reader.
+// An assistant gets no pixels: the model sees names, times and tags only.
 func (s *Service) Open(ctx context.Context, p Principal, assetID string) (Content, error) {
+	if p.Assistant {
+		return Content{}, ErrForbidden
+	}
 	record, err := s.visibleAsset(ctx, s.db, p, assetID)
 	if err != nil {
 		return Content{}, err
@@ -507,6 +517,9 @@ func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, sourc
 	if err != nil {
 		return assetRecord{}, err
 	}
+	if err := s.enqueuePeopleScans(ctx, tx, record.objectID); err != nil {
+		return assetRecord{}, err
+	}
 	return record, s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)
 }
 
@@ -562,8 +575,12 @@ func (s *Service) Purge(ctx context.Context, p Principal, assetID string) error 
 }
 
 // EmptyTrash permanently deletes every trashed asset of a library that p may
-// purge. An administrator can never empty a member's private trash.
+// purge. An administrator can never empty a member's private trash, and an
+// assistant can never empty any.
 func (s *Service) EmptyTrash(ctx context.Context, p Principal, libraryID string) (int, error) {
+	if p.Assistant {
+		return 0, ErrForbidden
+	}
 	s.commitMu.Lock()
 	defer s.commitMu.Unlock()
 	records, err := s.restorableTrash(ctx, p, libraryID)

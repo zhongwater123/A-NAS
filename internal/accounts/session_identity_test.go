@@ -70,6 +70,10 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	if _, err := directory.ResolveSessionUser(ctx, "not-a-session-token"); !errors.Is(err, accounts.ErrSessionNotFound) {
 		t.Fatalf("ResolveSessionUser(forged) error = %v, want ErrSessionNotFound", err)
 	}
+	profiles, err := directory.ActiveProfiles(ctx)
+	if err != nil || len(profiles) != 2 {
+		t.Fatalf("active profiles before disable = %v, %v", profiles, err)
+	}
 	if err := service.DisableUser(ctx, admin, alice); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +84,10 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 		t.Fatalf("disabled account's session user error = %v, want ErrSessionNotFound", err)
 	}
 
+	profiles, err = directory.ActiveProfiles(ctx)
+	if err != nil || len(profiles) != 1 || profiles[0].ID != admin.ID {
+		t.Fatalf("active profiles after disable = %v, %v", profiles, err)
+	}
 	remembered := service.RememberedSessions(ctx)
 	if len(remembered) != 1 || remembered[0].User.Username != "owner" || remembered[0].Token != ownerSession.Token {
 		t.Fatalf("remembered sessions = %#v, want only the owner's live session", remembered)
@@ -90,6 +98,60 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 	}
 	if remembered := service.RememberedSessions(ctx); len(remembered) != 0 {
 		t.Fatalf("expired sessions are still remembered: %#v", remembered)
+	}
+}
+
+func TestSessionDirectoryResolvesActiveAccountsByUID(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateMember(ctx, admin, "alice", "alice password for testing"); err != nil {
+		t.Fatal(err)
+	}
+	alice, err := service.UserIDForUsername(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartLibraryViewing(ctx, admin, alice, "correct horse battery staple", "family album request"); err != nil {
+		t.Fatal(err)
+	}
+	aliceSession, err := service.Authenticate(ctx, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := accounts.NewSessionDirectory(path)
+	t.Cleanup(func() { _ = directory.Close() })
+	aliceIdentity, err := directory.ResolveSessionIdentity(ctx, aliceSession.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The administrator's grant does not travel with a lookup by UID.
+	user, err := directory.ResolveAccountUID(ctx, 20100)
+	if err != nil || !reflect.DeepEqual(user, accounts.SessionUser{UserID: admin.ID, Username: "owner", Role: accounts.RoleAdmin}) {
+		t.Fatalf("ResolveAccountUID(owner) = %#v, %v", user, err)
+	}
+	user, err = directory.ResolveAccountUID(ctx, aliceIdentity.UID)
+	if err != nil || !reflect.DeepEqual(user, accounts.SessionUser{UserID: alice, Username: "alice", Role: accounts.RoleMember}) {
+		t.Fatalf("ResolveAccountUID(alice) = %#v, %v", user, err)
+	}
+	if _, err := directory.ResolveAccountUID(ctx, 29999); !errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("unallocated UID error = %v, want ErrUserNotFound", err)
+	}
+	if err := service.DisableUser(ctx, admin, alice); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := directory.ResolveAccountUID(ctx, aliceIdentity.UID); !errors.Is(err, accounts.ErrUserNotFound) {
+		t.Fatalf("disabled account error = %v, want ErrUserNotFound", err)
 	}
 }
 

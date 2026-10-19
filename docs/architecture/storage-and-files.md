@@ -70,7 +70,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 回收站条目只对删除者可见并只能由其恢复或清除，因为每个用户的回收目录只授予本人。
 - 例外：只读快照仍由 root Host Agent 创建、列出并读出对象内容；恢复时由工作进程以用户身份写入目标空间。
 - 派生工作进程要求 Host Agent 保留 `CAP_SETUID`/`CAP_SETGID`。systemd 257 在单元同时写 `User=` 与 seccomp 过滤（`RestrictAddressFamilies`）时会拿走 `CAP_SETUID`，所以 `anas-host-agent.service` 不写 `User=`/`Group=`，由 `make ops-check` 保证。Broker 启动时以 `nobody` 身份按工作进程相同的参数运行探针，记录 `file broker identity switch verified` 或失败原因；安装器在探针未通过或能力缺失时以退出码 5 结束。
-- Product Service 以 `ProtectSystem=strict` 运行，它看到的数据卷挂载始终是只读的。它在文件操作前只确认挂载的是预期的数据卷（Btrfs、卷标记与已初始化卷的 UUID 一致），不判断可写性；真正只读的数据卷由执行写入的工作进程以 `EROFS` 报告为卷不可用。
+- Product Service 以 `ProtectSystem=strict` 运行，它看到的数据卷挂载始终是只读的。它在文件操作前只确认挂载的是预期的数据卷（Btrfs、卷标记与已初始化卷的 UUID 一致），预期 UUID 取自已初始化卷的记录，不在每次请求时读取主机状态，也不判断可写性；真正只读的数据卷由执行写入的工作进程以 `EROFS` 报告为卷不可用。
 
 ## 上传与下载
 

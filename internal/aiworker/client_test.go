@@ -3,6 +3,7 @@ package aiworker_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -157,6 +158,74 @@ func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
 
 // The photo service stops a detection when someone starts using the device by
 // cancelling its context: the client hangs up, which the Worker watches for.
+func TestFacesCrossTheSocket(t *testing.T) {
+	socket := aiworkertest.Serve(t, aiworkertest.WithFaces(aiworkertest.Deterministic("fake-1", 2), "faces-1"))
+	client := aiworker.Client{SocketPath: socket}
+	info, err := client.Info(context.Background())
+	if err != nil || info.Faces != "faces-1" || info.Detector != "" {
+		t.Fatalf("Info() = %+v, %v; want the face models named", info, err)
+	}
+	dir := t.TempDir()
+	found := 0
+	for i := range 12 {
+		content := []byte(fmt.Sprintf("an upright photo %d", i))
+		path := filepath.Join(dir, fmt.Sprintf("input-%d.jpg", i))
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		model, faces, err := client.DetectFaces(context.Background(), file)
+		_ = file.Close()
+		want := aiworkertest.HashFaces(content)
+		if err != nil || model != "faces-1" || len(faces) != len(want) {
+			t.Fatalf("DetectFaces() = %q, %v, %v; want %d faces", model, faces, err, len(want))
+		}
+		for j, face := range faces {
+			if face.Box[2] != float32(want[j].Box[2]) || face.Landmarks[9] != float32(want[j].Landmarks[9]) ||
+				face.Score != float32(want[j].Score) || len(face.Vector) != aiworkertest.FaceDimensions {
+				t.Fatalf("face %d = %+v, want %+v", j, face, want[j])
+			}
+		}
+		found += len(faces)
+	}
+	if found == 0 {
+		t.Fatal("the fake found no faces in twelve photos")
+	}
+}
+
+func TestAnimalsCrossTheSocket(t *testing.T) {
+	socket := aiworkertest.Serve(t, aiworkertest.WithAnimals(aiworkertest.Deterministic("fake-1", 2), "animals-1"))
+	client := aiworker.Client{SocketPath: socket}
+	info, err := client.Info(context.Background())
+	if err != nil || info.Animals != "animals-1" || info.Faces != "" {
+		t.Fatalf("Info() = %+v, %v; want the animal model named", info, err)
+	}
+	content := []byte("an upright photo")
+	path := filepath.Join(t.TempDir(), "input.jpg")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	boxes := [][4]float32{{0.25, 0.5, 0.75, 1}, {0, 0, 0.5, 0.5}}
+	model, vectors, err := client.EmbedAnimals(context.Background(), file, boxes)
+	if err != nil || model != "animals-1" || len(vectors) != len(boxes) {
+		t.Fatalf("EmbedAnimals() = %q, %v, %v; want a vector per box", model, vectors, err)
+	}
+	for i, box := range boxes {
+		want := aiworkertest.HashAnimal(content, [4]float64{float64(box[0]), float64(box[1]), float64(box[2]), float64(box[3])})
+		if vectors[i][0] != want[0] || vectors[i][aiworkertest.AnimalDimensions-1] != want[aiworkertest.AnimalDimensions-1] {
+			t.Fatalf("vector %d = %v, want %v", i, vectors[i], want)
+		}
+	}
+}
+
 func TestCancellingADetectionHangsUp(t *testing.T) {
 	dir, err := os.MkdirTemp("", "ai")
 	if err != nil {

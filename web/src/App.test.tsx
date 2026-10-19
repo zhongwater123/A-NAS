@@ -54,6 +54,35 @@ const session = {
   user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
 };
 
+describe("member sharing in the file manager", () => {
+  it("opens sharing from the rail instead of the desktop and shares read-only files", async () => {
+    installAPI({ spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }], entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }] });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(within(desktop).queryByRole("button", { name: "打开分享" })).toBeNull();
+    const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
+    await user.click(within(rail).getByRole("button", { name: "打开分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "关闭分享" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /分享计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享给成员" })).toBeTruthy();
+  });
+
+  it("does not share administrative viewing files", async () => {
+    installAPI({ spaces: [{ id: "viewed", kind: "private", name: "Alice", ownerUserId: "alice", viewing: { grantId: "grant", expiresAt: "2099-01-01T00:00:00Z" } }], entries: [{ id: "viewed-file", spaceId: "viewed", name: "查看计划.txt", kind: "file", sizeBytes: 4 }] });
+    const user = userEvent.setup(); render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /查看计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
 const healthyState = {
   dataSource: "simulated", productVersion: "v1.0.1-rc.1", observedAt: "2026-10-07T10:00:00Z",
   system: { id: "host:fake-01", hostname: "anas-fake", operatingSystem: { name: "Debian", version: "13" }, architecture: "amd64", uptimeSeconds: 3661, health: "healthy" },
@@ -775,7 +804,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
     const buttons = within(rail).getAllByRole("button");
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["显示桌面", "全部应用", "打开设置", "账号（owner）"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["显示桌面", "全部应用", "打开分享", "打开设置", "账号（owner）"]);
     expect(buttons.some((button) => button.hasAttribute("disabled"))).toBe(false);
     expect(within(rail).getByRole("button", { name: "显示桌面" }).getAttribute("aria-pressed")).toBe("true");
   });
@@ -856,7 +885,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const search = within(launcher).getByRole("searchbox", { name: "搜索应用" });
     expect(document.activeElement).toBe(search);
     expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toContain("打开相册");
-    expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("AI 助手");
+    expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("VNAS");
 
     expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).not.toContain("日志");
     await user.type(search, "日志");
@@ -1485,7 +1514,7 @@ describe("Installed apps on the desktop", () => {
 describe("Settings", () => {
   const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
 
-  it("shows members their account, the overview and read-only storage", async () => {
+  it("shows members their account, task manager, overview and read-only storage", async () => {
     const fetchMock = installAPI({ session: { ...session, user: alice } });
     const user = userEvent.setup();
     render(<App />);
@@ -1493,7 +1522,7 @@ describe("Settings", () => {
     const settings = screen.getByRole("dialog", { name: "设置" });
     const sections = within(settings).getByRole("navigation", { name: "设置分区" });
     const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
-    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "存储", "日志"]);
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "任务管理器", "存储", "日志"]);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
     expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();

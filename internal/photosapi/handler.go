@@ -46,6 +46,13 @@ func NewPrincipal(userID, username string, admin bool, viewings []accounts.Libra
 	return principal
 }
 
+// NewAssistantPrincipal builds the photo Principal for a member's AI
+// assistant (ADR 0024): it reads as the member, never as an administrator or
+// through a viewing grant, and changes nothing.
+func NewAssistantPrincipal(userID, username string) photos.Principal {
+	return photos.Principal{UserID: userID, Username: username, Assistant: true}
+}
+
 func principalFrom(r *http.Request) (photos.Principal, bool) {
 	principal, ok := r.Context().Value(principalKey{}).(photos.Principal)
 	return principal, ok && principal.UserID != ""
@@ -74,8 +81,15 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 		return
 	}
-	if _, ok := principalFrom(r); !ok {
+	principal, ok := principalFrom(r)
+	if !ok {
 		WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+		return
+	}
+	// The photo Policy already refuses an assistant every change; refusing
+	// all but reads here also keeps it from searching by an uploaded image.
+	if principal.Assistant && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		WriteError(w, http.StatusForbidden, "assistant_read_only", "the assistant can only read the photo library")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -118,6 +132,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/assets/{assetID}/restore", h.restoreAsset)
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
 	h.metadataRoutes()
+	h.peopleRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -144,6 +159,9 @@ type searchResponse struct {
 	// Objects is set when the query is about things the detector finds
 	// reliably: the closest group is then the photos it found them in.
 	Objects *objectsFound `json:"objects,omitempty"`
+	// People are the person names in the query; the results keep to their
+	// photos.
+	People []string `json:"people,omitempty"`
 }
 
 type objectsFound struct {
@@ -290,7 +308,8 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest}
+	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest,
+		People: page.People}
 	if page.Objects != nil {
 		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
 	}

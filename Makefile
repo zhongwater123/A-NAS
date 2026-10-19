@@ -1,5 +1,7 @@
 GO ?= go
 SYSTEM_TEST_IMAGE ?= anas-systemd:trixie
+# The AI assistant's part of the system test and the scripts it runs from the spike.
+ASSISTANT_SYSTEM_TEST = $(addprefix ai/assistant-spike/,system-test.sh assistant-install.sh assistant-layout.sh seed.sh layout-acl.sh)
 NPM ?= npm
 BUILD_DIR ?= build
 VERSION ?= dev
@@ -36,8 +38,8 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh
-	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh
+	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST)
+	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST)
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
@@ -54,7 +56,7 @@ ops-check:
 	grep -Fq 'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' scripts/install-v1.0.1-system-services.sh
 	grep -Fq '[[ -S /run/a-nas-container/agent.sock ]]' scripts/install-v1.0.1-system-services.sh
 	grep -Fq "printf 'ANAS_CONTAINERS_MODE=agent\\n' >> /etc/a-nas/anas-api.env" scripts/install-v1.0.1-system-services.sh
-	grep -Fqx 'ReadWritePaths=/var/lib/a-nas' deploy/systemd/system/anas-api.service
+	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Fq 'setfacl getfacl' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'acl btrfs-progs' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
@@ -72,14 +74,17 @@ ops-check:
 	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'User=a-nas-shares' deploy/systemd/system/anas-shares.service
+	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api share-service' deploy/systemd/system/anas-shares.service
+	grep -Fq 'anas-shares-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'RuntimeDirectory=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
@@ -93,11 +98,16 @@ ops-check:
 	grep -Fq 'anas-ai-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'ai-worker.tar.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'ai-detector.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-face-detector.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-face-embedder.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-animal-embedder.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq -- '--detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json' deploy/systemd/system/anas-ai.service
-	grep -Fq 'ai_roles=(model:litertlm detector:onnx)' scripts/install-v1.0.1-system-services.sh
+	grep -Fq -- '--face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
+	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)' scripts/install-v1.0.1-system-services.sh
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
-	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'MemoryMax=3G' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'Slice=anas-ai.slice' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'CPUWeight=10' deploy/systemd/system/anas.slice
 	grep -Fq 'anas-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh

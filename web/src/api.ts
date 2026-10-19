@@ -168,7 +168,7 @@ export interface Profile { id: string; username: string; nickname?: string; avat
 // credentialReset is the latest time an administrator chose the user's
 // password; the user keeps seeing it.
 export interface Session { csrfToken: string; expiresAt: string; user: User; credentialReset?: { actorUsername: string; at: string } }
-export interface Space { id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
+export interface Space { writable?: boolean; id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
 export interface Notification { id: string; kind: "admin_viewing" | "admin_library_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
 export type ViewingScope = "space" | "library";
 export interface ViewingGrant { id: string; scope: ViewingScope; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }
@@ -273,7 +273,12 @@ export async function readFileTextPreview(fileId: string) {
   return response.text();
 }
 export const listTrash = async () => (await request<{items: TrashItem[]}>("/api/v1/trash")).items;
-export const restoreTrash = (id: string, name: string) => request<FileEntry>(`/api/v1/trash/${encodeURIComponent(id)}/restore`, json({ parentId: "", name }), true);
+// RestoreConflict is what a restore does when its name is taken: ask answers
+// name_conflict, rename keeps both under "name (恢复)", replace (files only)
+// sends the file of that name to the recycle bin.
+export type RestoreConflict = "ask" | "rename" | "replace";
+export interface RestoredEntry extends FileEntry { replaced?: boolean }
+export const restoreTrash = (id: string, name: string, conflict: RestoreConflict = "ask") => request<RestoredEntry>(`/api/v1/trash/${encodeURIComponent(id)}/restore`, json({ parentId: "", name, conflict }), true);
 export const purgeTrash = (id: string) => request<void>(`/api/v1/trash/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
 export const listUsers = async () => (await request<{items: User[]}>("/api/v1/users")).items;
 export const createMember = (username: string, password: string) => request<User>("/api/v1/users", json({ username, password }), true);

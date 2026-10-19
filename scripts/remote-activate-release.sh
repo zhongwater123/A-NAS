@@ -87,6 +87,7 @@ install -m 0644 Caddyfile.incoming Caddyfile
 install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
+install -m 0644 anas-shares-system.service.incoming anas-shares-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
@@ -104,7 +105,7 @@ install -d -m 0750 ai
 tar -C ai --strip-components=1 -xf ai-worker.tar.incoming
 install -m 0644 ai-runtime.json.incoming ai/runtime.json
 manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
-for role in model:litertlm detector:onnx; do
+for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx; do
   name=${role%%:*}
   install -m 0644 "ai-$name.json.incoming" "ai/$name.json"
   sha=$(manifest_field "ai/$name.json" sha256)
@@ -129,6 +130,9 @@ rm -f \
   ai-worker.tar.incoming \
   ai-model.json.incoming \
   ai-detector.json.incoming \
+  ai-face-detector.json.incoming \
+  ai-face-embedder.json.incoming \
+  ai-animal-embedder.json.incoming \
   ai-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
@@ -141,6 +145,7 @@ rm -f \
   anas-api-system.service.incoming \
   anas-host-agent-system.service.incoming \
   anas-photos-system.service.incoming \
+  anas-shares-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
   install-screensavers.sh.incoming

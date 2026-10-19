@@ -51,13 +51,14 @@ class Failing:
 
 
 class WorkerTest(unittest.TestCase):
-    def start(self, provider, reason=None, idle_seconds=30, detector=None):
+    def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
         path = os.path.join(directory, "ai.sock")
         listener = worker.listening_socket(path)
         self.addCleanup(listener.close)
-        thread = threading.Thread(target=worker.serve, args=(listener, provider, reason, idle_seconds, detector),
+        thread = threading.Thread(target=worker.serve,
+                                  args=(listener, provider, reason, idle_seconds, detector, faces, animals),
                                   daemon=True)
         thread.start()
         return path, thread
@@ -126,6 +127,82 @@ class WorkerTest(unittest.TestCase):
         self.assertGreater(seen, 0)
         self.assertEqual(call(path, {"op": "detect_objects"})["error"]["code"], protocol.CODE_INVALID_INPUT)
         self.assertEqual(call(path, {"op": "detect_objects"}, self.image(b""))["error"]["code"], protocol.CODE_INVALID_INPUT)
+
+    def test_finds_faces_with_the_fake(self):
+        fake = providers.FakeFaces()
+        path, _ = self.start(providers.FakeProvider(dimensions=8), faces=worker.Detector(fake))
+        info = call(path, {"op": "info"})
+        self.assertEqual(info["faceModel"], fake.model)
+        self.assertNotIn("detector", info)
+        vectors = []
+        for content in (b"photo %d" % i for i in range(30)):
+            found = call(path, {"op": "detect_faces"}, self.image(content))
+            self.assertTrue(found["ok"], found)
+            self.assertEqual(found["model"], fake.model)
+            self.assertEqual(found, call(path, {"op": "detect_faces"}, self.image(content)))
+            for face in found["faces"]:
+                self.assertEqual(len(face["box"]), 4)
+                self.assertEqual(len(face["landmarks"]), 10)
+                self.assertTrue(all(0 <= value <= 1 for value in face["box"] + face["landmarks"]))
+                vector = struct.unpack(f"<{fake.dimensions}f", base64.b64decode(face["vector"]))
+                self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=4)
+                vectors.append((content, vector))
+        # The same fake person comes back in other photos with nearly the same
+        # vector, and different people are far apart.
+        similarities = [sum(x * y for x, y in zip(a, b))
+                        for i, (photo_a, a) in enumerate(vectors) for photo_b, b in vectors[i + 1:] if photo_a != photo_b]
+        self.assertTrue(any(value > 0.99 for value in similarities))
+        self.assertTrue(any(value < 0.5 for value in similarities))
+        self.assertEqual(call(path, {"op": "detect_faces"})["error"]["code"], protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "detect_faces"}, self.image(b""))["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+        self.assertTrue(fake.loaded)
+        self.assertEqual(call(path, {"op": "release", "what": "detector"}), {"ok": True})
+        self.assertFalse(fake.loaded)
+
+    def test_embeds_animals_with_the_fake(self):
+        fake = providers.FakeAnimals()
+        path, _ = self.start(providers.FakeProvider(dimensions=8), animals=worker.Detector(fake))
+        self.assertEqual(call(path, {"op": "info"})["animalModel"], fake.model)
+        boxes = [[0.1, 0.2, 0.5, 0.9], [0.5, 0.1, 0.95, 0.6]]
+        vectors = []
+        for content in (b"photo %d" % i for i in range(20)):
+            found = call(path, {"op": "embed_animals", "boxes": boxes}, self.image(content))
+            self.assertTrue(found["ok"], found)
+            self.assertEqual(found["model"], fake.model)
+            self.assertEqual(len(found["vectors"]), len(boxes))
+            self.assertEqual(found, call(path, {"op": "embed_animals", "boxes": boxes}, self.image(content)))
+            for encoded in found["vectors"]:
+                vector = struct.unpack(f"<{fake.dimensions}f", base64.b64decode(encoded))
+                self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=4)
+                vectors.append(vector)
+        similarities = [sum(x * y for x, y in zip(a, b)) for i, a in enumerate(vectors) for b in vectors[i + 1:]]
+        self.assertTrue(any(value > 0.99 for value in similarities))
+        self.assertTrue(any(value < 0.5 for value in similarities))
+        for bad in (None, [], [[0.1, 0.2, 0.5]], [[0.5, 0.2, 0.1, 0.9]], [[0, 0, 1, 1.5]], [[0, 0, True, 1]],
+                    [[0, 0, 1, 1]] * (providers.MAX_ANIMALS + 1)):
+            response = call(path, {"op": "embed_animals", "boxes": bad}, self.image(b"photo"))
+            self.assertEqual(response["error"]["code"], protocol.CODE_INVALID_INPUT, bad)
+        self.assertEqual(call(path, {"op": "embed_animals", "boxes": boxes})["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "embed_animals", "boxes": boxes}, self.image(b""))["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+        self.assertTrue(fake.loaded)
+        self.assertEqual(call(path, {"op": "release", "what": "detector"}), {"ok": True})
+        self.assertFalse(fake.loaded)
+
+    def test_animals_are_unavailable_without_their_model(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), faces=worker.Detector(providers.FakeFaces()))
+        self.assertNotIn("animalModel", call(path, {"op": "info"}))
+        response = call(path, {"op": "embed_animals", "boxes": [[0, 0, 1, 1]]}, self.image(b"photo"))
+        self.assertEqual(response["error"], {"code": protocol.CODE_UNAVAILABLE, "message": "no animal model"})
+
+    def test_faces_are_unavailable_without_their_models(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), detector=worker.Detector(providers.FakeDetector()))
+        self.assertNotIn("faceModel", call(path, {"op": "info"}))
+        response = call(path, {"op": "detect_faces"}, self.image(b"photo"))
+        self.assertEqual(response["error"], {"code": protocol.CODE_UNAVAILABLE, "message": "no face models"})
+        self.assertTrue(call(path, {"op": "detect_objects"}, self.image(b"photo"))["ok"])
 
     def test_vectors_go_on_without_the_detector(self):
         path, _ = self.start(providers.FakeProvider(dimensions=8),

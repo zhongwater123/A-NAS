@@ -25,6 +25,11 @@ func RunWorker(volumeRoot string) error {
 		return errors.New("refusing to run a file worker as root")
 	}
 	syscall.Umask(0o007)
+	if writable, ok := os.LookupEnv(ConfineVariable); ok {
+		if err := confine(volumeRoot, writable); err != nil {
+			return err
+		}
+	}
 	file := os.NewFile(workerDescriptor, "file-broker")
 	connection, err := net.FileConn(file)
 	_ = file.Close()

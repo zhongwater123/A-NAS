@@ -5,8 +5,8 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
-    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, and container lifecycle actions that go through the separate
-    container agent.
+    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
+    container agent, and each member's AI assistant (proposed in ADR 0024).
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -427,12 +427,14 @@ paths:
   /api/v1/trash/{trashId}/restore:
     post:
       operationId: restoreTrash
-      summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. A taken name answers 409 name_conflict and never overwrites.
+      summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. What happens to a taken name is the request's conflict; nothing is overwritten.
       parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/TrashRestore" } } } }
       responses:
-        "200": { description: Restored entry, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "200": { description: Restored entry, content: { application/json: { schema: { $ref: "#/components/schemas/RestoredEntry" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/trash/{trashId}:
     delete:
       operationId: purgeTrash
@@ -565,6 +567,72 @@ paths:
       parameters: [{ $ref: "#/components/parameters/SnapshotID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "204": { description: Snapshot deleted }
+  /api/v1/task-manager/device:
+    get:
+      operationId: getTaskManagerDevice
+      summary: Read device utilisation and accelerator availability
+      description: >-
+        Every signed-in account, including members, can read this snapshot. This API is read-only.
+        Rates use the shared Host Agent sampling window; CPU percentages use whole-machine capacity.
+        Unknown metrics are present as null. Partial or unavailable groups retain explicit status and arrays.
+        No command lines, environment variables or host paths are exposed.
+      responses:
+        "200":
+          description: The latest observation and its data source.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskManagerDeviceResponse"
+        "401":
+          description: A valid signed-in session is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          description: The observation cannot currently be read (task_manager_unavailable).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/task-manager/tasks:
+    get:
+      operationId: getTaskManagerTasks
+      summary: Read running services and processes
+      description: >-
+        Every signed-in account, including members, can read this snapshot. This API is read-only.
+        Rates use the shared Host Agent sampling window; CPU percentages use whole-machine capacity.
+        Unknown metrics are present as null. Partial or unavailable groups retain explicit status and arrays.
+        No command lines, environment variables or host paths are exposed.
+      responses:
+        "200":
+          description: The latest observation and its data source.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskManagerTasksResponse"
+        "401":
+          description: A valid signed-in session is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          description: The observation cannot currently be read (task_manager_unavailable).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/metrics:
     get:
       operationId: getHostMetrics
@@ -980,6 +1048,125 @@ paths:
         "400": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/people:
+    get:
+      operationId: listPhotoPeople
+      summary: List the people and pets of the caller's private and the shared library, named ones first, then by photos; someone seen in fewer than two photos is listed once named
+      parameters:
+        - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list its people as well (read-only).", schema: { type: string } }
+        - { name: hidden, in: query, description: "1 to include people the members hid.", schema: { type: string, enum: ["1"] } }
+      responses:
+        "200": { description: People, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoPeople" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/photos/people/{personId}:
+    patch:
+      operationId: changePhotoPerson
+      summary: Name, hide or show a person, or choose the face that stands for them; the owner of a private library and every member in the shared library may
+      parameters: [{ $ref: "#/components/parameters/PhotoPersonID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, maxLength: 160, description: "At most 40 characters; empty clears the name." }
+                hidden: { type: boolean }
+                coverId: { type: string, description: "One of the person's occurrences." }
+      responses:
+        "200": { description: The person, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoPerson" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/people/{personId}/assets:
+    get:
+      operationId: listPhotoPersonPhotos
+      summary: List the untrashed photos of a person, newest first
+      parameters:
+        - { $ref: "#/components/parameters/PhotoPersonID" }
+        - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: One page of the person's photos, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoTimeline" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/people/{personId}/merge:
+    post:
+      operationId: mergePhotoPeople
+      summary: Move every face of a person into another person of the same library and kind; the merged person is gone afterwards
+      parameters: [{ $ref: "#/components/parameters/PhotoPersonID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [into], properties: { into: { type: string } } } } }
+      responses:
+        "200": { description: The person the faces moved into, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoPerson" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/people/{personId}/assets/{assetId}:
+    delete:
+      operationId: removePhotoFromPerson
+      summary: Take a photo out of a person; clustering never gives it back to that person
+      parameters: [{ $ref: "#/components/parameters/PhotoPersonID" }, { $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Taken out }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/people/{occurrenceId}:
+    put:
+      operationId: assignPhotoFace
+      summary: Say who a face or pet in a photo is, an existing person of the photo's library or a new one by name; clustering never changes it
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }, { $ref: "#/components/parameters/PhotoOccurrenceID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                personId: { type: string }
+                name: { type: string, maxLength: 160, description: "A new person's name when personId is absent." }
+      responses:
+        "200": { description: The photo's details, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/occurrences/{occurrenceId}/avatar:
+    get:
+      operationId: getPhotoOccurrenceAvatar
+      summary: The square crop of a face or pet in a photo the caller can see; the ID changes whenever the photo is scanned again
+      parameters: [{ $ref: "#/components/parameters/PhotoOccurrenceID" }]
+      responses:
+        "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/libraries/{libraryId}:
+    patch:
+      operationId: changePhotoLibrary
+      summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+      parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [people]
+              properties:
+                people: { type: boolean }
+      responses:
+        "200": { description: The library, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoLibrary" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/albums:
     get:
       operationId: listPhotoAlbums
@@ -2111,6 +2298,632 @@ paths:
       responses:
         "204": { description: Canceled }
         "404": { description: The upload is unknown }
+  /api/v1/assistant/status:
+    get:
+      operationId: getAssistantStatus
+      summary: "Whether the signed-in member has an AI assistant instance (ADR 0024)"
+      description: "Answers 503 assistant_unavailable when the assistant is not enabled on this device; the desktop then shows the app as planned."
+      responses:
+        "200": { description: Status, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantStatus" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/ws:
+    get:
+      operationId: openAssistantGateway
+      summary: "The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)"
+      description: >-
+        A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The
+        product service passes only the allowed methods with their allowed parameters (session.create, session.resume,
+        session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title,
+        session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602.
+        client.capabilities, approval.pending and approval.received are answered by the product service itself:
+        requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an
+        AssistantApproval. The connection reaches the instance through the session gate (decision 10) and closes when
+        the member's session ends.
+      responses:
+        "101": { description: Switched to WebSocket }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "426": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions:
+    get:
+      operationId: listAssistantSessions
+      summary: "The member's conversations with at least one message, newest activity first, from the member's own assistant instance"
+      description: "A new conversation is started over the gateway (session.create) and is stored by Hermes with its first message."
+      responses:
+        "200": { description: Conversations, content: { application/json: { schema: { type: object, additionalProperties: false, required: [sessions], properties: { sessions: { type: array, items: { $ref: "#/components/schemas/AssistantSession" } } } } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions/{sessionId}:
+    parameters: [{ $ref: "#/components/parameters/AssistantSessionID" }]
+    patch:
+      operationId: renameAssistantSession
+      summary: "Rename a stored conversation; title_in_use when another conversation of the member has the title"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [title], properties: { title: { type: string, minLength: 1, maxLength: 100 } } } } } }
+      responses:
+        "200": { description: The new title, content: { application/json: { schema: { type: object, additionalProperties: false, required: [id, title], properties: { id: { type: string }, title: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteAssistantSession
+      summary: Delete a conversation and its transcript
+      description: "The window first stops and closes the conversation over the gateway when it is live, as Hermes Desktop does."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/sessions/{sessionId}/messages:
+    parameters: [{ $ref: "#/components/parameters/AssistantSessionID" }]
+    get:
+      operationId: getAssistantMessages
+      summary: "A conversation's transcript in Hermes Agent's own message form"
+      description: "The desktop folds these rows into chat messages with Hermes Desktop's transcript model (web/src/assistant/hermes), so the rows are passed through as Hermes stores them."
+      responses:
+        "200": { description: Transcript, content: { application/json: { schema: { type: object, additionalProperties: false, required: [messages], properties: { messages: { type: array, items: { $ref: "#/components/schemas/AssistantMessage" } } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/memory:
+    get:
+      operationId: getAssistantMemory
+      summary: "What the member's assistant remembers and the skills it made, from Hermes's learning graph; A-NAS's own skills are left out"
+      responses:
+        "200": { description: The memory, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantMemory" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/memory/items/{memoryId}:
+    parameters: [{ $ref: "#/components/parameters/AssistantMemoryID" }]
+    get:
+      operationId: getAssistantMemoryItem
+      summary: "The whole text of one memory or skill (its SKILL.md)"
+      responses:
+        "200": { description: The text, content: { application/json: { schema: { type: object, additionalProperties: false, required: [id, kind, content], properties: { id: { type: string }, kind: { type: string, enum: [memory, skill] }, content: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteAssistantMemoryItem
+      summary: "Forget one memory, or move one skill into Hermes's archive; new conversations no longer carry it"
+      description: "memory_changed when the memory changed since it was read; read it again."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Forgotten }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/memory/clear:
+    post:
+      operationId: clearAssistantMemory
+      summary: "Forget every memory and skill; with conversations, also delete every conversation, which is the only way to clear it for good"
+      description: "A conversation with a turn running is kept and counted as busy."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: false, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { conversations: { type: boolean } } } } } }
+      responses:
+        "200": { description: What was cleared, content: { application/json: { schema: { type: object, additionalProperties: false, required: [memories, skills, conversations, busy], properties: { memories: { type: integer }, skills: { type: integer }, conversations: { type: integer }, busy: { type: integer } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/approvals:
+    get:
+      operationId: listAssistantApprovals
+      summary: "The member's confirmation cards: the ones awaiting an answer, and those decided in the last hour"
+      description: "Each card is one call of 提交更改 that asked for approval in a running turn; nothing outside the assistant's own directory changes until the member confirms it."
+      responses:
+        "200": { description: Cards, content: { application/json: { schema: { type: object, additionalProperties: false, required: [approvals], properties: { approvals: { type: array, items: { $ref: "#/components/schemas/AssistantApproval" } } } } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/approvals/{requestId}/confirm:
+    parameters: [{ $ref: "#/components/parameters/AssistantRequestID" }]
+    post:
+      operationId: confirmAssistantApproval
+      summary: "Confirm a card: for a change the executor records the member's one-time grant against this session, then the assistant is told yes and applies it as the member; a command runs in the sandbox"
+      description: "approval_expired when the assistant no longer waits (the time ran out or the turn was stopped); the grant is then void. A question is answered with /answer instead (invalid_answer)."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                forSession: { type: boolean, description: "Allow a command (with forSession) for the rest of its conversation." }
+      responses:
+        "200": { description: The card, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantApprovalEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/approvals/{requestId}/reject:
+    parameters: [{ $ref: "#/components/parameters/AssistantRequestID" }]
+    post:
+      operationId: rejectAssistantApproval
+      summary: Refuse a card; nothing changes and the assistant is told no (a question is skipped)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The card, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantApprovalEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/approvals/{requestId}/answer:
+    parameters: [{ $ref: "#/components/parameters/AssistantRequestID" }]
+    post:
+      operationId: answerAssistantQuestion
+      summary: "Answer a question card: the answers go back to the assistant as the reply to its question"
+      description: "invalid_answer when the card is not a question or an answer names no question of it or is over 4,000 characters; approval_expired when the assistant no longer waits."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [answers]
+              properties:
+                answers:
+                  type: object
+                  description: "Answer by question id; null leaves a question out."
+                  additionalProperties: { type: [string, "null"], maxLength: 4000 }
+      responses:
+        "200": { description: The card, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantApprovalEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/shares:
+    get:
+      operationId: listMemberShares
+      summary: List received or sent member shares
+      responses:
+        '200':
+          description: List received or sent member shares
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemberShare'
+                  nextOffset:
+                    type: integer
+                    minimum: 0
+                required:
+                - items
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - name: direction
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - received
+          - sent
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+    post:
+      operationId: createMemberShare
+      summary: Prepare an independent copy for specified NAS members
+      responses:
+        '202':
+          description: Prepare an independent copy for specified NAS members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberShare'
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemberShare'
+  /api/v1/shares/members:
+    get:
+      operationId: listShareMembers
+      summary: List enabled members excluding the signed-in user
+      responses:
+        '200':
+          description: List enabled members excluding the signed-in user
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        id:
+                          type: string
+                        username:
+                          type: string
+                        nickname:
+                          type: string
+                        avatarVersion:
+                          type: string
+                      required:
+                      - id
+                      - username
+                required:
+                - items
+        default:
+          $ref: '#/components/responses/ProductError'
+  /api/v1/shares/notifications:
+    get:
+      operationId: listShareNotifications
+      summary: Catch up on notifications after the per-account cursor
+      responses:
+        '200':
+          description: Catch up on notifications after the per-account cursor
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemberShareNotification'
+                required:
+                - items
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+  /api/v1/shares/jobs/{jobId}:
+    parameters:
+    - name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getShareSaveJob
+      summary: Read own persisted save progress
+      responses:
+        '200':
+          description: Read own persisted save progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberShareJob'
+        default:
+          $ref: '#/components/responses/ProductError'
+  /api/v1/shares/{shareId}:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getMemberShare
+      summary: Read share details without marking viewed
+      responses:
+        '200':
+          description: Read share details without marking viewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberShare'
+        default:
+          $ref: '#/components/responses/ProductError'
+  /api/v1/shares/{shareId}/view:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: viewMemberShare
+      summary: Mark this recipient as having viewed the share
+      responses:
+        '200':
+          description: Mark this recipient as having viewed the share
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberShare'
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - $ref: '#/components/parameters/CSRFToken'
+  /api/v1/shares/{shareId}/messages:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: listShareMessages
+      summary: Read the private sender-recipient conversation
+      responses:
+        '200':
+          description: Read the private sender-recipient conversation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemberShareMessage'
+                required:
+                - items
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - name: recipientId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+    post:
+      operationId: sendShareMessage
+      summary: Send a private reply supporting Unicode emoji
+      responses:
+        '201':
+          description: Send a private reply supporting Unicode emoji
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberShareMessage'
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                recipientId:
+                  type: string
+                requestId:
+                  type: string
+                text:
+                  type: string
+              required:
+              - recipientId
+              - requestId
+              - text
+  /api/v1/shares/{shareId}/read:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: readShareMessages
+      summary: Advance the private conversation read cursor
+      responses:
+        '204':
+          description: Advance the private conversation read cursor
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                recipientId:
+                  type: string
+                through:
+                  type: integer
+                  minimum: 0
+              required:
+              - recipientId
+              - through
+  /api/v1/shares/{shareId}/save:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: saveMemberShare
+      summary: Save selected entries to a writable destination with conflict renaming
+      responses:
+        '202':
+          description: Save selected entries to a writable destination with conflict renaming
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberShareJob'
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveMemberShare'
+      description: Seven days after publication new saves are refused. Jobs already accepted finish after
+        natural expiry; manual revocation fences all further publications immediately. The sender never
+        learns the target path.
+  /api/v1/shares/{shareId}/jobs:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: listShareSaveJobs
+      summary: List own save jobs for this share
+      responses:
+        '200':
+          description: List own save jobs for this share
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemberShareJob'
+                required:
+                - items
+        default:
+          $ref: '#/components/responses/ProductError'
+  /api/v1/shares/{shareId}/revoke:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: revokeMemberShare
+      summary: Revoke the share and stop ongoing saves before acknowledging
+      responses:
+        '204':
+          description: Revoke the share and stop ongoing saves before acknowledging
+        default:
+          $ref: '#/components/responses/ProductError'
+      parameters:
+      - $ref: '#/components/parameters/CSRFToken'
+  /api/v1/shares/{shareId}/entries/{entryId}/content:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: entryId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getShareContent
+      summary: Read authorized content
+      responses:
+        '200':
+          description: Read authorized content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: '#/components/responses/ProductError'
+        '206':
+          description: Partial authorized content
+        '416':
+          description: Unsatisfiable range
+      parameters:
+      - name: Range
+        in: header
+        required: false
+        schema:
+          type: string
+  /api/v1/shares/{shareId}/entries/{entryId}/preview:
+    parameters:
+    - name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: entryId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getSharePreview
+      summary: Convert HEIC preview in the isolated media worker
+      responses:
+        '200':
+          description: Convert HEIC preview in the isolated media worker
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: '#/components/responses/ProductError'
 components:
   securitySchemes:
     cookieAuth:
@@ -2128,6 +2941,8 @@ components:
     PhotoDirectoryID: { name: directoryId, in: path, required: true, schema: { type: string } }
     PhotoAssetID: { name: assetId, in: path, required: true, schema: { type: string } }
     PhotoAlbumID: { name: albumId, in: path, required: true, schema: { type: string } }
+    PhotoPersonID: { name: personId, in: path, required: true, schema: { type: string } }
+    PhotoOccurrenceID: { name: occurrenceId, in: path, required: true, schema: { type: string } }
     SnapshotID: { name: snapshotId, in: path, required: true, schema: { type: string } }
     MediaLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
     MediaVideoID: { name: videoId, in: path, required: true, schema: { type: string } }
@@ -2137,6 +2952,9 @@ components:
     CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
     FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
+    AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id.", schema: { type: string, pattern: "^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$" } }
+    AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
+    AssistantRequestID: { name: requestId, in: path, required: true, description: "The approval's request id from Hermes.", schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" } }
     TusResumable: { name: Tus-Resumable, in: header, required: true, schema: { type: string, enum: ["1.0.0"] } }
     AppId:
       name: appId
@@ -2231,6 +3049,195 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    TaskManagerStatus:
+      type: string
+      enum: [available, partial, unavailable, unsupported, absent]
+      description: Availability of a collection or accelerator; unknown metrics remain null.
+    TaskManagerID:
+      type: string
+      minLength: 1
+      maxLength: 512
+      description: Opaque observation identity, never a host path. Process identities include PID and start time.
+    TaskManagerPercent:
+      type: [number, "null"]
+      minimum: 0
+      maximum: 100
+      description: Percentage of whole-machine CPU capacity or of the named accelerator; null when unknown.
+    TaskManagerRate:
+      type: [number, "null"]
+      minimum: 0
+      description: Bytes per second during sampleSeconds; null without a valid sampling baseline.
+    TaskManagerBytes:
+      type: [integer, "null"]
+      minimum: 0
+      description: Bytes, or null when the observation is unavailable.
+    TaskManagerCPU:
+      type: object
+      additionalProperties: false
+      required: [model, logicalCores, usagePercent]
+      properties:
+        model: { type: string }
+        logicalCores: { type: integer, minimum: 1 }
+        usagePercent: { $ref: "#/components/schemas/TaskManagerPercent" }
+    TaskManagerMemory:
+      type: object
+      additionalProperties: false
+      required: [totalBytes, usedBytes]
+      properties:
+        totalBytes: { type: integer, minimum: 1 }
+        usedBytes:
+          type: integer
+          minimum: 0
+          description: MemTotal minus MemAvailable; reclaimable cache is available memory.
+    TaskManagerNetwork:
+      type: object
+      additionalProperties: false
+      required: [id, name, physical, receiveBytes, transmitBytes, receiveBytesPerSecond, transmitBytesPerSecond]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        name: { type: string, minLength: 1 }
+        physical: { type: boolean }
+        receiveBytes: { type: integer, minimum: 0 }
+        transmitBytes: { type: integer, minimum: 0 }
+        receiveBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+        transmitBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+    TaskManagerDisk:
+      type: object
+      additionalProperties: false
+      required: [id, model, capacityBytes, readBytesPerSecond, writeBytesPerSecond]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        model: { type: string }
+        capacityBytes: { type: integer, minimum: 0 }
+        readBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+        writeBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+    TaskManagerMetricStatus:
+      type: string
+      enum: [available, unsupported, unavailable]
+      description: Per-metric availability; unsupported means the driver lacks the interface, unavailable means reading failed.
+    TaskManagerAccelerator:
+      type: object
+      additionalProperties: false
+      required: [id, name, driver, status, usageStatus, memoryUsedStatus, memoryTotalStatus, usagePercent, memoryUsedBytes, memoryTotalBytes]
+      properties:
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        name: { type: string, minLength: 1 }
+        driver: { type: string }
+        usageStatus: { $ref: "#/components/schemas/TaskManagerMetricStatus" }
+        memoryUsedStatus: { $ref: "#/components/schemas/TaskManagerMetricStatus" }
+        memoryTotalStatus: { $ref: "#/components/schemas/TaskManagerMetricStatus" }
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        usagePercent: { $ref: "#/components/schemas/TaskManagerPercent" }
+        memoryUsedBytes: { $ref: "#/components/schemas/TaskManagerBytes" }
+        memoryTotalBytes: { $ref: "#/components/schemas/TaskManagerBytes" }
+    TaskManagerTask:
+      type: object
+      additionalProperties: false
+      required: [id, name, pid, state, cpuPercent, memoryBytes, readBytesPerSecond, writeBytesPerSecond]
+      properties:
+        iconId:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+          description: Content hash referencing an optional installed icon in the snapshot.
+        id: { $ref: "#/components/schemas/TaskManagerID" }
+        name: { type: string, minLength: 1 }
+        pid:
+          type: integer
+          minimum: 0
+          description: Process ID; services use zero because their usage aggregates the cgroup.
+        state: { type: string }
+        cpuPercent: { $ref: "#/components/schemas/TaskManagerPercent" }
+        memoryBytes: { $ref: "#/components/schemas/TaskManagerBytes" }
+        readBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+        writeBytesPerSecond: { $ref: "#/components/schemas/TaskManagerRate" }
+    TaskManagerNetworkGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerNetwork" }
+    TaskManagerDiskGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerDisk" }
+    TaskManagerAcceleratorGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerAccelerator" }
+    TaskManagerProcessGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 4096
+          items: { $ref: "#/components/schemas/TaskManagerTask" }
+    TaskManagerServiceGroup:
+      type: object
+      additionalProperties: false
+      required: [status, items]
+      properties:
+        status: { $ref: "#/components/schemas/TaskManagerStatus" }
+        items:
+          type: array
+          maxItems: 1024
+          items: { $ref: "#/components/schemas/TaskManagerTask" }
+    TaskManagerDeviceResponse:
+      type: object
+      additionalProperties: false
+      required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu]
+      properties:
+        observedAt: { type: string, format: date-time }
+        sampleSeconds:
+          type: number
+          exclusiveMinimum: 0
+          description: Shared sampling window in seconds.
+        dataSource: { $ref: "#/components/schemas/DataSource" }
+        cpu: { $ref: "#/components/schemas/TaskManagerCPU" }
+        memory: { $ref: "#/components/schemas/TaskManagerMemory" }
+        network: { $ref: "#/components/schemas/TaskManagerNetworkGroup" }
+        disks: { $ref: "#/components/schemas/TaskManagerDiskGroup" }
+        gpu: { $ref: "#/components/schemas/TaskManagerAcceleratorGroup" }
+        npu: { $ref: "#/components/schemas/TaskManagerAcceleratorGroup" }
+    TaskManagerTasksResponse:
+      type: object
+      additionalProperties: false
+      required: [observedAt, sampleSeconds, dataSource, processes, services]
+      properties:
+        icons:
+          type: object
+          maxProperties: 64
+          description: Deduplicated installed artwork; bounded to 1 MiB total. No host paths or remote URLs.
+          additionalProperties:
+            type: string
+            maxLength: 24576
+            pattern: '^data:image/(png|svg\+xml);base64,[A-Za-z0-9+/]+=*$'
+        observedAt: { type: string, format: date-time }
+        sampleSeconds:
+          type: number
+          exclusiveMinimum: 0
+          description: Shared sampling window in seconds.
+        dataSource: { $ref: "#/components/schemas/DataSource" }
+        processes: { $ref: "#/components/schemas/TaskManagerProcessGroup" }
+        services: { $ref: "#/components/schemas/TaskManagerServiceGroup" }
     Health:
       type: string
       enum: [healthy, warning, critical, unknown]
@@ -2560,6 +3567,7 @@ components:
         name: { type: string }
         ownerUserId: { type: string }
         createdAt: { type: string, format: date-time }
+        writable: { type: boolean, description: Whether this caller can write to this space; child ACLs are checked on save. }
         viewing:
           description: Present when an administrator reads this private space through Administrative Viewing Mode; access is read-only.
           type: object
@@ -2690,6 +3698,31 @@ components:
             How the space differs now at the entry's path: removed (deleted, moved or renamed), modified (a file of
             another size or modification time), or inside (a folder still there with something below it removed or
             modified). Absent when the path holds the same thing.
+    TrashRestore:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        parentId: { type: string }
+        name: { type: string, minLength: 1 }
+        conflict:
+          type: string
+          enum: [ask, rename, replace]
+          default: ask
+          description: "When the name is taken: ask answers 409 name_conflict; rename keeps both, the item taking the first free \"name (恢复).ext\", \"name (恢复 2).ext\"…; replace, for a file only (422 otherwise), sends the file of that name to the recycle bin and puts the item in its place. A folder in the way is never replaced: the file then comes back beside it."
+    RestoredEntry:
+      type: object
+      additionalProperties: false
+      required: [id, spaceId, name, kind, sizeBytes, modifiedAt]
+      properties:
+        id: { type: string }
+        spaceId: { type: string }
+        parentId: { type: string }
+        name: { type: string, description: The name the item came back under. }
+        kind: { type: string, enum: [file, directory] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        modifiedAt: { type: string, format: date-time }
+        replaced: { type: boolean, description: "The item took the place of a file of its name, which went to the recycle bin." }
     SnapshotRestore:
       type: object
       additionalProperties: false
@@ -2855,7 +3888,7 @@ components:
         unavailable: { type: array, items: { $ref: "#/components/schemas/ActivityCategory" }, description: Categories whose records could not be read this time. }
     SystemLogService:
       type: string
-      enum: [api, host-agent, photos, containers, ai, media, kiosk, samba, caddy]
+      enum: [api, host-agent, photos, shares, containers, ai, media, kiosk, samba, caddy]
     SystemLogEntry:
       type: object
       additionalProperties: false
@@ -3363,6 +4396,8 @@ components:
         ownerUserId: { type: string }
         ownerName: { type: string }
         createdAt: { type: string, format: date-time }
+        people: { type: boolean, description: Whether the library recognises people and pets. }
+        canSetPeople: { type: boolean, description: "Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library." }
         viewing:
           description: Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only.
           type: object
@@ -3428,6 +4463,18 @@ components:
           description: Albums the photo is in; only a single photo's details carry them.
           type: array
           items: { type: object, additionalProperties: false, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+        people:
+          description: The faces and pets in the photo with who each is in the photo's library; only a single photo's details carry them.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [occurrenceId, kind]
+            properties:
+              occurrenceId: { type: string, description: "Its avatar is at occurrences/{occurrenceId}/avatar." }
+              kind: { type: string, enum: [face, cat, dog] }
+              personId: { type: string, description: "Absent while the face is nobody yet." }
+              name: { type: string }
     PhotoTimeline:
       type: object
       additionalProperties: false
@@ -3467,6 +4514,25 @@ components:
               photos: { type: integer, minimum: 1 }
               coverId: { type: string, description: The photo that matches the label most clearly. }
         ready: { type: boolean, description: "False while AI clusters are not available; there are no items then." }
+    PhotoPerson:
+      type: object
+      additionalProperties: false
+      required: [id, libraryId, kind, name, hidden, photos, coverId, canChange]
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        kind: { type: string, enum: [person, cat, dog] }
+        name: { type: string, description: "Empty until a member names the person." }
+        hidden: { type: boolean }
+        photos: { type: integer, minimum: 0, description: "Untrashed photos of the person." }
+        coverId: { type: string, description: "The occurrence whose avatar stands for the person; empty when none is left." }
+        canChange: { type: boolean, description: "Whether the caller may name, merge, hide and correct the person." }
+    PhotoPeople:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PhotoPerson" } }
     PhotoTagCounts:
       type: object
       additionalProperties: false
@@ -3521,6 +4587,10 @@ components:
             words: { type: array, items: { type: string }, description: The query's class words. }
             detected: { type: integer, minimum: 0, description: Photos over all pages in which the detector found them. }
             undetected: { type: integer, minimum: 0, description: Photos in the search's scope the detector has not processed yet. }
+        people:
+          type: array
+          items: { type: string }
+          description: "Full names of people in the search's scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first."
     PhotoSimilarResults:
       type: object
       additionalProperties: false
@@ -3544,6 +4614,8 @@ components:
         reason: { type: string, description: "Why work is paused, such as foreground or cpu_pressure." }
         model: { type: string }
         objectModel: { type: string, description: The object detector's model while the AI Worker has one. }
+        faceModel: { type: string, description: "The face models while the AI Worker has them; a photo then also counts as ready once its faces are scanned." }
+        animalModel: { type: string, description: "The animal model while the AI Worker has it; a photo with a dog then also counts as ready once its dogs are scanned." }
         ready: { type: integer, minimum: 0, description: "Originals with a vector of the current pipeline and, while the AI Worker has a detector, its detection." }
         pending: { type: integer, minimum: 0 }
         failed: { type: integer, minimum: 0 }
@@ -3676,6 +4748,132 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/ErrorDetail"
+    AssistantStatus:
+      type: object
+      additionalProperties: false
+      required: [available]
+      properties:
+        available: { type: boolean, description: The member has an assistant instance. }
+    AssistantSession:
+      type: object
+      additionalProperties: false
+      required: [id, title, preview, startedAt, messageCount]
+      properties:
+        id: { type: string }
+        title: { type: string, description: Empty until the member or the assistant names the conversation. }
+        preview: { type: string }
+        startedAt: { type: number, description: Unix seconds. }
+        lastActive: { type: number, description: Unix seconds. }
+        messageCount: { type: integer, minimum: 0 }
+    AssistantMessage:
+      type: object
+      description: "One transcript row as Hermes Agent stores it; fields beyond role and content vary with the row (tool_calls, tool_call_id, reasoning, finish_reason, timestamp, display_metadata and others)."
+      required: [role]
+      properties:
+        role: { type: string, enum: [user, assistant, tool, system] }
+        content: {}
+      additionalProperties: true
+    AssistantMemory:
+      type: object
+      additionalProperties: false
+      required: [memories, skills]
+      properties:
+        memories:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, store, text]
+            properties:
+              id: { type: string }
+              store: { type: string, enum: [memory, profile], description: "memory for the assistant's notes, profile for what it noted about the member." }
+              text: { type: string, description: "The memory, at most its first 1,200 characters." }
+              updatedAt: { type: integer, description: Unix seconds. }
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, useCount]
+            properties:
+              id: { type: string, description: "The skill's name." }
+              category: { type: string }
+              createdBy: { type: string, description: "learn when the member asked for it, agent when the assistant made it itself; absent when it only used it." }
+              useCount: { type: integer, minimum: 0 }
+              updatedAt: { type: integer, description: Unix seconds. }
+    AssistantApprovalEnvelope:
+      type: object
+      additionalProperties: false
+      required: [approval]
+      properties:
+        approval: { $ref: "#/components/schemas/AssistantApproval" }
+    AssistantApproval:
+      type: object
+      description: "One thing the assistant asked the member in a running turn (ADR 0024 decisions 3 and 4)."
+      additionalProperties: false
+      required: [requestId, kind, sessionId, status, createdAt]
+      properties:
+        requestId: { type: string }
+        kind:
+          type: string
+          enum: [change, command, question]
+          description: "change: a call of 提交更改 the executor carries out as the member (change). command: a dangerous command or a script the assistant runs in its sandbox, which reaches nothing outside its own folder (command). question: the clarify tool's questions (questions), answered with /answer."
+        sessionId: { type: string, description: "The live conversation (Hermes's runtime id) it was asked in." }
+        storedSessionId: { type: string, description: "The stored conversation, when known." }
+        status: { type: string, enum: [awaiting, deciding, approved, answered, applied, failed, rejected, expired, stopped], description: "Only awaiting can be confirmed, rejected or answered; a rejected question was skipped." }
+        createdAt: { type: integer, description: Unix seconds. }
+        change: { $ref: "#/components/schemas/AssistantChange" }
+        command:
+          type: object
+          additionalProperties: false
+          required: [text]
+          properties:
+            text: { type: string, description: "The command, or the whole script, as it will run." }
+            description: { type: string, description: "Why Hermes asks, as it names the pattern." }
+            script: { type: boolean, description: "An execute_code script, approved as a whole." }
+            forSession: { type: boolean, description: "It may be allowed for the rest of the conversation." }
+        questions:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, text]
+            properties:
+              id: { type: string }
+              text: { type: string }
+              choices: { type: array, items: { type: string } }
+              multiSelect: { type: boolean }
+        answers:
+          type: object
+          description: "The member's answers by question id; null for one left out."
+          additionalProperties: { type: [string, "null"] }
+    AssistantChange:
+      type: object
+      description: "The change as the executor prepared it: each operation, with the text before and after each write."
+      additionalProperties: true
+      required: [id, summary, status, operations]
+      properties:
+        id: { type: string }
+        summary: { type: string }
+        status: { type: string, enum: [awaiting, approved, applying, applied, failed, rejected, expired] }
+        error: { type: string, description: Why a confirmed change failed. }
+        operations:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [op, path]
+            properties:
+              op: { type: string, enum: [write, copy, delete, move, mkdir] }
+              path: { type: string, description: "Path as the assistant sees it, under /nas." }
+              to: { type: string, description: Destination of a move. }
+              from: { type: string, description: "What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder)." }
+              size: { type: integer, description: "Bytes a copy copies; a folder's files together." }
+              folder: { type: boolean, description: A copy of a whole folder. }
+              exists: { type: boolean, description: The target existed when the card was made. }
+              before: { type: string, description: "Text of a written file when the card was made; absent when it is new or not text." }
+              after: { type: string, description: "Text the write leaves; absent when it is not text." }
     MediaLibraryInput:
       type: object
       additionalProperties: false
@@ -4056,3 +5254,263 @@ components:
               videos: { type: integer }
               cover: { type: string }
         videos: { type: array, items: { $ref: "#/components/schemas/MediaTitle" } }
+
+    MemberShareEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+        isDir:
+          type: boolean
+        size:
+          type: integer
+          minimum: 0
+      required:
+      - id
+      - path
+      - isDir
+      - size
+    MemberShareRecipient:
+      type: object
+      additionalProperties: false
+      properties:
+        userId:
+          type: string
+        viewedAt:
+          type: string
+          format: date-time
+        readThrough:
+          type: integer
+          minimum: 0
+        senderReadThrough:
+          type: integer
+          minimum: 0
+        saved:
+          type: boolean
+        saveUncertain:
+          type: boolean
+          description: Some complete files may exist but publication confirmation was lost.
+        savedFiles:
+          type: integer
+          minimum: 0
+        lastMessage:
+          type: integer
+          minimum: 0
+      required:
+      - userId
+      - readThrough
+      - senderReadThrough
+      - saved
+      - savedFiles
+      - lastMessage
+    MemberShare:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        sender:
+          type: object
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+          required:
+          - id
+          - username
+        status:
+          type: string
+          enum:
+          - preparing
+          - published
+          - failed
+          - revoked
+          - expired
+        createdAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberShareEntry'
+        recipients:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberShareRecipient'
+        error:
+          type: string
+        preparedBytes:
+          type: integer
+          minimum: 0
+      required:
+      - id
+      - sender
+      - status
+      - createdAt
+      - entries
+      - recipients
+      - preparedBytes
+    MemberShareMessage:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          minimum: 0
+        sender:
+          type: object
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+          required:
+          - id
+          - username
+        text:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+      - id
+      - sender
+      - text
+      - createdAt
+    MemberShareJob:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        shareId:
+          type: string
+        userId:
+          type: string
+        status:
+          type: string
+          enum:
+          - running
+          - completed
+          - failed
+          - cancelled
+          - interrupted
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        bytesDone:
+          type: integer
+          minimum: 0
+        bytesTotal:
+          type: integer
+          minimum: 0
+        completedIds:
+          type: array
+          items:
+            type: string
+        entryIds:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+      required:
+      - id
+      - shareId
+      - userId
+      - status
+      - createdAt
+      - bytesDone
+      - bytesTotal
+      - completedIds
+      - entryIds
+    MemberShareNotification:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          minimum: 0
+        shareId:
+          type: string
+        recipientId:
+          type: string
+        kind:
+          type: string
+        messageId:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+      required:
+      - id
+      - shareId
+      - recipientId
+      - kind
+      - createdAt
+    CreateMemberShare:
+      type: object
+      additionalProperties: false
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+        sourceIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+        recipientIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+        message:
+          type: string
+      required:
+      - requestId
+      - sourceIds
+      - recipientIds
+    SaveMemberShare:
+      type: object
+      additionalProperties: false
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+        entryIds:
+          type: array
+          items:
+            type: string
+        target:
+          type: object
+          additionalProperties: false
+          properties:
+            rootId:
+              type: string
+            parentId:
+              type: string
+          required:
+          - rootId
+      required:
+      - requestId
+      - entryIds
+      - target

@@ -66,6 +66,13 @@ func run(logger *slog.Logger) error {
 		_ = os.Remove(socketPath)
 	}()
 	reader := linuxhoststate.New()
+	// State reads only show SMART readings and refresh them in the
+	// background; the first read then already has them.
+	go func() {
+		if err := reader.RefreshSMART(context.Background()); err != nil {
+			logger.Warn("initial SMART read failed", "error", err)
+		}
+	}()
 	mountPoint := environment("ANAS_DATA_MOUNT", "/srv/a-nas/data")
 	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
 		MountPoint:   mountPoint,
@@ -76,7 +83,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logRepairs(logger, repaired)
-	ensurePhotosStore(context.Background(), executor, logger)
+	ensureManagedStores(context.Background(), executor, logger)
 	expireViewing(context.Background(), executor, logger)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
@@ -87,8 +94,21 @@ func run(logger *slog.Logger) error {
 	}
 	sessions := accounts.NewSessionDirectory(filepath.Join(environment("ANAS_STATE_DIR", "/var/lib/a-nas"), "control.db"))
 	defer sessions.Close()
+	// The AI assistant is not shipped yet (ADR 0024): off unless its sockets
+	// are named. With it come the session gate and the executor of its changes,
+	// which keeps the copies the members' cards show beside the assistant
+	// directories, where only root may read them.
+	assistantSockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
+	var assistantChanges string
+	if assistantSockets != "" {
+		assistantChanges = environment("ANAS_ASSISTANT_CHANGES_DIR", filepath.Join(mountPoint, "assistant", ".changes"))
+	}
 	broker, err := filebroker.NewServer(filebroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
+		AssistantSockets: assistantSockets,
+		AssistantTokens:  environment("ANAS_ASSISTANT_TOKEN_DIR", "/etc/a-nas-assistant/tokens"),
+		AssistantChanges: assistantChanges,
+		Accounts:         sessions,
 	})
 	if err != nil {
 		return err
@@ -116,11 +136,23 @@ func run(logger *slog.Logger) error {
 			logger.Error("file broker stopped", "error", err)
 		}
 	}()
+	if assistantChanges != "" {
+		stopChanges, err := serveAssistantChanges(broker, logger)
+		if err != nil {
+			return err
+		}
+		defer stopChanges()
+	}
 	stopSessionLookup, err := serveSessionLookup(sessions, logger)
 	if err != nil {
 		return err
 	}
 	defer stopSessionLookup()
+	stopShareLookup, err := serveShareSessionLookup(sessions, logger)
+	if err != nil {
+		return err
+	}
+	defer stopShareLookup()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go repairPermissionsPeriodically(ctx, executor, logger)
@@ -151,6 +183,32 @@ func run(logger *slog.Logger) error {
 	}
 }
 
+// serveAssistantChanges answers the assistants' MCP tool. The socket is open
+// to everyone but sits in /run/a-nas, which members cannot enter; the units
+// bind it into each assistant's sandbox, and the member is the caller's UID.
+func serveAssistantChanges(broker *filebroker.Server, logger *slog.Logger) (func(), error) {
+	socketPath := environment("ANAS_ASSISTANT_CHANGES_SOCKET", "/run/a-nas/assistant-changes.sock")
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("listen for the assistants' changes: %w", err)
+	}
+	if err := os.Chmod(socketPath, 0o666); err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	go func() {
+		if err := broker.ServeAssistantChanges(listener); err != nil {
+			logger.Error("assistant changes stopped", "error", err)
+		}
+	}()
+	logger.Info("assistant changes listening", "socket", socketPath)
+	return func() {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+	}, nil
+}
+
 // serveSessionLookup lets the photo service confirm who stands behind a
 // session token (ADR 0011). Only the photo service's group can reach the
 // socket; without that group the photo service is not installed and nothing
@@ -166,8 +224,14 @@ func serveSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger
 	if err != nil {
 		return nil, fmt.Errorf("listen for photo session lookups: %w", err)
 	}
+	// Looking accounts up by UID serves the photo service's socket for members' AI
+	// assistants (ADR 0024), which is not shipped yet; it stays off until named.
+	var accountsByUID sessionlookup.AccountResolver
+	if os.Getenv("ANAS_PHOTO_ASSISTANT_LOOKUP") == "1" {
+		accountsByUID = sessions
+	}
 	server := &http.Server{
-		Handler:           sessionlookup.NewHandler(sessions, logger),
+		Handler:           sessionlookup.NewHandler(sessions, accountsByUID, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 	}
 	go func() {
@@ -197,15 +261,20 @@ func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.E
 				logger.ErrorContext(ctx, "data-volume permission repair failed", "error", err)
 			}
 			logRepairs(logger, repaired)
-			ensurePhotosStore(ctx, executor, logger)
+			ensureManagedStores(ctx, executor, logger)
 		}
 	}
 }
 
-// ensurePhotosStore keeps the photo service's store in shape. A failure, such
-// as another account holding the photo service's UID, only leaves photos
+// ensureManagedStores keeps isolated service stores in shape. A failure, such
+// as another account holding a service UID, only leaves that service
 // unavailable; the Host Agent keeps serving everything else.
-func ensurePhotosStore(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	shareRepairs, shareErr := executor.EnsureSharesStore(ctx)
+	if shareErr != nil {
+		logger.ErrorContext(ctx, "share store repair failed", "error", shareErr)
+	}
+	logRepairs(logger, shareRepairs)
 	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
@@ -308,4 +377,24 @@ func environment(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func serveShareSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+	group := environment("ANAS_SHARE_SESSION_GROUP", accounts.ShareServiceUser)
+	if _, err := user.LookupGroup(group); err != nil {
+		logger.Info("share service is not installed; lookup is off")
+		return func() {}, nil
+	}
+	socket := environment("ANAS_SHARE_SESSION_SOCKET", "/run/a-nas-share-sessions/shares.sock")
+	listener, err := listen(socket, group)
+	if err != nil {
+		return nil, err
+	}
+	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, nil, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("share session lookup stopped", "error", err)
+		}
+	}()
+	return func() { _ = server.Close(); _ = os.Remove(socket) }, nil
 }

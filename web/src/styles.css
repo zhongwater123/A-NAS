@@ -365,11 +365,14 @@ button { font: inherit; }
 .desktop-icon.icon-photos svg { width: 42px; height: 42px; }
 .dock-icon.icon-photos svg { width: 32px; height: 32px; }
 .launcher-icon.icon-photos svg { width: 36px; height: 36px; }
-.icon-vm { background: linear-gradient(155deg, #7e9cff, #4e69de); }
 /* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
 .icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
 .icon-music { background: linear-gradient(155deg, #ff506d, #d92471); }
-.icon-ai { background: linear-gradient(155deg, #8c7cff, #5544c4); }
+/* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
+   edge and takes the tile's corners, with no gloss over the drawing. */
+.icon-ai { background: #fff; }
+.icon-ai::before { display: none; }
+.icon-ai .assistant-glyph { width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
 
 .status-bar {
   position: absolute;
@@ -472,6 +475,8 @@ button.net-rates:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 /* A white tile on the white title bar: a hairline keeps its edge. */
 .window-app-icon.light { background: #fff; box-shadow: inset 0 0 0 1px rgba(16, 24, 40, .1), 0 1px 2px rgba(16, 24, 40, .08); }
 .window-app-icon.light svg { width: 20px; height: 20px; }
+/* A full-bleed mark covers the tile's hairline, so it draws its own. */
+.window-app-icon .assistant-glyph { width: 100%; height: 100%; border-radius: inherit; outline: 1px solid rgba(16, 24, 40, .1); outline-offset: -1px; }
 .window-actions { height: 100%; display: flex; }
 .window-actions button { position: relative; width: 46px; height: 100%; border: 0; border-radius: 0; display: grid; place-items: center; color: #171b20; background: transparent; cursor: pointer; }
 .window-actions button:hover { background: rgba(33,42,52,.08); }

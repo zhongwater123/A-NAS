@@ -51,10 +51,11 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - Web 与 Samba 删除均进入隐藏的按空间、按删除者回收站，默认保留 30 天。回收站条目只有删除者能看到、恢复和清空（[统一身份与文件授权](unified-identity-and-file-acl.md)）。
 - 回收站窗口顶部汇总项目数、占用空间与 7 天内将被清理的数量，不另写保留规则的说明文字。项目按删除日期分组（今天、昨天、具体日期），每项一行：类型图标、名称与类型，原位置（空间与文件夹路径），大小（文件夹为其中已索引文件的合计），删除时间，剩余天数（圆环显示剩余比例，7 天以内标黄、1 天以内标红，悬停显示确切的清理时间），以及“恢复”和永久删除。可按名称搜索、按空间筛选，或改为按“即将清理”排序（分为 7 天内与更晚两组）。窗口变窄时每项变为两行，原位置、大小、删除时间与剩余时间带文字标签排在名称下方。
 - 原位置可以点击，在文件管理中打开那个文件夹。原文件夹被改名或移动后显示它现在的位置；原文件夹已被删除时标注“已不在”，恢复会放到该空间的根目录，而不是失败。
-- 恢复单个项目前确认恢复位置与名称；目标位置已有同名项目时返回 `409`，界面提示改用“名称 (恢复)”这样的新名称，绝不覆盖。恢复成功后可直接在文件管理中打开所在文件夹。
-- 勾选多项（或全选当前筛选结果）后可一起恢复或永久删除：批量恢复按原名称放回各自的原位置，原位置已有同名项目的留在回收站并保持选中，以便逐个改名恢复，结果以一句话汇总。永久删除单项、所选项目或“清空回收站”都需要再次确认，并写明数量与大小；进行中显示进度，Esc 取消选择。
+- 恢复单个项目前确认恢复位置与名称。目标位置已有同名项目（含只差大小写）时，对话框给出两种做法：“保留两者”让恢复的项目以第一个空闲的“名称 (恢复)”“名称 (恢复 2)”放在旁边；“替换”只对文件提供，现有的同名文件移到回收站、之后仍可恢复，恢复的文件以原名放回。文件夹不会被替换或合并，也可以自己另起名称。恢复成功后可直接在文件管理中打开所在文件夹；替换下来的文件随即出现在回收站中。
+- 恢复接口的 `conflict` 与上传相同：`ask`（默认）对已占用的名称返回 `409 name_conflict`；`rename` 由服务端挑选空闲名称；`replace` 只用于文件，文件夹返回 `422`。挡在原处的是文件夹时，替换改为保留两者。响应是恢复后的条目，`name` 为实际名称，替换了同名文件时 `replaced` 为 `true`。
+- 勾选多项（或全选当前筛选结果）后可一起恢复或永久删除：批量恢复按原名称放回各自的原位置；原位置已有同名项目的，统一询问一次是跳过、保留两者还是替换（只替换文件，其中的文件夹仍保留两者），跳过的留在回收站并保持选中。结果以一句话汇总，写明改用新名称与替换的数量。永久删除单项、所选项目或“清空回收站”都需要再次确认，并写明数量与大小；进行中显示进度，Esc 取消选择。
 - 个人空间所有者管理自己的手动快照；共享空间快照仅管理员创建和删除。快照只读且不通过 SMB 暴露。快照的浏览、找回与定时快照在[备份中心](backup-center.md)。
-- 恢复始终复制或移动到指定新位置，不覆盖已有文件，不提供整卷回滚。
+- 恢复始终复制或移动到指定新位置，不覆盖已有文件（替换时现有文件先移到回收站），不提供整卷回滚。
 
 ## 名称规则
 
@@ -73,6 +74,7 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - 产品服务只监听 `127.0.0.1`。本地 Kiosk 与受控 SSH 隧道直接访问；安装 Caddy 后，局域网浏览器经 80 端口以 HTTP 访问（[局域网 Web 访问](lan-web-access.md)）。
 - `401`、`403`、`409`、计划过期、卷离线、空间不足与需人工处理使用统一 JSON 错误结构。
 - SMART、温度、容量、占用、文件系统、数据卷角色与不可初始化原因可由磁盘接口读取。
+- SMART 与温度由 Host Agent 在后台读取，每块盘至多每 10 分钟一次，只读健康结论与温度；处于待机的硬盘不被唤醒，沿用上次的结果，超过 24 小时没有新结果时显示为未知。磁盘接口和文件请求都不等待 smartctl，文件请求前的数据卷确认也不读取主机状态（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。
 
 ## 验收
 
@@ -90,8 +92,8 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [统一身份与文件授权规格](unified-identity-and-file-acl.md)：取代本规格中的空间权限实现方式
 - [`internal/httpapi/product_test.go`](../../internal/httpapi/product_test.go)
 - [`internal/files/service_test.go`](../../internal/files/service_test.go)
-- [`internal/files/trash_test.go`](../../internal/files/trash_test.go)：回收项的原位置、大小、到期时间，原文件夹已删除时恢复到根目录
-- [`web/src/trash/TrashPanel.tsx`](../../web/src/trash/TrashPanel.tsx) 与 [`TrashPanel.test.tsx`](../../web/src/trash/TrashPanel.test.tsx)：回收站窗口
+- [`internal/files/trash_test.go`](../../internal/files/trash_test.go)：回收项的原位置、大小、到期时间，原文件夹已删除时恢复到根目录，同名时保留两者或替换（`TestRestoreOntoATakenNameKeepsBothOrReplaces`）
+- [`web/src/trash/TrashPanel.tsx`](../../web/src/trash/TrashPanel.tsx) 与 [`TrashPanel.test.tsx`](../../web/src/trash/TrashPanel.test.tsx)：回收站窗口，单个与批量恢复的同名处理
 - [`web/src/App.tsx`](../../web/src/App.tsx)
 - [`web/src/useFileOrder.ts`](../../web/src/useFileOrder.ts) 与 [`useFileOrder.test.ts`](../../web/src/useFileOrder.test.ts)：置顶、手动排列、偏好隔离与存储降级
 - [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：文件管理交互、会话过期回到登录页、本机屏幕申请持久会话
@@ -100,3 +102,4 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [`web/src/files/FileViewer.tsx`](../../web/src/files/FileViewer.tsx)：文件管理的图片与 PDF 预览
 - [`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut`](../../internal/httpapi/product_test.go)：本机会话只授予直接回环连接、跨越 12 小时、退出后失效
 - [本地控制台会话过期调查](../investigations/2026-10-09-local-console-disconnected-after-session-expiry.md)
+- [`internal/hoststate/linux/smart_test.go`](../../internal/hoststate/linux/smart_test.go)：SMART 不阻塞状态读取、10 分钟间隔、待机硬盘沿用上次结果

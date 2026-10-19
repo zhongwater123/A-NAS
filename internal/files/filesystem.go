@@ -62,6 +62,10 @@ type ScanEntry struct {
 type ScanSkip struct {
 	Names    []string `json:"names,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
+	// Strict refuses a disappearing or unreadable child instead of returning
+	// an incomplete tree. Limit bounds memory for explicit share selections.
+	Strict bool `json:"strict,omitempty"`
+	Limit  int  `json:"limit,omitempty"`
 }
 
 func (s ScanSkip) matches(name string) bool {

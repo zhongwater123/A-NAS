@@ -23,7 +23,7 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 		return nil, err
 	}
 	switch {
-	case name == "getent" && args[0] == "passwd" && args[1] == accounts.PhotoServiceUser && r.passwd != "":
+	case name == "getent" && args[0] == "passwd" && (args[1] == accounts.PhotoServiceUser || args[1] == accounts.ShareServiceUser) && r.passwd != "":
 		return []byte(r.passwd + "\n"), nil
 	case name == "getent":
 		return nil, notFound{}
@@ -118,5 +118,33 @@ func TestSpacesReconcileDespiteABrokenPhotoServiceIdentity(t *testing.T) {
 	}
 	if runner.ran(spacePermissionCommand{name: "getent", args: []string{"passwd", accounts.PhotoServiceUser}}) {
 		t.Fatalf("space reconciliation consulted the photo service identity")
+	}
+}
+
+func TestSharesStoreUsesItsOwnFixedIdentity(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(mountPoint, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &photosRunner{passwd: "a-nas-shares:x:31001:31001::/nonexistent:/usr/sbin/nologin"}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	drifted, err := executor.ensureOwnedStore(context.Background(), "shares", accounts.ShareServiceUser, accounts.ShareServiceUID)
+	if err != nil || drifted {
+		t.Fatalf("new share store: %v, %v", drifted, err)
+	}
+	root := filepath.Join(mountPoint, "shares")
+	for _, command := range []spacePermissionCommand{
+		{name: "btrfs", args: []string{"subvolume", "create", root}},
+		{name: "chown", args: []string{"31001:31001", root}},
+		{name: "chmod", args: []string{"0700", root}},
+		{name: "setfacl", args: []string{"--modify", "user:a-nas-shares:--x", mountPoint}},
+	} {
+		if !runner.ran(command) {
+			t.Errorf("missing %s %v", command.name, command.args)
+		}
+	}
+	runner.passwd = "a-nas-shares:x:998:998::/nonexistent:/usr/sbin/nologin"
+	if _, err := executor.ensureOwnedStore(context.Background(), "shares", accounts.ShareServiceUser, accounts.ShareServiceUID); !errors.Is(err, accounts.ErrIdentityConflict) {
+		t.Fatalf("unexpected identity accepted: %v", err)
 	}
 }

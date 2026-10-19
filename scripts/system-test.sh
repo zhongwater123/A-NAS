@@ -13,11 +13,17 @@
 #        scripts/system-test.sh [IMAGE]
 # Prints PASS/FAIL lines and exits non-zero on any failure.
 #
+# The AI assistant's sandbox (ai/assistant-spike/system-test.sh) runs without
+# Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the spike's runtime.tar.gz
+# adds its policy check and a real assistant against a scripted model.
+#
 # Local AI runs on a stand-in model, detector and runtime with the Worker's
 # fake providers. With ANAS_SYSTEM_TEST_AI=real, after
 # scripts/build-ai-runtime.sh and with ANAS_AI_MODEL and ANAS_AI_DETECTOR
-# naming the model and detector files, it installs the real runtime and models
-# instead.
+# naming the model and detector files, ANAS_AI_FACES the directory holding
+# the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces) and
+# ANAS_AI_PETS the one holding the animal model (dinov2-small/, as
+# D:\A-NAS-models\pets), it installs the real runtime and models instead.
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -31,11 +37,19 @@ if [[ "${1:-}" != --inside ]]; then
     [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
     [[ -f "${ANAS_AI_MODEL:-}" ]] || { echo "ANAS_AI_MODEL must name the model file" >&2; exit 2; }
     [[ -f "${ANAS_AI_DETECTOR:-}" ]] || { echo "ANAS_AI_DETECTOR must name the detector file" >&2; exit 2; }
-    real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro")
+    [[ -d "${ANAS_AI_FACES:-}" ]] || { echo "ANAS_AI_FACES must name the face models' directory" >&2; exit 2; }
+    [[ -d "${ANAS_AI_PETS:-}" ]] || { echo "ANAS_AI_PETS must name the animal model's directory" >&2; exit 2; }
+    real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
+      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro")
+  fi
+  assistant=()
+  if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
+    [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
+    assistant=(-v "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:/assistant-runtime.tar.gz:ro")
   fi
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "$image" >/dev/null
+    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "${assistant[@]}" "$image" >/dev/null
   trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT
   for _ in $(seq 1 60); do
     state=$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)
@@ -66,9 +80,17 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   ln -s "/ai-model/$(jq -r .file "$ai/model.json")" "$ai/model.litertlm"
   cp /src/deploy/models/dfine-m-obj365.json "$ai/detector.json"
   ln -s "/ai-detector/$(jq -r .file "$ai/detector.json")" "$ai/detector.onnx"
+  cp /src/deploy/models/yunet-2026may.json "$ai/face-detector.json"
+  ln -s "/ai-faces/yunet/$(jq -r .file "$ai/face-detector.json")" "$ai/face-detector.onnx"
+  cp "/src/deploy/models/${ANAS_SYSTEM_TEST_FACE_EMBEDDER:-auraface-v1}.json" "$ai/face-embedder.json"
+  ln -s "/ai-faces/$(jq -r .name "$ai/face-embedder.json" | cut -d - -f 1)/$(jq -r .file "$ai/face-embedder.json")" "$ai/face-embedder.onnx"
+  cp /src/deploy/models/dinov2-small.json "$ai/animal-embedder.json"
+  ln -s "/ai-pets/dinov2-small/$(jq -r .file "$ai/animal-embedder.json")" "$ai/animal-embedder.onnx"
   cp /src/build/ai-runtime.json "$ai/runtime.json"
   ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
   detector_model="$(jq -r .name "$ai/detector.json")@$(jq -r .sha256 "$ai/detector.json" | cut -c1-12)+"
+  face_model="$(jq -r .name "$ai/face-detector.json")@$(jq -r .sha256 "$ai/face-detector.json" | cut -c1-12)+"
+  animal_model="$(jq -r .name "$ai/animal-embedder.json")@$(jq -r .sha256 "$ai/animal-embedder.json" | cut -c1-12)+"
 else
   head -c 65536 /dev/urandom > "$ai/model.litertlm"
   printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
@@ -77,6 +99,13 @@ else
   printf '{"name":"system-test-detector","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' \
     "$(stat -c %s "$ai/detector.onnx")" "$(sha256sum "$ai/detector.onnx" | cut -d ' ' -f 1)" > "$ai/detector.json"
   detector_model=fake-detector
+  for role in face-detector face-embedder animal-embedder; do
+    head -c 2048 /dev/urandom > "$ai/$role.onnx"
+    printf '{"name":"system-test-%s","kind":"sface","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' "$role" \
+      "$(stat -c %s "$ai/$role.onnx")" "$(sha256sum "$ai/$role.onnx" | cut -d ' ' -f 1)" > "$ai/$role.json"
+  done
+  face_model=fake-faces
+  animal_model=fake-animals
   install -d "$ai/venv/bin"
   ln -s /usr/bin/python3 "$ai/venv/bin/python"
   printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
@@ -87,9 +116,11 @@ else
     "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$ai/runtime.tar.gz")" \
     "$runtime_sha" > "$ai/runtime.json"
   install -d /etc/systemd/system/anas-ai.service.d
-  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector\n' \
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals\n' \
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
+# Each model role's file is kept once by content: as many as distinct pins.
+models_kept=$(for role in model detector face-detector face-embedder animal-embedder; do jq -r .sha256 "$ai/$role.json"; done | sort -u | wc -l)
 # AI starts once the photo library has gone unused for this long, so that the
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
@@ -99,7 +130,7 @@ printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/
 stage() {
   install -d "$1"
   install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh "$1/"
-  for unit in anas-api anas-host-agent anas-photos; do
+  for unit in anas-api anas-host-agent anas-photos anas-shares; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
@@ -109,9 +140,13 @@ stage() {
   install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
-  install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/runtime.json" "$1/ai/"
+  install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
+    "$ai/animal-embedder.json" "$ai/runtime.json" "$1/ai/"
   ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
   ln -s "$ai/detector.onnx" "$1/ai/detector.onnx"
+  ln -s "$ai/face-detector.onnx" "$1/ai/face-detector.onnx"
+  ln -s "$ai/face-embedder.onnx" "$1/ai/face-embedder.onnx"
+  ln -s "$ai/animal-embedder.onnx" "$1/ai/animal-embedder.onnx"
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
@@ -213,7 +248,7 @@ api=http://127.0.0.1:8080
 data=/srv/a-nas/data
 
 # --- Every service runs under its production unit (issue #38).
-check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api smbd
+check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
@@ -268,6 +303,17 @@ check "Shared upload is owned by the member's UID" test "$(owner_uid "$data/spac
 check "administrator reads the member's Shared file" \
   cmp -s /tmp/shared.txt <(curl -fsS -b /tmp/owner.jar "$api/api/v1/files/$shared_file/content")
 
+# --- Member sharing crosses the product bridge, independent service and broker.
+shares_ready() {
+  for _ in $(seq 1 100); do
+    curl -fsS -b /tmp/owner.jar "$api/api/v1/shares" >/dev/null 2>&1 && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "member sharing works through production service sandboxes" \
+  python3 /src/scripts/smoke-member-sharing.py "$api" /tmp/owner.jar /tmp/alice.jar \
+    "$owner_csrf" "$alice_csrf" "$owner_file" "$alice_private"
 # --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
 lan=http://$ip
 lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
@@ -409,6 +455,7 @@ check "a disabled terminal refuses sessions" denied terminal "$api" /tmp/owner.j
 printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "sharing recovers after the Product Service restarts" shares_ready
 check "the operator turns the terminal on" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = true
 check "members cannot use the terminal" test "$(status_of -b /tmp/alice.jar "$api/api/v1/terminal")" = 403
@@ -495,12 +542,15 @@ check "only the photo service reaches the AI socket" \
 check "the release links the models and runtime kept once by content" \
   test "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/model.json")/$(jq -r .file "$ai/model.json")" \
   -a "$(readlink /opt/a-nas/current/ai/detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/detector.json")/$(jq -r .file "$ai/detector.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
   -a "$(readlink /opt/a-nas/current/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(jq -r .id "$ai/runtime.json")"
 ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
 check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
 check "the kernel reclaims the Worker's memory before its hard limit" \
-  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 1879048192:2147483648
+  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 2684354560:3221225472
 check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \
@@ -514,17 +564,19 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     journal_has anas-ai.service "$installed_at" "serving $(jq -r .name "$ai/model.json")@$(jq -r .sha256 "$ai/model.json" | cut -c1-12)"
 fi
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-organised() { # the member's photo has its vector and its detection
+organised() { # the member's photo has its vector, its detection and its face scan
   local status
   for _ in $(seq 1 180); do
     status=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/photos/ai" || true)
-    jq -e --arg model "$detector_model" '.pending == 0 and .ready >= 1 and (.objectModel // "" | startswith($model))' <<<"$status" >/dev/null && return
+    jq -e --arg model "$detector_model" --arg faces "$face_model" --arg animals "$animal_model" \
+      '.pending == 0 and .ready >= 1 and (.objectModel // "" | startswith($model)) and (.faceModel // "" | startswith($faces))
+        and (.animalModel // "" | startswith($animals))' <<<"$status" >/dev/null && return
     sleep 1
   done
   echo "$status"
   return 1
 }
-check "the Worker organises the photo with its vector and detector in its sandbox" organised
+check "the Worker organises the photo with its vector, detector, face and animal models in its sandbox" organised
 echo "INFO the Worker's memory peak: $(systemctl show -p MemoryPeak --value anas-ai.service) bytes"
 # A probe in the Worker's own unit, in place of the Worker.
 cat > /usr/local/lib/anas-ai-probe.py <<'PY'
@@ -562,7 +614,7 @@ check "a staged model that does not match its manifest is refused" \
   denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused release changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 2
+  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
 staged_tampered=/tmp/tampered-detector
 stage "$staged_tampered"
 rm "$staged_tampered/ai/detector.onnx"
@@ -573,7 +625,7 @@ check "a staged detector that does not match its manifest is refused" \
   denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused detector changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = 2
+  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
@@ -713,6 +765,7 @@ check "Host Agent proves the identity switch again after a restart" \
   bash -c "for _ in \$(seq 1 30); do journalctl -u anas-host-agent --since '$restarted_at' -o cat --no-pager |
     grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "sharing recovers after the Host Agent restarts" shares_ready
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 
 # --- Screen saver videos are long-lived media, not part of a release (ADR 0014).
@@ -776,7 +829,7 @@ check "the upgrade keeps the operator's terminal opt-in" \
   test "$(grep -cx 'ANAS_TERMINAL=enabled' /etc/a-nas/anas-api.env):$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = 1:true
 check "the upgrade keeps the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
 check "the upgrade copies neither the models nor the runtime again" \
-  test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = 3 \
+  test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = "$((models_kept + 1))" \
   -a "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "$(readlink /opt/a-nas/releases/system-test/ai/model.litertlm)" \
   -a "$(readlink /opt/a-nas/current/ai/detector.onnx)" = "$(readlink /opt/a-nas/releases/system-test/ai/detector.onnx)"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
@@ -817,6 +870,10 @@ check "the Product Service reads the current pool" \
   grep -Fqx "ANAS_SCREENSAVER_DIRECTORY=$pools/current" /etc/a-nas/anas-api.env
 video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
 check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
+
+# --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
+# shellcheck disable=SC1091 # sourced from the mounted checkout
+. /src/ai/assistant-spike/system-test.sh
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

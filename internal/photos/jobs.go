@@ -54,8 +54,11 @@ func derivedPath(derivation, objectID string) string {
 }
 
 // Thumbnail opens an asset's grid thumbnail. Callers fall back to the
-// original while the thumbnail is pending or failed.
+// original while the thumbnail is pending or failed. An assistant gets none.
 func (s *Service) Thumbnail(ctx context.Context, p Principal, assetID string) (Content, error) {
+	if p.Assistant {
+		return Content{}, ErrForbidden
+	}
 	record, err := s.visibleAsset(ctx, s.db, p, assetID)
 	if err != nil {
 		return Content{}, err
@@ -150,6 +153,12 @@ func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 // claimJob leases the next ready job of one derivation; thumbnails and AI
 // work run in separate loops with different rules.
 func (s *Service) claimJob(ctx context.Context, derivation string) (claimedJob, error) {
+	return s.claimObjectJob(ctx, derivation, "")
+}
+
+// claimObjectJob leases the ready job of one derivation for objectID, or the
+// next one of any object when objectID is empty.
+func (s *Service) claimObjectJob(ctx context.Context, derivation, objectID string) (claimedJob, error) {
 	// Every claim counts as an attempt, so a job that never finishes stops
 	// being reclaimed once its attempts are used up.
 	if _, err := s.db.ExecContext(ctx, `
@@ -165,8 +174,9 @@ WHERE derivation = ? AND state = 'running' AND lease_until <= ? AND attempts >= 
 SELECT j.object_id, j.derivation, j.attempts, o.orientation
 FROM jobs j JOIN objects o ON o.id = j.object_id
 WHERE j.derivation = ? AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
+  AND (? = '' OR j.object_id = ?)
 ORDER BY j.not_before, j.object_id
-LIMIT 1`, derivation, now, now).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation); err != nil {
+LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation); err != nil {
 			return err
 		}
 		job.attempts++
@@ -233,11 +243,14 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			return err
 		}
 		// The thumbnail is the vector's input and proves the original
-		// decodes for the detector.
+		// decodes for the detector and the face models.
 		if err := s.enqueueEmbedding(ctx, tx, job.objectID); err != nil {
 			return err
 		}
-		return s.enqueueDetection(ctx, tx, job.objectID)
+		if err := s.enqueueDetection(ctx, tx, job.objectID); err != nil {
+			return err
+		}
+		return s.enqueueFaces(ctx, tx, job.objectID)
 	}); err != nil {
 		return err
 	}

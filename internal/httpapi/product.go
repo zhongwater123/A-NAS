@@ -18,6 +18,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -26,6 +27,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
@@ -54,6 +56,8 @@ type ProductDependencies struct {
 	// photo service; any other handler receives the caller as a
 	// photos.Principal.
 	Photos http.Handler
+	// Shares serves member shares; production independently confirms sessions.
+	Shares http.Handler
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through mediaapi.WithUser; the session token stays in the context
 	// for the File Broker.
@@ -67,6 +71,10 @@ type ProductDependencies struct {
 	// to every signed-in user and receives the user through
 	// transfersapi.WithUser.
 	Transfers http.Handler
+	// Assistant serves /api/v1/assistant to every signed-in user, each reaching
+	// only their own assistant, and receives the user through
+	// assistantapi.WithUser.
+	Assistant http.Handler
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.
 	SystemLogs systemlog.Reader
@@ -89,10 +97,12 @@ type productHandler struct {
 	apps       http.Handler
 	shortcuts  http.Handler
 	photos     http.Handler
+	shares     http.Handler
 	media      http.Handler
 	music      *music.Service
 	feedback   http.Handler
 	transfers  http.Handler
+	assistant  http.Handler
 	systemLogs systemlog.Reader
 	dataSource DataSource
 	changed    func(context.Context, accounts.User, string)
@@ -110,8 +120,8 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		accounts: dependencies.Accounts, files: dependencies.Files, storage: dependencies.Storage,
 		previews: dependencies.FilePreviews,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,
-		photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
-		transfers: dependencies.Transfers, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
+		shares: dependencies.Shares, photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
+		transfers: dependencies.Transfers, assistant: dependencies.Assistant, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -131,6 +141,10 @@ func (h *productHandler) routes() {
 		h.mux.Handle(appstoreapi.ShortcutsPrefix, serve)
 		h.mux.Handle(appstoreapi.ShortcutsPrefix+"/", serve)
 	}
+	if h.shares != nil {
+		h.mux.Handle(sharesapi.PathPrefix, h.withUser(h.shares, sharesapi.WithUser))
+		h.mux.Handle(sharesapi.PathPrefix+"/", h.withUser(h.shares, sharesapi.WithUser))
+	}
 	if h.photos != nil {
 		h.mux.Handle(photosapi.PathPrefix+"/", h.withPhotoPrincipal(h.photos))
 	}
@@ -140,6 +154,9 @@ func (h *productHandler) routes() {
 	if h.feedback != nil {
 		h.mux.Handle(feedbackapi.PathPrefix, h.withUser(h.feedback, feedbackapi.WithUser))
 		h.mux.Handle(feedbackapi.PathPrefix+"/", h.withUser(h.feedback, feedbackapi.WithUser))
+	}
+	if h.assistant != nil {
+		h.mux.Handle(assistantapi.PathPrefix+"/", h.withUser(h.assistant, assistantapi.WithUser))
 	}
 	if h.transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
@@ -161,6 +178,14 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/terminal/session", h.withSession(h.handleTerminal))
 	for _, path := range []string{"/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics"} {
 		h.mux.HandleFunc("GET "+path, h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+			h.state.ServeHTTP(w, r)
+		}))
+	}
+	// The task manager is read-only and available to members as well as admins.
+	// Register the path without a method so the state handler returns JSON 405
+	// after authentication instead of falling through the catch-all 404.
+	for _, path := range []string{"/api/v1/task-manager/device", "/api/v1/task-manager/tasks"} {
+		h.mux.HandleFunc(path, h.withSession(func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 			h.state.ServeHTTP(w, r)
 		}))
 	}
@@ -332,12 +357,21 @@ func (h *productHandler) handleSpaces(w http.ResponseWriter, r *http.Request, se
 		h.writeAccountError(w, r, err)
 		return
 	}
-	if spaces == nil {
-		spaces = []accounts.Space{}
+	type visibleSpace struct {
+		accounts.Space
+		Writable bool `json:"writable"`
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": spaces})
+	items := []visibleSpace{}
+	for _, space := range spaces {
+		writable, err := h.accounts.CanAccessSpace(r.Context(), session.User, space.ID, true)
+		if err != nil {
+			h.writeAccountError(w, r, err)
+			return
+		}
+		items = append(items, visibleSpace{Space: space, Writable: writable && space.Viewing == nil})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
-
 func (h *productHandler) handleEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
 		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
@@ -535,18 +569,26 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
+		// Conflict is ask (the default), rename or replace, as for uploads.
+		Conflict files.ConflictPolicy `json:"conflict"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	entry, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name)
+	switch request.Conflict {
+	case "", files.ConflictAsk, files.ConflictRename, files.ConflictReplace:
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "conflict must be ask, rename or replace")
+		return
+	}
+	restored, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name, request.Conflict)
 	if err != nil {
 		h.writeFileError(w, r, err)
 		return
 	}
-	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusOK, entry)
+	h.filesChanged(r, session, restored.SpaceID)
+	writeJSON(w, http.StatusOK, restored)
 }
 
 func (h *productHandler) handlePurgeTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {
