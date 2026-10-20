@@ -267,6 +267,15 @@ export interface LocalDisplay { sleepAfterMinutes: number }
 // readLocalDisplay needs no session: the sign-in page on the local console reads it too.
 export const readLocalDisplay = () => request<LocalDisplay>("/api/v1/local-display");
 export const updateLocalDisplay = (sleepAfterMinutes: number) => request<LocalDisplay>("/api/v1/local-display", { ...json({ sleepAfterMinutes }), method: "PUT" }, true);
+// Wallpaper is the desktop every account sees; without image it is the built-in one.
+export type WallpaperStyle = "fill" | "fit" | "stretch" | "center" | "tile";
+export interface Wallpaper { style: WallpaperStyle; image?: { version: string; width: number; height: number } }
+export const readWallpaper = () => request<Wallpaper>("/api/v1/wallpaper");
+export const updateWallpaperStyle = (style: WallpaperStyle) => request<Wallpaper>("/api/v1/wallpaper", { ...json({ style }), method: "PATCH" }, true);
+export const uploadWallpaper = (picture: Blob) => request<Wallpaper>("/api/v1/wallpaper/image", { method: "PUT", headers: { "Content-Type": picture.type || "image/jpeg" }, body: picture }, true);
+export const resetWallpaper = () => request<Wallpaper>("/api/v1/wallpaper/image", { method: "DELETE" }, true);
+// A version names one picture for good, so the browser keeps it cached.
+export const wallpaperImageURL = (version: string) => `/api/v1/wallpaper/image?v=${encodeURIComponent(version)}`;
 export const listProfiles = async () => (await request<{items: Profile[]}>("/api/v1/profiles")).items;
 // A version names one picture for good, so the browser keeps it cached.
 export const avatarURL = (userId: string, version: string) => `/api/v1/users/${encodeURIComponent(userId)}/avatar?v=${encodeURIComponent(version)}`;

@@ -1,9 +1,12 @@
-import { Clapperboard, Monitor, Moon } from "lucide-react";
+import { Clapperboard, ImagePlus, Monitor, Moon, RotateCcw, Scaling } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { readLocalDisplay, updateLocalDisplay } from "../api";
+import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperStyle, type Wallpaper, type WallpaperStyle } from "../api";
 import { localConsoleScreenSaverIdleMs } from "../LocalConsoleScreenSaver";
+import { publishWallpaper, useWallpaper, wallpaperPicture } from "../wallpaper";
+import { DesktopPreview } from "./DesktopPreview";
 import { Banner, Group, IconTile, PageHeader, messageOf } from "./parts";
+import { WallpaperDialog } from "./WallpaperDialog";
 import "./personalization.css";
 
 const saverDelayMinutes = localConsoleScreenSaverIdleMs / 60_000;
@@ -15,54 +18,136 @@ const sleepChoices: Array<{ minutes: number; label: string }> = [
   { minutes: 0, label: "从不" },
 ];
 
+const styleChoices: Array<{ style: WallpaperStyle; label: string; detail: string }> = [
+  { style: "fill", label: "填充", detail: "保持比例铺满桌面，裁去多出的部分" },
+  { style: "fit", label: "适应", detail: "完整显示整张图片，空白处为深蓝色" },
+  { style: "stretch", label: "拉伸", detail: "拉到桌面的宽和高，比例可能改变" },
+  { style: "center", label: "居中", detail: "按图片原始大小居中显示" },
+  { style: "tile", label: "平铺", detail: "按图片原始大小重复铺满桌面" },
+];
+
 function minutesText(minutes: number): string {
   return minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
 }
 
-// PersonalizationSection is Settings → 个性化. The screen attached to the NAS
-// is shared by the household, so only administrators change it.
-export function PersonalizationSection({ isAdmin }: { isAdmin: boolean }) {
-  const [sleepAfter, setSleepAfter] = useState<number>();
-  const [saving, setSaving] = useState(false);
+// PersonalizationSection is Settings → 个性化, shown to administrators only:
+// the wallpaper and the screen attached to the NAS are the same for the whole
+// household.
+export function PersonalizationSection() {
   const [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    readLocalDisplay()
-      .then((display) => { if (active) setSleepAfter(display.sleepAfterMinutes); })
-      .catch((caught: unknown) => { if (active) setError(messageOf(caught)); });
-    return () => { active = false; };
-  }, []);
-  const choose = async (minutes: number) => {
-    if (sleepAfter === undefined || minutes === sleepAfter) return;
-    const previous = sleepAfter;
-    setSleepAfter(minutes); setSaving(true); setError("");
-    try { setSleepAfter((await updateLocalDisplay(minutes)).sleepAfterMinutes); }
-    catch (caught) { setSleepAfter(previous); setError(messageOf(caught)); }
-    finally { setSaving(false); }
-  };
   return (
     <>
-      <PageHeader title="个性化" subtitle="桌面外观与本机屏幕" />
+      <PageHeader title="个性化" subtitle="全家共用的桌面壁纸与本机屏幕" />
       {error && <Banner tone="error" onClose={() => setError("")}>{error}</Banner>}
-      <Group title="本机屏幕" footnote="本机屏幕是直接接在这台 NAS 上的显示器，用手机或电脑浏览器访问时不会息屏。黑屏时视频停止播放，显示器背光仍按它自己的亮度点亮。">
-        <div className="set-row pz-row">
-          <IconTile tone="sleep" icon={Moon} />
-          <div className="set-row-text">
-            <span>息屏</span>
-            <small>{isAdmin ? "屏保播放多久后让屏幕变黑" : "由管理员设置"}</small>
+      <WallpaperGroup onError={setError} />
+      <LocalScreenGroup onError={setError} />
+    </>
+  );
+}
+
+function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
+  const wallpaper = useWallpaper();
+  const [busy, setBusy] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  // A change shows at once; a failed one puts the previous wallpaper back.
+  const run = async (action: () => Promise<Wallpaper>, previous?: Wallpaper) => {
+    setBusy(true); onError("");
+    try { publishWallpaper(await action()); }
+    catch (caught) { if (previous) publishWallpaper(previous); onError(messageOf(caught)); }
+    finally { setBusy(false); }
+  };
+  const chooseStyle = (style: WallpaperStyle) => {
+    if (!wallpaper || style === wallpaper.style) return;
+    publishWallpaper({ ...wallpaper, style });
+    void run(() => updateWallpaperStyle(style), wallpaper);
+  };
+  const custom = wallpaper?.image;
+  const style = wallpaper?.style ?? "fill";
+  return (
+    <>
+      <Group title="桌面壁纸" footnote="壁纸对所有账号的桌面生效，包括本机屏幕。图片上传前会缩小到长边不超过 3840 像素，不带拍摄位置等信息。">
+        <div className="pz-wallpaper">
+          <DesktopPreview picture={wallpaper && wallpaperPicture(wallpaper)} style={style} label="当前桌面壁纸的预览" />
+          <div className="pz-wallpaper-side">
+            <div className="pz-wallpaper-name">
+              <strong>{wallpaper === undefined ? "正在读取…" : custom ? "自定义图片" : "默认壁纸"}</strong>
+              <small>{custom ? `${custom.width} × ${custom.height} 像素` : "A-NAS 内置的深蓝抽象壁纸"}</small>
+            </div>
+            {confirmingReset ? (
+              <div className="pz-confirm" role="group" aria-label="确认恢复默认壁纸">
+                <p>所有桌面会换回默认壁纸，样式改回“填充”。</p>
+                <div>
+                  <button className="set-btn" onClick={() => setConfirmingReset(false)} disabled={busy}>取消</button>
+                  <button className="set-btn danger" onClick={() => { setConfirmingReset(false); void run(resetWallpaper); }} disabled={busy}>恢复默认</button>
+                </div>
+              </div>
+            ) : (
+              <div className="pz-wallpaper-actions">
+                <button className="set-btn primary" onClick={() => setChoosing(true)} disabled={busy || !wallpaper}><ImagePlus />更换图片…</button>
+                {custom && <button className="set-btn" onClick={() => setConfirmingReset(true)} disabled={busy}><RotateCcw />恢复默认</button>}
+              </div>
+            )}
           </div>
-          <div className="pz-segmented" role="radiogroup" aria-label="息屏时间" aria-busy={saving || undefined}>
-            {sleepChoices.map(({ minutes, label }) => (
-              <button key={minutes} type="button" role="radio" aria-checked={sleepAfter === minutes}
-                disabled={!isAdmin || saving || sleepAfter === undefined} onClick={() => void choose(minutes)}>
-                {label}
+        </div>
+        <div className="set-row pz-row">
+          <IconTile tone="personalize" icon={Scaling} />
+          <div className="set-row-text">
+            <span>样式</span>
+            <small>{styleChoices.find((choice) => choice.style === style)?.detail}</small>
+          </div>
+          <div className="pz-segmented" role="radiogroup" aria-label="壁纸样式" aria-busy={busy || undefined}>
+            {styleChoices.map((choice) => (
+              <button key={choice.style} type="button" role="radio" aria-checked={wallpaper?.style === choice.style}
+                disabled={busy || !wallpaper} onClick={() => chooseStyle(choice.style)}>
+                {choice.label}
               </button>
             ))}
           </div>
         </div>
-        {sleepAfter !== undefined && <SleepTimeline sleepAfter={sleepAfter} />}
       </Group>
+      {choosing && <WallpaperDialog style={style} onClose={() => setChoosing(false)} onSaved={(next) => { publishWallpaper(next); setChoosing(false); }} />}
     </>
+  );
+}
+
+function LocalScreenGroup({ onError }: { onError: (message: string) => void }) {
+  const [sleepAfter, setSleepAfter] = useState<number>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let active = true;
+    readLocalDisplay()
+      .then((display) => { if (active) setSleepAfter(display.sleepAfterMinutes); })
+      .catch((caught: unknown) => { if (active) onError(messageOf(caught)); });
+    return () => { active = false; };
+  }, [onError]);
+  const choose = async (minutes: number) => {
+    if (sleepAfter === undefined || minutes === sleepAfter) return;
+    const previous = sleepAfter;
+    setSleepAfter(minutes); setSaving(true); onError("");
+    try { setSleepAfter((await updateLocalDisplay(minutes)).sleepAfterMinutes); }
+    catch (caught) { setSleepAfter(previous); onError(messageOf(caught)); }
+    finally { setSaving(false); }
+  };
+  return (
+    <Group title="本机屏幕" footnote="本机屏幕是直接接在这台 NAS 上的显示器，用手机或电脑浏览器访问时不会息屏。黑屏时视频停止播放，显示器背光仍按它自己的亮度点亮。">
+      <div className="set-row pz-row">
+        <IconTile tone="sleep" icon={Moon} />
+        <div className="set-row-text">
+          <span>息屏</span>
+          <small>屏保播放多久后让屏幕变黑</small>
+        </div>
+        <div className="pz-segmented" role="radiogroup" aria-label="息屏时间" aria-busy={saving || undefined}>
+          {sleepChoices.map(({ minutes, label }) => (
+            <button key={minutes} type="button" role="radio" aria-checked={sleepAfter === minutes}
+              disabled={saving || sleepAfter === undefined} onClick={() => void choose(minutes)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {sleepAfter !== undefined && <SleepTimeline sleepAfter={sleepAfter} />}
+    </Group>
   );
 }
 

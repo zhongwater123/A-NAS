@@ -1522,7 +1522,7 @@ describe("Settings", () => {
     const settings = screen.getByRole("dialog", { name: "设置" });
     const sections = within(settings).getByRole("navigation", { name: "设置分区" });
     const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
-    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "任务管理器", "存储", "个性化", "日志"]);
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "任务管理器", "存储", "日志"]);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
     expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();

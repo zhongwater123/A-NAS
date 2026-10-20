@@ -43,7 +43,7 @@ const systemSections: Array<{ id: SettingsSection; label: string; icon: LucideIc
   { id: "overview", label: "概览", icon: LayoutDashboard, tone: "overview" },
   { id: "task-manager", label: "任务管理器", icon: Activity, tone: "security" },
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
-  { id: "personalization", label: "个性化", icon: Palette, tone: "personalize" },
+  { id: "personalization", label: "个性化", icon: Palette, tone: "personalize", adminOnly: true },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
   { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
   { id: "terminal", label: "终端", icon: SquareTerminal, tone: "terminal", adminOnly: true },
@@ -90,7 +90,7 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
 }) {
   const { user } = session;
   const isAdmin = user.role === "admin";
-  const current = (section === "users" || section === "terminal") && !isAdmin ? "overview" : section;
+  const current = (section === "users" || section === "terminal" || section === "personalization") && !isAdmin ? "overview" : section;
   const [editingPassword, setEditingPassword] = useState(false);
   // "登录记录" in My account opens the logs on sign-ins.
   const [logsPreset, setLogsPreset] = useState<LogsPreset>();
@@ -124,7 +124,7 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
               onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
             {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
             {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
-            {current === "personalization" && <PersonalizationSection isAdmin={isAdmin} />}
+            {current === "personalization" && <PersonalizationSection />}
             {current === "users" && <UsersSection currentUser={user} onChangeOwnPassword={() => { onSectionChange("account"); setEditingPassword(true); }} />}
             {current === "task-manager" && <TaskManagerSection />}
             {current === "logs" && <LogsSection session={session} preset={logsPreset} />}

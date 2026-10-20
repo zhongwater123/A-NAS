@@ -71,6 +71,7 @@ import { nameErrorText, nameProblem } from "./fileNames";
 import { accountErrorText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { fileTypeLabel, isPreviewableImage, isVideoFile, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { useWallpaper, wallpaperBackground } from "./wallpaper";
 import { MediaCenter } from "./media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
 import { PhotosGlyph } from "./PhotosGlyph";
@@ -321,6 +322,7 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 
 function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogout: () => void; onUserChange: (user: User) => void }) {
   const host = useHostState(true);
+  const wallpaper = useWallpaper();
   // Names and avatars of every account; read again whenever the page comes
   // back into view, so someone else's new nickname shows up without a reload.
   useEffect(() => {
@@ -413,8 +415,9 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
   };
 
   return (
-    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}><main className="desktop-shell" onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
-      <div className="wallpaper-glow" />
+    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}><main className="desktop-shell" style={wallpaperBackground(wallpaper)} onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
+      {/* The glow belongs to the built-in wallpaper; it would wash out a chosen picture. */}
+      {wallpaper && !wallpaper.image && <div className="wallpaper-glow" />}
 
       <SystemRail
         apps={desktopApps}
