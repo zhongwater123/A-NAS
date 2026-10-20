@@ -1,6 +1,6 @@
 import {
   Activity, AtSign, Camera, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
-  LayoutDashboard, LogOut, Monitor, Network, PenLine, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
+  LayoutDashboard, LogOut, Monitor, Network, Palette, PenLine, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 
@@ -17,12 +17,13 @@ import { displayName, fullName, usePeople } from "./people";
 import { AvatarDialog } from "./settings/AvatarDialog";
 import { describeFinding } from "./settings/health";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
+import { PersonalizationSection } from "./settings/PersonalizationSection";
 import { TerminalSection } from "./settings/TerminalSection";
 import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
 import type { HostStateView } from "./useHostState";
 
-export type SettingsSection = "account" | "overview" | "storage" | "users" | "logs" | "terminal" | "task-manager";
+export type SettingsSection = "account" | "overview" | "storage" | "personalization" | "users" | "logs" | "terminal" | "task-manager";
 
 type PlanStep = "plan" | "confirm" | "execute";
 
@@ -42,6 +43,7 @@ const systemSections: Array<{ id: SettingsSection; label: string; icon: LucideIc
   { id: "overview", label: "概览", icon: LayoutDashboard, tone: "overview" },
   { id: "task-manager", label: "任务管理器", icon: Activity, tone: "security" },
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
+  { id: "personalization", label: "个性化", icon: Palette, tone: "personalize" },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
   { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
   { id: "terminal", label: "终端", icon: SquareTerminal, tone: "terminal", adminOnly: true },
@@ -122,6 +124,7 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
               onShowSignIns={() => { setLogsPreset({ category: "session", id: Date.now() }); navigate("logs"); }} />}
             {current === "overview" && <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => navigate("storage")} />}
             {current === "storage" && <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />}
+            {current === "personalization" && <PersonalizationSection isAdmin={isAdmin} />}
             {current === "users" && <UsersSection currentUser={user} onChangeOwnPassword={() => { onSectionChange("account"); setEditingPassword(true); }} />}
             {current === "task-manager" && <TaskManagerSection />}
             {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
