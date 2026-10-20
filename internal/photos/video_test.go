@@ -273,6 +273,14 @@ func TestTheAssistantDoesNotSeeVideos(t *testing.T) {
 	if _, err := s.Get(ctx, assistant, video.ID); !errors.Is(err, photos.ErrNotFound) {
 		t.Fatalf("assistant Get(video) error = %v", err)
 	}
+	// No pixels of a video reach a model: the assistant cannot find it, and
+	// a video has no view for anyone.
+	if _, err := s.View(ctx, assistant, video.ID); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("assistant View(video) error = %v", err)
+	}
+	if _, err := s.View(ctx, alice, video.ID); !errors.Is(err, photos.ErrNoView) {
+		t.Fatalf("View(video) error = %v", err)
+	}
 	onlyPhoto := func(what string, page photos.Page, err error) {
 		t.Helper()
 		if err != nil || len(page.Assets) != 1 || page.Assets[0].ID != photo.ID {
