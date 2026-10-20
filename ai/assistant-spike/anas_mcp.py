@@ -152,7 +152,7 @@ def failed(error: PhotoError) -> CallToolResult:
 
 
 PHOTO_NOTE = ("只读。结果里没有照片画面，只有名称、拍摄时间（taken）、所在图库（我的／共享）、"
-              "本人加的标签与相册；没有拍摄地点，也认不出照片里是谁。要看画面用 look_at_photo。回答中提到某张照片时写成 "
+              "本人加的标签与相册；拍摄地点与相机等原图信息用 photo_details 查，认不出照片里是谁。要看画面用 look_at_photo。回答中提到某张照片时写成 "
               "[名称](照片的 id)，id 原样照抄（它本身以 photo: 开头），窗口会显示它的缩略图。")
 
 
@@ -209,12 +209,16 @@ def browse_photos(month: str = "", album_id: str = "", tag: str = "", page: str 
 
 
 @server.tool(annotations=READ_ONLY, structured_output=False, description=(
-    "一张照片的详细信息：在搜索与浏览结果之外只多出尺寸、标签与所在相册；没有地点、人物或画面内容，"
+    "一张照片的详细信息：尺寸、标签、所在相册，以及原图记录的全部元数据（exif：相机、镜头、曝光、拍摄时间等；"
+    "location：相机记下的拍摄位置，经纬度与海拔，没有记下就没有）。经纬度可以换算成大致地点；没有人物与画面内容，"
     "不要为找这些逐张查看。" + PHOTO_NOTE))
 def photo_details(photo_id: str):
+    quoted = urllib.parse.quote(photo_id, safe='')
     try:
-        asset = photos(f"/assets/{urllib.parse.quote(photo_id, safe='')}")
+        asset = photos(f"/assets/{quoted}")
         data = photo(asset, libraries())
+        if asset.get("mediaType", "").startswith("image/"):
+            data.update(photos(f"/assets/{quoted}/metadata"))
     except PhotoError as error:
         return failed(error)
     data.update(width=asset["width"], height=asset["height"], bytes=asset["sizeBytes"])

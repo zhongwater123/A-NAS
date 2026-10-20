@@ -54,6 +54,8 @@ check "a session token sent along changes nothing" fail "not_found" -- inside al
 check "no thumbnails through the assistant socket" fail "not_found" -- inside alice python3 "$peer" "$bound" thumbnail "$alice_beach"
 check "a photo's view, for the model to look at, is a JPEG" ok "image/jpeg" -- inside alice python3 "$peer" "$bound" view "$alice_beach"
 check "and the view of bob's private photo is out of reach" fail "not_found" -- inside alice python3 "$peer" "$bound" view "$bob_beach"
+check "a photo's metadata, as its original records it" ok "exif=\['exif', 'gps', 'ifd0'\]" -- inside alice python3 "$peer" "$bound" metadata "$alice_beach"
+check "and bob's private photo's is out of reach" fail "not_found" -- inside alice python3 "$peer" "$bound" metadata "$bob_beach"
 check "no renaming through the assistant socket" fail "not_found" -- inside alice python3 "$peer" "$bound" rename "$alice_beach"
 check "the photo service's own session socket is out of reach" unreachable -- inside alice python3 "$peer" /run/a-nas-photos/photos.sock --session seed-alice libraries
 check "the assistant socket's real path is out of reach" unreachable -- inside alice python3 "$peer" "$hidden" libraries
