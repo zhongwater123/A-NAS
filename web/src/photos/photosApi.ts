@@ -18,8 +18,10 @@ export interface PhotoAsset {
   libraryId: string;
   directoryId?: string;
   name: string;
-  mediaType: "image/jpeg" | "image/png" | "image/heic";
+  mediaType: "image/jpeg" | "image/png" | "image/heic" | `video/${string}`;
   motion?: { kind: "live-photo" | "motion-photo"; duration: number };
+  // Set for a video, which plays in the viewer and takes no part in local AI.
+  video?: { duration: number };
   // The still of an Apple Live Photo that came without its MOV; uploading
   // the MOV later completes it.
   liveVideoMissing?: boolean;
@@ -71,7 +73,8 @@ export interface PhotoObjectsFound { words: string[]; detected: number; undetect
 // results then.
 export interface PhotoSimilarPage extends PhotoPage { ready: boolean }
 // A month of a library's timeline in the device's time zone (YYYY-MM).
-export interface PhotoMonth { month: string; photos: number }
+// photos counts the month's photos and videos; videos the videos among them.
+export interface PhotoMonth { month: string; photos: number; videos?: number }
 // An AI cluster: the photos local AI is sure show a label. Clusters are shown
 // on their own and never take part in search.
 export interface PhotoLabelCount { id: string; name: string; category: string; photos: number; coverId: string }
@@ -153,11 +156,14 @@ export const removeFromPerson = (personId: string, assetId: string) => request<v
 export const assignFace = (assetId: string, occurrenceId: string, who: { personId: string } | { name: string }) =>
   request<PhotoAsset>(`${base}/assets/${id(assetId)}/people/${id(occurrenceId)}`, json("PUT", who), true);
 export const avatarURL = (occurrenceId: string) => `${base}/occurrences/${id(occurrenceId)}/avatar`;
+// An original uploaded on its own becomes a photo or a video; a Live Photo's
+// MOV whose stills in the library wait for it completes them instead.
+export type PhotoUpload = PhotoAsset | { completed: PhotoAsset[] };
 export function uploadPhoto(libraryId: string, file: File, onProgress: (fraction: number) => void = () => undefined, signal?: AbortSignal, motion?: File) {
   const body = new FormData();
   body.set("file", file);
   if (motion) body.set("motion", motion);
-  return uploadForm<PhotoAsset>(`${base}/libraries/${id(libraryId)}/${motion ? "live-photos" : "uploads"}`, body, onProgress, signal);
+  return uploadForm<PhotoUpload>(`${base}/libraries/${id(libraryId)}/${motion ? "live-photos" : "uploads"}`, body, onProgress, signal);
 }
 export const getPhoto = (assetId: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`);
 export const renamePhoto = (assetId: string, name: string) => request<PhotoAsset>(`${base}/assets/${id(assetId)}`, json("PATCH", { name }), true);
@@ -184,8 +190,9 @@ export const thumbnailURL = (assetId: string) => `${base}/assets/${id(assetId)}/
 
 export const originalURL = (assetId: string, download = false) => `${base}/assets/${id(assetId)}/original${download ? "?download=1" : ""}`;
 // The grid shows the original until its thumbnail is ready; JPEG and PNG
-// originals display directly.
-export const displayURL = (asset: PhotoAsset) => asset.mediaType === "image/heic" ? `${base}/assets/${id(asset.id)}/preview` : originalURL(asset.id);
+// originals display directly, HEIC as a compatible JPEG and a video as a
+// frame of it.
+export const displayURL = (asset: PhotoAsset) => asset.mediaType === "image/heic" || asset.video ? `${base}/assets/${id(asset.id)}/preview` : originalURL(asset.id);
 // A Live Photo's MOV uploaded on its own completes the photos of the library
 // whose still came without it, matched by Apple's identifier; the result
 // lists them.
@@ -195,5 +202,14 @@ export async function attachLiveVideo(libraryId: string, file: File, onProgress:
   return (await uploadForm<{ items: PhotoAsset[] }>(`${base}/libraries/${id(libraryId)}/live-videos`, body, onProgress)).items;
 }
 export const motionURL = (assetId: string) => `${base}/assets/${id(assetId)}/motion/play`;
+// How this browser plays a video: the original itself, or a stream the NAS
+// converts it into, whose type is mime.
+export interface VideoPlayback { mode: "direct" | "remux" | "transcode"; duration: number; mime?: string }
+export const getVideoPlayback = (assetId: string, caps: string) =>
+  request<VideoPlayback>(`${base}/assets/${id(assetId)}/video/playback?${new URLSearchParams({ caps })}`);
+export const videoOriginalURL = (assetId: string) => `${base}/assets/${id(assetId)}/video/original`;
+// A converted stream cannot seek; a player asks for it again from start.
+export const videoStreamURL = (assetId: string, start: number, caps: string, transcode: boolean) =>
+  `${base}/assets/${id(assetId)}/video/stream?${new URLSearchParams({ start: start.toFixed(3), caps, ...(transcode ? { transcode: "1" } : {}) })}`;
 export const downloadURL = (assetId: string) => `${base}/assets/${id(assetId)}/download`;
 export const previewURL = (asset: PhotoAsset) => asset.thumbnail === "ready" ? thumbnailURL(asset.id) : displayURL(asset);

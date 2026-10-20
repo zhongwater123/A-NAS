@@ -156,9 +156,9 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM scans WHERE object_id = ? AND derivation = ?)
   AND EXISTS (SELECT 1 FROM derived_files WHERE object_id = ? AND derivation = ?)
-  AND `+inPeopleLibrary("?")+`
+  AND `+inPeopleLibrary("?")+` AND `+notVideo("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
-		objectID, facesDerivation, now, now, objectID, facesDerivation, objectID, thumbnailDerivation, objectID)
+		objectID, facesDerivation, now, now, objectID, facesDerivation, objectID, thumbnailDerivation, objectID, objectID)
 	return err
 }
 

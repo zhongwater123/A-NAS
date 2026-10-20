@@ -84,4 +84,19 @@ describe("Slideshow", () => {
     expect(shown()).toBe("c.jpg");
     expect(screen.queryByText("放完了")).toBeNull();
   });
+
+  it("passes over videos, starting at the photo after one", async () => {
+    const video = (id: string): PhotoAsset => ({ ...photo(id), name: `${id}.mp4`, mediaType: "video/mp4", video: { duration: 12 } });
+    render(<Slideshow assets={[photo("a"), video("v"), photo("b"), video("w")]} startId="v" total={4} more={false} onReveal={() => undefined} onExit={() => undefined} />);
+    expect(shown()).toBe("b.jpg");
+    expect(screen.getByText(/2 \/ 2/)).toBeTruthy();
+    await elapse(turn);
+    expect(screen.getByText("放完了")).toBeTruthy();
+    expect(screen.getByText("共 2 张照片")).toBeTruthy();
+
+    // Videos alone leave nothing to show.
+    const onExit = vi.fn();
+    render(<Slideshow assets={[video("x")]} startId="x" more={false} onReveal={() => undefined} onExit={onExit} />);
+    expect(onExit).toHaveBeenCalledWith("x");
+  });
 });

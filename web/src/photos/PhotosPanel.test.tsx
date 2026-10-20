@@ -171,7 +171,7 @@ describe("PhotosPanel timeline", () => {
     const app = document.querySelector(".ph-app") as HTMLElement;
     const files = [new File(["jpeg"], "cat.jpg", { type: "image/jpeg" }), new File(["text"], "notes.txt", { type: "text/plain" })];
     fireEvent.dragEnter(app, { dataTransfer: { types: ["Files"], files } });
-    expect(screen.getByText("照片会保存到我的图库")).toBeTruthy();
+    expect(screen.getByText("照片和视频会保存到我的图库")).toBeTruthy();
     fireEvent.drop(app, { dataTransfer: { types: ["Files"], files } });
 
     expect(await screen.findByRole("button", { name: "查看 cat.jpg" })).toBeTruthy();
@@ -182,9 +182,9 @@ describe("PhotosPanel timeline", () => {
     // The text file never left the browser; the queue says why.
     expect(screen.getByText("1 张未能上传")).toBeTruthy();
     // It never appears in the grid either.
-    expect(screen.queryByText("支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV")).toBeNull();
+    expect(screen.queryByText("支持 JPEG、PNG、HEIC 照片与 MP4、MOV 等常见视频")).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "展开上传队列" }));
-    expect(screen.getByText("支持 JPEG、PNG 和 HEIC；Live Photo 请同时选择同名照片与 MOV")).toBeTruthy();
+    expect(screen.getByText("支持 JPEG、PNG、HEIC 照片与 MP4、MOV 等常见视频")).toBeTruthy();
   });
 });
 
@@ -194,9 +194,9 @@ describe("PhotosPanel Live Photos", () => {
     vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:preview", revokeObjectURL: () => undefined }));
     let stored: PhotoAsset[] = [];
     FakeUpload.respond = (upload) => {
-      if (upload.url.endsWith("/live-videos")) {
+      if ((upload.body?.get("file") as File | null)?.name.endsWith(".MOV")) {
         stored = stored.map((photo) => ({ ...photo, liveVideoMissing: undefined, motion: { kind: "live-photo", duration: 2.5 } }));
-        return { status: 200, body: { items: stored } };
+        return { status: 200, body: { completed: stored } };
       }
       const still = asset("photo:live", { name: "IMG_1.HEIC", mediaType: "image/heic", liveVideoMissing: true });
       stored = [still];
@@ -225,10 +225,10 @@ describe("PhotosPanel Live Photos", () => {
     expect(screen.getByText(/HEIC/, { selector: "dd" })).toBeTruthy();
     await user.keyboard("{Escape}");
 
-    // The MOV on its own completes it instead of being refused.
+    // The MOV on its own is uploaded like any file and completes it.
     drop(new File(["mov"], "IMG_1.MOV", { type: "video/quicktime" }));
     expect(await screen.findByText("已为 1 张照片补上实况视频")).toBeTruthy();
-    expect(FakeUpload.sent.at(-1)?.url).toBe("/api/v1/photos/libraries/library%3Amine/live-videos");
+    expect(FakeUpload.sent.at(-1)?.url).toBe("/api/v1/photos/libraries/library%3Amine/uploads");
     expect(await screen.findByText("动态照片", { selector: ".ph-motion-badge" })).toBeTruthy();
   });
 
@@ -254,6 +254,82 @@ describe("PhotosPanel Live Photos", () => {
     expect(FakeUpload.sent[0].url).toBe("/api/v1/photos/libraries/library%3Amine/live-videos");
     expect(await screen.findByRole("button", { name: "播放动态照片" })).toBeTruthy();
     expect(screen.queryByText("实况照片只上传了静态画面")).toBeNull();
+  });
+});
+
+describe("PhotosPanel videos", () => {
+  const clip = (id: string, overrides: Partial<PhotoAsset> = {}) =>
+    asset(id, { name: `${id}.mp4`, mediaType: "video/mp4", video: { duration: 83.4 }, width: 1080, height: 1920, ...overrides });
+
+  it("uploads a video, shows it in the grid with its length and plays it in the viewer", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUpload);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:preview", revokeObjectURL: () => undefined }));
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) { this.dispatchEvent(new Event("pause")); });
+    let stored: PhotoAsset[] = [];
+    FakeUpload.respond = () => { stored = [clip("photo:beach")]; return { status: 201, body: stored[0] }; };
+    const fetchMock = serve(
+      (url) => url.startsWith("/api/v1/photos/assets/photo%3Abeach/video/playback?") ? json({ mode: "direct", duration: 83.4 }) : undefined,
+      (url) => url === "/api/v1/photos/assets/photo%3Abeach" ? json(stored[0]) : undefined,
+      timeline(privateLibrary.id, () => stored),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    expect(await screen.findByText("把照片拖到这里")).toBeTruthy();
+    const app = document.querySelector(".ph-app") as HTMLElement;
+    const files = [new File(["mp4"], "beach.mp4", { type: "video/mp4" })];
+    fireEvent.dragEnter(app, { dataTransfer: { types: ["Files"], files } });
+    fireEvent.drop(app, { dataTransfer: { types: ["Files"], files } });
+
+    expect(await screen.findByText("视频已保存到我的图库")).toBeTruthy();
+    expect(FakeUpload.sent[0].url).toBe("/api/v1/photos/libraries/library%3Amine/uploads");
+    expect(await screen.findByText("1:23", { selector: ".ph-tile-video" })).toBeTruthy();
+
+    await openPhoto(user, "photo:beach.mp4");
+    const viewer = await screen.findByRole("dialog", { name: "查看 photo:beach.mp4" });
+    const controls = await within(viewer).findByRole("toolbar", { name: "视频控制" });
+    const media = viewer.querySelector("video") as HTMLVideoElement;
+    await waitFor(() => expect(media.getAttribute("src")).toBe("/api/v1/photos/assets/photo%3Abeach/video/original"));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/v1/photos/assets/photo%3Abeach/video/playback?caps="))).toBe(true);
+    // A video has nothing alike to find and no zoom.
+    expect(within(viewer).queryByRole("button", { name: "找相似" })).toBeNull();
+    expect(controls.querySelector(".ph-video-time")?.textContent).toBe("0:00 / 1:23");
+    fireEvent(media, new Event("loadedmetadata"));
+    await waitFor(() => expect(play).toHaveBeenCalled());
+    expect(await within(controls).findByRole("button", { name: "暂停" })).toBeTruthy();
+    // The space bar pauses the video instead of starting a slideshow.
+    await user.keyboard(" ");
+    expect(await within(controls).findByRole("button", { name: "播放" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "幻灯片" })).toBeNull();
+    const showInfo = screen.queryByRole("button", { name: "显示信息" });
+    if (showInfo) await user.click(showInfo);
+    expect(await screen.findByText("1 分 23 秒")).toBeTruthy();
+    expect(screen.getByText("1080 × 1920 · 1080p")).toBeTruthy();
+  });
+
+  it("converts what the browser cannot play and falls back when the original fails", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
+    serve(
+      (url) => url.startsWith("/api/v1/photos/assets/photo%3Aold/video/playback?") ? json({ mode: "direct", duration: 20 }) : undefined,
+      timeline(privateLibrary.id, () => [clip("photo:old", { mediaType: "video/quicktime", video: { duration: 20 } })]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:old.mp4");
+    const viewer = await screen.findByRole("dialog", { name: "查看 photo:old.mp4" });
+    const media = viewer.querySelector("video") as HTMLVideoElement;
+    await waitFor(() => expect(media.getAttribute("src")).toBe("/api/v1/photos/assets/photo%3Aold/video/original"));
+    // jsdom has no Media Source Extensions: the stream plays as it comes.
+    fireEvent(media, new Event("error"));
+    await waitFor(() => expect(media.getAttribute("src")).toMatch(/^\/api\/v1\/photos\/assets\/photo%3Aold\/video\/stream\?start=0\.000&caps=.*&transcode=1$/));
+    expect(await within(viewer).findByText("转码播放")).toBeTruthy();
+    // A second failure is reported, with the original still to download.
+    fireEvent(media, new Event("error"));
+    expect(await within(viewer).findByText("视频暂时无法播放")).toBeTruthy();
+    expect(within(viewer).getByRole("button", { name: "下载原件" })).toBeTruthy();
   });
 });
 

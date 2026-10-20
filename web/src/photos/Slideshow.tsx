@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, X } from "lucide-react";
-import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { dayLabel, momentOf, reducedMotion } from "./model";
@@ -17,8 +17,8 @@ const slowDecode = 1200;
 const decodeLimit = 15000;
 
 interface Props {
-  // The photos of the view the slideshow started from, in its order; the
-  // list grows while the view loads more.
+  // The photos and videos of the view the slideshow started from, in its
+  // order; the list grows while the view loads more. Only photos are shown.
   assets: PhotoAsset[];
   startId: string;
   // All photos of the view, when known.
@@ -54,9 +54,14 @@ function prepare(prepared: Prepared, asset: PhotoAsset) {
 // slideDelay once shown, the next is decoded before it fades in over the
 // last, and the controls appear only while the pointer moves. It runs past
 // the photos loaded so far by keeping the view below at the photo shown.
-export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Props) {
+// Videos are passed over; started from one, it starts at the photo after it.
+export function Slideshow({ assets: all, startId, total, more, onReveal, onExit }: Props) {
   const root = useRef<HTMLDivElement>(null);
-  const [current, setCurrent] = useState<PhotoAsset | undefined>(() => assets.find((asset) => asset.id === startId) ?? assets[0]);
+  const assets = useMemo(() => all.filter((asset) => !asset.video), [all]);
+  const [current, setCurrent] = useState<PhotoAsset | undefined>(() => {
+    const start = Math.max(0, all.findIndex((asset) => asset.id === startId));
+    return all.slice(start).find((asset) => !asset.video) ?? assets[0];
+  });
   const [leaving, setLeaving] = useState<PhotoAsset>();
   const [paused, setPaused] = useState(false);
   const [ended, setEnded] = useState(false);
@@ -67,8 +72,8 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
 
   // Everything the timers act on is read through refs, so that renders of
   // the view below never restart them.
-  const latest = useRef({ assets, current, more, onReveal, onExit });
-  latest.current = { assets, current, more, onReveal, onExit };
+  const latest = useRef({ assets, all, current, more, onReveal, onExit });
+  latest.current = { assets, all, current, more, onReveal, onExit };
   const prepared = useRef<Prepared>(new Map());
   const move = useRef(0);
 
@@ -77,14 +82,14 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
   // go shows the photo delta places away once it is decoded. Moving past the
   // end waits for the view to load more, or ends.
   const go = useCallback(async (delta: number) => {
-    const { assets: list, current: shown, more: loading, onReveal: reveal } = latest.current;
+    const { assets: list, all: loaded, current: shown, more: loading, onReveal: reveal } = latest.current;
     const from = shown ? list.findIndex((asset) => asset.id === shown.id) : -1;
     const target = list[from + delta];
     if (!target) {
       if (delta < 0) return;
-      if (loading && list.length) {
+      if (loading && loaded.length) {
         setAwaitingMore(true);
-        reveal(list[list.length - 1].id);
+        reveal(loaded[loaded.length - 1].id);
       } else setEnded(true);
       return;
     }
@@ -123,14 +128,19 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
     return () => window.clearTimeout(timer);
   }, [current?.id, paused, ended, awaitingMore, go]);
 
-  // At the end of what is loaded, the view below loads the photos after it.
+  // At the end of what is loaded, the view below loads the photos after it,
+  // and past any videos after those.
   useEffect(() => {
     if (!awaitingMore) return;
     if (assets.length > position + 1) { setAwaitingMore(false); void go(1); return; }
     if (!more) { setAwaitingMore(false); setEnded(true); return; }
+    if (all.length) latest.current.onReveal(all[all.length - 1].id);
     const timer = window.setTimeout(() => { setAwaitingMore(false); setEnded(true); }, moreWait);
     return () => window.clearTimeout(timer);
-  }, [awaitingMore, assets.length, more]);
+  }, [awaitingMore, assets.length, all.length, more]);
+
+  // A view of videos alone has nothing to show.
+  useEffect(() => { if (!current) onExit(startId); }, []);
 
   // The controls show while the pointer moves, and stay while paused.
   const idle = useRef(0);
@@ -184,7 +194,9 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
 
   if (!current) return null;
   const moment = momentOf(current);
-  const count = total ?? (more ? undefined : assets.length);
+  // The view's total counts its videos too; without them the count is known
+  // once everything is loaded.
+  const count = !more ? assets.length : all.some((asset) => asset.video) ? undefined : total;
   const shownChrome = controls || paused || ended;
   return createPortal(
     <div

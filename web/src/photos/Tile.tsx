@@ -1,7 +1,8 @@
-import { Check, CircleAlert, Copy, RotateCcw } from "lucide-react";
+import { Check, CircleAlert, Copy, Film, Play, RotateCcw } from "lucide-react";
 import { DragEvent, MouseEvent, PointerEvent, ReactNode, memo, useRef } from "react";
 
 import type { Box, PendingPhoto } from "./layout";
+import { clock } from "./model";
 import { displayURL, previewURL, type PhotoAsset } from "./photosApi";
 
 export const dragType = "application/x-a-nas-photos";
@@ -39,7 +40,7 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
   };
   return (
     <div
-      className={`ph-tile${selected ? " selected" : ""}${selecting ? " selecting" : ""}`}
+      className={`ph-tile${selected ? " selected" : ""}${selecting ? " selecting" : ""}${asset.video ? " video" : ""}`}
       style={{ left: box.left, width: box.width, height: box.height }}
       data-asset-id={asset.id}
       draggable={Boolean(onDragIds)}
@@ -64,10 +65,13 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
           onError={(event) => {
             // A thumbnail reported ready can still be missing until the
             // photo service renders it again; the original shows instead.
+            // A video whose frame cannot be rendered shows that it is one.
             const original = displayURL(asset);
             if (event.currentTarget.getAttribute("src") !== original) event.currentTarget.src = original;
+            else if (asset.video) event.currentTarget.closest(".ph-tile")?.classList.add("no-picture");
           }}
         />
+        {asset.video && <span className="ph-tile-film" aria-hidden="true"><Film /></span>}
       </button>
       <button
         type="button"
@@ -86,18 +90,26 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
       </button>
       {asset.duplicate === "duplicate" && <span className="ph-tile-badge" title="本图库中已有相同照片"><Copy />重复</span>}
       {asset.motion && <span className="ph-motion-badge">动态照片</span>}
+      {asset.video && <span className="ph-tile-video" title={`视频 · ${clock(asset.video.duration)}`}><Play />{clock(asset.video.duration)}</span>}
       {badge}
     </div>
   );
 });
 
-// PendingTile is a photo being uploaded, shown from the file itself.
+// PendingTile is a photo or video being uploaded, shown from the file
+// itself: a video by its first frame, where the browser decodes it.
 export function PendingTile({ box, onRetry }: { box: Box<PendingPhoto>; onRetry: (key: string) => void }) {
   const item = box.item;
   const circumference = 2 * Math.PI * 15;
   return (
-    <div className={`ph-tile ph-pending ${item.state}`} style={{ left: box.left, width: box.width, height: box.height }} title={item.error ?? item.name}>
-      <img src={item.url} alt={item.name} className="loaded" draggable={false} />
+    <div className={`ph-tile ph-pending ${item.state}${item.video ? " video" : ""}`} style={{ left: box.left, width: box.width, height: box.height }} title={item.error ?? item.name}>
+      {item.video ? (
+        <>
+          <span className="ph-tile-film" aria-hidden="true"><Film /></span>
+          <video src={`${item.url}#t=0.1`} aria-label={item.name} className="loaded" muted playsInline preload="metadata" />
+          <span className="ph-tile-video"><Play />视频</span>
+        </>
+      ) : <img src={item.url} alt={item.name} className="loaded" draggable={false} />}
       {item.state === "failed" ? (
         <button type="button" className="ph-pending-failed" aria-label={`重试上传 ${item.name}`} onClick={() => onRetry(item.key)}>
           <CircleAlert /><span>{item.error ?? "上传失败"}</span><small><RotateCcw />重试</small>

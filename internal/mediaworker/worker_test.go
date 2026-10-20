@@ -98,14 +98,17 @@ func TestProbeOutputIsParsed(t *testing.T) {
      "color_transfer": "smpte2084", "side_data_list": [{"side_data_type": "DOVI configuration record"}]},
     {"index": 1, "codec_type": "audio", "codec_name": "alac", "channels": 2, "sample_rate": "96000", "sample_fmt": "s32p",
      "bits_per_raw_sample": "24", "disposition": {"default": 1}, "tags": {"language": "chi"}},
-    {"index": 2, "codec_type": "video", "codec_name": "mjpeg", "disposition": {"attached_pic": 1}}
+    {"index": 2, "codec_type": "video", "codec_name": "mjpeg", "disposition": {"attached_pic": 1}},
+    {"index": 3, "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
+     "side_data_list": [{"side_data_type": "Display Matrix", "displaymatrix": "...", "rotation": -90}]},
+    {"index": 4, "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "tags": {"rotate": "90"}}
   ],
   "format": {"format_name": "mov,mp4,m4a", "duration": "251.480000", "bit_rate": "2100000", "tags": {"title": "晴天", "artist": "周杰伦"}}
 }`))
 	if err != nil {
 		t.Fatalf("ParseProbe() error = %v", err)
 	}
-	if probe.Format.Name != "mov,mp4,m4a" || probe.Format.Duration != 251.48 || probe.Format.Tags["title"] != "晴天" || len(probe.Streams) != 3 {
+	if probe.Format.Name != "mov,mp4,m4a" || probe.Format.Duration != 251.48 || probe.Format.Tags["title"] != "晴天" || len(probe.Streams) != 5 {
 		t.Fatalf("probe = %+v", probe)
 	}
 	video, audio, cover := probe.Streams[0], probe.Streams[1], probe.Streams[2]
@@ -117,6 +120,9 @@ func TestProbeOutputIsParsed(t *testing.T) {
 	}
 	if !cover.AttachedPic {
 		t.Errorf("cover = %+v", cover)
+	}
+	if matrix, tag := probe.Streams[3], probe.Streams[4]; matrix.Rotation != -90 || tag.Rotation != -90 || video.Rotation != 0 {
+		t.Errorf("rotations = %d, %d, %d", matrix.Rotation, tag.Rotation, video.Rotation)
 	}
 	if _, err := ParseProbe([]byte(`{"streams": []}`)); err == nil {
 		t.Fatal("a probe without a container parsed")

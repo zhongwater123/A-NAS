@@ -2,7 +2,7 @@ import { CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react
 import { FormEvent, useState } from "react";
 
 import { formatBytes } from "../bytes";
-import { type Caller, canChange, canChangePeople, formatDateTime, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, sharedLibrary } from "./model";
+import { type Caller, canChange, canChangePeople, durationLabel, formatDateTime, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, sharedLibrary, videoLines } from "./model";
 import { PhotoFaces } from "./People";
 import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
 
@@ -21,7 +21,10 @@ export interface DetailsActions {
   error: (message: string) => void;
 }
 
-const mediaNames: Record<string, string> = { "image/png": "PNG", "image/heic": "HEIC", "image/jpeg": "JPEG" };
+const mediaNames: Record<string, string> = {
+  "image/png": "PNG", "image/heic": "HEIC", "image/jpeg": "JPEG",
+  "video/mp4": "MP4", "video/quicktime": "MOV", "video/3gpp": "3GP", "video/webm": "WebM", "video/x-matroska": "MKV", "video/x-msvideo": "AVI", "video/mp2t": "MTS",
+};
 
 interface Props {
   asset: PhotoAsset;
@@ -32,8 +35,8 @@ interface Props {
   onChanged: (asset: PhotoAsset) => void;
 }
 
-// PhotoDetails is the viewer's side panel: when and what the photo is, who is
-// in it, its tags and its albums.
+// PhotoDetails is the viewer's side panel: when and what the photo or video
+// is, who is in a photo, its tags and its albums.
 export function PhotoDetails({ asset, details, caller, actions, onChanged }: Props) {
   const [tag, setTag] = useState("");
   const [attaching, setAttaching] = useState(false);
@@ -66,6 +69,7 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
     input.click();
   };
   const megapixels = current.width * current.height / 1e6;
+  const video = current.video;
   const tags = details?.tags ?? [];
   const albums = details?.albums ?? [];
 
@@ -73,18 +77,19 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
     <div className="ph-details">
       <div className="ph-details-name">
         <h3>{current.name}</h3>
-        {editable && <button type="button" aria-label="重命名照片" title="重命名" onClick={() => void actions.rename(current).then((renamed) => renamed && onChanged(renamed))}><Pencil /></button>}
+        {editable && <button type="button" aria-label={video ? "重命名视频" : "重命名照片"} title="重命名" onClick={() => void actions.rename(current).then((renamed) => renamed && onChanged(renamed))}><Pencil /></button>}
       </div>
       <p className="ph-details-when">{current.takenAt ? formatDateTime(current.takenAt) : "没有拍摄时间"}</p>
       <dl>
-        {current.width > 0 && <><dt>尺寸</dt><dd>{current.width} × {current.height}{megapixels >= 1 ? ` · ${megapixels.toFixed(1)} MP` : ""}</dd></>}
-        <dt>大小</dt><dd>{formatBytes(current.sizeBytes)} · {mediaNames[current.mediaType] ?? "JPEG"}</dd>
+        {video && <><dt>时长</dt><dd>{durationLabel(video.duration)}</dd></>}
+        {current.width > 0 && <><dt>尺寸</dt><dd>{current.width} × {current.height}{video ? ` · ${videoLines(current.width, current.height)}` : megapixels >= 1 ? ` · ${megapixels.toFixed(1)} MP` : ""}</dd></>}
+        <dt>大小</dt><dd>{formatBytes(current.sizeBytes)} · {mediaNames[current.mediaType] ?? (video ? "视频" : "JPEG")}</dd>
         {current.motion && <><dt>动态</dt><dd>{current.motion.kind === "live-photo" ? "实况照片" : "动态照片"} · {current.motion.duration.toFixed(1)} 秒</dd></>}
         <dt>位置</dt><dd>{libraryName(caller, library)}</dd>
         <dt>导入</dt><dd>{formatDateTime(current.importedAt)}</dd>
-        {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? "本图库中最早导入的一张" : "本图库中已有相同照片"}</dd></>}
+        {current.duplicate && <><dt>重复</dt><dd>{current.duplicate === "first" ? `本图库中最早导入的一${video ? "段" : "张"}` : `本图库中已有相同${video ? "视频" : "照片"}`}</dd></>}
       </dl>
-      {current.alsoKeptBy?.length ? <p className="ph-details-hint">{current.alsoKeptBy.join("、")} 也保存了这张照片。</p> : null}
+      {current.alsoKeptBy?.length ? <p className="ph-details-hint">{current.alsoKeptBy.join("、")} 也保存了这{video ? "段视频" : "张照片"}。</p> : null}
       {current.liveVideoMissing && (
         <section className="ph-details-live" aria-label="实况照片">
           <p><CircleDot />实况照片只上传了静态画面</p>
@@ -93,8 +98,9 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
         </section>
       )}
 
-      <PhotoFaces asset={current} faces={details?.people ?? []} editable={canChangePeople(caller, asset.libraryId)} viewing={actions.viewing}
-        onChanged={onChanged} onOpenPerson={actions.openPerson} onError={actions.error} />
+      {/* Local AI does not look at videos, so they have no people. */}
+      {!video && <PhotoFaces asset={current} faces={details?.people ?? []} editable={canChangePeople(caller, asset.libraryId)} viewing={actions.viewing}
+        onChanged={onChanged} onOpenPerson={actions.openPerson} onError={actions.error} />}
 
       <section aria-label="标签">
         <h4>标签</h4>

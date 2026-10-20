@@ -13,7 +13,7 @@
 - 账号、会话、角色和管理员查看授权由 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 提供，相册服务经 Host Agent 的会话查询接口（`internal/sessionlookup`）确认身份，照片资产权限由 Catalog Policy（`internal/photos/policy.go`）判定。
 - 本地目录 Adapter、临时卷与系统测试只验证契约，不能替代 Experimental NAS 真实数据卷上的断盘和恢复验收（切片 7）。
 - AI 模型已有基线候选，但质量、处理速度、峰值内存、温度和前台影响必须通过代表性图库基准后才能成为发布默认值。
-- RAW、动态照片和视频的完整设备样本矩阵仍需扩充；动态照片已实现边界见[规格](../specs/photo-motion.md)。
+- RAW、动态照片和视频的完整设备样本矩阵仍需扩充；动态照片与普通视频已实现的边界见[动态照片规格](../specs/photo-motion.md)与[相册视频规格](../specs/photo-video.md)。
 
 ## 组件与数据流
 
@@ -53,7 +53,18 @@ anas-photos（a-nas-photos）◄──────┘
 
 首版不为目录表、对象路径、SQLite、OpenVINO 或某个向量扩展建立公共 Interface。真正需要 Adapter 的边界只有外部环境或昂贵依赖：受管存储目录、媒体解码、AI Provider、时钟和 Policy。
 
-HEIC 和动态照片经 `photos.Options.Media` 使用隔离 Media Worker，双原件引用、原子提交、提取视频的存储取舍以及模型输入边界统一记录在[动态照片规格](../specs/photo-motion.md)。
+HEIC、动态照片和普通视频经 `photos.Options.Media` 使用隔离 Media Worker，双原件引用、原子提交、提取视频的存储取舍以及模型输入边界统一记录在[动态照片规格](../specs/photo-motion.md)，普通视频见下面的“视频”。
+
+### 视频
+
+普通视频是照片资产（[规格](../specs/photo-video.md)）：资产、内容对象、重复组、复制、相册、回收站与 Policy 都不区分照片和视频。区别只在内容对象上：
+
+- **识别与导入**：暂存时按前 512 字节识别容器（ISO 媒体与 QuickTime、Matroska/WebM、AVI、MPEG-TS/M2TS），视频按 `MaxVideoBytes`（默认 4 GiB）计限。发布前由 Media Worker 的 `probe` 读出时长、第一条视频轨（尺寸、编码、像素格式、显示矩阵旋转）、第一条音轨的编码和录制时间，必须有可读的视频轨。尺寸按旋转转正后写入 `objects.width/height`，方向记为 1；读出的事实写入 Catalog 第 13 次迁移的 `videos(object_id, duration, info)`，随内容对象级联删除，复制与重复照片共用。
+- **封面**：缩略图任务对视频对象调用 Worker 的 `frame`，取 `min(时长/10, 1)` 秒处的一帧，在那里取不到时取第一帧；FFmpeg 已按显示矩阵转正。查看器的 1600 px 封面按需渲染、不缓存，与 HEIC 预览相同。
+- **AI 排除**：入队向量、检测、人脸（含按图库重新入队）的 SQL 都带 `notVideo` 条件，所以没有任何代码路径能为视频对象排 AI 任务；AI 进度不计视频对象，搜索只按名称与用户标签匹配视频、也不把它们计入“尚未识别完”，找相似对视频返回不存在。成员的 AI 助手（`Principal.Assistant`）读到的时间线、月份计数、相册、标签、搜索与详情都去掉视频（`hiddenVideos`）。
+- **播放**：`VideoPlayback` 按浏览器报告的能力（与影视中心相同的 `caps`）决定直接播放、转封装或转码，规则与影视中心相同；直接播放读 `/video/original`（QuickTime 与 3GP 以 `video/mp4` 返回，浏览器按 MP4 播放），转换经 Worker 的 `stream` 生成分段 MP4，同时最多两路（`streamSlots`），新请求等待 3 秒后返回 `media_busy`。转换由请求持有，断开即取消。
+- **前台活动**：相册服务把每个仍在服务中的用户请求（播放中的视频、长时间上传）都计为前台使用，`Gate.Use` 结束后才开始 5 分钟静默计时。
+- **回滚**：降级到第 12 次迁移前，必须先彻底删除所有视频资产（回收站清空），再删除 `videos` 表并把 `user_version` 设为 12；旧版本不认识视频对象，会把它们当作图片生成缩略图并排入 AI。
 
 ## 持久化与崩溃一致性
 
@@ -173,7 +184,7 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 **M3 人物、格式、导入与发布**
 
 13. 人脸 occurrence 与分图库人物库，猫和狗按个体并入人物库；实施方案见[相册人物与宠物](photo-people.md)（已合并，未部署）。
-14. HEIC 与动态照片的导入、预览、短片播放和静态 AI 输入已实现，见[规格](../specs/photo-motion.md)；GIF、RAW 与普通视频仍待实现。
+14. HEIC 与动态照片的导入、预览、短片播放和静态 AI 输入已实现，见[规格](../specs/photo-motion.md)；普通视频的导入、封面与播放已实现（2026-10-19，[规格](../specs/photo-video.md)，见上文“视频”）；GIF 与 RAW 仍待实现。
 15. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
 16. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。
 17. 账号删除时的图库转移、导出与待删除，私有图库 AI 开关与派生数据清除，备份恢复，以及 4 名成员、20,000 张照片、2,000 个视频的完整验收。
@@ -205,6 +216,7 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 ## 关联
 
 - [动态照片规格与实现](../specs/photo-motion.md)
+- [相册视频规格](../specs/photo-video.md)；代码：[`video.go`](../../internal/photos/video.go)、[`photosapi/video.go`](../../internal/photosapi/video.go)
 
 - [架构总览](OVERVIEW.md)
 - [相册规格](../specs/photo-library.md)

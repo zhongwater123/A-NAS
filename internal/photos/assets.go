@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -24,39 +25,113 @@ type ImportRequest struct {
 	MotionName    string
 }
 
-// Import persists one original and creates its photo asset. It returns only
-// after the original and the Catalog row are durable; nothing here waits for
-// thumbnails or AI.
+// Import persists one original, a photo or a video, and creates its photo
+// asset. It returns only after the original and the Catalog row are
+// durable; nothing here waits for thumbnails or AI.
 func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest) (Asset, error) {
-	name, ok := cleanName(request.Name)
-	if !ok {
-		return Asset{}, ErrInvalidName
-	}
-	lib, err := s.visibleLibrary(ctx, s.db, p, request.LibraryID)
+	name, lib, err := s.importTarget(ctx, p, request)
 	if err != nil {
 		return Asset{}, err
 	}
-	if !canAdd(p, lib) {
-		return Asset{}, ErrForbidden
-	}
-	if err := s.checkDirectory(ctx, s.db, lib, request.DirectoryID); err != nil {
-		return Asset{}, err
-	}
-	staged, err := s.stage(request.Content)
+	staged, err := s.stageOriginal(ctx, request.Content)
 	if err != nil {
 		return Asset{}, err
 	}
 	defer s.discardStaging(staged.name)
-	companion, err := s.prepareMotion(ctx, staged, request)
+	return s.importStaged(ctx, p, lib, name, request, staged)
+}
+
+// UploadResult is what an original uploaded on its own became: a new photo
+// asset or, for a Live Photo's MOV, the photos it completed.
+type UploadResult struct {
+	Asset     *Asset
+	Completed []Asset
+}
+
+// Upload imports an original uploaded on its own. A Live Photo's MOV whose
+// stills in the library are still waiting for it completes them, as
+// AttachLiveVideo does; without such stills it is a video like any other
+// (docs/specs/photo-video.md).
+func (s *Service) Upload(ctx context.Context, p Principal, request ImportRequest) (UploadResult, error) {
+	name, lib, err := s.importTarget(ctx, p, request)
 	if err != nil {
-		return Asset{}, err
+		return UploadResult{}, err
 	}
-	liveID, err := s.stillLiveID(staged.name)
+	staged, err := s.stageOriginal(ctx, request.Content)
 	if err != nil {
-		return Asset{}, err
+		return UploadResult{}, err
 	}
-	if companion != nil {
-		defer s.discardStaging(companion.object.name)
+	defer s.discardStaging(staged.name)
+	if video := staged.video; video != nil && video.liveID != "" && video.clip && strings.EqualFold(filepath.Ext(name), ".mov") {
+		completed, err := s.completeLivePhotos(ctx, p, lib, name, staged, video.liveID, video.duration)
+		if !errors.Is(err, ErrNoLiveStill) {
+			return UploadResult{Completed: completed}, err
+		}
+	}
+	asset, err := s.importStaged(ctx, p, lib, name, request, staged)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{Asset: &asset}, nil
+}
+
+// importTarget checks an import's name and that p may add to its library
+// and directory.
+func (s *Service) importTarget(ctx context.Context, p Principal, request ImportRequest) (string, library, error) {
+	name, ok := cleanName(request.Name)
+	if !ok {
+		return "", library{}, ErrInvalidName
+	}
+	lib, err := s.visibleLibrary(ctx, s.db, p, request.LibraryID)
+	if err != nil {
+		return "", library{}, err
+	}
+	if !canAdd(p, lib) {
+		return "", library{}, ErrForbidden
+	}
+	if err := s.checkDirectory(ctx, s.db, lib, request.DirectoryID); err != nil {
+		return "", library{}, err
+	}
+	return name, lib, nil
+}
+
+// stageOriginal stages an original and reads a video through the Media
+// Worker. The caller discards the staging file.
+func (s *Service) stageOriginal(ctx context.Context, content io.Reader) (stagedObject, error) {
+	staged, err := s.stage(content)
+	if err != nil {
+		return stagedObject{}, err
+	}
+	if isVideoType(staged.mediaType) {
+		if err := s.readVideo(ctx, &staged); err != nil {
+			s.discardStaging(staged.name)
+			return stagedObject{}, err
+		}
+	}
+	return staged, nil
+}
+
+// importStaged publishes a staged original, with a Live Photo's or motion
+// photo's video for a still, and creates its asset.
+func (s *Service) importStaged(ctx context.Context, p Principal, lib library, name string, request ImportRequest, staged stagedObject) (Asset, error) {
+	var companion *motionImport
+	liveID := ""
+	if staged.video != nil {
+		// Only a still has a Live Photo's or motion photo's video.
+		if request.MotionContent != nil {
+			return Asset{}, ErrInvalidMotion
+		}
+	} else {
+		var err error
+		if companion, err = s.prepareMotion(ctx, staged, request); err != nil {
+			return Asset{}, err
+		}
+		if companion != nil {
+			defer s.discardStaging(companion.object.name)
+		}
+		if liveID, err = s.stillLiveID(staged.name); err != nil {
+			return Asset{}, err
+		}
 	}
 
 	s.commitMu.Lock()
@@ -84,11 +159,18 @@ func (s *Service) Import(ctx context.Context, p Principal, request ImportRequest
 		}
 		now := formatTime(s.now())
 		metadata := staged.metadata
+		// A video that so far was only a Live Photo's has no size yet.
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO objects(id, size_bytes, media_type, width, height, orientation, created_at, live_id)
-			 VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET live_id = IFNULL(objects.live_id, excluded.live_id)`,
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET live_id = IFNULL(objects.live_id, excluded.live_id),
+			 width = IIF(objects.width = 0, excluded.width, objects.width), height = IIF(objects.height = 0, excluded.height, objects.height)`,
 			staged.id, staged.size, staged.mediaType, metadata.width, metadata.height, metadata.orientation, now, liveID); err != nil {
 			return err
+		}
+		if staged.video != nil {
+			if err := s.insertVideo(ctx, tx, staged.id, staged.video); err != nil {
+				return err
+			}
 		}
 		var takenAt any
 		if !metadata.takenAt.IsZero() {
@@ -177,6 +259,10 @@ func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, asse
 	if !canView(p, record.library, s.now()) {
 		return assetRecord{}, ErrNotFound
 	}
+	// Videos take no part in AI, and so none in the assistant's reads.
+	if p.Assistant && record.Video != nil {
+		return assetRecord{}, ErrNotFound
+	}
 	if record.Trash != nil && !canChange(p, record.library, record.UploadedBy) {
 		return assetRecord{}, ErrNotFound
 	}
@@ -239,6 +325,8 @@ type TimelineMonth struct {
 	// Month is YYYY-MM in the device's time zone.
 	Month  string `json:"month"`
 	Photos int    `json:"photos"`
+	// Videos counts the videos among them.
+	Videos int `json:"videos"`
 }
 
 // TimelineMonths counts a library's available assets by month, newest first,
@@ -248,26 +336,34 @@ func (s *Service) TimelineMonths(ctx context.Context, p Principal, libraryID str
 	if err != nil {
 		return nil, err
 	}
-	keys, err := s.strings(ctx, `SELECT IFNULL(taken_at, imported_at) FROM assets
-WHERE library_id = ? AND trashed_at IS NULL ORDER BY IFNULL(taken_at, imported_at) DESC`, lib.id)
+	rows, err := s.db.QueryContext(ctx, `SELECT IFNULL(taken_at, imported_at), NOT `+notVideo("assets.object_id")+` FROM assets
+WHERE library_id = ? AND trashed_at IS NULL`+hiddenVideos(p, "assets.object_id")+` ORDER BY IFNULL(taken_at, imported_at) DESC`, lib.id)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	months := []TimelineMonth{}
-	for _, key := range keys {
+	for rows.Next() {
+		var key string
+		var video bool
+		if err := rows.Scan(&key, &video); err != nil {
+			return nil, err
+		}
 		at, err := parseTime(key)
 		if err != nil {
 			return nil, err
 		}
 		// Local months follow the UTC order, so equal months are adjacent.
 		month := at.In(s.location).Format(monthLayout)
-		if last := len(months) - 1; last >= 0 && months[last].Month == month {
-			months[last].Photos++
-		} else {
-			months = append(months, TimelineMonth{Month: month, Photos: 1})
+		if last := len(months) - 1; last < 0 || months[last].Month != month {
+			months = append(months, TimelineMonth{Month: month})
+		}
+		months[len(months)-1].Photos++
+		if video {
+			months[len(months)-1].Videos++
 		}
 	}
-	return months, nil
+	return months, rows.Err()
 }
 
 // TimelineInMonth pages through one month (YYYY-MM) of a library's timeline
@@ -291,6 +387,7 @@ func (s *Service) TimelineInMonth(ctx context.Context, p Principal, libraryID, m
 func (s *Service) newestFirst(ctx context.Context, p Principal, where string, args []any, cursor string, limit int) (Page, error) {
 	limit = pageSize(limit)
 	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
+	where += hiddenVideos(p, "a.object_id")
 	if cursor != "" {
 		at, id, err := decodeCursor(cursor)
 		if err != nil {

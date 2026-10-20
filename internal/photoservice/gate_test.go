@@ -199,3 +199,23 @@ func TestGateRecordsWhatHeldAIWorkBack(t *testing.T) {
 		}
 	}
 }
+
+func TestGateStaysClosedWhileARequestIsServed(t *testing.T) {
+	now := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
+	gate := &Gate{quiet: time.Minute, now: func() time.Time { return now }, pressure: func(string) (float64, error) { return 0, nil }}
+	done := gate.Use()
+	// A video played for longer than the quiet period is still use.
+	now = now.Add(time.Hour)
+	if ok, reason := gate.Open(context.Background()); ok || reason != "foreground" {
+		t.Fatalf("Open() while a video plays = %v, %q", ok, reason)
+	}
+	done()
+	now = now.Add(time.Minute - time.Second)
+	if ok, _ := gate.Open(context.Background()); ok {
+		t.Fatal("Open() within the quiet period after playing ended = open")
+	}
+	now = now.Add(time.Second)
+	if ok, _ := gate.Open(context.Background()); !ok {
+		t.Fatal("Open() a quiet period after playing ended = closed")
+	}
+}

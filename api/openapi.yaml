@@ -1303,15 +1303,18 @@ paths:
   /api/v1/photos/libraries/{libraryId}/uploads:
     post:
       operationId: uploadPhoto
-      summary: Import one JPEG or PNG original; returns once the original is durable
+      summary: Import one photo or video original; returns once the original is durable
+      description: "A photo (JPEG, PNG, HEIC; at most 256 MiB) or a video (MP4, MOV, M4V, 3GP, MKV, WebM, AVI, MTS/M2TS; at most 4 GiB) that the Media Worker can read. A Live Photo's MOV, short and carrying Apple's content identifier, whose stills in the library are still waiting for it completes them instead and answers 200; without such stills it is imported as a video. 503 media_unavailable when a video cannot be read because the Media Worker is unavailable."
       parameters: [{ $ref: "#/components/parameters/PhotoLibraryID" }, { $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string, description: "Must precede the file part, which is streamed as it arrives; parts after the file are not read." }, file: { type: string, format: binary } } } } } }
       responses:
+        "200": { description: The Live Photos a MOV completed; no asset was created, content: { application/json: { schema: { type: object, additionalProperties: false, required: [completed], properties: { completed: { type: array, items: { $ref: "#/components/schemas/PhotoAsset" } } } } } } }
         "201": { description: Photo asset created, content: { application/json: { schema: { $ref: "#/components/schemas/PhotoAsset" } } } }
         "404": { $ref: "#/components/responses/ProductError" }
         "413": { $ref: "#/components/responses/ProductError" }
         "415": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
         "507": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/libraries/{libraryId}/directories:
     post:
@@ -1416,11 +1419,61 @@ paths:
   /api/v1/photos/assets/{assetId}/preview:
     get:
       operationId: previewPhoto
-      summary: Display a compatible JPEG for HEIC or the original for JPEG and PNG
+      summary: Display a compatible JPEG for HEIC, a video's poster frame, or the original for JPEG and PNG
       parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
       responses:
         "200": { description: Compatible still image, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
         "304": { description: ETag still matches after authorization }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/video/playback:
+    get:
+      operationId: getPhotoVideoPlayback
+      summary: Decide how this browser plays a video asset
+      description: "direct plays video/original; remux and transcode play video/stream, whose fragmented MP4 has the type mime. 404 not_video for a photo."
+      parameters:
+        - { $ref: "#/components/parameters/PhotoAssetID" }
+        - { name: caps, in: query, description: "What the browser decodes beyond H.264, AAC, MP3, Opus, Vorbis and FLAC in MP4, comma-separated: hevc, av1, vp9, webm, mkv, ac3, eac3.", schema: { type: string } }
+      responses:
+        "200":
+          description: How to play the video
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [mode, duration]
+                properties:
+                  mode: { type: string, enum: [direct, remux, transcode] }
+                  duration: { type: number, exclusiveMinimum: 0 }
+                  mime: { type: string, description: "Type of the converted stream, for Media Source Extensions; absent for direct play." }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/video/original:
+    get:
+      operationId: playPhotoVideoOriginal
+      summary: Read a video's original for direct play, typed as browsers accept it
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: Original video, content: { video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } }, video/x-matroska: { schema: { type: string, format: binary } } } }
+        "206": { description: Range of the original video }
+        "304": { description: ETag still matches after authorization }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/video/stream:
+    get:
+      operationId: streamPhotoVideo
+      summary: Convert a video for this browser from a start time; disconnect cancels conversion
+      description: "Remuxes or transcodes to H.264/AAC (at most 1080 lines) as the playback decision says, or always transcodes with transcode=1. The stream cannot seek; a player restarts it at a new start. At most two conversions run at once: 503 media_busy after a short wait."
+      parameters:
+        - { $ref: "#/components/parameters/PhotoAssetID" }
+        - { name: start, in: query, schema: { type: number, minimum: 0 }, description: Seconds into the video; before its end. }
+        - { name: transcode, in: query, schema: { type: string, enum: ["1"] } }
+        - { name: caps, in: query, schema: { type: string }, description: As for the playback decision. }
+      responses:
+        "200": { description: Fragmented MP4, content: { video/mp4: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/view:
@@ -4466,7 +4519,14 @@ components:
         libraryId: { type: string }
         directoryId: { type: string }
         name: { type: string }
-        mediaType: { type: string, enum: [image/jpeg, image/png, image/heic] }
+        mediaType: { type: string, enum: [image/jpeg, image/png, image/heic, video/mp4, video/quicktime, video/3gpp, video/webm, video/x-matroska, video/x-msvideo, video/mp2t] }
+        video:
+          description: Set for a video, which plays in the viewer and takes no part in local AI.
+          type: object
+          additionalProperties: false
+          required: [duration]
+          properties:
+            duration: { type: number, exclusiveMinimum: 0, description: Seconds. }
         motion:
           type: object
           additionalProperties: false
@@ -4478,7 +4538,7 @@ components:
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         uploadedBy: { type: string }
         importedAt: { type: string, format: date-time }
-        takenAt: { type: string, format: date-time, description: Capture time from the original's EXIF. }
+        takenAt: { type: string, format: date-time, description: "Capture time from the original's EXIF, or a video's recording time." }
         width: { type: integer, minimum: 0, description: Upright display width; 0 when unknown. }
         height: { type: integer, minimum: 0, description: Upright display height; 0 when unknown. }
         thumbnail: { type: string, enum: [ready, pending, failed] }
@@ -4532,10 +4592,11 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [month, photos]
+            required: [month, photos, videos]
             properties:
               month: { type: string, description: "YYYY-MM in the device's time zone." }
-              photos: { type: integer, minimum: 1 }
+              photos: { type: integer, minimum: 1, description: "Photo assets of the month, videos included." }
+              videos: { type: integer, minimum: 0, description: The videos among them. }
     PhotoLabelCounts:
       type: object
       additionalProperties: false

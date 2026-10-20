@@ -24,6 +24,9 @@ func (m motionDecoder) Probe(context.Context, *os.File) (mediaworker.Probe, erro
 func (m motionDecoder) Image(context.Context, *os.File, int) ([]byte, error) {
 	return nil, mediaworker.ErrUnreadable
 }
+func (m motionDecoder) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	return nil, mediaworker.ErrUnreadable
+}
 func (m motionDecoder) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("compatible movie"))), nil
 }

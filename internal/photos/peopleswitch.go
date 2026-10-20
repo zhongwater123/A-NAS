@@ -114,6 +114,7 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT DISTINCT a.object_id, ?, 'pending', ?, ? FROM assets a
 JOIN derived_files t ON t.object_id = a.object_id AND t.derivation = ?
 WHERE a.library_id = ? AND NOT EXISTS (SELECT 1 FROM scans s WHERE s.object_id = a.object_id AND s.derivation = ?)
+  AND `+notVideo("a.object_id")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
 		facesDerivation, now, now, thumbnailDerivation, libraryID, facesDerivation)
 	return err

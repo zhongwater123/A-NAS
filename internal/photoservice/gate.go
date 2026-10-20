@@ -27,6 +27,9 @@ type Gate struct {
 	quiet   time.Duration
 	now     func() time.Time
 	lastUse atomic.Int64
+	// using counts requests still being served, such as a video playing or
+	// a long upload; while there are any, the library is in use.
+	using atomic.Int64
 	// pressure returns the share of the last 10 seconds in which some task
 	// other than the AI Worker's stalled on a resource, in percent.
 	pressure func(resource string) (float64, error)
@@ -79,8 +82,19 @@ func NewGate(quiet time.Duration, logger *slog.Logger) *Gate {
 // Touch records that someone is using the photo library.
 func (g *Gate) Touch() { g.lastUse.Store(g.now().UnixNano()) }
 
+// Use records that someone uses the photo library until done is called;
+// the quiet period starts then.
+func (g *Gate) Use() (done func()) {
+	g.using.Add(1)
+	g.Touch()
+	return func() {
+		g.Touch()
+		g.using.Add(-1)
+	}
+}
+
 func (g *Gate) Open(context.Context) (bool, string) {
-	if g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
+	if g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
 		return false, "foreground"
 	}
 	for _, check := range pressureLimits {

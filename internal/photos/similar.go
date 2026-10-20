@@ -58,7 +58,8 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	if err != nil {
 		return SimilarPage{}, err
 	}
-	if source.Trash != nil || !slices.Contains(scope, any(source.LibraryID)) {
+	// A video has no vector to be like.
+	if source.Trash != nil || source.Video != nil || !slices.Contains(scope, any(source.LibraryID)) {
 		return SimilarPage{}, ErrNotFound
 	}
 	page := SimilarPage{Assets: []Asset{}}

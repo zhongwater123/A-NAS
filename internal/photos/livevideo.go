@@ -80,6 +80,13 @@ func (s *Service) AttachLiveVideo(ctx context.Context, p Principal, request Live
 		// only come with its still.
 		return nil, ErrInvalidMotion
 	}
+	return s.completeLivePhotos(ctx, p, lib, name, clip, liveID, probe.Format.Duration)
+}
+
+// completeLivePhotos gives a staged MOV with Apple's identifier liveID to
+// the stills of a library that carry it, have no video yet and that p may
+// change, and returns them; ErrNoLiveStill when there are none.
+func (s *Service) completeLivePhotos(ctx context.Context, p Principal, lib library, name string, clip stagedObject, liveID string, duration float64) ([]Asset, error) {
 	if err := s.readLiveIDs(ctx, lib.id, strings.TrimSuffix(name, filepath.Ext(name))); err != nil {
 		return nil, err
 	}
@@ -111,7 +118,7 @@ func (s *Service) AttachLiveVideo(ctx context.Context, p Principal, request Live
 			}
 			// The video takes the still's name, as a paired upload does.
 			video := &motionImport{object: clip, name: strings.TrimSuffix(still, filepath.Ext(still)) + filepath.Ext(name),
-				kind: "live-photo", duration: probe.Format.Duration}
+				kind: "live-photo", duration: duration}
 			if err := s.insertMotion(ctx, tx, id, video); err != nil {
 				return err
 			}

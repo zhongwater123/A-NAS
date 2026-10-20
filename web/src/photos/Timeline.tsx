@@ -3,7 +3,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import { DayHeader, gridInset, type GridProps, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, type MonthState, type PendingPhoto, timelineEntries } from "./layout";
-import { messageOf } from "./model";
+import { countLabel, messageOf } from "./model";
 import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./photosApi";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
 import { PendingTile } from "./Tile";
@@ -14,7 +14,8 @@ interface Props extends GridProps {
   onRetryUpload: (key: string) => void;
   // onReloaded runs after a refresh has loaded the photos again.
   onReloaded: () => void;
-  onCount: (photos: number | undefined) => void;
+  // photos counts the photos and videos, videos the videos among them.
+  onCount: (photos: number | undefined, videos?: number) => void;
   onError: (message: string) => void;
   empty: ReactNode;
 }
@@ -97,13 +98,14 @@ export function Timeline(props: Props) {
   usePendingThumbnails(ordered, (ready) => setLoaded((value) => new Map([...value].map(([month, state]) => [month, state.assets ? { assets: state.assets.map((asset) => ready.get(asset.id) ?? asset) } : state]))));
   useEffect(() => onAssets(ordered), [ordered]);
   const total = months?.reduce((sum, month) => sum + (visible.get(month.month)?.assets?.length ?? month.photos), 0);
-  useEffect(() => onCount(total), [total]);
+  const videos = months?.reduce((sum, month) => sum + (visible.get(month.month)?.assets?.filter((asset) => asset.video).length ?? month.videos ?? 0), 0);
+  useEffect(() => onCount(total, videos), [total, videos]);
 
   const renderTile = useTileRenderer(props);
   const renderEntry = (entry: Entry): ReactNode => {
     switch (entry.kind) {
       case "month":
-        return <div className="ph-month"><h2>{entry.label}</h2><small>{entry.photos} 张</small></div>;
+        return <div className="ph-month"><h2>{entry.label}</h2><small>{entry.videos ? countLabel(entry.photos, entry.videos, " · ") : `${entry.photos} 张`}</small></div>;
       case "day":
         return <DayHeader entry={entry} selected={props.selected} onSelect={props.onSelectGroup} />;
       case "heading":

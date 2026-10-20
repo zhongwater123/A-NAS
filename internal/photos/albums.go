@@ -39,16 +39,21 @@ type albumRecord struct {
 	library library
 }
 
-const albumSelect = `
+// albumSelect reads albums with how many photos p sees in each and the
+// newest of them as its cover.
+func albumSelect(p Principal) string {
+	shown := "a.trashed_at IS NULL" + hiddenVideos(p, "a.object_id")
+	return `
 SELECT al.id, al.library_id, al.name, al.created_by, al.created_at,
        (SELECT COUNT(*) FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
-        WHERE aa.album_id = al.id AND a.trashed_at IS NULL),
+        WHERE aa.album_id = al.id AND ` + shown + `),
        IFNULL((SELECT a.id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
-               WHERE aa.album_id = al.id AND a.trashed_at IS NULL
+               WHERE aa.album_id = al.id AND ` + shown + `
                ORDER BY IFNULL(a.taken_at, a.imported_at) DESC, a.id DESC LIMIT 1), ''),
        l.kind, IFNULL(l.owner_user_id, ''), l.created_at
 FROM albums al
 JOIN libraries l ON l.id = al.library_id`
+}
 
 func scanAlbum(row rowScanner) (albumRecord, error) {
 	var record albumRecord
@@ -77,7 +82,7 @@ func (s *Service) Albums(ctx context.Context, p Principal, libraryID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, albumSelect+" WHERE al.library_id = ? ORDER BY al.created_at DESC, al.id DESC", lib.id)
+	rows, err := s.db.QueryContext(ctx, albumSelect(p)+" WHERE al.library_id = ? ORDER BY al.created_at DESC, al.id DESC", lib.id)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +117,7 @@ func (s *Service) CreateAlbum(ctx context.Context, p Principal, libraryID, name 
 			id, lib.id, name, p.UserID, formatTime(s.now())); err != nil {
 			return conflictOnUnique(err)
 		}
-		record, err := scanAlbum(tx.QueryRowContext(ctx, albumSelect+" WHERE al.id = ?", id))
+		record, err := scanAlbum(tx.QueryRowContext(ctx, albumSelect(p)+" WHERE al.id = ?", id))
 		created = record.Album
 		if err != nil {
 			return err
@@ -213,7 +218,7 @@ func (s *Service) visibleAlbum(ctx context.Context, q queryer, p Principal, albu
 	if !p.valid() {
 		return albumRecord{}, ErrForbidden
 	}
-	record, err := scanAlbum(q.QueryRowContext(ctx, albumSelect+" WHERE al.id = ?", albumID))
+	record, err := scanAlbum(q.QueryRowContext(ctx, albumSelect(p)+" WHERE al.id = ?", albumID))
 	if err != nil {
 		return albumRecord{}, err
 	}
@@ -238,7 +243,7 @@ func (s *Service) changeAlbum(ctx context.Context, p Principal, albumID string, 
 		if err := change(tx, record); err != nil {
 			return err
 		}
-		updated, err := scanAlbum(tx.QueryRowContext(ctx, albumSelect+" WHERE al.id = ?", albumID))
+		updated, err := scanAlbum(tx.QueryRowContext(ctx, albumSelect(p)+" WHERE al.id = ?", albumID))
 		if errors.Is(err, ErrNotFound) {
 			return nil // deleted
 		}
