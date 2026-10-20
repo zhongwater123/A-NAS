@@ -199,8 +199,22 @@ export interface TrashItem {
   id: string; entryId: string; spaceId: string; name: string; kind: "file" | "directory"; sizeBytes: number;
   originalPath: string; originalGone: boolean; deletedBy: string; deletedAt: string; purgeAt: string;
 }
-export interface Volume { id: string; diskId: string; filesystemUuid?: string; capacityBytes?: number; availableBytes?: number; state: "creating" | "available" | "unavailable" | "read_only" }
-export interface StoragePlan { id: string; diskId: string; diskModel: string; capacityBytes: number; fingerprint: string; signatures: string[]; confirmationPhrase: string; actions: Array<{kind: string; description: string}>; state: string; expiresAt: string; failure?: string; volume?: Volume }
+// VolumeLayout is how the data volume keeps files on its disks (ADR 0025).
+export type VolumeLayout = "single" | "mirror" | "span" | "stripe";
+// VolumeConversion is set while Btrfs converts the volume to its layout
+// after disks were added; waiting means it stopped and continues later.
+export interface VolumeConversion { state: "running" | "waiting"; convertedBytes: number; totalBytes: number }
+export interface Volume {
+  id: string; diskIds: string[]; filesystemUuid?: string; layout: VolumeLayout; capacityBytes?: number; availableBytes?: number;
+  state: "creating" | "available" | "unavailable" | "read_only"; conversion?: VolumeConversion;
+}
+export interface PlannedDisk { id: string; model: string; capacityBytes: number; fingerprint: string; signatures: Array<{ type: string; label?: string }> }
+// A plan creates the data volume on its disks, or adds them to it; the
+// capacities estimate the space for files before and after.
+export interface StoragePlan {
+  id: string; kind: "create_volume" | "add_disks"; layout: VolumeLayout; disks: PlannedDisk[]; capacityBeforeBytes?: number; capacityAfterBytes: number;
+  confirmationPhrase: string; actions: Array<{kind: string; description: string}>; state: string; expiresAt: string; failure?: string; volume?: Volume;
+}
 
 export class APIError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -303,6 +317,7 @@ export const createMember = (username: string, password: string) => request<User
 export const resetMember = (id: string, password: string) => request<void>(`/api/v1/users/${encodeURIComponent(id)}/credential`, { ...json({ password }), method: "PATCH" }, true);
 export const disableMember = (id: string) => request<void>(`/api/v1/users/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
 export const listVolumes = async () => (await request<{items: Volume[]}>("/api/v1/volumes")).items;
-export const createStoragePlan = (diskId: string) => request<StoragePlan>("/api/v1/storage/plans", json({ diskId }), true);
+export const createStoragePlan = (diskIds: string[], layout?: VolumeLayout) => request<StoragePlan>("/api/v1/storage/plans", json({ diskIds, layout }), true);
+export const continueVolumeConversion = (volumeId: string) => request<void>(`/api/v1/volumes/${encodeURIComponent(volumeId)}/conversion`, json({}), true);
 export const confirmStoragePlan = (id: string, confirmationPhrase: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/confirm`, json({ confirmationPhrase }), true);
 export const executeStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/execute`, json({}), true);

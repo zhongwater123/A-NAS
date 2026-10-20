@@ -13,7 +13,7 @@
   ├── 类型化 HTTP/JSON over UDS（root:a-nas 0660）
   │       ▼
   │   root Host Agent
-  │     ├── 稳定磁盘重新枚举 → GPT → Btrfs → UUID mount unit
+  │     ├── 稳定磁盘重新枚举 → GPT → Btrfs → UUID mount unit；加盘与冗余方式转换
   │     ├── Linux 身份、Samba 账号与原子配置、空间 ACL
   │     └── Btrfs 只读子卷快照
   └── 文件操作 + 会话令牌 over UDS（file-broker.sock，root:a-nas 0660）
@@ -32,6 +32,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 卷与目录
 
 - 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec`。
+- 数据卷可以由多块硬盘组成，用 Btrfs 自带的多设备配置（[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)）：mount unit 不变，Btrfs 在全部成员出现后挂载；挂载表只列出其中一块设备，所以宿主机状态按文件系统 UUID 认出每块成员盘。卷标记 `.a-nas-volume.json` 的 `layout` 记录目标冗余方式（镜像、扩容或条带；单盘时没有），Host Agent 在启动时和每 15 分钟检查 sysfs 的 `allocation/<类型>/<profile>/used_bytes` 与 `exclusive_operation`，把不在目标 profile 中的数据以 `soft` 过滤的 balance 转换过去。停止 Host Agent 或关机会取消正在进行的 balance，下一次检查接着做。产品服务从同一份观测计算转换进度，目标冗余方式取自最近一次成功的存储计划。
 - 根目录必须同时是 Btrfs 且存在 root 创建的 `.a-nas-volume.json`。缺少任一证据时，文件服务返回 `volume_unavailable`，不会创建空间目录。
 - 个人空间位于 `spaces/private/<username>`，共享空间位于 `spaces/shared`；公开接口只使用不透明空间 ID。
 - 授权只由 POSIX ACL 表达（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。空间根目录、回收站目录及其容器均为 `root:root`、无 setgid，权限只在这些目录上设置，内容靠默认 ACL 继承，从不递归改写：
@@ -111,7 +112,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 失败语义
 
-- 计划十分钟过期；执行期间重启会把 `running` 恢复为 `needs_attention`，不自动重新格式化。
+- 计划十分钟过期；执行期间重启会把 `running` 恢复为 `needs_attention`，不自动重新格式化。加盘成功后的冗余方式转换不属于计划，被中断时由 Host Agent 的检查接着做。
 - 可用空间必须保留容量的 5%，且至少 10 GiB；不足、只读或离线卷拒绝写入。文件与相册共用 [`internal/capacity`](../../internal/capacity/capacity.go) 中的同一规则。
 - Samba 配置先由 `testparm` 验证，再原子替换；reload 失败恢复旧配置。
 - 创建或重置 Samba 凭据失败时账号进入 `error` 或保持不可登录，旧会话失效。
@@ -127,5 +128,6 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [备份中心规格](../specs/backup-center.md)与[快照计划](../../internal/files/schedule.go)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
+- [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md) 与[数据卷操作](../../internal/hostops/linux/volume.go)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
 - [相册存储区修复](../../internal/hostops/linux/photos.go)

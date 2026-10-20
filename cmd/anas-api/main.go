@@ -469,8 +469,8 @@ type productOperations interface {
 func configuredServices() (hoststate.Observer, httpapi.DataSource, productOperations, bool, error) {
 	switch mode := os.Getenv("ANAS_HOSTSTATE_MODE"); mode {
 	case "", "fake":
-		operations := &developmentOperations{}
-		return fake.NewHealthy(), httpapi.DataSourceSimulated, operations, false, nil
+		simulated := newSimulatedStorage(fake.NewWithSpareDisk())
+		return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, false, nil
 	case "agent":
 		socketPath, err := agent.SocketPath()
 		if err != nil {
@@ -529,7 +529,8 @@ func configuredScreensaverDirectory() string {
 	return "/var/lib/a-nas/screensavers/current"
 }
 
-type developmentOperations struct{}
+// developmentOperations stand in for the Host Agent in fake mode.
+type developmentOperations struct{ *simulatedStorage }
 
 func (*developmentOperations) SetCredential(context.Context, accounts.CredentialRequest) error {
 	return nil
@@ -541,9 +542,6 @@ func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequ
 	return nil
 }
 func (*developmentOperations) RevokeViewing(context.Context, string) error { return nil }
-func (*developmentOperations) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "development", State: storage.VolumeStateAvailable}, nil
-}
 func (*developmentOperations) Create(context.Context, string, string) ([]files.SnapshotObject, error) {
 	return nil, errors.New("development snapshot backend is not configured")
 }

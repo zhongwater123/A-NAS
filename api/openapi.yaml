@@ -246,13 +246,41 @@ paths:
       operationId: listVolumes
       responses:
         "200": { description: Data volumes, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Volume" } } } } } } }
+  /api/v1/volumes/{volumeId}/conversion:
+    post:
+      operationId: continueVolumeConversion
+      description: >-
+        Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion;
+        the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
+      parameters: [{ name: volumeId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "202": { description: Conversion started }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/storage/plans:
     post:
       operationId: createStoragePlan
+      description: >-
+        Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk,
+        mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
+        to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable,
+        volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks,
+        layout_too_small when the files would not fit.
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [diskId], properties: { diskId: { $ref: "#/components/schemas/StableResourceID" } } } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [diskIds]
+              properties:
+                diskIds: { type: array, minItems: 1, maxItems: 8, uniqueItems: true, items: { $ref: "#/components/schemas/StableResourceID" } }
+                layout: { $ref: "#/components/schemas/VolumeLayout" }
       responses:
         "201": { description: Destructive storage plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/storage/plans/{planId}/confirm:
     post:
@@ -1485,6 +1513,31 @@ paths:
       responses:
         "200": { description: The photo's view, content: { image/jpeg: { schema: { type: string, format: binary } } } }
         "304": { description: ETag still matches after authorization }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/metadata:
+    get:
+      operationId: getPhotoMetadata
+      summary: What a photo's original records about it, read when asked (ADR 0024 decision 6)
+      description: Everything its EXIF holds, under ifd0, exif and gps, and where the photo was taken when the camera recorded it. Videos have none yet.
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200":
+          description: The photo's metadata; empty when the original has no EXIF
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    type: object
+                    required: [latitude, longitude]
+                    properties:
+                      latitude: { type: number }
+                      longitude: { type: number }
+                      altitude: { type: number }
+                  exif: { type: object, additionalProperties: true }
         "404": { $ref: "#/components/responses/ProductError" }
         "415": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
@@ -3803,17 +3856,41 @@ components:
         deletedBy: { type: string }
         deletedAt: { type: string, format: date-time }
         purgeAt: { type: string, format: date-time, description: When the recycle bin deletes the item for good. }
+    VolumeLayout:
+      type: string
+      enum: [single, mirror, span, stripe]
+      description: >-
+        How the data volume keeps files on its disks (ADR 0025): single (one disk), mirror (Btrfs raid1, two copies
+        on different disks), span (capacities added, one copy of the data) or stripe (Btrfs raid0). With two disks or
+        more, metadata always has two copies.
     Volume:
       type: object
       additionalProperties: false
-      required: [id, diskId, state]
+      required: [id, diskIds, layout, state]
       properties:
         id: { type: string }
-        diskId: { $ref: "#/components/schemas/StableResourceID" }
+        diskIds:
+          type: array
+          items: { $ref: "#/components/schemas/StableResourceID" }
+          description: The disks holding the volume as observed, or as planned while it is not mounted.
         filesystemUuid: { type: string }
+        layout: { $ref: "#/components/schemas/VolumeLayout" }
         capacityBytes: { type: integer, format: int64, minimum: 0 }
         availableBytes: { type: integer, format: int64, minimum: 0 }
         state: { type: string, enum: [creating, available, unavailable, read_only] }
+        conversion: { $ref: "#/components/schemas/VolumeConversion" }
+    VolumeConversion:
+      type: object
+      additionalProperties: false
+      required: [state, convertedBytes, totalBytes]
+      description: Present while data or metadata are outside the layout's Btrfs profiles, after disks were added.
+      properties:
+        state:
+          type: string
+          enum: [running, waiting]
+          description: "running: Btrfs converts now. waiting: the conversion stopped and continues at the Host Agent's next check."
+        convertedBytes: { type: integer, format: int64, minimum: 0 }
+        totalBytes: { type: integer, format: int64, minimum: 0 }
     StorageAction:
       type: object
       additionalProperties: false
@@ -3821,17 +3898,36 @@ components:
       properties:
         kind: { type: string }
         description: { type: string }
+    PlannedDisk:
+      type: object
+      additionalProperties: false
+      required: [id, model, capacityBytes, fingerprint, signatures]
+      properties:
+        id: { $ref: "#/components/schemas/StableResourceID" }
+        model: { type: string }
+        capacityBytes: { type: integer, format: int64, minimum: 1 }
+        fingerprint: { type: string }
+        signatures:
+          type: array
+          description: Partition, filesystem and array signatures erasing the disk destroys, such as one another NAS left.
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: { type: string }
+              label: { type: string }
     StoragePlan:
       type: object
       additionalProperties: false
-      required: [id, diskId, diskModel, capacityBytes, fingerprint, signatures, confirmationPhrase, actions, state, createdAt, expiresAt]
+      required: [id, kind, layout, disks, capacityAfterBytes, confirmationPhrase, actions, state, createdAt, expiresAt]
       properties:
         id: { type: string }
-        diskId: { $ref: "#/components/schemas/StableResourceID" }
-        diskModel: { type: string }
-        capacityBytes: { type: integer, format: int64, minimum: 1 }
-        fingerprint: { type: string }
-        signatures: { type: array, items: { type: string } }
+        kind: { type: string, enum: [create_volume, add_disks] }
+        layout: { $ref: "#/components/schemas/VolumeLayout" }
+        disks: { type: array, minItems: 1, items: { $ref: "#/components/schemas/PlannedDisk" } }
+        capacityBeforeBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files before adding disks; absent for a new volume." }
+        capacityAfterBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files after the plan, before filesystem overhead." }
         confirmationPhrase: { type: string }
         actions: { type: array, items: { $ref: "#/components/schemas/StorageAction" } }
         state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired] }

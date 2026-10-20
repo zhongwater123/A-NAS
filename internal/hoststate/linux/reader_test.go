@@ -271,10 +271,23 @@ func TestReaderReportsRemovableUseAndFilesystemEvidence(t *testing.T) {
 	}
 }
 
-func TestDeviceInUseRejectsStorageStackMembersEvenWhenUnmounted(t *testing.T) {
+// A signature another system left behind is not use: only an assembled
+// array, an active volume group, an open LUKS mapping or active swap is.
+func TestDeviceInUseOnlyForActiveStorageStacks(t *testing.T) {
+	swap := "[SWAP]"
 	for _, filesystem := range []string{"swap", "linux_raid_member", "LVM2_member", "crypto_LUKS"} {
-		if !deviceInUse(blockDevice{Type: "part", Filesystem: filesystem}) {
-			t.Fatalf("deviceInUse(%q) = false, want true", filesystem)
+		if deviceInUse(blockDevice{Type: "part", Filesystem: filesystem}) {
+			t.Errorf("deviceInUse(unused %q) = true, want false", filesystem)
+		}
+	}
+	for name, device := range map[string]blockDevice{
+		"assembled md array": {Type: "part", Filesystem: "linux_raid_member", Children: []blockDevice{{Name: "md127", Type: "raid1"}}},
+		"active LVM volume":  {Type: "part", Filesystem: "LVM2_member", Children: []blockDevice{{Name: "vg-data", Type: "lvm"}}},
+		"open LUKS mapping":  {Type: "part", Filesystem: "crypto_LUKS", Children: []blockDevice{{Name: "luks-1", Type: "crypt"}}},
+		"active swap":        {Type: "part", Filesystem: "swap", Mountpoints: []*string{&swap}},
+	} {
+		if !deviceInUse(device) {
+			t.Errorf("deviceInUse(%s) = false, want true", name)
 		}
 	}
 }

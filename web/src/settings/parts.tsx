@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, RefreshCw, X, type LucideIcon } from "lucide-react";
+import { CircleAlert, CircleCheck, RefreshCw, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { accountErrorText } from "../accountRules";
 import type { Person } from "../people";
@@ -35,6 +35,11 @@ export function Banner({ tone, onClose, children }: { tone: "error" | "warning" 
       {onClose && <button className="set-icon-btn" aria-label="关闭提示" onClick={onClose}><X /></button>}
     </div>
   );
+}
+
+export function Callout({ tone, title, children }: { tone: "danger" | "success" | "warning"; title: string; children: ReactNode }) {
+  const Icon = tone === "success" ? CircleCheck : TriangleAlert;
+  return <div className={`wiz-callout ${tone}`}><Icon /><div><strong>{title}</strong><p>{children}</p></div></div>;
 }
 
 export function IconTile({ tone, icon: Icon, size }: { tone: string; icon: LucideIcon; size?: "lg" }) {
