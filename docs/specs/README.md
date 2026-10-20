@@ -11,7 +11,7 @@
 - [成员文件分享](member-sharing.md)（开发分支已实现，尚未部署）
 - [相册与本地智能检索](photo-library.md)（M1 切片 1–6 implemented；M2、M3 draft）
 - [动态照片](photo-motion.md)（implemented）
-- [相册视频](photo-video.md)（implemented，尚未合并）
+- [相册视频](photo-video.md)（implemented，尚未部署）
 - [Web 相册界面](photo-gallery-ui.md)（implemented）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
 - [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
@@ -22,6 +22,7 @@
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [个性化](personalization.md)（implemented，尚未合并）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented，尚未部署）
 - [头像与昵称](account-profile.md)（implemented，尚未部署）

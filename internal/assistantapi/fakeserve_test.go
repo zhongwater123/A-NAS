@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,9 +51,13 @@ type fakeServe struct {
 	results    chan string
 	closed     chan struct{}
 	answered   chan string
-	// The learning graph: alice's memories (store, text) and skills.
+	// The learning graph: alice's memories (store, text) and the skills the
+	// assistant made (name, createdBy). system are A-NAS's own skills, from
+	// skills.external_dirs: Hermes shows their text but leaves them out of the
+	// graph and refuses to delete them.
 	memories [][2]string
-	skills   []string
+	skills   [][2]string
+	system   []string
 	// Alice's scheduled tasks (tasks_test.go), and how long a run takes.
 	jobs    []*fakeJob
 	runTime time.Duration
@@ -70,7 +75,7 @@ func newFakeServe(t *testing.T) *fakeServe {
 	}
 	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8), results: make(chan string, 8),
 		memories: [][2]string{{"memory", "alice 喜欢简短的回答"}, {"profile", "alice 每周日大扫除"}},
-		skills:   []string{"family-trip", "anas-files"}}
+		skills:   [][2]string{{"family-trip", "learn"}, {"anas-photos", "agent"}}, system: []string{"anas-files"}}
 	listener, err := net.Listen("unix", filepath.Join(dir, "alice.sock"))
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +184,7 @@ func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		if r.URL.Path == "/api/learning/node" {
 			id := r.URL.Query().Get("id")
-			for _, skill := range f.skills {
+			for _, skill := range append(f.skillNames(), f.system...) {
 				if skill == id {
 					_, _ = fmt.Fprintf(w, `{"ok":true,"kind":"skill","id":%q,"content":"---\nname: %s\n---\n# 出游计划"}`, id, id)
 					return
@@ -190,7 +195,7 @@ func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
 		}
 		var nodes, cards []string
 		for _, skill := range f.skills {
-			nodes = append(nodes, fmt.Sprintf(`{"id":%q,"kind":"skill","category":"travel","createdBy":"learn","useCount":2,"timestamp":1800000000}`, skill))
+			nodes = append(nodes, fmt.Sprintf(`{"id":%q,"kind":"skill","category":"travel","createdBy":%q,"useCount":2,"timestamp":1800000000}`, skill[0], skill[1]))
 		}
 		for n, memory := range f.memories {
 			nodes = append(nodes, fmt.Sprintf(`{"id":%q,"kind":"memory","memorySource":%q,"category":"memory","timestamp":1800000001}`, memoryID(n), memory[0]))
@@ -207,7 +212,7 @@ func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"detail":"a profile reached Hermes"}`, http.StatusTeapot)
 			return
 		}
-		if strings.HasPrefix(body.ID, "anas-") {
+		if slices.Contains(f.system, body.ID) {
 			http.Error(w, `{"detail":"external skills are read-only to the curator"}`, http.StatusBadRequest)
 			return
 		}
@@ -219,7 +224,7 @@ func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for n, skill := range f.skills {
-			if skill == body.ID {
+			if skill[0] == body.ID {
 				f.skills = append(f.skills[:n], f.skills[n+1:]...)
 				_, _ = io.WriteString(w, `{"ok":true}`)
 				return
@@ -227,6 +232,14 @@ func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, `{"detail":"memory changed — stale, refresh the graph"}`, http.StatusBadRequest)
 	}
+}
+
+func (f *fakeServe) skillNames() []string {
+	names := []string{}
+	for _, skill := range f.skills {
+		names = append(names, skill[0])
+	}
+	return names
 }
 
 func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {

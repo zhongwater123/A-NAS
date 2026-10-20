@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { readLocalDisplay } from "./api";
+
 export const localConsoleScreenSaverIdleMs = 180_000;
 export const localConsoleScreenSaverManifest = "/local-console/screensavers";
+// defaultSleepAfterMinutes applies when the setting cannot be read, so the
+// screen never stays lit just because the service was unreachable.
+export const defaultSleepAfterMinutes = 30;
 
 const screensaverVideoPrefix = "/local-console/screensavers/";
 const screensaverVideoPattern = /^\/local-console\/screensavers\/[0-9a-f]{64}\.mp4$/;
 const activityEvents = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
+
+// awake shows the page; saver plays a video over it; asleep is plain black.
+type Phase = "awake" | "saver" | "asleep";
 
 export function isLocalConsole(search = window.location.search): boolean {
   return new URLSearchParams(search).get("local-console") === "1";
@@ -21,6 +29,10 @@ export async function loadScreenSaverVideos(): Promise<string[]> {
   ))];
 }
 
+export async function loadSleepAfterMinutes(): Promise<number> {
+  return (await readLocalDisplay()).sleepAfterMinutes;
+}
+
 export function selectScreenSaverVideo(
   videos: readonly string[],
   random: () => number = Math.random,
@@ -30,29 +42,41 @@ export function selectScreenSaverVideo(
   return videos[index];
 }
 
+// LocalConsoleScreenSaver plays a video after idleMs without input and turns
+// the screen black once the video has played the minutes set in 设置 →
+// 个性化. Without videos (or on the sign-in page, where videos is false) the
+// screen goes black at the same moment. The first input after either only
+// wakes the page.
 export function LocalConsoleScreenSaver({
   enabled,
+  videos = true,
   idleMs = localConsoleScreenSaverIdleMs,
   loadVideos = loadScreenSaverVideos,
+  loadSleepAfter = loadSleepAfterMinutes,
   random = Math.random,
 }: {
   enabled: boolean;
+  videos?: boolean;
   idleMs?: number;
   loadVideos?: () => Promise<string[]>;
+  loadSleepAfter?: () => Promise<number>;
   random?: () => number;
 }) {
-  const timer = useRef<number | undefined>(undefined);
+  const idleTimer = useRef<number | undefined>(undefined);
+  const sleepTimer = useRef<number | undefined>(undefined);
+  // idlePeriod changes with every input, so a setting read for an idle period
+  // that has since ended schedules nothing.
+  const idlePeriod = useRef(0);
   const video = useRef<HTMLVideoElement>(null);
   const playlist = useRef<string[]>([]);
   const current = useRef<string | undefined>(undefined);
-  const activeRef = useRef(false);
-  const [active, setActive] = useState(false);
+  const phaseRef = useRef<Phase>("awake");
+  const [phase, setPhaseState] = useState<Phase>("awake");
   const [currentSrc, setCurrentSrc] = useState<string>();
-  const [ready, setReady] = useState(false);
 
-  const hide = useCallback(() => {
-    activeRef.current = false;
-    setActive(false);
+  const setPhase = useCallback((next: Phase) => {
+    phaseRef.current = next;
+    setPhaseState(next);
   }, []);
 
   const selectVideo = useCallback(() => {
@@ -63,85 +87,98 @@ export function LocalConsoleScreenSaver({
     return true;
   }, [random]);
 
+  // A failed video leaves the pool for this page; the idle period, and so
+  // the moment the screen goes black, carries on.
   const disableVideo = useCallback((failed: string) => {
     if (current.current !== failed) return;
     playlist.current = playlist.current.filter((candidate) => candidate !== failed);
-    if (playlist.current.length > 0 && selectVideo()) return;
+    if (selectVideo()) return;
     current.current = undefined;
     setCurrentSrc(undefined);
-    setReady(false);
-    hide();
-  }, [hide, selectVideo]);
+    if (phaseRef.current === "saver") setPhase("awake");
+  }, [selectVideo, setPhase]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !videos) return;
     let cancelled = false;
-    setReady(false);
-    void loadVideos().then((videos) => {
+    void loadVideos().then((loaded) => {
       if (cancelled) return;
-      playlist.current = videos;
+      playlist.current = loaded;
       current.current = undefined;
       setCurrentSrc(undefined);
-      setReady(videos.length > 0);
-    }).catch(() => {
-      if (!cancelled) setReady(false);
-    });
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
       playlist.current = [];
       current.current = undefined;
     };
-  }, [enabled, loadVideos]);
+  }, [enabled, videos, loadVideos]);
 
   useEffect(() => {
-    if (!enabled || !ready) return;
+    if (!enabled) return;
 
-    const clearTimer = () => {
-      if (timer.current !== undefined) window.clearTimeout(timer.current);
-      timer.current = undefined;
+    const clearTimers = () => {
+      window.clearTimeout(idleTimer.current);
+      window.clearTimeout(sleepTimer.current);
+      idleTimer.current = undefined;
+      sleepTimer.current = undefined;
+      idlePeriod.current += 1;
+    };
+    const idle = () => {
+      const period = idlePeriod.current;
+      const since = Date.now();
+      if (videos && selectVideo()) setPhase("saver");
+      void loadSleepAfter().catch(() => defaultSleepAfterMinutes).then((minutes) => {
+        if (period !== idlePeriod.current || !Number.isFinite(minutes) || minutes <= 0) return;
+        sleepTimer.current = window.setTimeout(() => setPhase("asleep"), Math.max(0, minutes * 60_000 - (Date.now() - since)));
+      });
     };
     const schedule = () => {
-      clearTimer();
-      if (document.hidden) return;
-      timer.current = window.setTimeout(() => {
-        if (!selectVideo()) return;
-        activeRef.current = true;
-        setActive(true);
-      }, idleMs);
+      clearTimers();
+      if (!document.hidden) idleTimer.current = window.setTimeout(idle, idleMs);
     };
     const activity = (event: Event) => {
-      if (activeRef.current) {
+      if (phaseRef.current !== "awake") {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        hide();
+        setPhase("awake");
       }
       schedule();
     };
     const visibilityChanged = () => {
-      hide();
-      if (document.hidden) clearTimer();
-      else schedule();
+      setPhase("awake");
+      schedule();
     };
 
     activityEvents.forEach((name) => window.addEventListener(name, activity, { capture: true, passive: false }));
     document.addEventListener("visibilitychange", visibilityChanged);
     schedule();
     return () => {
-      clearTimer();
+      clearTimers();
       activityEvents.forEach((name) => window.removeEventListener(name, activity, { capture: true }));
       document.removeEventListener("visibilitychange", visibilityChanged);
-      activeRef.current = false;
+      setPhase("awake");
     };
-  }, [enabled, hide, idleMs, ready, selectVideo]);
+  }, [enabled, videos, idleMs, loadSleepAfter, selectVideo, setPhase]);
 
   useEffect(() => {
-    if (!active || !currentSrc || !video.current) return;
+    if (phase !== "saver" || !currentSrc || !video.current) return;
     const attempted = currentSrc;
     void video.current.play().catch(() => disableVideo(attempted));
-  }, [active, currentSrc, disableVideo]);
+  }, [phase, currentSrc, disableVideo]);
 
-  if (!enabled || !ready || !active || !currentSrc) return null;
+  if (!enabled) return null;
+
+  if (phase === "asleep") {
+    return (
+      <section className="local-console-sleep" role="dialog" aria-label="息屏">
+        <p className="sr-only">按任意键、移动鼠标或触摸屏幕即可唤醒</p>
+      </section>
+    );
+  }
+
+  if (phase !== "saver" || !currentSrc) return null;
 
   return (
     <section className="local-console-screensaver" role="dialog" aria-label="屏幕保护程序">

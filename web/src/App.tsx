@@ -71,6 +71,8 @@ import { nameErrorText, nameProblem } from "./fileNames";
 import { accountErrorText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { fileTypeLabel, isPreviewableImage, isVideoFile, isOfficeDocument, isPDFPreviewable, isTextPreviewable } from "./fileTypes";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { useWallpaper, wallpaperBackground } from "./wallpaper";
+import { WINDOW_ID } from "./windowSnapshot";
 import { MediaCenter } from "./media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "./MediaCenterGlyph";
 import { PhotosGlyph } from "./PhotosGlyph";
@@ -206,12 +208,15 @@ export default function App() {
 		});
 	}, [session]);
 	const authenticated = (value: Session) => { setError(""); setSessionState(value); };
-	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={authenticated} />;
 	const signOut = () => { transferStore.reset(); void logout().finally(() => { setSessionState(undefined); setMode("login"); }); };
-	if (session.user.mustChangePassword) {
-		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
-	}
-	return <Desktop session={session} onLogout={signOut} onUserChange={(user) => setSessionState((current) => current && { ...current, user })} />;
+	const signedIn = Boolean(session && !session.user.mustChangePassword);
+	return <>
+		{!session ? <Authentication mode={mode} error={error} onAuthenticated={authenticated} />
+			: session.user.mustChangePassword ? <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />
+			: <Desktop session={session} onLogout={signOut} onUserChange={(user) => setSessionState((current) => current && { ...current, user })} />}
+		{/* The sign-in pages have no screen saver but still go black. */}
+		<LocalConsoleScreenSaver enabled={isLocalConsole()} videos={signedIn} />
+	</>;
 }
 
 // PasswordChange blocks the desktop after an administrator reset the
@@ -322,6 +327,7 @@ function Authentication({ mode, error: initialError, onAuthenticated }: { mode: 
 
 function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogout: () => void; onUserChange: (user: User) => void }) {
   const host = useHostState(true);
+  const wallpaper = useWallpaper();
   // Names and avatars of every account; read again whenever the page comes
   // back into view, so someone else's new nickname shows up without a reload.
   useEffect(() => {
@@ -421,8 +427,9 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
   };
 
   return (
-    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}><main className="desktop-shell" onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
-      <div className="wallpaper-glow" />
+    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}><main className="desktop-shell" style={wallpaperBackground(wallpaper)} onPointerDownCapture={pressDesktop} onPointerCancelCapture={() => { wallpaperPress.current = undefined; }} onClick={clickDesktop}>
+      {/* The glow belongs to the built-in wallpaper; it would wash out a chosen picture. */}
+      {wallpaper && !wallpaper.image && <div className="wallpaper-glow" />}
 
       <SystemRail
         apps={desktopApps}
@@ -471,12 +478,13 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
           .sort((a, b) => a.opened - b.opened)
           .map((window) => ({ id: window.id, title: window.title, minimized: window.minimized, icon: windowIcons[window.id], tone: windowTones[window.id] }))}
         focusedID={focusedID}
-        onSelect={(id, state) => dispatch({ type: state === "focused" ? "minimize" : "open", id: id as WindowID })}
+        onOpen={(id) => dispatch({ type: "open", id: id as WindowID })}
+        onMinimize={(id) => dispatch({ type: "minimize", id: id as WindowID })}
+        onClose={(id) => dispatch({ type: "close", id: id as WindowID })}
       />
       <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
       <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
       <FeedbackChannel />
-      <LocalConsoleScreenSaver enabled={isLocalConsole()} />
     </main></SharesProvider>
   );
 }
@@ -527,7 +535,7 @@ function AppWindow({ model, dispatch, children }: { model: WindowModel; dispatch
     : { left: model.x, top: model.y, width: model.width, height: model.height, zIndex: model.z };
 
   return (
-    <section className={`app-window app-window-${model.id} ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
+    <section className={`app-window app-window-${model.id} ${model.maximized ? "maximized" : ""}`} hidden={model.minimized} style={style} {...{ [WINDOW_ID]: model.id }} role="dialog" aria-label={model.title} onPointerDown={() => dispatch({ type: "focus", id: model.id })}>
       <div className="window-titlebar" onPointerDown={beginDrag}>
         <div className="window-title"><span className={`window-app-icon${lightTitleIcons.has(model.id) ? " light" : ""}`}><Icon size={17} /></span>{model.title}</div>
         <div className="window-actions">

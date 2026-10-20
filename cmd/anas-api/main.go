@@ -43,6 +43,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
@@ -267,6 +268,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer feedbackStore.Close()
+	personalizationStore, err := personalization.Open(filepath.Join(stateDirectory, "personalization.db"))
+	if err != nil {
+		return err
+	}
+	defer personalizationStore.Close()
 	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
 		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
 	})
@@ -308,7 +314,7 @@ func run(logger *slog.Logger) error {
 	defer closeShares()
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
-		Accounts: accountService, Files: fileService, Storage: storageService,
+		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
 		Terminal:     terminals,
 		Containers:   containersapi.New(containerManager, containerSource, logger),
 		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),

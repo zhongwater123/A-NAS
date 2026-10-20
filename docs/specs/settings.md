@@ -1,7 +1,7 @@
 # 设置
 
 状态：implemented
-更新时间：2026-10-19
+更新时间：2026-10-20
 
 ## 目标
 
@@ -23,11 +23,12 @@
 | 概览 | 可用 | 可用 | 设备名、系统健康、数据来源、运行时间、磁盘数量与总容量、数据卷用量（点击进入“存储”）、健康检查（每项原因、处理办法与“查看存储”，见[系统健康](system-health.md)）、产品版本、操作系统、架构、设备标识与观测时间 |
 | 任务管理器 | 只读 | 只读 | 设备运行状态（总览、CPU、GPU、NPU、内存、网络、硬盘）与服务、进程资源用量，见[任务管理器](task-manager.md) |
 | 存储 | 只读 | 可用 | 数据卷状态、冗余方式、容量与转换进度、磁盘列表；尚无数据卷时管理员可初始化数据卷，有未使用的硬盘时可设置它的用途（见[硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)） |
+| 个性化 | 不显示 | 可用 | 全体账号共用的桌面壁纸与样式、本机屏幕的息屏时长，见[个性化](personalization.md) |
 | 用户与权限 | 不显示 | 可用 | 账号列表、添加成员；每个成员的“更多操作”菜单提供重置密码、只读查看个人空间或私有图库、禁用 |
 | 日志 | 只看自己的活动 | 可用 | 活动记录与系统日志，见[日志](logs.md) |
 | 终端 | 不显示 | 可用 | 以管理员本人 Linux 账号运行的设备 Shell，见[Web 桌面终端](web-terminal.md) |
 
-侧栏顶部是当前账号卡片（头像与昵称，进入“我的账号”），其下是概览、任务管理器、存储、用户与权限、日志、终端，每项带彩色图标；“规划中”列出网络与访问、安全、系统更新，均不可点击。内容区为居中的分组卡片，宽窗口下不无限拉伸；“终端”例外，深色终端占满内容区的宽度和高度。设置窗口变窄时侧栏改为内容上方可横向滚动的分区条，任何宽度下都能切换分区。
+侧栏顶部是当前账号卡片（头像与昵称，进入“我的账号”），其下是概览、任务管理器、存储、个性化、用户与权限、日志、终端，每项带彩色图标；“规划中”列出网络与访问、安全、系统更新，均不可点击。内容区为居中的分组卡片，宽窗口下不无限拉伸；“终端”例外，深色终端占满内容区的宽度和高度。设置窗口变窄时侧栏改为内容上方可横向滚动的分区条，任何宽度下都能切换分区。
 
 ## 场景
 
@@ -53,7 +54,7 @@
 
 - Given：成员登录。
 - When：打开设置。
-- Then：侧栏只有“我的账号”“概览”“任务管理器”“存储”“日志”和规划中项目；“存储”显示数据卷与磁盘但没有初始化入口；“日志”只有自己的活动记录；“用户与权限”和“终端”不出现。管理员看到全部分区。
+- Then：侧栏只有“我的账号”“概览”“任务管理器”“存储”“日志”和规划中项目；“存储”显示数据卷与磁盘但没有初始化入口；“日志”只有自己的活动记录；“个性化”“用户与权限”和“终端”不出现。管理员看到全部分区。
 
 ### 概览保留设备状态的读取语义
 
@@ -106,8 +107,8 @@
 
 ## 关联
 
-- 规格：[头像与昵称](account-profile.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[系统健康](system-health.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)
+- 规格：[头像与昵称](account-profile.md)、[个性化](personalization.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[系统健康](system-health.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
-- 代码：[设置窗口](../../web/src/SettingsPanel.tsx)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[日志分区](../../web/src/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[桌面](../../web/src/App.tsx)
+- 代码：[设置窗口](../../web/src/SettingsPanel.tsx)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[日志分区](../../web/src/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[个性化分区](../../web/src/settings/PersonalizationSection.tsx)、[桌面](../../web/src/App.tsx)
 - 测试：[桌面测试](../../web/src/App.test.tsx)

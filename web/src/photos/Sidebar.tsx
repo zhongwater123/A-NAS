@@ -63,8 +63,9 @@ export function Sidebar({ caller, library, place, albumsKey, count, ai, onPlace,
       </div>
 
       <div className="ph-nav">
-        <button type="button" className={at("timeline") ? "active" : ""} aria-current={at("timeline") ? "page" : undefined} onClick={() => onPlace({ kind: "timeline", libraryId })}>
-          <Images /><span>照片</span>{count !== undefined && at("timeline") && <small>{count}</small>}
+        {/* The library's photos and videos together, as in Apple's Photos. */}
+        <button type="button" className={at("timeline") ? "active" : ""} aria-current={at("timeline") ? "page" : undefined} title="图库中的全部照片和视频" onClick={() => onPlace({ kind: "timeline", libraryId })}>
+          <Images /><span>图库</span>{count !== undefined && at("timeline") && <small>{count}</small>}
         </button>
         <button type="button" className={onAIPage ? "active" : ""} aria-current={onAIPage ? "page" : undefined} onClick={() => onPlace({ kind: "search", viewing, query: "" })}>
           <Shapes /><span>AI 聚合</span>

@@ -281,6 +281,12 @@ func TestTheAssistantDoesNotSeeVideos(t *testing.T) {
 	if _, err := s.View(ctx, alice, video.ID); !errors.Is(err, photos.ErrNoView) {
 		t.Fatalf("View(video) error = %v", err)
 	}
+	if _, err := s.Metadata(ctx, assistant, video.ID); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("assistant Metadata(video) error = %v", err)
+	}
+	if _, err := s.Metadata(ctx, alice, video.ID); !errors.Is(err, photos.ErrNoMetadata) {
+		t.Fatalf("Metadata(video) error = %v", err)
+	}
 	onlyPhoto := func(what string, page photos.Page, err error) {
 		t.Helper()
 		if err != nil || len(page.Assets) != 1 || page.Assets[0].ID != photo.ID {

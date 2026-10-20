@@ -784,6 +784,38 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(dock).getByRole("button", { name: "恢复设置" })).toBeTruthy();
   });
 
+  it("previews a dock app's window on hover, shows or closes it from there, and hides the preview on click", async () => {
+    stubDesktopFetch(healthyState, true);
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+
+    await user.hover(within(dock).getByRole("button", { name: "切换到设置" }));
+    const settings = await screen.findByRole("group", { name: "设置窗口预览" });
+    expect(within(settings).queryByText("已最小化")).toBeNull();
+    await user.click(within(settings).getByRole("button", { name: "显示设置窗口" }));
+    expect(within(dock).getByRole("button", { name: "最小化设置" }).getAttribute("aria-current")).toBe("true");
+    await waitFor(() => expect(screen.queryByRole("group", { name: "设置窗口预览" })).toBeNull());
+
+    await user.hover(within(dock).getByRole("button", { name: "切换到回收站" }));
+    await user.click(within(await screen.findByRole("group", { name: "回收站窗口预览" })).getByRole("button", { name: "关闭回收站" }));
+    expect(screen.queryByRole("dialog", { name: "回收站" })).toBeNull();
+    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化设置"]);
+
+    await user.hover(within(dock).getByRole("button", { name: "最小化设置" }));
+    await screen.findByRole("group", { name: "设置窗口预览" });
+    await user.click(within(dock).getByRole("button", { name: "最小化设置" }));
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(screen.queryByRole("group", { name: "设置窗口预览" })).toBeNull();
+
+    await user.unhover(within(dock).getByRole("button", { name: "恢复设置" }));
+    await user.hover(within(dock).getByRole("button", { name: "恢复设置" }));
+    expect(within(await screen.findByRole("group", { name: "设置窗口预览" })).getByText("已最小化")).toBeTruthy();
+  });
+
   it("lists dock icons in launch order and drops closed apps immediately from the accessibility tree", async () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();

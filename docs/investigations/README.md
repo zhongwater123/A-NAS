@@ -36,6 +36,8 @@
 
 - [2026-10-16：局域网 HTTP 点击发送分享无反应](2026-10-16-member-sharing-http-send.md)（fixed locally；待部署验收）
 
+- [2026-10-20：VNAS 自建的技能不出现在“记忆”中](2026-10-20-assistant-skills-hidden-by-name.md)（fixed locally；待部署验收）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。
