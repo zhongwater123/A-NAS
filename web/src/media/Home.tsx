@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Clapperboard, FolderPlus, Info, Play, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clapperboard, CloudUpload, FolderPlus, Info, Play, Sparkles } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { Artwork, PosterCard, StillCard, useMediaActions } from "./Cards";
@@ -99,11 +99,13 @@ function Hero({ items, continuing }: { items: Title[]; continuing: Set<string> }
   );
 }
 
-export function HomePage({ home, onCategory, onLibraries, onCreateLibrary, canCreate }: {
+export function HomePage({ home, onCategory, onLibraries, onCreateLibrary, onUpload, canCreate }: {
   home: HomeData;
   onCategory: (category: "movie" | "show" | "other" | "all" | "favorites" | "history") => void;
   onLibraries: () => void;
   onCreateLibrary: () => void;
+  // onUpload is there when some library has a folder to upload into.
+  onUpload?: () => void;
   canCreate: boolean;
 }) {
   const empty = !home.recent.length;
@@ -127,8 +129,11 @@ export function HomePage({ home, onCategory, onLibraries, onCreateLibrary, canCr
       <div className="mc-state">
         {home.scanning ? <span className="mc-spinner" /> : <Clapperboard />}
         <h2>{home.scanning ? "正在扫描媒体库…" : "媒体库里还没有视频"}</h2>
-        <p>{home.scanning ? "找到的视频会陆续出现在这里。" : "把视频放进媒体库的文件夹后，重新扫描即可看到。"}</p>
-        <button type="button" className="mc-glass" onClick={onLibraries}>管理媒体库</button>
+        <p>{home.scanning ? "找到的视频会陆续出现在这里。" : onUpload ? "上传视频，或把视频放进媒体库的文件夹，稍后就会出现在这里。" : "把视频放进媒体库的文件夹后，重新扫描即可看到。"}</p>
+        <div className="mc-state-actions">
+          {!home.scanning && onUpload && <button type="button" className="mc-primary mc-upload-button" onClick={onUpload}><CloudUpload />上传视频</button>}
+          <button type="button" className="mc-glass" onClick={onLibraries}>管理媒体库</button>
+        </div>
       </div>
     );
   }

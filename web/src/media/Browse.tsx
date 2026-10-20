@@ -4,7 +4,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { APIError } from "../api";
 import { PosterCard, StillCard, type CardAction } from "./Cards";
 import { Dropdown } from "./Dropdown";
-import { ago, dayLabel, remaining } from "./format";
+import { ago, dayLabel, episodeCode, remaining } from "./format";
 import { listFavorites, listHistory, listTitles, type Category, type MediaLibrary, type SortOrder, type Title } from "./mediaApi";
 
 export function messageOf(error: unknown): string {
@@ -137,13 +137,14 @@ export function CategoryPage({ category, libraries, library: fixedLibrary, searc
   );
 }
 
+// historyCaption says how far a title was played and when; an episode
+// first says which one, since its card shows the show's name.
 function historyCaption(title: Title): string | undefined {
   const progress = title.progress;
   if (!progress) return undefined;
   const when = ago(progress.playedAt);
-  if (progress.watched && !progress.position) return `已看完 · ${when}`;
-  if (progress.position) return `${remaining(progress.position, progress.duration)} · ${when}`;
-  return `播放过 · ${when}`;
+  const state = progress.watched && !progress.position ? "已看完" : progress.position ? remaining(progress.position, progress.duration) : "播放过";
+  return [title.type === "episode" ? episodeCode(title.season, title.episode) : "", state, when].filter(Boolean).join(" · ");
 }
 
 export function FavoritesPage({ refreshKey, onError }: { refreshKey: number; onError: (message: string) => void }) {

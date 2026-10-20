@@ -16,7 +16,7 @@ import {
 } from "./mediaApi";
 import { Player, type PlayRequest } from "./Player";
 import { type Section, Sidebar } from "./Sidebar";
-import { DropOverlay, hasFiles, UploadDialog, UploadPill } from "./Upload";
+import { DropOverlay, hasFiles, UploadDialog, UploadPill, uploadTargets } from "./Upload";
 import { pickedFromDrop, useUploads } from "./uploads";
 import "./media.css";
 
@@ -177,6 +177,8 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
     return () => { live = false; };
   }, [place.kind, refreshKey, onError]);
 
+  const closePlayer = () => { setPlay(undefined); refresh(); };
+
   const playTitle = useCallback(async (title: Title, restart = false) => {
     if (title.type === "show") {
       try {
@@ -243,8 +245,10 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
 
   const libraryOf = (id: string) => libraries?.find((library) => library.id === id);
   const detail = place.kind === "video" || place.kind === "show";
-  // The pages that list a library's titles take uploads into it.
-  const uploadScope: Category | undefined = place.kind === "category" ? place.category : place.kind === "libraries" || place.kind === "library" ? "all" : undefined;
+  // Every page takes files dropped on it, so a video dropped anywhere is
+  // uploaded rather than opened by the browser in place of the NAS. A
+  // category page offers the libraries whose titles it lists.
+  const uploadScope: Category = place.kind === "category" ? place.category : "all";
   const uploadPreferred = place.kind === "library" ? place.id : undefined;
   const dropLabel = place.kind === "library" ? `“${libraryOf(place.id)?.name ?? "媒体库"}”` : place.kind === "category" ? { all: "影视中心", movie: "“电影”", show: "“电视剧”", other: "“其他”" }[place.category] : "媒体库";
 
@@ -253,6 +257,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
     case "home":
       page = !home ? <Loading /> : (
         <HomePage home={home} canCreate={canCreate} onLibraries={() => navigate({ kind: "libraries" }, false)} onCreateLibrary={() => void openLibraryDialog()}
+          onUpload={uploadTargets(libraries ?? [], "all").length ? () => openUpload("all") : undefined}
           onCategory={(category) => {
             if (category === "favorites") navigate({ kind: "favorites" }, false);
             else if (category === "history") navigate({ kind: "history" }, false);
@@ -323,7 +328,19 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
 
   return (
     <ActionsContext.Provider value={actions}>
-      <div ref={root} className={`mc-app ${narrow ? "narrow" : ""} ${sidebarOpen ? "with-sidebar" : ""}`} data-user={userId}>
+      <div ref={root} className={`mc-app ${narrow ? "narrow" : ""} ${sidebarOpen ? "with-sidebar" : ""}`} data-user={userId}
+        onDragOver={(event) => { if (hasFiles(event)) { event.preventDefault(); if (play) event.dataTransfer.dropEffect = "none"; } }}
+        onDrop={(event) => { if (hasFiles(event)) event.preventDefault(); }}
+        onMouseDown={(event) => { if (event.button === 3 || event.button === 4) event.preventDefault(); }}
+        onMouseUp={(event) => {
+          // The mouse's back button steps back inside the media center
+          // instead of taking the browser away from the NAS desktop.
+          if (event.button !== 3 && event.button !== 4) return;
+          event.preventDefault();
+          if (event.button === 4) return;
+          if (play) closePlayer();
+          else back();
+        }}>
         {(sidebarOpen || narrow) && (
           <div className={`mc-side ${narrow ? "drawer" : ""} ${sidebarOpen ? "open" : ""}`}>
             <Sidebar active={sectionOf(place)} libraries={libraries} processing={processing} onSelect={select} />
@@ -331,8 +348,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
         )}
         {narrow && drawer && <div className="mc-scrim" onPointerDown={() => setDrawer(false)} />}
         <main className={`mc-main ${detail ? "detail" : ""}`}
-          onDragEnter={(event) => { if (uploadScope && hasFiles(event) && !uploading) { event.preventDefault(); setDropping(true); } }}
-          onDragOver={(event) => { if (uploadScope && hasFiles(event)) event.preventDefault(); }}>
+          onDragEnter={(event) => { if (hasFiles(event) && !uploading) { event.preventDefault(); setDropping(true); } }}>
           <div className="mc-topbar">
             <button type="button" className="mc-icon-button" aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"} onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}><PanelLeft /></button>
             {stack.length > 1 && <button type="button" className="mc-icon-button" aria-label="返回" onClick={back}><ArrowLeft /></button>}
@@ -356,12 +372,12 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
               <div className="mc-state"><CircleAlert /><h2>影视中心暂时不可用</h2><p>{failure}</p><button type="button" className="mc-glass" onClick={() => void loadLibraries()}>重试</button></div>
             ) : page}
           </div>
-          {dropping && uploadScope && (
+          {dropping && (
             <DropOverlay label={dropLabel} onLeave={() => setDropping(false)}
               onDrop={(event) => { setDropping(false); void pickedFromDrop(event.dataTransfer).then(uploads.add); openUpload(uploadScope, uploadPreferred); }} />
           )}
         </main>
-        {play && <Player request={play} onClose={() => { setPlay(undefined); refresh(); }} onNavigate={(videoId) => setPlay({ videoId })} onSaved={() => undefined} />}
+        {play && <Player request={play} onClose={closePlayer} onNavigate={(videoId) => setPlay({ videoId })} onSaved={() => undefined} />}
         {renaming && (
           <RenameDialog title={renaming} onClose={() => setRenaming(undefined)}
             onDone={(message) => { setRenaming(undefined); toast({ text: message }); follow(); refresh(); }} />
