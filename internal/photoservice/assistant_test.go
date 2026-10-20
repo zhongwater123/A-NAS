@@ -209,6 +209,10 @@ func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
 		response.Header.Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("view = %d %s, want a JPEG", response.StatusCode, response.Header.Get("Content-Type"))
 	}
+	// And what its original records about it.
+	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/metadata", nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("metadata = %d, want 200", response.StatusCode)
+	}
 	for _, request := range [][2]string{
 		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/thumbnail"},
 		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/original"},
