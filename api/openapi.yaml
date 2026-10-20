@@ -1516,6 +1516,31 @@ paths:
         "404": { $ref: "#/components/responses/ProductError" }
         "415": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/metadata:
+    get:
+      operationId: getPhotoMetadata
+      summary: What a photo's original records about it, read when asked (ADR 0024 decision 6)
+      description: Everything its EXIF holds, under ifd0, exif and gps, and where the photo was taken when the camera recorded it. Videos have none yet.
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200":
+          description: The photo's metadata; empty when the original has no EXIF
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    type: object
+                    required: [latitude, longitude]
+                    properties:
+                      latitude: { type: number }
+                      longitude: { type: number }
+                      altitude: { type: number }
+                  exif: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/motion:
     get:
       operationId: openPhotoMotion
