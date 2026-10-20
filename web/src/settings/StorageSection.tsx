@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   HostState, StoragePlan, Volume, VolumeConversion, VolumeLayout,
-  confirmStoragePlan, continueVolumeConversion, createStoragePlan, executeStoragePlan, listVolumes,
+  cancelStoragePlan, confirmStoragePlan, continueVolumeConversion, createStoragePlan, executeStoragePlan, listVolumes,
 } from "../api";
 import { formatBytes, formatNominalCapacity } from "../bytes";
 import type { HostStateView } from "../useHostState";
@@ -15,7 +15,7 @@ import {
 import { Banner, Callout, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./parts";
 
 type Disk = HostState["disks"][number];
-type PlanStep = "plan" | "confirm" | "execute";
+type PlanStep = "plan" | "confirm" | "execute" | "cancel";
 
 export interface StoragePlanFlow {
   plan?: StoragePlan;
@@ -26,6 +26,9 @@ export interface StoragePlanFlow {
   generate: (diskIDs: string[], layout?: VolumeLayout) => Promise<void>;
   confirm: () => Promise<void>;
   execute: () => Promise<void>;
+  // cancel gives up a plan that has not run and forgets it; it reports
+  // whether the plan is gone, so the wizard can close.
+  cancel: () => Promise<boolean>;
   dismiss: () => void;
 }
 
@@ -48,6 +51,13 @@ export function useStoragePlan(): StoragePlanFlow {
     generate: async (diskIDs, layout) => { setPhrase(""); await run("plan", () => createStoragePlan(diskIDs, layout)); },
     confirm: async () => { if (plan) await run("confirm", () => confirmStoragePlan(plan.id, phrase)); },
     execute: async () => { if (plan) await run("execute", () => executeStoragePlan(plan.id)); },
+    cancel: async () => {
+      if (plan?.state !== "planned" && plan?.state !== "confirmed") { setPlan(undefined); setPhrase(""); setError(""); return true; }
+      setBusy("cancel"); setError("");
+      try { await cancelStoragePlan(plan.id); setPlan(undefined); setPhrase(""); return true; }
+      catch (caught) { setError(storageErrorText(caught)); return false; }
+      finally { setBusy(undefined); }
+    },
     dismiss: () => { setPlan(undefined); setPhrase(""); setError(""); },
   };
 }
@@ -91,7 +101,8 @@ export function StorageSection({ host, volumes, isAdmin, flow }: { host: HostSta
     <>
       <PageHeader title="存储" subtitle="数据卷承载全部文件、相册与共享" action={<RefreshButton label="刷新存储状态" busy={host.refreshing} onClick={() => { void volumes.refresh(); void refreshHost(); }} />} />
       {volumes.error && <Banner tone="error">{volumes.error}</Banner>}
-      {showWizard ? <VolumeWizard mode={mode} disks={disks} volume={volume} flow={flow} onClose={() => setWizardOpen(false)} onFinish={finish} />
+      {showWizard ? <VolumeWizard mode={mode} disks={disks} volume={volume} flow={flow} onClose={() => setWizardOpen(false)} onFinish={finish}
+        onCancel={async () => { if (await flow.cancel()) setWizardOpen(false); }} />
         : volumes.items === undefined ? !volumes.error && <div className="set-card set-state compact"><span className="loader" /><p>正在读取数据卷…</p></div>
           : noVolume ? (
             <div className="set-card set-empty">
@@ -242,8 +253,11 @@ type WizardMode = "create" | "add";
 
 interface LayoutOption { layout: VolumeLayout; before?: number; after: number; fits: boolean }
 
-function VolumeWizard({ mode, disks, volume, flow, onClose, onFinish }: {
-  mode: WizardMode; disks: Disk[]; volume?: Volume; flow: StoragePlanFlow; onClose: () => void; onFinish: () => void;
+// The wizard can be left at every step but while a plan runs: before a plan
+// by closing it, with a plan that has not run by cancelling it, and once a
+// plan ended by finishing it.
+function VolumeWizard({ mode, disks, volume, flow, onClose, onFinish, onCancel }: {
+  mode: WizardMode; disks: Disk[]; volume?: Volume; flow: StoragePlanFlow; onClose: () => void; onFinish: () => void; onCancel: () => Promise<void>;
 }) {
   const { plan, busy } = flow;
   const candidates = disks.filter((disk) => disk.role === "unassigned");
@@ -274,7 +288,13 @@ function VolumeWizard({ mode, disks, volume, flow, onClose, onFinish }: {
       <div className="wiz-head">
         <IconTile tone={mode === "add" ? "storage" : "danger"} icon={mode === "add" ? Layers : TriangleAlert} size="lg" />
         <div><h3>{title}</h3><p>{mode === "add" ? "让新硬盘加入数据卷，增加容量或让文件多一份" : "把空闲硬盘格式化为 A-NAS 数据卷"}</p></div>
-        {plan ? <Pill tone={planTone(state)}>{planStateLabel(state)}</Pill> : <button className="set-icon-btn" aria-label={`关闭${title}`} onClick={onClose}><X /></button>}
+        <span className="wiz-head-end">
+          {plan && <Pill tone={planTone(state)}>{planStateLabel(state)}</Pill>}
+          {!running && (
+            <button className="set-icon-btn" aria-label={pending && !expired ? "取消计划并关闭" : `关闭${title}`} disabled={Boolean(busy)}
+              onClick={() => void (!plan ? onClose() : pending && !expired ? onCancel() : state === "succeeded" ? onFinish() : onCancel())}><X /></button>
+          )}
+        </span>
       </div>
       <ol className="wiz-steps">
         {steps.map((label, index) => (
@@ -367,11 +387,12 @@ function VolumeWizard({ mode, disks, volume, flow, onClose, onFinish }: {
             <button className="set-btn primary" disabled={!choice || Boolean(busy)} onClick={generate}>{busy === "plan" ? "正在生成…" : mode === "add" ? "生成计划" : "生成格式化计划"}</button>
           </>
         )}
+        {(state === "planned" || state === "confirmed") && <button className="set-btn wiz-back" disabled={Boolean(busy)} onClick={() => void onCancel()}>{busy === "cancel" ? "正在取消…" : "取消计划"}</button>}
         {state === "planned" && <button className="set-btn primary" disabled={flow.phrase !== plan?.confirmationPhrase || Boolean(busy)} onClick={() => void flow.confirm()}>{busy === "confirm" ? "正在确认…" : "确认计划"}</button>}
         {state === "confirmed" && <button className="set-btn danger" disabled={Boolean(busy)} onClick={() => void flow.execute()}>{plan?.kind === "add_disks" ? "清除硬盘并加入数据卷" : "清除硬盘并创建数据卷"}</button>}
         {state === "succeeded" && <button className="set-btn primary" onClick={onFinish}>完成</button>}
         {state === "expired" && <button className="set-btn primary" onClick={flow.dismiss}>重新开始</button>}
-        {(state === "failed" || state === "needs_attention") && <button className="set-btn" onClick={flow.dismiss}>关闭</button>}
+        {(state === "failed" || state === "needs_attention") && <button className="set-btn" onClick={() => void onCancel()}>关闭</button>}
       </div>
     </section>
   );
@@ -479,7 +500,7 @@ function storageErrorText(error: unknown): string {
     invalid_layout: "这个冗余方式与硬盘数量不符。",
     layout_too_small: "数据卷上的文件放不进所选的冗余方式，请换一种方式。",
     disk_not_eligible: "这块硬盘不能使用：它可能已被挂载、正被其他阵列使用，或不是 SATA/NVMe 硬盘。",
-    plan_state_conflict: "已有一个尚未完成的存储计划，请先完成或等它过期。",
+    plan_state_conflict: "另一个存储计划正在执行，或这个计划已被取消、取代，请等它结束后再试。",
     no_conversion: "数据卷已经在转换，或者没有需要转换的内容。",
   };
   return (code && texts[code]) || messageOf(error);
