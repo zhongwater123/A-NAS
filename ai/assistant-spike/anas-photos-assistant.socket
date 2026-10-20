@@ -1,0 +1,19 @@
+[Unit]
+Description=A-NAS photo service socket for members' AI assistants (trial)
+# The photo service's socket for members' assistants (ADR 0024 decision 6, #113):
+# they search and browse their own and the shared photo libraries, read-only, and
+# the service learns the member from the peer UID. Open to every UID, so its
+# directory is root's alone; each assistant's unit binds the socket itself into
+# its sandbox. systemd holds it, so it outlives restarts of the photo service and
+# the copies bound into running sandboxes keep working. product-settings.sh hands
+# it to anas-photos.service.
+
+[Socket]
+ListenStream=/run/a-nas-photos-assistant/assistant.sock
+SocketMode=0666
+DirectoryMode=0700
+FileDescriptorName=assistant
+Service=anas-photos.service
+
+[Install]
+WantedBy=sockets.target

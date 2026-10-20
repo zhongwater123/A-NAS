@@ -6,6 +6,7 @@ answers deterministically:
                                 "{{album}}" in them become the first such ID in an
                                 earlier tool result of the conversation
   user "SLEEP <seconds>"     -> "ok" after that many seconds (a long model call)
+  user "SAY <text> END"      -> that text as the answer; a backslash and n make a line break
   last message is a tool result -> text echoing the start of that result
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
@@ -59,6 +60,10 @@ def decide(messages):
         return {"tool": name, "args": args}
     if said.startswith("SLEEP "):
         return {"text": "ok", "sleep": float(said.split()[1])}
+    if said.startswith("SAY "):
+        # An answer written out up to " END" (Hermes appends notes to some user messages),
+        # a literal \n also making a line break.
+        return {"text": said[4:].split(" END", 1)[0].replace("\\n", "\n")}
     return {"text": "ok"}
 
 

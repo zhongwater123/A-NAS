@@ -1423,6 +1423,18 @@ paths:
         "304": { description: ETag still matches after authorization }
         "404": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/view:
+    get:
+      operationId: viewPhoto
+      summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
+      description: An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200": { description: The photo's view, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "304": { description: ETag still matches after authorization }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/motion:
     get:
       operationId: openPhotoMotion

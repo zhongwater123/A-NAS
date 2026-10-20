@@ -56,8 +56,10 @@ if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
 fi
 # Hermes's curator, weekly, in the same sandbox, while the member's assistant is not
 # running (anas-assistant-curator@.timer). It needs neither the session token nor the model.
+# Hermes's own pruning of its image cache follows it (media-cache.py).
 sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i (spike)#' \
   -e 's#^ExecStart=.*#ExecStart=/usr/bin/tini -- /opt/a-nas/assistant-runtimes/spike/venv/bin/hermes curator run#' \
+  -e '/^ExecStart=/a ExecStartPost=/opt/a-nas/assistant-runtimes/spike/venv/bin/python -P /spike/media-cache.py' \
   -e '/^ExecStartPost=/d' -e '/^ExecStopPost=/d' -e '/^StopWhenUnneeded/d' -e '/anas-assistant-token@/d' \
   -e '/^BindReadOnlyPaths=\/run\/a-nas-assistant-start/d' -e 's/^Type=.*/Type=oneshot/' \
   -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \

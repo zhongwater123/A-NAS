@@ -6,6 +6,7 @@
     ids QUERY        name=id for each photo a search returns
     get ID           one photo's name
     thumbnail ID     the thumbnail's size
+    view ID          the size and type of the photo's view (what the model looks at)
     rename ID        try to rename a photo
 
 Prints the HTTP status and a short answer; exits 0 on 2xx, 1 otherwise and 2
@@ -61,6 +62,9 @@ elif action == "get":
 elif action == "thumbnail":
     status, data = call("GET", f"/assets/{quoted}/thumbnail")
     answer = f"{len(data)} bytes" if status == 200 else data[:200]
+elif action == "view":
+    status, data = call("GET", f"/assets/{quoted}/view")
+    answer = f"{len(data)} bytes {'image/jpeg' if data[:3] == bytes([0xff, 0xd8, 0xff]) else 'not a JPEG'}" if status == 200 else data[:200]
 elif action == "rename":
     status, data = call("PATCH", "/assets/" + quoted, {"name": "renamed.jpg"})
     answer = data[:200]

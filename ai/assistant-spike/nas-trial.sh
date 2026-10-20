@@ -8,7 +8,9 @@
 #   nas-trial.sh install      install for every member of a-nas-users, once, on fresh state
 #   nas-trial.sh update       this bundle's scripts, units, policy and runtime over an install,
 #                             keeping each member's assistant folder, conversations and memory
-#   nas-trial.sh smoke USER   start USER's assistant and wait for it (no model call)
+#   nas-trial.sh smoke USER [QUERY]
+#                             start USER's assistant and wait for it (no model call), then
+#                             list the photo libraries it reaches; with QUERY, search them
 #   nas-trial.sh remove [--purge-key]
 #                             undo install and delete the gateway's log; the key stays unless
 #                             --purge-key
@@ -19,7 +21,9 @@
 #
 # install runs assistant-layout.sh prepare, which works by path in folders members can
 # write; it therefore refuses to run over anything an earlier run or a member left. update
-# touches only root's own files (assistant-layout.sh members).
+# touches only root's own files (assistant-layout.sh members). Both switch on the session
+# gate and the photo service's socket for assistants (product-settings.sh, drop-ins that
+# survive deploys) and restart the Host Agent, the photo service and the Product Service.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 bundle=$(dirname "$here")
@@ -29,7 +33,6 @@ runtimes=/opt/a-nas/assistant-runtimes
 key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
-env_line=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
 units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
@@ -82,7 +85,7 @@ check() {
   if [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]]; then say "key:          $key (600 root)"
   else say "key:          MISSING — write it to $key (root, 0600) before install"; fi
   say "packages:     $(for p in socat ripgrep tini; do dpkg-query -W -f='${Package}=${Status} ' "$p" 2>/dev/null | sed 's/install ok installed/ok/' || printf '%s=missing ' "$p"; done)"
-  say "assistant on: $(grep -lx "$env_line" /etc/a-nas/host-agent.env /etc/a-nas/anas-api.env 2>/dev/null | tr '\n' ' ' || true)"
+  say "product:      $(bash "$here/product-settings.sh" state)"
   say "accounts ($(wc -l <<<"$list")): $(tr '\n' ' ' <<<"$list")"
   local left
   left=$(leftovers)
@@ -135,16 +138,15 @@ install_trial() {
     bash /spike/assistant-install.sh $(tr '\n' ' ' <<<"$list")
   systemctl enable --now anas-assistant-trial-gateway.service
 
-  say "--- the session gate in the Host Agent and the Product Service"
-  local file
-  for file in /etc/a-nas/host-agent.env /etc/a-nas/anas-api.env; do
-    grep -qx "$env_line" "$file" || printf '%s\n' "$env_line" >> "$file"
-  done
-  systemctl restart anas-host-agent
-  for _ in $(seq 1 100); do [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
-  systemctl restart anas-api
-  for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
+  product_on
   verify
+}
+
+# product_on switches on the session gate in the Host Agent and the Product Service and the
+# photo service's socket for assistants, as drop-ins that survive deploys.
+product_on() {
+  say "--- the session gate, and photos for the assistants"
+  bash /spike/product-settings.sh on
 }
 
 verify() {
@@ -160,6 +162,8 @@ verify() {
   check_one "instance sockets are root's alone" test "$(stat -c '%a %U' "/run/a-nas-assistant/$first.sock")" = "600 root"
   check_one "gateway log is root's alone" test "$(stat -c '%a' /var/log/anas-assistant-gateway)" = 700
   check_one "weekly curator for $first" systemctl is-enabled "anas-assistant-curator@$first.timer"
+  check_one "photo service's socket for assistants" test -S /run/a-nas-photos-assistant/assistant.sock
+  check_one "photo service serves assistants" test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
   ((ok)) || fail "see the FAIL lines; remove undoes the install"
   say "installed: open VNAS on the desktop (members of a-nas-users)"
 }
@@ -182,17 +186,27 @@ update_trial() {
   ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_MODEL_GATEWAY=external ASSISTANT_LAYOUT=members \
     bash /spike/assistant-install.sh "${ready[@]}"
   systemctl restart anas-assistant-trial-gateway.service
+  product_on
   ((${#missing[@]} == 0)) || say "not set up (new since install; remove and install again to include them): ${missing[*]}"
   verify
 }
 
 smoke() {
-  local account=${1:?account}
+  local account=${1:?account} query=${2:-}
   [[ -f "/etc/a-nas-assistant/tokens/$account.env" ]] || fail "$account has no assistant"
   say "starting $account's assistant (the first start writes Hermes's own skills, up to a minute)"
   local started=$SECONDS
   "$python" /spike/serve_client.py "$account" ready
   say "ready after $((SECONDS - started)) s; memory $(systemctl show -p MemoryCurrent --value "anas-assistant@$account.service") bytes"
+  # What the assistant's photo tools reach: the socket bound into its sandbox, as the member.
+  local pid
+  pid=$(systemctl show -p MainPID --value "anas-assistant@$account.service")
+  in_sandbox() {
+    nsenter -t "$pid" -m -- setpriv --reuid "$account" --regid "$account" --init-groups -- \
+      "$python" /spike/photos_peer.py /run/anas-assistant-photos/photos.sock "$@"
+  }
+  say "photo libraries: $(in_sandbox libraries 2>&1 || true)"
+  if [[ -n "$query" ]]; then say "photos for \"$query\": $(in_sandbox search "$query" 2>&1 | cut -c1-600 || true)"; fi
 }
 
 # drop PATH...: remove what it can, say what stays, and carry on.
@@ -211,11 +225,8 @@ remove_trial() {
   # are gone nothing would name them.
   [[ "$(findmnt -n -o FSTYPE --target "$data" 2>/dev/null)" == btrfs ]] || fail "$data is not mounted; mount it first"
   local file account path accounts=()
-  say "--- the session gate off"
-  for file in /etc/a-nas/host-agent.env /etc/a-nas/anas-api.env; do
-    if [[ -f "$file" ]]; then sed -i "\#^$env_line\$#d" "$file"; fi
-  done
-  systemctl restart anas-host-agent anas-api
+  say "--- the session gate and photos for the assistants off"
+  bash "$here/product-settings.sh" off
   say "--- assistants"
   for file in /etc/a-nas-assistant/tokens/*.env "$data"/assistant/*/; do
     [[ -e "$file" ]] || continue
@@ -263,7 +274,7 @@ case ${1:-} in
   check) check ;;
   install) install_trial ;;
   update) update_trial ;;
-  smoke) smoke "${2:-}" ;;
+  smoke) smoke "${2:-}" "${3:-}" ;;
   remove) remove_trial "${2:-}" ;;
-  *) sed -n '2,24p' "$0"; exit 2 ;;
+  *) sed -n '2,26p' "$0"; exit 2 ;;
 esac
