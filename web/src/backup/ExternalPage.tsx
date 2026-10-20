@@ -5,7 +5,8 @@ import { useBackup } from "./BackupCenter";
 // ExternalPage says plainly what backing up to another disk will be and that
 // it is not available yet; nothing on it pretends to work.
 export function ExternalPage() {
-  const { navigate } = useBackup();
+  const { navigate, spaces, data } = useBackup();
+  const allScheduled = spaces.length > 0 && spaces.every((space) => data[space.id]?.schedule?.enabled);
   return (
     <div className="bk-page bk-external-page">
       <header className="bk-page-head">
@@ -63,9 +64,9 @@ export function ExternalPage() {
         <span className="bk-advice-icon"><Laptop /></span>
         <div>
           <h4>在此之前</h4>
-          <p>请把重要的照片和文档另外复制一份到电脑或外接设备上，并为每个空间开启定时快照。</p>
+          <p>{allScheduled ? "请把重要的照片和文档另外复制一份到电脑或外接设备上。每个空间都已开启定时快照，误删的文件可以找回。" : "请把重要的照片和文档另外复制一份到电脑或外接设备上，并为每个空间开启定时快照。"}</p>
         </div>
-        <button type="button" className="bk-secondary small" onClick={() => navigate("schedules")}><Camera />开启定时快照<ArrowRight /></button>
+        {!allScheduled && <button type="button" className="bk-secondary small" onClick={() => navigate("schedules")}><Camera />开启定时快照<ArrowRight /></button>}
       </section>
     </div>
   );
