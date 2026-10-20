@@ -321,8 +321,31 @@ if [[ -x "$assistant_python" ]]; then
   check "Hermes's curator runs in her sandbox while her assistant is stopped" \
     test "$(systemctl show -p Result --value anas-assistant-curator@alice.service)" = success -a -s "$data/assistant/alice/hermes/skills/.curator_state"
   echo "INFO assistant curator: $(journalctl -u anas-assistant-curator@alice.service -o cat --no-pager | grep -m 1 '^auto:' || true)"
+  # Scheduled tasks (decision 8): alice makes one in a conversation with Hermes's own tool;
+  # when it is due, the waker runs it in her sandbox with her assistant stopped, and the
+  # Product Service lists it and tells her of the run once she is signed in.
+  check "the waker that starts due tasks runs" systemctl is-active --quiet anas-assistant-cron-waker.service
+  "$assistant_python" /spike/serve_client.py alice chat \
+    'CALL cronjob_manage {"action": "create", "name": "系统测试任务", "schedule": "every 1m", "prompt": "SAY 共享空间今天没有变化 END"}' >/dev/null 2>&1 || true
+  systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
+  jobs_file="$data/assistant/alice/hermes/cron/jobs.json"
+  for _ in $(seq 1 60); do jq -e '.jobs[0].last_run_at' "$jobs_file" >/dev/null 2>&1 && break; sleep 5; done
+  check "her task ran when due, in her sandbox, with her assistant stopped" \
+    jq -e '.jobs[0].last_status == "ok"' "$jobs_file"
+  check "her assistant itself stayed stopped" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
+  echo "INFO assistant tasks: $(jq -c '.jobs[0] | {name, last_status, last_error}' "$jobs_file" 2>/dev/null || true)"
   # The system test's last check uses /tmp/alice.jar.
   alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
+  tasks=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/tasks" || true)
+  check "the Product Service lists her task without Hermes's internals" \
+    jq -e '.tasks[0].name == "系统测试任务" and .tasks[0].lastStatus == "ok" and (tostring | contains("hermes_home") | not)' <<<"$tasks"
+  task_id=$(jq -r '.tasks[0].id // empty' <<<"$tasks" || true)
+  notices() { curl -fsS -b /tmp/alice.jar "$api/api/v1/notifications" || true; }
+  for _ in $(seq 1 60); do jq -e 'any(.items[]; .kind == "assistant_task")' <<<"$(notices)" >/dev/null 2>&1 && break; sleep 2; done
+  check "signed in, she is told of the run with what it answered" \
+    jq -e 'any(.items[]; .kind == "assistant_task" and .task.name == "系统测试任务" and .task.summary == "共享空间今天没有变化")' <<<"$(notices)"
+  check "she deletes the task" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).
