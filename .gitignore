@@ -30,6 +30,10 @@ node_modules/
 __pycache__/
 *.py[cod]
 .venv/
+# Text embedding fine-tuning on the development machine (docs/research/embeddinggemma-2-text-finetuning.md)
+ai/finetune/data/
+ai/finetune/out/
+ai/finetune/cache/
 target/
 
 # Runtime and diagnostic output

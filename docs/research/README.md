@@ -10,3 +10,4 @@
 - [应用目录扩充评审（2026-10）](app-catalog-review-2026-10.md)（完成；入选应用待实机安装验证）
 - [Hermes Agent 作为 AI 助手运行时的可行性](hermes-agent-runtime.md)（开发机 spike 与 DeepSeek 真实模型测试完成；实验 NAS 实测待做）
 - [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
+- [EmbeddingGemma 2 文本向量：任务前缀、社区微调与我们的微调流程](embeddinggemma-2-text-finetuning.md)（脚本与离线测试完成；基座基线与微调待在 GPU 开发机上跑，微调权重转 LiteRT 未验证）
