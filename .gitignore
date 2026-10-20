@@ -34,6 +34,8 @@ __pycache__/
 ai/finetune/data/
 ai/finetune/out/
 ai/finetune/cache/
+# Local Qdrant binary and data (docs/research/qdrant-vector-store.md)
+ai/finetune/qdrant/
 target/
 
 # Runtime and diagnostic output

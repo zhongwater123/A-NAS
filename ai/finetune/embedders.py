@@ -89,12 +89,13 @@ class HashEmbedder:
     n 取 2 和 3：中文两三个字就是一个词，英文则靠 3-gram。
     """
 
-    name = "hash-ngram"
     semantic = False
 
     def __init__(self, dim: int = 256, ngrams: tuple[int, ...] = (2, 3)):
         self.dim = dim
         self.ngrams = ngrams
+        # 名字带维度：CachedEmbedder 用名字做缓存键，不然 128 维和 512 维的向量会串
+        self.name = f"hash-ngram@{dim}"
 
     @staticmethod
     def _tokens(text: str, ngrams: tuple[int, ...]) -> list[str]:
