@@ -19,13 +19,15 @@ interface SystemRailProps {
   desktopView: DesktopView;
   settingsFocused: boolean;
   sharesFocused: boolean;
+  // sharesUnread counts shares with something new: unopened or with replies.
+  sharesUnread?: number;
   onOpenShares: () => void;
   onToggleDesktop: () => void;
   onOpenSettings: (section?: "account") => void;
   onLogout: () => void;
 }
 
-export function SystemRail({ apps, session, desktopView, settingsFocused, sharesFocused, onOpenShares, onToggleDesktop, onOpenSettings, onLogout }: SystemRailProps) {
+export function SystemRail({ apps, session, desktopView, settingsFocused, sharesFocused, sharesUnread = 0, onOpenShares, onToggleDesktop, onOpenSettings, onLogout }: SystemRailProps) {
   const [popover, setPopover] = useState<Popover>();
   const launcherButton = useRef<HTMLButtonElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
@@ -57,7 +59,9 @@ export function SystemRail({ apps, session, desktopView, settingsFocused, shares
           popup={{ kind: "dialog", id: launcherID, expanded: popover === "launcher" }}
           onClick={() => toggle("launcher")}
         ><Grid2X2 /></RailButton>
-        <RailButton label="打开分享" tip="分享" on={sharesFocused} onClick={() => { setPopover(undefined); onOpenShares(); }}><Share2 /></RailButton>
+        <RailButton label={sharesUnread ? `打开分享（${sharesUnread} 个有新内容）` : "打开分享"} tip={sharesUnread ? `分享 · ${sharesUnread} 个有新内容` : "分享"} on={sharesFocused} onClick={() => { setPopover(undefined); onOpenShares(); }}>
+          <Share2 />{sharesUnread > 0 && <span className="rail-badge" aria-hidden="true">{sharesUnread > 99 ? "99+" : sharesUnread}</span>}
+        </RailButton>
       </div>
       <div className="rail-spacer" />
       <div className="rail-group">

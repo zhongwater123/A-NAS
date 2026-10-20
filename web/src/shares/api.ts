@@ -41,9 +41,6 @@ export async function readText(id: string, entry: ShareEntry, signal: AbortSigna
     return result + decoder.decode();
   } finally { await reader.cancel(); }
 }
-export const isActive = (share: Share) => ["published", "active"].includes(share.status) && (!share.expiresAt || new Date(share.expiresAt).getTime() > Date.now());
-export const statusLabel = (share: Share) => ({ preparing: "正在准备副本", published: "分享中", active: "分享中", revoked: "已撤回", failed: "准备失败", expired: "已到期" }[share.status] ?? share.status);
-export const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请重试";
 // LAN HTTP is a supported entry: randomUUID is restricted to secure contexts,
 // but getRandomValues remains available. These IDs deduplicate requests only.
 export function requestKey(): string {

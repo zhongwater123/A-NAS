@@ -43,7 +43,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
+import { Component, ComponentProps, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 
 import {
   APIError, type AssistantTaskNotice, FileEntry, Notification, Session, Space, User, Volume,
@@ -132,7 +132,7 @@ type WindowAction =
   | { type: "restore"; ids: WindowID[] };
 
 const initialWindows: WindowModel[] = [
-  { id: "shares", title: "分享", open: false, minimized: false, maximized: false, x: 250, y: 65, width: 950, height: 680, z: 2, opened: 0 },
+  { id: "shares", title: "分享", open: false, minimized: false, maximized: false, x: 214, y: 56, width: 1160, height: 700, z: 2, opened: 0 },
 	{ id: "files", title: "文件管理", open: false, minimized: false, maximized: false, x: 230, y: 70, width: 900, height: 620, z: 3, opened: 0 },
 	{ id: "transfers", title: "传输中心", open: false, minimized: false, maximized: false, x: 270, y: 84, width: 900, height: 600, z: 2, opened: 0 },
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
@@ -145,6 +145,13 @@ const initialWindows: WindowModel[] = [
   { id: "store", title: "应用中心", open: false, minimized: false, maximized: false, x: 300, y: 60, width: 940, height: 660, z: 0, opened: 0 },
   { id: "assistant", title: "VNAS", open: false, minimized: false, maximized: false, x: 260, y: 54, width: 1040, height: 700, z: 0, opened: 0 },
 ];
+
+// SharesRail is the system rail with the count of shares that have something
+// new, which only the shares provider knows.
+function SharesRail(props: Omit<ComponentProps<typeof SystemRail>, "sharesUnread">) {
+  const { unread } = useShares();
+  return <SystemRail {...props} sharesUnread={unread.received + unread.sent} />;
+}
 
 const windowIcons: Record<WindowID, AppGlyph> = {
   shares: Share2,
@@ -166,7 +173,7 @@ const wallpaperClickSlop = 6;
 const lightTitleIcons: ReadonlySet<WindowID> = new Set(["photos", "assistant"]);
 // Dock icons reuse the desktop shortcut gradients so an app looks the same in both places.
 const windowTones: Record<WindowID, string> = {
-  shares: "download",
+  shares: "share",
   files: "files",
   transfers: "download",
   photos: "photos",
@@ -431,7 +438,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
       {/* The glow belongs to the built-in wallpaper; it would wash out a chosen picture. */}
       {wallpaper && !wallpaper.image && <div className="wallpaper-glow" />}
 
-      <SystemRail
+      <SharesRail
         apps={desktopApps}
         session={session}
         desktopView={desktopView}
