@@ -17,7 +17,7 @@ import {
 import { type CodeHeaderProps, type StreamdownTextComponents, StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
+  ArrowUp, Brain, CalendarClock, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
   Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
   Trash2, Users, Video, Wrench, X,
 } from "lucide-react";
@@ -32,6 +32,8 @@ import {
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
+import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
+import { TasksView } from "./TasksView";
 import { type NamedPhoto, linkPhotos, photoOf, photosIn } from "./photoLinks";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
@@ -46,13 +48,24 @@ const SUGGESTIONS = [
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
 
-export function AssistantPanel({ username, onShowPhoto }: { username: string; onShowPhoto?(assetId: string): void }) {
+/** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
+export interface AssistantFocus {
+  sessionId?: string;
+  title?: string;
+  at: number;
+}
+
+export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }: {
+  username: string; onShowPhoto?(assetId: string): void; focus?: AssistantFocus; onFocusHandled?(): void;
+}) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string>();
-  // The window shows a conversation, or what the assistant remembers.
-  const [view, setView] = useState<"chat" | "memory">("chat");
+  // The window shows a conversation, what the assistant remembers, or its scheduled tasks.
+  const [view, setView] = useState<"chat" | "memory" | "tasks">("chat");
+  // A run of a scheduled task opened from its task: not in the conversation list.
+  const [run, setRun] = useState<{ id: string; title: string }>();
   const [approvals, setApprovals] = useState<Map<string, Approval>>(new Map());
   // Stored conversations with a turn running in the instance, wherever it was started.
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -134,6 +147,31 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
   const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed });
   const { send, cancel } = thread;
 
+  // Results of scheduled tasks the member has not read; opening a run reads its task's.
+  const unread = useTaskNotices().length;
+  const openRun = useCallback((id: string, title: string) => {
+    const task = taskOfRun(id);
+    if (task) readTaskNotices(task);
+    setRun({ id, title });
+    setActiveId(id);
+    setView("chat");
+  }, []);
+  // A task asked for from the tasks page goes to a new conversation, once the
+  // thread has left the one that was open.
+  const [plan, setPlan] = useState<string>();
+  useEffect(() => {
+    if (plan === undefined || activeId) return;
+    setPlan(undefined);
+    void send(plan);
+  }, [plan, activeId, send]);
+  // A toast on the desktop opens a run, or the tasks.
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.sessionId) openRun(focus.sessionId, focus.title ?? "定时任务");
+    else setView("tasks");
+    onFocusHandled?.();
+  }, [focus, openRun, onFocusHandled]);
+
   // assistant-ui re-reads its store whenever the adapter changes, so it only
   // changes with the messages or the running state.
   const visible = useMemo(() => thread.messages.filter((message) => !message.hidden), [thread.messages]);
@@ -193,6 +231,7 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     .filter((approval) => approval.status === "awaiting" || approval.status === "deciding" || Date.now() / 1000 - approval.createdAt < 600)
     .sort((a, b) => a.createdAt - b.createdAt);
   const unreachable = !gateway.ready && gateway.problem;
+  const runOpen = Boolean(run && run.id === activeId && !active);
 
   return (
     <PhotoOpener.Provider value={onShowPhoto}>
@@ -201,6 +240,10 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
         <button type="button" className="as-new" onClick={() => { setActiveId(undefined); setView("chat"); }}><MessageSquarePlus />新对话</button>
         <button type="button" className={`as-nav${view === "memory" ? " active" : ""}`} aria-pressed={view === "memory"} onClick={() => setView("memory")}>
           <Brain />记忆<small>VNAS 记住的内容</small>
+        </button>
+        <button type="button" className={`as-nav${view === "tasks" ? " active" : ""}`} aria-pressed={view === "tasks"} onClick={() => setView("tasks")}>
+          <CalendarClock />定时任务
+          {unread > 0 ? <span className="as-nav-count" title={`${unread} 个任务有新结果`}>{unread}</span> : <small>按时替你做事</small>}
         </button>
         <div className="as-side-label"><History />对话</div>
         <ul className="as-sessions">
@@ -216,12 +259,22 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
 
       <main className="as-main">
         <header className="as-head">
-          <h2>{view === "memory" ? "记忆" : active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
+          {view === "chat" && runOpen && (
+            <button type="button" className="as-head-back" onClick={() => setView("tasks")} aria-label="回到定时任务"><ChevronLeft /><CalendarClock /></button>
+          )}
+          <h2>{view === "memory" ? "记忆" : view === "tasks" ? "定时任务" : active?.title || (runOpen ? run?.title : activeId ? "新对话" : "开始一个对话")}</h2>
           {thread.running && <span className="as-working"><LoaderCircle />正在处理</span>}
           {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接 VNAS</span>}
         </header>
 
         {view === "memory" && <MemoryView onConversationsDeleted={() => { setActiveId(undefined); void refreshSessions(); }} />}
+        {view === "tasks" && (
+          <TasksView onOpenRun={openRun} onPlan={(text) => {
+            setActiveId(undefined);
+            setView("chat");
+            if (text) setPlan(text);
+          }} />
+        )}
         <AssistantRuntimeProvider runtime={runtime}>
           <ThreadPrimitive.Root className="as-thread" hidden={view !== "chat"}>
             <ThreadPrimitive.Viewport className="as-viewport" autoScroll={Boolean(activeId)}>
@@ -275,8 +328,24 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
   );
 }
 
-function toThreadMessage(message: ChatMessage): ThreadMessageLike {
+// Hermes opens each run of a scheduled task with its own instructions for the
+// run (cron/scheduler_prompt.py), then the task's prompt.
+const CRON_PREAMBLE = /^\[IMPORTANT: You are running as a scheduled cron job[\s\S]*?\]\s*\n\n/;
+
+/** The task's prompt, when the message is the start of a scheduled run. */
+export function scheduledPrompt(message: ChatMessage): string | undefined {
+  if (message.role !== "user") return undefined;
+  const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
+  const preamble = CRON_PREAMBLE.exec(text);
+  return preamble ? text.slice(preamble[0].length).trim() : undefined;
+}
+
+export function toThreadMessage(message: ChatMessage): ThreadMessageLike {
   const createdAt = message.timestamp ? new Date(message.timestamp * 1000) : undefined;
+  const prompt = scheduledPrompt(message);
+  if (prompt !== undefined) {
+    return { id: message.id, role: "user", content: [{ type: "text", text: prompt }], createdAt, metadata: { custom: { scheduled: true } } };
+  }
   if (message.role === "user") return { id: message.id, role: "user", content: message.parts, createdAt };
   return {
     id: message.id,
@@ -382,9 +451,27 @@ function Welcome({ username, onPick }: { username: string; onPick(text: string):
 }
 
 function UserMessage() {
+  const scheduled = useAuiState((state) => Boolean(state.message.metadata?.custom?.scheduled));
+  if (scheduled) return <ScheduledStart />;
   return (
     <MessagePrimitive.Root className="as-msg user">
       <div className="as-bubble"><MessagePrimitive.Parts /></div>
+    </MessagePrimitive.Root>
+  );
+}
+
+// A run of a scheduled task starts with no one having typed anything: a marker,
+// with what the task asks folded under it.
+function ScheduledStart() {
+  const [open, setOpen] = useState(false);
+  return (
+    <MessagePrimitive.Root className="as-msg scheduled">
+      <div className="as-scheduled">
+        <button type="button" aria-expanded={open} onClick={() => setOpen((shown) => !shown)}>
+          <CalendarClock /><span>定时任务按计划运行</span><small>{open ? "收起" : "要做的事"}</small><ChevronDown className={open ? "open" : undefined} />
+        </button>
+        {open && <div className="as-scheduled-prompt"><MessagePrimitive.Parts /></div>}
+      </div>
     </MessagePrimitive.Root>
   );
 }

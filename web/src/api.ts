@@ -185,7 +185,9 @@ export interface Profile { id: string; username: string; nickname?: string; avat
 // password; the user keeps seeing it.
 export interface Session { csrfToken: string; expiresAt: string; user: User; credentialReset?: { actorUsername: string; at: string } }
 export interface Space { writable?: boolean; id: string; kind: "private" | "shared"; name: string; ownerUserId?: string; createdAt: string; viewing?: { grantId: string; expiresAt: string } }
-export interface Notification { id: string; kind: "admin_viewing" | "admin_library_viewing" | "credential_reset"; actorUsername: string; reason?: string; expiresAt?: string; createdAt: string }
+export interface Notification { id: string; kind: "admin_viewing" | "admin_library_viewing" | "credential_reset" | "assistant_task"; actorUsername: string; reason?: string; expiresAt?: string; task?: AssistantTaskNotice; createdAt: string }
+/** A run of one of the member's VNAS scheduled tasks that finished; at most one waits per task. */
+export interface AssistantTaskNotice { taskId: string; name: string; status: string; ranAt: string; sessionId?: string; summary?: string }
 export type ViewingScope = "space" | "library";
 export interface ViewingGrant { id: string; scope: ViewingScope; spaceId: string; ownerUserId: string; reason: string; grantedAt: string; expiresAt: string }
 export interface FileEntry { id: string; spaceId: string; parentId?: string; name: string; kind: "file" | "directory"; sizeBytes: number; modifiedAt: string }
