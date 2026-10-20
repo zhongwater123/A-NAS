@@ -17,7 +17,11 @@
 #
 # The key is /etc/anas-spike/model.key (root, 0600), which the owner writes by hand once;
 # install, update and remove leave it. ANAS_TRIAL_MODEL (default deepseek-flash) and ANAS_TRIAL_UPSTREAM (default
-# api.deepseek.com) pick the OpenAI-compatible service.
+# api.deepseek.com) pick the OpenAI-compatible service. ANAS_TRIAL_UPSTREAM=http://127.0.0.1:11434
+# instead uses NVIDIA PAIR on this NAS, which sends each request to a paired computer on the
+# LAN that has the model (docs/specs/lan-ai-compute.md); a plain-HTTP upstream gets no key.
+# ANAS_TRIAL_CONTEXT (default 128000) is the model's context length, which must match what
+# those computers give the model.
 #
 # install runs assistant-layout.sh prepare, which works by path in folders members can
 # write; it therefore refuses to run over anything an earlier run or a member left. update
@@ -33,12 +37,39 @@ runtimes=/opt/a-nas/assistant-runtimes
 key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
+context=${ANAS_TRIAL_CONTEXT:-128000}
 units=(anas-assistant@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
 say() { printf '%s\n' "$*"; }
 fail() { printf 'STOP: %s\n' "$*" >&2; exit 1; }
+
+# plain_http: whether the upstream is plain HTTP (PAIR on this NAS, or Ollama), which gets no key.
+plain_http() {
+  [[ "$context" =~ ^[0-9]+$ ]] || fail "ANAS_TRIAL_CONTEXT is not a number: $context"
+  [[ "$upstream" == http://* ]]
+}
+
+# key_arg: the gateway's key file argument; stops when a cloud upstream has no key.
+key_arg() {
+  if plain_http; then echo -; return; fi
+  [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]] || fail "write the key to $key (root, 0600) first"
+  echo "$key"
+}
+
+# models: whether the plain-HTTP upstream answers and offers the model; PAIR lists every
+# model its paired computers have.
+models() {
+  local ids
+  if ids=$(curl -fsS -m 5 "$upstream/v1/models" 2>/dev/null |
+    python3 -c 'import json,sys; print(" ".join(m["id"] for m in json.load(sys.stdin)["data"]))' 2>/dev/null); then
+    if [[ " $ids " == *" $model "* ]]; then say "upstream:     has $model"
+    else say "upstream:     answers, no $model (has: ${ids:-nothing})"; fi
+  else
+    say "upstream:     no answer from $upstream"
+  fi
+}
 
 # accounts: members of a-nas-users whose spaces and recycle bins the Host Agent made.
 accounts() {
@@ -81,8 +112,9 @@ check() {
   say "data volume:  $(findmnt -n -o SOURCE,FSTYPE,UUID --target "$data")"
   say "memory:       $(free -m | awk '/^Mem|^内存/ {print $7 " MiB available of " $2}')"
   say "product user: $api_user"
-  say "model:        $model at $upstream"
-  if [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]]; then say "key:          $key (600 root)"
+  say "model:        $model at $upstream (context $context)"
+  if plain_http; then say "key:          none (plain HTTP)"; models
+  elif [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]]; then say "key:          $key (600 root)"
   else say "key:          MISSING — write it to $key (root, 0600) before install"; fi
   say "packages:     $(for p in socat ripgrep tini; do dpkg-query -W -f='${Package}=${Status} ' "$p" 2>/dev/null | sed 's/install ok installed/ok/' || printf '%s=missing ' "$p"; done)"
   say "product:      $(bash "$here/product-settings.sh" state)"
@@ -116,13 +148,16 @@ install_files() {
   chown -R root:root "$runtimes/spike"
   install -m 0644 "$trial/spike/anas-assistant-trial.tmpfiles" /etc/tmpfiles.d/anas-assistant-trial.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/anas-assistant-trial.conf
-  sed "s/@UPSTREAM@/$upstream/" "$trial/spike/anas-assistant-trial-gateway.service" > /etc/systemd/system/anas-assistant-trial-gateway.service
+  local key_file
+  key_file=$(key_arg)
+  sed -e "s|@UPSTREAM@|$upstream|" -e "s|@KEY@|$key_file|" "$trial/spike/anas-assistant-trial-gateway.service" \
+    > /etc/systemd/system/anas-assistant-trial-gateway.service
 }
 
 install_trial() {
   local api_user list left
   api_user=$(preflight)
-  [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]] || fail "write the key to $key (root, 0600) first"
+  key_arg >/dev/null
   left=$(leftovers)
   [[ -z "$left" ]] || fail "not fresh, remove first: $(tr '\n' ' ' <<<"$left")"
   list=$(accounts)
@@ -134,7 +169,7 @@ install_trial() {
 
   say "--- the assistant for $(wc -l <<<"$list") accounts"
   # shellcheck disable=SC2046 # one argument per account
-  ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_MODEL_GATEWAY=external \
+  ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_CONTEXT=$context SPIKE_MODEL_GATEWAY=external \
     bash /spike/assistant-install.sh $(tr '\n' ' ' <<<"$list")
   systemctl enable --now anas-assistant-trial-gateway.service
 
@@ -172,7 +207,7 @@ verify() {
 update_trial() {
   local api_user list account ready=() missing=()
   api_user=$(preflight)
-  [[ -s "$key" && "$(stat -c '%a %U' "$key")" == "600 root" ]] || fail "write the key to $key (root, 0600) first"
+  key_arg >/dev/null
   [[ "$(readlink /spike)" == "$trial/spike" && -d /etc/a-nas-assistant ]] || fail "no trial installed here; use install"
   list=$(accounts)
   for account in $list; do
@@ -184,7 +219,7 @@ update_trial() {
   install_packages
   install_files
   say "--- the assistant for ${#ready[@]} accounts"
-  ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_MODEL_GATEWAY=external ASSISTANT_LAYOUT=members \
+  ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_CONTEXT=$context SPIKE_MODEL_GATEWAY=external ASSISTANT_LAYOUT=members \
     bash /spike/assistant-install.sh "${ready[@]}"
   systemctl restart anas-assistant-trial-gateway.service
   product_on
