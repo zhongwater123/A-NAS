@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 )
 
 const (
+	// fakeToken is alice's instance secret, her password for Hermes's login.
 	fakeToken   = "serve-token-alice"
 	fakeRuntime = "0a1b2c3d"
 	fakeStored  = "20261015_120000_abcdef"
@@ -40,8 +42,15 @@ type fakeServe struct {
 	resolved bool     // approval.respond answers resolved: 1 while true
 	conns    int
 	conn     *websocket.Conn
-	closed   chan struct{}
-	answered chan string
+	// access is the access token of the current login; logins counts them.
+	access string
+	logins int
+	// controller is the connection that registered as the browser; results
+	// are the browser command results it sent.
+	controller *websocket.Conn
+	results    chan string
+	closed     chan struct{}
+	answered   chan string
 	// The learning graph: alice's memories (store, text) and the skills the
 	// assistant made (name, createdBy). system are A-NAS's own skills, from
 	// skills.external_dirs: Hermes shows their text but leaves them out of the
@@ -64,7 +73,7 @@ func newFakeServe(t *testing.T) *fakeServe {
 	if err := os.WriteFile(filepath.Join(dir, "alice.token"), []byte(fakeToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8),
+	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8), results: make(chan string, 8),
 		memories: [][2]string{{"memory", "alice 喜欢简短的回答"}, {"profile", "alice 每周日大扫除"}},
 		skills:   [][2]string{{"family-trip", "learn"}, {"anas-photos", "agent"}}, system: []string{"anas-files"}}
 	listener, err := net.Listen("unix", filepath.Join(dir, "alice.sock"))
@@ -83,15 +92,22 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"bad host"}`, http.StatusBadRequest)
 		return
 	}
+	if r.URL.Path == "/auth/password-login" {
+		f.login(w, r)
+		return
+	}
+	f.mu.Lock()
+	access := f.access
+	f.mu.Unlock()
 	if r.URL.Path == "/api/ws" {
-		if r.URL.Query().Get("token") != fakeToken {
+		if access == "" || r.URL.Query().Get("token") != access {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		f.gateway(w, r)
 		return
 	}
-	if r.Header.Get(tokenHeader) != fakeToken {
+	if access == "" || r.Header.Get("Authorization") != "Bearer "+access {
 		http.Error(w, `{"detail":"Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -127,6 +143,32 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, `{"detail":"Not found"}`, http.StatusNotFound)
 	}
+}
+
+// login answers Hermes's password login: alice with her instance's secret
+// gets a new access token, which replaces the last.
+func (f *fakeServe) login(w http.ResponseWriter, r *http.Request) {
+	var login struct{ Provider, Username, Password string }
+	_ = json.NewDecoder(r.Body).Decode(&login)
+	if r.Method != http.MethodPost || login.Provider != "basic" || login.Username != "alice" || login.Password != fakeToken {
+		http.Error(w, `{"detail":"Invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+	f.mu.Lock()
+	f.logins++
+	f.access = fmt.Sprintf("access-%d", f.logins)
+	access := f.access
+	f.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: "hermes_session_at", Value: access, MaxAge: 43200, Path: "/"})
+	_, _ = io.WriteString(w, `{"ok":true,"next":"/"}`)
+}
+
+// restart stands in for the instance restarting: it signs sessions with a new
+// key, so the last access token is refused.
+func (f *fakeServe) restart() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.access = "signed-before-the-restart"
 }
 
 // learning serves Hermes's learning graph routes over the fake's memories and
@@ -254,6 +296,16 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = json.Unmarshal(msg.Params, &params)
 			go f.turn(conn, params.Text)
+		case "browser.controller.register":
+			f.mu.Lock()
+			f.controller = conn
+			f.mu.Unlock()
+			f.reply(conn, msg.ID, `{"scope":{"session_id":"`+fakeStored+`","controller_id":"vnas-window","capabilities":["browser_snapshot"]}}`)
+		case "browser.controller.result":
+			f.results <- string(msg.Params)
+			f.reply(conn, msg.ID, `{"accepted":true}`)
+		case "browser.controller.detach":
+			f.reply(conn, msg.ID, `{"detached":true}`)
 		case "approval.respond":
 			var params struct {
 				Choice string `json:"choice"`
@@ -310,12 +362,33 @@ func (f *fakeServe) turn(conn *websocket.Conn, said string) {
 			`","questions":[{"qid":"q1","question":"放到哪个文件夹？","choices":["照片","文档"]},{"qid":"q2","question":"改个名字吗？"}]}`)
 		<-f.answered
 		f.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	case "browse":
+		// browser_snapshot: Hermes sends the command to the connection that
+		// registered as the session's browser, and waits for its result.
+		f.mu.Lock()
+		controller := f.controller
+		f.mu.Unlock()
+		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t4","name":"browser_snapshot","args":{}}`)
+		f.event(controller, "browser.controller.command", fakeRuntime,
+			`{"command_id":"0123456789abcdef0123456789abcdef","action":"browser_snapshot","arguments":{},"controller_id":"vnas-window"}`)
+		select {
+		case result := <-f.results:
+			f.event(conn, "message.complete", fakeRuntime, `{"text":`+strconv.Quote(result)+`,"status":"complete"}`)
+		case <-time.After(5 * time.Second):
+			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
+		}
 	case "long":
 		f.event(conn, "message.delta", fakeRuntime, `{"text":"thinking…"}`)
 	default:
 		f.event(conn, "message.delta", fakeRuntime, `{"text":"hi"}`)
 		f.event(conn, "message.complete", fakeRuntime, `{"text":"hi","status":"complete"}`)
 	}
+}
+
+func (f *fakeServe) methodsSeen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.methods...)
 }
 
 func (f *fakeServe) finish() {

@@ -258,6 +258,15 @@ if [[ -x "$assistant_python" ]]; then
   echo "INFO assistant photos: $sandbox_libraries"
   check "it runs under alice's own UID" \
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
+  # Hermes's own login and browser control (decisions 8 to 10): the old session token is
+  # refused, and a logged-in window becomes the browser of its own session only.
+  browser_out=$("$assistant_python" /spike/browser_control.py alice 2>&1 || true)
+  check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$browser_out"
+  browser_ok=no
+  grep -q '^PASS browser_snapshot reaches the window' <<<"$browser_out" &&
+    grep -q '^browser control: 0 failed' <<<"$browser_out" && browser_ok=yes
+  check "a logged-in window becomes the browser of its session and answers its commands" test "$browser_ok" = yes
+  grep '^FAIL' <<<"$browser_out" | sed 's/^/INFO assistant browser control: /' || true
   check "the first model request offers the A-NAS MCP tool" \
     bash -c "grep -m 1 -F '\"tools\": [\"' /var/log/fake-model.jsonl | grep -q mcp__anas__submit_changes"
   # The window's way in: the Product Service, then the gate, then alice's instance.

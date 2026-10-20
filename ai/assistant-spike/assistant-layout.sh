@@ -21,24 +21,26 @@
 #                                                 assistant directories, the files Hermes's
 #                                                 home binds, then members
 #   assistant-layout.sh members DATA ACCOUNT...   only what lives in root's own /etc: member
-#                                                 config, session tokens, instance sockets
+#                                                 config, instance secrets, instance sockets
 #                                                 (nothing members can write; the trial's update)
 #   assistant-layout.sh quota   DATA SIZE ACCOUNT...  simple quota on the volume, SIZE per
 #                                                 assistant directory
 #   assistant-layout.sh remove  DATA ACCOUNT      what deleting the account removes
 #
 # With ASSISTANT_GATE=host-agent the Host Agent's File Broker is the session gate (ADR 0024
-# decision 10): the instance sockets stay root's and the product service gets no token, the
-# broker hands both out per session. Otherwise (the spike, and the local UI prototype whose
-# product service runs without a File Broker) PRODUCT_USER (default a-nas) owns the instance
-# sockets and gets a copy of each session token in PRODUCT_TOKENS (default
-# /run/anas-spike-tokens, which run.sh shares with the host in product mode).
+# decision 10): the instance sockets stay root's and the product service gets no secret, the
+# broker hands out a connection and an access token of Hermes's login per session. Otherwise
+# (the spike, and the local UI prototype whose product service runs without a File Broker)
+# PRODUCT_USER (default a-nas) owns the instance sockets and gets a copy of each instance
+# secret in PRODUCT_TOKENS (default /run/anas-spike-tokens, which run.sh shares with the host
+# in product mode) to log in with.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 users=a-nas-users
 product_user=${PRODUCT_USER:-a-nas}
 product_tokens=${PRODUCT_TOKENS:-/run/anas-spike-tokens}
 gate=${ASSISTANT_GATE:-}
+runtime_python=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 
 # acl.go: inheritedACL, containerACL, trashRootACL.
 inherited() {
@@ -117,22 +119,34 @@ case $cmd in
     ;&
   members)
     for account in "$@"; do
-      # Hermes reads skills.external_dirs and, under serve, mcp_servers from this file only.
-      install -d -m 0755 "/etc/a-nas-assistant/members/$account" "/etc/a-nas-assistant/members/$account/anas-member"
-      { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$account"
-        sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' "$here/managed-config.yaml"
-      } > "/etc/a-nas-assistant/members/$account/config.yaml.new"
-      mv "/etc/a-nas-assistant/members/$account/config.yaml.new" "/etc/a-nas-assistant/members/$account/config.yaml"
-      sed "s/{{member}}/$account/g" "$here/member-skill.md" > "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
-      chmod 0644 "/etc/a-nas-assistant/members/$account/config.yaml" "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
-      # The session token: created once, root-only; the product service gets its own copy.
-      # 64 hex characters, as `hermes serve --ssh-session-token-file` takes it; one made
-      # in another form before is replaced.
+      # The instance's secret: created once, root-only; the member's password for Hermes's own
+      # login (decision 10), which the Host Agent uses for a signed-in session. Without the
+      # gate the product service gets its own copy and logs in itself.
       install -d -m 0700 /etc/a-nas-assistant/tokens
       if ! grep -qxE 'HERMES_DASHBOARD_SESSION_TOKEN=[0-9a-f]{64}' "/etc/a-nas-assistant/tokens/$account.env" 2>/dev/null; then
         (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" \
           > "/etc/a-nas-assistant/tokens/$account.env")
       fi
+      # Hermes reads skills.external_dirs, mcp_servers (under serve), dashboard.basic_auth and
+      # browser.backend from this file only. The login holds the secret's scrypt hash, made
+      # with Hermes's own hash_password; without the runtime only the probe runs, and serve,
+      # whose login gate would refuse to start without it, never does.
+      install -d -m 0755 "/etc/a-nas-assistant/members/$account" "/etc/a-nas-assistant/members/$account/anas-member"
+      hash=
+      if [[ -x "$runtime_python" ]]; then
+        hash=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$account.env" | tr -d '\n' |
+          "$runtime_python" -c 'import sys; from plugins.dashboard_auth.basic import hash_password; print(hash_password(sys.stdin.read()))')
+      fi
+      { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$account"
+        sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' "$here/managed-config.yaml"
+        # Hermes's own browser tools only, served by the member's VNAS window (browser
+        # control), never the Browser Use CLI.
+        printf 'browser:\n  backend: "off"\n'
+        [[ -z "$hash" ]] || printf 'dashboard:\n  basic_auth:\n    username: %s\n    password_hash: "%s"\n' "$account" "$hash"
+      } > "/etc/a-nas-assistant/members/$account/config.yaml.new"
+      mv "/etc/a-nas-assistant/members/$account/config.yaml.new" "/etc/a-nas-assistant/members/$account/config.yaml"
+      sed "s/{{member}}/$account/g" "$here/member-skill.md" > "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
+      chmod 0644 "/etc/a-nas-assistant/members/$account/config.yaml" "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
       if [[ "$gate" != host-agent ]] && getent passwd "$product_user" >/dev/null; then
         install -d -m 0700 -o "$product_user" "$product_tokens"
         (umask 077; sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$account.env" \

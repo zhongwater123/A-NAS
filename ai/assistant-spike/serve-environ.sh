@@ -5,7 +5,7 @@
 set -uo pipefail
 user=${1:-alice}
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
 "$py" /spike/serve_client.py "$user" ready >/dev/null
 sleep 3  # MCP discovery starts with the first client
 nspid() { awk '/^NSpid/ {print $NF}' "/proc/$1/status"; }

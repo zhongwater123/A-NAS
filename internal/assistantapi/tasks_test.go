@@ -317,7 +317,7 @@ func TestASignedInMemberHearsOfEachFinishedRunOnce(t *testing.T) {
 		lastError: "RuntimeError: the model did not answer"})
 	serve.addJob(&fakeJob{id: "dddddddddddd", name: "还没运行过", state: "scheduled"})
 	notices := &heardRuns{}
-	h := New(Options{Connector: SocketConnector{SocketDir: serve.dir, TokenDir: serve.dir}, SocketDir: serve.dir, Notices: notices,
+	h := New(Options{Connector: NewSocketConnector(serve.dir, serve.dir), SocketDir: serve.dir, Notices: notices,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*handler)
 	h.Keep(alice, "alice-session")
 	t.Cleanup(func() { h.Forget("alice-session") })

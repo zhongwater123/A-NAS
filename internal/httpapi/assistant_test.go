@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -32,7 +33,8 @@ type assistantInstance struct {
 }
 
 // serveAssistantInstance stands in for alice's `hermes serve` on
-// <dir>/alice.sock with the rows it really returns.
+// <dir>/alice.sock with the rows it really returns, behind Hermes's password
+// login with her instance's secret.
 func serveAssistantInstance(t *testing.T, dir string) *assistantInstance {
 	t.Helper()
 	instance := &assistantInstance{opened: make(chan struct{}, 8), closed: make(chan struct{}, 8)}
@@ -44,7 +46,18 @@ func serveAssistantInstance(t *testing.T, dir string) *assistantInstance {
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/ws" && r.URL.Query().Get("token") == "serve-token-alice" && r.Host == "127.0.0.1:9119" {
+		if r.Method == http.MethodPost && r.URL.Path == "/auth/password-login" {
+			var login struct{ Provider, Username, Password string }
+			_ = json.NewDecoder(r.Body).Decode(&login)
+			if login.Provider != "basic" || login.Username != "alice" || login.Password != "serve-token-alice" {
+				http.Error(w, `{"detail":"Invalid credentials"}`, http.StatusUnauthorized)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "hermes_session_at", Value: "access-alice", MaxAge: 43200, Path: "/"})
+			_, _ = io.WriteString(w, `{"ok":true,"next":"/"}`)
+			return
+		}
+		if r.URL.Path == "/api/ws" && r.URL.Query().Get("token") == "access-alice" && r.Host == "127.0.0.1:9119" {
 			conn, err := websocket.Accept(w, r, nil)
 			if err != nil {
 				return
@@ -58,7 +71,7 @@ func serveAssistantInstance(t *testing.T, dir string) *assistantInstance {
 				}
 			}
 		}
-		if r.Header.Get("X-Hermes-Session-Token") != "serve-token-alice" || r.Host != "127.0.0.1:9119" {
+		if r.Header.Get("Authorization") != "Bearer access-alice" || r.Host != "127.0.0.1:9119" {
 			http.Error(w, `{"detail":"Unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -119,7 +132,7 @@ func TestSigningInKeepsTheMembersAssistantRunningUntilSigningOut(t *testing.T) {
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	assistant := assistantapi.New(assistantapi.Options{
-		Connector: assistantapi.SocketConnector{SocketDir: dir, TokenDir: dir}, SocketDir: dir, Logger: logger,
+		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
@@ -190,7 +203,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	assistant := assistantapi.New(assistantapi.Options{
-		Connector: assistantapi.SocketConnector{SocketDir: dir, TokenDir: dir}, SocketDir: dir, Logger: logger,
+		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,

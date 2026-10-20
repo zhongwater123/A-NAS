@@ -11,7 +11,7 @@ user=alice
 home=/srv/a-nas/data/assistant/$user/hermes
 sock=/run/a-nas-assistant/$user.sock
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
 # Written by the fake model for the conversation's own requests only (not titles, not reviews).
 system=/var/log/fake-model.jsonl.system.txt
 # shellcheck source=policy.sh
@@ -20,7 +20,7 @@ policy "$([[ ${1:-} == --managed ]] && echo "$2")"
 echo "logging.level in the managed policy: $(sed -n '/^logging:/,/^[a-z]/s/^  level: //p' /etc/hermes/config.yaml)"
 
 rest() {  # rest METHOD PATH [JSON]: the body, then the status on its own line
-  curl -sS --max-time 150 --unix-socket "$sock" -X "$1" -H "X-Hermes-Session-Token: $token" \
+  curl -sS --max-time 150 --unix-socket "$sock" -X "$1" -H "Authorization: Bearer $token" \
     -H 'Content-Type: application/json' ${3:+-d "$3"} -w '\n%{http_code}\n' "http://127.0.0.1:9119$2"
 }
 body() { rest "$@" | head -n -1; }

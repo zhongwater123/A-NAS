@@ -3,6 +3,7 @@ package assistantapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -39,7 +40,7 @@ func newHarness(t *testing.T) *harness {
 	serve := newFakeServe(t)
 	changes := &fakeChanges{}
 	api := New(Options{
-		Connector: SocketConnector{SocketDir: serve.dir, TokenDir: serve.dir},
+		Connector: NewSocketConnector(serve.dir, serve.dir),
 		SocketDir: serve.dir, Changes: changes,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -427,6 +428,62 @@ func TestEveryWindowWithTheConversationOpenFollowsItsTurn(t *testing.T) {
 	h.serve.finish()
 	second.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
 	first.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+}
+
+func TestTheWindowIsTheBrowserOfItsOwnSessionOnly(t *testing.T) {
+	h := newHarness(t)
+	first := h.open()
+	first.call("session.create", `{"cols":80}`)
+	register := `{"session_id":"` + fakeRuntime + `","protocol_version":1,"controller_id":"vnas-window","browser_profile_id":"webos","capabilities":%s}`
+	for _, refused := range []string{
+		fmt.Sprintf(register, `["browser_navigate"]`),
+		fmt.Sprintf(register, `["browser_snapshot","browser_cdp"]`),
+		fmt.Sprintf(register, `[]`),
+		strings.Replace(fmt.Sprintf(register, `["browser_snapshot"]`), "vnas-window", "extension", 1),
+		strings.Replace(fmt.Sprintf(register, `["browser_snapshot"]`), `"protocol_version":1`, `"protocol_version":true`, 1),
+	} {
+		if response := first.call("browser.controller.register", refused); len(response.Error) == 0 {
+			t.Fatalf("registration %s passed", refused)
+		}
+	}
+	if response := first.call("browser.controller.register", fmt.Sprintf(register, `["browser_snapshot","browser_click"]`)); len(response.Error) > 0 {
+		t.Fatalf("registration refused: %s", response.Error)
+	}
+	// A second window with the conversation open follows its turn, but the
+	// browser commands go to the window that is the session's browser only.
+	second := h.open()
+	second.call("session.resume", `{"session_id":"`+fakeStored+`","cols":80}`)
+	first.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"browse"}`)
+	command := first.waitFor(func(f frame) bool { return isEvent(f, "browser.controller.command") })
+	var ev struct {
+		Payload struct {
+			CommandID string `json:"command_id"`
+			Action    string `json:"action"`
+		} `json:"payload"`
+	}
+	_ = json.Unmarshal(command.Params, &ev)
+	if ev.Payload.Action != "browser_snapshot" {
+		t.Fatalf("command = %s", command.Params)
+	}
+	if response := first.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"`+ev.Payload.CommandID+
+		`","ok":true,"result":{"snapshot":"- button \"相册\" [ref=e1]"}}`); len(response.Error) > 0 {
+		t.Fatalf("result refused: %s", response.Error)
+	}
+	second.waitFor(func(f frame) bool {
+		if isEvent(f, "browser.controller.command") {
+			t.Fatal("a browser command reached another window")
+		}
+		return isEvent(f, "message.complete") && strings.Contains(string(f.Params), "相册")
+	})
+	// The window that leaves stops being the session's browser.
+	_ = first.conn.Close(websocket.StatusNormalClosure, "")
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(strings.Join(h.serve.methodsSeen(), "\n"), "browser.controller.detach") {
+		if time.Now().After(deadline) {
+			t.Fatalf("no detach after the window left: %v", h.serve.methodsSeen())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func TestIdleWindowClosingLetsTheInstanceGo(t *testing.T) {

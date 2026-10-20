@@ -9,10 +9,10 @@ part=${2:-all}
 sock=/run/a-nas-assistant/$user.sock
 home=/srv/a-nas/data/assistant/$user
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
 call() {  # call METHOD PATH [JSON]: status and the start of the body
   local out
-  out=$(curl -sS --max-time 150 --unix-socket "$sock" -X "$1" -H "X-Hermes-Session-Token: $token" \
+  out=$(curl -sS --max-time 150 --unix-socket "$sock" -X "$1" -H "Authorization: Bearer $token" \
     -H 'Content-Type: application/json' ${3:+-d "$3"} -w '\n%{http_code}' "http://127.0.0.1:9119$2")
   printf '%-58s HTTP %s %s\n' "$1 $2" "$(tail -n1 <<<"$out")" "$(head -n -1 <<<"$out" | tr '\n' ' ' | cut -c1-170)"
 }
@@ -81,7 +81,7 @@ if [[ $part == all || $part == cron ]]; then
   call POST /api/cron/jobs '{"schedule": "every 1m", "name": "probe", "prompt": "CALL read_file {\"path\": \"/nas/个人空间/secret.txt\"}"}'
   echo "waiting 75 s for a tick..."; sleep 75
   echo "model requests during the wait: $(( $(fake_requests) - before ))"
-  job=$(curl -sS --unix-socket "$sock" -H "X-Hermes-Session-Token: $token" http://127.0.0.1:9119/api/cron/jobs |
+  job=$(curl -sS --unix-socket "$sock" -H "Authorization: Bearer $token" http://127.0.0.1:9119/api/cron/jobs |
     python3 -c 'import json,sys; d=json.load(sys.stdin); jobs=d.get("jobs", d) if isinstance(d, dict) else d; print(jobs[0]["id"] if jobs else "")')
   echo "job id: ${job:-none}"
   if [ -n "$job" ]; then

@@ -1,0 +1,18 @@
+/* Where VNAS acts on the desktop: a brief ring around the control. */
+.vnas-control-ring {
+  position: fixed;
+  z-index: 2147483000;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px #0a0a0a, 0 0 0 5px rgba(255, 255, 255, .85), 0 8px 24px rgba(0, 0, 0, .25);
+  pointer-events: none;
+  animation: vnas-control-ring .9s cubic-bezier(.2, .8, .2, 1) forwards;
+}
+@keyframes vnas-control-ring {
+  0% { opacity: 0; transform: scale(1.08); }
+  20% { opacity: 1; transform: scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vnas-control-ring { animation: none; }
+}

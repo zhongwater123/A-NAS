@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -49,6 +51,8 @@ var (
 	runtimeIDPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
 	storedIDPattern  = regexp.MustCompile(`^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$`)
 	serverIDPattern  = regexp.MustCompile(`^srq-[0-9a-f]{12}$`)
+	// A browser command's id (secrets.token_hex(16) in Hermes's broker).
+	commandIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`)
 )
 
@@ -78,6 +82,44 @@ func title(raw json.RawMessage) bool {
 	}
 	count := utf8.RuneCountInString(value)
 	return count >= 1 && count <= maxTitleRunes
+}
+
+// exactly accepts one value: a string or an integer.
+func exactly[T string | int](want T) check {
+	return func(raw json.RawMessage) bool {
+		var got T
+		return json.Unmarshal(raw, &got) == nil && got == want && strings.TrimSpace(string(raw)) == mustJSON(want)
+	}
+}
+
+func mustJSON(value any) string {
+	data, _ := json.Marshal(value)
+	return string(data)
+}
+
+// someOf accepts a non-empty list of distinct strings out of allowed.
+func someOf(allowed ...string) check {
+	return func(raw json.RawMessage) bool {
+		var values []string
+		if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
+			return false
+		}
+		seen := map[string]bool{}
+		for _, value := range values {
+			if seen[value] || !slices.Contains(allowed, value) {
+				return false
+			}
+			seen[value] = true
+		}
+		return true
+	}
+}
+
+// anyJSON accepts any JSON value up to maxBytes.
+func anyJSON(maxBytes int) check {
+	return func(raw json.RawMessage) bool {
+		return len(raw) <= maxBytes && json.Valid(raw)
+	}
 }
 
 func boolean(raw json.RawMessage) bool {
@@ -123,7 +165,32 @@ var clientMethods = map[string]method{
 	"session.interrupt": {params: map[string]check{"session_id": runtimeID}, required: []string{"session_id"}},
 	"session.title":     {params: map[string]check{"session_id": runtimeID, "title": title}, required: []string{"session_id", "title"}},
 	"session.close":     {params: map[string]check{"session_id": runtimeID}, required: []string{"session_id"}},
+	// Hermes's browser control: the window registers as the browser of a session it
+	// opened, for the WebOS page it shows, and answers that session's browser commands.
+	// Only this controller and the capabilities the window serves.
+	"browser.controller.register": {params: map[string]check{"session_id": runtimeID, "protocol_version": exactly(1),
+		"controller_id": exactly(controllerID), "browser_profile_id": exactly(controllerProfile), "capabilities": someOf(controllerCapabilities...)},
+		required: []string{"session_id", "protocol_version", "controller_id", "browser_profile_id", "capabilities"}},
+	"browser.controller.result": {params: map[string]check{"session_id": runtimeID, "command_id": pattern(commandIDPattern), "ok": boolean,
+		"result": anyJSON(maxInputBytes), "error": anyJSON(4096)},
+		required: []string{"session_id", "command_id", "ok"}},
+	"browser.controller.heartbeat": {params: map[string]check{"session_id": runtimeID}, required: []string{"session_id"}},
+	"browser.controller.detach":    {params: map[string]check{"session_id": runtimeID}, required: []string{"session_id"}},
 }
+
+// The VNAS window as Hermes's browser for the WebOS page it shows: its names and
+// what it serves. It never navigates away from WebOS, so neither
+// browser_navigate nor browser_back, and no raw DevTools access.
+const (
+	controllerID      = "vnas-window"
+	controllerProfile = "webos"
+)
+
+var controllerCapabilities = []string{"browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll"}
+
+// controllerEvents carry a session's browser commands to the window that
+// registered as its browser, and to no other window of the member.
+var controllerEvents = map[string]bool{"browser.controller.command": true, "browser.controller.cancel": true}
 
 // localMethods are answered by the Product Service: it already declared to
 // Hermes that it answers the server's requests, and approvals are its own.

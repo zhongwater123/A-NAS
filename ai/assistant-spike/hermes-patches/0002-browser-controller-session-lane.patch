@@ -1,0 +1,68 @@
+From: A-NAS
+Subject: [PATCH] fix(browser-control): a live session's controller is found by its turns
+
+Two gaps keep a controller registered over a real /api/ws from ever serving a
+turn, at the pinned 0e427d78 and on main c5a3c0f8 (2026-10-20); the feature's
+tests (tests/gateway/test_browser_control_cloud.py) build session records that
+hide both:
+- browser.controller.register requires session["profile"], which no live
+  session records (_create_session keeps profile_home only), so registration
+  answers 4403. The scope's profile_id is only recorded, never matched: fall
+  back to the profile this backend serves.
+- The scope is keyed by the runtime session id from the RPC params, while a
+  turn's browser tools look it up by HERMES_SESSION_ID, the agent's durable
+  session id (or the session key). The fixtures make the two equal; in
+  `hermes serve` they never are, so the tools stay hidden and unrouted. Key
+  the scope, and the controller methods' lookups, by the id turns route by.
+Drop this file once upstream fixes both.
+---
+diff --git a/tui_gateway/methods_browser_control.py b/tui_gateway/methods_browser_control.py
+index 9b48e244..a5f745b9 100644
+--- a/tui_gateway/methods_browser_control.py
++++ b/tui_gateway/methods_browser_control.py
+@@ -53,6 +53,15 @@ def _principal_digest(identity: dict) -> str:
+     return f"principal:dashboard:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
+ 
+ 
++def _lane_session_id(session: dict | None, session_id: str) -> str:
++    """The id a session's turns route browser tools by: HERMES_SESSION_ID, the agent's durable
++    session id or else the session key (server._set_session_context). A live session's runtime
++    id, which RPC params carry, is neither."""
++    session = session or {}
++    agent = session.get("agent")
++    return str(getattr(agent, "session_id", None) or session.get("session_key") or session_id)
++
++
+ def _broker_event_writer(transport: object, session_id: str):
+     """Broker send callback: re-envelope ``{method, params}`` as a Gateway ``event`` frame
+     (``type`` = method, ``payload`` = params, plus the owning ``session_id``)."""
+@@ -115,7 +124,7 @@ def _controller_method(
+             scope = None
+             if lookup_scope:
+                 scope = broker.scope_for_session(
+-                    session_id=session_id, principal_id=_principal_digest(identity),
++                    session_id=_lane_session_id(session, session_id), principal_id=_principal_digest(identity),
+                     transport_family=_CLOUD_TRANSPORT_FAMILY)
+                 if scope is None:
+                     return _err(rid, _ERR_FORBIDDEN, missing_scope_message)
+@@ -157,7 +166,9 @@ def _(rid, params: dict, transport, identity, session_id, broker, _scope, sessio
+ 
+     controller_id = str(params.get("controller_id") or "").strip()
+     browser_profile_id = str(params.get("browser_profile_id") or "").strip()
+-    profile_id = str(session.get("profile") or "").strip()
++    # A live session records no "profile" (only its tests set one); the controller then belongs
++    # to the profile this backend serves.
++    profile_id = str(session.get("profile") or "").strip() or _current_profile_name()
+     if not controller_id or not browser_profile_id or not profile_id:
+         return _err(
+             rid, _ERR_FORBIDDEN,
+@@ -169,7 +180,8 @@ def _(rid, params: dict, transport, identity, session_id, broker, _scope, sessio
+     if not capabilities:
+         return _err(rid, _ERR_FORBIDDEN, "no permitted controller capabilities requested")
+     scope = browser_control_broker.ControllerScope(
+-        principal_id=_principal_digest(identity), profile_id=profile_id, session_id=session_id,
++        principal_id=_principal_digest(identity), profile_id=profile_id,
++        session_id=_lane_session_id(session, session_id),
+         controller_id=controller_id, browser_profile_id=browser_profile_id,
+         transport_family=_CLOUD_TRANSPORT_FAMILY, capabilities=capabilities)
+     broker.attach(scope, _broker_event_writer(transport, session_id), owner=transport)

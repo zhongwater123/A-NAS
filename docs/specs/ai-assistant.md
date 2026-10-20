@@ -9,7 +9,7 @@
 
 ## 非目标
 
-- 不让助手联网（浏览器、联网搜索、语音合成等），也不提供外部消息平台（微信、飞书等）的入口；定时任务的结果只在 VNAS 与桌面提示中查看（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。终端、代码执行、子任务、提问与看图可以用：它们在沙箱中以本人身份运行，改不了本人与共享的文件。
+- 不让助手联网（联网搜索、语音合成等）；它的浏览器工具只操作成员正在用的 WebOS 页面，不打开网站。也不提供外部消息平台（微信、飞书等）的入口；定时任务的结果只在 VNAS 与桌面提示中查看（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。终端、代码执行、子任务、提问与看图可以用：它们在沙箱中以本人身份运行，改不了本人与共享的文件。
 - 不写照片、图库、用户标签或 AI 纠错；不读快照。
 - 不处理开发期云端 API 的隐私问题：云端 API 只用于开发测试，本地多模态模型接入前不在保存真实家庭数据的设备上为成员开启助手。
 - 不让管理员看到或代为确认成员的助手对话、记忆与待确认更改。
@@ -197,6 +197,24 @@
 - When：查看或操作一个任务。
 - Then：每个任务显示名称、什么时候运行、要做的事、下次运行与上次运行的结果，可以立即运行（几秒内没跑完就显示“已开始运行，完成后会通知你”）、暂停、继续、查看运行记录，以及确认后连同运行记录一起删除。运行暂停的任务时，Hermes 会同时恢复它的定时。改任务的内容或时间在对话里说。没有任务时，页面给出几个可以直接说的例子。
 
+### 让 VNAS 操作桌面
+
+- Given：成员在 VNAS 窗口里说“帮我打开相册”“打开文件管理，进入共享空间”。
+- When：VNAS 处理这句话。
+- Then：VNAS 用 Hermes 的浏览器工具查看桌面（每个打开的窗口和它的控件），在成员自己的浏览器里点击程序坞、窗口里的按钮、输入框，就像成员自己操作；被点的控件闪一下黑框，成员能看到它在哪里操作。“处理过程”里显示“查看桌面”“点击”“输入”“按键”“滚动”。VNAS 自己的窗口不在它看到的桌面里，输入框里的密码也看不到。它不能打开网址，也不会离开这个桌面。
+
+### 确认会删除或替换内容的一步
+
+- Given：VNAS 在桌面上要点“删除”“替换”“清空”“还原”这类按钮，或在“设置”的存储、用户与权限、终端里操作。
+- When：轮到这一步。
+- Then：VNAS 窗口里出现一张卡片“VNAS 想点击‘删除’”，写明在哪个窗口、多少秒内不回答就不执行。成员点“允许”才执行，之后 30 秒内同一窗口里应用自己的确认（例如再点一次“删除”）不再重复询问；点“不允许”或 25 秒内不回答，这一步不执行，VNAS 照实告诉成员。
+
+### 没有 VNAS 窗口时不能操作桌面
+
+- Given：定时任务在运行，或成员关掉了 VNAS 窗口而回合还在继续。
+- When：VNAS 想操作桌面。
+- Then：它没有浏览器工具（窗口离开时注销），会说明需要在 VNAS 窗口里对话才能操作桌面。成员另一个打开着同一对话的窗口只跟着显示回复，不会也去点击。
+
 ### 助手在回答之后记下的内容
 
 - Given：Hermes 的后台复盘在一轮回答之后改了助手的记忆或技能。
@@ -214,6 +232,7 @@
 - 数据卷离线时助手不可用，不回退到系统盘；实例崩溃时由下一次请求重新启动，进行中的确认随这一轮作废。
 - 成员登录 WebOS 时实例在后台启动，登录期间常驻，打开助手时直接连上（开发机上实例已运行时，从点开到窗口可用 0.7 秒）；全部会话结束（退出登录、过期或账号停用）后约 45 秒退出。登录后立即打开时，窗口在实例启动完成前显示“正在连接 VNAS”（冷启动在实验 NAS 上约 5 秒，开发机 5.5–11 秒）。同一成员同时打开多个窗口时共用一个实例（[研究](../research/hermes-agent-runtime.md#登录即启动并常驻2026-10-19开发机)）。
 - 实例内存上限 768 MiB，超过 640 MiB 时内核先回收（开发机用真实模型多轮对话后常驻约 375 MB、峰值不超过 442 MB）；任务数上限 256。
+- 操作桌面的一步最多等 30 秒（Hermes 等浏览器命令的时限），所以确认卡片 25 秒内不回答就不执行；快照不超过 14,000 字符，更长的部分省略并提示滚动或关掉不需要的窗口。
 - 定时任务由 root 的唤醒服务每 30 秒检查一次是否到期，所以最多晚 30 秒开始；一次运行最长 1 小时。成员登录期间产品服务每分钟查看一次任务是否运行完，所以结果最晚约一分钟后提示。
 - 助手目录的容量上限为每个账号 10 GiB，写满时写入失败。确认的等待时限为 1 天（`approvals.timeout: 86400`）；卡片只在打开这一轮的登录会话有效时存在，浏览器登录 12 小时后过期，会话先结束时这一轮与卡片随之结束。
 
@@ -230,6 +249,8 @@
 - 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已改为 `hermes serve` 与回合内审批，在开发机上用真实模型跑通：卡片只出现在提交它的对话中，侧栏标“等你确认”；同一成员另一个窗口打开这个对话后看到同一张卡片并确认，两个窗口都显示已完成，文件已修改、旧版本在回收站；不回答时卡片在等待时限后变为超时，文件不变（[研究](../research/hermes-agent-runtime.md#集成会话闸门与产品服务的转发2026-10-15开发机)）。拒绝、停止与部分失败在浏览器中尚未验收。“记忆”页已在原型中用真实模型验收查看、逐条删除与连同对话全部清除。
 - 契约测试：`/api/v1/assistant` 每个接口的请求与响应符合 [OpenAPI](../../api/openapi.yaml)；管理员与其他成员到不了别人的实例；写操作需要 CSRF 令牌（[`assistant_test.go`](../../internal/httpapi/assistant_test.go)）。网关只放行白名单中的方法、参数与事件，审批只经卡片接口回答，窗口离开后回合期间保持到实例的连接，同一对话在多个窗口中都收到事件（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）。
 - 定时任务：任务列表不转出 Hermes 的内部字段（主目录、模型、投递目标、运行的系统提示），按名称或格式不对的编号到不了 Hermes，立即运行等几秒后答“已开始”，删除先删运行（[`tasks_test.go`](../../internal/assistantapi/tasks_test.go)）；登录期间每个结束的运行只告知一次，静默的运行记为已读（同一文件）；每个任务至多一条未读通知（[`assistanttasks_test.go`](../../internal/accounts/assistanttasks_test.go)）；窗口与桌面提示见 [`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)。真实沙箱中任务在实例停止时按时运行、以成员身份写助手目录、要改个人空间的被拒绝（[`cron.sh`](../../ai/assistant-spike/cron.sh)），系统测试在真实安装器上检查唤醒、按时运行、产品服务列出任务与告知结果（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
+- 操作桌面：页面快照只含窗口与控件、不含 VNAS 自己与密码，按编号点击、输入（React 能收到）与按键（不落到 VNAS 的输入框），删除类控件与设置的存储页先问成员、拒绝时不点击、允许后同一窗口一段时间内不重复问（[`webosControl.test.ts`](../../web/src/assistant/webosControl.test.ts)）；网关只放行 VNAS 窗口这一种控制器和它的能力，命令只到注册的窗口，窗口离开即注销（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）；真实沙箱中旧令牌被拒绝、登录过的窗口注册、模型只拿到窗口提供的浏览器工具、命令往返（[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh)）。
+- Hermes 自己的登录：文件代理用实例密钥登录、缓存令牌、实例拒绝后重新登录一次，密钥错误时不可用（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/assistantlogin`](../../internal/assistantlogin/login_test.go)、[`login_test.go`](../../internal/assistantapi/login_test.go)）。
 - 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 
 ## 关联
@@ -238,5 +259,6 @@
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
 - 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
+- 操作桌面：窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts)，系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
 - 定时任务：产品服务 [`tasks.go`](../../internal/assistantapi/tasks.go) 与 [`tasknotices.go`](../../internal/assistantapi/tasknotices.go)，通知 [`internal/accounts/assistanttasks.go`](../../internal/accounts/assistanttasks.go)，窗口 [`TasksView.tsx`](../../web/src/assistant/TasksView.tsx) 与桌面提示 [`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)，唤醒 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)，系统技能 [`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md)
 - 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)

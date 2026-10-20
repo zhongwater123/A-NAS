@@ -33,7 +33,7 @@ runtimes=/opt/a-nas/assistant-runtimes
 key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
-units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
+units=(anas-assistant@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
@@ -252,8 +252,10 @@ remove_trial() {
   say "--- units and files"
   systemctl disable --now anas-assistant-trial-gateway.service anas-assistant-cron-waker.service 2>/dev/null || true
   for file in "${units[@]}"; do drop "/etc/systemd/system/$file"; done
+  # anas-assistant-token@.service is from bundles before Hermes's own login.
   drop /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d \
-    /etc/systemd/system/anas-assistant-api@.socket.d /etc/tmpfiles.d/anas-assistant-trial.conf
+    /etc/systemd/system/anas-assistant-api@.socket.d /etc/tmpfiles.d/anas-assistant-trial.conf \
+    /etc/systemd/system/anas-assistant-token@.service
   systemctl daemon-reload
   drop /run/a-nas-assistant /run/a-nas-assistant-start /run/anas-assistant-start /run/anas-assistant-gw /run/anas-assistant-photos \
     /run/anas-change-agent /run/anas-spike-broker \
