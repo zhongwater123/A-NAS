@@ -521,7 +521,10 @@ func (s *Store) prepare(ctx context.Context, u User, id string, req CreateReques
 			if req.Message != "" {
 				m := Message{ID: 1, Sender: u, Text: req.Message, CreatedAt: now}
 				r.Threads[p.UserID] = append(r.Threads[p.UserID], m)
-				recipient(r, p.UserID).LastMessage = 1
+				thread := recipient(r, p.UserID)
+				thread.LastMessage = 1
+				// The sender wrote the note, so it is never unread on their side.
+				thread.SenderReadThrough = 1
 			}
 			s.event(r, p.UserID, p.UserID, "share", 0)
 		}

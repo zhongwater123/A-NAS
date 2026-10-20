@@ -214,3 +214,49 @@ func TestMessagesValidateUTF8SizeAndReadCursor(t *testing.T) {
 		t.Fatalf("history lost %v", err)
 	}
 }
+
+func TestAuthorsReadTheirOwnMessagesButNeverSkipReplies(t *testing.T) {
+	s, _ := setup(t, &testBackend{})
+	v := publish(t, s)
+	ctx := context.Background()
+	cursors := func(u User) Recipient {
+		t.Helper()
+		view, err := s.Get(ctx, u, v.ID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range view.Recipients {
+			if item.UserID == bob.ID {
+				return item
+			}
+		}
+		t.Fatal("bob's thread missing")
+		return Recipient{}
+	}
+	if got := cursors(sender); got.LastMessage != 1 || got.SenderReadThrough != 1 || got.ReadThrough != 0 {
+		t.Fatalf("initial note %+v", got)
+	}
+	// Bob has not read the note yet, so his own reply must not mark it read.
+	if _, err := s.SendMessage(ctx, bob, v.ID, bob.ID, "reply-1", "收到"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cursors(bob); got.ReadThrough != 0 {
+		t.Fatalf("reply skipped the unread note %+v", got)
+	}
+	if err := s.MarkRead(ctx, bob, v.ID, bob.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SendMessage(ctx, bob, v.ID, bob.ID, "reply-2", "谢谢"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cursors(bob); got.ReadThrough != 3 {
+		t.Fatalf("own reply left unread %+v", got)
+	}
+	// The sender has not read Bob's replies; answering must leave them unread.
+	if _, err := s.SendMessage(ctx, sender, v.ID, bob.ID, "answer", "好的"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cursors(sender); got.SenderReadThrough != 1 || got.LastMessage != 4 {
+		t.Fatalf("sender cursor %+v", got)
+	}
+}
