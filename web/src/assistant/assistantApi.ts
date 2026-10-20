@@ -126,6 +126,46 @@ export const memoryItem = (id: string) => request<{ id: string; kind: string; co
 export const forgetMemoryItem = (id: string) => request<void>(`${base}/memory/items/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
 export const clearMemory = (conversations: boolean) => request<MemoryCleared>(`${base}/memory/clear`, json("POST", { conversations }), true);
 
+/**
+ * One of the member's scheduled tasks: a Hermes cron job, made in a conversation.
+ * It runs when due whether the window is open or not, with nobody there to confirm a change.
+ */
+export interface AssistantTask {
+  id: string;
+  name: string;
+  /** What the task asks VNAS each time it runs. */
+  prompt: string;
+  schedule: { kind: "cron" | "interval" | "once" | string; expr?: string; minutes?: number; runAt?: number; display: string };
+  /** scheduled, paused, completed (a one-off that ran) or error (the schedule cannot be computed). */
+  state: string;
+  running?: boolean;
+  nextRunAt?: number;
+  lastRunAt?: number;
+  /** ok, or what went wrong. */
+  lastStatus?: string;
+  lastError?: string;
+  createdAt?: number;
+  completed: number;
+  times?: number;
+}
+
+/** A run of a task; one with an id is a conversation. */
+export interface AssistantTaskRun {
+  id?: string;
+  startedAt: number;
+  endedAt?: number;
+  messageCount: number;
+}
+
+const task = (id: string) => `${base}/tasks/${encodeURIComponent(id)}`;
+export const listTasks = () => request<{ tasks: AssistantTask[] }>(`${base}/tasks`).then((body) => body.tasks);
+export const taskRuns = (id: string) => request<{ runs: AssistantTaskRun[] }>(`${task(id)}/runs`).then((body) => body.runs);
+export const pauseTask = (id: string) => request<{ task: AssistantTask }>(`${task(id)}/pause`, { method: "POST" }, true).then((body) => body.task);
+export const resumeTask = (id: string) => request<{ task: AssistantTask }>(`${task(id)}/resume`, { method: "POST" }, true).then((body) => body.task);
+/** Runs a task now; finished is false when it goes on after the answer. */
+export const runTask = (id: string) => request<{ finished: boolean; task?: AssistantTask }>(`${task(id)}/run`, { method: "POST" }, true);
+export const deleteTask = (id: string) => request<void>(task(id), { method: "DELETE" }, true);
+
 /** The gateway WebSocket on this origin; the session cookie authenticates it. */
 export function gatewayUrl(): string {
   const { protocol, host } = window.location;
@@ -150,6 +190,8 @@ export function failureText(reason: unknown): string {
     case "authentication_required": return "登录已过期，请重新登录";
     case "memory_changed": return "VNAS 的记忆刚刚有变化，请再试一次";
     case "memory_not_found": return "这一条已经不在了";
+    case "task_not_found": return "这个定时任务已经不在了";
+    case "task_running": return "这个任务正在运行，等它完成再试";
   }
   return reason instanceof TypeError ? "网络连接中断" : "操作没有完成，请重试";
 }

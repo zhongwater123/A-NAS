@@ -315,7 +315,7 @@ describe("A-NAS v1.0.1 desktop", () => {
         { id: "file:1", spaceId: "space:owner", name: "家庭", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" },
         { id: "file:2", spaceId: "space:owner", name: "A.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" },
       ],
-      volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 480 * 1024 ** 3, availableBytes: 278 * 1024 ** 3, state: "available" }],
+      volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 480 * 1024 ** 3, availableBytes: 278 * 1024 ** 3, state: "available" }],
     });
     const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -562,7 +562,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   it("does not report the whole data volume as used when usage is unavailable", async () => {
     installAPI({
       spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
-      volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 500_107_862_016, state: "available" }],
+      volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 500_107_862_016, state: "available" }],
     });
     const user = userEvent.setup(); render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -592,8 +592,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   it("keeps the desktop usable when a blank-disk plan contains legacy null arrays", async () => {
     installAPI({
       storagePlan: {
-        id: "plan:blank", diskId: "disk:fake-data-01", diskModel: "A-NAS Fake HDD", capacityBytes: 512000000000,
-        fingerprint: "blank-disk-fingerprint", signatures: null,
+        id: "plan:blank", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
+        disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "blank-disk-fingerprint", signatures: null }],
         confirmationPhrase: "ERASE data-01", actions: null, state: "planned", expiresAt: "2026-10-07T10:10:00Z",
       },
     });
@@ -1223,6 +1223,9 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
     if (path.startsWith("/api/v1/files/") && path.includes("/content")) return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
     if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
 	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/confirm")) return ok({ ...(options.storagePlan as object), state: "confirmed" });
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute")) return ok({ ...(options.storagePlan as object), state: "succeeded" });
+    if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion")) return { ok: true, status: 202, headers: new Headers({ "Content-Length": "0" }), json: async () => undefined } as Response;
     if (path === "/api/v1/users" && init?.method === "POST") {
       const { username } = JSON.parse(String(init.body)) as { username: string };
       return ok({ id: "user:new", username: username.trim().toLowerCase(), role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z", mustChangePassword: false }, 201);
@@ -1579,8 +1582,9 @@ describe("Settings", () => {
   it("keeps a pending storage plan across sections and when settings closes", async () => {
     installAPI({
       storagePlan: {
-        id: "plan:pending", diskId: "disk:fake-data-01", diskModel: "A-NAS Fake HDD", capacityBytes: 512000000000,
-        fingerprint: "pending-fingerprint", signatures: [], confirmationPhrase: "ERASE data-01", actions: [], state: "planned", expiresAt: "2099-01-01T00:00:00Z",
+        id: "plan:pending", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
+        disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "pending-fingerprint", signatures: [] }],
+        confirmationPhrase: "ERASE data-01", actions: [], state: "planned", expiresAt: "2099-01-01T00:00:00Z",
       },
     });
     const user = userEvent.setup();
@@ -1636,7 +1640,7 @@ describe("Settings", () => {
   });
 
   it("reports unknown data volume usage instead of a full volume", async () => {
-    installAPI({ volumes: [{ id: "volume:data", diskId: "disk:data", capacityBytes: 500_107_862_016, state: "available", filesystemUuid: "09e275fe-794a" }] });
+    installAPI({ volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 500_107_862_016, state: "available", filesystemUuid: "09e275fe-794a" }] });
     const user = userEvent.setup();
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
@@ -1645,6 +1649,101 @@ describe("Settings", () => {
     expect(within(settings).getByText("在线")).toBeTruthy();
     expect(within(settings).queryByRole("meter", { name: "数据卷已用空间" })).toBeNull();
     expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();
+  });
+
+  it("adds a new disk to the data volume as a mirror", async () => {
+    const dataDisk = { ...healthyState.disks[0], id: "disk:data", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016, role: "data", inUse: true, filesystems: ["btrfs"], eligibleForDataVolume: false, ineligibleReasons: ["data_volume", "in_use"] };
+    const spareDisk = { ...healthyState.disks[0], id: "disk:spare", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016, filesystems: ["linux_raid_member"] };
+    const usbDisk = { ...healthyState.disks[0], id: "disk:usb", model: "USB Stick", transport: "usb", removable: true, eligibleForDataVolume: false, ineligibleReasons: ["unsupported_transport", "removable"] };
+    const plan = {
+      id: "plan:add", kind: "add_disks", layout: "mirror", capacityBeforeBytes: 500_107_862_016, capacityAfterBytes: 500_107_862_016,
+      disks: [{ id: "disk:spare", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016, fingerprint: "spare-fingerprint", signatures: [{ type: "linux_raid_member", label: "OrangePi3B:0" }] }],
+      confirmationPhrase: "ERASE k:spare", actions: [{ kind: "convert_layout", description: "在后台把数据卷从单盘转换为镜像（RAID 1），期间可以照常使用" }],
+      state: "planned", expiresAt: "2099-01-01T00:00:00Z",
+    };
+    const fetchMock = installAPI({
+      hostState: { ...healthyState, disks: [dataDisk, spareDisk, usbDisk] },
+      volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 480 * 1024 ** 3, availableBytes: 280 * 1024 ** 3, state: "available", filesystemUuid: "09e275fe-794a" }],
+      storagePlan: plan,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("发现 1 块未使用的硬盘")).toBeTruthy();
+    expect(within(settings).getAllByText("有旧数据").length).toBeGreaterThan(0);
+    expect(within(settings).getByText("USB 等外接硬盘不能加入数据卷；可移除设备不能加入数据卷")).toBeTruthy();
+
+    await user.click(within(settings).getByRole("button", { name: "设置用途…" }));
+    const wizard = within(settings).getByRole("region", { name: "设置硬盘用途" });
+    expect((within(wizard).getByRole("radio", { name: /用作备份盘/ }) as HTMLInputElement).disabled).toBe(true);
+    expect((within(wizard).getByRole("checkbox", { name: /ST500DM002/ }) as HTMLInputElement).checked).toBe(true);
+    await user.click(within(wizard).getByRole("button", { name: "下一步" }));
+    const layouts = within(wizard).getByRole("radiogroup", { name: "冗余方式" });
+    expect((within(layouts).getByRole("radio", { name: /镜像/ }) as HTMLInputElement).checked).toBe(true);
+    expect(within(layouts).getByText("推荐")).toBeTruthy();
+    expect(within(wizard).getByText(/不能代替备份/)).toBeTruthy();
+    await user.click(within(wizard).getByRole("button", { name: "生成计划" }));
+    const created = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST");
+    expect(JSON.parse(String(created?.[1]?.body))).toEqual({ diskIds: ["disk:spare"], layout: "mirror" });
+
+    expect(await within(wizard).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect(within(wizard).getByText("将清除：linux_raid_member（OrangePi3B:0）")).toBeTruthy();
+    expect(within(wizard).getByText("硬盘上有其他系统留下的数据")).toBeTruthy();
+    expect(within(wizard).getByText("镜像（RAID 1）")).toBeTruthy();
+    await user.type(within(wizard).getByLabelText(/输入确认短语/), "ERASE k:spare");
+    await user.click(within(wizard).getByRole("button", { name: "确认计划" }));
+    await user.click(await within(wizard).findByRole("button", { name: "清除硬盘并加入数据卷" }));
+    expect(await within(wizard).findByText("硬盘已加入数据卷")).toBeTruthy();
+    await user.click(within(wizard).getByRole("button", { name: "完成" }));
+    expect(within(settings).queryByRole("region", { name: "设置硬盘用途" })).toBeNull();
+  });
+
+  it("shows how far a conversion has come and continues a stopped one", async () => {
+    const disks = [
+      { ...healthyState.disks[0], id: "disk:data", role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] },
+      { ...healthyState.disks[0], id: "disk:spare", role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] },
+    ];
+    const fetchMock = installAPI({
+      hostState: { ...healthyState, disks },
+      volumes: [{
+        id: "volume:data", diskIds: ["disk:data", "disk:spare"], layout: "mirror", capacityBytes: 480 * 1024 ** 3, availableBytes: 280 * 1024 ** 3, state: "available",
+        conversion: { state: "waiting", convertedBytes: 80 * 1024 ** 3, totalBytes: 200 * 1024 ** 3 },
+      }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("转换为镜像已暂停")).toBeTruthy();
+    expect(within(settings).getByText("Btrfs · 镜像（RAID 1） · 2 块硬盘")).toBeTruthy();
+    expect(within(settings).getByRole("progressbar", { name: "转换为镜像" }).getAttribute("aria-valuenow")).toBe("40");
+    expect(within(settings).getByText("转换中")).toBeTruthy();
+    expect(within(settings).queryByRole("button", { name: "设置用途…" })).toBeNull();
+    await user.click(within(settings).getByRole("button", { name: "继续转换" }));
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/volumes/volume%3Adata/conversion" && init?.method === "POST")).toBe(true);
+  });
+
+  it("creates a mirror when two disks are chosen for a new data volume", async () => {
+    const second = { ...healthyState.disks[0], id: "disk:fake-data-02" };
+    const fetchMock = installAPI({ hostState: { ...healthyState, disks: [healthyState.disks[0], second] } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(await within(settings).findByRole("button", { name: "初始化数据卷…" }));
+    const wizard = within(settings).getByRole("region", { name: "初始化数据卷" });
+    const boxes = within(wizard).getAllByRole("checkbox");
+    await user.click(boxes[0]);
+    expect(within(wizard).getByRole("button", { name: "生成格式化计划" })).toBeTruthy();
+    await user.click(boxes[1]);
+    await user.click(within(wizard).getByRole("button", { name: "下一步" }));
+    expect(within(wizard).getAllByText("477 GiB").length).toBeGreaterThan(0);
+    await user.click(within(wizard).getByText("扩容"));
+    expect((within(wizard).getByRole("radio", { name: /扩容/ }) as HTMLInputElement).checked).toBe(true);
+    await user.click(within(wizard).getByRole("button", { name: "生成格式化计划" }));
+    const created = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST");
+    expect(JSON.parse(String(created?.[1]?.body))).toEqual({ diskIds: ["disk:fake-data-01", "disk:fake-data-02"], layout: "span" });
   });
 
   it("resets a member password from a form inside the window", async () => {

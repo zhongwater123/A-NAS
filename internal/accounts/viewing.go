@@ -86,12 +86,15 @@ type Notification struct {
 	ActorUsername string           `json:"actorUsername"`
 	Reason        string           `json:"reason,omitempty"`
 	ExpiresAt     *time.Time       `json:"expiresAt,omitempty"`
-	CreatedAt     time.Time        `json:"createdAt"`
+	// Task is the run an assistant_task notification tells of.
+	Task      *AssistantTaskRun `json:"task,omitempty"`
+	CreatedAt time.Time         `json:"createdAt"`
 }
 
 type notificationDetail struct {
-	Reason    string     `json:"reason,omitempty"`
-	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	Reason    string            `json:"reason,omitempty"`
+	ExpiresAt *time.Time        `json:"expiresAt,omitempty"`
+	Task      *AssistantTaskRun `json:"task,omitempty"`
 }
 
 // StartViewing opens another account's private space read-only to an
@@ -401,6 +404,7 @@ WHERE user_id = ? AND acknowledged_at IS NULL ORDER BY created_at, id`, actor.ID
 		if detail != "" && json.Unmarshal([]byte(detail), &decoded) == nil {
 			notification.Reason = decoded.Reason
 			notification.ExpiresAt = decoded.ExpiresAt
+			notification.Task = decoded.Task
 		}
 		notifications = append(notifications, notification)
 	}

@@ -115,6 +115,7 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/live-videos", h.uploadLiveVideo)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/preview", h.preview)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/view", h.view)
+	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/metadata", h.metadata)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/motion", h.motion)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/motion/play", h.playMotion)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/download", h.download)
@@ -688,6 +689,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "媒体解码服务暂不可用，请稍后重试")
 	case errors.Is(err, mediaworker.ErrUnreadable):
 		WriteError(w, http.StatusUnprocessableEntity, "unreadable_media", "动态片段无法读取，请选择未修改的原件")
+	case errors.Is(err, photos.ErrNoMetadata):
+		WriteError(w, http.StatusUnsupportedMediaType, "no_metadata", "视频的拍摄信息还读不了，只有照片的可以")
 	case errors.Is(err, photos.ErrNoView):
 		WriteError(w, http.StatusUnsupportedMediaType, "no_view", "视频没有可以查看的画面，只有照片有")
 	case errors.Is(err, photos.ErrUnsupportedType):

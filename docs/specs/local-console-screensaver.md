@@ -1,7 +1,7 @@
 # 本地控制台屏幕保护程序
 
 状态：implemented
-更新时间：2026-10-09
+更新时间：2026-10-20
 
 ## 目标
 
@@ -10,7 +10,7 @@
 ## 非目标
 
 - 不在远程浏览器、登录页或设备启用页启动屏保。
-- 不播放声音，不提供视频池设置界面、锁屏认证、显示器休眠或 DPMS 管理。
+- 不播放声音，不提供视频池设置界面、锁屏认证或 DPMS 管理。屏保播放满设定时长后黑屏由[个性化](personalization.md)定义。
 - 不把外部视频提交到 Git 或嵌入产品二进制。
 
 ## 场景
@@ -55,7 +55,7 @@
 
 - Given：视频目录不存在、清单为空，或池内全部视频均播放失败。
 - When：本地控制台加载或播放屏保。
-- Then：不显示视频覆盖层且本次页面会话不再重试，静态桌面继续可用。
+- Then：不显示视频覆盖层且本次页面会话不再重试，静态桌面继续可用；无人操作满 3 分钟加息屏时长后仍会黑屏，见[个性化](personalization.md)。
 
 ## 边界与失败
 
@@ -75,6 +75,7 @@
 
 ## 关联
 
+- 规格：[个性化](personalization.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)、[屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
 - 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/LocalConsoleScreenSaver.tsx)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)

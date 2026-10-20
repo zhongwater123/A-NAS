@@ -165,6 +165,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCreateVolume(w, r)
 		return
 	}
+	if r.URL.Path == "/v1/storage/volumes/disks" {
+		h.handleAddDisks(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/storage/volumes/conversion" {
+		h.handleContinueConversion(w, r)
+		return
+	}
 	if r.URL.Path == "/v1/accounts/credential" {
 		h.handleSetCredential(w, r)
 		return
@@ -316,7 +324,7 @@ func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	volume, err := h.volume.CreateVolume(r.Context(), storage.CreateVolumeRequest{
-		PlanID: document.PlanID, DiskID: document.DiskID, Fingerprint: document.Fingerprint,
+		PlanID: document.PlanID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "create volume failed", "error", err)
@@ -324,6 +332,54 @@ func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, volume)
+}
+
+func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	var document addDisksDocument
+	if err := decodeRequest(r, &document); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	volume, err := h.volume.AddDisks(r.Context(), storage.AddDisksRequest{
+		PlanID: document.PlanID, FilesystemUUID: document.FilesystemUUID, Disks: document.Disks, Layout: document.Layout,
+	})
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "add disks to the data volume failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, volume)
+}
+
+func (h *handler) handleContinueConversion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	if err := h.volume.ContinueConversion(r.Context()); err != nil {
+		if errors.Is(err, storage.ErrNoConversion) {
+			writeError(w, http.StatusConflict, noConversionCode, "the data volume has nothing to convert")
+			return
+		}
+		h.logger.ErrorContext(r.Context(), "continue data-volume conversion failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) handleSetCredential(w http.ResponseWriter, r *http.Request) {
@@ -416,10 +472,19 @@ func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request
 }
 
 type createVolumeDocument struct {
-	PlanID      string `json:"planId"`
-	DiskID      string `json:"diskId"`
-	Fingerprint string `json:"fingerprint"`
+	PlanID string               `json:"planId"`
+	Disks  []storage.DiskTarget `json:"disks"`
+	Layout storage.Layout       `json:"layout"`
 }
+
+type addDisksDocument struct {
+	PlanID         string               `json:"planId"`
+	FilesystemUUID string               `json:"filesystemUuid"`
+	Disks          []storage.DiskTarget `json:"disks"`
+	Layout         storage.Layout       `json:"layout"`
+}
+
+const noConversionCode = "no_conversion"
 
 type credentialDocument struct {
 	UserID         string        `json:"userId"`
@@ -518,9 +583,21 @@ func decodeRequest(r *http.Request, target any) error {
 func (c *Client) CreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
 	var response storage.Volume
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes", createVolumeDocument{
-		PlanID: request.PlanID, DiskID: request.DiskID, Fingerprint: request.Fingerprint,
+		PlanID: request.PlanID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
 	return response, err
+}
+
+func (c *Client) AddDisks(ctx context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+	var response storage.Volume
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/disks", addDisksDocument{
+		PlanID: request.PlanID, FilesystemUUID: request.FilesystemUUID, Disks: request.Disks, Layout: request.Layout,
+	}, &response)
+	return response, err
+}
+
+func (c *Client) ContinueConversion(ctx context.Context) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/conversion", nil, nil)
 }
 
 func (c *Client) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
@@ -628,6 +705,9 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		if response.StatusCode == http.StatusLocked && failure.Error.Code == volumeUnavailableCode {
 			return accounts.ErrVolumeUnavailable
 		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == noConversionCode {
+			return storage.ErrNoConversion
+		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
 	if responseBody == nil || response.StatusCode == http.StatusNoContent {
@@ -696,9 +776,29 @@ func (document metricsDocument) toDomain() (hoststate.Metrics, error) {
 }
 
 type stateDocument struct {
-	ObservedAt string         `json:"observedAt"`
-	System     systemDocument `json:"system"`
-	Disks      []diskDocument `json:"disks"`
+	ObservedAt string              `json:"observedAt"`
+	System     systemDocument      `json:"system"`
+	Disks      []diskDocument      `json:"disks"`
+	DataVolume *dataVolumeDocument `json:"dataVolume,omitempty"`
+}
+
+type dataVolumeDocument struct {
+	FilesystemUUID string                    `json:"filesystemUuid"`
+	DiskIDs        []string                  `json:"diskIds"`
+	Data           []profileUsageDocument    `json:"data"`
+	Metadata       []profileUsageDocument    `json:"metadata"`
+	Operation      hoststate.VolumeOperation `json:"operation,omitempty"`
+}
+
+type profileUsageDocument struct {
+	Profile   hoststate.Profile `json:"profile"`
+	UsedBytes uint64            `json:"usedBytes"`
+}
+
+type signatureDocument struct {
+	Type  string `json:"type"`
+	Label string `json:"label,omitempty"`
+	UUID  string `json:"uuid,omitempty"`
 }
 
 type systemDocument struct {
@@ -732,6 +832,7 @@ type diskDocument struct {
 	TemperatureCelsius       *int                `json:"temperatureCelsius,omitempty"`
 	FilesystemReadOnly       bool                `json:"filesystemReadOnly,omitempty"`
 	FilesystemErrors         *uint64             `json:"filesystemErrors,omitempty"`
+	Signatures               []signatureDocument `json:"signatures,omitempty"`
 }
 
 func documentFromDomain(state hoststate.State) stateDocument {
@@ -755,6 +856,19 @@ func documentFromDomain(state hoststate.State) stateDocument {
 			FilesystemReadOnly:       disk.FilesystemReadOnly,
 			FilesystemErrors:         disk.FilesystemErrors,
 		}
+		for _, signature := range disk.Signatures {
+			disks[i].Signatures = append(disks[i].Signatures, signatureDocument{Type: signature.Type, Label: signature.Label, UUID: signature.UUID})
+		}
+	}
+	var dataVolume *dataVolumeDocument
+	if volume := state.DataVolume; volume != nil {
+		dataVolume = &dataVolumeDocument{
+			FilesystemUUID: volume.FilesystemUUID, DiskIDs: make([]string, len(volume.DiskIDs)),
+			Data: usageDocuments(volume.Data), Metadata: usageDocuments(volume.Metadata), Operation: volume.Operation,
+		}
+		for i, id := range volume.DiskIDs {
+			dataVolume.DiskIDs[i] = id.String()
+		}
 	}
 	return stateDocument{
 		ObservedAt: state.ObservedAt.UTC().Format(time.RFC3339),
@@ -769,8 +883,17 @@ func documentFromDomain(state hoststate.State) stateDocument {
 			UptimeSeconds: state.System.UptimeSeconds,
 			Health:        state.System.Health,
 		},
-		Disks: disks,
+		Disks:      disks,
+		DataVolume: dataVolume,
 	}
+}
+
+func usageDocuments(usage []hoststate.ProfileUsage) []profileUsageDocument {
+	documents := make([]profileUsageDocument, len(usage))
+	for i, item := range usage {
+		documents[i] = profileUsageDocument{Profile: item.Profile, UsedBytes: item.UsedBytes}
+	}
+	return documents
 }
 
 func (document stateDocument) toDomain() (hoststate.State, error) {
@@ -820,6 +943,13 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 				return hoststate.State{}, errors.New("invalid disk filesystem evidence")
 			}
 		}
+		var signatures []hoststate.Signature
+		for _, signature := range disk.Signatures {
+			if strings.TrimSpace(signature.Type) == "" {
+				return hoststate.State{}, errors.New("invalid disk signature")
+			}
+			signatures = append(signatures, hoststate.Signature{Type: signature.Type, Label: signature.Label, UUID: signature.UUID})
+		}
 		disks[i] = hoststate.Disk{
 			ID:                       id,
 			Model:                    disk.Model,
@@ -837,7 +967,12 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			TemperatureCelsius:       disk.TemperatureCelsius,
 			FilesystemReadOnly:       disk.FilesystemReadOnly,
 			FilesystemErrors:         disk.FilesystemErrors,
+			Signatures:               signatures,
 		}
+	}
+	dataVolume, err := document.DataVolume.toDomain(disks)
+	if err != nil {
+		return hoststate.State{}, err
 	}
 	return hoststate.State{
 		ObservedAt: observedAt.UTC(),
@@ -852,8 +987,51 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			UptimeSeconds: document.System.UptimeSeconds,
 			Health:        document.System.Health,
 		},
-		Disks: disks,
+		Disks:      disks,
+		DataVolume: dataVolume,
 	}, nil
+}
+
+// toDomain accepts a data volume only on disks the same document reports as
+// data disks.
+func (document *dataVolumeDocument) toDomain(disks []hoststate.Disk) (*hoststate.DataVolume, error) {
+	if document == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(document.FilesystemUUID) == "" || len(document.DiskIDs) == 0 || !document.Operation.Valid() {
+		return nil, errors.New("invalid data volume")
+	}
+	roles := make(map[string]hoststate.DiskRole, len(disks))
+	for _, disk := range disks {
+		roles[disk.ID.String()] = disk.Role
+	}
+	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation}
+	for _, value := range document.DiskIDs {
+		id, err := hoststate.NewResourceID(value)
+		if err != nil || roles[id.String()] != hoststate.DiskRoleData {
+			return nil, errors.New("data volume on a disk that is not a data disk")
+		}
+		volume.DiskIDs = append(volume.DiskIDs, id)
+	}
+	var err error
+	if volume.Data, err = usageFromDocuments(document.Data); err != nil {
+		return nil, err
+	}
+	if volume.Metadata, err = usageFromDocuments(document.Metadata); err != nil {
+		return nil, err
+	}
+	return volume, nil
+}
+
+func usageFromDocuments(documents []profileUsageDocument) ([]hoststate.ProfileUsage, error) {
+	var usage []hoststate.ProfileUsage
+	for _, document := range documents {
+		if !document.Profile.Valid() {
+			return nil, errors.New("invalid data volume profile")
+		}
+		usage = append(usage, hoststate.ProfileUsage{Profile: document.Profile, UsedBytes: document.UsedBytes})
+	}
+	return usage, nil
 }
 
 func validHealth(value hoststate.Health) bool {

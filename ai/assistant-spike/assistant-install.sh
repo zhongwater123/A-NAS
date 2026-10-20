@@ -65,6 +65,17 @@ sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of 
   -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-curator@.service
 install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
+# The member's scheduled tasks (Hermes's cronjob): one round of Hermes's own `hermes cron tick`
+# in the same sandbox, behind the same bridge to the model (assistant-start.sh, channel cron),
+# started by anas-assistant-cron-waker.service when a job is due, whether the assistant runs
+# or not. A job may take a while; Hermes's own watchdog ends one that stalls.
+sed -e 's#^Description=.*#Description=Scheduled tasks of the A-NAS assistant of %i (spike)#' \
+  -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron' \
+  -e '/^ExecStartPost=/d' -e '/^ExecStopPost=/d' -e '/^StopWhenUnneeded/d' -e '/anas-assistant-token@/d' \
+  -e '/^BindReadOnlyPaths=\/run\/a-nas-assistant-start/d' -e 's/^Type=.*/Type=oneshot/' \
+  -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
+  "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-cron@.service
+install -m 0644 "$here/anas-assistant-cron-waker.service" /etc/systemd/system/
 # The same sandbox with probe.sh in place of Hermes.
 sed -e 's#^ExecStart=.*#ExecStart=/bin/bash /spike/probe.sh#' -e '/^ExecStartPost=/d' -e 's/^Type=.*/Type=oneshot/' -e '/^StopWhenUnneeded/d' \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-probe@.service
@@ -106,4 +117,5 @@ else
     python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 fi
 systemctl daemon-reload
+systemctl enable --now --quiet anas-assistant-cron-waker.service
 PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" "${ASSISTANT_LAYOUT:-prepare}" /srv/a-nas/data "$@"

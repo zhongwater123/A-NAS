@@ -28,7 +28,7 @@ func TestCreateVolumeResolvesStableIDAndWritesUUIDMountUnit(t *testing.T) {
 	})
 
 	volume, err := executor.CreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:test", DiskID: disk.ID.String(), Fingerprint: storage.FingerprintDisk(disk),
+		PlanID: "plan:test", Disks: []storage.DiskTarget{{DiskID: disk.ID.String(), Fingerprint: storage.FingerprintDisk(disk)}}, Layout: storage.LayoutSingle,
 	})
 	if err != nil {
 		t.Fatalf("CreateVolume() error = %v", err)
@@ -149,6 +149,15 @@ type recordedCommand struct {
 }
 
 type recordingRunner struct{ commands []recordedCommand }
+
+// lines are the recorded commands as command lines.
+func (r *recordingRunner) lines() []string {
+	lines := make([]string, len(r.commands))
+	for i, command := range r.commands {
+		lines[i] = strings.Join(append([]string{command.name}, command.args...), " ")
+	}
+	return lines
+}
 
 func (r *recordingRunner) Run(_ context.Context, name string, args []string, stdin string) ([]byte, error) {
 	r.commands = append(r.commands, recordedCommand{name: name, args: append([]string(nil), args...), stdin: stdin})

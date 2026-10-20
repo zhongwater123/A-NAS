@@ -42,11 +42,12 @@ const (
 )
 
 var (
-	// Hermes's own id forms: a runtime session id, a stored session id and a
+	// Hermes's own id forms: a runtime session id, a stored session id (a
+	// conversation, or a run of a scheduled task: cron_<task>_<time>) and a
 	// request from the server. Matching them exactly also shuts out Hermes's
 	// lookups by title or by id prefix.
 	runtimeIDPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
-	storedIDPattern  = regexp.MustCompile(`^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$`)
+	storedIDPattern  = regexp.MustCompile(`^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$`)
 	serverIDPattern  = regexp.MustCompile(`^srq-[0-9a-f]{12}$`)
 	requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`)
 )

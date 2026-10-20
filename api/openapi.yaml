@@ -246,13 +246,41 @@ paths:
       operationId: listVolumes
       responses:
         "200": { description: Data volumes, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Volume" } } } } } } }
+  /api/v1/volumes/{volumeId}/conversion:
+    post:
+      operationId: continueVolumeConversion
+      description: >-
+        Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion;
+        the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
+      parameters: [{ name: volumeId, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "202": { description: Conversion started }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/storage/plans:
     post:
       operationId: createStoragePlan
+      description: >-
+        Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk,
+        mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
+        to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable,
+        volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks,
+        layout_too_small when the files would not fit.
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [diskId], properties: { diskId: { $ref: "#/components/schemas/StableResourceID" } } } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [diskIds]
+              properties:
+                diskIds: { type: array, minItems: 1, maxItems: 8, uniqueItems: true, items: { $ref: "#/components/schemas/StableResourceID" } }
+                layout: { $ref: "#/components/schemas/VolumeLayout" }
       responses:
         "201": { description: Destructive storage plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+        "409": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
   /api/v1/storage/plans/{planId}/confirm:
     post:
@@ -322,6 +350,95 @@ paths:
       responses:
         "200": { description: One page of log lines, content: { application/json: { schema: { $ref: "#/components/schemas/SystemLogPage" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/local-display:
+    get:
+      security: []
+      operationId: getLocalDisplay
+      summary: Read how the screen attached to the NAS behaves (设置 → 个性化 → 本机屏幕)
+      description: >-
+        Needs no session, because the sign-in page on the local console reads it too. The local console turns the
+        screen black once the screen saver has played sleepAfterMinutes; the sign-in page after three minutes plus
+        that. Only pages opened with ?local-console=1 act on it.
+      responses:
+        "200": { description: The current setting, content: { application/json: { schema: { $ref: "#/components/schemas/LocalDisplay" } } } }
+        "503": { $ref: "#/components/responses/ProductError" }
+    put:
+      operationId: updateLocalDisplay
+      description: Administrators only. The local console uses the new value from its next idle period.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LocalDisplay" } } } }
+      responses:
+        "200": { description: The saved setting, content: { application/json: { schema: { $ref: "#/components/schemas/LocalDisplay" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/wallpaper:
+    get:
+      operationId: getWallpaper
+      summary: Read the desktop wallpaper every account sees (设置 → 个性化 → 桌面壁纸)
+      description: Without image the desktop shows the built-in default wallpaper, drawn in style all the same.
+      responses:
+        "200": { description: The current wallpaper, content: { application/json: { schema: { $ref: "#/components/schemas/Wallpaper" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: updateWallpaperStyle
+      description: Administrators only. Changes how every desktop draws the wallpaper.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/WallpaperStyleChange" } } } }
+      responses:
+        "200": { description: The updated wallpaper, content: { application/json: { schema: { $ref: "#/components/schemas/Wallpaper" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/wallpaper/image:
+    get:
+      operationId: getWallpaperImage
+      description: >-
+        The wallpaper picture as a JPEG. Pages ask for it with ?v=<version>; that URL may be cached for good. 404
+        while the default wallpaper is in use.
+      parameters:
+        - { name: v, in: query, schema: { type: string } }
+      responses:
+        "200": { description: The picture, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "304": { description: The cached picture is current }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+    put:
+      operationId: setWallpaperImage
+      description: >-
+        Administrators only. Replace the picture with the one in the body, keeping the style. The server turns it
+        upright, scales the long side down to at most 3840 pixels, fills transparency with the default wallpaper's
+        navy and stores a JPEG without the original's metadata. Pages scale the picture first.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/gif: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        "200": { description: The updated wallpaper, content: { application/json: { schema: { $ref: "#/components/schemas/Wallpaper" } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "413": { description: "image_too_large: more than 24 MiB or 25 million pixels", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "415": { description: "unsupported_image: not a JPEG, PNG, GIF or WebP picture", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "503": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: resetWallpaper
+      description: Administrators only. Go back to the built-in wallpaper, filled.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The default wallpaper, content: { application/json: { schema: { $ref: "#/components/schemas/Wallpaper" } } } }
         "401": { $ref: "#/components/responses/ProductError" }
         "403": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
@@ -1488,6 +1605,31 @@ paths:
         "404": { $ref: "#/components/responses/ProductError" }
         "415": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/photos/assets/{assetId}/metadata:
+    get:
+      operationId: getPhotoMetadata
+      summary: What a photo's original records about it, read when asked (ADR 0024 decision 6)
+      description: Everything its EXIF holds, under ifd0, exif and gps, and where the photo was taken when the camera recorded it. Videos have none yet.
+      parameters: [{ $ref: "#/components/parameters/PhotoAssetID" }]
+      responses:
+        "200":
+          description: The photo's metadata; empty when the original has no EXIF
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    type: object
+                    required: [latitude, longitude]
+                    properties:
+                      latitude: { type: number }
+                      longitude: { type: number }
+                      altitude: { type: number }
+                  exif: { type: object, additionalProperties: true }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "415": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/photos/assets/{assetId}/motion:
     get:
       operationId: openPhotoMotion
@@ -2476,6 +2618,73 @@ paths:
         "200": { description: What was cleared, content: { application/json: { schema: { type: object, additionalProperties: false, required: [memories, skills, conversations, busy], properties: { memories: { type: integer }, skills: { type: integer }, conversations: { type: integer }, busy: { type: integer } } } } } }
         "400": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks:
+    get:
+      operationId: listAssistantTasks
+      summary: "The member's scheduled tasks (Hermes cron jobs), made in a conversation with Hermes's cronjob tool"
+      description: "A task runs when due in the member's sandbox, whether the assistant runs or not, and nobody is there to confirm a change, so a change it would make is refused (ADR 0024 decision 8). These routes never make or edit a task."
+      responses:
+        "200": { description: Tasks, content: { application/json: { schema: { type: object, additionalProperties: false, required: [tasks], properties: { tasks: { type: array, items: { $ref: "#/components/schemas/AssistantTask" } } } } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    delete:
+      operationId: deleteAssistantTask
+      summary: "Delete a task with its runs; a run that is still being written stays"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/runs:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    get:
+      operationId: listAssistantTaskRuns
+      summary: "A task's latest runs, newest first; a run with an id is a conversation, read with the session routes"
+      responses:
+        "200": { description: Runs, content: { application/json: { schema: { type: object, additionalProperties: false, required: [runs], properties: { runs: { type: array, items: { $ref: "#/components/schemas/AssistantTaskRun" } } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/pause:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    post:
+      operationId: pauseAssistantTask
+      summary: "Stop a task from running when due, until it is resumed"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The task, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantTaskEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/resume:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    post:
+      operationId: resumeAssistantTask
+      summary: "Let a paused task run when due again"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The task, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantTaskEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/run:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    post:
+      operationId: runAssistantTask
+      summary: "Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs"
+      description: "200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The run ended, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished, task], properties: { finished: { type: boolean, enum: [true] }, task: { $ref: "#/components/schemas/AssistantTask" } } } } } }
+        "202": { description: The run started and goes on, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished], properties: { finished: { type: boolean, enum: [false] } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/assistant/approvals:
     get:
       operationId: listAssistantApprovals
@@ -3017,7 +3226,8 @@ components:
     CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
     FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
-    AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id.", schema: { type: string, pattern: "^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$" } }
+    AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).", schema: { type: string, pattern: "^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$" } }
+    AssistantTaskID: { name: taskId, in: path, required: true, description: "A Hermes cron job id; a job's name is not accepted.", schema: { type: string, pattern: "^[0-9a-f]{12}$" } }
     AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
     AssistantRequestID: { name: requestId, in: path, required: true, description: "The approval's request id from Hermes.", schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" } }
     TusResumable: { name: Tus-Resumable, in: header, required: true, schema: { type: string, enum: ["1.0.0"] } }
@@ -3584,6 +3794,44 @@ components:
         username: { type: string }
         nickname: { type: string }
         avatarVersion: { type: string }
+    LocalDisplay:
+      type: object
+      additionalProperties: false
+      required: [sleepAfterMinutes]
+      properties:
+        sleepAfterMinutes:
+          type: integer
+          enum: [0, 10, 30, 60]
+          description: >-
+            Minutes the screen saver plays before the screen turns black; 0 keeps it on. Defaults to 30. The server
+            refuses other values with 422 validation_failed.
+    WallpaperStyle:
+      type: string
+      enum: [fill, fit, stretch, center, tile]
+      description: >-
+        fill covers the desktop keeping proportions; fit shows the whole picture on navy; stretch fills the width and
+        height; center shows the picture at its own size in the middle; tile repeats it at its own size from the top
+        left.
+    Wallpaper:
+      type: object
+      additionalProperties: false
+      required: [style]
+      properties:
+        style: { $ref: "#/components/schemas/WallpaperStyle" }
+        image:
+          type: object
+          additionalProperties: false
+          required: [version, width, height]
+          properties:
+            version: { type: string, description: "Changes with the picture; ask for /api/v1/wallpaper/image?v=<version>." }
+            width: { type: integer, minimum: 1 }
+            height: { type: integer, minimum: 1 }
+    WallpaperStyleChange:
+      type: object
+      additionalProperties: false
+      required: [style]
+      properties:
+        style: { $ref: "#/components/schemas/WallpaperStyle" }
     ProfileChange:
       type: object
       additionalProperties: false
@@ -3609,10 +3857,22 @@ components:
       required: [id, kind, actorUsername, createdAt]
       properties:
         id: { type: string }
-        kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset] }
+        kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset, assistant_task] }
         actorUsername: { type: string }
         reason: { type: string }
         expiresAt: { type: string, format: date-time }
+        task:
+          type: object
+          description: "The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown."
+          additionalProperties: false
+          required: [taskId, name, status, ranAt]
+          properties:
+            taskId: { type: string }
+            name: { type: string }
+            status: { type: string, description: "ok, or what went wrong." }
+            ranAt: { type: string, format: date-time }
+            sessionId: { type: string, description: "The run's conversation." }
+            summary: { type: string, description: "The start of the run's answer, or of its error." }
         createdAt: { type: string, format: date-time }
     ViewingRequest:
       type: object
@@ -3723,17 +3983,41 @@ components:
         deletedBy: { type: string }
         deletedAt: { type: string, format: date-time }
         purgeAt: { type: string, format: date-time, description: When the recycle bin deletes the item for good. }
+    VolumeLayout:
+      type: string
+      enum: [single, mirror, span, stripe]
+      description: >-
+        How the data volume keeps files on its disks (ADR 0025): single (one disk), mirror (Btrfs raid1, two copies
+        on different disks), span (capacities added, one copy of the data) or stripe (Btrfs raid0). With two disks or
+        more, metadata always has two copies.
     Volume:
       type: object
       additionalProperties: false
-      required: [id, diskId, state]
+      required: [id, diskIds, layout, state]
       properties:
         id: { type: string }
-        diskId: { $ref: "#/components/schemas/StableResourceID" }
+        diskIds:
+          type: array
+          items: { $ref: "#/components/schemas/StableResourceID" }
+          description: The disks holding the volume as observed, or as planned while it is not mounted.
         filesystemUuid: { type: string }
+        layout: { $ref: "#/components/schemas/VolumeLayout" }
         capacityBytes: { type: integer, format: int64, minimum: 0 }
         availableBytes: { type: integer, format: int64, minimum: 0 }
         state: { type: string, enum: [creating, available, unavailable, read_only] }
+        conversion: { $ref: "#/components/schemas/VolumeConversion" }
+    VolumeConversion:
+      type: object
+      additionalProperties: false
+      required: [state, convertedBytes, totalBytes]
+      description: Present while data or metadata are outside the layout's Btrfs profiles, after disks were added.
+      properties:
+        state:
+          type: string
+          enum: [running, waiting]
+          description: "running: Btrfs converts now. waiting: the conversion stopped and continues at the Host Agent's next check."
+        convertedBytes: { type: integer, format: int64, minimum: 0 }
+        totalBytes: { type: integer, format: int64, minimum: 0 }
     StorageAction:
       type: object
       additionalProperties: false
@@ -3741,17 +4025,36 @@ components:
       properties:
         kind: { type: string }
         description: { type: string }
+    PlannedDisk:
+      type: object
+      additionalProperties: false
+      required: [id, model, capacityBytes, fingerprint, signatures]
+      properties:
+        id: { $ref: "#/components/schemas/StableResourceID" }
+        model: { type: string }
+        capacityBytes: { type: integer, format: int64, minimum: 1 }
+        fingerprint: { type: string }
+        signatures:
+          type: array
+          description: Partition, filesystem and array signatures erasing the disk destroys, such as one another NAS left.
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: { type: string }
+              label: { type: string }
     StoragePlan:
       type: object
       additionalProperties: false
-      required: [id, diskId, diskModel, capacityBytes, fingerprint, signatures, confirmationPhrase, actions, state, createdAt, expiresAt]
+      required: [id, kind, layout, disks, capacityAfterBytes, confirmationPhrase, actions, state, createdAt, expiresAt]
       properties:
         id: { type: string }
-        diskId: { $ref: "#/components/schemas/StableResourceID" }
-        diskModel: { type: string }
-        capacityBytes: { type: integer, format: int64, minimum: 1 }
-        fingerprint: { type: string }
-        signatures: { type: array, items: { type: string } }
+        kind: { type: string, enum: [create_volume, add_disks] }
+        layout: { $ref: "#/components/schemas/VolumeLayout" }
+        disks: { type: array, minItems: 1, items: { $ref: "#/components/schemas/PlannedDisk" } }
+        capacityBeforeBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files before adding disks; absent for a new volume." }
+        capacityAfterBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files after the plan, before filesystem overhead." }
         confirmationPhrase: { type: string }
         actions: { type: array, items: { $ref: "#/components/schemas/StorageAction" } }
         state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired] }
@@ -4865,6 +5168,48 @@ components:
         preview: { type: string }
         startedAt: { type: number, description: Unix seconds. }
         lastActive: { type: number, description: Unix seconds. }
+        messageCount: { type: integer, minimum: 0 }
+    AssistantTask:
+      type: object
+      additionalProperties: false
+      required: [id, name, prompt, schedule, state, completed]
+      properties:
+        id: { type: string, pattern: "^[0-9a-f]{12}$" }
+        name: { type: string }
+        prompt: { type: string, description: What the task asks the assistant each time it runs. }
+        schedule:
+          type: object
+          additionalProperties: false
+          required: [kind, display]
+          properties:
+            kind: { type: string, description: "cron, interval or once." }
+            expr: { type: string, description: A cron expression (kind cron). }
+            minutes: { type: integer, description: The interval (kind interval). }
+            runAt: { type: number, description: Unix seconds (kind once). }
+            display: { type: string, description: "Hermes's own wording, in English." }
+        state: { type: string, description: "Hermes's: scheduled, paused, completed (a one-off that ran, or its repeats used up) or error (the schedule cannot be computed)." }
+        running: { type: boolean }
+        nextRunAt: { type: number, description: Unix seconds. }
+        lastRunAt: { type: number, description: Unix seconds. }
+        lastStatus: { type: string, description: "ok, or what went wrong (error, ...)." }
+        lastError: { type: string }
+        createdAt: { type: number, description: Unix seconds. }
+        completed: { type: integer, minimum: 0, description: Runs so far. }
+        times: { type: integer, description: How many runs it has in all; without it the task repeats for good. }
+    AssistantTaskEnvelope:
+      type: object
+      additionalProperties: false
+      required: [task]
+      properties:
+        task: { $ref: "#/components/schemas/AssistantTask" }
+    AssistantTaskRun:
+      type: object
+      additionalProperties: false
+      required: [startedAt, messageCount]
+      properties:
+        id: { type: string, description: "The run's conversation; a run that only ran a script has none." }
+        startedAt: { type: number, description: Unix seconds. }
+        endedAt: { type: number, description: Unix seconds. }
         messageCount: { type: integer, minimum: 0 }
     AssistantMessage:
       type: object

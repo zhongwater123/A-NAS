@@ -12,9 +12,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/avatar"
 )
 
-// avatarGate decodes one uploaded picture at a time; a full-size photo sent
-// straight to the API takes a few hundred milliseconds and about 100 MB.
-var avatarGate = make(chan struct{}, 1)
+// pictureGate decodes one uploaded avatar or wallpaper at a time; a
+// full-size photo sent straight to the API takes a few hundred milliseconds
+// and about 100 MB.
+var pictureGate = make(chan struct{}, 1)
 
 func (h *productHandler) profileRoutes() {
 	h.mux.HandleFunc("GET /api/v1/profiles", h.withSession(h.handleProfiles))
@@ -69,12 +70,12 @@ func (h *productHandler) handleSetAvatar(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	select {
-	case avatarGate <- struct{}{}:
+	case pictureGate <- struct{}{}:
 	case <-r.Context().Done():
 		return
 	}
 	normalized, err := avatar.Normalize(picture)
-	<-avatarGate
+	<-pictureGate
 	switch {
 	case errors.Is(err, avatar.ErrTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", err.Error())

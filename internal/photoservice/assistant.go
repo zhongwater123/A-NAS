@@ -28,7 +28,8 @@ type AccountResolver interface {
 // thumbnails, the AI status, the activity log and uploads stay out of reach,
 // and nothing changes; a photo's pixels leave only as its view (a 1600-pixel
 // JPEG without the original's metadata), for the model to look at when the
-// member asks it to.
+// member asks it to, and its metadata, location included, as read from the
+// original.
 var assistantRoutes = []string{
 	"/libraries",
 	"/libraries/{libraryID}/timeline",
@@ -39,6 +40,7 @@ var assistantRoutes = []string{
 	"/assets/{assetID}",
 	"/assets/{assetID}/similar",
 	"/assets/{assetID}/view",
+	"/assets/{assetID}/metadata",
 	"/tags",
 	"/tags/{name}/assets",
 }

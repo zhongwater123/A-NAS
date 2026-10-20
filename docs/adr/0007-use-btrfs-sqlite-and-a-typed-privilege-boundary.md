@@ -1,6 +1,6 @@
 # 0007：基础存储使用单盘 Btrfs、SQLite 与类型化特权边界
 
-状态：accepted（v1.0.1）
+状态：accepted（v1.0.1）；单盘限制与“未选择 RAID”已由 [ADR 0025](0025-span-the-data-volume-across-disks-with-btrfs-profiles.md) 修订
 
 A-NAS v1.0.1 需要在仍属实验设备的单盘上完成可恢复的文件闭环，同时把磁盘破坏性操作限制在可审计的小边界内。我们决定使用单盘 Btrfs 数据卷，使用系统盘上的 SQLite/WAL 保存控制面状态，由 root Host Agent 只执行类型化高层操作；Web 与 SMB 共用账号和权限身份，但分别保存 Argon2id 与 Samba 的不可逆凭据。
 
