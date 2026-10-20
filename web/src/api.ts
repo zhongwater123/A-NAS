@@ -262,6 +262,11 @@ export const updateNickname = (nickname: string) => request<User>("/api/v1/sessi
 // uploadAvatar sends the cropped picture; the server makes the stored avatar from it.
 export const uploadAvatar = (picture: Blob) => request<User>("/api/v1/session/avatar", { method: "PUT", headers: { "Content-Type": picture.type || "image/jpeg" }, body: picture }, true);
 export const removeAvatar = () => request<User>("/api/v1/session/avatar", { method: "DELETE" }, true);
+// LocalDisplay is how the screen attached to the NAS behaves; sleepAfterMinutes 0 keeps it on.
+export interface LocalDisplay { sleepAfterMinutes: number }
+// readLocalDisplay needs no session: the sign-in page on the local console reads it too.
+export const readLocalDisplay = () => request<LocalDisplay>("/api/v1/local-display");
+export const updateLocalDisplay = (sleepAfterMinutes: number) => request<LocalDisplay>("/api/v1/local-display", { ...json({ sleepAfterMinutes }), method: "PUT" }, true);
 export const listProfiles = async () => (await request<{items: Profile[]}>("/api/v1/profiles")).items;
 // A version names one picture for good, so the browser keeps it cached.
 export const avatarURL = (userId: string, version: string) => `/api/v1/users/${encodeURIComponent(userId)}/avatar?v=${encodeURIComponent(version)}`;

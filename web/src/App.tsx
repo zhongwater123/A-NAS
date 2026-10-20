@@ -203,12 +203,15 @@ export default function App() {
 		});
 	}, [session]);
 	const authenticated = (value: Session) => { setError(""); setSessionState(value); };
-	if (!session) return <Authentication mode={mode} error={error} onAuthenticated={authenticated} />;
 	const signOut = () => { transferStore.reset(); void logout().finally(() => { setSessionState(undefined); setMode("login"); }); };
-	if (session.user.mustChangePassword) {
-		return <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />;
-	}
-	return <Desktop session={session} onLogout={signOut} onUserChange={(user) => setSessionState((current) => current && { ...current, user })} />;
+	const signedIn = Boolean(session && !session.user.mustChangePassword);
+	return <>
+		{!session ? <Authentication mode={mode} error={error} onAuthenticated={authenticated} />
+			: session.user.mustChangePassword ? <PasswordChange onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })} onLogout={signOut} />
+			: <Desktop session={session} onLogout={signOut} onUserChange={(user) => setSessionState((current) => current && { ...current, user })} />}
+		{/* The sign-in pages have no screen saver but still go black. */}
+		<LocalConsoleScreenSaver enabled={isLocalConsole()} videos={signedIn} />
+	</>;
 }
 
 // PasswordChange blocks the desktop after an administrator reset the
@@ -464,7 +467,6 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
       />
       <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
       <FeedbackChannel />
-      <LocalConsoleScreenSaver enabled={isLocalConsole()} />
     </main></SharesProvider>
   );
 }
