@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
@@ -93,9 +94,14 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
+	settings, err := personalization.Open(filepath.Join(dir, "personalization.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = settings.Close() })
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
-		Photos: photoAPI(photoService), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Photos: photoAPI(photoService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
 	if err != nil {

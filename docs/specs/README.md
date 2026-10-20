@@ -22,6 +22,7 @@
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [个性化](personalization.md)（implemented，尚未合并）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented，尚未部署）
 - [头像与昵称](account-profile.md)（implemented，尚未部署）
