@@ -10,3 +10,4 @@
 - [应用目录扩充评审（2026-10）](app-catalog-review-2026-10.md)（完成；入选应用待实机安装验证）
 - [Hermes Agent 作为 AI 助手运行时的可行性](hermes-agent-runtime.md)（开发机 spike 与 DeepSeek 真实模型测试完成；实验 NAS 实测待做）
 - [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
+- [NVIDIA PAIR 作为局域网 AI 算力的可行性](nvidia-pair-lan-inference.md)（评估完成；容器与实机原型待做）
