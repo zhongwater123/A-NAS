@@ -1,0 +1,19 @@
+[Unit]
+Description=Starts the A-NAS assistants' scheduled tasks when they are due (spike)
+# Each due Hermes job runs in its member's sandbox through anas-assistant-cron@.service,
+# Hermes's own `hermes cron tick`; `hermes serve` runs no scheduler (cron-waker.py).
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /spike/cron-waker.py
+Restart=always
+RestartSec=10s
+# It only reads the members' job stores and starts units.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadOnlyPaths=/srv/a-nas/data/assistant
+
+[Install]
+WantedBy=multi-user.target

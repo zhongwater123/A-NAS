@@ -36,6 +36,7 @@ var (
 // while, so this keeps it from the member's sign-in until their last session
 // ends; the gate cuts the connection then (ADR 0024 decision 10).
 type keep struct {
+	userID   string
 	sessions map[string]struct{}
 	current  string
 	cut      context.CancelFunc
@@ -57,9 +58,12 @@ func (h *handler) Keep(user accounts.User, sessionToken string) {
 	defer h.keepsMu.Unlock()
 	k := h.keeps[user.Username]
 	if k == nil {
-		k = &keep{sessions: map[string]struct{}{}}
+		k = &keep{userID: user.ID, sessions: map[string]struct{}{}}
 		h.keeps[user.Username] = k
 		go h.keepInstance(user.Username, k)
+		if h.options.Notices != nil {
+			go h.watchTasks(user.Username, k)
+		}
 	}
 	k.sessions[sessionToken] = struct{}{}
 }

@@ -1012,11 +1012,37 @@ managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带
 - spike：`photos-socket.sh` 27 项，其中助手读到本人照片的元数据、读不到 bob 的。
 - 真实模型（DeepSeek flash）：在 alice 的图库里放一张 EXIF 记着青岛坐标（36.0544°N, 120.3426°E，海拔 8.5 米）与 iPhone 15 Pro 的照片，问“相册里那张《海边散步》是在哪儿拍的？用什么拍的？”。它调用 `search_photos` 与 `photo_details`，答“按相机记录的经纬度换算，是青岛市南区汇泉湾一带，第一海水浴场附近”“Apple iPhone 15 Pro”，还指出这张图的拍摄时间与曝光参数都是空的。
 
+## 定时任务（2026-10-20，开发机）
+
+用户要开启定时任务。第一版关着 `cronjob`，因为实例闲置会退出，到点时没有进程去跑（[后台复盘与闲时整理](#后台复盘与闲时整理2026-10-16开发机)）。用户决定：运行中需要成员确认的一律拒绝，改动留给成员确认；结果作为一段对话，并在桌面上提醒。
+
+**Hermes 自己怎么做**：任务存在 `$HERMES_HOME/cron/jobs.json`。每 60 秒一次的调度在消息网关里；`hermes serve` 只在 `HERMES_DESKTOP=1` 时调度，那样还会加上桌面专用的工具，所以不用。`hermes cron tick` 把到期的任务跑一遍就退出。每次运行是一段 source 为 `cron` 的会话，编号 `cron_<任务>_<日期>_<时间>`，任务的 prompt 前面加上 Hermes 给运行的说明（`cron/scheduler_prompt.py`：结果会自动送达；无事可报只回答 `[SILENT]`；运行中不要再建任务）。运行时没人回答审批，`approvals.cron_mode` 默认就是 `deny`；`clarify` 与 `cronjob` 在运行中本来不给（`cron.allow_agent_scheduling: false`）。Hermes Desktop 的对话列表用 `exclude_sources=cron` 排除运行，在任务下单独列出（`/api/cron/jobs/{id}/runs`）；“立即运行”是 `POST /api/cron/jobs/{id}/trigger`，在 `serve` 进程中跑完才回答，暂停的任务会被同时恢复。
+
+**A-NAS 的做法**：
+- 唤醒：root 的 [`anas-assistant-cron-waker.service`](../../ai/assistant-spike/anas-assistant-cron-waker.service)（[`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)）每 30 秒读各成员的任务表（不跟随链接，限 4 MiB），有任务到期且没在跑，就启动 `anas-assistant-cron@<账号>.service`。这个单元由 `anas-assistant@.service` 生成：同一沙箱、同一条到模型网关的通道，`ANAS_ASSISTANT_CHANNEL=cron` 让 [`assistant-start.sh`](../../ai/assistant-spike/assistant-start.sh) 运行 `hermes cron tick`；没有会话令牌与套接字，最长 1 小时。实例在不在运行都一样，两者并存时由 Hermes 的文件锁协调。
+- 策略：managed scope 开启 `cronjob`，运行时的工具清单（`platform_toolsets.cron`）去掉 `clarify` 与 `cronjob`，写明 `approvals.cron_mode: deny`。
+- 产品服务（[`tasks.go`](../../internal/assistantapi/tasks.go)）：`/api/v1/assistant/tasks` 列出任务与每个任务的运行，不转出 `hermes_home`、模型、投递目标与运行的系统提示；任务编号只接受 Hermes 的 12 位十六进制（Hermes 也按名称找任务）。立即运行等 3 秒，没跑完就答“已开始”，运行继续；暂停、继续；删除时先删它的运行（Hermes 要经任务才找得到运行，任务不在了，运行在窗口里就没有地方显示）。不建也不改任务。对话列表照 Desktop 用 `exclude_sources=cron`；会话编号的白名单加上运行的编号，运行可以像对话一样打开与继续。
+- 告知（[`tasknotices.go`](../../internal/assistantapi/tasknotices.go)）：成员登录期间，与保持实例的连接并行，每分钟查一次任务；最近一次运行比成员听说过的新，就取这次运行的对话与回答开头，记成账号通知 `assistant_task`。每个任务至多一条未读，旧的被新的替换，删掉的任务的通知随之清掉（[`assistanttasks.go`](../../internal/accounts/assistanttasks.go)）。回答只是静默标记的运行记为已读，规则与 Hermes 的 `is_autonomous_silence_response` 相同（`gateway/response_filters.py`），也不覆盖还没读的上一条。成员离线时的运行在下次登录后告知。
+- 窗口：“定时任务”页、桌面提示（12 秒后收起，没读的在 VNAS 中计数）。运行打开时不显示 Hermes 的运行说明，开头是“定时任务按计划运行”，任务的 prompt 收在下面。cron 表达式用 [cronstrue](https://github.com/bradymholt/cRonstrue) 的中文说法（3.29.0，无依赖），每天的表达式由界面补上“每天”。
+- 模型：自动加载的系统技能 [`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md)：按时或到点的事用 `cronjob`，不要 `sleep`；结果在“定时任务”里并在桌面提醒，没有消息平台，`deliver` 不用设；时间按 NAS 本地时间；运行中改不了成员的文件。
+
+**真实模型发现的问题**（DeepSeek flash，开发机预览）：
+- 没有技能时，“3 分钟后提醒我给妈妈打电话”被做成对话里的 `sleep 180`，理由是“这个窗口没有定时推送”；“每天早上 8 点……”建了任务，却告诉成员结果只会存档，要投递到 Telegram 才收得到。有了技能，两者都用 `cronjob` 安排，并说明结果会在“定时任务”里、桌面会提醒。
+- `cronjob` 每次都回 “The Hermes gateway is not running — this job is saved but will NOT fire until the gateway is started”，并要求转告用户（`tools/cronjob_job_args.py` 的 `_gateway_liveness_notice`）。Hermes 只对登记为 cron provider 插件的外部调度（例如 Chronos，经签名的回调触发）不发这条警告，而沙箱的 `plugins/` 是空的只读目录；技能说明这条警告在 A-NAS 上不适用后，模型不再转告。
+- 时区：cron 按 Hermes 所在机器的本地时区计算。实验 NAS 是 Asia/Shanghai，沙箱看得到宿主的 `/etc/localtime`；spike 容器是 UTC，所以预览里“每天 08:00”的下次运行显示为北京时间 16:00。
+
+### 验证
+
+- Go：任务列表不带 Hermes 的内部字段，按名称或格式不对的编号到不了 Hermes，暂停、继续、删除（先删运行）与运行记录，立即运行 200、202 与 409（`internal/assistantapi/tasks_test.go`）；登录期间每个结束的运行只记一次，静默的运行记为已读，出错的运行带错误，退出登录后不再查（同一文件）；每个任务至多一条未读，旧运行不重复，静默运行不覆盖未读的，删掉的任务的通知清掉（`internal/accounts/assistanttasks_test.go`）。
+- Web：时间与 cron 的中文说法（`taskSchedule.test.ts`），任务页、删除确认、没有任务时的例子、“新结果”、桌面提示只取任务通知并在查看后确认已读、运行开头的折叠（`tasks.test.tsx`）。
+- spike：[`cron.sh`](../../ai/assistant-spike/cron.sh) 8 项：对话中用 Hermes 的工具建两个任务；实例停止时按时运行；由唤醒服务在成员自己的单元中启动；以成员身份写助手目录；要删个人空间文件的被拒绝；每次运行是 Hermes 的一段会话；实例一直停着。探针 39 项。
+- 预览（真实模型、产品服务与 spike 沙箱）：上面三轮，以及从“2 分钟后提醒我去楼下拿快递”到按时运行、桌面提示、12 秒后收起、VNAS 计数与“新结果”、打开运行后清除。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
-- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、定时任务的 [`cron.sh`](../../ai/assistant-spike/cron.sh) 与 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
 - Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#113](https://github.com/zhongwater123/A-NAS/issues/113)（“相册只读访问”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)、[系统测试](../../scripts/system-test.sh)与其中助手一节 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)、Host Agent 的替身 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)

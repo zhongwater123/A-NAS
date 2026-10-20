@@ -2529,6 +2529,73 @@ paths:
         "200": { description: What was cleared, content: { application/json: { schema: { type: object, additionalProperties: false, required: [memories, skills, conversations, busy], properties: { memories: { type: integer }, skills: { type: integer }, conversations: { type: integer }, busy: { type: integer } } } } } }
         "400": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks:
+    get:
+      operationId: listAssistantTasks
+      summary: "The member's scheduled tasks (Hermes cron jobs), made in a conversation with Hermes's cronjob tool"
+      description: "A task runs when due in the member's sandbox, whether the assistant runs or not, and nobody is there to confirm a change, so a change it would make is refused (ADR 0024 decision 8). These routes never make or edit a task."
+      responses:
+        "200": { description: Tasks, content: { application/json: { schema: { type: object, additionalProperties: false, required: [tasks], properties: { tasks: { type: array, items: { $ref: "#/components/schemas/AssistantTask" } } } } } } }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "502": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    delete:
+      operationId: deleteAssistantTask
+      summary: "Delete a task with its runs; a run that is still being written stays"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/runs:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    get:
+      operationId: listAssistantTaskRuns
+      summary: "A task's latest runs, newest first; a run with an id is a conversation, read with the session routes"
+      responses:
+        "200": { description: Runs, content: { application/json: { schema: { type: object, additionalProperties: false, required: [runs], properties: { runs: { type: array, items: { $ref: "#/components/schemas/AssistantTaskRun" } } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/pause:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    post:
+      operationId: pauseAssistantTask
+      summary: "Stop a task from running when due, until it is resumed"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The task, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantTaskEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/resume:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    post:
+      operationId: resumeAssistantTask
+      summary: "Let a paused task run when due again"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The task, content: { application/json: { schema: { $ref: "#/components/schemas/AssistantTaskEnvelope" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/assistant/tasks/{taskId}/run:
+    parameters: [{ $ref: "#/components/parameters/AssistantTaskID" }]
+    post:
+      operationId: runAssistantTask
+      summary: "Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs"
+      description: "200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The run ended, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished, task], properties: { finished: { type: boolean, enum: [true] }, task: { $ref: "#/components/schemas/AssistantTask" } } } } } }
+        "202": { description: The run started and goes on, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished], properties: { finished: { type: boolean, enum: [false] } } } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/assistant/approvals:
     get:
       operationId: listAssistantApprovals
@@ -3070,7 +3137,8 @@ components:
     CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
     FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
-    AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id.", schema: { type: string, pattern: "^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$" } }
+    AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).", schema: { type: string, pattern: "^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$" } }
+    AssistantTaskID: { name: taskId, in: path, required: true, description: "A Hermes cron job id; a job's name is not accepted.", schema: { type: string, pattern: "^[0-9a-f]{12}$" } }
     AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
     AssistantRequestID: { name: requestId, in: path, required: true, description: "The approval's request id from Hermes.", schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" } }
     TusResumable: { name: Tus-Resumable, in: header, required: true, schema: { type: string, enum: ["1.0.0"] } }
@@ -3662,10 +3730,22 @@ components:
       required: [id, kind, actorUsername, createdAt]
       properties:
         id: { type: string }
-        kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset] }
+        kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset, assistant_task] }
         actorUsername: { type: string }
         reason: { type: string }
         expiresAt: { type: string, format: date-time }
+        task:
+          type: object
+          description: "The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown."
+          additionalProperties: false
+          required: [taskId, name, status, ranAt]
+          properties:
+            taskId: { type: string }
+            name: { type: string }
+            status: { type: string, description: "ok, or what went wrong." }
+            ranAt: { type: string, format: date-time }
+            sessionId: { type: string, description: "The run's conversation." }
+            summary: { type: string, description: "The start of the run's answer, or of its error." }
         createdAt: { type: string, format: date-time }
     ViewingRequest:
       type: object
@@ -4961,6 +5041,48 @@ components:
         preview: { type: string }
         startedAt: { type: number, description: Unix seconds. }
         lastActive: { type: number, description: Unix seconds. }
+        messageCount: { type: integer, minimum: 0 }
+    AssistantTask:
+      type: object
+      additionalProperties: false
+      required: [id, name, prompt, schedule, state, completed]
+      properties:
+        id: { type: string, pattern: "^[0-9a-f]{12}$" }
+        name: { type: string }
+        prompt: { type: string, description: What the task asks the assistant each time it runs. }
+        schedule:
+          type: object
+          additionalProperties: false
+          required: [kind, display]
+          properties:
+            kind: { type: string, description: "cron, interval or once." }
+            expr: { type: string, description: A cron expression (kind cron). }
+            minutes: { type: integer, description: The interval (kind interval). }
+            runAt: { type: number, description: Unix seconds (kind once). }
+            display: { type: string, description: "Hermes's own wording, in English." }
+        state: { type: string, description: "Hermes's: scheduled, paused, completed (a one-off that ran, or its repeats used up) or error (the schedule cannot be computed)." }
+        running: { type: boolean }
+        nextRunAt: { type: number, description: Unix seconds. }
+        lastRunAt: { type: number, description: Unix seconds. }
+        lastStatus: { type: string, description: "ok, or what went wrong (error, ...)." }
+        lastError: { type: string }
+        createdAt: { type: number, description: Unix seconds. }
+        completed: { type: integer, minimum: 0, description: Runs so far. }
+        times: { type: integer, description: How many runs it has in all; without it the task repeats for good. }
+    AssistantTaskEnvelope:
+      type: object
+      additionalProperties: false
+      required: [task]
+      properties:
+        task: { $ref: "#/components/schemas/AssistantTask" }
+    AssistantTaskRun:
+      type: object
+      additionalProperties: false
+      required: [startedAt, messageCount]
+      properties:
+        id: { type: string, description: "The run's conversation; a run that only ran a script has none." }
+        startedAt: { type: number, description: Unix seconds. }
+        endedAt: { type: number, description: Unix seconds. }
         messageCount: { type: integer, minimum: 0 }
     AssistantMessage:
       type: object

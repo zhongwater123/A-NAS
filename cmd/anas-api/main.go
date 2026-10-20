@@ -320,7 +320,7 @@ func run(logger *slog.Logger) error {
 		FilePreviews: previewService,
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
-		Assistant:    assistantAPI(logger, broker),
+		Assistant:    assistantAPI(logger, broker, accountService),
 		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -600,10 +600,11 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 // it, in development only, the sockets are dialled directly with the tokens in
 // ANAS_ASSISTANT_TOKEN_DIR. The File Broker also executes the assistant's
 // changes; ANAS_ASSISTANT_CHANGES_SOCKET points at the spike's change broker
-// instead, which stands in for it where there is no File Broker.
-func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
+// instead, which stands in for it where there is no File Broker. The account
+// store keeps the notices of the members' scheduled tasks.
+func assistantAPI(logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) http.Handler {
 	sockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
-	options := assistantapi.Options{SocketDir: sockets, Logger: logger}
+	options := assistantapi.Options{SocketDir: sockets, Notices: notices, Logger: logger}
 	switch {
 	case sockets == "":
 	case broker != nil:

@@ -44,6 +44,9 @@ type fakeServe struct {
 	// The learning graph: alice's memories (store, text) and skills.
 	memories [][2]string
 	skills   []string
+	// Alice's scheduled tasks (tasks_test.go), and how long a run takes.
+	jobs    []*fakeJob
+	runTime time.Duration
 }
 
 func newFakeServe(t *testing.T) *fakeServe {
@@ -110,6 +113,8 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	case r.URL.Path == "/api/learning/graph" || r.URL.Path == "/api/learning/node":
 		f.learning(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/cron/") || strings.HasPrefix(r.URL.Path, "/api/sessions/cron_"):
+		f.cron(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/"+fakeStored+"/messages":
 		_, _ = io.WriteString(w, `{"session_id":"`+fakeStored+`","messages":[
 			{"id":1,"role":"user","content":"计划里加一项","timestamp":11},
