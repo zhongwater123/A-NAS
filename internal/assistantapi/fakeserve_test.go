@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	// fakeToken is alice's instance secret, her password for Hermes's login.
 	fakeToken   = "serve-token-alice"
 	fakeRuntime = "0a1b2c3d"
 	fakeStored  = "20261015_120000_abcdef"
@@ -39,6 +40,9 @@ type fakeServe struct {
 	resolved bool     // approval.respond answers resolved: 1 while true
 	conns    int
 	conn     *websocket.Conn
+	// access is the access token of the current login; logins counts them.
+	access   string
+	logins   int
 	closed   chan struct{}
 	answered chan string
 	// The learning graph: alice's memories (store, text) and skills.
@@ -78,15 +82,22 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"bad host"}`, http.StatusBadRequest)
 		return
 	}
+	if r.URL.Path == "/auth/password-login" {
+		f.login(w, r)
+		return
+	}
+	f.mu.Lock()
+	access := f.access
+	f.mu.Unlock()
 	if r.URL.Path == "/api/ws" {
-		if r.URL.Query().Get("token") != fakeToken {
+		if access == "" || r.URL.Query().Get("token") != access {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		f.gateway(w, r)
 		return
 	}
-	if r.Header.Get(tokenHeader) != fakeToken {
+	if access == "" || r.Header.Get("Authorization") != "Bearer "+access {
 		http.Error(w, `{"detail":"Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -122,6 +133,32 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, `{"detail":"Not found"}`, http.StatusNotFound)
 	}
+}
+
+// login answers Hermes's password login: alice with her instance's secret
+// gets a new access token, which replaces the last.
+func (f *fakeServe) login(w http.ResponseWriter, r *http.Request) {
+	var login struct{ Provider, Username, Password string }
+	_ = json.NewDecoder(r.Body).Decode(&login)
+	if r.Method != http.MethodPost || login.Provider != "basic" || login.Username != "alice" || login.Password != fakeToken {
+		http.Error(w, `{"detail":"Invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+	f.mu.Lock()
+	f.logins++
+	f.access = fmt.Sprintf("access-%d", f.logins)
+	access := f.access
+	f.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: "hermes_session_at", Value: access, MaxAge: 43200, Path: "/"})
+	_, _ = io.WriteString(w, `{"ok":true,"next":"/"}`)
+}
+
+// restart stands in for the instance restarting: it signs sessions with a new
+// key, so the last access token is refused.
+func (f *fakeServe) restart() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.access = "signed-before-the-restart"
 }
 
 // learning serves Hermes's learning graph routes over the fake's memories and

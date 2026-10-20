@@ -610,7 +610,7 @@ func assistantAPI(logger *slog.Logger, broker *filebroker.Client, notices assist
 	case broker != nil:
 		options.Connector = gatedAssistant{broker}
 	default:
-		options.Connector = assistantapi.SocketConnector{SocketDir: sockets, TokenDir: os.Getenv("ANAS_ASSISTANT_TOKEN_DIR")}
+		options.Connector = assistantapi.NewSocketConnector(sockets, os.Getenv("ANAS_ASSISTANT_TOKEN_DIR"))
 	}
 	if socket := os.Getenv("ANAS_ASSISTANT_CHANGES_SOCKET"); socket != "" {
 		options.Changes = assistantapi.BrokerChanges(socket)
@@ -662,8 +662,8 @@ func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 // checks the session itself and cuts the connection when it ends.
 type gatedAssistant struct{ broker *filebroker.Client }
 
-func (g gatedAssistant) Connect(ctx context.Context, account string) (net.Conn, string, error) {
-	conn, err := g.broker.ConnectAssistant(ctx)
+func (g gatedAssistant) Connect(ctx context.Context, account string, fresh bool) (net.Conn, string, error) {
+	conn, err := g.broker.ConnectAssistant(ctx, fresh)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, "", assistantapi.ErrNoAssistant

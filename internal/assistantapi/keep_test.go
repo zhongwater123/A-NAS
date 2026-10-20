@@ -28,7 +28,7 @@ type endingGate struct {
 	asked []string
 }
 
-func (g *endingGate) Connect(ctx context.Context, account string) (net.Conn, string, error) {
+func (g *endingGate) Connect(ctx context.Context, account string, fresh bool) (net.Conn, string, error) {
 	session := accounts.SessionToken(ctx)
 	g.mu.Lock()
 	g.asked = append(g.asked, session)
@@ -37,7 +37,7 @@ func (g *endingGate) Connect(ctx context.Context, account string) (net.Conn, str
 	if ended {
 		return nil, "", ErrSessionRejected
 	}
-	return g.inner.Connect(ctx, account)
+	return g.inner.Connect(ctx, account, fresh)
 }
 
 func (g *endingGate) end(session string) {
@@ -58,7 +58,7 @@ func (g *endingGate) lastAsked() string {
 func newKeeper(t *testing.T) (*handler, *fakeServe, *endingGate) {
 	t.Helper()
 	serve := newFakeServe(t)
-	gate := &endingGate{inner: SocketConnector{SocketDir: serve.dir, TokenDir: serve.dir}, ended: map[string]bool{}}
+	gate := &endingGate{inner: NewSocketConnector(serve.dir, serve.dir), ended: map[string]bool{}}
 	h := New(Options{Connector: gate, SocketDir: serve.dir, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*handler)
 	t.Cleanup(func() {
 		// Sessions that are still kept end with the test.

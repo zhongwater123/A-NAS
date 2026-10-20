@@ -53,6 +53,9 @@ type request struct {
 	Rows    uint16    `json:"rows,omitempty"`
 	// Change carries an operation on the assistant's changes.
 	Change *changeRequest `json:"change,omitempty"`
+	// Fresh asks for a new login to the assistant: the last access token was
+	// refused (the instance restarted and signs with a new key).
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 type changeRequest struct {
@@ -80,7 +83,7 @@ type response struct {
 
 type assistantGrant struct {
 	Username string `json:"username"`
-	// Token is the instance's `hermes serve` session token.
+	// Token is an access token of Hermes's own login to the instance.
 	Token string `json:"token"`
 }
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/assistantlogin"
 )
 
 const opAssistant = "assistant"
@@ -27,9 +28,11 @@ var assistantAccount = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 // serveAssistant is the session gate in front of the members' AI assistants
 // (ADR 0024 decision 10). Only root may connect to an assistant's socket; the
 // broker does so for the member behind a valid session and hands the
-// connection back with the instance's token, keeping its own copy. Like a
-// terminal, the session is checked again while the connection is open, and
-// when it stops being valid the connection is cut for every holder.
+// connection back with an access token of Hermes's own login to the instance,
+// keeping its own copy of the connection. The login's password, the
+// instance's secret, never leaves root. Like a terminal, the session is
+// checked again while the connection is open, and when it stops being valid
+// the connection is cut for every holder.
 func (s *Server) serveAssistant(conn *net.UnixConn, req request) {
 	ctx := context.Background()
 	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
@@ -45,7 +48,7 @@ func (s *Server) serveAssistant(conn *net.UnixConn, req request) {
 		_ = writeMessage(conn, response{Error: &wireError{Code: codeForbidden, Message: "this account has no assistant"}}, nil)
 		return
 	}
-	instance, token, err := s.dialAssistant(identity.Username)
+	instance, token, err := s.dialAssistant(ctx, identity.Username, req.Fresh)
 	if err != nil {
 		code := codeUnavailable
 		if errors.Is(err, fs.ErrNotExist) {
@@ -96,24 +99,49 @@ func (s *Server) serveAssistant(conn *net.UnixConn, req request) {
 	}
 }
 
-func (s *Server) dialAssistant(username string) (*net.UnixConn, string, error) {
-	token, err := readAssistantToken(filepath.Join(s.config.AssistantTokens, username+".env"))
+// assistantLoginTimeout covers a cold start of the instance, which the first
+// login triggers through its socket.
+const assistantLoginTimeout = 90 * time.Second
+
+func (s *Server) dialAssistant(ctx context.Context, username string, fresh bool) (*net.UnixConn, string, error) {
+	secret, err := readAssistantToken(filepath.Join(s.config.AssistantTokens, username+".env"))
 	if err != nil {
 		return nil, "", err
 	}
+	token, err := s.logins.Token(ctx, username, fresh, func(ctx context.Context) (string, time.Time, error) {
+		ctx, cancel := context.WithTimeout(ctx, assistantLoginTimeout)
+		defer cancel()
+		connection, err := s.connectAssistant(username)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		defer connection.Close()
+		return assistantlogin.Login(ctx, connection, username, secret)
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	connection, err := s.connectAssistant(username)
+	if err != nil {
+		return nil, "", err
+	}
+	return connection, token, nil
+}
+
+func (s *Server) connectAssistant(username string) (*net.UnixConn, error) {
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	connection, err := dialer.Dial("unix", filepath.Join(s.config.AssistantSockets, username+".sock"))
 	if err != nil {
 		if errors.Is(err, syscall.ENOENT) {
-			return nil, "", fmt.Errorf("%w: %v", fs.ErrNotExist, err)
+			return nil, fmt.Errorf("%w: %v", fs.ErrNotExist, err)
 		}
-		return nil, "", err
+		return nil, err
 	}
-	return connection.(*net.UnixConn), token, nil
+	return connection.(*net.UnixConn), nil
 }
 
-// readAssistantToken reads HERMES_DASHBOARD_SESSION_TOKEN from the root-only
-// file systemd hands the instance.
+// readAssistantToken reads the instance's secret, HERMES_DASHBOARD_SESSION_TOKEN
+// in the root-only token file: the member's password for Hermes's login.
 func readAssistantToken(path string) (string, error) {
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -126,7 +154,7 @@ func readAssistantToken(path string) (string, error) {
 			return strings.TrimSpace(value), nil
 		}
 	}
-	return "", fmt.Errorf("no session token in %s", path)
+	return "", fmt.Errorf("no assistant secret in %s", path)
 }
 
 func (s *Server) hold(instance *net.UnixConn) bool {
@@ -158,15 +186,16 @@ type AssistantConn struct {
 	net.Conn
 	// Username is the member the broker found behind the session.
 	Username string
-	// Token is the instance's `hermes serve` session token.
+	// Token is an access token of Hermes's own login to the instance.
 	Token   string
 	control *net.UnixConn
 	close   sync.Once
 }
 
 // ConnectAssistant asks the File Broker for a connection to the assistant of
-// the member signed in on the context's session.
-func (c *Client) ConnectAssistant(ctx context.Context) (*AssistantConn, error) {
+// the member signed in on the context's session. fresh asks for a new login,
+// when the instance refused the last token.
+func (c *Client) ConnectAssistant(ctx context.Context, fresh bool) (*AssistantConn, error) {
 	token := accounts.SessionToken(ctx)
 	if token == "" {
 		return nil, fmt.Errorf("%w: no session for the assistant", ErrUnavailable)
@@ -179,7 +208,7 @@ func (c *Client) ConnectAssistant(ctx context.Context) (*AssistantConn, error) {
 	control := connection.(*net.UnixConn)
 	stop := context.AfterFunc(ctx, func() { _ = control.Close() })
 	defer stop()
-	if err := writeMessage(control, request{Token: token, Op: opAssistant}, nil); err != nil {
+	if err := writeMessage(control, request{Token: token, Op: opAssistant, Fresh: fresh}, nil); err != nil {
 		_ = control.Close()
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

@@ -9,7 +9,7 @@ user=${1:-alice}
 secs=${2:-30}
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 sock=/run/a-nas-assistant/$user.sock
-token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
 systemctl stop "anas-assistant-api@$user.service" "anas-assistant@$user.service" 2>/dev/null
 sid=$("$py" - "$user" "$secs" <<'PY'
 import asyncio, sys
@@ -32,9 +32,9 @@ done
 [ "$state" = active ] && echo "instance still active $(( (secs + 60) / 5 * 5 )) s after the client left"
 grep -hE "client_gone|orphan|nterrupt" "/srv/a-nas/data/assistant/$user/hermes/logs/agent.log" | tail -n 4 | cut -c1-200
 # Reconnect (cold-starts the instance if it stopped) and read the stored transcript.
-key=$(curl -sS --max-time 150 --unix-socket "$sock" -H "X-Hermes-Session-Token: $token" "http://127.0.0.1:9119/api/sessions?limit=5" |
+key=$(curl -sS --max-time 150 --unix-socket "$sock" -H "Authorization: Bearer $token" "http://127.0.0.1:9119/api/sessions?limit=5" |
   python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("sessions", d) if isinstance(d, dict) else d; print(s[0]["id"] if s else "")')
-curl -sS --max-time 150 --unix-socket "$sock" -H "X-Hermes-Session-Token: $token" "http://127.0.0.1:9119/api/sessions/$key/messages" |
+curl -sS --max-time 150 --unix-socket "$sock" -H "Authorization: Bearer $token" "http://127.0.0.1:9119/api/sessions/$key/messages" |
   python3 -c '
 import json, sys
 d = json.load(sys.stdin)

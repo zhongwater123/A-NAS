@@ -39,7 +39,7 @@ func newHarness(t *testing.T) *harness {
 	serve := newFakeServe(t)
 	changes := &fakeChanges{}
 	api := New(Options{
-		Connector: SocketConnector{SocketDir: serve.dir, TokenDir: serve.dir},
+		Connector: NewSocketConnector(serve.dir, serve.dir),
 		SocketDir: serve.dir, Changes: changes,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

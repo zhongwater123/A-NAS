@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # `hermes serve` through a member's socket, as root outside the sandbox (the product
-# service's position): cold start, how REST and /api/ws authenticate, memory.
+# service's position): cold start, how REST and /api/ws authenticate with Hermes's own
+# login (the old session token, the instance's secret, is refused), memory.
 set -uo pipefail
 user=${1:-alice}
 other=$([ "$user" = alice ] && echo bob || echo alice)
 sock=/run/a-nas-assistant/$user.sock
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
-other_token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$other.env")
+token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
+other_token=$("$py" /spike/hermes_login.py "$other")
+# The instance's secret, the old session token: since Hermes's login gate is on, only a password.
+secret=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
 rest() { curl -sS --max-time 150 --unix-socket "$sock" -o /dev/null -w '%{http_code}' "$@"; }
 
 systemctl stop "anas-assistant-api@$user.service" "anas-assistant@$user.service" 2>/dev/null
@@ -18,12 +21,13 @@ systemctl is-active "anas-assistant@$user.service" | sed 's/^/assistant unit: /'
 
 echo "--- REST: /api/sessions"
 echo "no token:                 HTTP $(rest http://127.0.0.1:9119/api/sessions)"
-echo "other member's token:     HTTP $(rest -H "X-Hermes-Session-Token: $other_token" http://127.0.0.1:9119/api/sessions)"
-echo "token in header:          HTTP $(rest -H "X-Hermes-Session-Token: $token" http://127.0.0.1:9119/api/sessions)"
-echo "token as Bearer:          HTTP $(rest -H "Authorization: Bearer $token" http://127.0.0.1:9119/api/sessions)"
+echo "other member's token:     HTTP $(rest -H "Authorization: Bearer $other_token" http://127.0.0.1:9119/api/sessions)"
+echo "old session token header: HTTP $(rest -H "X-Hermes-Session-Token: $secret" http://127.0.0.1:9119/api/sessions)"
+echo "secret as Bearer:         HTTP $(rest -H "Authorization: Bearer $secret" http://127.0.0.1:9119/api/sessions)"
+echo "login token as Bearer:    HTTP $(rest -H "Authorization: Bearer $token" http://127.0.0.1:9119/api/sessions)"
 echo "token as ?token= on REST: HTTP $(rest "http://127.0.0.1:9119/api/sessions?token=$token")"
-echo "Host: a (not loopback):   HTTP $(rest -H "X-Hermes-Session-Token: $token" http://a/api/sessions)"
-echo "Origin: other site:       HTTP $(rest -H "X-Hermes-Session-Token: $token" -H 'Origin: http://evil.example' http://127.0.0.1:9119/api/sessions)"
+echo "Host: a (not loopback):   HTTP $(rest -H "Authorization: Bearer $token" http://a/api/sessions)"
+echo "Origin: other site:       HTTP $(rest -H "Authorization: Bearer $token" -H 'Origin: http://evil.example' http://127.0.0.1:9119/api/sessions)"
 echo "public paths without token: $(for p in health status config/defaults config/schema model/info dashboard/themes dashboard/plugins; do printf '%s=%s ' "$p" "$(rest "http://127.0.0.1:9119/api/$p")"; done)"
 
 echo "--- /api/ws upgrade"
@@ -44,7 +48,7 @@ async def attempt(label, query, **kw):
 async def main():
     await attempt("no token", "")
     await attempt("other member's token", f"?token={other}")
-    await attempt("token in a header only", "", additional_headers={"X-Hermes-Session-Token": token})
+    await attempt("token as a bearer only", "", additional_headers={"Authorization": f"Bearer {token}"})
     await attempt("?token=", f"?token={token}")
     await attempt("?token= with Host a", f"?token={token}", host="a")
     await attempt("?token= with foreign Origin", f"?token={token}", origin="http://evil.example")

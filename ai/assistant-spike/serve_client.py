@@ -2,7 +2,7 @@
 
 Runs as root in the spike container, outside the sandbox, with the Hermes runtime's Python
 (it has `websockets`). One WebSocket on /api/ws through the member's Unix socket,
-authenticated with the instance's session token as `?token=` (Hermes's loopback mode).
+authenticated with an access token of Hermes's own login as `?token=` (hermes_login.py).
 
   serve_client.py USER ready                 connect and wait for gateway.ready (cold start)
   serve_client.py USER chat TEXT [TEXT...]   one new session, one turn per TEXT
@@ -22,14 +22,14 @@ from pathlib import Path
 
 from websockets.asyncio.client import unix_connect
 
+import hermes_login
+
 PORT = 9119
 
 
 def session_token(user: str) -> str:
-    for line in Path(f"/etc/a-nas-assistant/tokens/{user}.env").read_text().splitlines():
-        if line.startswith("HERMES_DASHBOARD_SESSION_TOKEN="):
-            return line.split("=", 1)[1].strip()
-    raise SystemExit(f"no session token for {user}")
+    """An access token of Hermes's own login to USER's instance."""
+    return hermes_login.login(user)
 
 
 def short(value, n=600):

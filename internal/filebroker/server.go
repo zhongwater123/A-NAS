@@ -17,6 +17,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
+	"github.com/zhongwater123/A-NAS/internal/assistantlogin"
 )
 
 // SessionResolver verifies a session token and returns its Linux identity.
@@ -70,6 +71,8 @@ type Server struct {
 	// assistants are the broker's copies of the assistant connections it
 	// handed out, cut when the broker stops.
 	assistants map[*net.UnixConn]struct{}
+	// logins keeps each member's access token to their assistant.
+	logins assistantlogin.Cache
 	// changes executes the assistants' changes; nil when off.
 	changes     *assistantchanges.Executor
 	closed      bool

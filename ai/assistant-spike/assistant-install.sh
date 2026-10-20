@@ -43,11 +43,10 @@ chmod 0644 /etc/hermes/config.yaml
 # Mount point for the photo service's assistant socket (#113): an empty file on the host,
 # the socket itself inside each sandbox (anas-assistant@.service).
 install -d -m 0755 /run/anas-assistant-photos && : > /run/anas-assistant-photos/photos.sock
-# Mount point for the serve token the unit stages (anas-assistant@.service), and the
-# root-only directory it stages it in.
-install -d -m 0755 /run/anas-assistant-start && : > /run/anas-assistant-start/token
-install -d -m 0700 /run/a-nas-assistant-start
-install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-token@.service" "$here/anas-assistant-api@.service" \
+# serve takes no token any more: it uses Hermes's own login (assistant-start.sh). An
+# install from before that leaves its token unit behind.
+rm -f /etc/systemd/system/anas-assistant-token@.service
+install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-api@.service" \
   "$here/anas-assistant-api@.socket" /etc/systemd/system/
 if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -d /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d
@@ -60,8 +59,7 @@ fi
 sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i (spike)#' \
   -e 's#^ExecStart=.*#ExecStart=/usr/bin/tini -- /opt/a-nas/assistant-runtimes/spike/venv/bin/hermes curator run#' \
   -e '/^ExecStart=/a ExecStartPost=/opt/a-nas/assistant-runtimes/spike/venv/bin/python -P /spike/media-cache.py' \
-  -e '/^ExecStartPost=/d' -e '/^ExecStopPost=/d' -e '/^StopWhenUnneeded/d' -e '/anas-assistant-token@/d' \
-  -e '/^BindReadOnlyPaths=\/run\/a-nas-assistant-start/d' -e 's/^Type=.*/Type=oneshot/' \
+  -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
   -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-curator@.service
 install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
@@ -71,8 +69,7 @@ install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
 # or not. A job may take a while; Hermes's own watchdog ends one that stalls.
 sed -e 's#^Description=.*#Description=Scheduled tasks of the A-NAS assistant of %i (spike)#' \
   -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron' \
-  -e '/^ExecStartPost=/d' -e '/^ExecStopPost=/d' -e '/^StopWhenUnneeded/d' -e '/anas-assistant-token@/d' \
-  -e '/^BindReadOnlyPaths=\/run\/a-nas-assistant-start/d' -e 's/^Type=.*/Type=oneshot/' \
+  -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
   -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-cron@.service
 install -m 0644 "$here/anas-assistant-cron-waker.service" /etc/systemd/system/
