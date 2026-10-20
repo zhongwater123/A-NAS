@@ -46,7 +46,7 @@ import {
 import { Component, CSSProperties, DragEvent as ReactDragEvent, ErrorInfo, FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 
 import {
-  APIError, FileEntry, Notification, Session, Space, User, Volume,
+  APIError, type AssistantTaskNotice, FileEntry, Notification, Session, Space, User, Volume,
   acknowledgeNotification, changePassword, copyFile, createDirectory, currentSession, deleteFile,
   endViewing, filePreviewURL, getSetupStatus, listEntries, listNotifications,
   listSpaces, listVolumes, login, logout, moveFile, onSessionEnded, readFileTextPreview,
@@ -86,6 +86,9 @@ import { TrashPanel } from "./trash/TrashPanel";
 import { carriesFiles, PickedFile, pickedFromDrop, pickedFromInput } from "./transfers/picker";
 import { transferStore, useTransfers } from "./transfers/store";
 import { TransferIndicator, TransferToasts } from "./transfers/TransferNotices";
+import { TaskToasts } from "./assistant/TaskToasts";
+import { whenText } from "./assistant/taskTime";
+import type { AssistantFocus } from "./assistant/AssistantPanel";
 import type { TransferLocation } from "./transfers/transfersApi";
 import { useHostState } from "./useHostState";
 import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
@@ -247,10 +250,11 @@ function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogo
 
 // NotificationCenter shows what administrators did to the account since the
 // user last acknowledged it: viewing the private space or resetting the password.
+// Runs of VNAS's scheduled tasks are toasts of their own (TaskToasts).
 function NotificationCenter() {
 	const people = usePeople();
 	const [items, setItems] = useState<Notification[]>([]);
-	useEffect(() => { void listNotifications().then(setItems).catch(() => undefined); }, []);
+	useEffect(() => { void listNotifications().then((list) => setItems(list.filter((item) => item.kind !== "assistant_task"))).catch(() => undefined); }, []);
 	if (!items.length) return null;
 	const acknowledge = async () => {
 		await Promise.allSettled(items.map((item) => acknowledgeNotification(item.id)));
@@ -353,6 +357,13 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
   const [dockerFocus, setDockerFocus] = useState<DockerFocus>();
   // A photo another window asks the photo app to show, such as one the assistant named.
   const [photoFocus, setPhotoFocus] = useState<{ assetId: string; at: number }>();
+  // A toast of a scheduled task opens its run in VNAS, or the tasks.
+  const [assistantFocus, setAssistantFocus] = useState<AssistantFocus>();
+  const showTaskRun = (run: AssistantTaskNotice) => {
+    setAssistantFocus({ sessionId: run.sessionId, title: `${run.name} · ${whenText(Date.parse(run.ranAt) / 1000)}`, at: Date.now() });
+    openWindow("assistant");
+  };
+  const assistantFocusHandled = useCallback(() => setAssistantFocus(undefined), []);
   const showInDocker = (appID: string) => { setDockerFocus({ project: appProject(appID), at: Date.now() }); openWindow("docker"); };
   const showPhoto = (assetId: string) => { setPhotoFocus({ assetId, at: Date.now() }); openWindow("photos"); };
   const shortcuts = useAppShortcuts();
@@ -454,7 +465,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
-			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} onShowPhoto={showPhoto} /></Suspense>}
+			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} onShowPhoto={showPhoto} focus={assistantFocus} onFocusHandled={assistantFocusHandled} /></Suspense>}
             </AppWindow>
           );
         })}
@@ -469,6 +480,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
         onSelect={(id, state) => dispatch({ type: state === "focused" ? "minimize" : "open", id: id as WindowID })}
       />
       <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
+      <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
       <FeedbackChannel />
     </main></SharesProvider>
   );

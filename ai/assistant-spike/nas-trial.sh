@@ -33,7 +33,7 @@ runtimes=/opt/a-nas/assistant-runtimes
 key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
-units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
+units=(anas-assistant@.service anas-assistant-token@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
@@ -163,6 +163,7 @@ verify() {
   check_one "gateway log is root's alone" test "$(stat -c '%a' /var/log/anas-assistant-gateway)" = 700
   check_one "weekly curator for $first" systemctl is-enabled "anas-assistant-curator@$first.timer"
   check_one "photo service's socket for assistants" test -S /run/a-nas-photos-assistant/assistant.sock
+  check_one "scheduled tasks are started when due" systemctl is-active anas-assistant-cron-waker.service
   check_one "photo service serves assistants" test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
   ((ok)) || fail "see the FAIL lines; remove undoes the install"
   say "installed: open VNAS on the desktop (members of a-nas-users)"
@@ -249,7 +250,7 @@ remove_trial() {
     rmdir "$data/assistant" 2>/dev/null || say "kept $data/assistant: $(find "$data/assistant" -mindepth 1 -maxdepth 1 -printf '%f ')"
   fi
   say "--- units and files"
-  systemctl disable --now anas-assistant-trial-gateway.service 2>/dev/null || true
+  systemctl disable --now anas-assistant-trial-gateway.service anas-assistant-cron-waker.service 2>/dev/null || true
   for file in "${units[@]}"; do drop "/etc/systemd/system/$file"; done
   drop /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d \
     /etc/systemd/system/anas-assistant-api@.socket.d /etc/tmpfiles.d/anas-assistant-trial.conf

@@ -326,7 +326,7 @@ func run(logger *slog.Logger) error {
 		FilePreviews: previewService,
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
-		Assistant:    assistantAPI(logger, broker),
+		Assistant:    assistantAPI(logger, broker, accountService),
 		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -475,8 +475,8 @@ type productOperations interface {
 func configuredServices() (hoststate.Observer, httpapi.DataSource, productOperations, bool, error) {
 	switch mode := os.Getenv("ANAS_HOSTSTATE_MODE"); mode {
 	case "", "fake":
-		operations := &developmentOperations{}
-		return fake.NewHealthy(), httpapi.DataSourceSimulated, operations, false, nil
+		simulated := newSimulatedStorage(fake.NewWithSpareDisk())
+		return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, false, nil
 	case "agent":
 		socketPath, err := agent.SocketPath()
 		if err != nil {
@@ -535,7 +535,8 @@ func configuredScreensaverDirectory() string {
 	return "/var/lib/a-nas/screensavers/current"
 }
 
-type developmentOperations struct{}
+// developmentOperations stand in for the Host Agent in fake mode.
+type developmentOperations struct{ *simulatedStorage }
 
 func (*developmentOperations) SetCredential(context.Context, accounts.CredentialRequest) error {
 	return nil
@@ -547,9 +548,6 @@ func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequ
 	return nil
 }
 func (*developmentOperations) RevokeViewing(context.Context, string) error { return nil }
-func (*developmentOperations) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "development", State: storage.VolumeStateAvailable}, nil
-}
 func (*developmentOperations) Create(context.Context, string, string) ([]files.SnapshotObject, error) {
 	return nil, errors.New("development snapshot backend is not configured")
 }
@@ -608,10 +606,11 @@ func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, ap
 // it, in development only, the sockets are dialled directly with the tokens in
 // ANAS_ASSISTANT_TOKEN_DIR. The File Broker also executes the assistant's
 // changes; ANAS_ASSISTANT_CHANGES_SOCKET points at the spike's change broker
-// instead, which stands in for it where there is no File Broker.
-func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
+// instead, which stands in for it where there is no File Broker. The account
+// store keeps the notices of the members' scheduled tasks.
+func assistantAPI(logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) http.Handler {
 	sockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
-	options := assistantapi.Options{SocketDir: sockets, Logger: logger}
+	options := assistantapi.Options{SocketDir: sockets, Notices: notices, Logger: logger}
 	switch {
 	case sockets == "":
 	case broker != nil:

@@ -63,13 +63,21 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	client := agent.NewClient(serve(t, handler))
 
 	created, err := client.CreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:1", DiskID: "disk:fake-data-01", Fingerprint: "fingerprint",
+		PlanID: "plan:1", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-01", Fingerprint: "fingerprint"}}, Layout: storage.LayoutSingle,
 	})
 	if err != nil {
 		t.Fatalf("CreateVolume() error = %v", err)
 	}
-	if created.DiskID != "disk:fake-data-01" || volume.request.PlanID != "plan:1" {
+	if len(created.DiskIDs) != 1 || created.DiskIDs[0] != "disk:fake-data-01" || volume.request.PlanID != "plan:1" || volume.request.Layout != storage.LayoutSingle {
 		t.Fatalf("created volume/request = %#v / %#v", created, volume.request)
+	}
+	if _, err := client.AddDisks(context.Background(), storage.AddDisksRequest{
+		PlanID: "plan:2", FilesystemUUID: "uuid", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-02", Fingerprint: "fingerprint"}}, Layout: storage.LayoutMirror,
+	}); err != nil || volume.added.FilesystemUUID != "uuid" || volume.added.Disks[0].DiskID != "disk:fake-data-02" || volume.added.Layout != storage.LayoutMirror {
+		t.Fatalf("AddDisks() error = %v, request = %#v", err, volume.added)
+	}
+	if err := client.ContinueConversion(context.Background()); !errors.Is(err, storage.ErrNoConversion) {
+		t.Fatalf("ContinueConversion() with nothing to convert error = %v, want ErrNoConversion", err)
 	}
 	credential := accounts.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
@@ -129,11 +137,23 @@ func TestClientSynchronizesIdentitiesAndReportsConflicts(t *testing.T) {
 	}
 }
 
-type agentVolumeExecutor struct{ request storage.CreateVolumeRequest }
+type agentVolumeExecutor struct {
+	request storage.CreateVolumeRequest
+	added   storage.AddDisksRequest
+}
 
 func (e *agentVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
 	e.request = request
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, State: storage.VolumeStateAvailable}, nil
+	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+}
+
+func (e *agentVolumeExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+	e.added = request
+	return storage.Volume{FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+}
+
+func (e *agentVolumeExecutor) ContinueConversion(context.Context) error {
+	return storage.ErrNoConversion
 }
 
 type agentCredentialProvisioner struct {

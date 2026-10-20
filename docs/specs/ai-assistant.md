@@ -9,7 +9,7 @@
 
 ## 非目标
 
-- 不让助手联网（浏览器、联网搜索、语音合成等），也不提供定时任务与外部消息平台（微信、飞书等）的入口（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。终端、代码执行、子任务、提问与看图可以用：它们在沙箱中以本人身份运行，改不了本人与共享的文件。
+- 不让助手联网（浏览器、联网搜索、语音合成等），也不提供外部消息平台（微信、飞书等）的入口；定时任务的结果只在 VNAS 与桌面提示中查看（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。终端、代码执行、子任务、提问与看图可以用：它们在沙箱中以本人身份运行，改不了本人与共享的文件。
 - 不写照片、图库、用户标签或 AI 纠错；不读快照。
 - 不处理开发期云端 API 的隐私问题：云端 API 只用于开发测试，本地多模态模型接入前不在保存真实家庭数据的设备上为成员开启助手。
 - 不让管理员看到或代为确认成员的助手对话、记忆与待确认更改。
@@ -93,9 +93,9 @@
 
 ### 照片里是谁、在哪里拍的
 
-- Given：相册还不能识别人物，也不记录拍摄地点。
+- Given：相册还不能识别人物；拍摄地点只来自原图的 GPS。
 - When：成员问助手“我和妈妈的合照有哪些”或“这张是在哪里拍的”。
-- Then：助手说明它认不出照片里的人、也不知道拍摄地点，并给出能做的：按内容找多人合影，或按时间、相册与标签找；不编造人物或地点。
+- Then：助手说明它认不出照片里的人，给出能做的：按内容找多人合影，或按时间、相册与标签找。地点按这张照片原图记录的经纬度回答（换算成大致地点并说明依据），原图没有记下位置就如实说不知道；不编造人物或地点。它也能说出原图记录的其他信息，例如相机、镜头与曝光。
 
 ### 不改照片
 
@@ -173,6 +173,30 @@
 - When：产品服务在成员没有有效登录会话时（例如被攻破后）要连到这位成员的助手、为卡片读取文件或登记确认。
 - Then：文件代理与执行方各自核对会话，全部拒绝：产品服务自己连不到任何成员的实例，只有凭这位成员正在登录的会话才能连到这位成员的，确认也只能凭这个会话登记（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10）。
 
+### 安排定时任务
+
+- Given：成员对助手说“每天早上 8 点，告诉我共享空间昨天新增了哪些文件”或“下午 3 点提醒我交电费”。
+- When：助手处理这句话。
+- Then：助手用 Hermes 的 `cronjob` 建一个定时任务，告诉成员第一次在什么时候运行，结果会出现在“定时任务”里、桌面上会提醒；不在对话里等到点。时间按这台 NAS 的本地时间。
+
+### 定时任务按时运行
+
+- Given：成员有一个到期的定时任务，成员在不在线、助手窗口开没开都一样。
+- When：到了任务的时间。
+- Then：任务在成员自己的沙箱中运行，能读的与对话中相同，只能写助手目录；需要成员确认的命令、代码与“提交更改”被拒绝，回答里说明，由成员回到对话里确认。每次运行是一段对话，不出现在对话列表中，而在“定时任务”中这个任务的运行记录里。
+
+### 得知任务的结果
+
+- Given：一个任务刚运行完，或在成员离线时运行过。
+- When：成员在线，或下次登录后。
+- Then：一分钟内桌面右上角弹出提示，写着任务名与回答的开头（没有完成时写“没有完成”与原因），点“查看结果”在 VNAS 中打开这次运行；提示 12 秒后自己收起，指着时不收。没读的结果在 VNAS 的“定时任务”上计数，任务上标“新结果”，打开这次运行就算读过，在其他设备上也不再提示。同一个任务每次只提示最新的一次；回答只是“无事可报”（Hermes 的 `[SILENT]`）的运行不提示。运行的开头显示“定时任务按计划运行”，任务要做的事收在下面，不显示 Hermes 给运行的内部说明。
+
+### 管理定时任务
+
+- Given：成员打开 VNAS 的“定时任务”。
+- When：查看或操作一个任务。
+- Then：每个任务显示名称、什么时候运行、要做的事、下次运行与上次运行的结果，可以立即运行（几秒内没跑完就显示“已开始运行，完成后会通知你”）、暂停、继续、查看运行记录，以及确认后连同运行记录一起删除。运行暂停的任务时，Hermes 会同时恢复它的定时。改任务的内容或时间在对话里说。没有任务时，页面给出几个可以直接说的例子。
+
 ### 助手在回答之后记下的内容
 
 - Given：Hermes 的后台复盘在一轮回答之后改了助手的记忆或技能。
@@ -190,6 +214,7 @@
 - 数据卷离线时助手不可用，不回退到系统盘；实例崩溃时由下一次请求重新启动，进行中的确认随这一轮作废。
 - 成员登录 WebOS 时实例在后台启动，登录期间常驻，打开助手时直接连上（开发机上实例已运行时，从点开到窗口可用 0.7 秒）；全部会话结束（退出登录、过期或账号停用）后约 45 秒退出。登录后立即打开时，窗口在实例启动完成前显示“正在连接 VNAS”（冷启动在实验 NAS 上约 5 秒，开发机 5.5–11 秒）。同一成员同时打开多个窗口时共用一个实例（[研究](../research/hermes-agent-runtime.md#登录即启动并常驻2026-10-19开发机)）。
 - 实例内存上限 768 MiB，超过 640 MiB 时内核先回收（开发机用真实模型多轮对话后常驻约 375 MB、峰值不超过 442 MB）；任务数上限 256。
+- 定时任务由 root 的唤醒服务每 30 秒检查一次是否到期，所以最多晚 30 秒开始；一次运行最长 1 小时。成员登录期间产品服务每分钟查看一次任务是否运行完，所以结果最晚约一分钟后提示。
 - 助手目录的容量上限为每个账号 10 GiB，写满时写入失败。确认的等待时限为 1 天（`approvals.timeout: 86400`）；卡片只在打开这一轮的登录会话有效时存在，浏览器登录 12 小时后过期，会话先结束时这一轮与卡片随之结束。
 
 ## 验收证据
@@ -204,6 +229,7 @@
 - 真实模型场景：修改、删除、发布、总结、找回已删文件与共享空间中的诱导文字，按[研究](../research/hermes-agent-runtime.md#真实模型deepseek2026-10-14开发机)中的场景重跑，提交全部指向允许的位置并说明需要确认。
 - 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已改为 `hermes serve` 与回合内审批，在开发机上用真实模型跑通：卡片只出现在提交它的对话中，侧栏标“等你确认”；同一成员另一个窗口打开这个对话后看到同一张卡片并确认，两个窗口都显示已完成，文件已修改、旧版本在回收站；不回答时卡片在等待时限后变为超时，文件不变（[研究](../research/hermes-agent-runtime.md#集成会话闸门与产品服务的转发2026-10-15开发机)）。拒绝、停止与部分失败在浏览器中尚未验收。“记忆”页已在原型中用真实模型验收查看、逐条删除与连同对话全部清除。
 - 契约测试：`/api/v1/assistant` 每个接口的请求与响应符合 [OpenAPI](../../api/openapi.yaml)；管理员与其他成员到不了别人的实例；写操作需要 CSRF 令牌（[`assistant_test.go`](../../internal/httpapi/assistant_test.go)）。网关只放行白名单中的方法、参数与事件，审批只经卡片接口回答，窗口离开后回合期间保持到实例的连接，同一对话在多个窗口中都收到事件（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）。
+- 定时任务：任务列表不转出 Hermes 的内部字段（主目录、模型、投递目标、运行的系统提示），按名称或格式不对的编号到不了 Hermes，立即运行等几秒后答“已开始”，删除先删运行（[`tasks_test.go`](../../internal/assistantapi/tasks_test.go)）；登录期间每个结束的运行只告知一次，静默的运行记为已读（同一文件）；每个任务至多一条未读通知（[`assistanttasks_test.go`](../../internal/accounts/assistanttasks_test.go)）；窗口与桌面提示见 [`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)。真实沙箱中任务在实例停止时按时运行、以成员身份写助手目录、要改个人空间的被拒绝（[`cron.sh`](../../ai/assistant-spike/cron.sh)），系统测试在真实安装器上检查唤醒、按时运行、产品服务列出任务与告知结果（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 - 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 
 ## 关联
@@ -212,4 +238,5 @@
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
 - 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
+- 定时任务：产品服务 [`tasks.go`](../../internal/assistantapi/tasks.go) 与 [`tasknotices.go`](../../internal/assistantapi/tasknotices.go)，通知 [`internal/accounts/assistanttasks.go`](../../internal/accounts/assistanttasks.go)，窗口 [`TasksView.tsx`](../../web/src/assistant/TasksView.tsx) 与桌面提示 [`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)，唤醒 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)，系统技能 [`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md)
 - 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)

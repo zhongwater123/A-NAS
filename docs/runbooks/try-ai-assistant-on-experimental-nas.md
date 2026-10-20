@@ -15,7 +15,7 @@
 
 - 权限：NAS 上的 root 步骤由用户执行；开发机上的准备与暂存经 `ssh a-nas-dev`。
 - 目标：主机名 `a-nas-dev`；`/opt/a-nas/current` 指向含助手代码的 release（`df2a9837dc2d` 或更新）；数据卷 `/srv/a-nas/data` 为 `/dev/sda1`，Btrfs，UUID `09e275fe-794a-458d-8200-b6e67c55cc22`（与[数据卷手册](provision-v1.0.1-experimental-storage.md)一致）。
-- 隐私：成员使用助手时，它读到的个人空间与 Shared 文件内容会发往云端模型。规格要求本地模型接入前不在保存真实家庭数据的设备上开启；实验 NAS 只存可丢弃测试数据。搜索结果里的照片名称、拍摄时间、标签与相册名会发给模型；成员要它看照片的画面时，那几张照片的 1600 像素视图（不带拍摄地点等元数据）也会。模型网关只记 token 用量与工具名，不记消息，日志目录只有 root 可读。
+- 隐私：成员使用助手时，它读到的个人空间与 Shared 文件内容会发往云端模型。规格要求本地模型接入前不在保存真实家庭数据的设备上开启；实验 NAS 只存可丢弃测试数据。搜索结果里的照片名称、拍摄时间、标签与相册名会发给模型；它查看照片详情时，原图记录的元数据也会，包括相机记下的拍摄位置；成员要它看照片的画面时，那几张照片的 1600 像素视图也会。模型网关只记 token 用量与工具名，不记消息，日志目录只有 root 可读。
 - 数据卷写入：每个账号一个 Btrfs 子卷 `assistant/<账号>`，Shared 中的 `Agent空间/<账号>`，以及执行方的 `assistant/.changes`。不开启 simple quota：ADR 0024 要求先在测试卷上验证它对快照与删除的影响（#116），因此试用期间助手目录没有 10 GiB 上限。
 - 服务影响：安装、更新与移除各重启一次 Host Agent、相册服务与产品服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。
 - 内存：每个实例上限 2 GiB，没有连接约 45 秒后退出；NAS 共 7.7 GB，多人同时使用时留意（#116 记录实测）。
@@ -57,7 +57,7 @@
    ```bash
    bash /root/assistant-trial-<提交>/spike/nas-trial.sh install
    ```
-   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate, and photos for the assistants，最后 10 行 `PASS` 与 `installed`。
+   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate, and photos for the assistants，最后 11 行 `PASS` 与 `installed`。
    - 完成标准：没有 `STOP` 或 `FAIL`。
 5. NAS（root，可选）：测冷启动与它能看到的相册，不调用模型。
    ```bash
@@ -74,10 +74,11 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 ```
 
 - 换上新的脚本、单元、Hermes 策略与运行环境，重新生成会话令牌与成员配置（都在 root 自己的 `/etc` 中），停止正在运行的实例；成员的助手目录、对话与记忆保留，成员可写的文件夹不碰。
-- 完成标准：最后 10 行 `PASS`。安装之后才加入的成员不在其中，`update` 会列出；要包括他们，`remove` 后重新 `install`。
+- 完成标准：最后 11 行 `PASS`。安装之后才加入的成员不在其中，`update` 会列出；要包括他们，`remove` 后重新 `install`。
 - 已装早先试用（bundle `c6f6993`）的设备同样直接 `update`：会话令牌按新格式重新生成，成员的助手目录保留（2026-10-16 在系统测试容器中预演）。
 - 2026-10-16 之后的 bundle 带上了后台复盘工具白名单的上游修复，并为每个账号启用每周的闲时整理（`anas-assistant-curator@<账号>.timer`，`check` 的最后一行 `PASS weekly curator`）；`update` 一并换上（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理2026-10-16开发机)）。
 - 2026-10-19 之后的 bundle 接上相册（`check` 的最后两行 `PASS photo service ...`），并把会话闸门从 `/etc/a-nas/*.env` 移到 drop-in；`update` 删掉环境文件里旧的那一行。之后的正式部署不再需要重新加它（[研究](../research/hermes-agent-runtime.md#相册接入试用与回复中的照片2026-10-19开发机)）。
+- 2026-10-20 之后的 bundle 开启定时任务：装上唤醒服务 `anas-assistant-cron-waker.service` 与运行单元 `anas-assistant-cron@.service`（`check` 多一行 `PASS scheduled tasks are started when due`），以及系统技能 `anas-scheduled-tasks`。任务列表、立即运行与桌面提示在产品服务中，要正式部署带上它们才有（[研究](../research/hermes-agent-runtime.md#定时任务2026-10-20开发机)）。
 
 ## 验证
 

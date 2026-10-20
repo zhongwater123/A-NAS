@@ -1,43 +1,33 @@
 import {
-  Activity, AtSign, Camera, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
-  LayoutDashboard, LogOut, Monitor, Network, Palette, PenLine, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, X, type LucideIcon,
+  Activity, AtSign, Camera, ChevronRight, CircleArrowUp, CircleCheck, Clock3, Database, Ellipsis, FolderLock, Globe, HardDrive, History, Images, KeyRound,
+  LayoutDashboard, LogOut, Monitor, Network, Palette, PenLine, ScrollText, ShieldCheck, SquareTerminal, TriangleAlert, UserPlus, UsersRound, UserX, type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
-  Health, HostState, Session, StoragePlan, User, ViewingScope, Volume,
-  changePassword, confirmStoragePlan, createMember, createStoragePlan, disableMember, executeStoragePlan, listUsers, listVolumes, removeAvatar, resetMember, startViewing,
+  Health, HostState, Session, User, ViewingScope,
+  changePassword, createMember, disableMember, listUsers, removeAvatar, resetMember, startViewing,
   updateNickname,
 } from "./api";
 import { nicknameProblem, nicknameRuleText, passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
-import { formatBytes, formatNominalCapacity } from "./bytes";
+import { formatBytes } from "./bytes";
 import { isLocalConsole } from "./LocalConsoleScreenSaver";
 import { LogsSection, type LogsPreset } from "./logs/LogsSection";
 import { displayName, fullName, usePeople } from "./people";
 import { AvatarDialog } from "./settings/AvatarDialog";
+import { HostStateBanner, HostStatePending } from "./settings/hostState";
 import { describeFinding } from "./settings/health";
 import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./settings/parts";
 import { PersonalizationSection } from "./settings/PersonalizationSection";
+import { StorageSection, useVolumes, volumeState, volumeUsage, type StoragePlanFlow, type VolumesView } from "./settings/StorageSection";
 import { TerminalSection } from "./settings/TerminalSection";
 import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
 import type { HostStateView } from "./useHostState";
 
+export { useStoragePlan, type StoragePlanFlow } from "./settings/StorageSection";
+
 export type SettingsSection = "account" | "overview" | "storage" | "personalization" | "users" | "logs" | "terminal" | "task-manager";
-
-type PlanStep = "plan" | "confirm" | "execute";
-
-export interface StoragePlanFlow {
-  plan?: StoragePlan;
-  phrase: string;
-  busy?: PlanStep;
-  error: string;
-  setPhrase: (value: string) => void;
-  generate: (diskID: string) => Promise<void>;
-  confirm: () => Promise<void>;
-  execute: () => Promise<void>;
-  dismiss: () => void;
-}
 
 const systemSections: Array<{ id: SettingsSection; label: string; icon: LucideIcon; tone: string; adminOnly?: boolean }> = [
   { id: "overview", label: "概览", icon: LayoutDashboard, tone: "overview" },
@@ -54,29 +44,6 @@ const plannedSections: Array<{ label: string; icon: LucideIcon; tone: string }> 
   { label: "安全", icon: ShieldCheck, tone: "security" },
   { label: "系统更新", icon: CircleArrowUp, tone: "update" },
 ];
-
-// useStoragePlan belongs to the desktop rather than the storage section: the
-// service refuses a new plan while one is pending and cannot read one back, so
-// closing settings or switching sections must not forget it.
-export function useStoragePlan(): StoragePlanFlow {
-  const [plan, setPlan] = useState<StoragePlan>();
-  const [phrase, setPhrase] = useState("");
-  const [busy, setBusy] = useState<PlanStep>();
-  const [error, setError] = useState("");
-  const run = async (step: PlanStep, action: () => Promise<StoragePlan>) => {
-    setBusy(step); setError("");
-    try { setPlan(await action()); }
-    catch (caught) { setError(messageOf(caught)); }
-    finally { setBusy(undefined); }
-  };
-  return {
-    plan, phrase, busy, error, setPhrase,
-    generate: async (diskID) => { setPhrase(""); await run("plan", () => createStoragePlan(diskID)); },
-    confirm: async () => { if (plan) await run("confirm", () => confirmStoragePlan(plan.id, phrase)); },
-    execute: async () => { if (plan) await run("execute", () => executeStoragePlan(plan.id)); },
-    dismiss: () => { setPlan(undefined); setPhrase(""); setError(""); },
-  };
-}
 
 export function SettingsPanel({ session, host, section, onSectionChange, storagePlan, onUserChange, onLogout }: {
   session: Session;
@@ -136,20 +103,6 @@ export function SettingsPanel({ session, host, section, onSectionChange, storage
       </div>
     </div>
   );
-}
-
-interface VolumesView { items?: Volume[]; error: string; refresh: () => Promise<void> }
-
-// A finished storage plan changes the volume list, so it is read again then.
-function useVolumes(planState?: string): VolumesView {
-  const [items, setItems] = useState<Volume[]>();
-  const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    try { setItems(await listVolumes()); setError(""); }
-    catch (caught) { setError(messageOf(caught)); }
-  }, []);
-  useEffect(() => { void refresh(); }, [refresh, planState]);
-  return { items, error, refresh };
 }
 
 // ---------------------------------------------------------------- My account
@@ -414,185 +367,6 @@ function DeviceArt() {
   );
 }
 
-// ------------------------------------------------------------------- Storage
-
-function StorageSection({ host, volumes, isAdmin, flow }: { host: HostStateView; volumes: VolumesView; isAdmin: boolean; flow: StoragePlanFlow }) {
-  const { snapshot, refresh: refreshHost } = host;
-  const [setupOpen, setSetupOpen] = useState(false);
-  const planState = flow.plan?.state;
-  useEffect(() => { if (planState === "succeeded") void refreshHost(); }, [refreshHost, planState]);
-  const disks = snapshot?.disks ?? [];
-  const noVolume = volumes.items?.length === 0;
-  const showSetup = isAdmin && (Boolean(flow.plan) || (noVolume && setupOpen));
-  return (
-    <>
-      <PageHeader title="存储" subtitle="数据卷承载全部文件、相册与共享" action={<RefreshButton label="刷新存储状态" busy={host.refreshing} onClick={() => { void volumes.refresh(); void refreshHost(); }} />} />
-      {volumes.error && <Banner tone="error">{volumes.error}</Banner>}
-      {showSetup ? <VolumeSetup disks={disks} flow={flow} onClose={() => setSetupOpen(false)} />
-        : volumes.items === undefined ? !volumes.error && <div className="set-card set-state compact"><span className="loader" /><p>正在读取数据卷…</p></div>
-          : noVolume ? (
-            <div className="set-card set-empty">
-              <span className="set-empty-art"><Database /></span>
-              <h3>尚未创建数据卷</h3>
-              <p>{isAdmin ? "选择一块空闲磁盘初始化为数据卷后，就可以开始存放文件、照片和共享内容。" : "文件、照片和共享内容都保存在数据卷中。尚未创建数据卷，请联系管理员初始化。"}</p>
-              {isAdmin && <button className="set-btn primary" onClick={() => setSetupOpen(true)}>初始化数据卷…</button>}
-            </div>
-          ) : volumes.items.map((volume) => <VolumeCard key={volume.id} volume={volume} />)}
-      <Group title="磁盘" aside={snapshot ? `${disks.length} 块` : undefined}>
-        {!snapshot ? <HostStatePending host={host} inline /> : (
-          <>
-            {host.disconnected || isStale(snapshot) ? <div className="set-card-banner"><HostStateBanner host={host} snapshot={snapshot} /></div> : null}
-            {disks.length === 0
-              ? <div className="set-state compact"><HardDrive /><h4>未检测到磁盘</h4><p>设备重新出现后会自动更新。</p></div>
-              : disks.map((disk) => <DiskRow key={disk.id} disk={disk} />)}
-          </>
-        )}
-      </Group>
-    </>
-  );
-}
-
-function VolumeCard({ volume }: { volume: Volume }) {
-  const usage = volumeUsage(volume);
-  const state = volumeState(volume.state);
-  return (
-    <div className="set-card vol-card">
-      <div className="vol-head">
-        <IconTile tone="storage" icon={Database} size="lg" />
-        <div><h3>数据卷</h3><p>Btrfs · 单盘</p></div>
-        <Pill tone={state.tone}><span className="set-dot" />{state.label}</Pill>
-      </div>
-      {usage.known ? (
-        <div>
-          <div className="vol-numbers"><strong>{formatBytes(usage.used)}</strong><span>已用，共 {formatBytes(usage.capacity)}</span><em>{usage.percent}%</em></div>
-          <div className={`vol-bar ${usage.percent >= 85 ? "high" : ""}`} role="meter" aria-label="数据卷已用空间" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usage.percent}><span style={{ width: `${usage.percent}%` }} /></div>
-          <div className="vol-legend"><span><i className="used" />已用 {formatBytes(usage.used)}</span><span><i className="free" />可用 {formatBytes(usage.available)}</span></div>
-        </div>
-      ) : (
-        // Missing usage is unknown, never "full".
-        <p className="vol-unknown">{usage.capacity > 0 ? `已用空间未知 · 共 ${formatBytes(usage.capacity)}` : "容量未知"}</p>
-      )}
-      <div className="vol-meta"><span>文件系统 UUID</span><code>{volume.filesystemUuid ?? "等待 UUID"}</code></div>
-    </div>
-  );
-}
-
-function DiskRow({ disk }: { disk: HostState["disks"][number] }) {
-  const health = diskHealth(disk.health);
-  const role = { system: { label: "系统盘", tone: "neutral" as Tone }, data: { label: "数据盘", tone: "accent" as Tone }, unassigned: { label: "未分配", tone: "neutral" as Tone } }[disk.role];
-  return (
-    <div className="set-row">
-      <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} size="lg" />
-      <div className="set-row-text">
-        <span><strong>{disk.model}</strong><Pill tone={role.tone} outline={disk.role === "unassigned"}>{role.label}</Pill></span>
-        <small>{disk.transport.toUpperCase()} · {disk.rotational ? "机械硬盘" : "固态存储"} · <span className="set-mono">{shortID(disk.id)}</span></small>
-      </div>
-      <div className="disk-end">
-        <strong title={`硬盘标称 ${formatNominalCapacity(disk.capacityBytes)}：厂商按 1000 进制计算，这里按 1024 进制（GiB），所以数字更小`}>{formatBytes(disk.capacityBytes)}<span className="disk-nominal">标称 {formatNominalCapacity(disk.capacityBytes)}</span></strong>
-        <small className={`tone-${health.tone}`}><span className="set-dot" />{health.label}{disk.temperatureCelsius === undefined ? "" : ` · ${disk.temperatureCelsius}°C`}</small>
-      </div>
-    </div>
-  );
-}
-
-function VolumeSetup({ disks, flow, onClose }: { disks: HostState["disks"]; flow: StoragePlanFlow; onClose: () => void }) {
-  const { plan, busy } = flow;
-  const candidates = disks.filter((disk) => disk.role === "unassigned");
-  const eligibleIDs = candidates.filter((disk) => disk.eligibleForDataVolume).map((disk) => disk.id);
-  const [selected, setSelected] = useState("");
-  // With a single eligible disk there is nothing to choose.
-  useEffect(() => {
-    if (!selected && eligibleIDs.length === 1) setSelected(eligibleIDs[0]);
-  }, [selected, eligibleIDs.join("\n")]);
-  const pending = plan?.state === "planned" || plan?.state === "confirmed";
-  const expired = Boolean(plan && pending && Date.parse(plan.expiresAt) <= Date.now());
-  const running = busy === "execute" || plan?.state === "running";
-  const state = !plan ? "select" : running ? "running" : expired ? "expired" : plan.state;
-  const steps: Record<string, number> = { select: 0, planned: 1, confirmed: 2, running: 2, succeeded: 3 };
-  const stepIndex = steps[state] ?? 1;
-  const minutesLeft = plan ? Math.max(0, Math.ceil((Date.parse(plan.expiresAt) - Date.now()) / 60_000)) : 0;
-  return (
-    <section className="wiz" aria-label="初始化数据卷">
-      <div className="wiz-head">
-        <IconTile tone="danger" icon={TriangleAlert} size="lg" />
-        <div><h3>初始化数据卷</h3><p>把一块空闲磁盘格式化为 A-NAS 数据卷</p></div>
-        {plan ? <Pill tone={planTone(state)}>{planStateLabel(state)}</Pill> : <button className="set-icon-btn" aria-label="关闭初始化" onClick={onClose}><X /></button>}
-      </div>
-      <ol className="wiz-steps">
-        {["选择磁盘", "核对计划", "执行"].map((label, index) => (
-          <li key={label} className={index < stepIndex ? "done" : index === stepIndex ? "current" : ""}><b>{index < stepIndex ? <CircleCheck /> : index + 1}</b>{label}</li>
-        ))}
-      </ol>
-      <div className="wiz-body">
-        {flow.error && <Banner tone="error">{flow.error}</Banner>}
-        {!plan ? (
-          <>
-            <p className="wiz-lead">只能使用非系统、非 USB、未被占用且身份稳定的 SATA 或 NVMe 磁盘。</p>
-            {candidates.length ? (
-              <div className="set-card" role="radiogroup" aria-label="候选磁盘">
-                {candidates.map((disk) => (
-                  <label key={disk.id} className={`wiz-disk ${disk.eligibleForDataVolume ? "" : "disabled"} ${selected === disk.id ? "selected" : ""}`}>
-                    <input type="radio" name="volume-disk" value={disk.id} disabled={!disk.eligibleForDataVolume || Boolean(busy)} checked={selected === disk.id} onChange={() => setSelected(disk.id)} />
-                    <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} />
-                    <span className="set-row-text">
-                      <span><strong>{disk.model}</strong></span>
-                      <small>{disk.transport.toUpperCase()} · <span className="set-mono">{shortID(disk.id)}</span></small>
-                      {!disk.eligibleForDataVolume && <small className="wiz-reason">{disk.ineligibleReasons.join("；")}</small>}
-                    </span>
-                    <strong className="wiz-disk-size">{formatBytes(disk.capacityBytes)}</strong>
-                  </label>
-                ))}
-              </div>
-            ) : <div className="set-card set-state compact"><HardDrive /><h4>没有可初始化的磁盘</h4><p>请接入一块空闲的 SATA 或 NVMe 磁盘。</p></div>}
-          </>
-        ) : (
-          <>
-            <h4 className="wiz-title">破坏性操作计划</h4>
-            <dl className="wiz-facts">
-              <dt>目标磁盘</dt><dd>{plan.diskModel} · {formatBytes(plan.capacityBytes)}</dd>
-              <dt>身份指纹</dt><dd><code>{plan.fingerprint}</code></dd>
-              <dt>将清除的签名</dt><dd>{plan.signatures?.length ? plan.signatures.join("、") : "未检测到文件系统签名"}</dd>
-              <dt>计划有效期</dt><dd>{new Date(plan.expiresAt).toLocaleString("zh-CN")}{pending && !expired ? `（还剩约 ${minutesLeft} 分钟）` : ""}</dd>
-            </dl>
-            {(plan.actions?.length ?? 0) > 0 && <ol className="wiz-actions">{plan.actions!.map((action) => <li key={action.kind}>{action.description}</li>)}</ol>}
-            {state === "planned" && (
-              <label className="wiz-confirm">
-                <span>输入确认短语 <code>{plan.confirmationPhrase}</code> 以确认这是要清除的磁盘</span>
-                <input className="set-input" value={flow.phrase} onChange={(event) => flow.setPhrase(event.target.value)} autoComplete="off" spellCheck={false} />
-              </label>
-            )}
-            {state === "confirmed" && <Callout tone="danger" title="最后一步：执行后无法撤销">{plan.diskModel} 上的全部分区和数据将被永久清除，然后创建新的数据卷。</Callout>}
-            {state === "running" && (
-              <div className="wiz-running" role="status"><div className="wiz-progress"><span /></div><p>正在创建数据卷，请勿关闭设备或断电…</p></div>
-            )}
-            {state === "succeeded" && <Callout tone="success" title="数据卷已创建">现在可以在文件管理和相册中存放内容了。</Callout>}
-            {state === "expired" && <Callout tone="warning" title="计划已过期">为保证磁盘身份没有变化，计划只在十分钟内有效。请重新开始。</Callout>}
-            {(state === "failed" || state === "needs_attention") && (
-              <Callout tone="danger" title={state === "failed" ? "初始化失败" : "需要人工处理"}>
-                {plan.failure ? `${plan.failure}。` : ""}不要立即生成新计划，先按运行手册导出日志并核对磁盘状态。
-              </Callout>
-            )}
-          </>
-        )}
-      </div>
-      <div className="wiz-foot">
-        {!plan && (
-          <>
-            <p className="wiz-warn"><TriangleAlert />所选磁盘上的全部数据都会被清除</p>
-            <button className="set-btn" onClick={onClose}>取消</button>
-            <button className="set-btn primary" disabled={!selected || Boolean(busy)} onClick={() => void flow.generate(selected)}>{busy === "plan" ? "正在生成…" : "生成格式化计划"}</button>
-          </>
-        )}
-        {state === "planned" && <button className="set-btn primary" disabled={flow.phrase !== plan?.confirmationPhrase || Boolean(busy)} onClick={() => void flow.confirm()}>{busy === "confirm" ? "正在确认…" : "确认计划"}</button>}
-        {state === "confirmed" && <button className="set-btn danger" disabled={Boolean(busy)} onClick={() => void flow.execute()}>清除磁盘并创建数据卷</button>}
-        {state === "succeeded" && <button className="set-btn primary" onClick={flow.dismiss}>完成</button>}
-        {state === "expired" && <button className="set-btn primary" onClick={flow.dismiss}>重新开始</button>}
-        {(state === "failed" || state === "needs_attention") && <button className="set-btn" onClick={flow.dismiss}>关闭</button>}
-      </div>
-    </section>
-  );
-}
-
 // --------------------------------------------------------- Users & permissions
 
 type UserDialog =
@@ -788,45 +562,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <div className="set-field"><label><span>{label}</span>{children}</label>{hint && <small>{hint}</small>}</div>;
 }
 
-function Callout({ tone, title, children }: { tone: "danger" | "success" | "warning"; title: string; children: ReactNode }) {
-  const Icon = tone === "success" ? CircleCheck : TriangleAlert;
-  return <div className={`wiz-callout ${tone}`}><Icon /><div><strong>{title}</strong><p>{children}</p></div></div>;
-}
-
 function StatusText({ status }: { status: User["status"] }) {
   return <span className="set-status"><span className={`set-dot status-${status}`} />{statusLabel(status)}</span>;
 }
 
-function HostStatePending({ host, inline }: { host: HostStateView; inline?: boolean }) {
-  const className = inline ? "set-state" : "set-card set-state";
-  if (host.loading) return <div className={className}><span className="loader" /><h4>正在读取设备状态…</h4><p>正在连接 A-NAS 产品服务</p></div>;
-  return <div className={className}><CircleAlert /><h4>暂时无法读取设备状态</h4><p>请确认产品服务和 Host Agent 正在运行。</p><button className="set-btn primary" onClick={() => void host.refresh()}>重新连接</button></div>;
-}
-
-function HostStateBanner({ host, snapshot }: { host: HostStateView; snapshot: HostState }) {
-  if (host.disconnected) return <Banner tone="error">连接中断，正在显示上次成功读取的数据</Banner>;
-  if (isStale(snapshot)) return <Banner tone="warning">实时观测时间较早，正在等待新数据</Banner>;
-  return null;
-}
-
 // ------------------------------------------------------------------ Helpers
-
-function volumeUsage(volume: Volume) {
-  const capacity = volume.capacityBytes ?? 0;
-  const known = capacity > 0 && volume.availableBytes !== undefined;
-  const available = known ? Math.min(capacity, Math.max(0, volume.availableBytes!)) : 0;
-  const used = capacity - available;
-  return { known, capacity, available, used, percent: known ? Math.min(100, Math.round((used / capacity) * 100)) : 0 };
-}
-
-function volumeState(state: Volume["state"]): { label: string; tone: Tone } {
-  return {
-    creating: { label: "创建中", tone: "accent" as Tone },
-    available: { label: "在线", tone: "success" as Tone },
-    unavailable: { label: "离线", tone: "danger" as Tone },
-    read_only: { label: "只读", tone: "warning" as Tone },
-  }[state];
-}
 
 function healthPresentation(health: Health): { label: string; tone: Tone } {
   return {
@@ -834,15 +574,6 @@ function healthPresentation(health: Health): { label: string; tone: Tone } {
     warning: { label: "需要注意", tone: "warning" as Tone },
     critical: { label: "严重故障", tone: "danger" as Tone },
     unknown: { label: "健康未评估", tone: "neutral" as Tone },
-  }[health];
-}
-
-function diskHealth(health: Health): { label: string; tone: Tone } {
-  return {
-    healthy: { label: "健康", tone: "success" as Tone },
-    warning: { label: "注意", tone: "warning" as Tone },
-    critical: { label: "严重", tone: "danger" as Tone },
-    unknown: { label: "健康未知", tone: "neutral" as Tone },
   }[health];
 }
 
@@ -858,19 +589,6 @@ function roleLabel(role: User["role"]): string {
 
 function statusLabel(status: User["status"]): string {
   return { active: "正常", pending: "创建中", disabled: "已禁用", error: "凭据异常" }[status];
-}
-
-// Raw states stay visible next to the label because the runbooks name them.
-function planStateLabel(state: string): string {
-  const labels: Record<string, string> = { planned: "待确认", confirmed: "已确认", running: "执行中", succeeded: "已完成", failed: "失败", needs_attention: "需要人工处理", expired: "已过期" };
-  return labels[state] ? `${labels[state]} · ${state}` : state;
-}
-
-function planTone(state: string): Tone {
-  if (state === "succeeded") return "success";
-  if (state === "failed" || state === "needs_attention") return "danger";
-  if (state === "expired") return "warning";
-  return "accent";
 }
 
 function formatUptime(seconds: number): string {
@@ -891,10 +609,3 @@ function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-function shortID(value: string): string {
-  return value.length > 24 ? `${value.slice(0, 14)}…${value.slice(-6)}` : value;
-}
-
-function isStale(state: HostState): boolean {
-  return state.dataSource === "live" && Date.now() - new Date(state.observedAt).getTime() > 30_000;
-}

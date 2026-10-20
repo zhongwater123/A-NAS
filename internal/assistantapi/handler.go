@@ -56,6 +56,9 @@ type Options struct {
 	SocketDir string
 	// Changes executes 提交更改; without it every approval is denied.
 	Changes ChangeStore
+	// Notices keeps the notices of scheduled tasks' runs; without it the
+	// member is not told of them.
+	Notices TaskNotices
 	Logger  *slog.Logger
 }
 
@@ -103,6 +106,12 @@ func New(options Options) http.Handler {
 		"GET /memory/items/{id}":       h.getMemoryItem,
 		"DELETE /memory/items/{id}":    h.deleteMemoryItem,
 		"POST /memory/clear":           h.clearMemory,
+		"GET /tasks":                   h.listTasks,
+		"GET /tasks/{id}/runs":         h.taskRuns,
+		"POST /tasks/{id}/pause":       h.changeTask("pause"),
+		"POST /tasks/{id}/resume":      h.changeTask("resume"),
+		"POST /tasks/{id}/run":         h.runTask,
+		"DELETE /tasks/{id}":           h.deleteTask,
 	}
 	for pattern, route := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -197,8 +206,10 @@ func (h *handler) listSessions(w http.ResponseWriter, r *http.Request, account s
 		Sessions []hermesSession `json:"sessions"`
 	}
 	// Conversations show once they have a message: Hermes stores a new one at
-	// its first prompt.
-	query := url.Values{"limit": {fmt.Sprint(sessionLimit)}, "order": {"recent"}, "archived": {"exclude"}, "min_messages": {"1"}}
+	// its first prompt. Runs of scheduled tasks show under their task, as
+	// Hermes Desktop lists them (tasks.go).
+	query := url.Values{"limit": {fmt.Sprint(sessionLimit)}, "order": {"recent"}, "archived": {"exclude"}, "min_messages": {"1"},
+		"exclude_sources": {"cron"}}
 	if !h.call(w, r, account, http.MethodGet, "/api/sessions?"+query.Encode(), nil, &page) {
 		return
 	}

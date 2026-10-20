@@ -30,6 +30,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 
 - [0024：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行](0024-run-a-sandboxed-hermes-agent-per-member.md)（proposed）
 
+- [0025：数据卷以 Btrfs 自带的多盘配置跨越多块硬盘](0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 0007 的单盘限制）
+
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。

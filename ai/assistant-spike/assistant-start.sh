@@ -7,6 +7,11 @@ runtime=/opt/a-nas/assistant-runtimes/spike/venv/bin
 if [ "${ANAS_ASSISTANT_CHANNEL:-serve}" = api_server ]; then
   exec "$runtime/hermes" gateway run
 fi
+# A round of the member's scheduled tasks (anas-assistant-cron@.service): Hermes's own
+# `hermes cron tick` runs the jobs that are due once, behind the same bridge to the model.
+if [ "${ANAS_ASSISTANT_CHANNEL:-serve}" = cron ]; then
+  exec "$runtime/hermes" cron tick
+fi
 # The session token reaches `hermes serve` alone, the way Hermes Desktop hands it to a
 # backend over SSH: in a 0600 file under $HOME/.hermes/desktop-ssh, which serve checks
 # without following links and deletes once read (--ssh-session-token-file). No process

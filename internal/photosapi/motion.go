@@ -147,6 +147,17 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 	h.serve(w, r, content, "inline")
 }
 
+// metadata is what a photo's original records about it, its location among it.
+func (h *handler) metadata(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	metadata, err := h.service.Metadata(r.Context(), principal, r.PathValue("assetID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, metadata)
+}
+
 func (h *handler) motion(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	content, err := h.service.OpenMotion(r.Context(), principal, r.PathValue("assetID"))
