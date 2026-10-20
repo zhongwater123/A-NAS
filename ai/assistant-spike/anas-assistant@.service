@@ -1,6 +1,8 @@
 [Unit]
 Description=A-NAS assistant for %i (spike)
-# Started by anas-assistant-api@%i.service, stopped when that proxy exits idle.
+# Started by anas-assistant-api@%i.service, stopped when that proxy exits idle,
+# 45 s after its last connection. The Product Service holds one from the member's
+# sign-in until their last session ends, so it runs while they are signed in.
 StopWhenUnneeded=yes
 Requires=anas-assistant-token@%i.service
 After=anas-assistant-token@%i.service
