@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -78,6 +79,9 @@ type ProductDependencies struct {
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.
 	SystemLogs systemlog.Reader
+	// Personalization keeps the device-wide 个性化 settings; nil answers
+	// personalization_unavailable.
+	Personalization *personalization.Store
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
 	// center) catch up without waiting for their periodic scan. The context
@@ -108,6 +112,8 @@ type productHandler struct {
 	changed    func(context.Context, accounts.User, string)
 	logger     *slog.Logger
 	mux        *http.ServeMux
+
+	personalization *personalization.Store
 }
 
 func NewProduct(dependencies ProductDependencies) http.Handler {
@@ -126,7 +132,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,
 		shares: dependencies.Shares, photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
 		transfers: dependencies.Transfers, assistant: dependencies.Assistant, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
-		changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
+		personalization: dependencies.Personalization, changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
 	return handler
@@ -230,6 +236,8 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
 	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
 	h.mux.HandleFunc("GET /api/v1/system-logs", h.withSession(h.handleSystemLogs))
+	h.mux.HandleFunc("GET /api/v1/local-display", h.handleLocalDisplay)
+	h.mux.HandleFunc("PUT /api/v1/local-display", h.withMutation(h.handleUpdateLocalDisplay))
 	h.musicRoutes()
 	h.profileRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {

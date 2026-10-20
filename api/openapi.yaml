@@ -325,6 +325,30 @@ paths:
         "401": { $ref: "#/components/responses/ProductError" }
         "403": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/local-display:
+    get:
+      security: []
+      operationId: getLocalDisplay
+      summary: Read how the screen attached to the NAS behaves (设置 → 个性化 → 本机屏幕)
+      description: >-
+        Needs no session, because the sign-in page on the local console reads it too. The local console turns the
+        screen black once the screen saver has played sleepAfterMinutes; the sign-in page after three minutes plus
+        that. Only pages opened with ?local-console=1 act on it.
+      responses:
+        "200": { description: The current setting, content: { application/json: { schema: { $ref: "#/components/schemas/LocalDisplay" } } } }
+        "503": { $ref: "#/components/responses/ProductError" }
+    put:
+      operationId: updateLocalDisplay
+      description: Administrators only. The local console uses the new value from its next idle period.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LocalDisplay" } } } }
+      responses:
+        "200": { description: The saved setting, content: { application/json: { schema: { $ref: "#/components/schemas/LocalDisplay" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "401": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/spaces:
     get:
       operationId: listSpaces
@@ -3584,6 +3608,17 @@ components:
         username: { type: string }
         nickname: { type: string }
         avatarVersion: { type: string }
+    LocalDisplay:
+      type: object
+      additionalProperties: false
+      required: [sleepAfterMinutes]
+      properties:
+        sleepAfterMinutes:
+          type: integer
+          enum: [0, 10, 30, 60]
+          description: >-
+            Minutes the screen saver plays before the screen turns black; 0 keeps it on. Defaults to 30. The server
+            refuses other values with 422 validation_failed.
     ProfileChange:
       type: object
       additionalProperties: false
