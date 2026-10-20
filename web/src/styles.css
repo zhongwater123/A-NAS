@@ -107,6 +107,7 @@ button { font: inherit; }
 }
 .rail-button.on::before { opacity: 1; transform: translateY(-50%) scaleY(1); }
 .rail-button:focus-visible { outline: 2px solid rgba(255,255,255,.92); outline-offset: 2px; }
+.rail-badge { position: absolute; top: 3px; right: 2px; min-width: 17px; height: 17px; display: grid; place-items: center; padding: 0 4px; border-radius: 9px; color: #fff; background: #f26a1b; box-shadow: 0 0 0 2px rgba(30, 20, 62, .9); font-size: 10px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
 .rail-face {
   width: 32px;
   height: 32px;
@@ -347,6 +348,8 @@ button { font: inherit; }
 .icon-video { background: linear-gradient(155deg, #34363d 0%, #131418 46%, #000 100%); }
 .icon-video::before { opacity: .55; }
 .icon-download { background: linear-gradient(155deg, #66eb83, #11b944); }
+/* 分享: warm orange, apart from 传输中心's green. */
+.icon-share { background: linear-gradient(155deg, #ffb25e, #f2621c); }
 /* Docker's own whale and blue (#2496ed). */
 .icon-docker { background: linear-gradient(155deg, #3aa8f5, #1d7fd6); }
 .desktop-icon.icon-docker svg { width: 36px; height: 36px; }

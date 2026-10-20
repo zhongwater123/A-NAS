@@ -13,6 +13,8 @@ const getRandomValues = crypto.getRandomValues.bind(crypto);
 beforeEach(() => vi.stubGlobal("crypto", { getRandomValues }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); });
 function Launcher() { const shares = useShares(); return <button onClick={() => shares.compose([file])}>新分享</button>; }
+// The list stays beside an open share, so files are looked up in their own region.
+const files = () => screen.getByRole("region", { name: "分享内容" });
 
 it("shares ordinary files with multiple members, Unicode emoji and a stable request key", async () => {
   const sent: unknown[] = [];
@@ -53,26 +55,48 @@ it("opens a received private thread and renders markup as text, marking only dis
   expect(screen.queryByLabelText("选择接收者讨论")).toBeNull();
 });
 
-it("keeps every paginated offline notification and resumes from the persisted per-account cursor", async () => {
+it("reads every page of the notification backlog without replaying it and resumes from the per-account cursor", async () => {
   const offsets: number[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url) => {
-    const after = Number(new URL(String(url), "http://nas").searchParams.get("after")); offsets.push(after);
-    return json({ items: after === 0 ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1, shareId: `s${index}`, recipientId: "bob", kind: "published", createdAt: share.createdAt })) : after === 100 ? [{ id: 101, shareId: "last", recipientId: "bob", kind: "message", createdAt: share.createdAt }] : [] });
+    const address = new URL(String(url), "http://nas");
+    if (!address.pathname.endsWith("/notifications")) return json({ items: [] });
+    const after = Number(address.searchParams.get("after")); offsets.push(after);
+    return json({ items: after === 0 ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1, shareId: `s${index}`, recipientId: "bob", kind: "share", createdAt: share.createdAt })) : after === 100 ? [{ id: 101, shareId: "last", recipientId: "bob", kind: "message", createdAt: share.createdAt }] : [] });
   }));
   const { unmount } = render(<SharesProvider userId="bob" active={false} onOpen={() => undefined}><div /></SharesProvider>);
-  await waitFor(() => expect(screen.getAllByLabelText("关闭分享通知")).toHaveLength(3));
-  expect(screen.getByText("还有 98 条提醒")).toBeTruthy();
-  expect(offsets).toEqual([0, 100]);
   await waitFor(() => expect(localStorage.getItem("anas:shares:notifications:bob")).toBe("101"));
-  await userEvent.click(screen.getAllByLabelText("关闭分享通知")[0]);
-  expect(screen.getAllByLabelText("关闭分享通知")).toHaveLength(3);
-  expect(screen.getByText("还有 97 条提醒")).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "关闭全部提醒" }));
-  expect(screen.queryByLabelText("分享通知")).toBeNull();
+  expect(offsets.slice(0, 2)).toEqual([0, 100]);
+  expect(screen.queryByLabelText("关闭分享通知")).toBeNull();
   unmount();
   render(<SharesProvider userId="bob" active={false} onOpen={() => undefined}><div /></SharesProvider>);
   await waitFor(() => expect(offsets.at(-1)).toBe(101));
   expect(screen.queryByLabelText("关闭分享通知")).toBeNull();
+});
+
+it("summarises what is unread when the desktop opens", async () => {
+  const fresh = { ...share, recipients: [{ ...share.recipients[0], lastMessage: 0 }] };
+  vi.stubGlobal("fetch", vi.fn(async (url) => json({ items: String(url).includes("direction=received") ? [fresh] : [] })));
+  render(<SharesProvider userId="bob" active={false} onOpen={() => undefined}><div /></SharesProvider>);
+  expect(await screen.findByText("有未读的分享")).toBeTruthy();
+  expect(screen.getByText("1 个收到的分享有新内容")).toBeTruthy();
+});
+
+it("groups live replies of one conversation into a single toast", async () => {
+  vi.useFakeTimers();
+  let polls = 0;
+  vi.stubGlobal("fetch", vi.fn(async (url) => {
+    const address = new URL(String(url), "http://nas");
+    if (!address.pathname.endsWith("/notifications")) return json({ items: [] });
+    polls++;
+    const after = Number(address.searchParams.get("after"));
+    return json({ items: polls === 1 ? [] : [{ id: after + 1, shareId: "s1", recipientId: "bob", kind: "message", messageId: after + 1, createdAt: share.createdAt }] });
+  }));
+  render(<SharesProvider userId="bob" active={false} onOpen={() => undefined}><div /></SharesProvider>);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getAllByLabelText("关闭分享通知")).toHaveLength(1);
+  expect(screen.getByText("2 条")).toBeTruthy();
 });
 
 it("retries an uncertain send with the same key and preserves the draft", async () => {
@@ -110,10 +134,10 @@ it("saves a subset in a writable folder and reloads persisted jobs after reopeni
   }));
   const user = userEvent.setup();
   const first = render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
-  await user.click(await screen.findByRole("button", { name: /资料、其他.txt/ }));
-  await user.click(await screen.findByRole("button", { name: /资料.*文件夹/ }));
+  await user.click(await screen.findByRole("button", { name: /资料 等 2 项/ }));
+  await user.click(await within(files()).findByRole("button", { name: "资料" }));
   await user.click(screen.getByLabelText("选择 计划.txt"));
-  await user.click(screen.getByRole("button", { name: "保存所选 1" }));
+  await user.click(screen.getByRole("button", { name: "保存所选 1 项" }));
   const picker = await screen.findByRole("dialog", { name: "保存到我的空间" });
   expect(within(picker).queryByText("只读资料")).toBeNull();
   await user.click(await within(picker).findByRole("button", { name: "收件箱" }));
@@ -124,7 +148,7 @@ it("saves a subset in a writable folder and reloads persisted jobs after reopeni
   expect(await screen.findByText("正在保存")).toBeTruthy();
   first.unmount();
   render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
-  await user.click(await screen.findByRole("button", { name: /资料、其他.txt/ }));
+  await user.click(await screen.findByRole("button", { name: /资料 等 2 项/ }));
   expect(await screen.findByText("正在保存")).toBeTruthy();
 });
 
@@ -144,7 +168,7 @@ it("switches sender private threads without showing the previous recipient messa
   await user.click(screen.getByRole("button", { name: "我发出的分享" }));
   await user.click(await screen.findByRole("button", { name: /计划.txt/ }));
   expect(await screen.findByText("Bob 的私密回复")).toBeTruthy();
-  await user.selectOptions(screen.getByLabelText("选择接收者讨论"), "carol");
+  await user.click(within(screen.getByRole("complementary", { name: "私聊" })).getByRole("button", { name: "carol" }));
   expect(await screen.findByText("Carol 的私密回复")).toBeTruthy();
   expect(screen.queryByText("Bob 的私密回复")).toBeNull();
   await waitFor(() => expect(readRequests.map((item) => item.recipientId)).toContain("carol"));
@@ -154,7 +178,7 @@ it("switches sender private threads without showing the previous recipient messa
 it("suppresses only the active visible thread and not a minimized thread", async () => {
   vi.useFakeTimers();
   let sequence = 0;
-  vi.stubGlobal("fetch", vi.fn(async () => json({ items: [{ id: ++sequence, shareId: "s1", recipientId: "bob", kind: "message", createdAt: share.createdAt }] })));
+  vi.stubGlobal("fetch", vi.fn(async (url) => String(url).includes("/notifications") ? json({ items: [{ id: ++sequence, shareId: "s1", recipientId: "bob", kind: "message", createdAt: share.createdAt }] }) : json({ items: [] })));
   function Thread() {
     const context = useShares();
     useEffect(() => { context.thread({ id: "s1", recipientId: "bob" }); }, []);
@@ -162,6 +186,7 @@ it("suppresses only the active visible thread and not a minimized thread", async
   }
   const { rerender } = render(<SharesProvider userId="bob" active onOpen={() => undefined}><Thread /></SharesProvider>);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.queryByLabelText("关闭分享通知")).toBeNull();
   rerender(<SharesProvider userId="bob" active={false} onOpen={() => undefined}><Thread /></SharesProvider>);
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
@@ -186,7 +211,7 @@ it("does not mark replies hidden behind a content preview as read", async () => 
   fireEvent.click(screen.getByRole("button", { name: /photo.jpg/ }));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(reads).toContain(1);
-  fireEvent.click(screen.getByRole("button", { name: /photo.jpg/ }));
+  fireEvent.click(within(files()).getByRole("button", { name: "photo.jpg" }));
   expect(screen.getByRole("dialog", { name: "预览 photo.jpg" })).toBeTruthy();
   count = 2;
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
@@ -273,7 +298,7 @@ it("finishes previewing an empty text file instead of showing a permanent loadin
   const user = userEvent.setup();
   render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
   await user.click(await screen.findByRole("button", { name: /计划.txt/ }));
-  await user.click(await screen.findByRole("button", { name: /计划.txt/ }));
+  await user.click(await within(files()).findByRole("button", { name: "计划.txt" }));
   const preview = screen.getByRole("dialog", { name: "预览 计划.txt" });
   await waitFor(() => expect(within(preview).queryByText("正在读取…")).toBeNull());
   expect(preview.querySelector("pre")?.textContent).toBe("");
@@ -292,8 +317,8 @@ it("shows uncertain save results separately from confirmed saved file counts", a
   render(<SharesProvider userId="alice" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
   await user.click(screen.getByRole("button", { name: "我发出的分享" }));
   await user.click(await screen.findByRole("button", { name: /计划.txt/ }));
-  expect(await screen.findByText(/保存结果待确认/)).toBeTruthy();
-  expect(screen.getByText(/曾成功保存 1 个文件/)).toBeTruthy();
+  // The count says what was confirmed; the uncertain rest is named apart from it.
+  expect((await screen.findAllByText("已保存 1 个文件，另有结果待确认")).length).toBeGreaterThan(0);
 });
 
 it("sends a private reply over LAN HTTP without randomUUID", async () => {
@@ -379,7 +404,7 @@ it("keeps a reply draft while chat is collapsed and marks new messages read only
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(reads).not.toContain(2);
   expect(screen.queryByRole("textbox", { name: "回复" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "展开私聊" }));
+  fireEvent.click(screen.getByRole("button", { name: "私聊" }));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect((screen.getByLabelText("回复") as HTMLTextAreaElement).value).toBe("还没发出的草稿");
   expect(reads).toContain(2);
@@ -398,7 +423,7 @@ it("saves all top-level entries without requiring manual selection", async () =>
   }));
   const user = userEvent.setup();
   render(<SharesProvider userId="bob" active onOpen={() => undefined}><SharesPanel /></SharesProvider>);
-  await user.click(await screen.findByRole("button", { name: /资料、其他.txt/ }));
+  await user.click(await screen.findByRole("button", { name: /资料 等 2 项/ }));
   await user.click(await screen.findByRole("button", { name: "保存全部" }));
   await user.click(await screen.findByRole("button", { name: "保存到此文件夹" }));
   await waitFor(() => expect(requests).toHaveLength(1));
