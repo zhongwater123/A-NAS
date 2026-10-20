@@ -22,9 +22,9 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		NewID: func() string { return "plan-01" },
 	})
 
-	plan, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01")
+	plan, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, "")
 	if err != nil {
-		t.Fatalf("PlanCreateVolume() error = %v", err)
+		t.Fatalf("PlanVolume() error = %v", err)
 	}
 	if got, want := plan.State, storage.PlanStatePlanned; got != want {
 		t.Fatalf("plan state = %q, want %q", got, want)
@@ -57,8 +57,9 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 	if got, want := executor.executedDiskID, "disk:fake-data-01"; got != want {
 		t.Fatalf("executed disk = %q, want %q", got, want)
 	}
-	if _, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01"); err != storage.ErrVolumeExists {
-		t.Fatalf("second volume plan error = %v, want ErrVolumeExists", err)
+	// The fake host never mounts the volume, so nothing can join it.
+	if _, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeUnavailable) {
+		t.Fatalf("plan for an offline volume error = %v, want ErrVolumeUnavailable", err)
 	}
 }
 
@@ -68,11 +69,11 @@ func TestPlanForBlankDiskSerializesEmptySignaturesArray(t *testing.T) {
 		NewID: func() string { return "plan-blank-disk" },
 	})
 
-	plan, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01")
+	plan, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, "")
 	if err != nil {
-		t.Fatalf("PlanCreateVolume() error = %v", err)
+		t.Fatalf("PlanVolume() error = %v", err)
 	}
-	if plan.Signatures == nil {
+	if plan.Disks[0].Signatures == nil {
 		t.Fatal("blank-disk signatures = nil, want an empty array")
 	}
 	payload, err := json.Marshal(plan)
@@ -98,7 +99,7 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func TestListVolumesRefreshesFilesystemUsageFromHostState(t *testing.T) {
 	}
 	reader := &stateReader{state: state}
 	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-usage" }})
-	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
 	if got := service.DataVolumeFilesystemUUID(); got != "" {
 		t.Fatalf("UUID before any volume = %q, want empty", got)
 	}
-	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,6 +221,9 @@ func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
 
 type recordingExecutor struct {
 	executedDiskID string
+	created        storage.CreateVolumeRequest
+	added          []storage.AddDisksRequest
+	continued      int
 }
 
 type stateReader struct {
@@ -240,6 +244,17 @@ func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
 }
 
 func (e *recordingExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	e.executedDiskID = request.DiskID
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable}, nil
+	e.executedDiskID = request.Disks[0].DiskID
+	e.created = request
+	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable}, nil
+}
+
+func (e *recordingExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+	e.added = append(e.added, request)
+	return storage.Volume{FilesystemUUID: request.FilesystemUUID, State: storage.VolumeStateAvailable}, nil
+}
+
+func (e *recordingExecutor) ContinueConversion(context.Context) error {
+	e.continued++
+	return nil
 }

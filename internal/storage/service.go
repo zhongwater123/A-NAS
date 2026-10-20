@@ -10,25 +10,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
 
 var (
 	ErrDiskNotFound       = errors.New("disk not found")
-	ErrDiskNotEligible    = errors.New("disk is not eligible for data-volume creation")
+	ErrDiskNotEligible    = errors.New("disk is not eligible for the data volume")
 	ErrPlanNotFound       = errors.New("execution plan not found")
 	ErrPlanExpired        = errors.New("execution plan expired")
 	ErrPlanState          = errors.New("execution plan is not in the required state")
 	ErrConfirmation       = errors.New("confirmation phrase does not match")
 	ErrDiskChanged        = errors.New("disk identity changed after planning")
-	ErrVolumeExists       = errors.New("a data volume already exists")
+	ErrVolumeChanged      = errors.New("data volume changed after planning")
+	ErrVolumeUnavailable  = errors.New("the data volume is not mounted and writable")
+	ErrVolumeBusy         = errors.New("the data volume is converting to another layout")
+	ErrInvalidLayout      = errors.New("the layout does not fit the number of disks")
+	ErrLayoutTooSmall     = errors.New("the files on the data volume do not fit the layout")
+	ErrNoConversion       = errors.New("the data volume is not converting")
 	ErrOperationAttention = errors.New("operation needs administrator attention")
 )
+
+// maxPlanDisks bounds one plan; a home NAS has a handful of bays.
+const maxPlanDisks = 8
 
 type PlanState string
 
@@ -40,6 +50,16 @@ const (
 	PlanStateFailed         PlanState = "failed"
 	PlanStateNeedsAttention PlanState = "needs_attention"
 	PlanStateExpired        PlanState = "expired"
+)
+
+// PlanKind is what a plan does to the data volume.
+type PlanKind string
+
+const (
+	// PlanKindCreateVolume formats the disks as a new data volume.
+	PlanKindCreateVolume PlanKind = "create_volume"
+	// PlanKindAddDisks erases the disks and adds them to the data volume.
+	PlanKindAddDisks PlanKind = "add_disks"
 )
 
 type VolumeState string
@@ -56,29 +76,115 @@ type Action struct {
 	Description string `json:"description"`
 }
 
+// Signature is a format found on a disk that erasing it destroys.
+type Signature struct {
+	Type  string `json:"type"`
+	Label string `json:"label,omitempty"`
+}
+
+// PlannedDisk is a disk a plan erases, as identified when planning.
+type PlannedDisk struct {
+	ID            string      `json:"id"`
+	Model         string      `json:"model"`
+	CapacityBytes uint64      `json:"capacityBytes"`
+	Fingerprint   string      `json:"fingerprint"`
+	Signatures    []Signature `json:"signatures"`
+}
+
 type ExecutionPlan struct {
-	ID                 string    `json:"id"`
-	DiskID             string    `json:"diskId"`
-	DiskModel          string    `json:"diskModel"`
-	CapacityBytes      uint64    `json:"capacityBytes"`
-	Fingerprint        string    `json:"fingerprint"`
-	Signatures         []string  `json:"signatures"`
-	ConfirmationPhrase string    `json:"confirmationPhrase"`
-	Actions            []Action  `json:"actions"`
-	State              PlanState `json:"state"`
-	CreatedAt          time.Time `json:"createdAt"`
-	ExpiresAt          time.Time `json:"expiresAt"`
-	Failure            string    `json:"failure,omitempty"`
-	Volume             *Volume   `json:"volume,omitempty"`
+	ID     string        `json:"id"`
+	Kind   PlanKind      `json:"kind"`
+	Layout Layout        `json:"layout"`
+	Disks  []PlannedDisk `json:"disks"`
+	// CapacityBeforeBytes and CapacityAfterBytes estimate the space for
+	// files before and after the plan; there is no before for a new volume.
+	CapacityBeforeBytes uint64    `json:"capacityBeforeBytes,omitempty"`
+	CapacityAfterBytes  uint64    `json:"capacityAfterBytes"`
+	ConfirmationPhrase  string    `json:"confirmationPhrase"`
+	Actions             []Action  `json:"actions"`
+	State               PlanState `json:"state"`
+	CreatedAt           time.Time `json:"createdAt"`
+	ExpiresAt           time.Time `json:"expiresAt"`
+	Failure             string    `json:"failure,omitempty"`
+	Volume              *Volume   `json:"volume,omitempty"`
+}
+
+// UnmarshalJSON also reads plans stored before data volumes could span
+// disks, which named one disk at the top level.
+func (p *ExecutionPlan) UnmarshalJSON(data []byte) error {
+	type document ExecutionPlan
+	var decoded struct {
+		document
+		DiskID        string   `json:"diskId"`
+		DiskModel     string   `json:"diskModel"`
+		CapacityBytes uint64   `json:"capacityBytes"`
+		Fingerprint   string   `json:"fingerprint"`
+		Signatures    []string `json:"signatures"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*p = ExecutionPlan(decoded.document)
+	if p.Kind == "" {
+		p.Kind, p.Layout, p.CapacityAfterBytes = PlanKindCreateVolume, LayoutSingle, decoded.CapacityBytes
+		disk := PlannedDisk{ID: decoded.DiskID, Model: decoded.DiskModel, CapacityBytes: decoded.CapacityBytes, Fingerprint: decoded.Fingerprint, Signatures: []Signature{}}
+		for _, signature := range decoded.Signatures {
+			disk.Signatures = append(disk.Signatures, Signature{Type: signature})
+		}
+		p.Disks = []PlannedDisk{disk}
+	}
+	return nil
 }
 
 type Volume struct {
-	ID             string      `json:"id"`
-	DiskID         string      `json:"diskId"`
+	ID string `json:"id"`
+	// DiskIDs are the disks holding the volume: those observed, or the
+	// planned ones while it is not mounted.
+	DiskIDs        []string    `json:"diskIds"`
 	FilesystemUUID string      `json:"filesystemUuid,omitempty"`
+	Layout         Layout      `json:"layout"`
 	CapacityBytes  uint64      `json:"capacityBytes,omitempty"`
 	AvailableBytes *uint64     `json:"availableBytes,omitempty"`
 	State          VolumeState `json:"state"`
+	// Conversion is set while data or metadata are outside the layout's
+	// Btrfs profiles, after disks were added with another layout.
+	Conversion *Conversion `json:"conversion,omitempty"`
+}
+
+// UnmarshalJSON also reads volumes stored when a volume had one disk.
+func (v *Volume) UnmarshalJSON(data []byte) error {
+	type document Volume
+	var decoded struct {
+		document
+		DiskID string `json:"diskId"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*v = Volume(decoded.document)
+	if len(v.DiskIDs) == 0 && decoded.DiskID != "" {
+		v.DiskIDs = []string{decoded.DiskID}
+	}
+	if v.Layout == "" {
+		v.Layout = LayoutSingle
+	}
+	return nil
+}
+
+type ConversionState string
+
+const (
+	// ConversionRunning: Btrfs is converting the volume now.
+	ConversionRunning ConversionState = "running"
+	// ConversionWaiting: the conversion stopped, for example at shutdown;
+	// the Host Agent continues it at startup and every 15 minutes.
+	ConversionWaiting ConversionState = "waiting"
+)
+
+type Conversion struct {
+	State          ConversionState `json:"state"`
+	ConvertedBytes uint64          `json:"convertedBytes"`
+	TotalBytes     uint64          `json:"totalBytes"`
 }
 
 type AuditEvent struct {
@@ -91,14 +197,34 @@ type AuditEvent struct {
 	Detail       string    `json:"detail,omitempty"`
 }
 
+// DiskTarget is a disk the Host Agent erases, with the fingerprint it must
+// still have.
+type DiskTarget struct {
+	DiskID      string `json:"diskId"`
+	Fingerprint string `json:"fingerprint"`
+}
+
 type CreateVolumeRequest struct {
-	PlanID      string
-	DiskID      string
-	Fingerprint string
+	PlanID string
+	Disks  []DiskTarget
+	Layout Layout
+}
+
+// AddDisksRequest adds disks to the mounted data volume with the
+// filesystem UUID and converts it to the layout.
+type AddDisksRequest struct {
+	PlanID         string
+	FilesystemUUID string
+	Disks          []DiskTarget
+	Layout         Layout
 }
 
 type VolumeExecutor interface {
 	CreateVolume(context.Context, CreateVolumeRequest) (Volume, error)
+	AddDisks(context.Context, AddDisksRequest) (Volume, error)
+	// ContinueConversion starts converting the data volume to its layout
+	// again now, instead of at the Host Agent's next check.
+	ContinueConversion(context.Context) error
 }
 
 type Options struct {
@@ -173,63 +299,175 @@ func OpenService(reader hoststate.Reader, executor VolumeExecutor, options Optio
 	return service, nil
 }
 
-func (s *Service) PlanCreateVolume(ctx context.Context, diskID string) (ExecutionPlan, error) {
-	s.mu.Lock()
-	for _, existing := range s.plans {
-		if existing.State == PlanStateSucceeded && existing.Volume != nil {
-			s.mu.Unlock()
-			return ExecutionPlan{}, ErrVolumeExists
-		}
-		if existing.State == PlanStateRunning || ((existing.State == PlanStatePlanned || existing.State == PlanStateConfirmed) && s.now().UTC().Before(existing.ExpiresAt)) {
-			s.mu.Unlock()
-			return ExecutionPlan{}, ErrPlanState
-		}
-	}
-	s.mu.Unlock()
-	disk, err := s.findEligibleDisk(ctx, diskID)
+// PlanVolume plans erasing the disks: it creates the data volume with the
+// layout when there is none, and otherwise adds them to it and converts it
+// to the layout. An empty layout creates a single disk or a mirror.
+func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layout) (ExecutionPlan, error) {
+	ids, err := distinctDiskIDs(diskIDs)
 	if err != nil {
 		return ExecutionPlan{}, err
 	}
+	s.mu.Lock()
+	err = s.pendingPlanLocked(s.now().UTC())
+	current, exists := s.currentVolumeLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return ExecutionPlan{}, err
+	}
+	state, err := s.reader.Read(ctx)
+	if err != nil {
+		return ExecutionPlan{}, err
+	}
+	disks := make([]hoststate.Disk, 0, len(ids))
+	for _, id := range ids {
+		disk, err := eligibleDisk(state, id, current.FilesystemUUID)
+		if err != nil {
+			return ExecutionPlan{}, err
+		}
+		disks = append(disks, disk)
+	}
 	now := s.now().UTC()
 	plan := ExecutionPlan{
-		ID:                 s.newID(),
-		DiskID:             disk.ID.String(),
-		DiskModel:          disk.Model,
-		CapacityBytes:      disk.CapacityBytes,
-		Fingerprint:        FingerprintDisk(disk),
-		Signatures:         append([]string{}, disk.Filesystems...),
-		ConfirmationPhrase: confirmationPhrase(disk.ID.String()),
-		Actions: []Action{
-			{Kind: "erase_signatures", Description: "清除目标磁盘上现有的分区和文件系统签名"},
-			{Kind: "create_partition_table", Description: "创建 GPT 和单个 A-NAS 数据分区"},
-			{Kind: "create_btrfs", Description: "创建标签为 ANAS_DATA 的单盘 Btrfs 文件系统"},
-			{Kind: "mount_volume", Description: "按文件系统 UUID 持久挂载并创建空间子卷"},
-		},
-		State:     PlanStatePlanned,
-		CreatedAt: now,
-		ExpiresAt: now.Add(10 * time.Minute),
+		ID: s.newID(), Layout: layout, ConfirmationPhrase: confirmationPhrase(ids),
+		State: PlanStatePlanned, CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
 	}
+	sizes := make([]uint64, 0, len(disks))
+	for _, disk := range disks {
+		plan.Disks = append(plan.Disks, plannedDisk(disk))
+		sizes = append(sizes, disk.CapacityBytes)
+	}
+	if !exists {
+		plan.Kind = PlanKindCreateVolume
+		if plan.Layout == "" {
+			plan.Layout = LayoutSingle
+			if len(disks) > 1 {
+				plan.Layout = LayoutMirror
+			}
+		}
+		if !plan.Layout.Fits(len(disks)) {
+			return ExecutionPlan{}, ErrInvalidLayout
+		}
+		plan.CapacityAfterBytes = UsableBytes(plan.Layout, sizes)
+	} else {
+		plan.Kind = PlanKindAddDisks
+		volume := observeVolume(current, state)
+		if volume.State != VolumeStateAvailable || state.DataVolume == nil {
+			return ExecutionPlan{}, ErrVolumeUnavailable
+		}
+		if volume.Conversion != nil {
+			return ExecutionPlan{}, ErrVolumeBusy
+		}
+		members := diskSizes(state, volume.DiskIDs)
+		if !plan.Layout.Fits(len(members) + len(disks)) {
+			return ExecutionPlan{}, ErrInvalidLayout
+		}
+		plan.CapacityBeforeBytes = UsableBytes(current.Layout, members)
+		plan.CapacityAfterBytes = UsableBytes(plan.Layout, append(members, sizes...))
+		if volume.AvailableBytes != nil && volume.CapacityBytes > 0 {
+			used := volume.CapacityBytes - min(*volume.AvailableBytes, volume.CapacityBytes)
+			if used+capacity.Reserve(plan.CapacityAfterBytes) > plan.CapacityAfterBytes {
+				return ExecutionPlan{}, ErrLayoutTooSmall
+			}
+		}
+	}
+	plan.Actions = planActions(plan.Kind, plan.Layout, current.Layout)
 	if strings.TrimSpace(plan.ID) == "" {
 		return ExecutionPlan{}, errors.New("generate execution plan ID: empty ID")
 	}
 	s.mu.Lock()
-	for _, existing := range s.plans {
-		if existing.State == PlanStateSucceeded && existing.Volume != nil {
-			s.mu.Unlock()
-			return ExecutionPlan{}, ErrVolumeExists
-		}
-		if existing.State == PlanStateRunning || ((existing.State == PlanStatePlanned || existing.State == PlanStateConfirmed) && now.Before(existing.ExpiresAt)) {
-			s.mu.Unlock()
-			return ExecutionPlan{}, ErrPlanState
-		}
+	defer s.mu.Unlock()
+	if err := s.pendingPlanLocked(now); err != nil {
+		return ExecutionPlan{}, err
+	}
+	if latest, stillExists := s.currentVolumeLocked(); stillExists != exists || latest.FilesystemUUID != current.FilesystemUUID {
+		return ExecutionPlan{}, ErrPlanState
 	}
 	s.plans[plan.ID] = plan
-	err = s.savePlanLocked(context.Background(), plan)
-	s.mu.Unlock()
-	if err != nil {
+	if err := s.savePlanLocked(context.Background(), plan); err != nil {
 		return ExecutionPlan{}, err
 	}
 	return clonePlan(plan), nil
+}
+
+// pendingPlanLocked refuses a new plan while another one runs or can still
+// be confirmed.
+func (s *Service) pendingPlanLocked(now time.Time) error {
+	for _, existing := range s.plans {
+		if existing.State == PlanStateRunning || ((existing.State == PlanStatePlanned || existing.State == PlanStateConfirmed) && now.Before(existing.ExpiresAt)) {
+			return ErrPlanState
+		}
+	}
+	return nil
+}
+
+func distinctDiskIDs(diskIDs []string) ([]string, error) {
+	ids := make([]string, 0, len(diskIDs))
+	for _, id := range diskIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(ids, id) {
+			return nil, ErrDiskNotFound
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 || len(ids) > maxPlanDisks {
+		return nil, ErrDiskNotFound
+	}
+	return ids, nil
+}
+
+func plannedDisk(disk hoststate.Disk) PlannedDisk {
+	planned := PlannedDisk{
+		ID: disk.ID.String(), Model: disk.Model, CapacityBytes: disk.CapacityBytes,
+		Fingerprint: FingerprintDisk(disk), Signatures: []Signature{},
+	}
+	for _, signature := range disk.Signatures {
+		planned.Signatures = append(planned.Signatures, Signature{Type: signature.Type, Label: signature.Label})
+	}
+	if len(disk.Signatures) == 0 {
+		for _, filesystem := range disk.Filesystems {
+			planned.Signatures = append(planned.Signatures, Signature{Type: filesystem})
+		}
+	}
+	return planned
+}
+
+func diskIDsOf(disks []PlannedDisk) []string {
+	ids := make([]string, len(disks))
+	for i, disk := range disks {
+		ids[i] = disk.ID
+	}
+	return ids
+}
+
+func diskSizes(state hoststate.State, diskIDs []string) []uint64 {
+	var sizes []uint64
+	for _, disk := range state.Disks {
+		if slices.Contains(diskIDs, disk.ID.String()) {
+			sizes = append(sizes, disk.CapacityBytes)
+		}
+	}
+	return sizes
+}
+
+var layoutNames = map[Layout]string{LayoutSingle: "单盘", LayoutMirror: "镜像（RAID 1）", LayoutSpan: "扩容（不冗余）", LayoutStripe: "条带（RAID 0）"}
+
+func planActions(kind PlanKind, layout, current Layout) []Action {
+	actions := []Action{
+		{Kind: "erase_signatures", Description: "清除目标硬盘上现有的分区、文件系统和阵列签名"},
+		{Kind: "create_partition_table", Description: "在每块目标硬盘上创建 GPT 和单个 A-NAS 数据分区"},
+	}
+	if kind == PlanKindCreateVolume {
+		return append(actions,
+			Action{Kind: "create_btrfs", Description: "创建标签为 ANAS_DATA、冗余方式为" + layoutNames[layout] + "的 Btrfs 文件系统"},
+			Action{Kind: "mount_volume", Description: "按文件系统 UUID 持久挂载并创建空间子卷"},
+		)
+	}
+	actions = append(actions, Action{Kind: "add_devices", Description: "把目标硬盘加入正在使用的数据卷，已有文件保持原样"})
+	description := "在后台把数据卷从" + layoutNames[current] + "转换为" + layoutNames[layout] + "，期间可以照常使用"
+	if layout == current {
+		description = "在后台让数据卷的元数据在两块硬盘上各存一份，期间可以照常使用"
+	}
+	return append(actions, Action{Kind: "convert_layout", Description: description})
 }
 
 func (s *Service) ConfirmPlan(ctx context.Context, planID, phrase string) (ExecutionPlan, error) {
@@ -289,18 +527,47 @@ func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan
 	}
 	s.mu.Unlock()
 
-	disk, err := s.findEligibleDisk(ctx, plan.DiskID)
-	if err != nil || FingerprintDisk(disk) != plan.Fingerprint {
-		return s.needsAttention(planID, ErrDiskChanged)
-	}
 	if s.executor == nil {
 		return s.needsAttention(planID, errors.New("volume executor is unavailable"))
 	}
-	volume, err := s.executor.CreateVolume(ctx, CreateVolumeRequest{
-		PlanID: plan.ID, DiskID: plan.DiskID, Fingerprint: plan.Fingerprint,
-	})
+	state, err := s.reader.Read(ctx)
 	if err != nil {
 		return s.needsAttention(planID, err)
+	}
+	s.mu.Lock()
+	current, exists := s.currentVolumeLocked()
+	s.mu.Unlock()
+	targets := make([]DiskTarget, 0, len(plan.Disks))
+	for _, planned := range plan.Disks {
+		disk, err := eligibleDisk(state, planned.ID, current.FilesystemUUID)
+		if err != nil || FingerprintDisk(disk) != planned.Fingerprint {
+			return s.needsAttention(planID, ErrDiskChanged)
+		}
+		targets = append(targets, DiskTarget{DiskID: planned.ID, Fingerprint: planned.Fingerprint})
+	}
+	var volume Volume
+	switch {
+	case plan.Kind == PlanKindCreateVolume && !exists:
+		volume, err = s.executor.CreateVolume(ctx, CreateVolumeRequest{PlanID: plan.ID, Disks: targets, Layout: plan.Layout})
+	case plan.Kind == PlanKindAddDisks && exists:
+		observed := observeVolume(current, state)
+		if observed.State != VolumeStateAvailable || observed.Conversion != nil || state.DataVolume == nil {
+			return s.needsAttention(planID, ErrVolumeChanged)
+		}
+		volume, err = s.executor.AddDisks(ctx, AddDisksRequest{
+			PlanID: plan.ID, FilesystemUUID: current.FilesystemUUID, Disks: targets, Layout: plan.Layout,
+		})
+		volume.ID, volume.FilesystemUUID = current.ID, current.FilesystemUUID
+		volume.DiskIDs = append(append([]string(nil), observed.DiskIDs...), diskIDsOf(plan.Disks)...)
+	default:
+		return s.needsAttention(planID, ErrVolumeChanged)
+	}
+	if err != nil {
+		return s.needsAttention(planID, err)
+	}
+	volume.Layout = plan.Layout
+	if plan.Kind == PlanKindCreateVolume {
+		volume.DiskIDs = diskIDsOf(plan.Disks)
 	}
 
 	s.mu.Lock()
@@ -339,41 +606,110 @@ func (s *Service) needsAttention(planID string, cause error) (ExecutionPlan, err
 
 func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 	s.mu.Lock()
-	volumes := make([]Volume, 0, 1)
-	seen := make(map[string]struct{})
-	for _, plan := range s.plans {
-		if plan.State == PlanStateSucceeded && plan.Volume != nil {
-			if _, ok := seen[plan.Volume.ID]; ok {
-				continue
-			}
-			seen[plan.Volume.ID] = struct{}{}
-			volumes = append(volumes, *plan.Volume)
-		}
-	}
+	current, exists := s.currentVolumeLocked()
 	s.mu.Unlock()
-	state, readErr := s.reader.Read(ctx)
-	for index := range volumes {
-		volumes[index].State = VolumeStateUnavailable
-		volumes[index].AvailableBytes = nil
-		if readErr != nil {
+	if !exists {
+		return []Volume{}, nil
+	}
+	state, err := s.reader.Read(ctx)
+	if err != nil {
+		current.State, current.AvailableBytes = VolumeStateUnavailable, nil
+		return []Volume{current}, nil
+	}
+	return []Volume{observeVolume(current, state)}, nil
+}
+
+// ContinueConversion asks the Host Agent to convert the data volume to its
+// layout now, after a conversion stopped.
+func (s *Service) ContinueConversion(ctx context.Context) error {
+	volumes, err := s.ListVolumes(ctx)
+	if err != nil {
+		return err
+	}
+	if len(volumes) == 0 || volumes[0].Conversion == nil || volumes[0].Conversion.State != ConversionWaiting {
+		return ErrNoConversion
+	}
+	if s.executor == nil {
+		return errors.New("volume executor is unavailable")
+	}
+	return s.executor.ContinueConversion(ctx)
+}
+
+// currentVolumeLocked is the data volume this device created, with the
+// layout and disks the most recent plan left it with.
+func (s *Service) currentVolumeLocked() (Volume, bool) {
+	var created, latest *ExecutionPlan
+	for _, plan := range s.plans {
+		if plan.State != PlanStateSucceeded || plan.Volume == nil {
 			continue
 		}
-		for _, disk := range state.Disks {
-			if disk.ID.String() == volumes[index].DiskID {
-				volumes[index].CapacityBytes = disk.CapacityBytes
-				if disk.Role == hoststate.DiskRoleData {
-					volumes[index].State = VolumeStateAvailable
-					if disk.FilesystemCapacityBytes != nil && disk.FilesystemAvailableBytes != nil {
-						volumes[index].CapacityBytes = *disk.FilesystemCapacityBytes
-						available := *disk.FilesystemAvailableBytes
-						volumes[index].AvailableBytes = &available
-					}
-				}
-				break
-			}
+		if plan.Kind == PlanKindCreateVolume && (created == nil || plan.CreatedAt.Before(created.CreatedAt)) {
+			created = &plan
+		}
+		if latest == nil || plan.CreatedAt.After(latest.CreatedAt) {
+			latest = &plan
 		}
 	}
-	return volumes, nil
+	if created == nil {
+		return Volume{}, false
+	}
+	volume := *created.Volume
+	volume.Layout = latest.Volume.Layout
+	volume.DiskIDs = append([]string(nil), latest.Volume.DiskIDs...)
+	volume.Conversion = nil
+	return volume, true
+}
+
+// observeVolume adds what the host shows of the volume: whether it is
+// mounted and writable, its size and free space, its disks, and how far a
+// conversion to its layout has come.
+func observeVolume(volume Volume, state hoststate.State) Volume {
+	volume.State, volume.AvailableBytes, volume.Conversion = VolumeStateUnavailable, nil, nil
+	var raw []uint64
+	for _, disk := range state.Disks {
+		if slices.Contains(volume.DiskIDs, disk.ID.String()) {
+			raw = append(raw, disk.CapacityBytes)
+		}
+		if disk.Role != hoststate.DiskRoleData {
+			continue
+		}
+		if volume.State == VolumeStateUnavailable {
+			volume.State = VolumeStateAvailable
+		}
+		if disk.FilesystemReadOnly {
+			volume.State = VolumeStateReadOnly
+		}
+		if disk.FilesystemCapacityBytes != nil && disk.FilesystemAvailableBytes != nil {
+			available := *disk.FilesystemAvailableBytes
+			volume.CapacityBytes, volume.AvailableBytes = *disk.FilesystemCapacityBytes, &available
+		}
+	}
+	if volume.AvailableBytes == nil && len(raw) > 0 {
+		volume.CapacityBytes = UsableBytes(volume.Layout, raw)
+	}
+	if volume.DiskIDs == nil {
+		volume.DiskIDs = []string{}
+	}
+	mounted := state.DataVolume
+	if mounted == nil || volume.State == VolumeStateUnavailable || (volume.FilesystemUUID != "" && !strings.EqualFold(mounted.FilesystemUUID, volume.FilesystemUUID)) {
+		return volume
+	}
+	volume.DiskIDs = make([]string, 0, len(mounted.DiskIDs))
+	for _, id := range mounted.DiskIDs {
+		volume.DiskIDs = append(volume.DiskIDs, id.String())
+	}
+	// A single disk is never converted to; its metadata is dup or single
+	// depending on the btrfs-progs that formatted it.
+	if volume.Layout == LayoutSingle {
+		return volume
+	}
+	if converted, total := conversionProgress(mounted, volume.Layout); converted < total {
+		volume.Conversion = &Conversion{State: ConversionWaiting, ConvertedBytes: converted, TotalBytes: total}
+		if mounted.Operation == hoststate.VolumeOperationBalance {
+			volume.Conversion.State = ConversionRunning
+		}
+	}
+	return volume
 }
 
 // DataVolumeFilesystemUUID returns the filesystem UUID of the one data volume
@@ -484,17 +820,21 @@ ON CONFLICT(id) DO UPDATE SET document_json=excluded.document_json, updated_at=e
 	return err
 }
 
-func (s *Service) findEligibleDisk(ctx context.Context, diskID string) (hoststate.Disk, error) {
-	state, err := s.reader.Read(ctx)
-	if err != nil {
-		return hoststate.Disk{}, err
-	}
+// eligibleDisk is the disk with the ID if a plan may erase it: an unused
+// SATA or NVMe disk that is not the system disk, nor part of the data volume
+// while it is offline. Signatures another system left behind do not count.
+func eligibleDisk(state hoststate.State, diskID, volumeUUID string) (hoststate.Disk, error) {
 	for _, disk := range state.Disks {
 		if disk.ID.String() != diskID {
 			continue
 		}
 		if disk.Role != hoststate.DiskRoleUnassigned || disk.Transport == hoststate.TransportUSB || disk.Transport == hoststate.TransportUnknown || disk.Removable || disk.InUse {
 			return hoststate.Disk{}, ErrDiskNotEligible
+		}
+		for _, signature := range disk.Signatures {
+			if volumeUUID != "" && strings.EqualFold(signature.UUID, volumeUUID) {
+				return hoststate.Disk{}, ErrDiskNotEligible
+			}
 		}
 		return disk, nil
 	}
@@ -506,19 +846,34 @@ func FingerprintDisk(disk hoststate.Disk) string {
 	return hex.EncodeToString(digest[:16])
 }
 
-func confirmationPhrase(diskID string) string {
+// confirmationPhrase names the last characters of every disk to erase.
+func confirmationPhrase(diskIDs []string) string {
 	const visible = 7
-	if len(diskID) > visible {
-		diskID = diskID[len(diskID)-visible:]
+	suffixes := make([]string, len(diskIDs))
+	for i, diskID := range diskIDs {
+		if len(diskID) > visible {
+			diskID = diskID[len(diskID)-visible:]
+		}
+		suffixes[i] = diskID
 	}
-	return "ERASE " + diskID
+	return "ERASE " + strings.Join(suffixes, " ")
 }
 
 func clonePlan(plan ExecutionPlan) ExecutionPlan {
 	plan.Actions = append([]Action{}, plan.Actions...)
-	plan.Signatures = append([]string{}, plan.Signatures...)
+	disks := make([]PlannedDisk, len(plan.Disks))
+	for i, disk := range plan.Disks {
+		disk.Signatures = append([]Signature{}, disk.Signatures...)
+		disks[i] = disk
+	}
+	plan.Disks = disks
 	if plan.Volume != nil {
 		volume := *plan.Volume
+		volume.DiskIDs = append([]string(nil), volume.DiskIDs...)
+		if volume.Conversion != nil {
+			conversion := *volume.Conversion
+			volume.Conversion = &conversion
+		}
 		plan.Volume = &volume
 	}
 	return plan
