@@ -15,6 +15,8 @@ export interface Danger {
   what: string;
   /** Where on the desktop: the window, and the settings section. */
   where: string;
+  /** Why the member is asked. */
+  why: string;
 }
 
 export interface ControllerOptions {
@@ -134,11 +136,11 @@ export class WebosController {
     if (settings && element.closest(".set-main")) {
       const section = settings.querySelector('.set-nav [aria-current="page"]')?.textContent?.trim() ?? "";
       const risky = DANGER_SECTIONS.find((label) => section.includes(label));
-      if (risky) return { what: `${verb}“${clip(name, 40)}”`, where: `设置 · ${risky}` };
+      if (risky) return { what: `${verb}“${clip(name, 40)}”`, where: `设置 · ${risky}`, why: `“${risky}”里的操作都要你先允许` };
     }
-    if (element.closest(".xterm")) return { what: `${verb}到终端`, where };
+    if (element.closest(".xterm")) return { what: `${verb}到终端`, where, why: "终端里的输入会直接运行" };
     if (verb === "点击" && (DANGER_WORDS.test(name) || /\bdanger\b/.test(String((element as HTMLElement).className ?? "")))) {
-      return { what: `点击“${clip(name, 40)}”`, where };
+      return { what: `点击“${clip(name, 40)}”`, where, why: "这一步可能删除、替换或改动内容" };
     }
     return undefined;
   }

@@ -81,7 +81,7 @@ describe("WebosController", () => {
     document.getElementById("delete")!.addEventListener("click", deleted);
     const { snapshot } = await control.run("browser_snapshot", {}) as { snapshot: string };
     await expect(control.run("browser_click", { ref: refOf(snapshot, "删除") })).rejects.toThrow(ControlError);
-    expect(asked).toEqual([{ what: "点击“删除”", where: "文件管理" }]);
+    expect(asked).toEqual([{ what: "点击“删除”", where: "文件管理", why: "这一步可能删除、替换或改动内容" }]);
     expect(deleted).not.toHaveBeenCalled();
   });
 
@@ -97,7 +97,7 @@ describe("WebosController", () => {
     const { control, asked } = controller(false);
     const { snapshot } = await control.run("browser_snapshot", {}) as { snapshot: string };
     await expect(control.run("browser_click", { ref: refOf(snapshot, "创建数据卷") })).rejects.toThrow("成员没有允许");
-    expect(asked[0]).toEqual({ what: "点击“创建数据卷”", where: "设置 · 存储" });
+    expect(asked[0]).toEqual({ what: "点击“创建数据卷”", where: "设置 · 存储", why: "“存储”里的操作都要你先允许" });
     // The settings navigation itself is not risky.
     await control.run("browser_click", { ref: refOf(snapshot, "日志") });
     expect(asked).toHaveLength(1);

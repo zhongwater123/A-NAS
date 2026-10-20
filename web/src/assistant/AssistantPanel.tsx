@@ -438,7 +438,7 @@ function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(all
           <span className="as-change-mark"><MousePointerClick /></span>
           <div>
             <strong>VNAS 想{ask.danger.what}</strong>
-            <small>在“{ask.danger.where}”中 · 这一步可能删除、替换或改动内容 · {left} 秒内不回答就不执行</small>
+            <small>在“{ask.danger.where}”中 · {ask.danger.why} · {left} 秒内不回答就不执行</small>
           </div>
         </header>
         <footer>
