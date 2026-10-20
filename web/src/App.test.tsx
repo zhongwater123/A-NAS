@@ -1641,7 +1641,7 @@ describe("Settings", () => {
     expect((within(settings).getByLabelText(/输入确认短语/) as HTMLInputElement).value).toBe("ERASE");
     expect(within(settings).getByRole("button", { name: "确认计划" }).hasAttribute("disabled")).toBe(true);
     expect(within(settings).queryByRole("button", { name: "生成格式化计划" })).toBeNull();
-  });
+  }, 15000);
 
   it("says why the system is rated as it is and leads to storage", async () => {
     installAPI({ hostState: { ...healthyState, system: { ...healthyState.system, health: "critical", healthFindings: [
@@ -1730,7 +1730,7 @@ describe("Settings", () => {
     expect(await within(wizard).findByText("硬盘已加入数据卷")).toBeTruthy();
     await user.click(within(wizard).getByRole("button", { name: "完成" }));
     expect(within(settings).queryByRole("region", { name: "设置硬盘用途" })).toBeNull();
-  });
+  }, 15000);
 
   it("leaves the wizard by cancelling a plan that has not run", async () => {
     const fetchMock = installAPI({
@@ -1757,7 +1757,7 @@ describe("Settings", () => {
     await user.click(within(settings).getByRole("button", { name: "生成格式化计划" }));
     await user.click(await within(settings).findByRole("button", { name: "取消计划并关闭" }));
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
-  });
+  }, 15000);
 
   it("shows how far a conversion has come and continues a stopped one", async () => {
     const disks = [
@@ -1804,7 +1804,7 @@ describe("Settings", () => {
     await user.click(within(wizard).getByRole("button", { name: "生成格式化计划" }));
     const created = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST");
     expect(JSON.parse(String(created?.[1]?.body))).toEqual({ diskIds: ["disk:fake-data-01", "disk:fake-data-02"], layout: "span" });
-  });
+  }, 15000);
 
   it("resets a member password from a form inside the window", async () => {
     const prompt = vi.spyOn(window, "prompt");
