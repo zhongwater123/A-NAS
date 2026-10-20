@@ -1,0 +1,8 @@
+[
+  {"query": "小孩在沙滩上跑", "relevant": ["clip_003", "clip_007"]},
+  {"query": "一群人在餐桌上吃饭", "relevant": ["clip_012"]},
+  {"query": "狗在草地上玩球", "relevant": ["clip_001", "clip_015"]},
+  {"query": "日落时的海边", "relevant": ["clip_005"]},
+  {"query": "有人在骑自行车", "relevant": []},
+  {"query": "航拍的城市夜景", "relevant": []}
+]

@@ -1,0 +1,8 @@
+# 5090（Blackwell）要 CUDA 12.8 以上的 PyTorch：
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# Spark（ARM）按 NVIDIA 给的 wheel 装 torch，其余相同。
+sentence-transformers>=6.1.0
+transformers>=4.57.0
+pillow>=10.0
+numpy>=1.26
+accelerate>=1.0
