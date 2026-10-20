@@ -80,6 +80,59 @@ func TestReaderFindsEveryDiskOfTheDataVolumeAndItsConversion(t *testing.T) {
 	}
 }
 
+// After btrfs device add the udev database, and so lsblk, shows the new
+// partition wiped until the next boot. The kernel lists it at once; going by
+// lsblk alone offered a disk of the mounted volume to be erased again.
+func TestADiskJustAddedToTheVolumeIsADataDiskBeforeUdevKnows(t *testing.T) {
+	const uuid = "09e275fe-794a-458d-8200-b6e67c55cc22"
+	const other = "aaaaaaaa-0000-4000-8000-000000000000"
+	reader := newReader(dependencies{
+		root: fstest.MapFS{
+			"etc/os-release":                         &fstest.MapFile{Data: []byte("ID=debian\nNAME=Debian\nVERSION_ID=13\n")},
+			"etc/machine-id":                         &fstest.MapFile{Data: []byte("0123456789abcdef0123456789abcdef\n")},
+			"proc/uptime":                            &fstest.MapFile{Data: []byte("1.0 2.0\n")},
+			"sys/fs/btrfs/" + uuid + "/devices/sda1": &fstest.MapFile{},
+			"sys/fs/btrfs/" + uuid + "/devices/sdb1": &fstest.MapFile{},
+			"sys/fs/btrfs/" + other + "/devices/sdc": &fstest.MapFile{},
+			"sys/fs/btrfs/" + other + "/devices/sdd": &fstest.MapFile{},
+			"sys/fs/btrfs/features/raid1c34":         &fstest.MapFile{Data: []byte("0\n")},
+		},
+		hostname:     func() (string, error) { return "a-nas-dev", nil },
+		architecture: "amd64",
+		now:          func() time.Time { return time.Unix(0, 0) },
+		readBlockDevices: func(context.Context) ([]byte, error) {
+			return []byte(`{"blockdevices":[
+              {"name":"nvme0n1","type":"disk","size":125000000000,"model":"System","tran":"nvme","wwn":"system",
+               "children":[{"name":"nvme0n1p2","type":"part","fstype":"ext4","mountpoints":["/"]}]},
+              {"name":"sda","type":"disk","size":500107862016,"model":"Added","tran":"sata","wwn":"added",
+               "children":[{"name":"sda1","type":"part","mountpoints":[null]}]},
+              {"name":"sdb","type":"disk","size":500107862016,"model":"Original","tran":"sata","wwn":"original",
+               "children":[{"name":"sdb1","type":"part","fstype":"btrfs","uuid":"` + uuid + `","mountpoints":["/srv/a-nas/data"]}]},
+              {"name":"sdc","type":"disk","size":500107862016,"model":"Other","tran":"sata","wwn":"other","fstype":"btrfs","mountpoints":["/mnt/other"]},
+              {"name":"sdd","type":"disk","size":500107862016,"model":"OtherSecond","tran":"sata","wwn":"other-second","mountpoints":[null]}
+            ]}`), nil
+		},
+	})
+
+	state, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	byModel := map[string]hoststate.Disk{}
+	for _, disk := range state.Disks {
+		byModel[disk.Model] = disk
+	}
+	if added := byModel["Added"]; added.Role != hoststate.DiskRoleData || !added.InUse {
+		t.Fatalf("added disk = %+v, want a data disk in use", added)
+	}
+	if second := byModel["OtherSecond"]; second.Role != hoststate.DiskRoleUnassigned || !second.InUse {
+		t.Fatalf("second disk of another mounted Btrfs = %+v, want unassigned but in use", second)
+	}
+	if volume := state.DataVolume; volume == nil || volume.FilesystemUUID != uuid || len(volume.DiskIDs) != 2 {
+		t.Fatalf("data volume = %+v, want both disks", volume)
+	}
+}
+
 func TestNoDataVolumeWithoutABtrfsMountedThere(t *testing.T) {
 	if volume := readDataVolume(fstest.MapFS{}, "", []hoststate.Disk{{Role: hoststate.DiskRoleData}}); volume != nil {
 		t.Fatalf("data volume without a UUID = %+v, want nil", volume)
