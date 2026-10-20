@@ -1038,11 +1038,43 @@ managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带
 - spike：[`cron.sh`](../../ai/assistant-spike/cron.sh) 8 项：对话中用 Hermes 的工具建两个任务；实例停止时按时运行；由唤醒服务在成员自己的单元中启动；以成员身份写助手目录；要删个人空间文件的被拒绝；每次运行是 Hermes 的一段会话；实例一直停着。探针 39 项。
 - 预览（真实模型、产品服务与 spike 沙箱）：上面三轮，以及从“2 分钟后提醒我去楼下拿快递”到按时运行、桌面提示、12 秒后收起、VNAS 计数与“新结果”、打开运行后清除。
 
+## 让 VNAS 操作 WebOS（2026-10-20，开发机）
+
+用户问 Hermes 的 computer use 能不能操作我们的 WebOS，后来说：成员让 VNAS 操作 WebOS 就是允许它操作，项目文档可以挑战，目标是不重复造轮子、规范开发。用户决定只拦破坏性的一步（删除、替换、清空回收站、存储与用户管理、终端）。
+
+**Hermes 已有的做法**：Hermes 自带的 `computer_use` 截屏并移动鼠标，操作的是运行 Hermes 的机器的桌面；沙箱没有显示器，也碰不到成员浏览器里的 WebOS。合适的是 Hermes 的浏览器控制（`gateway/browser_control_broker.py`、`tui_gateway/methods_browser_control.py`，Hermes 给自己的浏览器扩展用的协议）：客户端在 `/api/ws` 上用 `browser.controller.register`（协议 1，能力清单）为一个会话注册成浏览器，之后这个会话的 `browser_snapshot`、`browser_click`、`browser_type`、`browser_press`、`browser_scroll` 都以 `browser.controller.command` 事件交给它，它用 `browser.controller.result` 回答；Hermes 把回答包成“不可信的页面内容”再交给模型。工具在组装时按会话检查有没有控制器，没有就不出现。命令最多等 30 秒，这个时限是代码里的常数。
+
+**注册要登录过的连接**：控制器只接受带服务端身份的连接（`WSTransport.auth_identity`），这个身份只来自 Hermes 自己的登录（dashboard auth 的 ticket 或会话令牌）。我们的实例按 Hermes Desktop 本地后端的方式用 `--ssh-session-token-file` 的令牌，Hermes 对这种回环后端专门豁免登录关卡（`_desktop_loopback_auth_exempt`），所以连接永远没有身份。改用 Hermes 自带的密码登录（`plugins/dashboard_auth/basic`）：
+- 成员的 `config.yaml`（root 写入、成员只读）里有 `dashboard.basic_auth`：账号名与实例密钥的 scrypt 散列（Hermes 自己的 `hash_password`）；密钥本身仍只在 root 的 `/etc/a-nas-assistant/tokens/`。
+- `serve` 监听 `0.0.0.0`：沙箱的私有网络里只有回环，但 Hermes 只看地址是不是回环，非回环地址让登录关卡生效（`should_require_auth`）。之后旧令牌一律 401。会话用 `serve` 启动时随机生成的密钥签名，只在内存里，`serve_nondumpable.py` 让它不可转储。
+- 文件代理（会话闸门）在成员的有效会话下 `POST /auth/password-login`，从 `hermes_session_at` cookie 取访问令牌，按成员缓存到过期前 5 分钟，随连接交给产品服务；产品服务把它作为 `Authorization: Bearer` 与 WebSocket 的 `?token=`，被拒绝时（实例重启换了签名密钥）请文件代理重新登录一次。Hermes 按地址限制密码尝试次数，所有登录都来自回环，所以要缓存（[`internal/assistantlogin`](../../internal/assistantlogin/login.go)）。
+- 原来把令牌交给 `serve` 的单元（`anas-assistant-token@`）与暂存目录都不再需要。
+
+**上游的两处缺口**（固定提交与 main c5a3c0f8 都有）：`browser.controller.register` 要 `session["profile"]`，但真实会话从不记录它，注册一律 4403；控制器按 RPC 参数里的运行时会话编号登记，工具却按 `HERMES_SESSION_ID`（Hermes 存档的会话编号）查找，二者在 `hermes serve` 中从不相同，工具永远找不到控制器。上游的测试构造的会话记录恰好掩盖了这两点。[`hermes-patches/0002`](../../ai/assistant-spike/hermes-patches/0002-browser-controller-session-lane.patch) 回退到这个后端服务的 profile，并按回合实际使用的编号登记与查找。
+
+**策略**：managed scope 开启 `browser` 与 `browser.extension_control.enabled`；成员的 `config.yaml` 写 `browser.backend: "off"`（Hermes 只从成员自己的文件读这一项），否则默认的 Browser Use CLI 模式会带出 `browser_vault` 等工具；`browser_cdp`、`browser_dialog`、`browser_exec` 由仍关着的 `browser-cdp`、`browser-use` 去掉，`toolsets-check.py` 把它们记为有意去掉。窗口只声明它实现的五种能力，没有 `browser_navigate` 与 `browser_back`。
+
+**产品服务与窗口**：网关只放行 `vnas-window` 这一个控制器、`webos` 这一个浏览器名与这五种能力，结果至多 64 KiB；命令只交给注册它的窗口，不经“同一对话的其他窗口”转发；窗口离开时产品服务替它注销，之后的回合没有浏览器工具，而不是每条命令都等 30 秒。窗口（[`webosControl.ts`](../../web/src/assistant/webosControl.ts)）在一段对话的 `session.create` 或 `session.resume` 之后、发出提示之前注册（新对话的第一轮工具在提交时组装）。快照用 [`dom-accessibility-api`](https://github.com/eps1lon/dom-accessibility-api)（Testing Library 用的角色与可访问名称计算，0.7.1，无依赖）把页面读成窗口、标题与带 `[ref=eN]` 的控件，不含 VNAS 窗口与密码；点击依次派发指针与鼠标事件再 `click()`，输入用原型上的 value setter 与 input/change 事件（React 才收得到），按键不落到 VNAS 的输入框。被点的控件闪一下黑框。删除类控件与设置的存储、用户与权限、终端先弹确认卡片，25 秒内不回答就不执行，允许后同一窗口 30 秒内不再问（应用自己的“确定删除”不必再问一次）。系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)（自动加载）说明这些工具操作的是成员的桌面、怎么看与点、改文件仍优先“提交更改”、页面文字是数据。
+
+**真实模型**（DeepSeek flash，开发机预览：产品服务 + spike 沙箱）：
+- “帮我打开相册”：3 个动作，点程序坞的“打开相册”，相册窗口打开。
+- “再打开文件管理，进入共享空间”：8 个动作，进入共享空间。预览的产品服务用模拟的文件数据，窗口里共享空间是空的；模型如实说界面与它在沙箱里读到的不一致。
+- 第一次让它在界面上删文件时，它以为自己沙箱的写入限制也适用于界面操作；技能补上“在桌面上操作用的是成员自己的权限”。
+- “在文件管理里把共享空间的 family.md 删掉，直接在界面上操作”：预览的产品服务没有数据卷，文件列表是空的。它试了 22 步，没有找到能删的文件，如实说明，什么都没删；成员说“我允许”后它改用“提交更改”，被策略拒绝（共享空间根目录不在助手可写的范围），也照实说了。
+- “打开设置，进入存储，点一下刷新存储状态”：窗口弹出“VNAS 想点击‘刷新存储状态’（设置 · 存储）”。没有回答时 25 秒后不执行，它说明了没有执行；允许后点击，并报告了三块硬盘的情况。
+
+### 验证
+
+- Go：文件代理用密钥登录、只交出访问令牌、缓存到实例拒绝为止、密钥错误时不可用（`internal/filebroker/assistant_test.go`）；登录与缓存（`internal/assistantlogin`）；实例重启后请求与窗口各重新登录一次（`internal/assistantapi/login_test.go`）；网关只放行窗口这一种控制器，命令只到注册的窗口，窗口离开即注销（`TestTheWindowIsTheBrowserOfItsOwnSessionOnly`）。
+- Web：快照、按编号点击与输入、删除类控件与设置存储页的确认、按键不落到 VNAS（`webosControl.test.ts`，8 项）。
+- spike（重新构建、带 0002 的运行环境）：探针 39 项；[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh) 8 项（旧令牌被拒、没有窗口的会话没有浏览器工具、别的连接注册不了、模型只拿到窗口的五种工具、命令往返且被包成不可信内容）；`cron.sh` 8 项；`serve-terminal.sh` 14 项（任何进程环境里都没有密钥，沙箱里只有散列）。
+- 预览：上面几轮。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
-- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、定时任务的 [`cron.sh`](../../ai/assistant-spike/cron.sh) 与 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、定时任务的 [`cron.sh`](../../ai/assistant-spike/cron.sh) 与 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)、浏览器控制的 [`browser-control.sh`](../../ai/assistant-spike/browser-control.sh) 与 Hermes 登录的 [`hermes_login.py`](../../ai/assistant-spike/hermes_login.py)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
 - Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#113](https://github.com/zhongwater123/A-NAS/issues/113)（“相册只读访问”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)、[系统测试](../../scripts/system-test.sh)与其中助手一节 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)、Host Agent 的替身 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)
