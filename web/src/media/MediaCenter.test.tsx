@@ -130,6 +130,40 @@ describe("MediaCenter", () => {
     expect(await screen.findByText("已创建“电影”，正在扫描")).toBeTruthy();
   });
 
+  it("names an unnamed library after its folder and picks folders by pressing them", async () => {
+    const fetchMock = serve([],
+      (url) => (url === "/api/v1/spaces" ? json({ items: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "" }] }) : undefined),
+      (url) => (url === "/api/v1/spaces/space%3Ashared/entries?parentId=" ? json({ items: [
+        { id: "file:media", spaceId: "space:shared", name: "影视", kind: "directory", sizeBytes: 0, modifiedAt: "" },
+      ] }) : undefined),
+      (url) => (url === "/api/v1/spaces/space%3Ashared/entries?parentId=file%3Amedia" ? json({ items: [
+        { id: "file:movies", spaceId: "space:shared", name: "电影", kind: "directory", sizeBytes: 0, modifiedAt: "" },
+        { id: "file:shows", spaceId: "space:shared", name: "剧集", kind: "directory", sizeBytes: 0, modifiedAt: "" },
+      ] }) : undefined),
+      (url, init) => (url === "/api/v1/media/libraries" && init?.method === "POST" ? json({ ...library, id: "library:new", name: "电影" }, 201) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(await screen.findByRole("button", { name: "新建媒体库" }));
+    const dialog = await screen.findByRole("dialog", { name: "新建媒体库" });
+    // A name is not needed to go on.
+    await user.click(within(dialog).getByRole("button", { name: "下一步" }));
+
+    // Pressing a folder picks it; its arrow goes inside, where the folder itself can be picked too.
+    await user.click(await within(dialog).findByRole("button", { name: "选择影视" }));
+    expect(within(dialog).getByLabelText("已选择的文件夹").textContent).toBe("影视");
+    await user.click(within(dialog).getByRole("button", { name: "打开影视" }));
+    expect(await within(dialog).findByRole("button", { name: "选择电影" })).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "取消选择影视" }));
+    await user.click(within(dialog).getByRole("button", { name: "选择电影" }));
+    expect(within(dialog).getByRole("button", { name: "取消选择电影" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(within(dialog).getByRole("button", { name: "创建并扫描" }));
+
+    await waitFor(() => expect(calls(fetchMock, "POST", "/api/v1/media/libraries")).toHaveLength(1));
+    const [, init] = calls(fetchMock, "POST", "/api/v1/media/libraries")[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ name: "电影", kind: "movies", folderIds: ["file:movies"], spaceId: "space:shared" });
+  });
+
   it("shows the home rows and navigates the sidebar", async () => {
     const fetchMock = serve([library], (url) => (url === "/api/v1/media/videos/video%3Aheat" ? json(detail(film)) : undefined));
     const user = userEvent.setup();

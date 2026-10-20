@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, Check, ChevronRight, Clapperboard, CloudUpload, Film, Folder, FolderOpen, FolderPlus, HardDrive, Layers, Pencil, Plus, RefreshCw, Trash2, Tv, Users, Video, X,
+  AlertTriangle, Check, ChevronRight, Clapperboard, CloudUpload, Film, Folder, FolderCheck, FolderOpen, FolderPlus, HardDrive, Layers, Pencil, Plus, RefreshCw, Trash2, Tv, Users, Video, X,
 } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 
@@ -115,6 +115,22 @@ export function LibrariesPage({ libraries, processing, canCreate, onOpen, onCrea
 
 interface PickedFolder { id: string; name: string; path: string }
 
+// PickRow is one folder in the library dialog: pressing it picks it, its
+// arrow or a double press opens it.
+function PickRow({ name, label, selected, current, onPick, onOpen }: {
+  name: string; label: string; selected: boolean; current?: boolean; onPick: () => void; onOpen?: () => void;
+}) {
+  return (
+    <div className={`mc-picker-row ${selected ? "selected" : ""} ${current ? "current" : ""}`} role="option" aria-selected={selected}>
+      <button type="button" className="mc-picker-pick" aria-label={label} aria-pressed={selected} onClick={onPick} onDoubleClick={onOpen}>
+        <span className="mc-check" aria-hidden="true">{selected && <Check />}</span>
+        {current ? <FolderCheck /> : <FolderOpen />}<span>{name}</span>
+      </button>
+      {onOpen && <button type="button" className="mc-picker-enter" aria-label={`打开${name}`} title="查看里面的文件夹" onClick={onOpen}><ChevronRight /></button>}
+    </div>
+  );
+}
+
 // LibraryDialog creates or edits a library in two steps: what it holds, then
 // which folders of one space.
 export function LibraryDialog({ library, spaces, isAdmin, onClose, onSaved }: {
@@ -141,18 +157,24 @@ export function LibraryDialog({ library, spaces, isAdmin, onClose, onSaved }: {
   }, [step, spaceId, parent]);
   const space = usable.find((candidate) => candidate.id === spaceId);
   const pathOf = (entry: FileEntry) => [...trail.map((crumb) => crumb.name), entry.name].join("/");
-  const toggle = (entry: FileEntry) => setPicked((current) => current.some((folder) => folder.id === entry.id)
-    ? current.filter((folder) => folder.id !== entry.id)
-    : [...current, { id: entry.id, name: entry.name, path: pathOf(entry) }]);
+  const isPicked = (id: string) => picked.some((folder) => folder.id === id);
+  const toggle = (folder: PickedFolder) => setPicked((current) => current.some((item) => item.id === folder.id)
+    ? current.filter((item) => item.id !== folder.id)
+    : [...current, folder]);
+  const open = (entry: FileEntry) => setTrail([...trail, { id: entry.id, name: entry.name }]);
+  const here = trail.at(-1);
   const switchSpace = (id: string) => { if (id === spaceId) return; setSpaceId(id); setTrail([]); setPicked([]); };
+  // A library left unnamed takes its first folder's name, so naming it
+  // never stands between a newcomer and the folders.
+  const finalName = name.trim() || picked[0]?.name || kindInfo[kind].label;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (step === 1) { if (name.trim()) setStep(2); return; }
+    if (step === 1) { setStep(2); return; }
     if (!picked.length) return;
     setSaving(true);
     setError("");
     try {
-      const input = { name: name.trim(), kind, folderIds: picked.map((folder) => folder.id) };
+      const input = { name: finalName, kind, folderIds: picked.map((folder) => folder.id) };
       onSaved(library ? await updateLibrary(library.id, input) : await createLibrary({ ...input, spaceId }));
     } catch (caught) {
       setError(messageOf(caught));
@@ -175,7 +197,7 @@ export function LibraryDialog({ library, spaces, isAdmin, onClose, onSaved }: {
           <div className="mc-dialog-body">
             <label className="mc-field">
               <span>名称</span>
-              <input autoFocus value={name} maxLength={40} placeholder="例如：家庭影院、动画片" onChange={(event) => setName(event.target.value)} />
+              <input autoFocus value={name} maxLength={40} placeholder="可以不填，默认用所选文件夹的名字" onChange={(event) => setName(event.target.value)} />
             </label>
             <div className="mc-field">
               <span>内容类型</span>
@@ -210,18 +232,16 @@ export function LibraryDialog({ library, spaces, isAdmin, onClose, onSaved }: {
                   <span key={crumb.id}><ChevronRight /><button type="button" onClick={() => setTrail(trail.slice(0, index + 1))}>{crumb.name}</button></span>
                 ))}
               </nav>
+              {/* A press on a folder picks it, as in a file dialog; the arrow, or a double press, goes inside. */}
               <div className="mc-picker-list" role="listbox" aria-label="文件夹" aria-multiselectable="true">
-                {!entries ? <span className="mc-spinner small" /> : !entries.length ? <p className="mc-picker-empty">这里没有子文件夹</p> : entries.map((entry) => {
-                  const selected = picked.some((folder) => folder.id === entry.id);
-                  return (
-                    <div key={entry.id} className={`mc-picker-row ${selected ? "selected" : ""}`} role="option" aria-selected={selected}>
-                      <button type="button" className="mc-check" aria-label={`${selected ? "取消选择" : "选择"}${entry.name}`} onClick={() => toggle(entry)}>{selected && <Check />}</button>
-                      <button type="button" className="mc-picker-open" onClick={() => setTrail([...trail, { id: entry.id, name: entry.name }])}>
-                        <FolderOpen /><span>{entry.name}</span><ChevronRight />
-                      </button>
-                    </div>
-                  );
-                })}
+                {here && (
+                  <PickRow name={`整个“${here.name}”文件夹`} selected={isPicked(here.id)} current label={`${isPicked(here.id) ? "取消选择" : "选择"}${here.name}`}
+                    onPick={() => toggle({ id: here.id, name: here.name, path: trail.map((crumb) => crumb.name).join("/") })} />
+                )}
+                {!entries ? <span className="mc-spinner small" /> : !entries.length ? <p className="mc-picker-empty">{here ? "里面没有子文件夹" : "这里没有文件夹"}</p> : entries.map((entry) => (
+                  <PickRow key={entry.id} name={entry.name} selected={isPicked(entry.id)} label={`${isPicked(entry.id) ? "取消选择" : "选择"}${entry.name}`}
+                    onPick={() => toggle({ id: entry.id, name: entry.name, path: pathOf(entry) })} onOpen={() => open(entry)} />
+                ))}
               </div>
             </div>
             <div className="mc-picked" aria-label="已选择的文件夹">
@@ -230,7 +250,7 @@ export function LibraryDialog({ library, spaces, isAdmin, onClose, onSaved }: {
                   <Folder />{folder.path || folder.name}
                   <button type="button" aria-label={`移除${folder.name}`} onClick={() => setPicked(picked.filter((item) => item.id !== folder.id))}><X /></button>
                 </span>
-              )) : <span className="mc-picked-none">勾选一个或多个文件夹</span>}
+              )) : <span className="mc-picked-none">点一下文件夹即可选中，可以选多个；点右侧的 › 查看里面的文件夹</span>}
             </div>
           </div>
         )}
@@ -239,7 +259,7 @@ export function LibraryDialog({ library, spaces, isAdmin, onClose, onSaved }: {
           {step === 2 && <button type="button" className="mc-glass" onClick={() => setStep(1)} disabled={saving}>上一步</button>}
           <span />
           <button type="button" className="mc-glass" onClick={onClose} disabled={saving}>取消</button>
-          <button type="submit" className="mc-primary" disabled={saving || (step === 1 ? !name.trim() : !picked.length)}>
+          <button type="submit" className="mc-primary" disabled={saving || (step === 2 && !picked.length)}>
             {step === 1 ? "下一步" : saving ? "正在保存…" : library ? "保存并重新扫描" : "创建并扫描"}
           </button>
         </footer>

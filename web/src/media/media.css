@@ -507,6 +507,16 @@
 .mc-check { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 1.5px solid #5a6578; border-radius: 6px; padding: 0; color: #fff; background: transparent; transition: background .12s, border-color .12s; }
 .mc-picker-row.selected .mc-check { border-color: var(--mc-accent-2); background: var(--mc-accent-2); }
 .mc-check svg { width: 13px; height: 13px; stroke-width: 3; }
+.mc-picker-pick { min-width: 0; flex: 1; height: 38px; display: flex; align-items: center; gap: 10px; border: 0; padding: 0 8px 0 0; color: var(--mc-ink); background: transparent; text-align: left; }
+.mc-picker-pick:focus-visible { outline-offset: -2px; border-radius: 8px; }
+.mc-picker-pick > svg { width: 17px; height: 17px; color: #ffd27a; }
+.mc-picker-pick > span:last-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-picker-enter { width: 32px; height: 32px; flex: none; display: grid; place-items: center; margin-right: 3px; border: 0; border-radius: 8px; color: var(--mc-muted); background: transparent; transition: background .12s, color .12s; }
+.mc-picker-enter:hover { color: var(--mc-ink); background: rgba(255, 255, 255, .08); }
+.mc-picker-enter svg { width: 16px; height: 16px; }
+.mc-picker-row.current { margin-bottom: 4px; background: rgba(255, 255, 255, .035); }
+.mc-picker-row.current.selected { background: rgba(76, 157, 255, .1); }
+.mc-picker-row.current .mc-picker-pick > svg { color: var(--mc-accent); }
 .mc-picker-open { min-width: 0; flex: 1; height: 36px; display: flex; align-items: center; gap: 9px; border: 0; padding: 0 8px; color: var(--mc-ink); background: transparent; text-align: left; }
 .mc-picker-open svg { width: 17px; height: 17px; color: #ffd27a; }
 .mc-picker-open svg:last-child { width: 15px; height: 15px; color: var(--mc-muted); opacity: 0; }
