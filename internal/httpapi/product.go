@@ -79,8 +79,8 @@ type ProductDependencies struct {
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.
 	SystemLogs systemlog.Reader
-	// Personalization keeps the device-wide 个性化 settings; nil answers
-	// personalization_unavailable.
+	// Personalization keeps the device-wide 个性化 settings and wallpaper;
+	// nil answers personalization_unavailable.
 	Personalization *personalization.Store
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
@@ -240,6 +240,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("PUT /api/v1/local-display", h.withMutation(h.handleUpdateLocalDisplay))
 	h.musicRoutes()
 	h.profileRoutes()
+	h.wallpaperRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})

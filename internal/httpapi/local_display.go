@@ -11,8 +11,7 @@ import (
 // handleLocalDisplay needs no session: the sign-in page on the device's own
 // screen reads it too, and it reveals only how long the screen stays on.
 func (h *productHandler) handleLocalDisplay(w http.ResponseWriter, r *http.Request) {
-	if h.personalization == nil {
-		writeError(w, http.StatusServiceUnavailable, "personalization_unavailable", "personalization settings are unavailable")
+	if !h.personalizationReady(w) {
 		return
 	}
 	display, err := h.personalization.LocalDisplay(r.Context())
@@ -24,11 +23,7 @@ func (h *productHandler) handleLocalDisplay(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *productHandler) handleUpdateLocalDisplay(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-	if !h.requireAdministrator(w, session) {
-		return
-	}
-	if h.personalization == nil {
-		writeError(w, http.StatusServiceUnavailable, "personalization_unavailable", "personalization settings are unavailable")
+	if !h.requireAdministrator(w, session) || !h.personalizationReady(w) {
 		return
 	}
 	var request struct {

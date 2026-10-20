@@ -1,7 +1,8 @@
 // Package personalization keeps the device-wide choices shown under 设置 →
-// 个性化. Today that is how long the local console's screen saver plays before
-// the screen goes black. The settings live in personalization.db on the
-// system disk, beside the Product Service's other state.
+// 个性化: the desktop wallpaper every account sees, and how long the local
+// console's screen saver plays before the screen goes black. The settings and
+// the wallpaper picture live in personalization.db on the system disk, beside
+// the Product Service's other state.
 package personalization
 
 import (
@@ -45,6 +46,15 @@ func Open(path string) (*Store, error) {
 CREATE TABLE IF NOT EXISTS local_display (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     sleep_after_minutes INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS wallpaper (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    style TEXT NOT NULL,
+    image BLOB,
+    version TEXT NOT NULL DEFAULT '',
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT ''
 );`
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
