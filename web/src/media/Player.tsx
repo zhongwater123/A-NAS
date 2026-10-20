@@ -2,10 +2,12 @@ import {
   ArrowLeft, Captions, Check, ChevronRight, Clapperboard, Gauge, Languages, ListVideo, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Settings2, SkipBack, SkipForward, Volume1, Volume2,
   VolumeX,
 } from "lucide-react";
-import { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CSSProperties, FocusEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+} from "react";
 
 import { messageOf } from "./Browse";
-import { episodeCode, timecode } from "./format";
+import { episodeCode, episodeName, timecode } from "./format";
 import { browserCapabilities, getPlayback, getVideo, saveProgress, streamURL, subtitleURL, type Playback, type Quality, type VideoDetail } from "./mediaApi";
 import { PlayerPanel, type PanelTab } from "./PlayerPanel";
 import { canFeed, StreamFeed } from "./streamFeed";
@@ -46,6 +48,38 @@ type MenuName = "settings" | "audio" | "subtitles" | "quality" | "speed";
 
 export interface PlayRequest { videoId: string; restart?: boolean }
 
+// useHeldFocus keeps the keyboard on the player. Its keys work only while
+// focus is inside it, and a control that goes away while focused, such as
+// the episode button while the next episode loads, leaves focus on the page;
+// the player then takes it back. Focus moved elsewhere by the viewer stays
+// where they put it.
+function useHeldFocus(container: RefObject<HTMLDivElement | null>) {
+  const inside = useRef(false);
+  const reclaim = useCallback(() => {
+    const active = document.activeElement;
+    if (!active || active === document.body) container.current?.focus({ preventScroll: true });
+  }, [container]);
+  useLayoutEffect(() => { if (inside.current) reclaim(); });
+  const onFocus = () => { inside.current = true; };
+  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && container.current?.contains(next)) return;
+    const lost = event.target as Node;
+    if (next || lost.isConnected) inside.current = false;
+    // Some browsers report the blur before the control is gone.
+    if (!next) window.requestAnimationFrame(() => { if (!lost.isConnected) { inside.current = true; reclaim(); } });
+  };
+  return { onFocus, onBlur };
+}
+
+// Notice is the brief word a key press leaves on the picture.
+interface Notice { id: number; icon: ReactNode; text: string }
+
+// SkipIcon is the circular arrow of a ten-second skip with its seconds on it.
+function SkipIcon({ forward }: { forward?: boolean }) {
+  return <span className="mc-skip-icon">{forward ? <RotateCw /> : <RotateCcw />}<small>10</small></span>;
+}
+
 // Player plays one video over the media center. A converted stream cannot
 // seek, so the player restarts it at the new position and adds that offset
 // to the stream's own clock; positions it has already received play from
@@ -85,7 +119,14 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   const [scrub, setScrub] = useState<number>();
   const [hover, setHover] = useState<{ x: number; time: number }>();
   const [countdown, setCountdown] = useState<number>();
+  // upNext names the episode the countdown leads to.
+  const [upNext, setUpNext] = useState<string>();
   const [resumed, setResumed] = useState<number>();
+  // halted is a pause the viewer sees as one: their own, or a refused
+  // autoplay, not the moment before a video starts.
+  const [halted, setHalted] = useState(false);
+  const [notice, setNotice] = useState<Notice>();
+  const held = useHeldFocus(container);
   // jump is where a seek is going while the picture is not there yet.
   const [jump, setJump] = useState<number>();
   const [frozen, setFrozen] = useState(false);
@@ -119,6 +160,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     setDetail(undefined);
     setPlayback(undefined);
     setCountdown(undefined);
+    setUpNext(undefined);
+    setHalted(false);
     setCues([]);
     Promise.all([getVideo(request.videoId), getPlayback(request.videoId, { caps })]).then(([value, decision]) => {
       if (!live) return;
@@ -196,7 +239,9 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => () => saveRef.current(true), []);
-  const go = (videoId: string) => { saveRef.current(true); setCountdown(undefined); onNavigate(videoId); };
+  // The control that moved on, a panel's episode or the countdown's button,
+  // goes away with the video, so the player keeps the keyboard itself.
+  const go = (videoId: string) => { saveRef.current(true); setCountdown(undefined); container.current?.focus({ preventScroll: true }); onNavigate(videoId); };
 
   // holdFrame keeps the last picture on screen while a restarted stream
   // loads, instead of a black frame.
@@ -296,20 +341,38 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     return () => window.clearTimeout(timer);
   }, [resumed]);
 
-  // The next episode starts after a short countdown.
+  // The next episode starts after a short countdown that names it.
   useEffect(() => {
     if (countdown === undefined) return;
     if (countdown <= 0) { if (detail?.nextId) onNavigate(detail.nextId); return; }
     const timer = window.setTimeout(() => setCountdown((value) => (value === undefined ? undefined : value - 1)), 1000);
     return () => window.clearTimeout(timer);
   }, [countdown, detail?.nextId, onNavigate]);
+  const counting = countdown !== undefined;
+  useEffect(() => {
+    if (!counting || !detail?.nextId) return;
+    let live = true;
+    getVideo(detail.nextId).then((next) => { if (live) setUpNext(episodeName({ season: next.season ?? 0, episode: next.episode ?? 0, title: next.title })); }, () => undefined);
+    return () => { live = false; };
+  }, [counting, detail?.nextId]);
+
+  // A key leaves a short notice of what it did; the volume and the skips
+  // are otherwise invisible while the controls are hidden.
+  const noticeTimer = useRef(0);
+  const announce = (icon: ReactNode, text: string) => {
+    window.clearTimeout(noticeTimer.current);
+    setNotice({ id: Date.now(), icon, text });
+    noticeTimer.current = window.setTimeout(() => setNotice(undefined), 900);
+  };
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
 
   const events = {
     onLoadedMetadata: () => {
       const element = video.current;
       if (!element) return;
       if (pendingStart.current > 0) { element.currentTime = pendingStart.current; pendingStart.current = 0; }
-      if (resumePlaying.current) playSafely(element, () => setPaused(true));
+      if (resumePlaying.current) playSafely(element, () => { setPaused(true); setHalted(true); });
+      else setHalted(true);
     },
     onTimeUpdate: () => {
       const element = video.current;
@@ -321,8 +384,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
     onProgress: () => readRanges(),
     onLoadedData: () => { setFrozen(false); if (pendingSeek.current === undefined) setJump(undefined); },
     onSeeked: () => { if (pendingSeek.current === undefined) setJump(undefined); },
-    onPlay: () => { setPaused(false); wake(); },
-    onPause: () => { setPaused(true); save(true); },
+    onPlay: () => { setPaused(false); setHalted(false); wake(); },
+    onPause: () => { setPaused(true); setHalted(true); save(true); },
     onWaiting: () => setWaiting(true),
     onPlaying: () => { started.current = true; setWaiting(false); setFrozen(false); if (pendingSeek.current === undefined) setJump(undefined); },
     onCanPlay: () => setWaiting(false),
@@ -381,17 +444,28 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
   }, [subtitle, source]);
   const activeCues = cues.filter((cue) => cue.start <= time && cue.end >= time);
 
+  const changeVolume = (step: number) => {
+    const next = Math.round(Math.max(0, Math.min(1, volume + step)) * 100) / 100;
+    const silent = next === 0 || (muted && step < 0);
+    setVolume(next);
+    if (step > 0) setMuted(false);
+    announce(silent ? <VolumeX /> : next < 0.5 ? <Volume1 /> : <Volume2 />, silent && next > 0 ? "已静音" : `音量 ${Math.round(next * 100)}%`);
+  };
+  const skip = (seconds: number) => {
+    seek(position() + seconds, settleSkips);
+    announce(<SkipIcon forward={seconds > 0} />, seconds > 0 ? `快进 ${seconds} 秒` : `后退 ${-seconds} 秒`);
+  };
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).tagName === "INPUT" && event.key !== "Escape") return;
     let handled = true;
     switch (event.key) {
       case " ": case "k": case "K": toggle(); break;
-      case "ArrowLeft": seek(position() - 10, settleSkips); break;
-      case "ArrowRight": seek(position() + 10, settleSkips); break;
-      case "ArrowUp": setVolume((value) => Math.min(1, value + 0.1)); setMuted(false); break;
-      case "ArrowDown": setVolume((value) => Math.max(0, value - 0.1)); break;
+      case "ArrowLeft": skip(-10); break;
+      case "ArrowRight": skip(10); break;
+      case "ArrowUp": changeVolume(0.1); break;
+      case "ArrowDown": changeVolume(-0.1); break;
       case "f": case "F": toggleFullscreen(); break;
-      case "m": case "M": setMuted((value) => !value); break;
+      case "m": case "M": setMuted(!muted); announce(muted ? <Volume2 /> : <VolumeX />, muted ? "取消静音" : "已静音"); break;
       case "Escape":
         if (panel) setPanel(undefined);
         else if (menu) setMenu(undefined);
@@ -439,7 +513,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
 
   return (
     <div ref={container} className={`mc-player ${showChrome ? "chrome" : "bare"} ${panel ? "paneled" : ""}`} tabIndex={-1} role="dialog" aria-label={titleText ? `播放 ${titleText}` : "播放器"}
-      onKeyDown={keys} onPointerMove={wake} onPointerDown={() => wake()}>
+      onKeyDown={keys} onPointerMove={wake} onPointerDown={() => wake()} {...held}>
       <video ref={video} src={source || undefined} className="mc-video" playsInline preload="auto" onClick={() => (panel ? setPanel(undefined) : toggle())} onDoubleClick={toggleFullscreen} {...events}>
         {subtitle !== "off" && detail && <track key={`${subtitle}-${source}`} ref={trackElement} kind="subtitles" default src={subtitleURL(detail.id, subtitle)} />}
       </video>
@@ -447,6 +521,10 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       {activeCues.length > 0 && <div className="mc-cues" aria-live="off">{activeCues.map((cue, index) => <span key={index}>{cue.text}</span>)}</div>}
       {((waiting || jump !== undefined) && !failure) && <span className="mc-player-spinner" aria-label="正在载入" />}
       {jump !== undefined && !failure && <span className="mc-jump" role="status">跳转到 {timecode(jump)}</span>}
+      {halted && !waiting && jump === undefined && !failure && countdown === undefined && (
+        <button type="button" className="mc-player-center" aria-label="播放" onClick={toggle}><Play /></button>
+      )}
+      {notice && <span key={notice.id} className="mc-notice" role="status">{notice.icon}{notice.text}</span>}
       {failure && (
         <div className="mc-player-failure" role="alert">
           <p>{failure}</p>
@@ -464,8 +542,8 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       )}
       {countdown !== undefined && detail?.nextId && (
         <div className="mc-next" role="status">
-          <span>即将播放下一集</span>
-          <strong>{countdown}</strong>
+          <span>{countdown} 秒后播放下一集</span>
+          <strong>{upNext ?? "下一集"}</strong>
           <div>
             <button type="button" className="mc-primary small" onClick={() => go(detail.nextId!)}><SkipForward />立即播放</button>
             <button type="button" className="mc-glass small" onClick={() => setCountdown(undefined)}>取消</button>
@@ -474,7 +552,7 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
       )}
 
       <header className="mc-player-top">
-        <button type="button" className="mc-player-button" aria-label="退出播放" onClick={onClose}><ArrowLeft /></button>
+        <button type="button" className="mc-player-button" aria-label="退出播放" data-tip="退出播放 (Esc)" data-tip-at="below start" onClick={onClose}><ArrowLeft /></button>
         <div className="mc-player-title">
           <strong>{titleText}</strong>
           {subtitleText && <small>{subtitleText}</small>}
@@ -496,28 +574,29 @@ export function Player({ request, onClose, onNavigate, onSaved }: {
           {hover && duration > 0 && <span className="mc-seek-tip" style={{ left: hover.x }}>{timecode(hover.time)}</span>}
         </div>
         <div className="mc-controls">
-          {detail?.previousId && <button type="button" className="mc-player-button" aria-label="上一集" onClick={() => go(detail.previousId!)}><SkipBack /></button>}
-          <button type="button" className="mc-player-button big" aria-label={paused ? "播放" : "暂停"} onClick={toggle}>{paused ? <Play /> : <Pause />}</button>
-          {detail?.nextId && <button type="button" className="mc-player-button" aria-label="下一集" onClick={() => go(detail.nextId!)}><SkipForward /></button>}
-          <button type="button" className="mc-player-button" aria-label="后退 10 秒" onClick={() => seek(position() - 10, settleSkips)}><RotateCcw /></button>
-          <button type="button" className="mc-player-button" aria-label="前进 10 秒" onClick={() => seek(position() + 10, settleSkips)}><RotateCw /></button>
+          {detail?.previousId && <button type="button" className="mc-player-button" aria-label="上一集" data-tip="上一集" onClick={() => go(detail.previousId!)}><SkipBack /></button>}
+          <button type="button" className="mc-player-button big" aria-label={paused ? "播放" : "暂停"} data-tip={paused ? "播放 (空格)" : "暂停 (空格)"} data-tip-at={detail?.previousId ? undefined : "start"} onClick={toggle}>{paused ? <Play /> : <Pause />}</button>
+          {detail?.nextId && <button type="button" className="mc-player-button" aria-label="下一集" data-tip="下一集" onClick={() => go(detail.nextId!)}><SkipForward /></button>}
+          <button type="button" className="mc-player-button" aria-label="后退 10 秒" data-tip="后退 10 秒 (←)" onClick={() => seek(position() - 10, settleSkips)}><SkipIcon /></button>
+          <button type="button" className="mc-player-button" aria-label="前进 10 秒" data-tip="快进 10 秒 (→)" onClick={() => seek(position() + 10, settleSkips)}><SkipIcon forward /></button>
           <div className="mc-volume">
-            <button type="button" className="mc-player-button" aria-label={muted ? "取消静音" : "静音"} onClick={() => setMuted(!muted)}><VolumeIcon /></button>
+            <button type="button" className="mc-player-button" aria-label={muted ? "取消静音" : "静音"} data-tip={muted ? "取消静音 (M)" : "静音 (M)"} onClick={() => setMuted(!muted)}><VolumeIcon /></button>
             <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume} aria-label="音量"
               onChange={(event) => { setVolume(Number(event.target.value)); setMuted(false); }} style={{ "--mc-level": `${(muted ? 0 : volume) * 100}%` } as CSSProperties} />
           </div>
           <span className="mc-time">{timecode(shown)}<span> / {timecode(duration)}</span></span>
           <span className="mc-controls-gap" />
           {detail && (
-            <button type="button" className={`mc-player-button labeled ${panel ? "on" : ""}`} aria-label={episodic ? "选集" : "片库"} aria-expanded={Boolean(panel)} onClick={togglePanel}>
+            <button type="button" className={`mc-player-button labeled ${panel ? "on" : ""}`} aria-label={episodic ? "选集" : "片库"} aria-expanded={Boolean(panel)}
+              data-tip={episodic ? "选择其他集" : "换一部看"} onClick={togglePanel}>
               {episodic ? <ListVideo /> : <Clapperboard />}<span>{episodic ? "选集" : "片库"}</span>
             </button>
           )}
           {detail && detail.subtitles.length > 0 && (
-            <button type="button" className={`mc-player-button ${subtitle !== "off" ? "on" : ""}`} aria-label="字幕" aria-expanded={menu === "subtitles"} onClick={() => setMenu(menu === "subtitles" ? undefined : "subtitles")}><Captions /></button>
+            <button type="button" className={`mc-player-button ${subtitle !== "off" ? "on" : ""}`} aria-label="字幕" data-tip="字幕" aria-expanded={menu === "subtitles"} onClick={() => setMenu(menu === "subtitles" ? undefined : "subtitles")}><Captions /></button>
           )}
-          <button type="button" className="mc-player-button" aria-label="播放设置" aria-expanded={menu === "settings"} onClick={() => { setPanel(undefined); setMenu(menu ? undefined : "settings"); }}><Settings2 /></button>
-          <button type="button" className="mc-player-button" aria-label={fullscreen ? "退出全屏" : "全屏"} onClick={toggleFullscreen}>{fullscreen ? <Minimize /> : <Maximize />}</button>
+          <button type="button" className="mc-player-button" aria-label="播放设置" data-tip="画质、倍速与音轨" data-tip-at="end" aria-expanded={Boolean(menu) && menu !== "subtitles"} onClick={() => { setPanel(undefined); setMenu(menu ? undefined : "settings"); }}><Settings2 /></button>
+          <button type="button" className="mc-player-button" aria-label={fullscreen ? "退出全屏" : "全屏"} data-tip={fullscreen ? "退出全屏 (F)" : "全屏 (F)"} data-tip-at="end" onClick={toggleFullscreen}>{fullscreen ? <Minimize /> : <Maximize />}</button>
         </div>
         {menu && detail && playback && (
           <div className="mc-player-menu" role="menu" onPointerDown={(event) => event.stopPropagation()}>

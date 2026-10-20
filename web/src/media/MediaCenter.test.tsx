@@ -521,6 +521,28 @@ describe("MediaCenter", () => {
     expect(within(player).queryByRole("complementary")).toBeNull();
   });
 
+  it("keeps the keyboard on the player after the next episode loads", async () => {
+    const episode = (number: number): VideoDetail => detail({ ...film, id: `video:blossoms-${number}`, type: "episode", title: `第 ${number} 集`, showId: show.id, showTitle: "繁花", season: 1, episode: number }, { nextId: `video:blossoms-${number + 1}` });
+    serve([library],
+      (url) => { const match = /^\/api\/v1\/media\/videos\/video%3Ablossoms-(\d)$/.exec(url); return match ? json(episode(Number(match[1]))) : undefined; },
+      (url) => (/\/videos\/video%3Ablossoms-\d\/playback/.test(url) ? json({ mode: "direct", url: "/api/v1/media/videos/x/file", audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+    );
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { rerender } = render(<Player request={{ videoId: "video:blossoms-1" }} onClose={() => undefined} onNavigate={() => undefined} onSaved={() => undefined} />);
+    const player = await screen.findByRole("dialog", { name: "播放 繁花" });
+    // The viewer last pressed the episode button, which goes away while the next episode loads.
+    within(player).getByRole("button", { name: "选集" }).focus();
+    rerender(<Player request={{ videoId: "video:blossoms-2" }} onClose={() => undefined} onNavigate={() => undefined} onSaved={() => undefined} />);
+    await waitFor(() => expect(within(player).getByText("S1 · E2")).toBeTruthy());
+    expect(document.activeElement).toBe(player);
+    const before = play.mock.calls.length;
+    fireEvent.keyDown(document.activeElement!, { key: " " });
+    await waitFor(() => expect(play.mock.calls.length).toBe(before + 1));
+    // A key leaves a notice of what it did.
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(within(player).getByText("音量 90%")).toBeTruthy();
+  });
+
   it("switches the player's library list between libraries", async () => {
     const kids: MediaLibrary = { ...library, id: "library:kids", name: "少儿", covers: [] };
     const playing: VideoDetail = detail(film);

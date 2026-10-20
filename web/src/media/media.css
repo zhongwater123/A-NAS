@@ -691,6 +691,27 @@
 .mc-player-button.labeled { width: auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; font-size: 13px; font-weight: 650; }
 .mc-player-button.labeled svg { width: 18px; height: 18px; }
 
+/* The pause the viewer sees, and what a key just did */
+.mc-player-center { position: absolute; z-index: 2; left: 50%; top: 50%; width: 76px; height: 76px; display: grid; place-items: center; margin: -38px 0 0 -38px; border: 0; border-radius: 50%; color: #fff; background: rgba(12, 15, 22, .55); backdrop-filter: blur(10px); box-shadow: 0 0 0 1px rgba(255, 255, 255, .16), 0 18px 48px rgba(0, 0, 0, .45); animation: mc-center-in .22s var(--mc-ease); transition: background .15s, transform .15s var(--mc-ease); }
+.mc-player-center:hover { background: rgba(53, 104, 237, .88); transform: scale(1.06); }
+.mc-player-center svg { width: 32px; height: 32px; margin-left: 4px; fill: currentColor; }
+@keyframes mc-center-in { from { opacity: 0; transform: scale(.86); } }
+.mc-notice { position: absolute; z-index: 3; left: 50%; top: 18%; display: inline-flex; align-items: center; gap: 9px; padding: 9px 17px 9px 14px; border-radius: 22px; color: #fff; background: rgba(12, 15, 22, .74); backdrop-filter: blur(12px); box-shadow: 0 12px 34px rgba(0, 0, 0, .4); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; translate: -50% 0; pointer-events: none; animation: mc-notice .9s ease forwards; }
+.mc-notice svg { width: 19px; height: 19px; }
+@keyframes mc-notice { 0% { opacity: 0; transform: translateY(6px); } 14% { opacity: 1; transform: none; } 72% { opacity: 1; } 100% { opacity: 0; } }
+.mc-skip-icon { position: relative; display: grid; place-items: center; }
+.mc-skip-icon small { position: absolute; padding-top: 1px; font-size: 8px; font-weight: 800; letter-spacing: -.4px; line-height: 1; font-variant-numeric: tabular-nums; }
+
+/* Tooltips name an icon's action, and its key, a moment after the pointer rests on it. */
+@media (hover: hover) {
+  .mc-app [data-tip]::after { content: attr(data-tip); position: absolute; z-index: 8; left: 50%; bottom: calc(100% + 8px); padding: 5px 9px; border-radius: 8px; color: #f1f4f9; background: rgba(16, 19, 27, .96); box-shadow: 0 8px 22px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .08); font-size: 12px; font-weight: 600; letter-spacing: 0; line-height: 1.3; text-shadow: none; white-space: nowrap; opacity: 0; translate: -50% 0; transform: translateY(4px); pointer-events: none; transition: opacity .14s, transform .14s var(--mc-ease); }
+  .mc-app [data-tip]:hover::after, .mc-app [data-tip]:focus-visible::after { opacity: 1; transform: none; transition-delay: .35s; }
+  .mc-app [data-tip][aria-expanded="true"]::after { display: none; }
+  .mc-app [data-tip-at~="start"]::after { left: 0; translate: 0 0; }
+  .mc-app [data-tip-at~="end"]::after { left: auto; right: 0; translate: 0 0; }
+  .mc-app [data-tip-at~="below"]::after { top: calc(100% + 8px); bottom: auto; transform: translateY(-4px); }
+}
+
 /* Picking another episode or title while playing */
 .mc-player { --mc-panel-w: min(380px, 92%); }
 .mc-player.paneled .mc-player-top, .mc-player.paneled .mc-player-bottom { right: var(--mc-panel-w); }
@@ -747,7 +768,7 @@
 .mc-resume button svg { width: 14px; height: 14px; }
 .mc-next { position: absolute; right: 24px; bottom: 120px; display: grid; justify-items: start; gap: 6px; padding: 16px 18px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 16px; color: #eef2f8; background: rgba(18, 22, 31, .92); backdrop-filter: blur(12px); box-shadow: 0 20px 50px rgba(0, 0, 0, .5); animation: mc-rise .3s var(--mc-ease); }
 .mc-next span { color: #aab3c2; font-size: 12px; }
-.mc-next strong { font-size: 30px; font-variant-numeric: tabular-nums; }
+.mc-next strong { max-width: 280px; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .mc-next div { display: flex; gap: 8px; }
 
 /* Narrow windows */
