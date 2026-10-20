@@ -730,7 +730,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("searchbox", { name: "用一句话搜索照片" }));
 
     // Opened from the sidebar, AI 聚合 starts from the top again.
-    await user.click(screen.getByRole("button", { name: "照片" }));
+    await user.click(screen.getByRole("button", { name: "图库" }));
     await user.click(screen.getByRole("button", { name: "AI 聚合" }));
     expect(await screen.findByRole("button", { name: "展开全部 8 类" })).toBeTruthy();
     expect(container.querySelector<HTMLElement>(".ph-discover")!.scrollTop).toBe(0);
@@ -926,7 +926,7 @@ describe("PhotosPanel search and viewing", () => {
 
     await user.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByRole("heading", { name: "alice，您可以用一句话来找照片" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /^照片/ }));
+    await user.click(screen.getByRole("button", { name: /^图库/ }));
     expect(await screen.findByRole("button", { name: "查看 photo:home.jpg" })).toBeTruthy();
     expect((screen.getByRole("searchbox", { name: "搜索照片" }) as HTMLInputElement).value).toBe("");
   });
