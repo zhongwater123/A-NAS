@@ -65,7 +65,7 @@ mcp_servers:
       resources: false
 skills:
   external_dirs: [/opt/a-nas/assistant-skills]
-  auto_load: [anas-files, anas-member, anas-scheduled-tasks]
+  auto_load: [anas-files, anas-member, anas-scheduled-tasks, anas-desktop]
 tools:
   # List the A-NAS tools directly instead of behind tool_search.
   tool_search:

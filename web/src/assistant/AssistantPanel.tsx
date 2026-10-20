@@ -19,7 +19,7 @@ import { diffLines } from "diff";
 import {
   ArrowUp, Brain, CalendarClock, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
   Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
-  Trash2, Users, Video, Wrench, X,
+  Trash2, Users, Video, Wrench, X, Keyboard, MonitorSmartphone, MousePointerClick,
 } from "lucide-react";
 import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -33,6 +33,7 @@ import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
 import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
+import { type Danger, ControlError, WebosController } from "./webosControl";
 import { TasksView } from "./TasksView";
 import { type NamedPhoto, linkPhotos, photoOf, photosIn } from "./photoLinks";
 import { useAssistantGateway } from "./useAssistantGateway";
@@ -44,6 +45,12 @@ const SUGGESTIONS = [
   "帮我在个人空间的 计划.md 里加一项：交电费",
   "我之前删掉过一个文件，帮我在回收站找找",
 ];
+
+// How long a step VNAS takes on the desktop waits for the member to allow it:
+// Hermes gives the window 30 s to answer a browser command.
+const CONTROL_CONFIRM_MS = 25_000;
+// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go).
+const CONTROL_CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll"];
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
@@ -144,7 +151,63 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
     // Hermes names a new conversation in the background after its first turn.
     window.setTimeout(() => void refreshSessions(), 4000);
   }, [refreshSessions, refreshBusy]);
-  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed });
+  // VNAS operates the WebOS page it is on as Hermes's browser for its live
+  // conversation (Hermes's browser control). A step that deletes, replaces or
+  // resets something waits here for the member.
+  const [controlAsk, setControlAsk] = useState<{ danger: Danger; until: number; answer(allowed: boolean): void }>();
+  const asking = useRef<(allowed: boolean) => void>(undefined);
+  const controller = useMemo(() => new WebosController({
+    exclude: (element) => Boolean(element.closest(".app-window-assistant, .vt-toasts, .vnas-control-ring")),
+    confirm: (danger) => new Promise<boolean>((resolve) => {
+      let timer = 0;
+      const answer = (allowed: boolean) => {
+        window.clearTimeout(timer);
+        asking.current = undefined;
+        setControlAsk(undefined);
+        resolve(allowed);
+      };
+      asking.current = answer;
+      timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
+      setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
+    }),
+  }), []);
+  // A live session is registered once per connection.
+  const controlled = useRef(new Map<string, Promise<void>>());
+  const generation = useRef(gateway.generation);
+  if (generation.current !== gateway.generation) {
+    generation.current = gateway.generation;
+    controlled.current.clear();
+  }
+  const onLive = useCallback((liveId: string) => {
+    let registered = controlled.current.get(liveId);
+    if (!registered) {
+      registered = gateway.client.request("browser.controller.register", {
+        session_id: liveId, protocol_version: 1, controller_id: "vnas-window", browser_profile_id: "webos", capabilities: CONTROL_CAPABILITIES,
+      }).then(() => undefined, () => { controlled.current.delete(liveId); });
+      controlled.current.set(liveId, registered);
+    }
+    return registered;
+  }, [gateway.client]);
+  useEffect(() => gateway.client.onEvent((event) => {
+    const type = event.type as string;
+    const session = typeof event.session_id === "string" ? event.session_id : "";
+    if (type === "browser.controller.cancel") {
+      // Hermes stopped waiting: the step is not taken.
+      asking.current?.(false);
+      return;
+    }
+    if (type !== "browser.controller.command" || !controlled.current.has(session)) return;
+    const command = (event.payload ?? {}) as { command_id?: string; action?: string; arguments?: Record<string, unknown> };
+    if (!command.command_id || !command.action) return;
+    void controller.run(command.action, command.arguments ?? {})
+      .then((result) => ({ ok: true, result }), (reason) => ({
+        ok: false, error: { message: reason instanceof ControlError ? reason.message : "这一步没有完成" },
+      }))
+      .then((outcome) => gateway.client.request("browser.controller.result", { session_id: session, command_id: command.command_id, ...outcome }))
+      .catch(() => undefined);
+  }), [gateway.client, controller]);
+
+  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, onLive });
   const { send, cancel } = thread;
 
   // Results of scheduled tasks the member has not read; opening a run reads its task's.
@@ -302,6 +365,7 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
               <div className="as-viewport-spacer" />
             </ThreadPrimitive.Viewport>
 
+            {controlAsk && <ControlCard ask={controlAsk} />}
             {here.length > 0 && (
               <section className="as-changes" aria-label="本对话中等你确认或回答的事">
                 {here.map((approval) => approval.kind === "command" ? (
@@ -357,6 +421,33 @@ export function toThreadMessage(message: ChatMessage): ThreadMessageLike {
       : message.error ? { type: "incomplete", reason: "error" }
       : { type: "complete", reason: "stop" },
   } as ThreadMessageLike;
+}
+
+// A step VNAS wants to take on the desktop that deletes, replaces or resets
+// something: the member allows it, or not, before Hermes stops waiting.
+function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(allowed: boolean): void } }) {
+  const [left, setLeft] = useState(() => Math.max(0, Math.ceil((ask.until - Date.now()) / 1000)));
+  useEffect(() => {
+    const timer = window.setInterval(() => setLeft(Math.max(0, Math.ceil((ask.until - Date.now()) / 1000))), 500);
+    return () => window.clearInterval(timer);
+  }, [ask.until]);
+  return (
+    <section className="as-changes" aria-label="VNAS 想在桌面上执行的操作">
+      <article className="as-change as-command awaiting" role="alertdialog" aria-label={`VNAS 想${ask.danger.what}`}>
+        <header>
+          <span className="as-change-mark"><MousePointerClick /></span>
+          <div>
+            <strong>VNAS 想{ask.danger.what}</strong>
+            <small>在“{ask.danger.where}”中 · 这一步可能删除、替换或改动内容 · {left} 秒内不回答就不执行</small>
+          </div>
+        </header>
+        <footer>
+          <button type="button" className="as-reject" onClick={() => ask.answer(false)}>不允许</button>
+          <button type="button" className="as-confirm" onClick={() => ask.answer(true)}><Check />允许</button>
+        </footer>
+      </article>
+    </section>
+  );
 }
 
 function SessionRow({ session, active, waiting, running, onOpen, onRename, onDelete }: {
@@ -639,6 +730,11 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "memory": return { icon: <Brain />, label: "记住", detail: "" };
     case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
     case "skill_view": case "skills_list": case "skill_manage": return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
+    case "browser_snapshot": return { icon: <MonitorSmartphone />, label: "查看桌面", detail: "" };
+    case "browser_click": return { icon: <MousePointerClick />, label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
+    case "browser_type": return { icon: <Keyboard />, label: "输入", detail: typeof args.text === "string" ? `“${short(args.text)}”` : "" };
+    case "browser_press": return { icon: <Keyboard />, label: "按键", detail: typeof args.key === "string" ? args.key : "" };
+    case "browser_scroll": return { icon: <MousePointerClick />, label: "滚动", detail: args.direction === "up" ? "向上" : "向下" };
     default: return { icon: <Wrench />, label: name, detail: "" };
   }
 }
