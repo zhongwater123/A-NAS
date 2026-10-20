@@ -262,8 +262,10 @@ if [[ -x "$assistant_python" ]]; then
   # refused, and a logged-in window becomes the browser of its own session only.
   browser_out=$("$assistant_python" /spike/browser_control.py alice 2>&1 || true)
   check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$browser_out"
-  check "a logged-in window becomes the browser of its session and answers its commands" \
-    bash -c 'grep -q "^PASS browser_snapshot reaches the window" <<<"$1" && grep -q "^browser control: 0 failed" <<<"$1"' _ "$browser_out"
+  browser_ok=no
+  grep -q '^PASS browser_snapshot reaches the window' <<<"$browser_out" &&
+    grep -q '^browser control: 0 failed' <<<"$browser_out" && browser_ok=yes
+  check "a logged-in window becomes the browser of its session and answers its commands" test "$browser_ok" = yes
   grep '^FAIL' <<<"$browser_out" | sed 's/^/INFO assistant browser control: /' || true
   check "the first model request offers the A-NAS MCP tool" \
     bash -c "grep -m 1 -F '\"tools\": [\"' /var/log/fake-model.jsonl | grep -q mcp__anas__submit_changes"
