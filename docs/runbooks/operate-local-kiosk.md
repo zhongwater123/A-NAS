@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; confinement and VT recovery pending
-更新时间：2026-10-10
+更新时间：2026-10-20
 
 ## 目的
 
@@ -149,6 +149,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 7. 登录后请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。
 8. 登录后保持三分钟无输入，屏保应从池中选择一条，静音、居中铺满且无黑边；让视频自然结束，确认仍循环同一条而不切换。第一次移动鼠标或按键只退出屏保，不打开或操作下层应用；再次等待三分钟后应重新随机选择池内一条，允许与上次相同。
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
+10. 管理员在“设置 → 个性化”把息屏设为 10 分钟后，本机屏幕保持 13 分钟无输入应变为纯黑（屏保先播放 10 分钟）；第一次移动鼠标或按键只回到桌面。退出登录后在登录页保持 13 分钟无输入同样变黑，唤醒后已输入的账号保留。验收后按需改回 30 分钟。行为见[个性化规格](../specs/personalization.md)。
 
 如果分辨率、方向或 UI 大小不正确，先在同一 Wayland 会话中用 `wlr-randr` 临时验证，再更新 `/etc/a-nas/kiosk.env`；不要在不知道输出名称时写死显卡或 connector。
 
@@ -182,4 +183,5 @@ cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
 - [Debian 13 Cage 手册](https://manpages.debian.org/trixie/cage/cage.1.en.html)
 - [systemd.exec 对 PAM、TTY 和运行时目录的说明](https://manpages.debian.org/trixie/systemd/systemd.exec.5.en.html)
 - [本地控制台屏保规格](../specs/local-console-screensaver.md)
+- [个性化规格（息屏）](../specs/personalization.md)
 - [ADR 0014：屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
