@@ -143,7 +143,8 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
-	disks, smartTargets, err := parseDisks(blockDevices, r.smartFor)
+	btrfs := btrfsDevices(r.dependencies.root)
+	disks, smartTargets, err := parseDisks(blockDevices, r.smartFor, btrfs)
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
@@ -154,7 +155,7 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	var dataVolume *hoststate.DataVolume
 	var document blockDeviceDocument
 	if json.Unmarshal(blockDevices, &document) == nil {
-		dataVolume = readDataVolume(r.dependencies.root, mountedBtrfsUUID(document.BlockDevices, dataMountPoint), disks)
+		dataVolume = readDataVolume(r.dependencies.root, dataVolumeUUID(document.BlockDevices, btrfs), disks)
 	}
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
@@ -259,6 +260,12 @@ func mountedDevices(contents []byte, mountpoint string) []string {
 	if json.Unmarshal(contents, &document) != nil {
 		return nil
 	}
+	return namesMountedAt(document.BlockDevices, mountpoint)
+}
+
+// namesMountedAt names the devices in the tree mounted at mountpoint; the
+// mount table, unlike FSTYPE and UUID, does not come from udev.
+func namesMountedAt(devices []blockDevice, mountpoint string) []string {
 	var names []string
 	var visit func(blockDevice)
 	visit = func(device blockDevice) {
@@ -272,7 +279,7 @@ func mountedDevices(contents []byte, mountpoint string) []string {
 			visit(child)
 		}
 	}
-	for _, device := range document.BlockDevices {
+	for _, device := range devices {
 		visit(device)
 	}
 	return names
@@ -289,7 +296,7 @@ func (r *Reader) ResolveDevice(ctx context.Context, diskID string) (ResolvedDevi
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return ResolvedDevice{}, err
 	}
-	disks, _, err := parseDisks(contents, r.smartFor)
+	disks, _, err := parseDisks(contents, r.smartFor, btrfsDevices(r.dependencies.root))
 	if err != nil {
 		return ResolvedDevice{}, err
 	}
@@ -417,7 +424,10 @@ type blockDevice struct {
 
 // parseDisks maps lsblk's disks to public disks with the SMART readings smart
 // has for them, and lists the disks SMART can be read from. smart may be nil.
-func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, *int)) ([]hoststate.Disk, []smartTarget, error) {
+// btrfs maps devices of mounted Btrfs filesystems to their UUIDs (see
+// btrfsDevices); such a device is in use, and those of the data volume make
+// their disks data disks, whatever the udev database says.
+func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, *int), btrfs map[string]string) ([]hoststate.Disk, []smartTarget, error) {
 	var document blockDeviceDocument
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return nil, nil, err
@@ -427,7 +437,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 	targets := make([]smartTarget, 0, len(document.BlockDevices))
 	seen := make(map[string]struct{})
 	systemDisks := 0
-	dataUUID := mountedBtrfsUUID(document.BlockDevices, dataMountPoint)
+	dataUUID := dataVolumeUUID(document.BlockDevices, btrfs)
 	for _, device := range document.BlockDevices {
 		if device.Type != "disk" {
 			continue
@@ -452,7 +462,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 		if containsMountpoint(device, "/") {
 			role = hoststate.DiskRoleSystem
 			systemDisks++
-		} else if containsMountpoint(device, dataMountPoint) || (dataUUID != "" && containsBtrfs(device, dataUUID)) {
+		} else if containsMountpoint(device, dataMountPoint) || (dataUUID != "" && (containsBtrfs(device, dataUUID) || holdsBtrfs(device, btrfs, dataUUID))) {
 			role = hoststate.DiskRoleData
 		}
 		smartStatus := hoststate.HealthUnknown
@@ -474,7 +484,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 			CapacityBytes:      device.Size,
 			Rotational:         device.Rotational,
 			Removable:          device.Removable,
-			InUse:              deviceInUse(device),
+			InUse:              deviceInUse(device) || holdsBtrfs(device, btrfs, ""),
 			Filesystems:        collectFilesystems(device),
 			Signatures:         collectSignatures(device),
 			Role:               role,
