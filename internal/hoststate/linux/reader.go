@@ -83,7 +83,7 @@ func New() *Reader {
 				"--bytes",
 				"--tree",
 				"--exclude", "7",
-				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,FSTYPE,MOUNTPOINTS,WWN,SERIAL",
+				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,FSTYPE,UUID,LABEL,MOUNTPOINTS,WWN,SERIAL",
 			).Output()
 		},
 		readSMART: readSMARTCommand,
@@ -151,6 +151,11 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	observeDataVolume(disks, r.dependencies.readFilesystemUsage, func() *uint64 {
 		return readBtrfsErrors(r.dependencies.root, mountedDevices(blockDevices, dataMountPoint))
 	})
+	var dataVolume *hoststate.DataVolume
+	var document blockDeviceDocument
+	if json.Unmarshal(blockDevices, &document) == nil {
+		dataVolume = readDataVolume(r.dependencies.root, mountedBtrfsUUID(document.BlockDevices, dataMountPoint), disks)
+	}
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
 	if err != nil {
@@ -167,7 +172,8 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 			UptimeSeconds:   uptime,
 			Health:          hoststate.HealthUnknown,
 		},
-		Disks: disks,
+		Disks:      disks,
+		DataVolume: dataVolume,
 	}, nil
 }
 
@@ -401,6 +407,8 @@ type blockDevice struct {
 	Rotational  bool          `json:"rota"`
 	Removable   bool          `json:"rm"`
 	Filesystem  string        `json:"fstype"`
+	UUID        string        `json:"uuid"`
+	Label       string        `json:"label"`
 	Mountpoints []*string     `json:"mountpoints"`
 	WWN         string        `json:"wwn"`
 	Serial      string        `json:"serial"`
@@ -419,6 +427,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 	targets := make([]smartTarget, 0, len(document.BlockDevices))
 	seen := make(map[string]struct{})
 	systemDisks := 0
+	dataUUID := mountedBtrfsUUID(document.BlockDevices, dataMountPoint)
 	for _, device := range document.BlockDevices {
 		if device.Type != "disk" {
 			continue
@@ -443,7 +452,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 		if containsMountpoint(device, "/") {
 			role = hoststate.DiskRoleSystem
 			systemDisks++
-		} else if containsMountpoint(device, dataMountPoint) {
+		} else if containsMountpoint(device, dataMountPoint) || (dataUUID != "" && containsBtrfs(device, dataUUID)) {
 			role = hoststate.DiskRoleData
 		}
 		smartStatus := hoststate.HealthUnknown
@@ -467,6 +476,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 			Removable:          device.Removable,
 			InUse:              deviceInUse(device),
 			Filesystems:        collectFilesystems(device),
+			Signatures:         collectSignatures(device),
 			Role:               role,
 			Health:             health,
 			SMARTStatus:        smartStatus,
@@ -483,22 +493,91 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 	return disks, targets, nil
 }
 
+// deviceInUse reports whether something uses the device now: a mount or
+// active swap, or a holder such as an assembled md array, an active LVM
+// volume or an open LUKS mapping, which lsblk lists as a child. A signature
+// alone, such as a linux_raid_member another NAS left behind, is not use:
+// the storage plan lists it and erasing it needs the confirmation phrase.
 func deviceInUse(device blockDevice) bool {
 	for _, mountpoint := range device.Mountpoints {
 		if mountpoint != nil && strings.TrimSpace(*mountpoint) != "" {
 			return true
 		}
 	}
-	filesystem := strings.ToLower(strings.TrimSpace(device.Filesystem))
-	if filesystem == "swap" || filesystem == "linux_raid_member" || filesystem == "lvm2_member" || filesystem == "crypto_luks" {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(device.Type)) {
-	case "crypt", "lvm", "raid", "md", "mpath":
+	switch kind := strings.ToLower(strings.TrimSpace(device.Type)); {
+	case kind == "crypt", kind == "lvm", kind == "md", kind == "dm", kind == "mpath", strings.HasPrefix(kind, "raid"):
 		return true
 	}
 	for _, child := range device.Children {
 		if deviceInUse(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// collectSignatures lists the formats blkid found on the disk and its
+// partitions, sorted and without repeats.
+func collectSignatures(device blockDevice) []hoststate.Signature {
+	seen := make(map[hoststate.Signature]struct{})
+	var visit func(blockDevice)
+	visit = func(candidate blockDevice) {
+		if kind := strings.ToLower(strings.TrimSpace(candidate.Filesystem)); kind != "" {
+			seen[hoststate.Signature{
+				Type: kind, Label: strings.TrimSpace(candidate.Label), UUID: strings.ToLower(strings.TrimSpace(candidate.UUID)),
+			}] = struct{}{}
+		}
+		for _, child := range candidate.Children {
+			visit(child)
+		}
+	}
+	visit(device)
+	if len(seen) == 0 {
+		return nil
+	}
+	signatures := make([]hoststate.Signature, 0, len(seen))
+	for signature := range seen {
+		signatures = append(signatures, signature)
+	}
+	sort.Slice(signatures, func(i, j int) bool {
+		left, right := signatures[i], signatures[j]
+		if left.Type != right.Type {
+			return left.Type < right.Type
+		}
+		if left.Label != right.Label {
+			return left.Label < right.Label
+		}
+		return left.UUID < right.UUID
+	})
+	return signatures
+}
+
+// mountedBtrfsUUID is the filesystem UUID of the Btrfs device lsblk shows
+// mounted at mountpoint, or "" when there is none.
+func mountedBtrfsUUID(devices []blockDevice, mountpoint string) string {
+	for _, device := range devices {
+		for _, candidate := range device.Mountpoints {
+			if candidate != nil && *candidate == mountpoint && strings.EqualFold(device.Filesystem, "btrfs") {
+				if uuid := strings.ToLower(strings.TrimSpace(device.UUID)); filesystemUUIDPattern.MatchString(uuid) {
+					return uuid
+				}
+			}
+		}
+		if uuid := mountedBtrfsUUID(device.Children, mountpoint); uuid != "" {
+			return uuid
+		}
+	}
+	return ""
+}
+
+// containsBtrfs reports whether the device or a partition on it is a member
+// of the Btrfs filesystem with the UUID.
+func containsBtrfs(device blockDevice, uuid string) bool {
+	if strings.EqualFold(device.Filesystem, "btrfs") && strings.EqualFold(strings.TrimSpace(device.UUID), uuid) {
+		return true
+	}
+	for _, child := range device.Children {
+		if containsBtrfs(child, uuid) {
 			return true
 		}
 	}

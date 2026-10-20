@@ -30,6 +30,26 @@ func NewWarning() *Reader {
 	return newReader(state)
 }
 
+// NewWithSpareDisk adds a second data disk that another NAS left an md
+// array signature on, so a volume can be created on two disks or grown.
+func NewWithSpareDisk() *Reader {
+	state := baseState()
+	state.Disks = append(state.Disks, hoststate.Disk{
+		ID:                 mustResourceID("disk:fake-data-02"),
+		Model:              "A-NAS Fake HDD",
+		Transport:          hoststate.TransportSATA,
+		CapacityBytes:      512_000_000_000,
+		Rotational:         true,
+		Role:               hoststate.DiskRoleUnassigned,
+		Health:             hoststate.HealthHealthy,
+		SMARTStatus:        hoststate.HealthHealthy,
+		TemperatureCelsius: intPointer(32),
+		Filesystems:        []string{"linux_raid_member"},
+		Signatures:         []hoststate.Signature{{Type: "linux_raid_member", Label: "OrangePi3B:0", UUID: "2a5a4bd2-c45f-586f-20c3-f2657f46b405"}},
+	})
+	return newReader(state)
+}
+
 func NewUnavailable() *Reader {
 	return &Reader{err: errUnavailable}
 }
@@ -132,6 +152,14 @@ func cloneState(state hoststate.State) hoststate.State {
 			cloned.Disks[i].FilesystemErrors = &value
 		}
 		cloned.Disks[i].Filesystems = append([]string(nil), disk.Filesystems...)
+		cloned.Disks[i].Signatures = append([]hoststate.Signature(nil), disk.Signatures...)
+	}
+	if state.DataVolume != nil {
+		volume := *state.DataVolume
+		volume.DiskIDs = append([]hoststate.ResourceID(nil), volume.DiskIDs...)
+		volume.Data = append([]hoststate.ProfileUsage(nil), volume.Data...)
+		volume.Metadata = append([]hoststate.ProfileUsage(nil), volume.Metadata...)
+		cloned.DataVolume = &volume
 	}
 	return cloned
 }
