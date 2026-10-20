@@ -34,6 +34,7 @@
 - [日志](logs.md)（implemented）
 - [容量与大小的显示单位](size-units.md)（implemented）
 - [AI 助手](ai-assistant.md)（draft）
+- [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented，尚未部署；M2、M3 draft）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 

@@ -77,6 +77,7 @@ func run(logger *slog.Logger) error {
 	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
 		MountPoint:   mountPoint,
 		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
+		Logger:       logger,
 	})
 	repaired, err := executor.ReconcileDataVolume(context.Background())
 	if err != nil {
@@ -84,6 +85,7 @@ func run(logger *slog.Logger) error {
 	}
 	logRepairs(logger, repaired)
 	ensureManagedStores(context.Background(), executor, logger)
+	continueConversion(context.Background(), executor, logger)
 	expireViewing(context.Background(), executor, logger)
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
@@ -262,7 +264,16 @@ func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.E
 			}
 			logRepairs(logger, repaired)
 			ensureManagedStores(ctx, executor, logger)
+			continueConversion(ctx, executor, logger)
 		}
+	}
+}
+
+// continueConversion resumes converting the data volume to its layout after
+// a restart or shutdown cancelled the balance (ADR 0025).
+func continueConversion(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	if _, err := executor.ReconcileConversion(ctx); err != nil {
+		logger.ErrorContext(ctx, "data-volume conversion check failed", "error", err)
 	}
 }
 

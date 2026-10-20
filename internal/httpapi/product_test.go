@@ -279,7 +279,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 		t.Fatalf("disable member status = %d; body=%s", disable.Code, disable.Body.String())
 	}
 
-	planRequest := httptest.NewRequest(http.MethodPost, "/api/v1/storage/plans", bytes.NewBufferString(`{"diskId":"disk:fake-data-01"}`))
+	planRequest := httptest.NewRequest(http.MethodPost, "/api/v1/storage/plans", bytes.NewBufferString(`{"diskIds":["disk:fake-data-01"]}`))
 	planRequest.Header.Set("Content-Type", "application/json")
 	planRequest.Header.Set("X-CSRF-Token", session.CSRFToken)
 	planRequest.AddCookie(responseCookies[0])
@@ -456,5 +456,11 @@ func (failingCredentials) DisableCredential(context.Context, string) error { ret
 type apiVolumeExecutor struct{}
 
 func (apiVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, State: storage.VolumeStateAvailable}, nil
+	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
 }
+
+func (apiVolumeExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+	return storage.Volume{FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+}
+
+func (apiVolumeExecutor) ContinueConversion(context.Context) error { return storage.ErrNoConversion }

@@ -224,6 +224,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("DELETE /api/v1/users/{userID}", h.withMutation(h.handleDisableUser))
 	h.mux.HandleFunc("GET /api/v1/volumes", h.withSession(h.handleVolumes))
 	h.mux.HandleFunc("POST /api/v1/storage/plans", h.withMutation(h.handleCreateStoragePlan))
+	h.mux.HandleFunc("POST /api/v1/volumes/{volumeID}/conversion", h.withMutation(h.handleContinueConversion))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/confirm", h.withMutation(h.handleConfirmStoragePlan))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
@@ -850,13 +851,14 @@ func (h *productHandler) handleCreateStoragePlan(w http.ResponseWriter, r *http.
 		return
 	}
 	var request struct {
-		DiskID string `json:"diskId"`
+		DiskIDs []string       `json:"diskIds"`
+		Layout  storage.Layout `json:"layout"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
-	plan, err := h.storage.PlanCreateVolume(r.Context(), request.DiskID)
+	plan, err := h.storage.PlanVolume(r.Context(), request.DiskIDs, request.Layout)
 	if err != nil {
 		h.writeStorageError(w, r, err)
 		return
@@ -878,6 +880,32 @@ func (h *productHandler) handleVolumes(w http.ResponseWriter, r *http.Request, _
 		volumes = []storage.Volume{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": volumes})
+}
+
+// handleContinueConversion starts converting the data volume to its layout
+// now, after a shutdown or an error stopped the conversion.
+func (h *productHandler) handleContinueConversion(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if !h.requireAdministrator(w, session) {
+		return
+	}
+	if h.storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		return
+	}
+	volumes, err := h.storage.ListVolumes(r.Context())
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	if len(volumes) == 0 || volumes[0].ID != r.PathValue("volumeID") {
+		writeError(w, http.StatusNotFound, "not_found", "storage resource was not found")
+		return
+	}
+	if err := h.storage.ContinueConversion(r.Context()); err != nil {
+		h.writeStorageError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -1273,8 +1301,16 @@ func (h *productHandler) writeStorageError(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusGone, "plan_expired", err.Error())
 	case errors.Is(err, storage.ErrPlanState):
 		writeError(w, http.StatusConflict, "plan_state_conflict", err.Error())
-	case errors.Is(err, storage.ErrVolumeExists):
-		writeError(w, http.StatusConflict, "data_volume_exists", err.Error())
+	case errors.Is(err, storage.ErrVolumeUnavailable):
+		writeError(w, http.StatusConflict, "volume_unavailable", err.Error())
+	case errors.Is(err, storage.ErrVolumeBusy):
+		writeError(w, http.StatusConflict, "volume_busy", err.Error())
+	case errors.Is(err, storage.ErrNoConversion):
+		writeError(w, http.StatusConflict, "no_conversion", err.Error())
+	case errors.Is(err, storage.ErrInvalidLayout):
+		writeError(w, http.StatusUnprocessableEntity, "invalid_layout", err.Error())
+	case errors.Is(err, storage.ErrLayoutTooSmall):
+		writeError(w, http.StatusUnprocessableEntity, "layout_too_small", err.Error())
 	case errors.Is(err, storage.ErrOperationAttention), errors.Is(err, storage.ErrDiskChanged):
 		writeError(w, http.StatusServiceUnavailable, "operation_needs_attention", err.Error())
 	default:

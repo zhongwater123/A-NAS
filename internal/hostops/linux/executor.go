@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +60,9 @@ type Options struct {
 	MountUnitName string
 	SMBInterface  string
 	Now           func() time.Time
+	// Logger receives what background work, such as converting the data
+	// volume, reports after the request that started it returned.
+	Logger *slog.Logger
 }
 
 type Executor struct {
@@ -86,6 +90,9 @@ type Executor struct {
 	apps          map[string]int
 	appsPath      string
 	appsError     error
+	logger        *slog.Logger
+	conversionMu  sync.Mutex
+	converting    bool
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -112,6 +119,10 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	}
 	if executor.now == nil {
 		executor.now = time.Now
+	}
+	executor.logger = options.Logger
+	if executor.logger == nil {
+		executor.logger = slog.Default()
 	}
 	executor.registryPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "space-registry.json")
 	executor.registryError = executor.loadSpaceRegistry()
@@ -380,107 +391,6 @@ func (e *Executor) registerSpaces(spaces map[string]string) error {
 func withinDirectory(root, path string) bool {
 	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}
-
-func (e *Executor) CreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || strings.TrimSpace(request.DiskID) == "" || strings.TrimSpace(request.Fingerprint) == "" {
-		return storage.Volume{}, errors.New("invalid create-volume request")
-	}
-	device, err := e.resolver.ResolveDevice(ctx, request.DiskID)
-	if err != nil {
-		return storage.Volume{}, fmt.Errorf("resolve stable disk ID: %w", err)
-	}
-	if device.Disk.ID.String() != request.DiskID || storage.FingerprintDisk(device.Disk) != request.Fingerprint {
-		return storage.Volume{}, storage.ErrDiskChanged
-	}
-	if device.Disk.Role != hoststate.DiskRoleUnassigned || device.Disk.InUse || device.Disk.Removable || (device.Disk.Transport != hoststate.TransportSATA && device.Disk.Transport != hoststate.TransportNVMe) {
-		return storage.Volume{}, storage.ErrDiskNotEligible
-	}
-	if !validDevicePath(device.DevicePath) || !validDevicePath(device.PartitionPath) || device.DevicePath == device.PartitionPath {
-		return storage.Volume{}, errors.New("resolved block-device path is invalid")
-	}
-	commands := []struct {
-		name string
-		args []string
-	}{
-		{name: "wipefs", args: []string{"--all", device.DevicePath}},
-		{name: "parted", args: []string{"--script", device.DevicePath, "mklabel", "gpt", "mkpart", "primary", "btrfs", "1MiB", "100%"}},
-		{name: "partprobe", args: []string{device.DevicePath}},
-		{name: "udevadm", args: []string{"settle", "--timeout=10"}},
-		{name: "mkfs.btrfs", args: []string{"--force", "--label", "ANAS_DATA", device.PartitionPath}},
-	}
-	for _, command := range commands {
-		if _, err := e.runner.Run(ctx, command.name, command.args, ""); err != nil {
-			return storage.Volume{}, fmt.Errorf("%s failed: %w", command.name, err)
-		}
-	}
-	uuidBytes, err := e.runner.Run(ctx, "blkid", []string{"--output", "value", "--match-tag", "UUID", device.PartitionPath}, "")
-	if err != nil {
-		return storage.Volume{}, fmt.Errorf("read Btrfs UUID: %w", err)
-	}
-	uuid := strings.TrimSpace(string(uuidBytes))
-	if !regexp.MustCompile(`^[0-9A-Fa-f-]{16,64}$`).MatchString(uuid) {
-		return storage.Volume{}, errors.New("blkid returned an invalid filesystem UUID")
-	}
-	if err := os.MkdirAll(e.mountPoint, 0o750); err != nil {
-		return storage.Volume{}, fmt.Errorf("create mount point: %w", err)
-	}
-	unit := fmt.Sprintf(`[Unit]
-Description=A-NAS data volume
-After=local-fs-pre.target
-Before=local-fs.target
-
-[Mount]
-What=UUID=%s
-Where=%s
-Type=btrfs
-Options=noatime,compress=zstd:3,nodev,nosuid,noexec
-TimeoutSec=30
-
-[Install]
-WantedBy=local-fs.target
-`, uuid, e.mountPoint)
-	unitPath := filepath.Join(e.systemRoot, "etc", "systemd", "system", e.mountUnitName)
-	if err := writeAtomic(unitPath, []byte(unit), 0o644); err != nil {
-		return storage.Volume{}, fmt.Errorf("install data-volume mount unit: %w", err)
-	}
-	for _, command := range []struct {
-		name string
-		args []string
-	}{
-		{name: "systemctl", args: []string{"daemon-reload"}},
-		{name: "systemctl", args: []string{"enable", "--now", e.mountUnitName}},
-		{name: "btrfs", args: []string{"subvolume", "create", filepath.Join(e.mountPoint, "spaces")}},
-	} {
-		if _, err := e.runner.Run(ctx, command.name, command.args, ""); err != nil {
-			return storage.Volume{}, fmt.Errorf("%s failed after formatting: %w", command.name, err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(e.mountPoint, ".a-nas-snapshots"), 0o700); err != nil {
-		return storage.Volume{}, err
-	}
-	marker, err := json.Marshal(struct {
-		FilesystemUUID string `json:"filesystemUuid"`
-		DiskID         string `json:"diskId"`
-		FormatVersion  int    `json:"formatVersion"`
-	}{FilesystemUUID: uuid, DiskID: request.DiskID, FormatVersion: 1})
-	if err != nil {
-		return storage.Volume{}, err
-	}
-	if err := writeAtomic(filepath.Join(e.mountPoint, ".a-nas-volume.json"), append(marker, '\n'), 0o644); err != nil {
-		return storage.Volume{}, fmt.Errorf("write data-volume identity marker: %w", err)
-	}
-	if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
-		return storage.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
-	}
-	// Best effort: a failure only delays managed stores until the Host Agent's
-	// periodic repair, which logs it.
-	_, _ = e.EnsurePhotosStore(ctx)
-	_, _ = e.EnsureSharesStore(ctx)
-	return storage.Volume{
-		ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: uuid,
-		CapacityBytes: device.Disk.CapacityBytes, State: storage.VolumeStateAvailable,
-	}, nil
 }
 
 func validDevicePath(path string) bool {
