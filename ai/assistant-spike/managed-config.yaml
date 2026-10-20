@@ -18,10 +18,13 @@ model:
 # video send images and frames to the model: for testing only, until a local
 # model (decision 7). cronjob schedules tasks (user decision, 2026-10-20); they run
 # through anas-assistant-cron@.service, with the cron list: no one is there to answer a
-# question, and a job does not schedule more jobs.
+# question, and a job does not schedule more jobs. browser is Hermes's own browser tools,
+# served only by the member's VNAS window for the WebOS page it shows (browser control,
+# user decision 2026-10-20); with no window attached they are not offered, so a scheduled
+# task, which has no window, has none.
 platform_toolsets:
-  cli: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, anas]
-  api_server: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, anas]
+  cli: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, browser, anas]
+  api_server: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, browser, anas]
   cron: [file, terminal, code_execution, delegation, vision, video, memory, session_search, skills, todo, anas]
 agent:
   # Every toolset at the pinned commit except the ones above, including the ones tool
@@ -32,7 +35,7 @@ agent:
   # (debugging, safe) stay out: a disabled toolset removes every tool it resolves to, and
   # debugging includes the file tools. toolsets-check.py (run by probe.sh) checks all this.
   disabled_toolsets: [web, search, x_search, image_gen, video_gen, computer_use,
-    browser, tts, context_engine, connections, project, bot_room, desktop_ui, onboarding, catalog,
+    tts, context_engine, connections, project, bot_room, desktop_ui, onboarding, catalog,
     kanban, discord, discord_admin, yuanbao, feishu_doc, feishu_drive, coding,
     a2a, browser-cdp, browser-use]
   # Never switch to the coding posture (its own toolset and prompt) in a git workspace.
@@ -76,6 +79,13 @@ approvals:
   # A scheduled task runs with no one there to approve: a dangerous command, a script or
   # 提交更改 in it is refused (Hermes's default, made explicit; user decision, 2026-10-20).
   cron_mode: deny
+# Hermes's browser control: a client that logged in (Hermes's own login, assistant-start.sh)
+# may register as the browser for its session; the VNAS window does, for the WebOS page.
+# The browser tools then reach only that window, which never navigates away from WebOS,
+# and refuse otherwise (browser.backend "off" in the member's config: no Browser Use CLI).
+browser:
+  extension_control:
+    enabled: true
 security:
   allow_lazy_installs: false
   allow_private_urls: false
