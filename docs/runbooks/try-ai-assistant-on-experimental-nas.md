@@ -53,6 +53,7 @@
    粘贴密钥，回车，再按 Ctrl-D。
    - 完成标准：再次 `check` 显示 `key: /etc/anas-spike/model.key (600 root)`。
    - 密钥只写这一次：`install`、`update` 与 `remove` 都不动它，只有 `remove --purge-key` 删除它。
+   - 不用云端时跳过本步：以 `ANAS_TRIAL_UPSTREAM=http://127.0.0.1:11434`（NAS 上的 NVIDIA PAIR，尚未提供安装方式，见[局域网算力](../specs/lan-ai-compute.md)）、`ANAS_TRIAL_MODEL=<电脑上的 Ollama 模型标签>` 与 `ANAS_TRIAL_CONTEXT=<各电脑设置的 OLLAMA_CONTEXT_LENGTH>` 运行第 2、4 步与以后的 `update`；明文上游不需要密钥，`check` 显示 `key: none (plain HTTP)` 与上游是否有该模型。
 4. NAS（root）：安装。
    ```bash
    bash /root/assistant-trial-<提交>/spike/nas-trial.sh install

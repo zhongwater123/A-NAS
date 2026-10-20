@@ -1,10 +1,18 @@
 """Model gateway for the spike: the stand-in for the product service's gateway.
 
-Listens on the Unix socket bound into the sandbox, adds the provider key that
-only this process can read, forwards to an OpenAI-compatible upstream and logs
-every request (tools offered, messages) and the token usage it saw. With
-GATEWAY_LOG_MESSAGES=0 (the trial on the Experimental NAS, where the requests
-carry members' files) it logs how many messages there were instead of them.
+Listens on the Unix socket bound into the sandbox, forwards to an
+OpenAI-compatible upstream and logs every request (tools offered, messages) and
+the token usage it saw. With GATEWAY_LOG_MESSAGES=0 (the trial on the
+Experimental NAS, where the requests carry members' files) it logs how many
+messages there were instead of them.
+
+UPSTREAM is where the model runs:
+  api.deepseek.com          a cloud service over HTTPS; the gateway adds the key from
+                            KEY_FILE, which only this process can read
+  http://127.0.0.1:11434    NVIDIA PAIR on this NAS (its Ollama proxy), which sends the
+                            request to a paired computer on the LAN that has the model;
+                            or another plain-HTTP server, such as Ollama. It is never sent
+                            the key, and KEY_FILE is "-"
 """
 import http.client
 import json
@@ -12,11 +20,20 @@ import os
 import socketserver
 import sys
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-SOCK, LOG, UPSTREAM_HOST, KEY_FILE = sys.argv[1:5]
-KEY = open(KEY_FILE, encoding="utf-8").read().strip()
+SOCK, LOG, UPSTREAM, KEY_FILE = sys.argv[1:5]
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
+
+url = urllib.parse.urlsplit(UPSTREAM if "://" in UPSTREAM else "https://" + UPSTREAM)
+if url.scheme not in ("http", "https") or not url.hostname or url.path not in ("", "/") \
+        or url.query or url.fragment or url.username or url.password:
+    sys.exit(f"gateway: upstream {UPSTREAM!r} is not a host or an http(s)://host[:port] URL")
+SCHEME, HOST, PORT = url.scheme, url.hostname, url.port
+KEY = "" if KEY_FILE == "-" else open(KEY_FILE, encoding="utf-8").read().strip()
+if SCHEME == "https" and not KEY:
+    sys.exit("gateway: an HTTPS upstream needs the key file")
 
 
 def log(record):
@@ -33,16 +50,35 @@ class Handler(BaseHTTPRequestHandler):
     def address_string(self):
         return "uds"
 
+    def fail(self, status, message):
+        data = json.dumps({"error": {"message": message, "type": "upstream_unavailable"}}).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+        self.close_connection = True
+
     def forward(self, method, body=b""):
         if self.path.startswith("/api/show"):
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
-            return
-        upstream = http.client.HTTPSConnection(UPSTREAM_HOST, timeout=300)
-        headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*")}
-        upstream.request(method, self.path, body=body or None, headers=headers)
-        resp = upstream.getresponse()
+            return 404, None
+        kind = http.client.HTTPSConnection if SCHEME == "https" else http.client.HTTPConnection
+        conn = kind(HOST, PORT, timeout=300)
+        headers = {"Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*")}
+        if SCHEME == "https":
+            headers["Authorization"] = f"Bearer {KEY}"
+        try:
+            conn.request(method, self.path, body=body or None, headers=headers)
+            resp = conn.getresponse()
+        except (OSError, http.client.HTTPException) as err:
+            # PAIR not running, or no paired computer that has the model answered in time.
+            conn.close()
+            self.fail(502, f"model gateway: {UPSTREAM}: {err}")
+            return 502, None
         self.send_response(resp.status)
         self.send_header("Content-Type", resp.getheader("Content-Type", "application/json"))
         self.send_header("Connection", "close")
@@ -55,7 +91,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             try:
                 usage = json.loads(data).get("usage")
-            except ValueError:
+            except (ValueError, AttributeError):
                 pass
         else:
             self.end_headers()
@@ -69,6 +105,7 @@ class Handler(BaseHTTPRequestHandler):
                         usage = json.loads(line[6:]).get("usage") or usage
                     except ValueError:
                         pass
+        conn.close()
         self.close_connection = True
         return resp.status, usage
 
@@ -82,8 +119,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             body = {}
         started = time.time()
-        result = self.forward("POST", raw)
-        status, usage = result if result else (404, None)
+        status, usage = self.forward("POST", raw)
         log({"t": started, "seconds": round(time.time() - started, 2), "path": self.path, "status": status,
              "model": body.get("model"), "stream": bool(body.get("stream")),
              "tools": [t.get("function", {}).get("name") for t in body.get("tools") or []],

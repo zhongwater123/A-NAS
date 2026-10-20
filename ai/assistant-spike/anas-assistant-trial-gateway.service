@@ -7,10 +7,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Holds the cloud model's key, which no sandbox can read, and forwards the
-# assistants' requests. The requests carry members' files: the log keeps
-# token usage and tool names, not messages, and only root reads it.
+# assistants' requests, or forwards them to NVIDIA PAIR on this NAS, which gets
+# no key (@KEY@ is then -) and sends them on to a paired computer. The requests carry
+# members' files: the log keeps token usage and tool names, not messages, and
+# only root reads it.
 Environment=GATEWAY_LOG_MESSAGES=0
-ExecStart=/usr/bin/python3 /spike/gateway.py /run/anas-assistant-gw/model.sock /var/log/anas-assistant-gateway/requests.jsonl @UPSTREAM@ /etc/anas-spike/model.key
+ExecStart=/usr/bin/python3 /spike/gateway.py /run/anas-assistant-gw/model.sock /var/log/anas-assistant-gateway/requests.jsonl @UPSTREAM@ @KEY@
 LogsDirectory=anas-assistant-gateway
 LogsDirectoryMode=0700
 UMask=0077

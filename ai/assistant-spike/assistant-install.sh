@@ -5,7 +5,8 @@
 # spike's hand-made layout, ai/assistant-spike/system-test.sh on the real installer's.
 #   assistant-install.sh ACCOUNT...
 # Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
-# run.sh; ASSISTANT_LAYOUT=members to leave the folders on the volume as they are (the
+# run.sh; SPIKE_CONTEXT, the model's context length (default 128000), which must match what
+# the model's server gives it; ASSISTANT_LAYOUT=members to leave the folders on the volume as they are (the
 # trial's update; assistant-layout.sh members); SPIKE_MODEL_GATEWAY=external when the caller runs the model gateway itself (the
 # trial on the Experimental NAS, nas-trial.sh); PRODUCT_USER, the account of the product service, which alone may connect to the
 # broker's product socket; ASSISTANT_GATE=host-agent when the Host Agent's File Broker is the
@@ -36,7 +37,9 @@ else
   install -m 0644 /dev/null /etc/a-nas-assistant/SOUL.md  # no runtime: only the probe runs
 fi
 cp -r "$here/skills/." /opt/a-nas/assistant-skills/ && chown -R root:root /opt/a-nas/assistant-skills && chmod -R u=rwX,go=rX /opt/a-nas/assistant-skills
-sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 86400$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-86400}/" \
+# Model names on LAN computers can have / and : in them (hf.co/org/repo:Q4_K_M).
+sed -e "s|spike-model|${SPIKE_MODEL:-spike-model}|" -e "s/^  timeout: 86400$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-86400}/" \
+  -e "s/^  context_length: 128000$/  context_length: ${SPIKE_CONTEXT:-128000}/" \
   "$here/managed-config.yaml" > /etc/hermes/config.yaml
 chmod 0644 /etc/hermes/config.yaml
 
