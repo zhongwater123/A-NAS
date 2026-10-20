@@ -30,7 +30,7 @@ check() {
 inside() {
   local user=$1 pid
   shift
-  pid=$(pgrep -u "$user" -f 'hermes serve' | head -1)
+  pid=$(pgrep -u "$user" -f serve_nondumpable | head -1)
   nsenter -t "$pid" -m -- setpriv --reuid "$user" --regid "$user" --groups 20000 -- "$@"
 }
 host() { local user=$1; shift; setpriv --reuid "$user" --regid "$user" --groups 20000 -- "$@"; }
@@ -52,6 +52,8 @@ check "alice's assistant opens a shared photo" ok "IMG_7001" -- inside alice pyt
 check "alice's assistant cannot open bob's private photo" fail "not_found" -- inside alice python3 "$peer" "$bound" get "$bob_beach"
 check "a session token sent along changes nothing" fail "not_found" -- inside alice python3 "$peer" "$bound" --session seed-bob get "$bob_beach"
 check "no thumbnails through the assistant socket" fail "not_found" -- inside alice python3 "$peer" "$bound" thumbnail "$alice_beach"
+check "a photo's view, for the model to look at, is a JPEG" ok "image/jpeg" -- inside alice python3 "$peer" "$bound" view "$alice_beach"
+check "and the view of bob's private photo is out of reach" fail "not_found" -- inside alice python3 "$peer" "$bound" view "$bob_beach"
 check "no renaming through the assistant socket" fail "not_found" -- inside alice python3 "$peer" "$bound" rename "$alice_beach"
 check "the photo service's own session socket is out of reach" unreachable -- inside alice python3 "$peer" /run/a-nas-photos/photos.sock --session seed-alice libraries
 check "the assistant socket's real path is out of reach" unreachable -- inside alice python3 "$peer" "$hidden" libraries
@@ -60,11 +62,11 @@ echo "--- on the host, outside any sandbox"
 check "a member's own process cannot reach the real path" unreachable -- host alice python3 "$peer" "$hidden" libraries
 check "the sandbox path is only an empty file on the host" unreachable -- host alice python3 "$peer" "$bound" libraries
 check "root at the other end is a wiring fault, not a member" fail "photos_unavailable" -- python3 "$peer" "$hidden" libraries
-check "another member cannot reach it through alice's /proc" unreachable -- host bob python3 "$peer" "/proc/$(pgrep -u alice -f 'hermes serve' | head -1)/root$bound" libraries
+check "another member cannot reach it through alice's /proc" unreachable -- host bob python3 "$peer" "/proc/$(pgrep -u alice -f serve_nondumpable | head -1)/root$bound" libraries
 # Not a boundary: a process of the same member reaches the sandbox's mount namespace through
 # /proc/<pid>/root when ptrace is open to the same UID (Yama ptrace_scope 0, as on the
 # Experimental NAS). It gets that member's own photos, read-only, as the assistant does.
-pid=$(pgrep -u alice -f 'hermes serve' | head -1)
+pid=$(pgrep -u alice -f serve_nondumpable | head -1)
 echo "INFO ptrace_scope $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo unknown); alice's own process through /proc/$pid/root: $(host alice python3 "$peer" "/proc/$pid/root$bound" libraries 2>&1 | head -c 120)"
 
 echo "--- the photo service restarts while an assistant runs"
@@ -76,13 +78,13 @@ echo "--- the photo service restarts while an assistant runs"
 holder=$!
 sleep 5
 answered() { for _ in $(seq 1 30); do inside alice python3 "$peer" "$bound" libraries >/dev/null 2>&1 && return; sleep 1; done; }
-pid=$(pgrep -u alice -f 'hermes serve' | head -1)
+pid=$(pgrep -u alice -f serve_nondumpable | head -1)
 systemctl restart photos-spike
 answered
 check "alice's running assistant reaches the restarted service" ok "private:user:alice" -- inside alice python3 "$peer" "$bound" libraries
 check "its photo tools still answer" ok "IMG_3101" -- inside alice "$py" -c \
   'import sys; sys.path.insert(0, "/spike"); import anas_mcp; print(anas_mcp.search_photos("海边").content[0].text)'
-check "the assistant was not restarted for it" ok "^$pid\$" -- pgrep -u alice -f 'hermes serve'
+check "the assistant was not restarted for it" ok "^$pid\$" -- pgrep -u alice -f serve_nondumpable
 systemctl stop photos-spike
 inside alice python3 "$peer" "$bound" libraries >/dev/null 2>&1
 check "a connection while the service is stopped starts it again" ok "^active" -- systemctl is-active photos-spike

@@ -135,6 +135,18 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	h.serve(w, r, content, "inline")
 }
+
+// view is a photo as a model looks at it, for members' AI assistants.
+func (h *handler) view(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	content, err := h.service.View(r.Context(), principal, r.PathValue("assetID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.serve(w, r, content, "inline")
+}
+
 func (h *handler) motion(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	content, err := h.service.OpenMotion(r.Context(), principal, r.PathValue("assetID"))

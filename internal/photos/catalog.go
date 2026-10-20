@@ -499,6 +499,8 @@ LEFT JOIN videos v ON v.object_id = a.object_id`
 
 type assetRecord struct {
 	Asset
+	// orientation is the EXIF orientation of the original (1 when upright).
+	orientation    int
 	objectID       string
 	motionObjectID string
 	motionName     string
@@ -531,6 +533,7 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	record.Duplicate = DuplicateRole(duplicate)
 	record.Thumbnail = ThumbnailState(thumbnail)
 	record.Width, record.Height = metadata.displaySize()
+	record.orientation = metadata.orientation
 	record.library.id = record.LibraryID
 	var err error
 	if record.ImportedAt, err = parseTime(importedAt); err != nil {

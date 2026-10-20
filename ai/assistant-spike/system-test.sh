@@ -53,10 +53,11 @@ check "the Product Service cannot connect to one directly" denied as a-nas pytho
 check "session tokens are root's alone" test "$(stat -c '%a %U' /etc/a-nas-assistant/tokens/alice.env 2>/dev/null)" = "600 root"
 check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spike-tokens/alice.token
 check "each member's weekly curator is enabled" systemctl is-enabled --quiet anas-assistant-curator@alice.timer anas-assistant-curator@bob.timer
-# The gate on, and the assistant's API in the Product Service (both off by default).
-printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/host-agent.env
-printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/anas-api.env
-{ systemctl restart anas-host-agent && systemctl restart anas-api; } || true
+# The session gate, the assistant's API in the Product Service and the photo service's socket
+# for assistants, all off by default, switched on the way the trial does it.
+bash /spike/product-settings.sh on >/tmp/product-settings.log 2>&1 || tail -n 5 /tmp/product-settings.log
+check "the assistant's settings are on in the product's services" \
+  test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 changes_socket='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas/assistant-changes.sock")'
 check "the executor's assistant socket is out of a member's reach outside the sandbox" denied as alice python3 -c "$changes_socket"
@@ -236,6 +237,25 @@ if [[ -x "$assistant_python" ]]; then
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"
+  # Her photos (decision 6, #113): the photo service's socket, held by systemd and bound into
+  # her sandbox, answers her UID with her own library and the shared one, read-only.
+  # The unit's main process (tini) shares the sandbox's mount namespace.
+  alice_pid=$(systemctl show -p MainPID --value anas-assistant@alice.service)
+  in_alice_sandbox() {
+    nsenter -t "$alice_pid" -m -- setpriv --reuid alice --regid alice --init-groups -- \
+      "$assistant_python" /spike/photos_peer.py /run/anas-assistant-photos/photos.sock "$@"
+  }
+  sandbox_libraries=$(in_alice_sandbox libraries 2>&1 || true)
+  check "her assistant reaches her photo library and the shared one" \
+    grep -qE 'private:.*shared:|shared:.*private:' <<<"$sandbox_libraries"
+  check "and finds her photo" grep -q photo.png <<<"$(in_alice_sandbox search photo 2>&1 || true)"
+  alice_photo=$(in_alice_sandbox ids photo 2>/dev/null | grep -o 'photo.png=[^,'"'"' ]*' | cut -d= -f2 || true)
+  renamed=0
+  in_alice_sandbox rename "$alice_photo" >/dev/null 2>&1 || renamed=$?
+  check "but cannot rename it" test "$renamed" = 1
+  photo_out=$("$assistant_python" /spike/serve_client.py alice chat 'CALL mcp__anas__search_photos {"query": "photo"}' 2>&1 || true)
+  check "Hermes's photo search tool returns it" grep -q photo.png <<<"$photo_out"
+  echo "INFO assistant photos: $sandbox_libraries"
   check "it runs under alice's own UID" \
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
   check "the first model request offers the A-NAS MCP tool" \
@@ -280,6 +300,20 @@ if [[ -x "$assistant_python" ]]; then
   check "signing out cuts the window's connection to the instance" \
     test "$(sed -n 's/^closed after \([0-9]*\) s.*/\1/p' /tmp/gate.out)" -le 40
   echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate.out)"
+  # The Product Service keeps a member's assistant running while they are signed in: alice is
+  # still signed in with /tmp/alice.jar (above). Once she signs out everywhere it exits idle;
+  # signing in starts it in the background, with no window open, and keeps it running.
+  check "she signs out of her last session" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/session")" = 204
+  for _ in $(seq 1 180); do systemctl is-active --quiet anas-assistant@alice.service || break; sleep 0.5; done
+  check "once she is signed out everywhere her assistant exits idle" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
+  keep_csrf=$(login alice "$new_password" /tmp/alice-keep.jar || true)
+  for _ in $(seq 1 120); do systemctl is-active --quiet anas-assistant@alice.service && break; sleep 0.5; done
+  check "signing in starts her assistant with no window open" systemctl is-active --quiet anas-assistant@alice.service
+  sleep 50
+  check "it keeps running while she is signed in, past the idle exit" systemctl is-active --quiet anas-assistant@alice.service
+  check "she signs out again" \
+    test "$(status_of -b /tmp/alice-keep.jar -H "X-CSRF-Token: $keep_csrf" -X DELETE "$api/api/v1/session")" = 204
   # Hermes's curator as the weekly timer starts it: in alice's sandbox, only while her
   # assistant is not running.
   systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
@@ -287,6 +321,8 @@ if [[ -x "$assistant_python" ]]; then
   check "Hermes's curator runs in her sandbox while her assistant is stopped" \
     test "$(systemctl show -p Result --value anas-assistant-curator@alice.service)" = success -a -s "$data/assistant/alice/hermes/skills/.curator_state"
   echo "INFO assistant curator: $(journalctl -u anas-assistant-curator@alice.service -o cat --no-pager | grep -m 1 '^auto:' || true)"
+  # The system test's last check uses /tmp/alice.jar.
+  alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).
