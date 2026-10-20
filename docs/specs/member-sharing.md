@@ -1,6 +1,6 @@
 # 成员文件分享
 
-状态：implemented（PR #123 已合并，用户报告已部署；HTTP 兼容与界面修复待部署；界面重排见本分支）
+状态：implemented（PR #123 已合并，用户报告已部署；HTTP 兼容与界面修复待部署；界面重排见 [PR #157](https://github.com/zhongwater123/A-NAS/pull/157)）
 更新时间：2026-10-20
 
 ## 目标
