@@ -233,6 +233,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/volumes/{volumeID}/conversion", h.withMutation(h.handleContinueConversion))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/confirm", h.withMutation(h.handleConfirmStoragePlan))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
+	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/cancel", h.withMutation(h.handleCancelStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
 	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
 	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
@@ -949,6 +950,22 @@ func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http
 		return
 	}
 	plan, err := h.storage.ExecutePlan(r.Context(), r.PathValue("planID"))
+	if err != nil {
+		h.writeStorageError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
+}
+
+func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if !h.requireAdministrator(w, session) {
+		return
+	}
+	if h.storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		return
+	}
+	plan, err := h.storage.CancelPlan(r.Context(), r.PathValue("planID"))
 	if err != nil {
 		h.writeStorageError(w, r, err)
 		return

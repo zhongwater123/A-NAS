@@ -335,3 +335,4 @@ export const createStoragePlan = (diskIds: string[], layout?: VolumeLayout) => r
 export const continueVolumeConversion = (volumeId: string) => request<void>(`/api/v1/volumes/${encodeURIComponent(volumeId)}/conversion`, json({}), true);
 export const confirmStoragePlan = (id: string, confirmationPhrase: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/confirm`, json({ confirmationPhrase }), true);
 export const executeStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/execute`, json({}), true);
+export const cancelStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/cancel`, json({}), true);

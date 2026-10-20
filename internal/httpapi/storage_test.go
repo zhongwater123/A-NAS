@@ -41,7 +41,16 @@ func TestStoragePlansOnSeveralDisksFollowTheContract(t *testing.T) {
 	admin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 
 	admin.do(http.MethodPost, "/api/v1/storage/plans", `{"diskIds":["disk:fake-data-01"],"layout":"mirror"}`, nil, http.StatusUnprocessableEntity)
-	response := admin.do(http.MethodPost, "/api/v1/storage/plans", `{"diskIds":["disk:fake-data-01","disk:fake-data-02"]}`, nil, http.StatusCreated)
+	response := admin.do(http.MethodPost, "/api/v1/storage/plans", `{"diskIds":["disk:fake-data-01"]}`, nil, http.StatusCreated)
+	var abandoned storage.ExecutionPlan
+	if err := json.Unmarshal(response.Body.Bytes(), &abandoned); err != nil {
+		t.Fatal(err)
+	}
+	admin.do(http.MethodPost, "/api/v1/storage/plans/"+abandoned.ID+"/cancel", `{}`, nil, http.StatusOK)
+	admin.do(http.MethodPost, "/api/v1/storage/plans/"+abandoned.ID+"/execute", `{}`, nil, http.StatusConflict)
+	// A reload forgets a pending plan; the next one takes its place.
+	admin.do(http.MethodPost, "/api/v1/storage/plans", `{"diskIds":["disk:fake-data-02"]}`, nil, http.StatusCreated)
+	response = admin.do(http.MethodPost, "/api/v1/storage/plans", `{"diskIds":["disk:fake-data-01","disk:fake-data-02"]}`, nil, http.StatusCreated)
 	var plan storage.ExecutionPlan
 	if err := json.Unmarshal(response.Body.Bytes(), &plan); err != nil {
 		t.Fatal(err)
@@ -51,6 +60,7 @@ func TestStoragePlansOnSeveralDisksFollowTheContract(t *testing.T) {
 	}
 	admin.do(http.MethodPost, "/api/v1/storage/plans/"+plan.ID+"/confirm", `{"confirmationPhrase":"`+plan.ConfirmationPhrase+`"}`, nil, http.StatusOK)
 	admin.do(http.MethodPost, "/api/v1/storage/plans/"+plan.ID+"/execute", `{}`, nil, http.StatusOK)
+	admin.do(http.MethodPost, "/api/v1/storage/plans/"+plan.ID+"/cancel", `{}`, nil, http.StatusConflict)
 
 	response = admin.do(http.MethodGet, "/api/v1/volumes", "", nil, http.StatusOK)
 	var volumes struct{ Items []storage.Volume }
