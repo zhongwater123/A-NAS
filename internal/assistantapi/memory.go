@@ -15,15 +15,14 @@ import (
 // the skills it made, from Hermes's own learning graph — the routes Hermes
 // Desktop's star map uses (docs/research/hermes-agent-runtime.md, "记忆与自建技能").
 // Only reading and deleting are passed; Hermes keeps a deleted skill in its
-// archive, as it does everywhere.
+// archive, as it does everywhere. A-NAS's own skills come from
+// skills.external_dirs, which Hermes leaves out of the graph and refuses to
+// delete; the graph is taken as it is, whatever a skill is named: the
+// assistant may well call one it made anas-photos.
 
 // memoryIDPattern bounds a learning-graph id: memory:<store>:<n>:<fingerprint>
 // or a skill's name. An id must also be in the graph just read.
 var memoryIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$`)
-
-// systemSkills are A-NAS's own, read-only to the assistant; they are never the
-// member's to delete.
-const systemSkillPrefix = "anas-"
 
 type memoryItem struct {
 	ID string `json:"id"`
@@ -93,9 +92,6 @@ func (h *handler) learning(ctx context.Context, account string) (learned, error)
 			text := bodies[node.Source+":"+parts[len(parts)-1]]
 			result.Memories = append(result.Memories, memoryItem{ID: node.ID, Store: node.Source, Text: text, UpdatedAt: node.Timestamp})
 		case "skill":
-			if strings.HasPrefix(node.ID, systemSkillPrefix) {
-				continue
-			}
 			result.Skills = append(result.Skills, learnedSkill{ID: node.ID, Category: node.Category, CreatedBy: node.CreatedBy,
 				UseCount: node.UseCount, UpdatedAt: node.Timestamp})
 		}

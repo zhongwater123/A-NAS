@@ -618,7 +618,7 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 
 ### “记忆”页的接口草案
 
-产品服务的 `/api/v1/assistant` 增加下面几条，只作用于本人的实例，写操作要 CSRF 令牌，管理员与其他成员不能调用。2026-10-16 已按此实现（[`memory.go`](../../internal/assistantapi/memory.go)、窗口 [`MemoryView.tsx`](../../web/src/assistant/MemoryView.tsx)），经会话闸门到达实例；`POST /api/memory/reset` 的退路没有做，清除只逐条删除。`anas-` 开头的技能是 A-NAS 的系统技能，产品服务不列出，也不让删除。本地原型中用 DeepSeek 实测：请助手记住两件事后，“记忆”页列出两条（都记在“关于你”，即 `USER.md`），删除一条后剩一条，“全部清除”连同对话后记忆与对话都为空。
+产品服务的 `/api/v1/assistant` 增加下面几条，只作用于本人的实例，写操作要 CSRF 令牌，管理员与其他成员不能调用。2026-10-16 已按此实现（[`memory.go`](../../internal/assistantapi/memory.go)、窗口 [`MemoryView.tsx`](../../web/src/assistant/MemoryView.tsx)），经会话闸门到达实例；`POST /api/memory/reset` 的退路没有做，清除只逐条删除。A-NAS 的系统技能在 `skills.external_dirs` 中，Hermes 不把它们列进学习图，也拒绝删除；产品服务不再按名字另行过滤：原先跳过 `anas-` 开头的技能，把后台复盘自建的 `anas-photos` 也藏了起来（2026-10-20，[调查](../investigations/2026-10-20-assistant-skills-hidden-by-name.md)）。本地原型中用 DeepSeek 实测：请助手记住两件事后，“记忆”页列出两条（都记在“关于你”，即 `USER.md`），删除一条后剩一条，“全部清除”连同对话后记忆与对话都为空。
 
 | 接口 | 做法 |
 |---|---|
