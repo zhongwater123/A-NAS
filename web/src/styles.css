@@ -373,6 +373,8 @@ button { font: inherit; }
 /* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
 .icon-backup { background: linear-gradient(155deg, #3ddbc4, #0f8ea3); }
 .icon-music { background: linear-gradient(155deg, #ff506d, #d92471); }
+/* 语音处理: indigo, the accent of its window. */
+.icon-voice { background: linear-gradient(155deg, #8b7bff, #5a44ea 55%, #4330d2); }
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
 .icon-ai { background: #fff; }
