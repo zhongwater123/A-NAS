@@ -83,6 +83,7 @@ describe("activity sentences", () => {
     expect(describeActivity(event({ action: "snapshot.schedule_updated", actor: owner, detail: "hourly 00:15 weekday=0 keep=24" }), owner.id).meta).toEqual(["每小时第 15 分 · 保留最近 24 份"]);
     expect(describeActivity(event({ action: "snapshot.schedule_updated", actor: owner, detail: "disabled" }), owner.id).meta).toEqual(["已关闭定时快照"]);
     expect(sentence(event({ action: "snapshot.expired", system: true, detail: "定时快照 2026-10-12 03:00", space: shared }))).toBe("系统 清理了到期的定时快照 定时快照 2026-10-12 03:00");
+    expect(sentence(event({ action: "snapshot.missing", system: true, detail: "定时快照 2026-10-12 03:00", space: shared }))).toBe("系统 移除了数据卷上已不存在的快照 定时快照 2026-10-12 03:00");
     expect(sentence(event({ action: "snapshot.folder_restored", actor: alice, detail: "snapshot:1" }))).toBe("alice 从快照恢复了 1 个文件夹");
   });
 
