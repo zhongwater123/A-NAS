@@ -138,6 +138,7 @@ stage() {
   install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
   install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
   install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
+  install -m 0644 /src/deploy/systemd/system/system-anasmedia.slice "$1/anas-media-system.slice"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
@@ -747,6 +748,38 @@ done
 curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$heif_file/content" -o /tmp/heif-original.heic
 check "HEIC download remains the original" cmp /tmp/preview.heic /tmp/heif-original.heic
 check "Product Service cannot open the HEIC source itself" denied as a-nas cat "$data/spaces/shared/preview.HEIC"
+
+# The services take turns from shared slots before they connect (issue #168):
+# with every slot held elsewhere, a preview waits for one instead of failing.
+check "the media worker's slots are open to its callers only" \
+  test "$(stat -c '%a %U %G' /run/a-nas-media/slots):$(find /run/a-nas-media/slots -type f -perm 0440 | wc -l)" = "750 root a-nas-photos:8"
+# Each account with the groups its unit gives it.
+for account in a-nas:a-nas-photos,a-nas-shares a-nas-photos:a-nas-photos a-nas-shares:a-nas-photos; do
+  check "${account%%:*} can take a media worker slot" \
+    setpriv --reuid="${account%%:*}" --regid="${account%%:*}" --groups="${account#*:}" flock -n /run/a-nas-media/slots/7 true
+done
+check "all media workers share one memory limit" test \
+  "$(systemctl show -p Slice --value anas-media@slot-check.service):$(systemctl show -p MemoryMax --value system-anasmedia.slice)" = "system-anasmedia.slice:3221225472"
+ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=teal:s=320x240 -frames:v 1 /tmp/slots.png
+heif-enc -o /tmp/slots.heic /tmp/slots.png >/tmp/heif-encode.log 2>&1
+slots_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
+  -F 'file=@/tmp/slots.heic;filename=slots.HEIC' "$api/api/v1/spaces/$shared/uploads" | jq -r .id)
+slot_holders=()
+for slot in 0 1 2 3 4 5 6 7; do
+  flock -n -o "/run/a-nas-media/slots/$slot" sleep 60 &
+  slot_holders+=("$!")
+done
+sleep 0.5
+# Only someone waiting can take the top slot: neither streams nor background
+# work reach it.
+(sleep 2; kill "${slot_holders[7]}") &
+slot_releaser=$!
+waited_from=$(date +%s%N)
+slot_status=$(status_of -b /tmp/alice.jar "$api/api/v1/files/$slots_file/preview?size=thumbnail")
+waited_ms=$(( ($(date +%s%N) - waited_from) / 1000000 ))
+kill "${slot_holders[@]:0:7}" 2>/dev/null || true
+wait "${slot_holders[@]}" "$slot_releaser" 2>/dev/null || true
+check "a preview waits for a slot other processes hold, then renders" test "$slot_status:$((waited_ms >= 1500))" = "200:1"
 
 media_library=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
   -d "{\"name\":\"Movies\",\"kind\":\"movies\",\"spaceId\":\"$shared\",\"folderIds\":[\"$movies_dir\"]}" \

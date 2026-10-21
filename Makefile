@@ -125,6 +125,14 @@ ops-check:
 	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-media@.service
 	grep -Fq 'InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas' deploy/systemd/system/anas-media@.service
 	grep -Fq 'anas-media-system@.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'anas-media-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq '/etc/systemd/system/system-anasmedia.slice' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'Slice=system-anasmedia.slice' deploy/systemd/system/anas-media@.service
+	grep -Fqx 'MemoryMax=3G' deploy/systemd/system/system-anasmedia.slice
+	grep -Fqx 'MaxConnections=16' deploy/systemd/system/anas-media.socket
+	grep -Fq '"/run/a-nas-media/slots"' cmd/anas-api/main.go
+	grep -Fqx 'const Slots = 8' internal/mediaworker/admission.go
+	grep -Fq 'for slot in 0 1 2 3 4 5 6 7; do' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'ffmpeg ffprobe heif-thumbnailer; do' scripts/install-v1.0.1-system-services.sh
 	! grep -E '^[A-Za-z0-9_.-]+==' ai/requirements.lock | grep -v -- ' --hash=sha256:[0-9a-f]\{64\}$$'
 

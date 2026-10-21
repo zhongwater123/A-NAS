@@ -1,0 +1,17 @@
+[Unit]
+Description=A-NAS media workers
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Slice]
+# Every connection to anas-media.socket runs its own anas-media@ instance,
+# each limited to 2G; up to 8 run at once (the shared slots). Together they
+# stay within this, so a busy evening of transcodes on an 8 GB device cannot
+# take the memory the rest of A-NAS needs; past it the kernel reclaims, then
+# ends a worker in this slice rather than elsewhere (issue #168).
+MemoryMax=3G
+# The slice sits in system.slice beside the other services, not in the
+# background anas.slice: playback is someone watching. It still yields when
+# both want a core or the disk. IOWeight takes effect only under BFQ or
+# io.cost (docs/investigations/2026-10-13-idle-detection-used-one-core.md).
+CPUWeight=50
+IOWeight=50
