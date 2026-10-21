@@ -9,6 +9,7 @@ import os
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 
 from anas_ai import providers
 from finetune import build_triplets, server, similarity
@@ -205,6 +206,50 @@ class FinetuneScriptsTest(unittest.TestCase):
             r2 = finetune_eval.evaluate(trip, ProviderEmbedder(TextFakeProvider(64)))
             self.assertEqual(r2["anchors"], r["anchors"])
 
+
+class EvalDocsTest(unittest.TestCase):
+    def test_chunking_and_evaluation(self):
+        from finetune import eval_docs
+        nl = chr(10)
+        with tempfile.TemporaryDirectory() as d:
+            docs = os.path.join(d, "docs")
+            os.makedirs(os.path.join(docs, "specs"))
+            body = nl.join(["# 相册", "", "开头一段。", "", "## 回收站", "",
+                            "照片删除后进入回收站，三十天内可以恢复，恢复后回到原相册。",
+                            "```", "# 代码块里的井号不是标题", "```", "", "## 搜索", "",
+                            "用中文描述搜索照片，结果按相似度排序。", ""])
+            with open(os.path.join(docs, "specs", "a.md"), "w", encoding="utf-8") as f:
+                f.write(body)
+            with open(os.path.join(docs, "README.md"), "w", encoding="utf-8") as f:
+                f.write(nl.join(["# 索引", "", "被跳过的文件。", ""]))
+            chunks = eval_docs.chunk_markdown(Path(docs), min_chars=5)
+            ids = [c.id for c in chunks]
+            self.assertIn("specs/a.md#回收站", ids)
+            self.assertIn("specs/a.md#搜索", ids)
+            self.assertTrue(all(c.path == "specs/a.md" for c in chunks))
+            self.assertNotIn("specs/a.md#代码块里的井号不是标题", ids)
+            queries = [{"q": "删掉的照片多久内还能恢复", "target": "specs/a.md#回收站"},
+                       {"q": "怎么用一句话找照片", "target": ["specs/a.md#搜索"]}]
+            r = eval_docs.evaluate(chunks, queries, HashEmbedder(256), "retrieval")
+            for k in ("hit@1", "hit@5", "hit@10", "mrr@10", "file_hit@1", "file_hit@5"):
+                self.assertIn(k, r)
+            self.assertEqual(r["file_hit@1"], 1.0)   # 只有一篇文档
+            self.assertGreaterEqual(r["hit@5"], r["hit@1"])
+
+    def test_truncated_wrapper(self):
+        from finetune.eval_docs import Truncated
+        t = Truncated(HashEmbedder(64), 16)
+        v = t.embed(["hello world"])[0]
+        self.assertEqual(len(v), 16)
+        self.assertAlmostEqual(cosine(v, v), 1.0, places=6)
+        self.assertEqual(t.name, "hash-ngram->16")
+
+    def test_long_path_reader(self):
+        from finetune.eval_docs import _read_text
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.md"
+            p.write_text("内容", encoding="utf-8")
+            self.assertEqual(_read_text(p), "内容")
 
 if __name__ == "__main__":
     unittest.main()
