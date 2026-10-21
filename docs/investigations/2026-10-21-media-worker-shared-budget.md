@@ -57,7 +57,7 @@
   - `internal/photos`：Worker 缺席比 3 次尝试更久时缩略图与检测最终完成且次数为 0；中途停止与超时各计一次，`interrupted` 不在启动时恢复而 `io` 会；停止时任务带着次数退回；崩溃遗留的任务立即重新排队并保留次数（[`workerwait_test.go`](../../internal/photos/workerwait_test.go)）。
   - `internal/music`：`TestLengthsAndCoversWaitForAWorkerThatIsAway`。
   - 修复前的代码上，相册与音乐的新测试都失败（见“最小复现”）；修复后 `go test -race` 覆盖的 `mediaworker`、`photos`、`photoservice`、`music`、`media` 全部通过。
-  - 系统测试新增：槽位目录与文件的权限、三个服务账号各自能取得槽位、实例位于 `system-anasmedia.slice` 且其 `MemoryMax` 为 3G，以及在 8 个槽位都被其他进程持有时，一个 HEIC 预览等到槽位放开后返回 200（[`system-test.sh`](../../scripts/system-test.sh)）。
+  - 系统测试新增：槽位目录与文件的权限、三个服务账号各自能取得槽位、实例位于 `system-anasmedia.slice` 且其 `MemoryMax` 为 3G，以及在 8 个槽位都被其他进程持有时，一个 HEIC 预览等到槽位放开后返回 200（[`system-test.sh`](../../scripts/system-test.sh)）。2026-10-21 在开发机的 Debian 13 systemd 容器中运行：263 项通过，新增检查与原有的 HEIC、实况照片、影视与音乐检查全部通过；失败的 2 项是本机镜像（2026-10-14 构建）缺少 10-15 才加入的 ripgrep，与本修复无关。
 
 ## 后续工作
 
