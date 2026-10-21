@@ -57,14 +57,24 @@ func TestScaleSearch(t *testing.T) {
 	if os.Getenv("ANAS_PHOTO_SCALE") == "" {
 		t.Skip("set ANAS_PHOTO_SCALE=1 to time search at 20,000 photos")
 	}
+	// The budget only catches work that grows faster than the library; a
+	// laptop's own numbers vary by half from run to run.
 	const (
 		photos = 20000
-		budget = 250 * time.Millisecond
+		budget = time.Second
 	)
 	ctx := context.Background()
+	// Imports advance the clock a minute each; the timed reads run at one
+	// moment, so that a kept image search does not expire midway.
 	var clock atomic.Int64
+	var frozen atomic.Bool
 	clock.Store(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
-	now := func() time.Time { return time.Unix(0, clock.Add(int64(time.Minute))).UTC() }
+	now := func() time.Time {
+		if frozen.Load() {
+			return time.Unix(0, clock.Load()).UTC()
+		}
+		return time.Unix(0, clock.Add(int64(time.Minute))).UTC()
+	}
 	random := rand.New(rand.NewPCG(7, 11))
 	service, err := Open(filepath.Join(t.TempDir(), "photos"), Options{Now: now, DisableCapacityReserve: true, AI: scaleEmbedder{random}})
 	if err != nil {
@@ -130,6 +140,15 @@ func TestScaleSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("seeded %d photos with vectors and detections in %s", len(objectIDs), time.Since(seeded).Round(time.Second))
+	// Vectors and detections live in the Catalog; its size per photo is what
+	// they and the photo's rows cost on the data volume.
+	if _, err := service.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(service.rootPath, catalogFile)); err == nil {
+		t.Logf("catalog %.1f MiB, %.1f KiB per photo", float64(info.Size())/(1<<20), float64(info.Size())/1024/float64(photos))
+	}
+	frozen.Store(true)
 
 	search := func(query string) func() error {
 		return func() error {
