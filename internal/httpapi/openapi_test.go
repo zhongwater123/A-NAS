@@ -55,6 +55,8 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	mediaHandler := mediaAPIFor(movies.media, movies.admin)
 	mediaVideo := "/api/v1/media/videos/" + movies.film
 	feedbackHandler, feedbackItem := feedbackAPI(t)
+	voices := voiceAPI(t)
+	voicePath := "/api/v1/voice/recordings/" + voices.recording
 	transfer := transfersAPI(t)
 	tusHeaders := func(headers map[string]string) map[string]string {
 		headers["Tus-Resumable"] = "1.0.0"
@@ -88,6 +90,41 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		headers     map[string]string
 		wantStatus  int
 	}{
+		{name: "voice status", path: "/api/v1/voice/status", handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice recognizer settings", path: "/api/v1/voice/settings/recognizer", handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice recognizer settings for a member", path: "/api/v1/voice/settings/recognizer", handler: voices.member, wantStatus: http.StatusForbidden},
+		{name: "voice save recognizer", method: http.MethodPut, body: `{"mode":"apiKey","apiKey":"contract-key-1234"}`, path: "/api/v1/voice/settings/recognizer", handler: voices.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "voice save recognizer incomplete", method: http.MethodPut, body: `{"mode":"appKey","appId":"1"}`, path: "/api/v1/voice/settings/recognizer", handler: voices.handler, csrf: true, wantStatus: http.StatusBadRequest},
+		{name: "voice test recognizer", method: http.MethodPost, path: "/api/v1/voice/settings/recognizer/test", handler: voices.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "voice recordings", path: "/api/v1/voice/recordings", handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice import", method: http.MethodPost, body: `{"fileId":"` + voices.another + `","template":"interview","hotwords":["王老师"]}`, path: "/api/v1/voice/recordings", handler: voices.handler, csrf: true, wantStatus: http.StatusCreated},
+		{name: "voice import again", method: http.MethodPost, body: `{"fileId":"` + voices.another + `"}`, path: "/api/v1/voice/recordings", handler: voices.handler, csrf: true, wantStatus: http.StatusConflict},
+		{name: "voice import missing", method: http.MethodPost, body: `{"fileId":"file:missing"}`, path: "/api/v1/voice/recordings", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice import bad template", method: http.MethodPost, body: `{"fileId":"` + voices.another + `","template":"poem"}`, path: "/api/v1/voice/recordings", handler: voices.handler, csrf: true, wantStatus: http.StatusBadRequest},
+		{name: "voice recording", path: voicePath, handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice recording missing", path: "/api/v1/voice/recordings/recording:missing", handler: voices.handler, wantStatus: http.StatusNotFound},
+		{name: "voice rename", method: http.MethodPatch, body: `{"title":"十月周会"}`, path: voicePath, handler: voices.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "voice audio", path: voicePath + "/audio", handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice decoded audio", path: voicePath + "/audio?start=4.5", handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice edit sentence", method: http.MethodPatch, body: `{"text":"好，我们开始吧。"}`, path: voicePath + "/utterances/1", handler: voices.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "voice edit missing sentence", method: http.MethodPatch, body: `{"text":"x"}`, path: voicePath + "/utterances/999", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice name speaker", method: http.MethodPut, body: `{"name":"张三"}`, path: voicePath + "/speakers/s1", handler: voices.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "voice name missing speaker", method: http.MethodPut, body: `{"name":"张三"}`, path: voicePath + "/speakers/s99", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice reject unknown person", method: http.MethodPost, body: `{"personId":"person:missing"}`, path: voicePath + "/speakers/s1/reject", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice merge speakers", method: http.MethodPost, body: `{"into":"s1"}`, path: voicePath + "/speakers/s2/merge", handler: voices.handler, csrf: true, wantStatus: http.StatusOK},
+		{name: "voice merge into itself", method: http.MethodPost, body: `{"into":"s1"}`, path: voicePath + "/speakers/s1/merge", handler: voices.handler, csrf: true, wantStatus: http.StatusBadRequest},
+		{name: "voice translate", method: http.MethodPost, body: `{"language":"ja"}`, path: voicePath + "/translations", handler: voices.handler, csrf: true, wantStatus: http.StatusAccepted},
+		{name: "voice translate unknown language", method: http.MethodPost, body: `{"language":"tlh"}`, path: voicePath + "/translations", handler: voices.handler, csrf: true, wantStatus: http.StatusBadRequest},
+		{name: "voice summarize", method: http.MethodPost, body: `{"template":"lecture"}`, path: voicePath + "/summaries", handler: voices.handler, csrf: true, wantStatus: http.StatusAccepted},
+		{name: "voice delete translation", method: http.MethodDelete, path: voicePath + "/translations/en", handler: voices.handler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "voice delete missing summary", method: http.MethodDelete, path: voicePath + "/summaries/talk", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice retry ready", method: http.MethodPost, path: voicePath + "/retry", handler: voices.handler, csrf: true, wantStatus: http.StatusBadRequest},
+		{name: "voice people", path: "/api/v1/voice/people", handler: voices.handler, wantStatus: http.StatusOK},
+		{name: "voice rename missing person", method: http.MethodPatch, body: `{"name":"李四"}`, path: "/api/v1/voice/people/person:missing", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice merge missing people", method: http.MethodPost, body: `{"into":"person:other"}`, path: "/api/v1/voice/people/person:missing/merge", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice delete missing person", method: http.MethodDelete, path: "/api/v1/voice/people/person:missing", handler: voices.handler, csrf: true, wantStatus: http.StatusNotFound},
+		{name: "voice clear recognizer", method: http.MethodDelete, path: "/api/v1/voice/settings/recognizer", handler: voices.handler, csrf: true, wantStatus: http.StatusNoContent},
+		{name: "voice delete recording", method: http.MethodDelete, path: voicePath, handler: voices.handler, csrf: true, wantStatus: http.StatusNoContent},
 		{name: "photo libraries", path: "/api/v1/photos/libraries", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo timeline", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?limit=2", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo timeline month", path: "/api/v1/photos/libraries/" + photoLibraryID + "/timeline?month=2026-10", handler: photoHandler, wantStatus: http.StatusOK},

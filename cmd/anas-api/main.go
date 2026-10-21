@@ -53,6 +53,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/voice"
+	"github.com/zhongwater123/A-NAS/internal/voiceapi"
+	"github.com/zhongwater123/A-NAS/internal/voiceworker"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -284,6 +287,17 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	voiceStore, err := voice.OpenSQLite(filepath.Join(stateDirectory, "voice.db"))
+	if err != nil {
+		return err
+	}
+	defer voiceStore.Close()
+	voiceService, err := configuredVoice(live, voiceStore, fileService, mediaWorker, accountService, logger)
+	if err != nil {
+		return err
+	}
+	// Runs before the deferred voiceStore.Close, after the server stopped.
+	defer voiceService.Close()
 	terminalEnabled, err := configuredTerminal()
 	if err != nil {
 		return err
@@ -327,6 +341,7 @@ func run(logger *slog.Logger) error {
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
 		Assistant:    assistantAPI(logger, broker, accountService),
+		Voice:        voiceapi.New(voiceService, logger),
 		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -349,6 +364,7 @@ func run(logger *slog.Logger) error {
 	go fileService.RunSnapshotSchedules(ctx, accountService, logger)
 	go mediaService.Run(ctx)
 	go transferService.Run(ctx)
+	voiceService.Run()
 	if photoService != nil {
 		background := make(chan struct{})
 		go func() {
@@ -424,6 +440,54 @@ func configuredMediaWorker(live bool) (mediaworker.Worker, error) {
 		return nil, nil
 	}
 	return nil, errors.New("ANAS_MEDIA_WORKER must be socket, local or disabled")
+}
+
+// configuredVoice assembles 语音处理 (ADR 0027). Production recognises
+// speech with Doubao, with the credentials an administrator enters; translates
+// and summarises through the assistant's model gateway when
+// ANAS_TEXT_MODEL_SOCKET names it, with the model ANAS_TEXT_MODEL; and
+// computes voiceprints in the voice Worker. Development uses fakes for each
+// unless ANAS_VOICE_RECOGNIZER=doubao, ANAS_TEXT_MODEL_SOCKET or
+// ANAS_VOICE_SOCKET says otherwise.
+func configuredVoice(live bool, store *voice.Store, fileService *files.Service, media mediaworker.Worker, accountService *accounts.Service, logger *slog.Logger) (*voice.Service, error) {
+	options := voice.Options{Sessions: accountService.RememberedSessions, Logger: logger}
+	if speaker, ok := media.(voice.MediaWorker); ok {
+		options.Media = speaker
+	}
+	recognizer := os.Getenv("ANAS_VOICE_RECOGNIZER")
+	if recognizer == "" {
+		recognizer = "fake"
+		if live {
+			recognizer = "doubao"
+		}
+	}
+	switch recognizer {
+	case "doubao":
+		options.Recognizer = voice.Doubao{Credentials: store.DoubaoCredentials}
+	case "fake":
+		options.Recognizer = voice.FakeRecognizer{}
+	case "disabled":
+	default:
+		return nil, errors.New("ANAS_VOICE_RECOGNIZER must be doubao, fake or disabled")
+	}
+	if socket := strings.TrimSpace(os.Getenv("ANAS_TEXT_MODEL_SOCKET")); socket != "" {
+		if !filepath.IsAbs(socket) {
+			return nil, errors.New("ANAS_TEXT_MODEL_SOCKET must be an absolute path")
+		}
+		model := strings.TrimSpace(os.Getenv("ANAS_TEXT_MODEL"))
+		if model == "" {
+			return nil, errors.New("ANAS_TEXT_MODEL must name the model when ANAS_TEXT_MODEL_SOCKET is set")
+		}
+		options.TextModel = voice.NewChatModel(socket, model)
+	} else if !live {
+		options.TextModel = voice.FakeTextModel{Delay: 2 * time.Second}
+	}
+	if socket := os.Getenv("ANAS_VOICE_SOCKET"); socket != "" || live {
+		options.Voiceprints = voice.WorkerVoiceprints{Client: voiceworker.Client{SocketPath: environment("ANAS_VOICE_SOCKET", "/run/a-nas-voice/voice.sock")}}
+	} else {
+		options.Voiceprints = voice.FakeVoiceprints{}
+	}
+	return voice.New(store, fileService, options), nil
 }
 
 // developmentAI reaches an AI Worker only when ANAS_AI_SOCKET names one, so
