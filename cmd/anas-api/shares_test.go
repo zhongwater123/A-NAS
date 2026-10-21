@@ -41,11 +41,13 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	if err = users.ChangePassword(ctx, member, "initial member password", "member changed password"); err != nil {
 		t.Fatal(err)
 	}
-	ownerSession, err := users.Authenticate(ctx, "owner", "owner strong password")
+	// httptest requests are direct loopback connections, where these sessions work.
+	direct := accounts.WithClientOrigin(ctx, accounts.ClientOrigin{Via: accounts.ViaLoopback})
+	ownerSession, err := users.Authenticate(direct, "owner", "owner strong password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	memberSession, err := users.Authenticate(ctx, "member", "member changed password")
+	memberSession, err := users.Authenticate(direct, "member", "member changed password")
 	if err != nil {
 		t.Fatal(err)
 	}

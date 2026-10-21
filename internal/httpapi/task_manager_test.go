@@ -39,7 +39,7 @@ func TestTaskManagerIsReadOnlyAndAvailableToEverySignedInAccount(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"owner", "member"} {
-		session, err := service.Authenticate(ctx, name, name+" password for testing")
+		session, err := service.Authenticate(signedInDirectly(ctx), name, name+" password for testing")
 		if err != nil {
 			t.Fatal(err)
 		}

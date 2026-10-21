@@ -138,7 +138,7 @@ func (f *activityFixture) signIn(path, username, password, address string, want 
 	}
 	_ = json.Unmarshal(recorder.Body.Bytes(), &session)
 	client := *f.client
-	client.cookie, client.csrf = recorder.Result().Cookies()[0], session.CSRFToken
+	client.cookie, client.csrf, client.forwardedFor = recorder.Result().Cookies()[0], session.CSRFToken, request.Header.Get("X-Forwarded-For")
 	return &client
 }
 
