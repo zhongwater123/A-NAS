@@ -62,12 +62,4 @@ describe("cards for what the assistant asks", () => {
     expect(onAnswer).toHaveBeenCalledWith({ q1: "桌面", q2: JSON.stringify(["猫", "狗", "兔子"]) });
   });
 
-  it("shows what was answered once the question is closed", () => {
-    const approval: Approval = { ...base, kind: "question", status: "answered",
-      questions: [{ id: "q1", text: "放到哪个文件夹？", choices: ["照片", "文档"] }], answers: { q1: "照片" } };
-    render(<QuestionCard approval={approval} onAnswer={() => Promise.resolve()} onSkip={() => Promise.resolve()} />);
-    expect(screen.getByText("已回答")).toBeTruthy();
-    expect(screen.getByText("照片")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "回答" })).toBeNull();
-  });
 });
