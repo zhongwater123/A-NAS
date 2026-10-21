@@ -30,9 +30,9 @@ const hangupGracePeriod = 2 * time.Second
 // a session that stops being valid ends the shell.
 func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 	ctx := context.Background()
-	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-	if err != nil || !identity.Enabled {
-		_ = writeMessage(conn, response{Error: &wireError{Code: codeUnauthenticated}}, nil)
+	identity, refused := s.identify(ctx, req.Token)
+	if refused != nil {
+		_ = writeMessage(conn, response{Error: refused}, nil)
 		return
 	}
 	if identity.Role != accounts.RoleAdmin {
@@ -61,6 +61,7 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 	}()
 	recheck := time.NewTicker(s.config.TerminalRecheck)
 	defer recheck.Stop()
+	unconfirmed := 0
 	for {
 		select {
 		case <-shell.Done():
@@ -72,8 +73,9 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 			_ = writeMessage(conn, response{ExitCode: &code}, nil)
 			return
 		case <-recheck.C:
-			current, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-			if err != nil || !current.Enabled || current.Role != accounts.RoleAdmin || current.UID != identity.UID {
+			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accounts.Identity) bool {
+				return current.Role == accounts.RoleAdmin && current.UID == identity.UID
+			}) {
 				s.config.Logger.Info("terminal session no longer valid; hanging up", "username", identity.Username)
 				code := shell.HangUp(hangupGracePeriod)
 				_ = writeMessage(conn, response{ExitCode: &code}, nil)

@@ -148,6 +148,36 @@ func TestBrokerRefusesUnverifiedCallers(t *testing.T) {
 	}
 }
 
+// A session directory that cannot be read right now says nothing about the
+// caller: file operations are unavailable, not refused (#166).
+func TestFileOperationsAreUnavailableWhileSessionsCannotBeRead(t *testing.T) {
+	server, err := NewServer(Config{
+		Sessions: resolverFunc(func(string) (accounts.Identity, error) {
+			return accounts.Identity{}, errors.New("read session directory: database is locked")
+		}),
+		VolumeRoot: t.TempDir(), VolumeReady: func() bool { return true },
+		Command:         func(volumeRoot string) *exec.Cmd { return exec.Command(os.Args[0], WorkerArgument, volumeRoot) },
+		skipCredentials: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(t.TempDir(), "broker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		server.Close()
+	})
+	err = NewClient(socket).Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("Mkdir() error = %v, want ErrUnavailable and not a refusal", err)
+	}
+}
+
 func TestIdleWorkersAreStoppedAndRespawned(t *testing.T) {
 	harness := newHarness(t)
 	ctx := accounts.WithSessionToken(context.Background(), "alice-token")

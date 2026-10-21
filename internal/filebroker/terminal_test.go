@@ -87,6 +87,54 @@ func TestTerminalEndsWhenTheSessionStopsBeingValid(t *testing.T) {
 	}
 }
 
+// A session directory that cannot be read for a moment, as while SQLite is
+// busy, must not hang up a working shell (#166).
+func TestTerminalOutlivesAPassingSessionDirectoryError(t *testing.T) {
+	broker := newTerminalHarness(t, "echo ready; read line; echo got:$line")
+	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	output := bufio.NewReader(shell)
+	waitForLine(t, output, "ready")
+	broker.setUnreadable(errors.New("database is locked"))
+	// Two or three rechecks fail; four in a row would end the shell.
+	time.Sleep(120 * time.Millisecond)
+	broker.setUnreadable(nil)
+	if _, err := shell.Write([]byte("hello\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForLine(t, output, "got:hello")
+}
+
+// A directory that stays unreadable cannot keep a shell alive whose session
+// may have been revoked meanwhile.
+func TestTerminalEndsWhenTheSessionDirectoryStaysUnreadable(t *testing.T) {
+	broker := newTerminalHarness(t, "echo ready; sleep 60")
+	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	waitForLine(t, bufio.NewReader(shell), "ready")
+	broker.setUnreadable(errors.New("database is locked"))
+	select {
+	case <-shell.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shell outlived a session directory that stayed unreadable")
+	}
+}
+
+func TestTerminalIsUnavailableWhileSessionsCannotBeRead(t *testing.T) {
+	broker := newTerminalHarness(t, "echo ready")
+	broker.setUnreadable(errors.New("database is locked"))
+	_, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("StartShell() error = %v, want ErrUnavailable and not a refusal", err)
+	}
+}
+
 func waitForLine(t *testing.T, reader *bufio.Reader, want string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -106,16 +154,28 @@ type terminalHarness struct {
 	client     *Client
 	mu         sync.Mutex
 	identities map[string]accounts.Identity
+	// unreadable, when set, is what every lookup fails with, as a session
+	// directory that SQLite reports busy.
+	unreadable error
 }
 
 func (h *terminalHarness) ResolveSessionIdentity(_ context.Context, token string) (accounts.Identity, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.unreadable != nil {
+		return accounts.Identity{}, h.unreadable
+	}
 	identity, ok := h.identities[token]
 	if !ok {
 		return accounts.Identity{}, accounts.ErrSessionNotFound
 	}
 	return identity, nil
+}
+
+func (h *terminalHarness) setUnreadable(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.unreadable = err
 }
 
 func (h *terminalHarness) revoke(token string) {
