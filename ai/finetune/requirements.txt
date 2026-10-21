@@ -1,6 +1,6 @@
 # 只有 finetune/train.py 和 finetune/server.py（真模型模式）需要这些，装在开发机的另一个 venv 里；
 # 不进 ai/requirements.lock（Worker 运行环境用 MediaPipe，不装 torch）。
-# GPU 机器按显卡装对应 CUDA 的 torch，例如 5090：pip install torch --index-url https://download.pytorch.org/whl/cu128
+# 按机器装 torch：CPU 用 --index-url https://download.pytorch.org/whl/cpu，GPU 用显卡对应的 CUDA 版本。
 sentence-transformers>=6.1.0
 transformers>=4.57.0
 datasets>=3.0

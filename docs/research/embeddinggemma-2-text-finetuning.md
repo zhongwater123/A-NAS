@@ -1,7 +1,7 @@
 # EmbeddingGemma 2 文本向量：任务前缀、社区微调与我们的微调流程
 
-> 状态：脚本与离线测试完成；基座基线与微调待在 GPU 开发机上跑，微调权重转 LiteRT 未验证  
-> 更新日期：2026-10-20  
+> 状态：脚本与离线测试完成；基座基线已在 CPU 开发机上跑（sentence-transformers 运行时）；MediaPipe 运行时的对照、微调与微调权重转 LiteRT 未做  
+> 更新日期：2026-10-21  
 > 适用范围：EmbeddingGemma 2 的文本编码器（270M），与相册 Worker 同一模型文件 `embeddinggemma-2-740m@e7a8a2204b91`；只讨论文本对文本的用法  
 > 关联：[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)、[标签校准与中文检索评估](photo-ai-label-calibration.md)、[`ai/finetune/`](../../ai/finetune/)、[`ai/tests/test_finetune.py`](../../ai/tests/test_finetune.py)
 
@@ -65,12 +65,19 @@ python -m finetune.eval finetune/data/triplets.jsonl --embed-url http://127.0.0.
 
 ### 目前的数字
 
-| embedder | 数据 | hit@1 | hit@5 | mrr@10 | 正负例平均差 |
-|---|---|---|---|---|---|
-| hash-ngram（无模型下限） | 47 条容器故障日志三元组（哈希挖难负例，开发机临时数据） | 0.481 | 0.852 | 0.629 | 0.009 |
-| EmbeddingGemma 2 基座（sentence-transformers） | 待跑 | | | | |
-| EmbeddingGemma 2 基座（MediaPipe，`--model`） | 待跑 | | | | |
-| 微调后 | 待跑 | | | | |
+数据：60 条中文带标签短文本（NAS 使用问题 8 类，各 5 条，如上传完整性、相册回收站、快照、越权、应用崩溃、相册搜索、SMB、备份、硬盘健康）加 20 条英文容器故障日志（7 类），`build_triplets.py` 生成 190 条三元组，难负例用被评估的模型自己挖；每个 anchor 在全部 60 条里检索同标签的其他文本。数据是开发机临时编写的，不进仓库。2026-10-21，CPU 开发机（无 GPU），`server.py` 加载 `google/embeddinggemma-2` 修订 `914f7f89`、只加载文本编码器、bf16。
+
+| embedder | hit@1 | hit@5 | mrr@10 | 正负例平均差（难负例由该模型挖） |
+|---|---|---|---|---|
+| hash-ngram（无模型下限） | 0.550 | 0.783 | 0.650 | 0.010 |
+| EmbeddingGemma 2 基座，768 维（sentence-transformers） | 0.717 | 0.950 | 0.812 | -0.004 |
+| EmbeddingGemma 2 基座，256 维截断，同一运行时 | 0.667 | 0.900 | 0.781 | -0.002 |
+| EmbeddingGemma 2 基座（MediaPipe，`--model`） | 待跑（需开发镜像） | | | |
+| 微调后 | 待跑（需 GPU） | | | |
+
+同一数据上的分数分布（STS 前缀，768 维）：同标签对中位 0.858（P10 0.814），异标签对中位 0.791（P90 0.833，P99 0.868）。**分数整体挤在 0.75–0.95**：无关的中文句子也有 0.8 左右，同义改写 0.98。所以"相似"不能用一个凭感觉的阈值：取异标签 P99（0.868）为阈值，同标签对只召回 39%；取 P95（0.846）召回 64%。线上要用的阈值必须从各自场景的数据里标定，`similarity.py` 里的阈值只是占位。Hit@1 的失败集中在快照、应用崩溃、SMB、硬盘健康这几类：类内说法差异大（"没有执行记录"对"目标盘已满"），类间又共享"文件""失败"这类词。256 维比 768 维低 3–5 个点，在这个规模的数据上不算无损，和官方多语基准的 1 个点差距不同。
+
+耗时：CPU 上 5 条短文本 1.85 s（含 HTTP），单条约 0.4 s；首次请求 3 s 含预热。60 条文本的一次评估十几秒。
 
 ### 候选用途
 
@@ -83,7 +90,8 @@ python -m finetune.eval finetune/data/triplets.jsonl --embed-url http://127.0.0.
 - **哈希退路只能看字面。** `semantic=False` 时的分数不是语义分数，只用作下限和单元测试。
 - **阈值是经验值。** `similarity.py` 的用例阈值参考官方示例的分数分布，没在我们的数据上调过。
 - **双重前缀。** TEI 的 `/embed` 会按 `prompt_name` 自己加前缀，接那种服务时关掉 `HttpEmbedder(add_prefix=False)`。
-- **本机未跑过真模型。** 写脚本的 Windows 机器没有 GPU、torch 和 MediaPipe；`server.py`、`train.py`、`eval.py --model` 只做了依赖缺失路径和 `--fake` 联调，离线测试在 [`ai/tests/test_finetune.py`](../../ai/tests/test_finetune.py)（`make ai-test`）。
+- **只跑了一条运行时。** 基线用的是 sentence-transformers 在 CPU 上加载 Hugging Face 权重；Worker 走的 MediaPipe + LiteRT 没有在这台机器上跑（没有开发镜像），两条运行时的向量是否一致待对照。`train.py` 和 `eval.py --model` 只做了依赖缺失路径的检查，离线测试在 [`ai/tests/test_finetune.py`](../../ai/tests/test_finetune.py)（`make ai-test`）。
+- **数据太小。** 60 条文本、8 + 7 个类别，是为了把流程跑通，不足以下结论；要用各场景的真实文本（OCR 输出、对话片段、日志）重做。
 
 ## 来源
 
