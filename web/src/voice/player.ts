@@ -37,7 +37,8 @@ export function usePlayer(recording: Pick<Recording, "id" | "transcode" | "durat
     const element = audio.current;
     if (!element || !id) return;
     offset.current = 0;
-    element.preload = "metadata";
+    // A decoded stream starts FFmpeg on the NAS, so it waits for play.
+    element.preload = transcode ? "none" : "metadata";
     element.src = audioURL(id, transcode ? 0 : undefined);
     setTimeMs(0);
     setPlaying(false);

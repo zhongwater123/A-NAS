@@ -194,6 +194,18 @@ function SentenceActions({ menu, speakers, onClose, onPlay, onEdit, onMove, onCo
   menu: SentenceMenu; speakers: Speaker[]; onClose: () => void; onPlay: () => void; onEdit: () => void; onMove: (key: string) => void; onCopy: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState({ left: menu.x, top: menu.y });
+  // The menu stays inside the visible part of the transcript.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const scroller = element?.parentElement;
+    if (!element || !scroller) return;
+    const edge = 8;
+    const bottom = scroller.scrollTop + scroller.clientHeight - edge;
+    const top = menu.y + element.offsetHeight > bottom ? Math.max(scroller.scrollTop + edge, menu.y - element.offsetHeight) : menu.y;
+    const left = Math.max(edge, Math.min(menu.x, scroller.clientWidth - element.offsetWidth - edge));
+    setPlace({ left, top });
+  }, [menu]);
   useEffect(() => {
     const outside = (event: Event) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
     const escape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -203,7 +215,7 @@ function SentenceActions({ menu, speakers, onClose, onPlay, onEdit, onMove, onCo
   }, [onClose]);
   const act = (run: () => void) => () => { run(); onClose(); };
   return (
-    <div ref={ref} className="vo-menu floating" role="menu" style={{ left: menu.x, top: menu.y }}>
+    <div ref={ref} className="vo-menu floating" role="menu" style={{ left: place.left, top: place.top }}>
       <button type="button" role="menuitem" onClick={act(onPlay)}><Play />从这里播放</button>
       <button type="button" role="menuitem" onClick={act(onEdit)}><Pencil />修改文字</button>
       <button type="button" role="menuitem" onClick={act(onCopy)}><Copy />复制这句</button>

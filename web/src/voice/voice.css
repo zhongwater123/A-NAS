@@ -548,12 +548,12 @@
   .vo-tabs { margin-left: 18px; margin-right: 18px; }
   .vo-speakers { padding-left: 18px; padding-right: 18px; }
   .vo-scroll { padding-left: 18px; padding-right: 18px; }
-  .vo-toolbar-hint { display: none; }
+  .vo-toolbar-hint, .vo-title p > .vo-file { display: none; }
   .vo-search.inline { width: 200px; }
 }
 @container voicewindow (max-width: 700px) {
   .vo-app { grid-template-columns: 190px minmax(0, 1fr); }
   .vo-card-preview, .vo-card-people { display: none; }
-  .vo-time.end, .vo-file { display: none; }
+  .vo-time.end { display: none; }
   .vo-sources, .vo-option-row { grid-template-columns: 1fr; }
 }

@@ -94,6 +94,9 @@ func New(store *Store, fileService Files, options Options) *Service {
 	if service.poll <= 0 {
 		service.poll = 30 * time.Second
 	}
+	// The model the newest voiceprints came from, until the Worker answers
+	// again; asking it here would start it for nothing.
+	_ = store.db.QueryRow("SELECT voiceprint_model FROM recordings WHERE voiceprint_model != '' ORDER BY processed_at DESC LIMIT 1").Scan(&service.voiceModel)
 	return service
 }
 

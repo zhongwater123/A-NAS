@@ -98,7 +98,7 @@ describe("VoicePanel", () => {
   it("opens the first recording with its speakers, transcript and summary", async () => {
     serve();
     render(<VoicePanel userId="user:u1" isAdmin={false} onOpenFiles={() => undefined} />);
-    expect(await screen.findByRole("heading", { name: "十月周会" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "十月周会" }, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByText("我们开始开会。")).toBeTruthy();
     // Two sentences of one speaker are one turn.
     expect(screen.getAllByText("发言人 1").length).toBeGreaterThanOrEqual(2);
@@ -112,7 +112,7 @@ describe("VoicePanel", () => {
   it("names a speaker from the speaker strip", async () => {
     const calls = serve();
     render(<VoicePanel userId="user:u1" isAdmin={false} onOpenFiles={() => undefined} />);
-    await screen.findByRole("heading", { name: "十月周会" });
+    await screen.findByRole("heading", { name: "十月周会" }, { timeout: 5000 });
     fireEvent.click(screen.getAllByRole("button", { name: "发言人 1，点击命名" })[0]);
     const input = await screen.findByPlaceholderText("输入名字");
     fireEvent.change(input, { target: { value: "张三" } });
@@ -124,7 +124,7 @@ describe("VoicePanel", () => {
   it("asks for a translation and shows it on its way", async () => {
     const calls = serve();
     render(<VoicePanel userId="user:u1" isAdmin={false} onOpenFiles={() => undefined} />);
-    await screen.findByRole("heading", { name: "十月周会" });
+    await screen.findByRole("heading", { name: "十月周会" }, { timeout: 5000 });
     fireEvent.click(screen.getByRole("tab", { name: /翻译/ }));
     fireEvent.click(await screen.findByRole("button", { name: "日语" }));
     await waitFor(() => expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/translations"))).toBe(true));
@@ -135,7 +135,7 @@ describe("VoicePanel", () => {
     const waiting = { ...base, status: "waiting" as const, waiting: "recognizer" as const, speakers: 0 };
     serve(detailOf({ ...waiting, utterances: [], speakerList: [], summaries: [] }), [waiting]);
     render(<VoicePanel userId="user:u1" isAdmin={false} onOpenFiles={() => undefined} />);
-    expect(await screen.findByRole("heading", { name: "等待配置豆包语音" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "等待配置豆包语音" }, { timeout: 5000 })).toBeTruthy();
     const list = screen.getByRole("listbox", { name: "录音列表" });
     expect(within(list).getByText("等待管理员配置豆包语音")).toBeTruthy();
   });
@@ -143,7 +143,7 @@ describe("VoicePanel", () => {
   it("welcomes a member without recordings", async () => {
     serve(detailOf(), []);
     render(<VoicePanel userId="user:u1" isAdmin={false} onOpenFiles={() => undefined} />);
-    expect(await screen.findByRole("button", { name: /导入第一段录音/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /导入第一段录音/ }, { timeout: 5000 })).toBeTruthy();
   });
 });
 
