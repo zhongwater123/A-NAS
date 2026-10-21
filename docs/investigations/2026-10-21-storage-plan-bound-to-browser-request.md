@@ -52,6 +52,9 @@
   - 产品服务执行后返回 `202` 与进行中的计划，在后台每秒查询直到结束，重启后接着查询；`needs_attention` 的计划可重试；没有登记数据卷而宿主机显示一个时拒绝新建（`409 volume_exists`）；新增 `GET /api/v1/storage/plans` 供页面找回。代码：[`operation.go`](../../internal/storage/operation.go)、[`service.go`](../../internal/storage/service.go)、[`product.go`](../../internal/httpapi/product.go)、[`StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)。
 - 测试：在每一步注入停止与被杀，见[规格的验收证据](../specs/disk-roles-and-redundancy.md#验收证据)中“执行在设备上进行”一节。修复前，取消请求会杀死被测命令；修复后，取消请求的操作照常完成，Host Agent 在清除、格式化、挂载、准备各步停下后报告 `interrupted` 与步骤，重试只在挂载前重新格式化，并留下与挂载卷一致的卷标记和挂载单元。
 
+- 本地 fake 模式在浏览器中核对：执行时向导逐步显示设备所在的步骤并跟到完成；加盘执行中重启产品服务后，存储页显示“上次的存储操作没有完成”，向导给出停下的原因与“重试”，重试再次停下时显示新的原因。
+- 修复在 [PR #202](https://github.com/zhongwater123/A-NAS/pull/202)。
+
 ## 后续工作
 
 - 部署后在实验 NAS 上确认：Host Agent 能写 `/var/lib/a-nas/volume-operations.json`；对一块空闲盘执行加盘时关闭页面，回来后向导接着显示并成功。部署须同时更新 Host Agent 与产品服务（IPC 改为启动加查询）。

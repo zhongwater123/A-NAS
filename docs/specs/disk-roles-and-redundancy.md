@@ -189,7 +189,7 @@ M1：
 - Host Agent（[`volume_test.go`](../../internal/hostops/linux/volume_test.go)、[`volume_internal_test.go`](../../internal/hostops/linux/volume_internal_test.go)）：请求被取消后操作照常完成；在清除、格式化、挂载、准备每一步停下后，重启的 Host Agent 报告 `interrupted` 与步骤，重试只在卷挂载前重新清除与格式化；命令被杀后重试；拒绝不是本计划建出的卷与指向它的挂载配置；接管本计划建出的卷；加盘先记下冗余方式，硬盘加入后被杀，重试跳过已加入的硬盘；同一时间只运行一个操作，日志在重启后仍在；待定的冗余方式在设备齐全后生效。
 - root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go)）：真实 Btrfs 上先记下镜像、再加入硬盘，检查把它转为镜像。
 - 接口契约（[`storage_test.go`](../../internal/httpapi/storage_test.go)）与 Host Agent IPC（[`agent_test.go`](../../internal/hoststate/agent/agent_test.go)）：执行返回 `202` 与步骤、`GET /api/v1/storage/plans`、`GET /v1/storage/operations/{planId}` 与错误码。
-- React（[`App.test.tsx`](../../web/src/App.test.tsx)）：页面回来后接着显示进行中的计划直到完成；停下的计划显示步骤并重试。
+- React（[`App.test.tsx`](../../web/src/App.test.tsx)）：页面回来后接着显示进行中的计划直到完成；停下的计划显示步骤并重试；重试再次停下时显示新的原因。
 
 M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test.sh`](../../scripts/system-test.sh)）、更换与移除的 root 集成测试，以及拔盘开机、接回恢复的实机验证。
 - 实机：按运行手册在实验 NAS 上：
