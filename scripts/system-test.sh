@@ -334,6 +334,12 @@ printf 'lan %s\n' "$(secret)" > /tmp/lan.txt
 curl -fsS -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" \
   -F "file=@/tmp/lan.txt;filename=lan.txt" "$lan/api/v1/spaces/$alice_private/uploads" || true
 check "LAN upload is owned by the member's UID" test "$(owner_uid "$data/spaces/private/alice/lan.txt" 2>/dev/null)" = "$alice_id"
+# Installed apps get the session cookie too (issue #161): it works only from
+# the client that signed in, and only the desktop may frame its pages.
+check "a LAN session is refused from another client" test "$(status_of -b /tmp/lan.jar "$api/api/v1/session")" = 401
+check "the local console session is refused through the LAN entry" test "$(status_of -b /tmp/console.jar "$lan/api/v1/session")" = 401
+check "the desktop cannot be framed through the LAN entry" \
+  bash -c "curl -fsS -D - -o /dev/null '$lan/' | tr -d '\r' | grep -qix 'x-frame-options: deny'"
 
 # --- Resumable uploads (ADR 0019): tus parts land in the member's own temporary.
 tus_meta() { # KEY VALUE ... -> Upload-Metadata
