@@ -19,7 +19,7 @@ import { type CodeHeaderProps, type StreamdownTextComponents, StreamdownTextPrim
 import { diffLines } from "diff";
 import {
   ArrowUp, Brain, CalendarClock, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleHelp, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
-  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
+  Eye, Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
   Trash2, Users, Video, Wrench, X, Keyboard, MonitorSmartphone, MousePointerClick,
 } from "lucide-react";
 import {
@@ -55,8 +55,9 @@ const SUGGESTIONS = [
 // How long a step VNAS takes on the desktop waits for the member to allow it:
 // Hermes gives the window 30 s to answer a browser command.
 const CONTROL_CONFIRM_MS = 25_000;
-// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go).
-const CONTROL_CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll"];
+// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go);
+// a screenshot is what Hermes's browser_vision looks at (hermes-patches/0003).
+const CONTROL_CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_screenshot"];
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
@@ -820,6 +821,7 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
     case "skill_view": case "skills_list": case "skill_manage": return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
     case "browser_snapshot": return { icon: <MonitorSmartphone />, label: "查看桌面", detail: "" };
+    case "browser_vision": return { icon: <Eye />, label: "看桌面画面", detail: typeof args.question === "string" ? short(args.question) : "" };
     case "browser_click": return { icon: <MousePointerClick />, label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
     case "browser_type": return { icon: <Keyboard />, label: "输入", detail: typeof args.text === "string" ? `“${short(args.text)}”` : "" };
     case "browser_press": return { icon: <Keyboard />, label: "按键", detail: typeof args.key === "string" ? args.key : "" };

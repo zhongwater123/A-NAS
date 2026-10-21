@@ -7,14 +7,20 @@ with the Hermes runtime's Python; prints PASS and FAIL lines.
 """
 import asyncio
 import json
+import os
 import sys
 
 import hermes_login
 from serve_client import Gateway, RpcError, short
 
-CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll"]
+CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_screenshot"]
+# What the model gets: the window's tools, and browser_vision looking at its screenshot (hermes-patches/0003).
+TOOLS = {"browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_vision"}
 SNAPSHOT = '- button "文件管理" [ref=e1]\n- button "相册" [ref=e2]'
-TOOLS_LOG = "/var/log/fake-model.jsonl.tools.json"
+# A 1x1 PNG, as the window sends a picture of the page.
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+MODEL_LOG = "/var/log/fake-model.jsonl"
+TOOLS_LOG = MODEL_LOG + ".tools.json"
 failures = 0
 
 
@@ -30,6 +36,16 @@ def offered() -> set[str]:
         return {t["function"]["name"] for t in json.load(open(TOOLS_LOG)) if t["function"]["name"].startswith("browser")}
     except (OSError, ValueError):
         return set()
+
+
+def images_sent_since(offset: int) -> int:
+    """Image parts the model was sent after its log was ``offset`` bytes long."""
+    try:
+        with open(MODEL_LOG, encoding="utf-8") as log:
+            log.seek(offset)
+            return sum(json.loads(line).get("image_parts", 0) for line in log if line.strip())
+    except OSError:
+        return 0
 
 
 def legacy_status(user: str) -> int:
@@ -52,7 +68,10 @@ async def turn(gw: Gateway, sid: str, text: str, answer_commands: bool) -> tuple
         kind, payload = frame.get("type"), frame.get("payload") or {}
         if kind == "browser.controller.command" and answer_commands:
             commands.append(payload)
-            result = {"snapshot": SNAPSHOT} if payload.get("action") == "browser_snapshot" else {"clicked": payload.get("arguments")}
+            action = payload.get("action")
+            result = ({"snapshot": SNAPSHOT} if action == "browser_snapshot"
+                      else {"mime_type": "image/png", "data": PNG, "width": 1, "height": 1} if action == "browser_screenshot"
+                      else {"clicked": payload.get("arguments")})
             await gw.call("browser.controller.result", {"session_id": sid, "command_id": payload["command_id"], "ok": True, "result": result})
         elif kind == "message.complete" and frame.get("session_id") == sid:
             return commands, payload.get("text") or ""
@@ -77,12 +96,18 @@ async def main(user: str):
               sorted(registered["scope"]["capabilities"]) == sorted(CAPABILITIES), short(registered))
 
         commands, answer = await turn(window, sid, "CALL browser_snapshot {}", True)
-        check("the model is offered exactly the window's browser tools", offered() == set(CAPABILITIES), str(sorted(offered())))
+        check("the model is offered the window's browser tools and browser_vision", offered() == TOOLS, str(sorted(offered())))
         check("browser_snapshot reaches the window", [c.get("action") for c in commands] == ["browser_snapshot"], short(commands))
         check("its answer returns into the turn, as untrusted page content",
               "相册" in answer and "untrusted" in answer, short(answer, 300))
         commands, answer = await turn(window, sid, 'CALL browser_click {"ref": "@e2"}', True)
         check("browser_click carries the ref", commands and commands[0].get("arguments") == {"ref": "@e2"}, short(commands))
+        before = os.path.getsize(MODEL_LOG)
+        commands, answer = await turn(window, sid, 'CALL browser_vision {"question": "桌面上开着哪些窗口？"}', True)
+        check("browser_vision asks the window for a screenshot",
+              [c.get("action") for c in commands] == ["browser_screenshot"], short(commands))
+        check("the screenshot goes to the vision model", images_sent_since(before) >= 1, str(images_sent_since(before)))
+        check("what the vision model saw returns into the turn", '"analysis"' in answer and '"success": true' in answer, short(answer, 300))
     print(f"browser control: {failures} failed")
     sys.exit(1 if failures else 0)
 

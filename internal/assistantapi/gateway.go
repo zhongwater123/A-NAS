@@ -17,9 +17,13 @@ import (
 )
 
 const (
-	// maxBrowserFrame bounds one frame from the window; a message is at most
-	// maxInputBytes.
-	maxBrowserFrame = maxInputBytes + 16<<10
+	// maxControllerResult bounds the result of one browser command the window
+	// carries out: a screenshot of the page is the largest, a PNG the window
+	// keeps under 4 MiB of base64.
+	maxControllerResult = 5 << 20
+	// maxBrowserFrame bounds one frame from the window: a message is at most
+	// maxInputBytes, a browser command's result maxControllerResult.
+	maxBrowserFrame = maxControllerResult + 16<<10
 	// maxUpstreamBytes bounds one frame or REST reply from Hermes; resuming a
 	// long conversation returns its messages.
 	maxUpstreamBytes = 64 << 20

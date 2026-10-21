@@ -1,8 +1,9 @@
 // The VNAS window as Hermes's browser for the WebOS page it lives in (Hermes's
 // browser control, ADR 0024 decision 8): Hermes's own browser tools read the page
-// as a list of controls with refs and act on them by ref, here, in the member's
-// own browser and session. The VNAS window itself is never part of the page it
-// reads or acts on, and the page is never navigated away.
+// as a list of controls with refs, or look at a picture of it, and act on them by
+// ref, here, in the member's own browser and session. The VNAS window itself is
+// never part of the page it reads, sees or acts on, and the page is never
+// navigated away.
 //
 // What a control is called is no boundary (#160): the page's writes are. A step
 // VNAS takes holds the writes it causes until the member allows the ones that
@@ -10,10 +11,12 @@
 // 2026-10-21). The terminal, Docker and 应用中心 reach the host, so every step
 // there waits for the member first. What the member may see but VNAS may not
 // (another member's space under a viewing grant, snapshots) is marked
-// data-vnas-private and never read or acted on.
+// data-vnas-private and never read as text or acted on; the picture shows the
+// page as it is, while vision is a feasibility trial (user decision 2026-10-21).
 import { computeAccessibleName, getRole } from "dom-accessibility-api";
 
 import { setWriteGate } from "../api";
+import { drawDesktop, onScreen } from "../desktopPicture";
 import "./webosControl.css";
 import { writeRisk } from "./webosWrites";
 
@@ -62,6 +65,27 @@ const STEP_WRITES_MS = 15_000;
 const SETTLE_MS = 400;
 /** The member's own input; VNAS's events are never trusted. */
 const MEMBER_INPUT = ["pointerdown", "keydown", "drop"];
+/** The longest side of a screenshot: the desktop's text stays readable. */
+const SHOT_EDGE = 1600;
+/** A screenshot's base64 stays under this; the product service takes up to 5 MiB. */
+const SHOT_LIMIT = 4_000_000;
+
+/** The page as a PNG, for Hermes's browser_vision. */
+export interface Screenshot {
+  mime_type: "image/png";
+  /** The PNG in base64. */
+  data: string;
+  width: number;
+  height: number;
+  /** With annotate: the controls labelled on the picture by ref. */
+  annotations?: Array<{ ref: string; name: string }>;
+}
+
+interface Label {
+  ref: string;
+  name: string;
+  box: DOMRect;
+}
 
 /** One click, input or key press of VNAS, and what the member said about its writes. */
 interface Step {
@@ -131,6 +155,8 @@ export class WebosController {
         return this.press(String(args.key ?? ""));
       case "browser_scroll":
         return this.scroll(args.direction === "up" ? "up" : "down");
+      case "browser_screenshot":
+        return this.screenshot(args.annotate === true);
       default:
         throw new ControlError(`VNAS 的窗口不支持 ${action}`);
     }
@@ -145,6 +171,49 @@ export class WebosController {
     let text = lines.join("\n");
     if (text.length > SNAPSHOT_LIMIT) text = `${text.slice(0, SNAPSHOT_LIMIT)}\n…（页面内容太多，后面的省略了；滚动或关掉不需要的窗口后再查看）`;
     return text || "（桌面上没有可操作的内容）";
+  }
+
+  /**
+   * The page as the member sees it, for Hermes's browser_vision
+   * (hermes-patches/0003): the same picture 问题反馈 attaches
+   * (desktopPicture.ts), as a PNG, without VNAS's own window, toasts and
+   * marks, as the snapshot is. Annotated, every control of a fresh snapshot
+   * carries its ref on the picture, so what VNAS sees it can click.
+   */
+  async screenshot(annotate = false): Promise<Screenshot> {
+    const view = { width: window.innerWidth, height: window.innerHeight };
+    const labels = annotate ? this.labels(view) : [];
+    let canvas = await drawDesktop({ leaveOut: this.options.exclude, maxEdge: SHOT_EDGE });
+    mark(canvas, labels, canvas.width / view.width);
+    let data = pngOf(canvas);
+    while (data.length > SHOT_LIMIT && canvas.width > 480) {
+      canvas = shrink(canvas, 0.75);
+      data = pngOf(canvas);
+    }
+    if (data.length > SHOT_LIMIT) throw new ControlError("桌面的画面太大，没能截下来");
+    return {
+      mime_type: "image/png", data, width: canvas.width, height: canvas.height,
+      ...(annotate ? { annotations: labels.map(({ ref, name }) => ({ ref, name })) } : {}),
+    };
+  }
+
+  /** The controls of a fresh snapshot that show on the picture, with their refs: not off screen, not under another window. */
+  private labels(view: { width: number; height: number }): Label[] {
+    this.snapshot();
+    const labels: Label[] = [];
+    for (const [ref, element] of this.refs) {
+      const box = element.getBoundingClientRect();
+      if (!box.width || !box.height || !onScreen(element, view) || this.covered(element, box)) continue;
+      labels.push({ ref, name: clip(nameOf(element), 40), box });
+    }
+    return labels;
+  }
+
+  /** Whether something else of the page, not VNAS's own window, lies over the middle of the control. */
+  private covered(element: Element, box: DOMRect): boolean {
+    if (typeof document.elementsFromPoint !== "function") return false;
+    const top = document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2).find((hit) => !this.options.exclude(hit));
+    return Boolean(top) && !(top === element || element.contains(top!) || top!.contains(element));
   }
 
   private walk(node: Element, depth: number, full: boolean, lines: string[]) {
@@ -310,6 +379,38 @@ export class WebosController {
     container.scrollBy({ top: (direction === "down" ? 1 : -1) * Math.max(120, container.clientHeight * 0.8) });
     return { scrolled: direction, moved: container.scrollTop !== before || undefined };
   }
+}
+
+/** Outlines each labelled control on the picture and puts its ref at its corner. */
+function mark(canvas: HTMLCanvasElement, labels: Label[], ratio: number) {
+  const context = labels.length ? canvas.getContext("2d") : null;
+  if (!context) return;
+  context.font = "600 12px ui-monospace, Consolas, monospace";
+  context.textBaseline = "top";
+  for (const { ref, box } of labels) {
+    const x = Math.round(box.left * ratio);
+    const y = Math.round(box.top * ratio);
+    context.strokeStyle = "rgba(225, 29, 72, .85)";
+    context.lineWidth = 1;
+    context.strokeRect(x + 0.5, y + 0.5, Math.round(box.width * ratio), Math.round(box.height * ratio));
+    const width = context.measureText(ref).width + 6;
+    context.fillStyle = "rgba(225, 29, 72, .92)";
+    context.fillRect(x, Math.max(0, y - 15), width, 15);
+    context.fillStyle = "#fff";
+    context.fillText(ref, x + 3, Math.max(0, y - 15) + 1.5);
+  }
+}
+
+function pngOf(canvas: HTMLCanvasElement): string {
+  return canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, "");
+}
+
+function shrink(canvas: HTMLCanvasElement, factor: number): HTMLCanvasElement {
+  const smaller = document.createElement("canvas");
+  smaller.width = Math.round(canvas.width * factor);
+  smaller.height = Math.round(canvas.height * factor);
+  smaller.getContext("2d")?.drawImage(canvas, 0, 0, smaller.width, smaller.height);
+  return smaller;
 }
 
 function visible(element: Element): boolean {
