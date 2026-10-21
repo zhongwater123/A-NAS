@@ -26,7 +26,8 @@ func NewClient(socket string) *Client {
 
 // fileOps is a files.FileSystem over one way of sending a request: to the
 // broker with the session (Client), or straight to a worker (the executor of
-// the assistant's changes).
+// the assistant's changes). Either way call returns the whole reply, with a
+// scan's pages gathered.
 type fileOps struct {
 	call func(context.Context, request) (response, *os.File, error)
 }
@@ -52,8 +53,7 @@ func (c *Client) call(ctx context.Context, req request) (response, *os.File, err
 	if err := writeMessage(conn, req, nil); err != nil {
 		return response{}, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	var result response
-	file, err := readMessage(conn, &result)
+	result, file, err := readReply(conn)
 	if err != nil {
 		if ctx.Err() != nil {
 			return response{}, nil, ctx.Err()
@@ -86,7 +86,7 @@ func (c *fileOps) Lstat(ctx context.Context, path string) (files.FileInfo, error
 }
 
 func (c *fileOps) Scan(ctx context.Context, path string, skip files.ScanSkip) ([]files.ScanEntry, error) {
-	result, file, err := c.call(ctx, request{Op: opScan, Path: path, Skip: skip})
+	result, file, err := c.call(ctx, request{Op: opScan, Path: path, Skip: skip, Paged: true})
 	closeFile(file)
 	return result.Entries, err
 }

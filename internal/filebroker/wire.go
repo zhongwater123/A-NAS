@@ -18,20 +18,40 @@ import (
 	"syscall"
 )
 
-// maxMessage bounds one JSON message; a scan of a very large tree is the
-// biggest legitimate response.
-const maxMessage = 64 << 20
+// maxMessage bounds one JSON message. A scan travels in pages far below it;
+// a reply that still does not fit is answered with an error instead. Test
+// workers lower it.
+var maxMessage = 64 << 20
+
+// scanPage bounds the entries in one message of a scan, so neither the
+// broker nor a worker ever holds a whole large tree in one message.
+var scanPage = 2048
+
+var errTooLarge = errors.New("file broker message is too large")
+
+// encodeMessage encodes value, refusing a message over the limit.
+func encodeMessage(value any) ([]byte, error) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxMessage {
+		return nil, errTooLarge
+	}
+	return body, nil
+}
 
 // writeMessage sends a length-prefixed JSON message. A file, when given,
 // travels as SCM_RIGHTS ancillary data attached to the length prefix.
 func writeMessage(conn *net.UnixConn, value any, file *os.File) error {
-	body, err := json.Marshal(value)
+	body, err := encodeMessage(value)
 	if err != nil {
 		return err
 	}
-	if len(body) > maxMessage {
-		return errors.New("file broker message is too large")
-	}
+	return writeEncoded(conn, body, file)
+}
+
+func writeEncoded(conn *net.UnixConn, body []byte, file *os.File) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(body)))
 	var rights []byte
@@ -41,7 +61,7 @@ func writeMessage(conn *net.UnixConn, value any, file *os.File) error {
 	if _, _, err := conn.WriteMsgUnix(header, rights, nil); err != nil {
 		return err
 	}
-	_, err = conn.Write(body)
+	_, err := conn.Write(body)
 	return err
 }
 
@@ -67,9 +87,9 @@ func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
 		return nil, rightsErr
 	}
 	length := binary.BigEndian.Uint32(header)
-	if length > maxMessage {
+	if length > uint32(maxMessage) {
 		closeFile(file)
-		return nil, errors.New("file broker message is too large")
+		return nil, errTooLarge
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(conn, body); err != nil {
@@ -81,6 +101,24 @@ func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
 		return nil, fmt.Errorf("decode file broker message: %w", err)
 	}
 	return file, nil
+}
+
+// readReply reads a whole reply: the pages of a scan, then its final
+// message, which alone may carry a file.
+func readReply(conn *net.UnixConn) (response, *os.File, error) {
+	var entries pages
+	for {
+		var result response
+		file, err := readMessage(conn, &result)
+		if err != nil {
+			return response{}, nil, err
+		}
+		if !result.More {
+			return entries.complete(result), file, nil
+		}
+		closeFile(file)
+		entries.add(result)
+	}
 }
 
 func receivedFile(rights []byte) (*os.File, error) {
