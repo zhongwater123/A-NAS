@@ -38,6 +38,7 @@
 - [2026-10-16：局域网 HTTP 点击发送分享无反应](2026-10-16-member-sharing-http-send.md)（fixed locally；待部署验收）
 
 - [2026-10-20：VNAS 自建的技能不出现在“记忆”中](2026-10-20-assistant-skills-hidden-by-name.md)（fixed locally；待部署验收）
+- [2026-10-21：VNAS 长对话中窗口崩溃，回答过的确认卡片堆在输入框上方](2026-10-21-vnas-window-crash-and-stacked-cards.md)（fixed locally；崩溃的确切报错待取得，待部署验收）
 
 ## 使用方式
 
