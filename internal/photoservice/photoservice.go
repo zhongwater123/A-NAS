@@ -293,11 +293,17 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 	}
 }
 
-// RunBackground renders media, runs local AI through ai while gate allows
-// it, and maintains the store until ctx ends. It returns only once all of
+// RunBackground readies the job queue (photos.Service.RecoverJobs), then
+// renders media, runs local AI through ai while gate allows it, and
+// maintains the store until ctx ends. It returns only once all of
 // them have stopped, so the caller may then close service. None needs a user
 // session; a nil ai leaves local AI off.
 func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate) {
+	if recovery, err := service.RecoverJobs(ctx); err != nil {
+		logger.ErrorContext(ctx, "photo job recovery failed", "error", err)
+	} else if recovery != (photos.JobRecovery{}) {
+		logger.InfoContext(ctx, "photo jobs recovered", "recovery", recovery)
+	}
 	var workers sync.WaitGroup
 	workers.Go(func() {
 		service.RunMedia(ctx, time.Minute, func(err error) {

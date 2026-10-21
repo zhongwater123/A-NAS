@@ -318,6 +318,9 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	vector, err := embedder.EmbedImage(ctx, thumbnail)
 	_ = thumbnail.Close()
 	switch {
+	case ctx.Err() != nil:
+		// Stopping: the job keeps its place and its attempt.
+		return false, s.returnJob(context.WithoutCancel(ctx), job)
 	case errors.Is(err, ErrAIUnavailable):
 		s.ai.set(AIUnavailable, "", "")
 		return false, s.releaseJob(ctx, job)
@@ -367,7 +370,12 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 	}
 	jobs := input.jobs()
 	s.ai.set(AIWorking, "", info.Model)
-	if input.err != nil {
+	if ctx.Err() != nil {
+		return false, s.returnDetection(context.WithoutCancel(ctx), input)
+	}
+	if input.err != nil || input.class == jobWaiting {
+		// The input waits for storage or the Media Worker; its jobs keep
+		// their attempts.
 		var err error
 		for _, job := range jobs {
 			err = errors.Join(err, s.releaseJob(ctx, job))
