@@ -70,7 +70,7 @@ go test ./internal/files/ -run 'Reconcil|StaleScan|BinStill|Damaged|SameFile|Rec
 ## 后续工作
 
 - 部署后在实验 NAS 上：一人在共享空间反复列目录，另一人删除并恢复带子文件夹的文件夹；检查恢复成功、子条目 ID 不变。已被旧版本损坏的回收站条目在第一次恢复时修复。
-- 对账仍扫描整个空间，单次写入事务随空间变大而变长，期间同一空间的变更等待，见 [#167](https://github.com/zhongwater123/A-NAS/issues/167)。
+- 对账扫描整个空间、写入事务随空间变大而变长的问题已按范围对账处理，见 [#167 的调查](2026-10-21-whole-space-reconcile-scale.md)。
 - 助手“提交更改”与 SMB 一样绕过 `files.Service` 直接改文件，由对账吸收，不参与这里的排序。
 
 ## 关联

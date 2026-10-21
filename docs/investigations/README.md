@@ -45,6 +45,8 @@
 
 - [2026-10-21：快照清单超过 1 MiB 即失败，并留下孤儿子卷](2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)（fixed locally；待部署验收）
 
+- [2026-10-21：每次列目录对账整个空间，大空间下列目录与影视扫描以十秒计](2026-10-21-whole-space-reconcile-scale.md)（fixed locally；待部署验收）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

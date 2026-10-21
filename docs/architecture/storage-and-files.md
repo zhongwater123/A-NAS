@@ -59,14 +59,17 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 磁盘以 Linux 稳定硬件链接形成的 `disk:*` ID 标识，执行前重新验证型号、容量、传输类型和指纹。
 - 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。
-- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由列表时增量扫描吸收。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。复制先写成目标文件夹中的隐藏副本 `.a-nas-copy-*`，完成后改名就位；Product Service 在内存中持有进行中的副本，目录对账只列出副本本身而不进入，并删除无人持有的副本（重启中断的复制留下的）。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
-- 对账与 Web 变更按空间排序（[调查](../investigations/2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)）。删除、恢复、清除、移动、复制、上传与新建文件夹从第一次文件操作到其行提交为止处于“在途”；对账与 Samba 回收导入记下扫描开始时的代次，开始时有变更在途、或扫描期间有变更开始或结束，就整体丢弃这次扫描：变更自己的行已是最新，SMB 的改动由下一轮补上。扫描结果在一个事务内写入，期间同一空间的新变更等待。必须拿到结果的扫描（上传完成时的文件夹已被 SMB 移走，分享选择的文件夹内容）先等在途变更结束，再独占扫描与写入。扫描到的 inode 属于回收站行时，回收站仍持有该 inode 或无法确认就不收录，否则删除这条过期的回收站行；打开条目时路径上的 inode 必须与记录一致，不一致视为不存在。
+- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由目录对账吸收（见下条）。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。复制先写成目标文件夹中的隐藏副本 `.a-nas-copy-*`，完成后改名就位；Product Service 在内存中持有进行中的副本，目录对账只列出副本本身而不进入，并删除无人持有的副本（重启中断的复制留下的）。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
+- 对账与 Web 变更按空间排序（[调查](../investigations/2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)）。删除、恢复、清除、移动、复制、上传与新建文件夹从第一次文件操作到其行提交为止处于“在途”；对账与 Samba 回收导入记下扫描开始时的代次，开始时有变更在途、或扫描期间有变更开始或结束，就整体丢弃这次扫描：变更自己的行已是最新，SMB 的改动由下一轮补上。扫描结果在一个事务内写入，期间同一空间的新变更等待。必须拿到结果的扫描（上传完成时的文件夹已被 SMB 移走，分享选择的文件夹内容）先等在途变更结束，再独占扫描与写入。扫描到的 inode 属于回收站行时，回收站仍持有该 inode 或无法确认就不收录，否则删除这条过期的回收站行；打开条目时路径上的 inode 必须与记录一致，不一致视为不存在。写入时一行也没改的对账不推进代次，因此浏览文件夹不会让同时进行的整空间对账被丢弃。
+- 对账只覆盖请求涉及的范围（[#167](https://github.com/zhongwater123/A-NAS/issues/167)，[调查](../investigations/2026-10-21-whole-space-reconcile-scale.md)）：列目录只扫描该文件夹的直接子项，影视、音乐等读取文件夹之下全部内容的 `Tree` 只扫描该子树；写入时与范围内的现有行逐项比较，只写有变化的行，未变化的范围不写任何行。只有整空间对账能断定没找到的条目已不存在并删除其行：后台每 5 分钟的对账、快照比较与“最近删除”、对整个空间的 `Tree`，以及文件夹不在记录位置（经 SMB 移走）时的查找。部分对账没找到的行改到 `.a-nas-stale/<id>` 待定，列表与重名检查都不包含它们；之后任何一次对账在别处找到同一 inode，就以原 ID 放回。文件夹经 SMB 改名或移动时，其下各行随它改写路径（经它的待定路径中转，避免中途撞上唯一约束）；同名位置被另一个文件夹占用时，旧文件夹下的行随旧行一起待定。同一空间的整空间对账一次只跑一个，等待的请求由开始于其请求之后的那一次满足；后台循环跳过 4 分钟内已对账过的空间，共享空间每轮只对账一次。
 - 后台每 5 分钟的目录对账、Samba 回收导入和回收站到期清除只为本进程见过且仍有效的会话执行；长期未登录用户在下次登录时补做。
 
 ## 文件代理
 
 - Product Service 的每个文件操作都携带请求的会话令牌。File Broker 以只读方式打开 `control.db` 自行校验令牌、账号状态与过期时间，不信任 Product Service 声明的身份；令牌无效、账号被禁用或数据卷不可用时拒绝，不会派生进程。
-- 通过校验后，Broker 为该用户（按 UID 与角色）派生 `anas-host-agent file-worker`：UID/GID 为账号 UID，附加组为 `a-nas-users`（管理员另加 `a-nas-admins`），只接受 20100–29999 内且与 `/etc/passwd` 一致的身份。工作进程拒绝以 root 运行，空闲 5 分钟后退出，同一用户的操作串行执行。
+- 通过校验后，Broker 为该用户（按 UID 与角色）派生 `anas-host-agent file-worker`：UID/GID 为账号 UID，附加组为 `a-nas-users`（管理员另加 `a-nas-admins`），只接受 20100–29999 内且与 `/etc/passwd` 一致的身份。工作进程拒绝以 root 运行，空闲 5 分钟后退出。同一账号最多同时有 4 个工作进程（助手“提交更改”的受限进程另算一组），每个一次执行一个操作：一个成员长时间的复制或删除不会挡住他的列目录、预览与上传，超出时排队等空闲的进程。
+- Product Service 关闭连接（浏览器离开、请求取消）时，Broker 向工作进程发送取消消息，工作进程停止正在执行的扫描、复制、删除或用量统计并照常应答，之后继续服务；复制大文件按 64 MiB 一段检查取消。助手“提交更改”的操作不随调用方取消，避免改到一半。
+- 扫描结果分页传输：每条消息最多 2048 个条目（路径很长时继续减半），Broker 收到一页转发一页，root 进程不持有整棵树。单条消息仍以 64 MiB 为上限，超出时以错误应答，工作进程不退出。分页由请求声明，旧版 Product Service 仍收到单条消息。
 - 工作进程用 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` 解析数据卷内路径：`..` 与符号链接无法越界，经过仅可穿过的容器与回收站目录只需执行权限。改名使用 `RENAME_NOREPLACE`，不会覆盖已有条目。需要 Linux 5.6 及以上内核。
 - 下载与上传的文件内容不经过 root：工作进程打开或新建文件后经 `SCM_RIGHTS` 把描述符交回 Product Service。容量检查在 Product Service 中对数据卷根目录执行；复制目录按其中文件总大小检查，分片上传开始时检查整个文件、之后每片再检查一次，旧的 multipart 上传只检查下一块数据。
 - 回收站条目只对删除者可见并只能由其恢复或清除，因为每个用户的回收目录只授予本人。
@@ -137,4 +140,6 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md) 与[数据卷操作](../../internal/hostops/linux/volume.go)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
 - [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)
+- [按范围对账](../../internal/files/reconcile.go)、[范围回归测试](../../internal/files/reconcile_scope_test.go) 与[规模测量](../../internal/files/reconcile_scale_test.go)
+- [文件代理的分页、取消与工作进程池](../../internal/filebroker/server.go) 与[测试](../../internal/filebroker/worker_test.go)
 - [相册存储区修复](../../internal/hostops/linux/photos.go)
