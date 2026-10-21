@@ -29,6 +29,7 @@
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
 - [音乐](music.md)（implemented，尚未部署）
+- [语音处理](voice-processing.md)（implemented，尚未合并）
 - [问题反馈](feedback.md)（implemented）
 - [传输中心](transfer-center.md)（implemented，尚未部署）
 - [备份中心](backup-center.md)（implemented，尚未部署）

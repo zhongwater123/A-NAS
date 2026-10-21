@@ -17,6 +17,8 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► 媒体 Worker（按连接启动，无网络、无数据卷）
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一媒体 Worker 探测与解码；ADR 0018）
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
+  ├── /api/v1/voice ── 语音处理：经 Files 以成员身份读取录音 ──► 媒体 Worker 转 16 kHz ──► 豆包语音（云端转写）
+  │                    声纹 ──► 声纹 Worker（套接字激活，无网络、无数据卷）；翻译与总结 ──► VNAS 的模型网关（ADR 0027）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
@@ -99,6 +101,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/filepreview` | 普通文件的视频抽帧与 HEIC/HEIF 预览；每次以用户身份打开文件后使用隔离 Worker，带有界内存与系统盘派生缓存，命中与 HTTP 304 前仍验证源文件访问权 | 见[基础存储与共享](../specs/basic-storage-and-sharing.md) |
 | `internal/mediaworker` | 媒体 Worker：与应用无关的类型化协议（探测、截图、HEIF 图片、字幕、视频流、音频解码）、FFmpeg 与 libheif 命令、按连接服务端（`anas-api media-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker`、相册经 `photos.Options.Media` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/transfers` / `internal/transfersapi` | 传输中心：每名账号的上传与下载记录（`transfers.db`），tus 分片上传（tusd `pkg/handler` 与写入 `files.PendingUpload` 的数据存储，[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）、按发送字节跟踪的下载与 ZIP 打包，以及 `/api/v1/transfers`、`/api/v1/uploads` | 已实现，单元测试、真实 tus 请求的 API 测试与 OpenAPI 契约测试覆盖，见[传输中心规格](../specs/transfer-center.md)；尚未部署 |
+| `internal/voice` / `internal/voiceapi` / `internal/voiceworker` | 语音处理：`voice.db` 中每个成员的录音、转写、发言人与声纹、人、译文与总结；经 `files.Service` 以成员身份读取录音，豆包语音极速版转写，声纹 Worker（`ai/anas_ai/voice.py`，sherpa-onnx）计算声纹，VNAS 的模型网关翻译与总结；`/api/v1/voice`（[ADR 0027](../adr/0027-transcribe-in-the-cloud-and-keep-voiceprints-on-the-device.md)） | 已实现，单元测试、Go 与 Python 的协议测试、OpenAPI 契约测试覆盖，见[语音处理技术设计](voice.md)；尚未合并 |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单、评论与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
 | `internal/personalization` | “设置 → 个性化”的设备级设置：系统盘上 `personalization.db` 中全体账号共用的桌面壁纸（图片经转正、缩到 3840 px 并重新编码为 JPEG）与样式、本机屏幕的息屏时长，以及 `/api/v1/wallpaper`（已登录读取）与 `/api/v1/local-display`（读取无需登录）；修改仅管理员 | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[个性化规格](../specs/personalization.md)；尚未合并 |
 | `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，由 `internal/httpapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
@@ -115,6 +118,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 ## 关联
 
 - [成员分享技术设计](member-sharing.md)（开发分支已实现，尚未部署）
+- [语音处理技术设计](voice.md)（尚未合并）与 [ADR 0027](../adr/0027-transcribe-in-the-cloud-and-keep-voiceprints-on-the-device.md)
 
 - [领域语言](../../CONTEXT.md)
 - [当前状态](../status/CURRENT.md)
