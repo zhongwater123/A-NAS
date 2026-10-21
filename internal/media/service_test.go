@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -920,5 +921,46 @@ func TestRenamingAShowRenamesItsFolderAndEpisodesAndKeepsItsID(t *testing.T) {
 	loose := waitForShow("影视")
 	if _, err := env.media.RenameShow(env.ctx, env.admin, loose.ID, "某部剧"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("renaming a show with nothing to rename: %v, want ErrInvalid", err)
+	}
+}
+
+// heldTree counts the trees a scan reads and holds each until release.
+type heldTree struct {
+	Files
+	reached chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (h *heldTree) Tree(ctx context.Context, actor accounts.User, spaceID, directoryID string) ([]files.TreeEntry, error) {
+	h.calls.Add(1)
+	h.reached <- struct{}{}
+	<-h.release
+	return h.Files.Tree(ctx, actor, spaceID, directoryID)
+}
+
+// Opening the media center, as its 20-second refresh does, while a library
+// is being scanned does not queue another scan: a library that takes longer
+// than staleScan would otherwise scan for as long as the window is open
+// (#167).
+func TestRefreshLeavesAScanInProgressAlone(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
+	library := env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	held := &heldTree{Files: env.media.files, reached: make(chan struct{}, 10), release: make(chan struct{})}
+	env.media.files = held
+	later := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	env.media.now = func() time.Time { return later }
+
+	env.media.RefreshStale(env.ctx, env.admin)
+	<-held.reached
+	for range 5 {
+		later = later.Add(3 * time.Minute)
+		env.media.RefreshStale(env.ctx, env.admin)
+	}
+	close(held.release)
+	env.media.background.Wait()
+	if calls := held.calls.Load(); calls != 1 {
+		t.Fatalf("refreshing during a scan of %s read its folder %d times, want 1", library.Name, calls)
 	}
 }
