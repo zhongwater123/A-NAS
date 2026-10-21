@@ -172,7 +172,7 @@ var clientMethods = map[string]method{
 		"controller_id": exactly(controllerID), "browser_profile_id": exactly(controllerProfile), "capabilities": someOf(controllerCapabilities...)},
 		required: []string{"session_id", "protocol_version", "controller_id", "browser_profile_id", "capabilities"}},
 	"browser.controller.result": {params: map[string]check{"session_id": runtimeID, "command_id": pattern(commandIDPattern), "ok": boolean,
-		"result": anyJSON(maxInputBytes), "error": anyJSON(4096)},
+		"result": anyJSON(maxControllerResult), "error": anyJSON(4096)},
 		required: []string{"session_id", "command_id", "ok"}},
 	"browser.controller.heartbeat": {params: map[string]check{"session_id": runtimeID}, required: []string{"session_id"}},
 	"browser.controller.detach":    {params: map[string]check{"session_id": runtimeID}, required: []string{"session_id"}},
@@ -180,13 +180,14 @@ var clientMethods = map[string]method{
 
 // The VNAS window as Hermes's browser for the WebOS page it shows: its names and
 // what it serves. It never navigates away from WebOS, so neither
-// browser_navigate nor browser_back, and no raw DevTools access.
+// browser_navigate nor browser_back, and no raw DevTools access. A screenshot is
+// the page drawn by the window, for Hermes's browser_vision (hermes-patches/0003).
 const (
 	controllerID      = "vnas-window"
 	controllerProfile = "webos"
 )
 
-var controllerCapabilities = []string{"browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll"}
+var controllerCapabilities = []string{"browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_screenshot"}
 
 // controllerEvents carry a session's browser commands to the window that
 // registered as its browser, and to no other window of the member.

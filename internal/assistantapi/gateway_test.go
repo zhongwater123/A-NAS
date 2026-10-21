@@ -497,6 +497,44 @@ func TestTheWindowIsTheBrowserOfItsOwnSessionOnly(t *testing.T) {
 	}
 }
 
+func TestTheWindowAnswersWithAScreenshotOfItsPage(t *testing.T) {
+	h := newHarness(t)
+	w := h.open()
+	w.call("session.create", `{"cols":80}`)
+	register := `{"session_id":"` + fakeRuntime + `","protocol_version":1,"controller_id":"vnas-window","browser_profile_id":"webos","capabilities":["browser_snapshot","browser_screenshot"]}`
+	if response := w.call("browser.controller.register", register); len(response.Error) > 0 {
+		t.Fatalf("registration with screenshots refused: %s", response.Error)
+	}
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"look"}`)
+	w.waitFor(func(f frame) bool {
+		return isEvent(f, "browser.controller.command") && strings.Contains(string(f.Params), `"action":"browser_screenshot"`)
+	})
+	// The page as a PNG in base64 is far larger than any message.
+	image := strings.Repeat("A", 4<<20)
+	if response := w.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"fedcba9876543210fedcba9876543210",`+
+		`"ok":true,"result":{"mime_type":"image/png","data":"`+image+`"}}`); len(response.Error) > 0 {
+		t.Fatalf("screenshot refused: %s", response.Error)
+	}
+	done := w.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+	var ev struct {
+		Payload struct {
+			Text string `json:"text"`
+		} `json:"payload"`
+	}
+	_ = json.Unmarshal(done.Params, &ev)
+	var received int
+	if _, err := fmt.Sscanf(ev.Payload.Text, "received %d bytes", &received); err != nil || received < len(image) {
+		t.Fatalf("Hermes got %q, not the screenshot", ev.Payload.Text)
+	}
+	// Anything larger than a screenshot is still refused.
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"look"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "browser.controller.command") })
+	if response := w.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"fedcba9876543210fedcba9876543210",`+
+		`"ok":true,"result":{"data":"`+strings.Repeat("A", maxControllerResult)+`"}}`); len(response.Error) == 0 {
+		t.Fatal("a result over the limit passed")
+	}
+}
+
 // waitBrowse waits for the browser_snapshot of the fake's browse turn at the
 // window that is the session's browser, and returns its command id.
 func waitBrowse(t *testing.T, w *window) string {

@@ -57,7 +57,27 @@ const answered = (message: ChatMessage) => {
   return message.parts.slice(lastTool + 1).some((part) => part.type === "text" && part.text.trim() !== "");
 };
 
-function fromTranscript(stored: SessionMessage[]): ChatMessage[] {
+// Desktop's model names a message by its place in the page it came from, and
+// Hermes serves the latest 500 rows, so past that every reload would rename
+// every message, and assistant-ui keeps each name it was ever given. A stored
+// row's id, or for a run of tool calls its first call's id, stays the same.
+function stableIds(messages: ChatMessage[]): ChatMessage[] {
+  const taken = new Set<string>();
+  return messages.map((message, index) => {
+    const call = message.parts.find((part) => part.type === "tool-call");
+    const next = messages[index + 1];
+    const id = message.rowId !== undefined ? `row-${message.rowId}`
+      : call?.type === "tool-call" && call.toolCallId ? `tools-${call.toolCallId}`
+      : message.error && next?.rowId !== undefined ? `row-${next.rowId}-error`
+      : message.id;
+    // Some providers repeat tool call ids; a name used twice keeps the page's.
+    const unique = taken.has(id) ? message.id : id;
+    taken.add(unique);
+    return unique === message.id ? message : { ...message, id: unique };
+  });
+}
+
+export function fromTranscript(stored: SessionMessage[]): ChatMessage[] {
   const result: ChatMessage[] = [];
   const closeTurn = () => {
     const last = result.at(-1);
@@ -65,8 +85,18 @@ function fromTranscript(stored: SessionMessage[]): ChatMessage[] {
     if (last.role === "user") result.push({ id: `${last.id}-stopped`, role: "assistant", parts: [], interrupted: true, timestamp: last.timestamp });
     else if (last.role === "assistant" && !answered(last)) result[result.length - 1] = { ...last, interrupted: true };
   };
-  for (const message of toChatMessages(stored)) {
+  for (const message of stableIds(toChatMessages(stored))) {
     if (message.role === "user") closeTurn();
+    // Desktop's model folds the steps of a turn Hermes closed as failed into
+    // Hermes's notice; a notice is one text, so the steps go back to a reply of
+    // their own and the member still sees what may already have run.
+    const steps = message.role === "system" ? message.parts.filter((part) => part.type !== "text") : [];
+    if (steps.length) {
+      result.push({ ...message, id: `${message.id}-steps`, role: "assistant", parts: steps });
+      const notice = message.parts.filter((part) => part.type === "text" && part.text.trim());
+      if (notice.length) result.push({ ...message, parts: notice });
+      continue;
+    }
     result.push(message.parts.some(isStopNotice) ? { ...message, parts: message.parts.filter((part) => !isStopNotice(part)) } : message);
   }
   closeTurn();
