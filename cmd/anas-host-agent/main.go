@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -79,18 +80,13 @@ func run(logger *slog.Logger) error {
 		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
 		Logger:       logger,
 	})
-	repaired, err := executor.ReconcileDataVolume(context.Background())
-	if err != nil {
-		return err
-	}
-	logRepairs(logger, repaired)
-	ensureManagedStores(context.Background(), executor, logger)
-	continueConversion(context.Background(), executor, logger)
-	expireViewing(context.Background(), executor, logger)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var reconcileFailed atomic.Bool
 	server := &http.Server{
 		Handler: agent.NewOperationsHandler(agent.Services{
 			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-			SystemLogs: journal.New(),
+			SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
@@ -155,10 +151,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopShareLookup()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go repairPermissionsPeriodically(ctx, executor, logger)
-	go expireViewingPeriodically(ctx, executor, logger)
+	// Serving waits for nothing on the data volume: one that cannot be
+	// reconciled, or a long walk over a large space, leaves Web files, the
+	// terminal and the logs working (#166).
+	go keepDataVolume(ctx, executor, &reconcileFailed, logger)
+	go keepViewing(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
 		logger.Info("A-NAS Host Agent listening", "socket", socketPath, "file_broker", brokerSocket, "version", version)
@@ -248,9 +245,37 @@ func serveSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger
 	}, nil
 }
 
-// repairPermissionsPeriodically reapplies the space ACL layout so manual
-// chmod/setfacl changes on space roots do not persist silently.
-func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+// keepDataVolume reconciles the data volume, its space permissions, the
+// identity manifest on it and the Samba configuration for it, once the Host
+// Agent serves, then every 15 minutes reapplies the space ACL layout so manual
+// chmod/setfacl changes on space roots do not persist silently. A failure,
+// such as a volume Btrfs turned read-only, is logged and reported in the host
+// state through failed, and the next round reconciles everything again; the
+// Host Agent keeps serving either way.
+func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed *atomic.Bool, logger *slog.Logger) {
+	reconcile := func(everything bool) {
+		var repaired []string
+		var err error
+		if everything {
+			repaired, err = executor.ReconcileDataVolume(ctx)
+		} else {
+			repaired, err = executor.RepairDataVolumePermissions(ctx)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		switch {
+		case err != nil:
+			logger.ErrorContext(ctx, "data-volume reconciliation failed", "error", err)
+		case everything:
+			logger.InfoContext(ctx, "data volume reconciled")
+		}
+		failed.Store(err != nil)
+		logRepairs(logger, repaired)
+		ensureManagedStores(ctx, executor, logger)
+		continueConversion(ctx, executor, logger)
+	}
+	reconcile(true)
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -258,13 +283,7 @@ func repairPermissionsPeriodically(ctx context.Context, executor *linuxhostops.E
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			repaired, err := executor.RepairDataVolumePermissions(ctx)
-			if err != nil {
-				logger.ErrorContext(ctx, "data-volume permission repair failed", "error", err)
-			}
-			logRepairs(logger, repaired)
-			ensureManagedStores(ctx, executor, logger)
-			continueConversion(ctx, executor, logger)
+			reconcile(failed.Load())
 		}
 	}
 }
@@ -293,10 +312,13 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 	logRepairs(logger, repaired)
 }
 
-// expireViewingPeriodically revokes Administrative Viewing Mode grants on
-// time; grants that expired while the Host Agent was stopped are revoked at
-// startup.
-func expireViewingPeriodically(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+// keepViewing revokes Administrative Viewing Mode grants on time: those that
+// expired while the Host Agent was stopped once it serves, then every minute.
+// Revoking walks the whole private space, which takes minutes on a large one,
+// so nothing waits for it; the Product Service already refuses an expired
+// grant, and the ACL entries are the second line.
+func keepViewing(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	expireViewing(ctx, executor, logger)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {

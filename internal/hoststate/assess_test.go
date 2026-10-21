@@ -107,3 +107,22 @@ func TestAssessTakesTheWorstObservedFact(t *testing.T) {
 		})
 	}
 }
+
+// A Host Agent that could not reconcile the data volume keeps serving and
+// says so (#166); when the volume is read-only, that is the reason given.
+func TestAssessReportsAFailedReconciliation(t *testing.T) {
+	data := func(readOnly bool) hoststate.Disk {
+		return hoststate.Disk{
+			ID: mustDiskID(t, "disk:data"), Role: hoststate.DiskRoleData, Health: hoststate.HealthHealthy, FilesystemReadOnly: readOnly,
+		}
+	}
+	system := hoststate.Disk{ID: mustDiskID(t, "disk:system"), Role: hoststate.DiskRoleSystem, Health: hoststate.HealthHealthy}
+	health, findings := hoststate.Assess(hoststate.State{Disks: []hoststate.Disk{system, data(false)}, ReconcileFailed: true}, hoststate.Expectations{DataVolume: true})
+	if want := []found{{hoststate.FindingVolumeReconcileFailed, hoststate.HealthWarning, "", 0}}; health != hoststate.HealthWarning || !reflect.DeepEqual(summarize(findings), want) {
+		t.Fatalf("Assess(writable) = %q, %+v; want warning, %+v", health, summarize(findings), want)
+	}
+	health, findings = hoststate.Assess(hoststate.State{Disks: []hoststate.Disk{system, data(true)}, ReconcileFailed: true}, hoststate.Expectations{DataVolume: true})
+	if want := []found{{hoststate.FindingVolumeReadOnly, hoststate.HealthCritical, "disk:data", 0}}; health != hoststate.HealthCritical || !reflect.DeepEqual(summarize(findings), want) {
+		t.Fatalf("Assess(read-only) = %q, %+v; want critical, %+v", health, summarize(findings), want)
+	}
+}
