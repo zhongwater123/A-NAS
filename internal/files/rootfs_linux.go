@@ -194,7 +194,7 @@ func scanDirectory(ctx context.Context, fd int, prefix string, skip ScanSkip, en
 		if skip.Limit > 0 && len(*entries) > skip.Limit {
 			return ErrInvalidSelection
 		}
-		if entry.Info.Kind != KindDirectory {
+		if entry.Info.Kind != KindDirectory || skip.opaque(child) {
 			continue
 		}
 		childFD, err := unix.Openat(fd, child, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)

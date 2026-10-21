@@ -161,7 +161,7 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 		SpaceID: space.ID, ParentID: parentID, Name: request.Name, Size: request.Size, Conflict: request.Conflict,
 		file: file, temporary: filepath.Base(temporaryPath), path: temporaryPath,
 	}
-	s.holdUpload(upload.temporary, true)
+	s.holdTemporary(upload.temporary, true)
 	return upload, nil
 }
 
@@ -276,7 +276,7 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 			return CommittedUpload{}, err
 		}
 	}
-	s.holdUpload(upload.temporary, false)
+	s.holdTemporary(upload.temporary, false)
 	entry, err := s.registerPath(ctx, space.ID, upload.ParentID, root, target)
 	if err != nil {
 		return CommittedUpload{}, err
@@ -298,7 +298,7 @@ func (s *Service) AbortUpload(ctx context.Context, actor accounts.User, upload *
 		_ = upload.file.Close()
 		upload.file = nil
 	}
-	defer s.holdUpload(upload.temporary, false)
+	defer s.holdTemporary(upload.temporary, false)
 	temporary := upload.path
 	if space, root, err := s.authorizedSpace(ctx, actor, upload.SpaceID, true); err == nil {
 		if parentPath, err := s.parentPath(ctx, root, space.ID, upload.ParentID); err == nil {
@@ -414,22 +414,23 @@ func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, 
 	return true, nil
 }
 
-// holdUpload marks a temporary as owned by a pending upload, so that
-// reconciliation never removes it however long the upload is paused.
-func (s *Service) holdUpload(temporary string, held bool) {
-	s.uploadsMu.Lock()
-	defer s.uploadsMu.Unlock()
+// holdTemporary marks a temporary as owned by a pending upload or a copy in
+// progress, so that reconciliation never removes it however long the upload
+// is paused or the copy runs.
+func (s *Service) holdTemporary(temporary string, held bool) {
+	s.temporariesMu.Lock()
+	defer s.temporariesMu.Unlock()
 	if held {
-		s.uploads[temporary] = struct{}{}
+		s.temporaries[temporary] = struct{}{}
 	} else {
-		delete(s.uploads, temporary)
+		delete(s.temporaries, temporary)
 	}
 }
 
-func (s *Service) uploadHeld(temporary string) bool {
-	s.uploadsMu.Lock()
-	defer s.uploadsMu.Unlock()
-	_, held := s.uploads[temporary]
+func (s *Service) temporaryHeld(temporary string) bool {
+	s.temporariesMu.Lock()
+	defer s.temporariesMu.Unlock()
+	_, held := s.temporaries[temporary]
 	return held
 }
 
@@ -439,7 +440,7 @@ func (s *Service) uploadHeld(temporary string) bool {
 func (s *Service) removeStaleUploads(ctx context.Context, root string, temporaries []ScanEntry) {
 	cutoff := s.now().Add(-staleUploadAge)
 	for _, item := range temporaries {
-		if item.Info.Kind != KindFile || item.Info.ModTime.After(cutoff) || s.uploadHeld(item.Info.Name) {
+		if item.Info.Kind != KindFile || item.Info.ModTime.After(cutoff) || s.temporaryHeld(item.Info.Name) {
 			continue
 		}
 		_ = s.fs.Remove(ctx, filepath.Join(root, filepath.FromSlash(item.Path)))
