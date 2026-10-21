@@ -23,6 +23,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
@@ -267,6 +268,7 @@ CREATE TABLE IF NOT EXISTS snapshot_schedules (
 	if _, err := s.db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS snapshots_by_space ON snapshots(space_id, created_at);
 CREATE INDEX IF NOT EXISTS entries_by_parent ON entries(space_id, parent_id);
+`+activity.IndexStatement+`;
 UPDATE trash SET original_path = (SELECT relative_path FROM entries p WHERE p.id = trash.original_parent_id AND p.trashed = 0)
 WHERE original_path = '' AND original_parent_id <> ''
     AND EXISTS (SELECT 1 FROM entries p WHERE p.id = trash.original_parent_id AND p.trashed = 0);
