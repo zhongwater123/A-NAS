@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
+	"github.com/zhongwater123/A-NAS/internal/systemdscope"
 	"github.com/zhongwater123/A-NAS/internal/systemlog/journal"
 )
 
@@ -32,6 +33,13 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
 		if err := filebroker.RunWorker(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS file worker:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) >= 4 && os.Args[1] == filebroker.ShellGateArgument {
+		if err := filebroker.RunShellGate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "A-NAS terminal:", err)
 			os.Exit(1)
 		}
 		return
@@ -101,12 +109,23 @@ func run(logger *slog.Logger) error {
 	if assistantSockets != "" {
 		assistantChanges = environment("ANAS_ASSISTANT_CHANGES_DIR", filepath.Join(mountPoint, "assistant", ".changes"))
 	}
+	// File workers and terminal shells run in scopes of their own, so they
+	// share neither the Host Agent's limits nor its name in the journal.
+	// Without systemd, as in development, they stay in the Host Agent's.
+	var scopes filebroker.Placer
+	if placer, err := systemdscope.New(ctx); err != nil {
+		logger.Warn("file workers and terminals run in the Host Agent's cgroup", "error", err)
+	} else {
+		defer placer.Close()
+		scopes = placer
+	}
 	broker, err := filebroker.NewServer(filebroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: assistantSockets,
 		AssistantTokens:  environment("ANAS_ASSISTANT_TOKEN_DIR", "/etc/a-nas-assistant/tokens"),
 		AssistantChanges: assistantChanges,
 		Accounts:         sessions,
+		Scopes:           scopes,
 	})
 	if err != nil {
 		return err

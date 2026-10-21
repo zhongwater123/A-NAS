@@ -29,6 +29,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(os.Args) >= 4 && os.Args[1] == ShellGateArgument {
+		if err := RunShellGate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 	if len(os.Args) == 2 && os.Args[1] == ProbeArgument {
 		if err := RunProbe(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -175,6 +181,24 @@ func TestFileOperationsAreUnavailableWhileSessionsCannotBeRead(t *testing.T) {
 	err = NewClient(socket).Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
 	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
 		t.Fatalf("Mkdir() error = %v, want ErrUnavailable and not a refusal", err)
+	}
+}
+
+// Each file worker runs in a scope of its own, apart from the Host Agent's
+// cgroup (#166).
+func TestWorkersArePlacedInScopesOfTheirOwn(t *testing.T) {
+	harness := newHarness(t)
+	placer := &recordingPlacer{marker: filepath.Join(t.TempDir(), "placed")}
+	harness.server.config.Scopes = placer
+	space := filepath.Join(harness.volume, "spaces", "alice")
+	if err := os.MkdirAll(space, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.client.Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(space, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	if placed := placer.calls(); len(placed) != 1 || !strings.HasPrefix(placed[0], "files:alice:") {
+		t.Fatalf("placed = %v, want alice's worker once", placed)
 	}
 }
 
