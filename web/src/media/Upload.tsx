@@ -97,6 +97,9 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
   const [over, setOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  // The dialog takes focus, so Escape closes it and Tab starts inside it.
+  const dialog = useRef<HTMLDivElement>(null);
+  useEffect(() => { dialog.current?.focus({ preventScroll: true }); }, []);
   const parentId = trail.at(-1)?.id ?? root?.entryId ?? "";
 
   // Libraries are polled, so the listing follows the space, not the object.
@@ -160,7 +163,7 @@ export function UploadDialog({ uploads, libraries, scope, preferred, onClose, on
   return (
     <div className="mc-dialog-backdrop" onDragOver={(event) => { if (hasFiles(event)) { event.preventDefault(); setOver(true); } }} onDragLeave={(event) => { if (event.target === event.currentTarget) setOver(false); }} onDrop={drop}
       onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="mc-dialog wide mc-upload" role="dialog" aria-modal="true" aria-label="上传视频" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+      <div ref={dialog} tabIndex={-1} className="mc-dialog wide mc-upload" role="dialog" aria-modal="true" aria-label="上传视频" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
         <header className="mc-dialog-head">
           <span className="mc-upload-mark"><CloudUpload /></span>
           <div className="mc-upload-title"><h3>上传视频</h3><small>保存到媒体库的文件夹，上传完成后自动出现在影视中心</small></div>

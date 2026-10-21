@@ -130,6 +130,58 @@ describe("MediaCenter", () => {
     expect(await screen.findByText("已创建“电影”，正在扫描")).toBeTruthy();
   });
 
+  it("names an unnamed library after its folder and picks folders by pressing them", async () => {
+    const fetchMock = serve([],
+      (url) => (url === "/api/v1/spaces" ? json({ items: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "" }] }) : undefined),
+      (url) => (url === "/api/v1/spaces/space%3Ashared/entries?parentId=" ? json({ items: [
+        { id: "file:media", spaceId: "space:shared", name: "影视", kind: "directory", sizeBytes: 0, modifiedAt: "" },
+      ] }) : undefined),
+      (url) => (url === "/api/v1/spaces/space%3Ashared/entries?parentId=file%3Amedia" ? json({ items: [
+        { id: "file:movies", spaceId: "space:shared", name: "电影", kind: "directory", sizeBytes: 0, modifiedAt: "" },
+        { id: "file:shows", spaceId: "space:shared", name: "剧集", kind: "directory", sizeBytes: 0, modifiedAt: "" },
+      ] }) : undefined),
+      (url, init) => (url === "/api/v1/media/libraries" && init?.method === "POST" ? json({ ...library, id: "library:new", name: "电影" }, 201) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(await screen.findByRole("button", { name: "新建媒体库" }));
+    const dialog = await screen.findByRole("dialog", { name: "新建媒体库" });
+    // A name is not needed to go on.
+    await user.click(within(dialog).getByRole("button", { name: "下一步" }));
+
+    // Pressing a folder picks it; its arrow goes inside, where the folder itself can be picked too.
+    await user.click(await within(dialog).findByRole("button", { name: "选择影视" }));
+    expect(within(dialog).getByLabelText("已选择的文件夹").textContent).toBe("影视");
+    await user.click(within(dialog).getByRole("button", { name: "打开影视" }));
+    expect(await within(dialog).findByRole("button", { name: "选择电影" })).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "取消选择影视" }));
+    await user.click(within(dialog).getByRole("button", { name: "选择电影" }));
+    expect(within(dialog).getByRole("button", { name: "取消选择电影" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(within(dialog).getByRole("button", { name: "创建并扫描" }));
+
+    await waitFor(() => expect(calls(fetchMock, "POST", "/api/v1/media/libraries")).toHaveLength(1));
+    const [, init] = calls(fetchMock, "POST", "/api/v1/media/libraries")[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ name: "电影", kind: "movies", folderIds: ["file:movies"], spaceId: "space:shared" });
+  });
+
+  it("takes files dropped on the home page into an upload instead of letting the browser open them", async () => {
+    serve([library]);
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await screen.findByRole("region", { name: "精选" });
+    const dataTransfer = { types: ["Files"], items: [], files: [new File(["clip"], "Up (2009).mp4")] };
+    const main = screen.getByRole("main");
+    expect(fireEvent.dragOver(main, { dataTransfer })).toBe(false);
+    fireEvent.dragEnter(main, { dataTransfer });
+    const overlay = await screen.findByText("松开即可上传到媒体库");
+    expect(fireEvent.drop(overlay, { dataTransfer })).toBe(false);
+    const dialog = await screen.findByRole("dialog", { name: "上传视频" });
+    expect(await within(dialog).findByText("Up (2009).mp4")).toBeTruthy();
+    // The dialog has the keyboard, so Escape closes it.
+    expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "上传视频" })).toBeNull();
+  });
+
   it("shows the home rows and navigates the sidebar", async () => {
     const fetchMock = serve([library], (url) => (url === "/api/v1/media/videos/video%3Aheat" ? json(detail(film)) : undefined));
     const user = userEvent.setup();
@@ -162,13 +214,16 @@ describe("MediaCenter", () => {
   });
 
   it("lists history by day and removes entries", async () => {
-    const fetchMock = serve([library], (url, init) => (url.startsWith("/api/v1/media/history?") && !init?.method ? json({ items: [resuming], total: 1 }) : undefined));
+    const episode: Title = { ...film, id: "video:blossoms-3", type: "episode", title: "第 3 集", showId: show.id, showTitle: "繁花", season: 1, episode: 3, progress: { position: 0, duration: 2700, watched: true, playedAt: "2026-10-10T07:00:00Z" } };
+    const fetchMock = serve([library], (url, init) => (url.startsWith("/api/v1/media/history?") && !init?.method ? json({ items: [resuming, episode], total: 2 }) : undefined));
     const user = userEvent.setup();
     render(<MediaCenter userId="user:admin" isAdmin />);
     const nav = await screen.findByRole("navigation", { name: "影视中心导航" });
     await user.click(within(nav).getByRole("button", { name: "最近播放" }));
     const card = await screen.findByRole("article", { name: "沙丘" });
     expect(card.textContent).toMatch(/剩余/);
+    // An episode's card shows the show, so its caption says which episode.
+    expect(screen.getByRole("article", { name: "繁花" }).textContent).toContain("S1 · E3 · 已看完");
     await user.click(within(card).getByRole("button", { name: "沙丘的更多操作" }));
     await user.click(screen.getByRole("menuitem", { name: "从记录中移除" }));
     await waitFor(() => expect(calls(fetchMock, "DELETE", "/api/v1/media/history/video%3Adune")).toHaveLength(1));
@@ -519,6 +574,53 @@ describe("MediaCenter", () => {
     await user.click(within(films).getByRole("button", { name: /盗火线/ }));
     expect(navigate).toHaveBeenLastCalledWith("video:heat");
     expect(within(player).queryByRole("complementary")).toBeNull();
+  });
+
+  it("plays an episode pressed anywhere on its row, its title after a moment", async () => {
+    const episode = (number: number): Episode => ({ id: `video:blossoms-${number}`, season: 1, episode: number, title: `第 ${number} 集`, addedAt: "2026-10-08T00:00:00Z", artwork: art, duration: 2700, file: `繁花.S01E0${number}.mkv` });
+    const blossoms: ShowDetail = { ...show, collections: [], folder: "繁花 (2023)", next: episode(1), seasonList: [{ number: 1, episodes: [episode(1), episode(2)] }] };
+    const fetchMock = serve([library],
+      (url) => (url === "/api/v1/media/shows/show%3Ablossoms" ? json(blossoms) : undefined),
+      (url) => (/^\/api\/v1\/media\/videos\/video%3Ablossoms-\d$/.test(url) ? json(detail({ ...film, id: "video:blossoms-2", type: "episode", title: "第 2 集", showId: show.id, showTitle: "繁花", season: 1, episode: 2 })) : undefined),
+      (url) => (/\/videos\/video%3Ablossoms-\d\/playback/.test(url) ? json({ mode: "direct", url: "/api/v1/media/videos/x/file", audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+    );
+    const user = userEvent.setup();
+    render(<MediaCenter userId="user:admin" isAdmin />);
+    await user.click(within(await screen.findByRole("region", { name: "最近添加" })).getByRole("button", { name: "打开繁花" }));
+    const episodes = await screen.findByRole("list");
+    const opened = () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => /\/videos\/video%3Ablossoms-\d\/playback/.test(url));
+
+    await user.click(within(episodes).getAllByText("45 分钟")[1]);
+    await waitFor(() => expect(opened()).toEqual([expect.stringContaining("video%3Ablossoms-2")]));
+    await act(async () => { fireEvent.keyDown(await screen.findByRole("dialog", { name: /播放/ }), { key: "Escape" }); });
+
+    // A double press on a title renames it and plays nothing.
+    await user.dblClick(within(episodes).getByText("第 1 集"));
+    expect(within(episodes).getByRole("textbox", { name: "重命名片源" })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(opened()).toHaveLength(1);
+  });
+
+  it("keeps the keyboard on the player after the next episode loads", async () => {
+    const episode = (number: number): VideoDetail => detail({ ...film, id: `video:blossoms-${number}`, type: "episode", title: `第 ${number} 集`, showId: show.id, showTitle: "繁花", season: 1, episode: number }, { nextId: `video:blossoms-${number + 1}` });
+    serve([library],
+      (url) => { const match = /^\/api\/v1\/media\/videos\/video%3Ablossoms-(\d)$/.exec(url); return match ? json(episode(Number(match[1]))) : undefined; },
+      (url) => (/\/videos\/video%3Ablossoms-\d\/playback/.test(url) ? json({ mode: "direct", url: "/api/v1/media/videos/x/file", audio: 0, quality: "original", qualities: ["original"] }) : undefined),
+    );
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { rerender } = render(<Player request={{ videoId: "video:blossoms-1" }} onClose={() => undefined} onNavigate={() => undefined} onSaved={() => undefined} />);
+    const player = await screen.findByRole("dialog", { name: "播放 繁花" });
+    // The viewer last pressed the episode button, which goes away while the next episode loads.
+    within(player).getByRole("button", { name: "选集" }).focus();
+    rerender(<Player request={{ videoId: "video:blossoms-2" }} onClose={() => undefined} onNavigate={() => undefined} onSaved={() => undefined} />);
+    await waitFor(() => expect(within(player).getByText("S1 · E2")).toBeTruthy());
+    expect(document.activeElement).toBe(player);
+    const before = play.mock.calls.length;
+    fireEvent.keyDown(document.activeElement!, { key: " " });
+    await waitFor(() => expect(play.mock.calls.length).toBe(before + 1));
+    // A key leaves a notice of what it did.
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(within(player).getByText("音量 90%")).toBeTruthy();
   });
 
   it("switches the player's library list between libraries", async () => {
