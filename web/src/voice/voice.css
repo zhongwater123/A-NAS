@@ -448,6 +448,11 @@
 .vo-credentials h3 { margin: 0; font-size: 15px; }
 .vo-credentials > header p { margin: 4px 0 0; color: var(--vo-muted); font-size: 12.5px; line-height: 1.6; }
 .vo-credentials > footer { display: flex; align-items: center; gap: 8px; }
+.vo-credential-part { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--vo-line); }
+.vo-credential-part h4 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--vo-ink-2); font-size: 13px; }
+.vo-credential-part h4 svg { width: 15px; height: 15px; color: var(--vo-accent); }
+.vo-credential-why { margin: -2px 0 0; color: var(--vo-muted); font-size: 12px; line-height: 1.6; }
+.vo-credential-part .vo-fineprint { margin: 0; }
 .vo-credentials > footer > span { flex: 1; }
 .vo-secret { display: flex; align-items: center; gap: 4px; }
 .vo-secret input { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; letter-spacing: .02em; }

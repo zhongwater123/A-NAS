@@ -7,7 +7,7 @@ import { type RecordingDetail, retryRecording } from "./voiceApi";
 
 const steps = [
   { stage: "preparing", title: "准备音频", detail: "在 NAS 上把录音转成识别服务需要的格式" },
-  { stage: "recognizing", title: "识别文字", detail: "豆包语音转写说话内容，分开不同的人" },
+  { stage: "recognizing", title: "识别文字", detail: "豆包语音转写说话内容、分开不同的人；排队的人多时要多等一会儿" },
   { stage: "identifying", title: "识别发言人", detail: "在本机计算声纹，认出你命名过的人" },
 ] as const;
 

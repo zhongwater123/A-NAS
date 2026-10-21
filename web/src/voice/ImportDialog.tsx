@@ -137,7 +137,7 @@ export function ImportDialog({ initialFiles, onClose, onImported, onOpenFiles }:
           {status && !status.recognizer.available && (
             <p className="vo-note warn"><CircleAlert />管理员还没有配置豆包语音，录音会先排队，配置后自动开始。</p>
           )}
-          <p className="vo-note"><ShieldCheck />录音会发送到豆包语音（火山引擎）转写，转写文字交给 VNAS 使用的文本模型翻译与总结；声纹只在这台 NAS 上计算和保存。</p>
+          <p className="vo-note"><ShieldCheck />录音会经火山引擎对象存储中转给豆包语音转写，识别完即从中转处删除；转写文字交给 VNAS 使用的文本模型翻译与总结；声纹只在这台 NAS 上计算和保存。</p>
           {error && <p className="vo-error" role="alert">{error}</p>}
         </div>
         <footer className="vo-dialog-actions">

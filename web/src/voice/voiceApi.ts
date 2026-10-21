@@ -113,12 +113,22 @@ export interface RecognizerSettings {
   mode?: CredentialMode;
   appId?: string;
   secretHint?: string;
+  // storage is the TOS bucket that relays recordings to Doubao.
+  storage?: { region: string; bucket: string; accessKeyHint: string; secretHint: string };
+  regions: string[];
   updatedBy?: string;
   updatedAt?: string;
 }
 
-export interface RecognizerCredentials { mode: CredentialMode; apiKey?: string; appId?: string; accessToken?: string }
-export interface RecognizerTest { ok: boolean; code?: "unconfigured" | "rejected" | "unreachable" | "failed"; message?: string }
+export interface StorageInput { region: string; bucket: string; accessKeyId: string; secretAccessKey: string }
+export interface RecognizerCredentials { mode: CredentialMode; apiKey?: string; appId?: string; accessToken?: string; storage: StorageInput }
+export interface RecognizerTest {
+  ok: boolean;
+  code?: "unconfigured" | "rejected" | "unreachable" | "storage_rejected" | "storage_unreachable" | "failed";
+  message?: string;
+  // queued: Doubao took the test task but had not finished it yet.
+  queued?: boolean;
+}
 
 export interface ImportOptions { fileId: string; language: string; template: string; translateTo: string; hotwords: string[] }
 

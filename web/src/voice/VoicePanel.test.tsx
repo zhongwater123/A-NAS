@@ -70,6 +70,11 @@ function serve(detail = detailOf(), recordings: Recording[] = [base]) {
       current = { ...current, speakerList: current.speakerList.map((speaker) => speaker.key === "s1" ? { ...speaker, label: body.name, personId: "person:new", assigned: "user" } : speaker) };
       return json(current);
     }
+    if (url === "/api/v1/voice/settings/recognizer" && method === "GET") return json({ provider: "doubao", configured: false, regions: ["cn-beijing", "cn-shanghai"] });
+    if (url === "/api/v1/voice/settings/recognizer/test" && method === "POST") return json({ ok: true, queued: true });
+    if (url === "/api/v1/voice/settings/recognizer" && method === "PUT") {
+      return json({ provider: "doubao", configured: true, mode: "apiKey", secretHint: "••••1234", regions: ["cn-beijing", "cn-shanghai"], storage: { region: body.storage.region, bucket: body.storage.bucket, accessKeyHint: "••••5678", secretHint: "••••wxyz" } });
+    }
     if (url === "/api/v1/voice/recordings/recording%3A1/translations" && method === "POST") {
       current = { ...current, translations: [{ language: body.language, status: "queued", revision: 0, progress: 0, lines: [], updatedAt: "" }] };
       return json(current, 202);
@@ -138,6 +143,27 @@ describe("VoicePanel", () => {
     expect(await screen.findByRole("heading", { name: "等待配置豆包语音" }, { timeout: 5000 })).toBeTruthy();
     const list = screen.getByRole("listbox", { name: "录音列表" });
     expect(within(list).getByText("等待管理员配置豆包语音")).toBeTruthy();
+  });
+
+  it("lets an administrator test and save Doubao's key with the bucket that relays recordings", async () => {
+    const calls = serve();
+    render(<VoicePanel userId="user:u1" isAdmin onOpenFiles={() => undefined} />);
+    await screen.findByRole("heading", { name: "十月周会" }, { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: /服务与设置/ }));
+    fireEvent.change(await screen.findByPlaceholderText("粘贴 API Key"), { target: { value: "doubao-key-1234" } });
+    const save = screen.getByRole("button", { name: "测试并保存" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("地域"), { target: { value: "cn-shanghai" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 family-voice"), { target: { value: "family-voice" } });
+    fireEvent.change(screen.getByPlaceholderText("AKLT…"), { target: { value: "AKLT5678" } });
+    fireEvent.change(screen.getByPlaceholderText("粘贴 Secret Access Key"), { target: { value: "secret-wxyz" } });
+    fireEvent.click(save);
+    expect(await screen.findByText(/仍在排队/)).toBeTruthy();
+    await waitFor(() => expect(calls.some((call) => call.method === "PUT")).toBe(true));
+    const storage = { region: "cn-shanghai", bucket: "family-voice", accessKeyId: "AKLT5678", secretAccessKey: "secret-wxyz" };
+    expect(calls.find((call) => call.url.endsWith("/settings/recognizer/test"))?.body).toEqual({ mode: "apiKey", apiKey: "doubao-key-1234", storage });
+    expect(calls.find((call) => call.method === "PUT")?.body).toEqual({ mode: "apiKey", apiKey: "doubao-key-1234", storage });
+    expect(await screen.findByText(/上海 · cn-shanghai \/ family-voice/)).toBeTruthy();
   });
 
   it("welcomes a member without recordings", async () => {
