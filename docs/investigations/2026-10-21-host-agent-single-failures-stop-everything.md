@@ -1,6 +1,6 @@
 # 一处故障让 Host Agent 的全部入口失效
 
-状态：fixed locally（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）；实验 NAS 待部署后复核
+状态：fixed locally（[#166](https://github.com/zhongwater123/A-NAS/issues/166)，[PR #212](https://github.com/zhongwater123/A-NAS/pull/212)）；实验 NAS 待部署后复核
 更新时间：2026-10-21
 
 ## 症状与影响
