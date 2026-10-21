@@ -2,8 +2,8 @@ import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, Triangl
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  HostState, StoragePlan, Volume, VolumeConversion, VolumeLayout,
-  cancelStoragePlan, confirmStoragePlan, continueVolumeConversion, createStoragePlan, executeStoragePlan, listVolumes,
+  HostState, StoragePlan, StorageStep, Volume, VolumeConversion, VolumeLayout,
+  cancelStoragePlan, confirmStoragePlan, continueVolumeConversion, createStoragePlan, executeStoragePlan, getStoragePlan, listUnfinishedStoragePlans, listVolumes,
 } from "../api";
 import { formatBytes, formatNominalCapacity } from "../bytes";
 import type { HostStateView } from "../useHostState";
@@ -25,32 +25,57 @@ export interface StoragePlanFlow {
   setPhrase: (value: string) => void;
   generate: (diskIDs: string[], layout?: VolumeLayout) => Promise<void>;
   confirm: () => Promise<void>;
+  // execute starts a confirmed plan, or retries one that needs attention.
   execute: () => Promise<void>;
   // cancel gives up a plan that has not run and forgets it; it reports
   // whether the plan is gone, so the wizard can close.
   cancel: () => Promise<boolean>;
   dismiss: () => void;
+  // resume shows a plan that ran on the device while this page was away.
+  resume: (plan: StoragePlan) => void;
 }
 
 // useStoragePlan belongs to the desktop rather than the storage section: the
-// service refuses a new plan while one is pending and cannot read one back, so
-// closing settings or switching sections must not forget it.
+// service cannot read back a plan that has not run, so closing settings or
+// switching sections must not forget it. A running plan is followed until the
+// device finishes it.
 export function useStoragePlan(): StoragePlanFlow {
   const [plan, setPlan] = useState<StoragePlan>();
   const [phrase, setPhrase] = useState("");
   const [busy, setBusy] = useState<PlanStep>();
   const [error, setError] = useState("");
-  const run = async (step: PlanStep, action: () => Promise<StoragePlan>) => {
+  // reread is how a plan that stopped is shown: its own failure says why.
+  const run = async (step: PlanStep, action: () => Promise<StoragePlan>, reread?: () => Promise<StoragePlan>) => {
     setBusy(step); setError("");
     try { setPlan(await action()); }
-    catch (caught) { setError(storageErrorText(caught)); }
+    catch (caught) {
+      const stopped = reread && (caught as { code?: string } | undefined)?.code === "operation_needs_attention";
+      try { if (stopped) setPlan(await reread()); else setError(storageErrorText(caught)); }
+      catch { setError(storageErrorText(caught)); }
+    }
     finally { setBusy(undefined); }
   };
+  const planID = plan?.id;
+  const running = plan?.state === "running";
+  useEffect(() => {
+    if (!planID || !running) return;
+    let current = true;
+    const timer = window.setInterval(() => {
+      getStoragePlan(planID)
+        .then((next) => { if (current) setPlan((shown) => (shown?.id === planID ? next : shown)); })
+        // The device runs the plan regardless; the next check may reach it.
+        .catch(() => undefined);
+    }, 1500);
+    return () => { current = false; window.clearInterval(timer); };
+  }, [planID, running]);
+  const resume = useCallback((found: StoragePlan) => {
+    setPlan((shown) => shown ?? found); setPhrase(""); setError("");
+  }, []);
   return {
-    plan, phrase, busy, error, setPhrase,
+    plan, phrase, busy, error, setPhrase, resume,
     generate: async (diskIDs, layout) => { setPhrase(""); await run("plan", () => createStoragePlan(diskIDs, layout)); },
     confirm: async () => { if (plan) await run("confirm", () => confirmStoragePlan(plan.id, phrase)); },
-    execute: async () => { if (plan) await run("execute", () => executeStoragePlan(plan.id)); },
+    execute: async () => { if (plan) await run("execute", () => executeStoragePlan(plan.id), () => getStoragePlan(plan.id)); },
     cancel: async () => {
       if (plan?.state !== "planned" && plan?.state !== "confirmed") { setPlan(undefined); setPhrase(""); setError(""); return true; }
       setBusy("cancel"); setError("");
@@ -84,9 +109,30 @@ export function useVolumes(planState?: string): VolumesView {
   return { items, error, refresh };
 }
 
+// useUnfinishedPlan finds a plan that ran on the device while this page was
+// away: a running one is shown at once, one that stopped is offered.
+function useUnfinishedPlan(isAdmin: boolean, flow: StoragePlanFlow): StoragePlan | undefined {
+  const [stopped, setStopped] = useState<StoragePlan>();
+  const showing = Boolean(flow.plan);
+  const { resume } = flow;
+  useEffect(() => {
+    if (!isAdmin || showing) return;
+    let current = true;
+    listUnfinishedStoragePlans().then((items) => {
+      if (!current) return;
+      const running = items.find((plan) => plan.state === "running");
+      if (running) resume(running);
+      setStopped(running ? undefined : items[0]);
+    }).catch(() => { if (current) setStopped(undefined); });
+    return () => { current = false; };
+  }, [isAdmin, showing, resume]);
+  return showing ? undefined : stopped;
+}
+
 export function StorageSection({ host, volumes, isAdmin, flow }: { host: HostStateView; volumes: VolumesView; isAdmin: boolean; flow: StoragePlanFlow }) {
   const { snapshot, refresh: refreshHost } = host;
   const [wizardOpen, setWizardOpen] = useState(false);
+  const stopped = useUnfinishedPlan(isAdmin, flow);
   const planState = flow.plan?.state;
   useEffect(() => { if (planState === "succeeded") void refreshHost(); }, [refreshHost, planState]);
   const disks = snapshot?.disks ?? [];
@@ -101,6 +147,7 @@ export function StorageSection({ host, volumes, isAdmin, flow }: { host: HostSta
     <>
       <PageHeader title="存储" subtitle="数据卷承载全部文件、相册与共享" action={<RefreshButton label="刷新存储状态" busy={host.refreshing} onClick={() => { void volumes.refresh(); void refreshHost(); }} />} />
       {volumes.error && <Banner tone="error">{volumes.error}</Banner>}
+      {!showWizard && stopped && <StoppedPlan plan={stopped} onOpen={() => flow.resume(stopped)} />}
       {showWizard ? <VolumeWizard mode={mode} disks={disks} volume={volume} flow={flow} onClose={() => setWizardOpen(false)} onFinish={finish}
         onCancel={async () => { if (await flow.cancel()) setWizardOpen(false); }} />
         : volumes.items === undefined ? !volumes.error && <div className="set-card set-state compact"><span className="loader" /><p>正在读取数据卷…</p></div>
@@ -128,6 +175,19 @@ export function StorageSection({ host, volumes, isAdmin, flow }: { host: HostSta
         )}
       </Group>
     </>
+  );
+}
+
+function StoppedPlan({ plan, onOpen }: { plan: StoragePlan; onOpen: () => void }) {
+  return (
+    <div className="set-card spare-card">
+      <IconTile tone="danger" icon={TriangleAlert} size="lg" />
+      <div>
+        <h3>上次的存储操作没有完成</h3>
+        <p>{plan.kind === "add_disks" ? "把硬盘加入数据卷" : "创建数据卷"}{stoppedWhere(plan.step)}。可以查看原因并重试，已经完成的步骤不会重做。</p>
+      </div>
+      <button className="set-btn primary" onClick={onOpen}>查看并处理</button>
+    </div>
   );
 }
 
@@ -392,7 +452,12 @@ function VolumeWizard({ mode, disks, volume, flow, onClose, onFinish, onCancel }
         {state === "confirmed" && <button className="set-btn danger" disabled={Boolean(busy)} onClick={() => void flow.execute()}>{plan?.kind === "add_disks" ? "清除硬盘并加入数据卷" : "清除硬盘并创建数据卷"}</button>}
         {state === "succeeded" && <button className="set-btn primary" onClick={onFinish}>完成</button>}
         {state === "expired" && <button className="set-btn primary" onClick={flow.dismiss}>重新开始</button>}
-        {(state === "failed" || state === "needs_attention") && <button className="set-btn" onClick={() => void onCancel()}>关闭</button>}
+        {(state === "failed" || state === "needs_attention") && (
+          <>
+            <button className="set-btn wiz-back" disabled={Boolean(busy)} onClick={() => void onCancel()}>关闭</button>
+            <button className="set-btn primary" disabled={Boolean(busy)} onClick={() => void flow.execute()}>重试</button>
+          </>
+        )}
       </div>
     </section>
   );
@@ -444,7 +509,11 @@ function PlanReview({ plan, flow, state, pending, expired, minutesLeft }: {
         </Callout>
       )}
       {state === "running" && (
-        <div className="wiz-running" role="status"><div className="wiz-progress"><span /></div><p>{adding ? "正在把硬盘加入数据卷，请勿关闭设备或断电…" : "正在创建数据卷，请勿关闭设备或断电…"}</p></div>
+        <div className="wiz-running" role="status">
+          <div className="wiz-progress"><span /></div>
+          <p>{(plan.step && stepTexts[plan.step]) || (adding ? "正在把硬盘加入数据卷…" : "正在创建数据卷…")}</p>
+          <p>操作在设备上进行，关闭这个窗口或页面不会打断它，回来时会看到结果。请勿关闭设备或断电。</p>
+        </div>
       )}
       {state === "succeeded" && (adding
         ? <Callout tone="success" title="硬盘已加入数据卷">数据卷正在后台转换为{layouts[plan.layout]?.name ?? "新的冗余方式"}，进度显示在数据卷卡片上。转换期间可以照常使用，也可以关闭这个窗口。</Callout>
@@ -452,7 +521,8 @@ function PlanReview({ plan, flow, state, pending, expired, minutesLeft }: {
       {state === "expired" && <Callout tone="warning" title="计划已过期">为保证硬盘身份没有变化，计划只在十分钟内有效。请重新开始。</Callout>}
       {(state === "failed" || state === "needs_attention") && (
         <Callout tone="danger" title={state === "failed" ? "执行失败" : "需要人工处理"}>
-          {plan.failure ? `${plan.failure}。` : ""}不要立即生成新计划，先按运行手册导出日志并核对硬盘状态。
+          {adding ? "把硬盘加入数据卷" : "创建数据卷"}{stoppedWhere(plan.step)}{plan.failure ? `：${plan.failure}` : ""}。
+          可以重试：设备会再核对一次硬盘身份，已经完成的步骤不会重做。重试仍不成功时，按运行手册导出日志并核对硬盘状态。
         </Callout>
       )}
     </>
@@ -491,6 +561,20 @@ function LayoutDiagram({ layout }: { layout: VolumeLayout }) {
   );
 }
 
+// The steps a plan goes through on the device, as it runs and where it stopped.
+const stepTexts: Record<StorageStep, string> = {
+  erase: "正在清除硬盘上的分区和签名…",
+  format: "正在格式化，固态硬盘可能要几分钟…",
+  mount: "正在挂载数据卷…",
+  prepare: "正在准备空间与目录…",
+  add_devices: "正在把硬盘加入数据卷…",
+};
+const stepNames: Record<StorageStep, string> = { erase: "清除硬盘", format: "格式化", mount: "挂载", prepare: "准备空间", add_devices: "加入数据卷" };
+
+function stoppedWhere(step?: StorageStep): string {
+  return step ? `在“${stepNames[step]}”这一步停下了` : "没有完成";
+}
+
 // storageErrorText turns the storage API's error codes into what to do.
 function storageErrorText(error: unknown): string {
   const code = (error as { code?: string } | undefined)?.code;
@@ -501,6 +585,7 @@ function storageErrorText(error: unknown): string {
     layout_too_small: "数据卷上的文件放不进所选的冗余方式，请换一种方式。",
     disk_not_eligible: "这块硬盘不能使用：它可能已被挂载、正被其他阵列使用，或不是 SATA/NVMe 硬盘。",
     plan_state_conflict: "另一个存储计划正在执行，或这个计划已被取消、取代，请等它结束后再试。",
+    volume_exists: "设备上已经有一个没有登记的数据卷，可能来自一次没有完成的操作。请重试那次操作来接管它，不要新建。",
     no_conversion: "数据卷已经在转换，或者没有需要转换的内容。",
   };
   return (code && texts[code]) || messageOf(error);

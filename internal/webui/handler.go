@@ -49,8 +49,19 @@ func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 	return &handler{api: api, assets: assets, index: index, screensaverDirectory: options.ScreensaverDirectory}, nil
 }
 
+// desktopPolicy is the desktop's Content Security Policy. Installed apps are
+// served from other ports of the same address, which the browser counts as
+// the same site, so no other origin may frame the desktop (issue #161). Images
+// stay on the device: Markdown from the assistant must not make the browser
+// fetch an outside address (ADR 0024).
+const desktopPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' data: blob:; " +
+	"frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/api/") {
+		// The desktop frames its own file previews, such as PDFs.
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		h.api.ServeHTTP(w, r)
 		return
 	}
@@ -60,6 +71,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Content-Security-Policy", desktopPolicy)
 	switch {
 	case r.URL.Path == "/":
 		w.Header().Set("Cache-Control", "no-store")

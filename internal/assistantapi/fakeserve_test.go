@@ -247,6 +247,8 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	// A browser command's result can be a screenshot of the page.
+	conn.SetReadLimit(maxUpstreamBytes)
 	f.mu.Lock()
 	f.conns++
 	f.conn = conn
@@ -374,6 +376,21 @@ func (f *fakeServe) turn(conn *websocket.Conn, said string) {
 		select {
 		case result := <-f.results:
 			f.event(conn, "message.complete", fakeRuntime, `{"text":`+strconv.Quote(result)+`,"status":"complete"}`)
+		case <-time.After(5 * time.Second):
+			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
+		}
+	case "look":
+		// browser_vision on the window's lane: Hermes asks the window for a
+		// screenshot of its page (hermes-patches/0003).
+		f.mu.Lock()
+		controller := f.controller
+		f.mu.Unlock()
+		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t5","name":"browser_vision","args":{"question":"what is open?"}}`)
+		f.event(controller, "browser.controller.command", fakeRuntime,
+			`{"command_id":"fedcba9876543210fedcba9876543210","action":"browser_screenshot","arguments":{"annotate":false},"controller_id":"vnas-window"}`)
+		select {
+		case result := <-f.results:
+			f.event(conn, "message.complete", fakeRuntime, `{"text":"received `+strconv.Itoa(len(result))+` bytes","status":"complete"}`)
 		case <-time.After(5 * time.Second):
 			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
 		}

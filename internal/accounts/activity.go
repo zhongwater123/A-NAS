@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/netip"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
@@ -41,6 +42,29 @@ func WithClientOrigin(ctx context.Context, origin ClientOrigin) context.Context 
 func originFrom(ctx context.Context) ClientOrigin {
 	origin, _ := ctx.Value(originKey{}).(ClientOrigin)
 	return origin
+}
+
+// client is what a session signed in from this origin is bound to: direct
+// loopback (the local console or an SSH tunnel), or the LAN address. An IPv6
+// client is bound to its /64, since its temporary addresses rotate; link-local
+// addresses all share one /64 and are bound exactly. An origin without an
+// address binds to nothing, and its sessions are refused.
+func (o ClientOrigin) client() string {
+	switch o.Via {
+	case ViaLoopback:
+		return ViaLoopback
+	case ViaLAN:
+		address, err := netip.ParseAddr(o.Address)
+		if err != nil {
+			return ""
+		}
+		if address = address.Unmap(); address.Is6() && !address.IsLinkLocalUnicast() {
+			prefix, _ := address.Prefix(64)
+			return ViaLAN + ":" + prefix.String()
+		}
+		return ViaLAN + ":" + address.String()
+	}
+	return ""
 }
 
 // sessionDetail is the JSON detail of session.* events.

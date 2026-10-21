@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { domToCanvas } from "modern-screenshot";
+
 import { request } from "../api";
-import { ControlError, type Danger, WebosController } from "./webosControl";
+import { ControlError, type Danger, type Screenshot, WebosController } from "./webosControl";
+
+vi.mock("modern-screenshot", () => ({ domToCanvas: vi.fn() }));
 
 // A desktop as App.tsx renders one: windows are .app-window sections named by aria-label.
 function desktop() {
@@ -259,5 +263,62 @@ describe("WebosController", () => {
     document.getElementById("open")!.remove();
     await expect(control.run("browser_click", { ref })).rejects.toThrow("browser_snapshot");
     await expect(control.run("browser_navigate", { url: "https://example.com" })).rejects.toThrow(ControlError);
+  });
+});
+
+describe("the picture of the page", () => {
+  // The renderer draws the page into a canvas; here a canvas that records what is written on it.
+  function canvasOf(width: number, height: number) {
+    const written: string[] = [];
+    const context = { font: "", textBaseline: "", strokeStyle: "", fillStyle: "", lineWidth: 1, strokeRect: vi.fn(), fillRect: vi.fn(),
+      measureText: () => ({ width: 18 }), fillText: (text: string) => written.push(text) };
+    return { canvas: { width, height, getContext: () => context, toDataURL: () => "data:image/png;base64,iVBORw0KGgo=" }, written };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("draws the page as the member sees it, without VNAS's own window, as a PNG", async () => {
+    const { control } = controller();
+    const { canvas } = canvasOf(1024, 768);
+    vi.mocked(domToCanvas).mockResolvedValue(canvas as unknown as HTMLCanvasElement);
+    const shot = await control.run("browser_screenshot", { annotate: false }) as Screenshot;
+    expect(shot).toEqual({ mime_type: "image/png", data: "iVBORw0KGgo=", width: 1024, height: 768 });
+    const [root, options] = vi.mocked(domToCanvas).mock.calls[0] as unknown as [Element, { width?: number; height?: number; filter?(node: Node): boolean }];
+    expect(root).toBe(document.body);
+    expect([options?.width, options?.height]).toEqual([window.innerWidth, window.innerHeight]);
+    expect(options?.filter?.(document.querySelector(".app-window-assistant")!)).toBe(false);
+    expect(options?.filter?.(document.querySelector(".app-window-files")!)).toBe(true);
+  });
+
+  it("labels each control with the ref VNAS clicks it by", async () => {
+    const { control } = controller();
+    const { canvas, written } = canvasOf(1024, 768);
+    vi.mocked(domToCanvas).mockResolvedValue(canvas as unknown as HTMLCanvasElement);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 40, 80, 24));
+    const shot = await control.run("browser_screenshot", { annotate: true }) as Screenshot;
+    const folder = shot.annotations?.find((label) => label.name === "新建文件夹");
+    expect(folder?.ref).toMatch(/^e\d+$/);
+    expect(written).toContain(folder?.ref);
+    // Nothing of VNAS's own window, nothing it may not read.
+    expect(shot.annotations?.some((label) => ["发送", "日记.md"].includes(label.name))).toBe(false);
+    // The refs on the picture are the ones a click uses.
+    await control.run("browser_click", { ref: `@${folder?.ref}` });
+  });
+
+  it("labels no control another window lies over", async () => {
+    const { control } = controller();
+    const { canvas } = canvasOf(1024, 768);
+    vi.mocked(domToCanvas).mockResolvedValue(canvas as unknown as HTMLCanvasElement);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 40, 80, 24));
+    // 相册 lies over everything, with VNAS's own window above it.
+    const photos = document.querySelector(".app-window-photos")!;
+    const vnas = document.querySelector(".app-window-assistant")!;
+    document.elementsFromPoint = vi.fn(() => [vnas, photos, document.body]);
+    try {
+      const shot = await control.run("browser_screenshot", { annotate: true }) as Screenshot;
+      expect(shot.annotations?.map((label) => label.name).sort()).toEqual(["照片查看器", "移到回收站"]);
+    } finally {
+      delete (document as Partial<Document>).elementsFromPoint;
+    }
   });
 });

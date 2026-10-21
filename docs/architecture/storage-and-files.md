@@ -59,7 +59,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 磁盘以 Linux 稳定硬件链接形成的 `disk:*` ID 标识，执行前重新验证型号、容量、传输类型和指纹。
 - 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。
-- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由列表时增量扫描吸收。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
+- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由列表时增量扫描吸收。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。复制先写成目标文件夹中的隐藏副本 `.a-nas-copy-*`，完成后改名就位；Product Service 在内存中持有进行中的副本，目录对账只列出副本本身而不进入，并删除无人持有的副本（重启中断的复制留下的）。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
+- 对账与 Web 变更按空间排序（[调查](../investigations/2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)）。删除、恢复、清除、移动、复制、上传与新建文件夹从第一次文件操作到其行提交为止处于“在途”；对账与 Samba 回收导入记下扫描开始时的代次，开始时有变更在途、或扫描期间有变更开始或结束，就整体丢弃这次扫描：变更自己的行已是最新，SMB 的改动由下一轮补上。扫描结果在一个事务内写入，期间同一空间的新变更等待。必须拿到结果的扫描（上传完成时的文件夹已被 SMB 移走，分享选择的文件夹内容）先等在途变更结束，再独占扫描与写入。扫描到的 inode 属于回收站行时，回收站仍持有该 inode 或无法确认就不收录，否则删除这条过期的回收站行；打开条目时路径上的 inode 必须与记录一致，不一致视为不存在。
 - 后台每 5 分钟的目录对账、Samba 回收导入和回收站到期清除只为本进程见过且仍有效的会话执行；长期未登录用户在下次登录时补做。
 
 ## 文件代理
@@ -105,6 +106,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 快照
 
 - 手动快照与定时快照都是空间子卷的 Btrfs 只读快照，由 root Host Agent 创建、列出、读出对象与删除；快照目录在系统盘的 `files.db`，为每个文件记录大小与修改时间，供备份中心把相同的版本合并显示。
+- 拍摄分两步：Host Agent 先创建只读快照，再按需逐行流式返回其中的文件与文件夹（`GET /v1/snapshots/{id}/objects`，每行一个 JSON 对象，以带总数的结束行收尾）；Product Service 读完全部清单后在一个短事务中写入目录，所以清单长度不受单次回复大小限制，单连接的目录也不会在遍历期间被占住。创建与删除都按快照 ID 幂等：已存在的快照算拍好，已不存在的算删除。Product Service 从请求 Host Agent 拍摄之前起就持有这份快照，直到目录记下它；其间失败或中断（关闭标签页、服务停止）都会删除它，停止时等这一步完成后才关闭目录。崩溃留下的由清扫处理：Product Service 启动后（数据卷离线时等它上线）以及之后每小时，把目录记录的快照与正在拍摄的快照交给 Host Agent（`PUT /v1/snapshots`），Host Agent 只在挂载着数据卷时删除 `.a-nas-snapshots` 中不在其中的快照子卷，并回报哪些仍在；不在数据卷上的快照，其目录记录随之删除。原因与取舍见[调查](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)。
 - 每个空间至多一份快照计划。Product Service 每分钟检查一次，到期时直接请求 Host Agent 拍摄，不经过文件代理，因此不需要任何用户会话；拍摄前确认挂载的是预期数据卷，否则记录失败并在 15 分钟后重试。成功后按计划的保留方式（固定份数或智能保留）删除该空间不再保留的定时快照，手动快照不受影响。
 - 恢复文件夹时，文件代理以用户身份先建目录、再逐个复制文件，新条目照常继承目标空间的默认 ACL；文件写完后由文件代理以用户身份把修改时间设回快照中的值（`set_mod_time`，只作用于普通文件、不跟随符号链接）。“还原此版本”先把整份文件写成临时文件，再把当前文件移入回收站并改名就位，与替换上传相同。快照对象仍由 Host Agent 读出（见上文的例外）。
 - 快照与现在的比较、“最近删除或移走”只读 `files.db`：按路径把快照条目与文件目录逐行比对，打开快照顶层与列出最近删除前先对账空间，以计入 SMB 的改动。
@@ -112,7 +114,11 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 失败语义
 
-- 计划十分钟过期，执行前可以取消（`cancelled`）；执行期间重启会把 `running` 恢复为 `needs_attention`，不自动重新格式化。加盘成功后的冗余方式转换不属于计划，被中断时由 Host Agent 的检查接着做。
+- 计划十分钟过期，执行前可以取消（`cancelled`）。
+- 执行与发起它的请求无关（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）：Host Agent 在自己的上下文中运行建卷或加盘，按计划 ID 把所在步骤、格式化出的文件系统与结果记在系统盘的 `/var/lib/a-nas/volume-operations.json`，`GET /v1/storage/operations/{planId}` 查询；同一时间只运行一个操作。产品服务每秒查询一次直到结束，重启后对仍为 `running` 的计划接着查询，所以关闭页面、断网或重启产品服务都不会中途杀死 `wipefs`、`mkfs.btrfs` 或 `btrfs device add`。
+- Host Agent 自身停止（重启、断电）时，日志中的操作在下次启动读为 `interrupted`，计划进入 `needs_attention`，不自动重做。管理员重试同一计划时，Host Agent 重新核对硬盘并从停下处继续：新卷挂载前从头清除并格式化（上面不可能有文件），挂载后只补齐子卷、卷标记与空间；已经加入数据卷的硬盘不再清除。Host Agent 从没收到的计划什么也没改，同样进入 `needs_attention` 等待重试。失败原因只写步骤与类别，设备路径与命令输出只进 Host Agent 的系统日志。
+- 新建数据卷不碰不是本计划建出的数据卷：已挂载的卷只有由本计划格式化，或卷标记写着本计划（更早版本的标记：首块硬盘相同）且成员恰为计划中的硬盘时才接管；mount unit 指向的文件系统只有由一次未成功的建卷格式化、或就在本计划将清除的硬盘上时才可替换，否则离线的数据卷会在下次开机被遗忘、它的硬盘显示为未使用。产品服务没有记录数据卷、宿主机却显示一个时，拒绝新建计划（`409 volume_exists`），由留下它的那次计划重试接管。
+- 加盘先把目标冗余方式作为 `pending`（计划 ID、方式、加入后的设备数）写进卷标记，再执行 `btrfs device add`，之后改写为 `layout`。硬盘加入后进程被杀时，Host Agent 的检查在内核列出足够的设备后把 `pending` 转为 `layout` 并开始转换。加盘成功后的冗余方式转换不属于计划，被中断时由 Host Agent 的检查接着做。
 - 可用空间必须保留容量的 5%，且至少 10 GiB；不足、只读或离线卷拒绝写入。文件与相册共用 [`internal/capacity`](../../internal/capacity/capacity.go) 中的同一规则。
 - Samba 配置先由 `testparm` 验证，再原子替换；reload 失败恢复旧配置。
 - 创建或重置 Samba 凭据失败时账号进入 `error` 或保持不可登录，旧会话失效。
@@ -130,4 +136,5 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [`api/openapi.yaml`](../../api/openapi.yaml)
 - [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md) 与[数据卷操作](../../internal/hostops/linux/volume.go)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
+- [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)
 - [相册存储区修复](../../internal/hostops/linux/photos.go)

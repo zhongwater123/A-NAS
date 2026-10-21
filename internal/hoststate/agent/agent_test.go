@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -62,19 +63,29 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}, discardLogger())
 	client := agent.NewClient(serve(t, handler))
 
-	created, err := client.CreateVolume(context.Background(), storage.CreateVolumeRequest{
+	started, err := client.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
 		PlanID: "plan:1", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-01", Fingerprint: "fingerprint"}}, Layout: storage.LayoutSingle,
 	})
 	if err != nil {
-		t.Fatalf("CreateVolume() error = %v", err)
+		t.Fatalf("StartCreateVolume() error = %v", err)
 	}
-	if len(created.DiskIDs) != 1 || created.DiskIDs[0] != "disk:fake-data-01" || volume.request.PlanID != "plan:1" || volume.request.Layout != storage.LayoutSingle {
-		t.Fatalf("created volume/request = %#v / %#v", created, volume.request)
+	if started.State != storage.OperationRunning || started.Step != storage.StepFormat || volume.request.PlanID != "plan:1" || volume.request.Layout != storage.LayoutSingle {
+		t.Fatalf("started operation/request = %#v / %#v", started, volume.request)
 	}
-	if _, err := client.AddDisks(context.Background(), storage.AddDisksRequest{
+	created, err := client.VolumeOperation(context.Background(), "plan:1")
+	if err != nil || created.State != storage.OperationSucceeded || created.Volume == nil || len(created.Volume.DiskIDs) != 1 || created.Volume.DiskIDs[0] != "disk:fake-data-01" {
+		t.Fatalf("VolumeOperation() = %#v, %v; want the created volume", created, err)
+	}
+	if _, err := client.VolumeOperation(context.Background(), "plan:unknown"); !errors.Is(err, storage.ErrOperationNotFound) {
+		t.Fatalf("VolumeOperation() of an unknown plan error = %v, want ErrOperationNotFound", err)
+	}
+	if _, err := client.StartAddDisks(context.Background(), storage.AddDisksRequest{
 		PlanID: "plan:2", FilesystemUUID: "uuid", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-02", Fingerprint: "fingerprint"}}, Layout: storage.LayoutMirror,
 	}); err != nil || volume.added.FilesystemUUID != "uuid" || volume.added.Disks[0].DiskID != "disk:fake-data-02" || volume.added.Layout != storage.LayoutMirror {
-		t.Fatalf("AddDisks() error = %v, request = %#v", err, volume.added)
+		t.Fatalf("StartAddDisks() error = %v, request = %#v", err, volume.added)
+	}
+	if _, err := client.StartAddDisks(context.Background(), storage.AddDisksRequest{PlanID: "plan:busy"}); !errors.Is(err, storage.ErrPlanState) {
+		t.Fatalf("StartAddDisks() while another operation runs error = %v, want ErrPlanState", err)
 	}
 	if err := client.ContinueConversion(context.Background()); !errors.Is(err, storage.ErrNoConversion) {
 		t.Fatalf("ContinueConversion() with nothing to convert error = %v, want ErrNoConversion", err)
@@ -89,11 +100,11 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	if credentials.request != credential {
 		t.Fatalf("credential request = %#v, want %#v", credentials.request, credential)
 	}
-	objects, err := client.Create(context.Background(), "space:alice", "snapshot:1")
-	if err != nil || len(objects) != 1 || objects[0].Name != "photo.jpg" {
-		t.Fatalf("Create snapshot objects = %#v, err=%v", objects, err)
+	if err := client.Create(context.Background(), "space:alice", "snapshot:1"); err != nil ||
+		!reflect.DeepEqual(snapshots.created, []string{"space:alice/snapshot:1"}) {
+		t.Fatalf("Create snapshot error = %v, created %v", err, snapshots.created)
 	}
-	reader, object, err := client.Open(context.Background(), "snapshot:1", objects[0].Key)
+	reader, object, err := client.Open(context.Background(), "snapshot:1", "photo.jpg")
 	if err != nil {
 		t.Fatalf("Open snapshot object: %v", err)
 	}
@@ -104,6 +115,78 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}
 	if err := client.Delete(context.Background(), "space:alice", "snapshot:1"); err != nil {
 		t.Fatalf("Delete snapshot: %v", err)
+	}
+}
+
+// A listing is streamed, so a space far beyond what one JSON reply could
+// carry (issue #162: 1 MiB, about 6,000 entries) arrives whole and in order.
+func TestClientStreamsLargeSnapshotListings(t *testing.T) {
+	snapshots := &agentSnapshotBackend{objects: 100_000}
+	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	received := 0
+	err := client.Objects(context.Background(), "snapshot:1", func(object files.SnapshotObject) error {
+		if want := listedObject(received); object != want {
+			return fmt.Errorf("object %d = %#v, want %#v", received, object, want)
+		}
+		received++
+		return nil
+	})
+	if err != nil || received != 100_000 {
+		t.Fatalf("Objects() error = %v after %d objects, want all 100000", err, received)
+	}
+	if err := client.Objects(context.Background(), "snapshot:missing", func(files.SnapshotObject) error { return nil }); !errors.Is(err, files.ErrNotFound) {
+		t.Fatalf("Objects() of a missing snapshot error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
+	snapshots := &agentSnapshotBackend{objects: 10_000, failAt: 5_000}
+	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	received := 0
+	err := client.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { received++; return nil })
+	if err == nil || received != 5_000 {
+		t.Fatalf("Objects() of a failing walk error = %v after %d objects, want an error after 5000", err, received)
+	}
+
+	// A listing that stops without its end line, as when the Host Agent dies.
+	cut := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = io.WriteString(w, `{"object":{"key":"a","name":"a","kind":"file","sizeBytes":1}}`+"\n")
+	})))
+	received = 0
+	err = cut.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { received++; return nil })
+	if err == nil || received != 1 {
+		t.Fatalf("Objects() of a cut-off listing error = %v, want an error", err)
+	}
+
+	// A count that disagrees with the lines sent.
+	miscounted := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"object":{"key":"a","name":"a","kind":"file","sizeBytes":1}}`+"\n"+`{"end":{"count":2}}`+"\n")
+	})))
+	if err := miscounted.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { return nil }); err == nil {
+		t.Fatal("Objects() accepted a listing whose count disagrees with its lines")
+	}
+}
+
+func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
+	snapshots := &agentSnapshotBackend{
+		deleteErr: files.ErrNotFound,
+		pruned:    files.SnapshotPrune{Present: []string{"snapshot:1"}, Removed: 3},
+	}
+	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	if err := client.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, files.ErrNotFound) {
+		t.Fatalf("Delete() in an unknown space error = %v, want ErrNotFound", err)
+	}
+	pruned, err := client.Prune(context.Background(), []string{"snapshot:1", "snapshot:2"})
+	if err != nil || !reflect.DeepEqual(pruned, snapshots.pruned) || !reflect.DeepEqual(snapshots.kept, []string{"snapshot:1", "snapshot:2"}) {
+		t.Fatalf("Prune() = %#v, %v; kept %v", pruned, err, snapshots.kept)
+	}
+	if _, err := client.Prune(context.Background(), nil); err != nil || snapshots.kept == nil || len(snapshots.kept) != 0 {
+		t.Fatalf("Prune() keeping nothing error = %v, kept %#v", err, snapshots.kept)
+	}
+	snapshots.pruneErr = files.ErrVolumeUnavailable
+	if _, err := client.Prune(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("Prune() without the data volume error = %v, want ErrVolumeUnavailable", err)
 	}
 }
 
@@ -142,14 +225,27 @@ type agentVolumeExecutor struct {
 	added   storage.AddDisksRequest
 }
 
-func (e *agentVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
+// agentVolumeExecutor reports a creation running, then done when asked.
+func (e *agentVolumeExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
 	e.request = request
-	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationRunning, Step: storage.StepFormat}, nil
 }
 
-func (e *agentVolumeExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+func (e *agentVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	if request.PlanID == "plan:busy" {
+		return storage.VolumeOperation{}, storage.ErrPlanState
+	}
 	e.added = request
-	return storage.Volume{FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationRunning, Step: storage.StepErase}, nil
+}
+
+func (e *agentVolumeExecutor) VolumeOperation(_ context.Context, planID string) (storage.VolumeOperation, error) {
+	if planID != e.request.PlanID {
+		return storage.VolumeOperation{}, storage.ErrOperationNotFound
+	}
+	return storage.VolumeOperation{PlanID: planID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		ID: "volume:data", DiskIDs: []string{e.request.Disks[0].DiskID}, Layout: e.request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
 }
 
 func (e *agentVolumeExecutor) ContinueConversion(context.Context) error {
@@ -174,17 +270,60 @@ func (p *agentCredentialProvisioner) SyncIdentities(_ context.Context, identitie
 
 func (*agentCredentialProvisioner) DisableCredential(context.Context, string) error { return nil }
 
-type agentSnapshotBackend struct{}
+type agentSnapshotBackend struct {
+	created []string
+	// objects is how many objects "snapshot:1" lists; failAt > 0 fails the
+	// walk after that many.
+	objects, failAt int
+	deleteErr       error
+	kept            []string
+	pruned          files.SnapshotPrune
+	pruneErr        error
+}
 
-func (*agentSnapshotBackend) Create(context.Context, string, string) ([]files.SnapshotObject, error) {
-	return []files.SnapshotObject{{Key: "photo.jpg", Name: "photo.jpg", Kind: files.EntryKindFile, SizeBytes: 14}}, nil
+func (b *agentSnapshotBackend) Create(_ context.Context, spaceID, snapshotID string) error {
+	b.created = append(b.created, spaceID+"/"+snapshotID)
+	return nil
+}
+
+func (b *agentSnapshotBackend) Objects(_ context.Context, snapshotID string, visit func(files.SnapshotObject) error) error {
+	if snapshotID != "snapshot:1" {
+		return files.ErrNotFound
+	}
+	for index := range b.objects {
+		if b.failAt > 0 && index == b.failAt {
+			return errors.New("walk failed")
+		}
+		if err := visit(listedObject(index)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// listedObject is the index-th object of a listing: folders of 100 files,
+// each folder before its files.
+func listedObject(index int) files.SnapshotObject {
+	folder := fmt.Sprintf("相册/2026 年 %05d", index/101)
+	if index%101 == 0 {
+		return files.SnapshotObject{Key: folder, ParentKey: "相册", Name: path.Base(folder), Kind: files.EntryKindDirectory,
+			ModifiedAt: time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC)}
+	}
+	name := fmt.Sprintf("IMG_%06d.jpg", index)
+	return files.SnapshotObject{Key: folder + "/" + name, ParentKey: folder, Name: name, Kind: files.EntryKindFile,
+		SizeBytes: int64(index) * 1000, ModifiedAt: time.Date(2026, time.October, 2, 3, 4, 5, index, time.UTC)}
 }
 
 func (*agentSnapshotBackend) Open(context.Context, string, string) (io.ReadCloser, files.SnapshotObject, error) {
 	return io.NopCloser(strings.NewReader("snapshot bytes")), files.SnapshotObject{Key: "photo.jpg", Name: "photo.jpg", Kind: files.EntryKindFile, SizeBytes: 14}, nil
 }
 
-func (*agentSnapshotBackend) Delete(context.Context, string, string) error { return nil }
+func (b *agentSnapshotBackend) Delete(context.Context, string, string) error { return b.deleteErr }
+
+func (b *agentSnapshotBackend) Prune(_ context.Context, keep []string) (files.SnapshotPrune, error) {
+	b.kept = keep
+	return b.pruned, b.pruneErr
+}
 
 func TestClientReportsUnavailableReader(t *testing.T) {
 	socketPath := serve(t, agent.NewHandler(fake.NewUnavailable(), discardLogger()))

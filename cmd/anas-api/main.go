@@ -183,6 +183,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer storageService.Close()
 	volumeRoot := strings.TrimSpace(os.Getenv("ANAS_DATA_MOUNT"))
 	if volumeRoot == "" {
 		if live {
@@ -361,7 +362,17 @@ func run(logger *slog.Logger) error {
 	go syncIdentities(ctx, accountService, logger)
 	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
 	// The Host Agent takes scheduled snapshots, so they need no session.
-	go fileService.RunSnapshotSchedules(ctx, accountService, logger)
+	schedules := make(chan struct{})
+	go func() {
+		defer close(schedules)
+		fileService.RunSnapshotSchedules(ctx, accountService, logger)
+	}()
+	// Runs before the deferred fileStore.Close: a snapshot that stopping
+	// interrupts is deleted again before the catalog closes.
+	defer func() {
+		stop()
+		<-schedules
+	}()
 	go mediaService.Run(ctx)
 	go transferService.Run(ctx)
 	voiceService.Run()
@@ -612,13 +623,19 @@ func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequ
 	return nil
 }
 func (*developmentOperations) RevokeViewing(context.Context, string) error { return nil }
-func (*developmentOperations) Create(context.Context, string, string) ([]files.SnapshotObject, error) {
-	return nil, errors.New("development snapshot backend is not configured")
+func (*developmentOperations) Create(context.Context, string, string) error {
+	return errors.New("development snapshot backend is not configured")
+}
+func (*developmentOperations) Objects(context.Context, string, func(files.SnapshotObject) error) error {
+	return files.ErrNotFound
 }
 func (*developmentOperations) Open(context.Context, string, string) (io.ReadCloser, files.SnapshotObject, error) {
 	return nil, files.SnapshotObject{}, files.ErrNotFound
 }
 func (*developmentOperations) Delete(context.Context, string, string) error { return files.ErrNotFound }
+func (*developmentOperations) Prune(context.Context, []string) (files.SnapshotPrune, error) {
+	return files.SnapshotPrune{}, errors.New("development snapshot backend is not configured")
+}
 
 func configuredTerminal() (bool, error) {
 	switch mode := os.Getenv("ANAS_TERMINAL"); mode {

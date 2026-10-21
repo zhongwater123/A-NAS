@@ -46,7 +46,7 @@
 
 4. 输入确认短语，“确认计划”，再点“清除硬盘并加入数据卷”。
    - 预期：几秒后显示“硬盘已加入数据卷”；点“完成”后，数据卷卡片显示 2 块硬盘和“正在转换为镜像”，磁盘列表中两块盘都是“数据盘”，不再出现“发现 1 块未使用的硬盘”。若新盘仍显示“未使用”，说明运行的构建早于[该问题的修复](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)：不要再对它生成计划。
-   - 完成标准：计划状态 `succeeded`。若为 `needs_attention`，不要重试，转到“回滚或恢复”。
+   - 完成标准：计划状态 `succeeded`。执行在设备上进行，关闭页面不会打断它；若为 `needs_attention`，先转到“回滚或恢复”。
 
 5. 等待转换完成。卡片每 5 秒刷新一次进度与剩余时间；也可以只读查看：
 
@@ -77,7 +77,7 @@
 ## 回滚或恢复
 
 - 执行前都可以放弃：点“取消计划”，没有任何磁盘写入，可以立即重新开始。
-- 执行进入 `needs_attention`：保留现场，在“日志”中导出 Host Agent 的系统日志，按第 1 步只读检查新盘的分区与签名。旧数据卷不受影响；新盘可能已被清除。不要生成新计划，排查后再决定。
+- 执行进入 `needs_attention`：保留现场，记下向导显示停在哪一步，在“日志”中导出 Host Agent 的系统日志，按第 1 步只读检查新盘的分区与签名。旧数据卷不受影响；新盘可能已被清除，也可能已经加入（`btrfs filesystem show /srv/a-nas/data` 列出它）。目标冗余方式在加入前已记进卷标记，已加入的盘会照常转换。排查后在向导中点“重试”：Host Agent 再核对一次硬盘，已加入的盘不再清除，只补记冗余方式（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）。重试仍失败时不要生成新计划，联系开发处理。
 - 转换停在中途（卡片显示“转换为镜像已暂停”）：文件不丢。原因记在系统日志中，Host Agent 每 15 分钟自动继续，也可以点“继续转换”。空间不足时先删除或移走文件。
 - 新盘在转换完成前损坏：没转换的数据只在原数据盘上，已转换的在两块盘上各有一份，原数据盘上仍有全部文件。缺盘时的降级挂载与更换属于规格的 M2，尚未实现；此时停止使用，联系开发处理。
 - 把数据卷退回单盘、移出这块硬盘属于规格的 M3，尚未实现；界面上没有回退入口。
@@ -86,6 +86,6 @@
 
 - 规格：[硬盘用途与数据卷冗余](../specs/disk-roles-and-redundancy.md)
 - ADR：[0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)
-- 调查：不涉及
+- 调查：[存储计划执行绑定浏览器请求](../investigations/2026-10-21-storage-plan-bound-to-browser-request.md)
 - 代码：[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)
 - 主手册：[配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（部署与回滚 release）

@@ -8,34 +8,41 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
-func (e *Executor) Create(ctx context.Context, spaceID, snapshotID string) ([]files.SnapshotObject, error) {
+// Create takes a read-only Btrfs snapshot of a space. A snapshot that already
+// exists counts as taken, so a caller that lost the answer may ask again.
+func (e *Executor) Create(ctx context.Context, spaceID, snapshotID string) error {
 	spaceRoot, err := e.resolveSpaceRoot(spaceID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	snapshotRoot := e.snapshotRoot(snapshotID)
 	if _, err := os.Lstat(snapshotRoot); err == nil {
-		return nil, files.ErrConflict
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(snapshotRoot), 0o700); err != nil {
-		return nil, err
+		return err
 	}
-	if _, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "snapshot", "-r", spaceRoot, snapshotRoot}, ""); err != nil {
-		return nil, err
+	_, err = e.runner.Run(ctx, "btrfs", []string{"subvolume", "snapshot", "-r", spaceRoot, snapshotRoot}, "")
+	return err
+}
+
+// Objects walks a read-only snapshot, so the same snapshot always lists the
+// same objects.
+func (e *Executor) Objects(ctx context.Context, snapshotID string, visit func(files.SnapshotObject) error) error {
+	root := e.snapshotRoot(snapshotID)
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+		return files.ErrNotFound
+	} else if err != nil {
+		return err
 	}
-	objects, err := walkSnapshot(snapshotRoot)
-	if err != nil {
-		_, _ = e.runner.Run(ctx, "btrfs", []string{"subvolume", "delete", snapshotRoot}, "")
-		return nil, err
-	}
-	return objects, nil
+	return files.WalkSnapshot(ctx, root, visit)
 }
 
 func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
@@ -63,16 +70,59 @@ func (e *Executor) Delete(ctx context.Context, spaceID, snapshotID string) error
 		return err
 	}
 	root := e.snapshotRoot(snapshotID)
-	if !withinDirectory(filepath.Join(e.mountPoint, ".a-nas-snapshots"), root) {
+	if !withinDirectory(e.snapshotsRoot(), root) {
 		return files.ErrNotFound
 	}
+	// Already gone counts as deleted, so a deletion that stopped half way
+	// can be finished.
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
-		return files.ErrNotFound
+		return nil
 	} else if err != nil {
 		return err
 	}
 	_, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "delete", root}, "")
 	return err
+}
+
+// Prune deletes the snapshot subvolumes that keep does not name, such as one
+// the Product Service was taking when it failed or stopped, and reports
+// which of keep exist. It touches only entries named the way snapshotRoot
+// names them, and only on the mounted data volume. A subvolume it cannot
+// delete is logged and left for the next prune.
+func (e *Executor) Prune(ctx context.Context, keep []string) (files.SnapshotPrune, error) {
+	if !e.dataVolumeReady() {
+		return files.SnapshotPrune{}, files.ErrVolumeUnavailable
+	}
+	wanted := make(map[string]string, len(keep))
+	for _, id := range keep {
+		wanted[filepath.Base(e.snapshotRoot(id))] = id
+	}
+	pruned := files.SnapshotPrune{Present: []string{}}
+	items, err := os.ReadDir(e.snapshotsRoot())
+	if errors.Is(err, os.ErrNotExist) {
+		return pruned, nil
+	}
+	if err != nil {
+		return files.SnapshotPrune{}, err
+	}
+	for _, item := range items {
+		if id, ok := wanted[item.Name()]; ok {
+			pruned.Present = append(pruned.Present, id)
+			continue
+		}
+		if !item.IsDir() || !snapshotDirectoryName.MatchString(item.Name()) {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return files.SnapshotPrune{}, err
+		}
+		if _, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "delete", filepath.Join(e.snapshotsRoot(), item.Name())}, ""); err != nil {
+			e.logger.WarnContext(ctx, "delete a snapshot nobody keeps failed", "subvolume", item.Name(), "error", err)
+			continue
+		}
+		pruned.Removed++
+	}
+	return pruned, nil
 }
 
 func (e *Executor) resolveSpaceRoot(spaceID string) (string, error) {
@@ -88,55 +138,14 @@ func (e *Executor) resolveSpaceRoot(spaceID string) (string, error) {
 	return root, nil
 }
 
+func (e *Executor) snapshotsRoot() string { return filepath.Join(e.mountPoint, ".a-nas-snapshots") }
+
 func (e *Executor) snapshotRoot(snapshotID string) string {
 	digest := sha256.Sum256([]byte("a-nas:snapshot:v1\x00" + snapshotID))
-	return filepath.Join(e.mountPoint, ".a-nas-snapshots", hex.EncodeToString(digest[:16]))
+	return filepath.Join(e.snapshotsRoot(), hex.EncodeToString(digest[:16]))
 }
 
-func walkSnapshot(root string) ([]files.SnapshotObject, error) {
-	var objects []files.SnapshotObject
-	err := filepath.WalkDir(root, func(path string, item os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		if strings.HasPrefix(item.Name(), ".a-nas-") {
-			if item.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		info, err := item.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		parentKey := filepath.ToSlash(filepath.Dir(relative))
-		if parentKey == "." {
-			parentKey = ""
-		}
-		kind := files.EntryKindFile
-		if info.IsDir() {
-			kind = files.EntryKindDirectory
-		}
-		objects = append(objects, files.SnapshotObject{
-			Key: filepath.ToSlash(relative), ParentKey: parentKey, Name: info.Name(), Kind: kind, SizeBytes: info.Size(),
-			ModifiedAt: info.ModTime().UTC(),
-		})
-		return nil
-	})
-	return objects, err
-}
+// snapshotDirectoryName matches the names snapshotRoot gives.
+var snapshotDirectoryName = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 var _ files.SnapshotBackend = (*Executor)(nil)

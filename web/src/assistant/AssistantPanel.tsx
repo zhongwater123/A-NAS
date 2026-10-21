@@ -11,17 +11,21 @@ import {
   useAuiState,
   useExternalStoreRuntime,
   type AppendMessage,
+  type ExternalStoreAdapter,
   type ThreadMessageLike,
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import { type CodeHeaderProps, type StreamdownTextComponents, StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Brain, CalendarClock, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
-  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
+  ArrowUp, Brain, CalendarClock, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleHelp, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
+  Eye, Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
   Trash2, Users, Video, Wrench, X, Keyboard, MonitorSmartphone, MousePointerClick,
 } from "lucide-react";
-import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ComponentPropsWithoutRef, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode,
+  Component, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState,
+} from "react";
 
 import { AssistantGlyph } from "../AssistantGlyph";
 import { copyText } from "../clipboard";
@@ -29,6 +33,8 @@ import {
   type Approval, type AssistantQuestion, type AssistantSession, type ChangeOperation,
   answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
 } from "./assistantApi";
+import { chatMessageText } from "./hermes/lib/chat-messages/parts";
+import { withUniqueToolCallIdsWithinMessage } from "./hermes/lib/chat-messages/tool-parts";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
@@ -49,8 +55,9 @@ const SUGGESTIONS = [
 // How long a step VNAS takes on the desktop waits for the member to allow it:
 // Hermes gives the window 30 s to answer a browser command.
 const CONTROL_CONFIRM_MS = 25_000;
-// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go).
-const CONTROL_CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll"];
+// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go);
+// a screenshot is what Hermes's browser_vision looks at (hermes-patches/0003).
+const CONTROL_CAPABILITIES = ["browser_snapshot", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_screenshot"];
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
@@ -250,7 +257,6 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
     onNew: async (message: AppendMessage) => send(message.content.map((part) => (part.type === "text" ? part.text : "")).join("")),
     onCancel: async () => cancel(),
   }), [visible, thread.running, send, cancel]);
-  const runtime = useExternalStoreRuntime<ChatMessage>(adapter);
 
   const remove = async (session: AssistantSession) => {
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
@@ -287,8 +293,11 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
     }
   };
 
-  // A card belongs to the conversation it was asked in and shows only there; the
-  // list marks the conversations waiting for an answer.
+  // A card belongs to the conversation it was asked in and shows only there,
+  // above the composer, while it waits for the member: once answered (here or
+  // in another window), withdrawn or timed out it leaves, and what came of it
+  // is in the steps and the reply. The list marks the conversations waiting
+  // for an answer.
   const active = sessions.find((session) => session.id === activeId);
   const waiting = new Map<string, number>();
   for (const approval of approvals.values()) {
@@ -296,10 +305,26 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
   }
   const here = [...approvals.values()]
     .filter((approval) => (activeId && approval.storedSessionId === activeId) || (thread.liveId && approval.sessionId === thread.liveId))
-    .filter((approval) => approval.status === "awaiting" || approval.status === "deciding" || Date.now() / 1000 - approval.createdAt < 600)
+    .filter((approval) => approval.status === "awaiting" || approval.status === "deciding")
     .sort((a, b) => a.createdAt - b.createdAt);
   const unreachable = !gateway.ready && gateway.problem;
   const runOpen = Boolean(run && run.id === activeId && !active);
+  const dock = (
+    <>
+      {controlAsk && <ControlCard ask={controlAsk} />}
+      {here.length > 0 && (
+        <section className="as-changes" aria-label="本对话中等你确认或回答的事">
+          {here.map((approval) => approval.kind === "command" ? (
+            <CommandCard key={approval.requestId} approval={approval} onDecide={(confirm, forSession) => decide(approval, confirm, forSession)} />
+          ) : approval.kind === "question" ? (
+            <QuestionCard key={approval.requestId} approval={approval} onAnswer={(answers) => answer(approval, answers)} onSkip={() => decide(approval, false)} />
+          ) : (
+            <ApprovalCard key={approval.requestId} approval={approval} onDecide={(confirm) => decide(approval, confirm)} />
+          ))}
+        </section>
+      )}
+    </>
+  );
 
   return (
     <PhotoOpener.Provider value={onShowPhoto}>
@@ -343,7 +368,18 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
             if (text) setPlan(text);
           }} />
         )}
-        <AssistantRuntimeProvider runtime={runtime}>
+        <ConversationBoundary key={activeId ?? ""} messages={thread.messages} fallback={(
+          <div className="as-thread" hidden={view !== "chat"}>
+            <div className="as-thread-failed" role="alert">
+              <CircleAlert />
+              <strong>这个对话暂时无法显示</strong>
+              <p>VNAS 仍在后台处理，等你确认的事照常显示在下方。可以打开其他对话，或开始新对话。</p>
+              <button type="button" onClick={() => setActiveId(undefined)}><MessageSquarePlus />开始新对话</button>
+            </div>
+            {dock}
+          </div>
+        )}>
+        <ConversationRuntime adapter={adapter}>
           <ThreadPrimitive.Root className="as-thread" hidden={view !== "chat"}>
             <ThreadPrimitive.Viewport className="as-viewport" autoScroll={Boolean(activeId)}>
               {!activeId && !thread.messages.length ? (
@@ -370,18 +406,7 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
               <div className="as-viewport-spacer" />
             </ThreadPrimitive.Viewport>
 
-            {controlAsk && <ControlCard ask={controlAsk} />}
-            {here.length > 0 && (
-              <section className="as-changes" aria-label="本对话中等你确认或回答的事">
-                {here.map((approval) => approval.kind === "command" ? (
-                  <CommandCard key={approval.requestId} approval={approval} onDecide={(confirm, forSession) => decide(approval, confirm, forSession)} />
-                ) : approval.kind === "question" ? (
-                  <QuestionCard key={approval.requestId} approval={approval} onAnswer={(answers) => answer(approval, answers)} onSkip={() => decide(approval, false)} />
-                ) : (
-                  <ApprovalCard key={approval.requestId} approval={approval} onDecide={(confirm) => decide(approval, confirm)} />
-                ))}
-              </section>
-            )}
+            {dock}
 
             <ComposerPrimitive.Root className="as-composer">
               <ComposerPrimitive.Input className="as-input" placeholder="让 VNAS 帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
@@ -390,11 +415,42 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
                 : <ComposerPrimitive.Send className="as-send" aria-label="发送"><ArrowUp /></ComposerPrimitive.Send>}
             </ComposerPrimitive.Root>
           </ThreadPrimitive.Root>
-        </AssistantRuntimeProvider>
+        </ConversationRuntime>
+        </ConversationBoundary>
       </main>
     </div>
     </PhotoOpener.Provider>
   );
+}
+
+// The conversation's assistant-ui runtime. It lives inside the conversation's
+// boundary, so a message assistant-ui refuses while taking it in is caught there
+// as well, and each conversation starts with a fresh one.
+function ConversationRuntime({ adapter, children }: { adapter: ExternalStoreAdapter<ChatMessage>; children: ReactNode }) {
+  const runtime = useExternalStoreRuntime<ChatMessage>(adapter);
+  return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
+}
+
+// A conversation that fails to render takes down only itself: the list, the
+// cards waiting for the member and the other conversations stay usable, where
+// the desktop's window boundary would replace all of VNAS and ask to reload
+// WebOS. The next change of its messages tries again.
+class ConversationBoundary extends Component<{ messages: unknown; fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() { return { failed: true }; }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("VNAS conversation render failed", error, info.componentStack);
+  }
+
+  componentDidUpdate(previous: { messages: unknown }) {
+    if (this.state.failed && previous.messages !== this.props.messages) this.setState({ failed: false });
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
 }
 
 // Hermes opens each run of a scheduled task with its own instructions for the
@@ -409,16 +465,35 @@ export function scheduledPrompt(message: ChatMessage): string | undefined {
   return preamble ? text.slice(preamble[0].length).trim() : undefined;
 }
 
-export function toThreadMessage(message: ChatMessage): ThreadMessageLike {
+// Hermes closes a turn that ended without an answer with a notice of its own
+// (agent/turn_failure_copy.py), which its history serves as a system message;
+// the member reads it in their own words.
+const TURN_NOTICES: Record<string, string> = {
+  "Your request was not processed. Send it again if you still want me to carry it out.": "这次请求没有处理。如果还需要，请重新发送。",
+  "This turn did not complete. Some actions may already have run; verify their effects before resending.":
+    "这一轮没有完成，其中一些操作可能已经执行；重新发送前请先确认结果。",
+};
+
+// assistant-ui throws, and takes the whole window down with it, on a message it
+// cannot take: a status on anything but an answer, a notice that is not exactly
+// one text, anything but text from the member, or a tool call id repeated in one
+// message. Messages are shaped as Hermes Desktop shapes them for it
+// (lib/chat-runtime.ts, and #87857 for the ids).
+export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
+  const message = withUniqueToolCallIdsWithinMessage(original);
   const createdAt = message.timestamp ? new Date(message.timestamp * 1000) : undefined;
   const prompt = scheduledPrompt(message);
   if (prompt !== undefined) {
     return { id: message.id, role: "user", content: [{ type: "text", text: prompt }], createdAt, metadata: { custom: { scheduled: true } } };
   }
-  if (message.role === "user") return { id: message.id, role: "user", content: message.parts, createdAt };
+  if (message.role === "user") return { id: message.id, role: "user", content: message.parts.filter((part) => part.type === "text"), createdAt };
+  if (message.role === "system") {
+    const text = chatMessageText(message).trim();
+    return { id: message.id, role: "system", content: [{ type: "text", text: TURN_NOTICES[text] ?? text }], createdAt };
+  }
   return {
     id: message.id,
-    role: message.role === "system" ? "system" : "assistant",
+    role: "assistant",
     content: message.parts.map((part) => (part.type === "text" ? { ...part, text: linkPhotos(part.text) } : part)),
     createdAt,
     status: message.pending ? { type: "running" }
@@ -572,6 +647,16 @@ function ScheduledStart() {
   );
 }
 
+// A notice Hermes wrote into the conversation itself, such as a turn that did
+// not complete: a quiet line, not VNAS speaking.
+function SystemNotice() {
+  return (
+    <MessagePrimitive.Root className="as-msg notice">
+      <div className="as-notice"><Info /><div><MessagePrimitive.Parts /></div></div>
+    </MessagePrimitive.Root>
+  );
+}
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="as-msg assistant">
@@ -632,6 +717,29 @@ function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWi
       <ImageIcon />{children}
     </button>
   );
+}
+
+// Pictures in an answer load only from A-NAS itself. An outside address
+// would have the member's browser fetch it, carrying whatever the model put in
+// it, which the sandbox having no network is meant to rule out (ADR 0024); the
+// desktop's CSP blocks such images too (issue #161). It shows as a link the
+// member may open instead.
+function MarkdownImage({ src, alt, node: _node, ...rest }: ComponentPropsWithoutRef<"img"> & { node?: unknown }) {
+  if (typeof src === "string" && onDevice(src)) return <img src={src} alt={alt} {...rest} />;
+  return (
+    <a className="as-outside-image" href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer" title="外部图片不会自动加载">
+      <ImageIcon />{alt || "外部图片"}
+    </a>
+  );
+}
+
+function onDevice(src: string) {
+  if (/^data:image\//i.test(src)) return true;
+  try {
+    return new URL(src, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 // More than this many photos show as the first ones and a count.
@@ -736,6 +844,7 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
     case "skill_view": case "skills_list": case "skill_manage": return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
     case "browser_snapshot": return { icon: <MonitorSmartphone />, label: "查看桌面", detail: "" };
+    case "browser_vision": return { icon: <Eye />, label: "看桌面画面", detail: typeof args.question === "string" ? short(args.question) : "" };
     case "browser_click": return { icon: <MousePointerClick />, label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
     case "browser_type": return { icon: <Keyboard />, label: "输入", detail: typeof args.text === "string" ? `“${short(args.text)}”` : "" };
     case "browser_press": return { icon: <Keyboard />, label: "按键", detail: typeof args.key === "string" ? args.key : "" };
@@ -769,34 +878,27 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
     void onDecide(confirm).finally(() => setBusy(false));
   };
   const { change, status } = approval;
-  const open = status === "awaiting" || status === "deciding";
   if (!change) return null;
+  const operations = change.operations ?? [];
   return (
-    <article className={`as-change ${status}`}>
+    <article className="as-change">
       <header>
-        <span className="as-change-mark">{CARD_MARKS[status]}</span>
+        <span className="as-change-mark"><ShieldCheck /></span>
         <div>
           <strong>{change.summary || "VNAS 提交的更改"}</strong>
-          <small>{statusText(approval)}</small>
+          <small>{operations.length} 项操作 · 确认前文件不会变化</small>
         </div>
       </header>
-      {open && <ul className="as-change-ops">{change.operations.map((operation, index) => <OperationRow key={index} operation={operation} />)}</ul>}
-      {open && (
-        <footer>
-          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
-          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
-            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
-          </button>
-        </footer>
-      )}
+      <ul className="as-change-ops">{operations.map((operation, index) => <OperationRow key={index} operation={operation} />)}</ul>
+      <footer>
+        <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
+        <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
+          {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
+        </button>
+      </footer>
     </article>
   );
 }
-
-const CARD_MARKS: Record<Approval["status"], ReactNode> = {
-  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, answered: <Check />, applied: <Check />,
-  failed: <CircleAlert />, rejected: <X />, expired: <Clock />, stopped: <Square />,
-};
 
 // Hermes names why it asks in English; the common reasons, in the member's words.
 const COMMAND_REASONS: Record<string, string> = {
@@ -813,44 +915,30 @@ export function CommandCard({ approval, onDecide }: { approval: Approval; onDeci
     void onDecide(confirm, forSession).finally(() => setBusy(false));
   };
   const { command, status } = approval;
-  const open = status === "awaiting" || status === "deciding";
   const script = Boolean(command?.script);
   const reason = command?.description ? COMMAND_REASONS[command.description] ?? command.description : "";
   const shown = script ? (command?.text ?? "").replace(/^execute_code <<'PY'\n/, "").replace(/\nPY$/, "") : command?.text ?? "";
   return (
-    <article className={`as-change as-command ${status === "approved" ? "allowed" : status}`}>
+    <article className="as-change as-command">
       <header>
-        <span className="as-change-mark">{status === "approved" ? <Check /> : script ? <Code /> : <SquareTerminal />}</span>
+        <span className="as-change-mark">{script ? <Code /> : <SquareTerminal />}</span>
         <div>
           <strong>{script ? "VNAS 想运行一段代码" : `VNAS 想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
-          <small>{commandStatus(approval)}</small>
+          <small>只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动</small>
         </div>
       </header>
-      {open && <pre className="as-command-text">{shown}</pre>}
-      {open && (
-        <footer>
-          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
-          {command?.forSession && (
-            <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(true, true)}>本对话中都允许</button>
-          )}
-          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
-            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}允许
-          </button>
-        </footer>
-      )}
+      <pre className="as-command-text">{shown}</pre>
+      <footer>
+        <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
+        {command?.forSession && (
+          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(true, true)}>本对话中都允许</button>
+        )}
+        <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
+          {busy || status === "deciding" ? <LoaderCircle /> : <Check />}允许
+        </button>
+      </footer>
     </article>
   );
-}
-
-function commandStatus({ status, command }: Approval) {
-  const what = command?.script ? "代码" : "命令";
-  switch (status) {
-    case "approved": return `已允许，${what}在 VNAS 自己的文件夹里运行`;
-    case "rejected": return `你拒绝了，${what}没有运行`;
-    case "expired": return `等待确认超时，${what}没有运行`;
-    case "stopped": return `这一轮已停止，${what}没有运行`;
-    default: return `只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动`;
-  }
 }
 
 export function QuestionCard({ approval, onAnswer, onSkip }: {
@@ -861,7 +949,6 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
   const [written, setWritten] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const { status } = approval;
-  const open = status === "awaiting" || status === "deciding";
   // The answer Hermes Desktop sends for a question (clarify/pending.tsx stagedAnswer): one
   // choice or the text, which replace each other; for several choices a JSON list of them
   // with the text as one more.
@@ -892,50 +979,42 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
     void work().finally(() => setBusy(false));
   };
   return (
-    <article className={`as-change as-question ${status}`}>
+    <article className="as-change as-question">
       <header>
-        <span className="as-change-mark">{status === "answered" ? <Check /> : <CircleHelp />}</span>
+        <span className="as-change-mark"><CircleHelp /></span>
         <div>
           <strong>VNAS 想问你</strong>
-          <small>{questionStatus(approval)}</small>
+          <small>{questions.length} 个问题 · 回答后 VNAS 接着做</small>
         </div>
       </header>
       <div className="as-questions">
         {questions.map((question) => (
           <div key={question.id} className="as-question-item">
             <p>{question.text}</p>
-            {open ? (
-              <>
-                {question.choices?.length ? (
-                  <div className="as-choices" role="group" aria-label={question.text}>
-                    {question.choices.map((choice) => (
-                      <button key={choice} type="button" aria-pressed={(picked[question.id] ?? []).includes(choice)} disabled={busy}
-                        onClick={() => pick(question, choice)}>
-                        {plainChoice(choice)}
-                        {RECOMMENDED.test(choice) && <small>推荐</small>}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <input className="as-answer-input" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
-                  value={written[question.id] ?? ""} disabled={busy} maxLength={4000}
-                  onChange={(event) => write(question, event.target.value)} />
-              </>
-            ) : status === "answered" ? (
-              <span className="as-answered">{plainChoice(approval.answers?.[question.id] ?? "没有回答")}</span>
+            {question.choices?.length ? (
+              <div className="as-choices" role="group" aria-label={question.text}>
+                {question.choices.map((choice) => (
+                  <button key={choice} type="button" aria-pressed={(picked[question.id] ?? []).includes(choice)} disabled={busy}
+                    onClick={() => pick(question, choice)}>
+                    {plainChoice(choice)}
+                    {RECOMMENDED.test(choice) && <small>推荐</small>}
+                  </button>
+                ))}
+              </div>
             ) : null}
+            <input className="as-answer-input" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
+              value={written[question.id] ?? ""} disabled={busy} maxLength={4000}
+              onChange={(event) => write(question, event.target.value)} />
           </div>
         ))}
       </div>
-      {open && (
-        <footer>
-          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => run(onSkip)}>跳过</button>
-          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting" || !anything}
-            onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))}>
-            {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
-          </button>
-        </footer>
-      )}
+      <footer>
+        <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => run(onSkip)}>跳过</button>
+        <button type="button" className="as-confirm" disabled={busy || status !== "awaiting" || !anything}
+          onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))}>
+          {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
+        </button>
+      </footer>
     </article>
   );
 }
@@ -945,29 +1024,6 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
 // a badge and answers with the bare choice.
 const RECOMMENDED = /\s*\(Recommended\)$/;
 const plainChoice = (choice: string) => choice.replace(RECOMMENDED, "");
-
-function questionStatus({ status, questions }: Approval) {
-  switch (status) {
-    case "answered": return "已回答";
-    case "rejected": return "你跳过了这些问题";
-    case "expired": return "等待回答超时";
-    case "stopped": return "这一轮已停止";
-    default: return `${questions?.length ?? 0} 个问题 · 回答后 VNAS 接着做`;
-  }
-}
-
-function statusText({ status, change }: Approval) {
-  if (!change) return "";
-  switch (status) {
-    case "approved": return "已确认，正在执行";
-    case "applied": return "已按你的确认完成；被替换或删除的旧文件在回收站";
-    case "failed": return `没有完成：${change.error ?? "未知原因"}`;
-    case "rejected": return "你拒绝了这项更改，文件没有变化";
-    case "expired": return "等待确认超时，文件没有变化";
-    case "stopped": return "这一轮已停止，文件没有变化";
-    default: return `${change.operations.length} 项操作 · 确认前文件不会变化`;
-  }
-}
 
 function OperationRow({ operation }: { operation: ChangeOperation }) {
   const target = friendlyPath(operation.path);
@@ -1014,10 +1070,10 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, CodeHeader };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, img: MarkdownImage, CodeHeader };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
-const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
+const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: SystemNotice };
 
 // Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
 function formatBytes(bytes: number) {

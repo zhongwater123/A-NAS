@@ -250,7 +250,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	if err := json.Unmarshal(member.Body.Bytes(), &createdMember); err != nil {
 		t.Fatal(err)
 	}
-	memberSession, err := accountService.Authenticate(context.Background(), "alice", "alice password for testing")
+	memberSession, err := accountService.Authenticate(signedInDirectly(context.Background()), "alice", "alice password for testing")
 	if err != nil {
 		t.Fatalf("authenticate member: %v", err)
 	}
@@ -433,6 +433,102 @@ func TestProductAPIKeepsLocalConsoleSessionsUntilSignOut(t *testing.T) {
 	}
 }
 
+// The browser also sends the session cookie to installed apps on other ports
+// of the device's address, so the cookie alone must not be enough (issue
+// #161): a session works only from the client that signed in.
+func TestProductAPIAcceptsSessionsOnlyFromTheClientThatSignedIn(t *testing.T) {
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
+		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	// from is a request through the LAN entry, which sets X-Forwarded-For to
+	// the client's address (ADR 0012), or "" for a direct loopback connection.
+	var csrf string
+	send := func(method, path, body, from string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		request.RemoteAddr, request.Host = "127.0.0.1:41234", "127.0.0.1:8080"
+		if body != "" {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		if csrf != "" {
+			request.Header.Set("X-CSRF-Token", csrf)
+		}
+		if from != "" {
+			request.Header.Set("X-Forwarded-For", from)
+		}
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	signIn := func(path, from string) (*http.Cookie, string) {
+		t.Helper()
+		response := send(http.MethodPost, path, `{"username":"owner","password":"correct horse battery staple","localConsole":true}`, from)
+		var body struct {
+			CSRFToken string `json:"csrfToken"`
+		}
+		cookies := response.Result().Cookies()
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || len(cookies) != 1 {
+			t.Fatalf("sign in = %d %s", response.Code, response.Body.String())
+		}
+		return cookies[0], body.CSRFToken
+	}
+	console, _ := signIn("/api/v1/setup/admin", "")
+	laptop, laptopCSRF := signIn("/api/v1/session", "192.0.2.10")
+	status := func(from string, cookies ...*http.Cookie) int {
+		return send(http.MethodGet, "/api/v1/session", "", from, cookies...).Code
+	}
+
+	for _, c := range []struct {
+		name    string
+		from    string
+		cookies []*http.Cookie
+		want    int
+	}{
+		{"LAN session from its browser", "192.0.2.10", []*http.Cookie{laptop}, http.StatusOK},
+		{"LAN session replayed by an app container through Caddy", "172.18.0.2", []*http.Cookie{laptop}, http.StatusUnauthorized},
+		{"LAN session from another LAN client", "192.0.2.77", []*http.Cookie{laptop}, http.StatusUnauthorized},
+		{"LAN session over direct loopback", "", []*http.Cookie{laptop}, http.StatusUnauthorized},
+		{"local console session on the device", "", []*http.Cookie{console}, http.StatusOK},
+		{"local console session through Caddy", "127.0.0.1", []*http.Cookie{console}, http.StatusUnauthorized},
+		{"local console session from the LAN", "192.0.2.10", []*http.Cookie{console}, http.StatusUnauthorized},
+		// An app's page can add a cookie of the same name for a longer path,
+		// which the browser sends first.
+		{"own session after a foreign one", "192.0.2.10", []*http.Cookie{console, {Name: "anas_session", Value: "forged"}, laptop}, http.StatusOK},
+	} {
+		if got := status(c.from, c.cookies...); got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, got, c.want)
+		}
+	}
+
+	csrf = laptopCSRF
+	signOut := send(http.MethodDelete, "/api/v1/session", "", "192.0.2.10", console, laptop)
+	if signOut.Code != http.StatusNoContent {
+		t.Fatalf("sign out = %d %s", signOut.Code, signOut.Body.String())
+	}
+	if got := status("192.0.2.10", laptop); got != http.StatusUnauthorized {
+		t.Errorf("LAN session after its sign out = %d, want 401", got)
+	}
+	if got := status("", console); got != http.StatusOK {
+		t.Errorf("local console session after the LAN browser signed out = %d, want 200", got)
+	}
+}
+
+// signedInDirectly signs in as a direct loopback connection, which a plain
+// httptest request is; a session works only from where it signed in.
+func signedInDirectly(ctx context.Context) context.Context {
+	return accounts.WithClientOrigin(ctx, accounts.ClientOrigin{Via: accounts.ViaLoopback})
+}
+
 // fromLocalConsole makes request a direct loopback connection, the only kind
 // that may set up the device.
 func fromLocalConsole(request *http.Request) {
@@ -455,12 +551,20 @@ func (failingCredentials) DisableCredential(context.Context, string) error { ret
 
 type apiVolumeExecutor struct{}
 
-func (apiVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+func (apiVolumeExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
 }
 
-func (apiVolumeExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
-	return storage.Volume{FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+func (apiVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (apiVolumeExecutor) VolumeOperation(context.Context, string) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{}, storage.ErrOperationNotFound
 }
 
 func (apiVolumeExecutor) ContinueConversion(context.Context) error { return storage.ErrNoConversion }

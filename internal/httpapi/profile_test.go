@@ -67,6 +67,7 @@ func TestEveryoneChoosesTheirOwnNicknameAndAvatar(t *testing.T) {
 		request.AddCookie(alice.cookie)
 		request.Header.Set("Content-Type", contentType)
 		request.Header.Set("X-CSRF-Token", alice.csrf)
+		request.Header.Set("X-Forwarded-For", alice.forwardedFor)
 		recorder := httptest.NewRecorder()
 		f.handler.ServeHTTP(recorder, request)
 		return recorder.Code

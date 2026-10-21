@@ -238,6 +238,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("PATCH /api/v1/users/{userID}/credential", h.withMutation(h.handleResetUserCredential))
 	h.mux.HandleFunc("DELETE /api/v1/users/{userID}", h.withMutation(h.handleDisableUser))
 	h.mux.HandleFunc("GET /api/v1/volumes", h.withSession(h.handleVolumes))
+	h.mux.HandleFunc("GET /api/v1/storage/plans", h.withSession(h.handleUnfinishedStoragePlans))
 	h.mux.HandleFunc("POST /api/v1/storage/plans", h.withMutation(h.handleCreateStoragePlan))
 	h.mux.HandleFunc("POST /api/v1/volumes/{volumeID}/conversion", h.withMutation(h.handleContinueConversion))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/confirm", h.withMutation(h.handleConfirmStoragePlan))
@@ -339,15 +340,13 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	// The page reads its session on every load; renewing the cookie here keeps
 	// a local console signed in past the browser's cookie lifetime cap.
-	cookie, err := r.Cookie(sessionCookieName)
-	if err == nil && session.LocalConsole() {
-		session.Token = cookie.Value
+	token := accounts.SessionToken(r.Context())
+	if session.LocalConsole() {
+		session.Token = token
 		h.setSessionCookie(w, session)
 	}
-	if err == nil {
-		// Also after the Product Service restarted, which forgets kept instances.
-		h.keepAssistant(session.User, cookie.Value)
-	}
+	// Also after the Product Service restarted, which forgets kept instances.
+	h.keepAssistant(session.User, token)
 	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
@@ -382,12 +381,10 @@ func directLoopback(r *http.Request) bool {
 }
 
 func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-	cookie, _ := r.Cookie(sessionCookieName)
-	if cookie != nil {
-		_ = h.accounts.EndSession(withClientOrigin(r), cookie.Value)
-		if keeper, ok := h.assistant.(assistantapi.Keeper); ok {
-			keeper.Forget(cookie.Value)
-		}
+	token := accounts.SessionToken(r.Context())
+	_ = h.accounts.EndSession(withClientOrigin(r), token)
+	if keeper, ok := h.assistant.(assistantapi.Keeper); ok {
+		keeper.Forget(token)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)
@@ -962,7 +959,26 @@ func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http
 		h.writeStorageError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	// The Host Agent goes on with a running plan after this response;
+	// GET /api/v1/operations/{planId} follows it.
+	status := http.StatusOK
+	if plan.State == storage.PlanStateRunning {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, plan)
+}
+
+// handleUnfinishedStoragePlans lists the plans that still need the
+// administrator, so that the settings page finds them again after a reload.
+func (h *productHandler) handleUnfinishedStoragePlans(w http.ResponseWriter, _ *http.Request, session accounts.Session) {
+	if !h.requireAdministrator(w, session) {
+		return
+	}
+	if h.storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": h.storage.UnfinishedPlans()})
 }
 
 func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -1011,13 +1027,8 @@ func (h *productHandler) withSession(next func(http.ResponseWriter, *http.Reques
 			writeError(w, http.StatusServiceUnavailable, "accounts_unavailable", "account service is unavailable")
 			return
 		}
-		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil || strings.TrimSpace(cookie.Value) == "" {
-			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
-			return
-		}
-		session, err := h.accounts.ResolveSession(r.Context(), cookie.Value)
-		if err != nil {
+		session, token, ok := h.clientSession(r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
@@ -1026,8 +1037,38 @@ func (h *productHandler) withSession(next func(http.ResponseWriter, *http.Reques
 			return
 		}
 		// The File Broker verifies the token itself before acting as the user.
-		next(w, r.WithContext(accounts.WithSessionToken(r.Context(), cookie.Value)), session)
+		next(w, r.WithContext(accounts.WithSessionToken(r.Context(), token)), session)
 	}
+}
+
+// maxSessionCookies bounds the session cookies tried for one request.
+const maxSessionCookies = 4
+
+// clientSession returns the session of the first session cookie that belongs
+// to this client. The browser also sends the cookie to installed apps on other
+// ports of the device's address, and an app's page can add cookies of the
+// same name for longer paths, which the browser then sends first; so a cookie
+// alone proves nothing and a foreign one must not hide the user's own
+// (issue #161).
+func (h *productHandler) clientSession(r *http.Request) (accounts.Session, string, bool) {
+	origin := clientOrigin(r)
+	tried := 0
+	for _, cookie := range r.Cookies() {
+		if cookie.Name != sessionCookieName || strings.TrimSpace(cookie.Value) == "" {
+			continue
+		}
+		if tried++; tried > maxSessionCookies {
+			break
+		}
+		session, err := h.accounts.ResolveClientSession(r.Context(), cookie.Value, origin)
+		if err == nil {
+			return session, cookie.Value, true
+		}
+		if errors.Is(err, accounts.ErrSessionElsewhere) {
+			h.logger.WarnContext(r.Context(), "session refused from another client", "via", origin.Via, "address", origin.Address)
+		}
+	}
+	return accounts.Session{}, "", false
 }
 
 // withAdministrator admits only administrators, and requires the CSRF token
@@ -1289,6 +1330,8 @@ func (h *productHandler) writeStorageError(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "volume_unavailable", err.Error())
 	case errors.Is(err, storage.ErrVolumeBusy):
 		writeError(w, http.StatusConflict, "volume_busy", err.Error())
+	case errors.Is(err, storage.ErrVolumeExists):
+		writeError(w, http.StatusConflict, "volume_exists", err.Error())
 	case errors.Is(err, storage.ErrNoConversion):
 		writeError(w, http.StatusConflict, "no_conversion", err.Error())
 	case errors.Is(err, storage.ErrInvalidLayout):
