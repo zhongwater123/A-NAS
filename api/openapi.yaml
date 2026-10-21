@@ -316,12 +316,6 @@ paths:
       parameters: [{ name: operationId, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Operation state, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
-  /api/v1/audit:
-    get:
-      operationId: listAuditEvents
-      responses:
-        "200": { description: Administrator audit export, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } } } } } } }
-        "403": { $ref: "#/components/responses/ProductError" }
   /api/v1/activity:
     get:
       operationId: listActivity
@@ -4233,18 +4227,6 @@ components:
         lastSeenAt: { type: string, format: date-time, description: When that snapshot was taken. }
         goneBy: { type: string, format: date-time, description: When the next snapshot was taken without the item; absent when it went after the newest snapshot. }
         inTrash: { type: boolean, description: "The recycle bin holds an item deleted from the same path; restoring it from there brings back its latest version." }
-    AuditEvent:
-      type: object
-      additionalProperties: false
-      required: [id, action, resourceType, resourceId, occurredAt]
-      properties:
-        id: { type: string }
-        actorUserId: { type: string }
-        action: { type: string }
-        resourceType: { type: string }
-        resourceId: { type: string }
-        occurredAt: { type: string, format: date-time }
-        detail: { type: string }
     ActivityCategory:
       type: string
       enum: [session, account, file, storage, photo]
