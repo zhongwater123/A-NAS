@@ -63,19 +63,29 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}, discardLogger())
 	client := agent.NewClient(serve(t, handler))
 
-	created, err := client.CreateVolume(context.Background(), storage.CreateVolumeRequest{
+	started, err := client.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
 		PlanID: "plan:1", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-01", Fingerprint: "fingerprint"}}, Layout: storage.LayoutSingle,
 	})
 	if err != nil {
-		t.Fatalf("CreateVolume() error = %v", err)
+		t.Fatalf("StartCreateVolume() error = %v", err)
 	}
-	if len(created.DiskIDs) != 1 || created.DiskIDs[0] != "disk:fake-data-01" || volume.request.PlanID != "plan:1" || volume.request.Layout != storage.LayoutSingle {
-		t.Fatalf("created volume/request = %#v / %#v", created, volume.request)
+	if started.State != storage.OperationRunning || started.Step != storage.StepFormat || volume.request.PlanID != "plan:1" || volume.request.Layout != storage.LayoutSingle {
+		t.Fatalf("started operation/request = %#v / %#v", started, volume.request)
 	}
-	if _, err := client.AddDisks(context.Background(), storage.AddDisksRequest{
+	created, err := client.VolumeOperation(context.Background(), "plan:1")
+	if err != nil || created.State != storage.OperationSucceeded || created.Volume == nil || len(created.Volume.DiskIDs) != 1 || created.Volume.DiskIDs[0] != "disk:fake-data-01" {
+		t.Fatalf("VolumeOperation() = %#v, %v; want the created volume", created, err)
+	}
+	if _, err := client.VolumeOperation(context.Background(), "plan:unknown"); !errors.Is(err, storage.ErrOperationNotFound) {
+		t.Fatalf("VolumeOperation() of an unknown plan error = %v, want ErrOperationNotFound", err)
+	}
+	if _, err := client.StartAddDisks(context.Background(), storage.AddDisksRequest{
 		PlanID: "plan:2", FilesystemUUID: "uuid", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-02", Fingerprint: "fingerprint"}}, Layout: storage.LayoutMirror,
 	}); err != nil || volume.added.FilesystemUUID != "uuid" || volume.added.Disks[0].DiskID != "disk:fake-data-02" || volume.added.Layout != storage.LayoutMirror {
-		t.Fatalf("AddDisks() error = %v, request = %#v", err, volume.added)
+		t.Fatalf("StartAddDisks() error = %v, request = %#v", err, volume.added)
+	}
+	if _, err := client.StartAddDisks(context.Background(), storage.AddDisksRequest{PlanID: "plan:busy"}); !errors.Is(err, storage.ErrPlanState) {
+		t.Fatalf("StartAddDisks() while another operation runs error = %v, want ErrPlanState", err)
 	}
 	if err := client.ContinueConversion(context.Background()); !errors.Is(err, storage.ErrNoConversion) {
 		t.Fatalf("ContinueConversion() with nothing to convert error = %v, want ErrNoConversion", err)
@@ -215,14 +225,27 @@ type agentVolumeExecutor struct {
 	added   storage.AddDisksRequest
 }
 
-func (e *agentVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
+// agentVolumeExecutor reports a creation running, then done when asked.
+func (e *agentVolumeExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
 	e.request = request
-	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationRunning, Step: storage.StepFormat}, nil
 }
 
-func (e *agentVolumeExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+func (e *agentVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	if request.PlanID == "plan:busy" {
+		return storage.VolumeOperation{}, storage.ErrPlanState
+	}
 	e.added = request
-	return storage.Volume{FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationRunning, Step: storage.StepErase}, nil
+}
+
+func (e *agentVolumeExecutor) VolumeOperation(_ context.Context, planID string) (storage.VolumeOperation, error) {
+	if planID != e.request.PlanID {
+		return storage.VolumeOperation{}, storage.ErrOperationNotFound
+	}
+	return storage.VolumeOperation{PlanID: planID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		ID: "volume:data", DiskIDs: []string{e.request.Disks[0].DiskID}, Layout: e.request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
 }
 
 func (e *agentVolumeExecutor) ContinueConversion(context.Context) error {

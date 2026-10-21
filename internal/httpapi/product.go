@@ -228,6 +228,7 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("PATCH /api/v1/users/{userID}/credential", h.withMutation(h.handleResetUserCredential))
 	h.mux.HandleFunc("DELETE /api/v1/users/{userID}", h.withMutation(h.handleDisableUser))
 	h.mux.HandleFunc("GET /api/v1/volumes", h.withSession(h.handleVolumes))
+	h.mux.HandleFunc("GET /api/v1/storage/plans", h.withSession(h.handleUnfinishedStoragePlans))
 	h.mux.HandleFunc("POST /api/v1/storage/plans", h.withMutation(h.handleCreateStoragePlan))
 	h.mux.HandleFunc("POST /api/v1/volumes/{volumeID}/conversion", h.withMutation(h.handleContinueConversion))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/confirm", h.withMutation(h.handleConfirmStoragePlan))
@@ -952,7 +953,26 @@ func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http
 		h.writeStorageError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	// The Host Agent goes on with a running plan after this response;
+	// GET /api/v1/operations/{planId} follows it.
+	status := http.StatusOK
+	if plan.State == storage.PlanStateRunning {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, plan)
+}
+
+// handleUnfinishedStoragePlans lists the plans that still need the
+// administrator, so that the settings page finds them again after a reload.
+func (h *productHandler) handleUnfinishedStoragePlans(w http.ResponseWriter, _ *http.Request, session accounts.Session) {
+	if !h.requireAdministrator(w, session) {
+		return
+	}
+	if h.storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": h.storage.UnfinishedPlans()})
 }
 
 func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -1279,6 +1299,8 @@ func (h *productHandler) writeStorageError(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "volume_unavailable", err.Error())
 	case errors.Is(err, storage.ErrVolumeBusy):
 		writeError(w, http.StatusConflict, "volume_busy", err.Error())
+	case errors.Is(err, storage.ErrVolumeExists):
+		writeError(w, http.StatusConflict, "volume_exists", err.Error())
 	case errors.Is(err, storage.ErrNoConversion):
 		writeError(w, http.StatusConflict, "no_conversion", err.Error())
 	case errors.Is(err, storage.ErrInvalidLayout):

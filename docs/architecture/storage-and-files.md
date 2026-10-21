@@ -114,7 +114,11 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 失败语义
 
-- 计划十分钟过期，执行前可以取消（`cancelled`）；执行期间重启会把 `running` 恢复为 `needs_attention`，不自动重新格式化。加盘成功后的冗余方式转换不属于计划，被中断时由 Host Agent 的检查接着做。
+- 计划十分钟过期，执行前可以取消（`cancelled`）。
+- 执行与发起它的请求无关（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）：Host Agent 在自己的上下文中运行建卷或加盘，按计划 ID 把所在步骤、格式化出的文件系统与结果记在系统盘的 `/var/lib/a-nas/volume-operations.json`，`GET /v1/storage/operations/{planId}` 查询；同一时间只运行一个操作。产品服务每秒查询一次直到结束，重启后对仍为 `running` 的计划接着查询，所以关闭页面、断网或重启产品服务都不会中途杀死 `wipefs`、`mkfs.btrfs` 或 `btrfs device add`。
+- Host Agent 自身停止（重启、断电）时，日志中的操作在下次启动读为 `interrupted`，计划进入 `needs_attention`，不自动重做。管理员重试同一计划时，Host Agent 重新核对硬盘并从停下处继续：新卷挂载前从头清除并格式化（上面不可能有文件），挂载后只补齐子卷、卷标记与空间；已经加入数据卷的硬盘不再清除。Host Agent 从没收到的计划什么也没改，同样进入 `needs_attention` 等待重试。失败原因只写步骤与类别，设备路径与命令输出只进 Host Agent 的系统日志。
+- 新建数据卷不碰不是本计划建出的数据卷：已挂载的卷只有由本计划格式化，或卷标记写着本计划（更早版本的标记：首块硬盘相同）且成员恰为计划中的硬盘时才接管；mount unit 指向的文件系统只有由一次未成功的建卷格式化、或就在本计划将清除的硬盘上时才可替换，否则离线的数据卷会在下次开机被遗忘、它的硬盘显示为未使用。产品服务没有记录数据卷、宿主机却显示一个时，拒绝新建计划（`409 volume_exists`），由留下它的那次计划重试接管。
+- 加盘先把目标冗余方式作为 `pending`（计划 ID、方式、加入后的设备数）写进卷标记，再执行 `btrfs device add`，之后改写为 `layout`。硬盘加入后进程被杀时，Host Agent 的检查在内核列出足够的设备后把 `pending` 转为 `layout` 并开始转换。加盘成功后的冗余方式转换不属于计划，被中断时由 Host Agent 的检查接着做。
 - 可用空间必须保留容量的 5%，且至少 10 GiB；不足、只读或离线卷拒绝写入。文件与相册共用 [`internal/capacity`](../../internal/capacity/capacity.go) 中的同一规则。
 - Samba 配置先由 `testparm` 验证，再原子替换；reload 失败恢复旧配置。
 - 创建或重置 Samba 凭据失败时账号进入 `error` 或保持不可登录，旧会话失效。

@@ -231,11 +231,14 @@ export interface Volume {
   state: "creating" | "available" | "unavailable" | "read_only"; conversion?: VolumeConversion;
 }
 export interface PlannedDisk { id: string; model: string; capacityBytes: number; fingerprint: string; signatures: Array<{ type: string; label?: string }> }
+// StorageStep is the step a running plan is at on the device, or the one it
+// stopped in.
+export type StorageStep = "erase" | "format" | "mount" | "prepare" | "add_devices";
 // A plan creates the data volume on its disks, or adds them to it; the
 // capacities estimate the space for files before and after.
 export interface StoragePlan {
   id: string; kind: "create_volume" | "add_disks"; layout: VolumeLayout; disks: PlannedDisk[]; capacityBeforeBytes?: number; capacityAfterBytes: number;
-  confirmationPhrase: string; actions: Array<{kind: string; description: string}>; state: string; expiresAt: string; failure?: string; volume?: Volume;
+  confirmationPhrase: string; actions: Array<{kind: string; description: string}>; state: string; step?: StorageStep; expiresAt: string; failure?: string; volume?: Volume;
 }
 
 export class APIError extends Error {
@@ -357,5 +360,11 @@ export const listVolumes = async () => (await request<{items: Volume[]}>("/api/v
 export const createStoragePlan = (diskIds: string[], layout?: VolumeLayout) => request<StoragePlan>("/api/v1/storage/plans", json({ diskIds, layout }), true);
 export const continueVolumeConversion = (volumeId: string) => request<void>(`/api/v1/volumes/${encodeURIComponent(volumeId)}/conversion`, json({}), true);
 export const confirmStoragePlan = (id: string, confirmationPhrase: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/confirm`, json({ confirmationPhrase }), true);
+// executeStoragePlan starts a confirmed plan, or retries one that needs
+// attention; the device runs it on whether or not this page stays open.
 export const executeStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/execute`, json({}), true);
+export const getStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/operations/${encodeURIComponent(id)}`);
+// listUnfinishedStoragePlans finds a plan running on the device, or one that
+// stopped, after the page was closed or reloaded.
+export const listUnfinishedStoragePlans = async () => (await request<{ items: StoragePlan[] }>("/api/v1/storage/plans")).items;
 export const cancelStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/cancel`, json({}), true);

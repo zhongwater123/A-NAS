@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 	"time"
@@ -23,8 +22,9 @@ type simulatedStorage struct {
 	base hoststate.Observer
 	now  func() time.Time
 
-	mu     sync.Mutex
-	volume *simulatedVolume
+	mu         sync.Mutex
+	volume     *simulatedVolume
+	operations map[string]*simulatedOperation
 }
 
 type simulatedVolume struct {
@@ -102,34 +102,87 @@ func (s *simulatedStorage) Read(ctx context.Context) (hoststate.State, error) {
 	return state, nil
 }
 
-func (s *simulatedStorage) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
+// simulatedStep is how long each step of a simulated operation takes, so
+// that the settings page shows the steps as it follows the operation.
+const simulatedStep = 1500 * time.Millisecond
+
+// simulatedOperation is a plan's operation; it takes effect when its last
+// step ends.
+type simulatedOperation struct {
+	started time.Time
+	steps   []storage.OperationStep
+	apply   func()
+	done    bool
+}
+
+func (s *simulatedStorage) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if operation, ok := s.operations[request.PlanID]; ok {
+		return s.reportLocked(request.PlanID, operation), nil
+	}
 	if s.volume != nil {
-		return storage.Volume{}, errors.New("the simulated data volume exists")
+		return storage.VolumeOperation{}, storage.ErrVolumeExists
 	}
 	volume := &simulatedVolume{layout: request.Layout, from: request.Layout}
 	for _, disk := range request.Disks {
 		volume.diskIDs = append(volume.diskIDs, disk.DiskID)
 	}
-	s.volume = volume
-	return storage.Volume{
-		ID: "volume:data", DiskIDs: append([]string(nil), volume.diskIDs...), FilesystemUUID: simulatedUUID,
-		Layout: request.Layout, State: storage.VolumeStateAvailable,
-	}, nil
+	return s.startLocked(request.PlanID, []storage.OperationStep{storage.StepErase, storage.StepFormat, storage.StepMount, storage.StepPrepare}, func() {
+		s.volume = volume
+	}), nil
 }
 
-func (s *simulatedStorage) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+func (s *simulatedStorage) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if operation, ok := s.operations[request.PlanID]; ok {
+		return s.reportLocked(request.PlanID, operation), nil
+	}
 	if s.volume == nil || request.FilesystemUUID != simulatedUUID {
-		return storage.Volume{}, storage.ErrVolumeChanged
+		return storage.VolumeOperation{}, storage.ErrVolumeChanged
 	}
-	for _, disk := range request.Disks {
-		s.volume.diskIDs = append(s.volume.diskIDs, disk.DiskID)
+	return s.startLocked(request.PlanID, []storage.OperationStep{storage.StepErase, storage.StepAddDevices}, func() {
+		for _, disk := range request.Disks {
+			s.volume.diskIDs = append(s.volume.diskIDs, disk.DiskID)
+		}
+		s.volume.from, s.volume.layout, s.volume.started = s.volume.layout, request.Layout, s.now()
+	}), nil
+}
+
+func (s *simulatedStorage) VolumeOperation(_ context.Context, planID string) (storage.VolumeOperation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	operation, ok := s.operations[planID]
+	if !ok {
+		return storage.VolumeOperation{}, storage.ErrOperationNotFound
 	}
-	s.volume.from, s.volume.layout, s.volume.started = s.volume.layout, request.Layout, s.now()
-	return storage.Volume{FilesystemUUID: simulatedUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+	return s.reportLocked(planID, operation), nil
+}
+
+func (s *simulatedStorage) startLocked(planID string, steps []storage.OperationStep, apply func()) storage.VolumeOperation {
+	if s.operations == nil {
+		s.operations = make(map[string]*simulatedOperation)
+	}
+	operation := &simulatedOperation{started: s.now(), steps: steps, apply: apply}
+	s.operations[planID] = operation
+	return s.reportLocked(planID, operation)
+}
+
+func (s *simulatedStorage) reportLocked(planID string, operation *simulatedOperation) storage.VolumeOperation {
+	report := storage.VolumeOperation{PlanID: planID, State: storage.OperationRunning}
+	step := int(s.now().Sub(operation.started) / simulatedStep)
+	if step < len(operation.steps) {
+		report.Step = operation.steps[step]
+		return report
+	}
+	if !operation.done {
+		operation.apply()
+		operation.done = true
+	}
+	report.State = storage.OperationSucceeded
+	report.Volume = &storage.Volume{ID: "volume:data", FilesystemUUID: simulatedUUID, State: storage.VolumeStateAvailable}
+	return report
 }
 
 func (s *simulatedStorage) ContinueConversion(context.Context) error { return nil }

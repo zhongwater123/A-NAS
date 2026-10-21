@@ -178,6 +178,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleContinueConversion(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, volumeOperationsPath) {
+		h.handleVolumeOperation(w, r)
+		return
+	}
 	if r.URL.Path == "/v1/accounts/credential" {
 		h.handleSetCredential(w, r)
 		return
@@ -397,15 +401,14 @@ func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	volume, err := h.volume.CreateVolume(r.Context(), storage.CreateVolumeRequest{
+	operation, err := h.volume.StartCreateVolume(r.Context(), storage.CreateVolumeRequest{
 		PlanID: document.PlanID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "create volume failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		h.writeVolumeOperationError(w, r, "start creating the data volume failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, volume)
+	writeJSON(w, http.StatusOK, operation)
 }
 
 func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
@@ -423,15 +426,51 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	volume, err := h.volume.AddDisks(r.Context(), storage.AddDisksRequest{
+	operation, err := h.volume.StartAddDisks(r.Context(), storage.AddDisksRequest{
 		PlanID: document.PlanID, FilesystemUUID: document.FilesystemUUID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "add disks to the data volume failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		h.writeVolumeOperationError(w, r, "start adding disks to the data volume failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, volume)
+	writeJSON(w, http.StatusOK, operation)
+}
+
+// handleVolumeOperation reports a plan's data-volume operation, which runs
+// on after the request that started it.
+func (h *handler) handleVolumeOperation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	planID := strings.TrimPrefix(r.URL.Path, volumeOperationsPath)
+	if planID == "" || strings.Contains(planID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "plan ID is invalid")
+		return
+	}
+	operation, err := h.volume.VolumeOperation(r.Context(), planID)
+	if err != nil {
+		h.writeVolumeOperationError(w, r, "read the data-volume operation failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, operation)
+}
+
+func (h *handler) writeVolumeOperationError(w http.ResponseWriter, r *http.Request, message string, err error) {
+	switch {
+	case errors.Is(err, storage.ErrOperationNotFound):
+		writeError(w, http.StatusNotFound, operationNotFoundCode, "the plan has no data-volume operation")
+	case errors.Is(err, storage.ErrPlanState):
+		writeError(w, http.StatusConflict, operationConflictCode, "another data-volume operation is running, or the plan asked for another one")
+	default:
+		h.logger.ErrorContext(r.Context(), message, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+	}
 }
 
 func (h *handler) handleContinueConversion(w http.ResponseWriter, r *http.Request) {
@@ -559,7 +598,12 @@ type addDisksDocument struct {
 	Layout         storage.Layout       `json:"layout"`
 }
 
-const noConversionCode = "no_conversion"
+const (
+	noConversionCode      = "no_conversion"
+	operationNotFoundCode = "operation_not_found"
+	operationConflictCode = "operation_conflict"
+	volumeOperationsPath  = "/v1/storage/operations/"
+)
 
 type credentialDocument struct {
 	UserID         string        `json:"userId"`
@@ -671,19 +715,25 @@ func decodeRequest(r *http.Request, target any) error {
 	return ensureEndOfJSON(decoder)
 }
 
-func (c *Client) CreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	var response storage.Volume
+func (c *Client) StartCreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+	var response storage.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes", createVolumeDocument{
 		PlanID: request.PlanID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
 	return response, err
 }
 
-func (c *Client) AddDisks(ctx context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
-	var response storage.Volume
+func (c *Client) StartAddDisks(ctx context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	var response storage.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/disks", addDisksDocument{
 		PlanID: request.PlanID, FilesystemUUID: request.FilesystemUUID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
+	return response, err
+}
+
+func (c *Client) VolumeOperation(ctx context.Context, planID string) (storage.VolumeOperation, error) {
+	var response storage.VolumeOperation
+	err := c.doJSON(ctx, c.operationClient, http.MethodGet, volumeOperationsPath+url.PathEscape(planID), nil, &response)
 	return response, err
 }
 
@@ -866,6 +916,12 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		}
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == noConversionCode {
 			return storage.ErrNoConversion
+		}
+		if response.StatusCode == http.StatusNotFound && failure.Error.Code == operationNotFoundCode {
+			return storage.ErrOperationNotFound
+		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == operationConflictCode {
+			return fmt.Errorf("%w: %s", storage.ErrPlanState, failure.Error.Message)
 		}
 		if response.StatusCode == http.StatusNotFound && failure.Error.Code == snapshotNotFoundCode {
 			return files.ErrNotFound
