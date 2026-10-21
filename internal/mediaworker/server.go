@@ -18,7 +18,7 @@ import (
 var maxOutput = map[string]int64{OpProbe: 4 << 20, OpFrame: 8 << 20, OpImage: 12 << 20, OpSubtitle: 32 << 20}
 
 // timeouts bound one operation; a stream ends when either side closes.
-var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minute, OpImage: 30 * time.Second, OpSubtitle: 15 * time.Minute, OpStream: 8 * time.Hour, OpAudio: 8 * time.Hour}
+var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minute, OpImage: 30 * time.Second, OpSubtitle: 15 * time.Minute, OpStream: 8 * time.Hour, OpAudio: 8 * time.Hour, OpSpeech: 30 * time.Minute}
 
 // Serve answers one request on conn and returns when it is done.
 func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
@@ -65,7 +65,7 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	var stderr limitedBuffer
 	stderr.limit = 8 << 10
 	command.Stderr = &stderr
-	if request.Op == OpStream || request.Op == OpAudio {
+	if request.Op == OpStream || request.Op == OpAudio || request.Op == OpSpeech {
 		return serveStream(ctx, conn, command, &stderr)
 	}
 	// Buffered previews also stop decoding when the caller goes away.

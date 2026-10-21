@@ -24,6 +24,8 @@ func TestRequestsAreBoundedBeforeAnyCommandRuns(t *testing.T) {
 		{Op: OpStream, Height: 720, MaxBitrate: 4000, AudioTrack: -1},
 		{Op: OpAudio, Bits: 16},
 		{Op: OpAudio, Start: 42.5, SampleRate: 176400, Bits: 24},
+		{Op: OpSpeech, Format: SpeechOpus},
+		{Op: OpSpeech, Format: SpeechPCM, Start: 3600, Duration: 3600},
 	}
 	for _, request := range valid {
 		if err := request.Validate(); err != nil {
@@ -43,6 +45,9 @@ func TestRequestsAreBoundedBeforeAnyCommandRuns(t *testing.T) {
 		{Op: OpAudio, Bits: 32},
 		{Op: OpAudio, Bits: 16, SampleRate: 1},
 		{Op: OpAudio, Bits: 16, Start: -1},
+		{Op: OpSpeech},
+		{Op: OpSpeech, Format: "wav"},
+		{Op: OpSpeech, Format: SpeechPCM, Duration: -1},
 	}
 	for _, request := range invalid {
 		if err := request.Validate(); err == nil {
@@ -56,7 +61,7 @@ func TestCommandsReadTheDescriptorAndWriteStandardOutput(t *testing.T) {
 	for _, request := range []Request{
 		{Op: OpProbe}, {Op: OpFrame, At: 30, Width: 640}, {Op: OpSubtitle, Format: "ass", Stream: -1},
 		{Op: OpStream, Start: 90, CopyVideo: true, AudioTrack: 0}, {Op: OpStream, Height: 480, MaxBitrate: 1500, AudioTrack: 2},
-		{Op: OpAudio, Bits: 16},
+		{Op: OpAudio, Bits: 16}, {Op: OpSpeech, Format: SpeechOpus, Start: 60, Duration: 30}, {Op: OpSpeech, Format: SpeechPCM},
 	} {
 		program, args := tools.command(request)
 		joined := strings.Join(args, " ")
@@ -319,5 +324,54 @@ func TestRealFFmpegAudio(t *testing.T) {
 		if err != nil || strings.TrimSpace(string(output)) != "48000,24" {
 			t.Fatalf("%s: decoded stream = %q, %v", sample.name, output, err)
 		}
+	}
+}
+
+// TestRealFFmpegSpeech decodes a stereo recording to 16 kHz mono samples and
+// to Ogg Opus with FFmpeg when it is installed.
+func TestRealFFmpegSpeech(t *testing.T) {
+	tools, ok := LocalTools()
+	if !ok {
+		t.Skip("FFmpeg is not installed")
+	}
+	path := filepath.Join(t.TempDir(), "memo.m4a")
+	generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=5:sample_rate=44100",
+		"-ac", "2", "-c:a", "aac", path)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("FFmpeg cannot generate a sample: %v %s", err, output)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	local := Local{Tools: tools}
+	ctx := context.Background()
+	pcm, err := local.Speech(ctx, file, SpeechRequest{Format: SpeechPCM, Start: 1, Duration: 2})
+	if err != nil {
+		t.Fatalf("Speech(pcm) error = %v", err)
+	}
+	samples, _ := io.ReadAll(pcm)
+	_ = pcm.Close()
+	// Two seconds of 16-bit mono at 16 kHz; AAC priming may add a frame.
+	if len(samples) < 63_000 || len(samples) > 66_000 {
+		t.Fatalf("pcm = %d bytes, want about 64000", len(samples))
+	}
+	opus, err := local.Speech(ctx, file, SpeechRequest{Format: SpeechOpus})
+	if err != nil {
+		t.Fatalf("Speech(opus) error = %v", err)
+	}
+	encoded, _ := io.ReadAll(opus)
+	_ = opus.Close()
+	if !bytes.HasPrefix(encoded, []byte("OggS")) || !bytes.Contains(encoded[:200], []byte("OpusHead")) {
+		t.Fatalf("opus = %d bytes starting %q", len(encoded), encoded[:min(8, len(encoded))])
+	}
+	check := filepath.Join(t.TempDir(), "check.ogg")
+	if err := os.WriteFile(check, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command(tools.FFprobe, "-v", "error", "-show_entries", "stream=codec_name,channels", "-of", "csv=p=0", check).Output()
+	if err != nil || strings.TrimSpace(string(output)) != "opus,1" {
+		t.Fatalf("encoded stream = %q, %v", output, err)
 	}
 }

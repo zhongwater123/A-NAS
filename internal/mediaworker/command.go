@@ -101,6 +101,22 @@ func (t Tools) command(request Request) (string, []string) {
 			args = append(args, "-sample_fmt", "s16")
 		}
 		return t.FFmpeg, append(args, "-f", "flac", "pipe:1")
+	case OpSpeech:
+		// Recognition services and the voiceprint model take 16 kHz mono;
+		// Opus at 24 kbps keeps an hour of speech near 11 MB to upload.
+		args := append([]string{"-nostdin"}, quiet...)
+		if request.Start > 0 {
+			args = append(args, "-ss", seconds(request.Start))
+		}
+		args = append(args, "-i", "fd:")
+		if request.Duration > 0 {
+			args = append(args, "-t", seconds(request.Duration))
+		}
+		args = append(args, "-map", "0:a:0", "-vn", "-sn", "-dn", "-map_metadata", "-1", "-ac", "1", "-ar", "16000")
+		if request.Format == SpeechOpus {
+			return t.FFmpeg, append(args, "-c:a", "libopus", "-b:a", "24k", "-application", "voip", "-f", "ogg", "pipe:1")
+		}
+		return t.FFmpeg, append(args, "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1")
 	}
 	return "", nil
 }
