@@ -761,7 +761,8 @@ func (s *Service) reconcileSambaTrash(ctx context.Context, actor accounts.User, 
 	if !order.beginWrite(generation) {
 		return nil
 	}
-	defer order.endWrite()
+	imported := false
+	defer func() { order.endWrite(imported) }()
 	known, err := s.trashPaths(ctx, space.ID)
 	if err != nil {
 		return err
@@ -781,6 +782,7 @@ func (s *Service) reconcileSambaTrash(ctx context.Context, actor accounts.User, 
 		if item.Info.Kind != KindFile {
 			continue
 		}
+		imported = true
 		if err := s.importSambaTrashFile(ctx, space.ID, trashRelative, path.Dir(item.Path), actor.ID, item.Info); err != nil {
 			return err
 		}
@@ -1321,7 +1323,7 @@ func (s *Service) registerTree(ctx context.Context, spaceID, parentID, root, tar
 	if err != nil {
 		return Entry{}, err
 	}
-	if _, err := s.registerScan(ctx, tx, root, spaceID, relative, entry.ID, below, nil); err != nil {
+	if _, _, err := s.registerScan(ctx, tx, root, spaceID, relative, entry.ID, below, nil); err != nil {
 		return Entry{}, err
 	}
 	return entry, tx.Commit()
@@ -1755,33 +1757,36 @@ func (s *Service) reconcileNow(ctx context.Context, space accounts.Space, root s
 		if err != nil {
 			return err
 		}
-		return s.writeScan(ctx, space.ID, root, scope{}, scanned)
+		_, err = s.writeScan(ctx, space.ID, root, scope{}, scanned)
+		return err
 	})
 }
 
 // writeScan catalogs a scan of a scope of a space in one transaction,
 // writing only the rows that do not already say what the scan found, drops
 // or unplaces the rows of what the scope no longer holds (see dropMissing)
-// and removes stale upload and copy temporaries.
-func (s *Service) writeScan(ctx context.Context, spaceID, root string, sc scope, scanned []ScanEntry) error {
+// and removes stale upload and copy temporaries. changed reports whether
+// it wrote any row.
+func (s *Service) writeScan(ctx context.Context, spaceID, root string, sc scope, scanned []ScanEntry) (changed bool, err error) {
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	known, err := scopeRows(ctx, tx, spaceID, sc)
 	if err != nil {
-		return err
+		return false, err
 	}
-	seen, err := s.registerScan(ctx, tx, root, spaceID, sc.relative, sc.id, scanned, known)
+	seen, registered, err := s.registerScan(ctx, tx, root, spaceID, sc.relative, sc.id, scanned, known)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := dropMissing(ctx, tx, spaceID, sc, known, seen); err != nil {
-		return err
+	dropped, err := dropMissing(ctx, tx, spaceID, sc, known, seen)
+	if err != nil {
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return err
+		return false, err
 	}
 	var temporaries, copies []ScanEntry
 	for _, item := range scopedEntries(sc, scanned) {
@@ -1794,17 +1799,19 @@ func (s *Service) writeScan(ctx context.Context, spaceID, root string, sc scope,
 	}
 	s.removeStaleUploads(ctx, root, temporaries)
 	s.removeStaleCopies(ctx, root, copies)
-	return nil
+	return registered > 0 || dropped, nil
 }
 
 // registerScan catalogs what a scan found below base (empty for the space
-// root), whose row is baseID, and returns the inodes it catalogued. Rows in
-// known, by inode, that already say what the scan found are left as they
-// are. Upload and copy temporaries are left out, and so is a file the
-// recycle bin still holds, with everything below it.
-func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, base, baseID string, scanned []ScanEntry, known map[uint64]knownRow) (map[uint64]struct{}, error) {
+// root), whose row is baseID, and returns the inodes it catalogued and how
+// many rows it wrote. Rows in known, by inode, that already say what the
+// scan found are left as they are. Upload and copy temporaries are left
+// out, and so is a file the recycle bin still holds, with everything below
+// it.
+func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, base, baseID string, scanned []ScanEntry, known map[uint64]knownRow) (map[uint64]struct{}, int, error) {
 	parentIDs := map[string]string{".": baseID}
 	seen := make(map[uint64]struct{})
+	written := 0
 	for _, item := range scanned {
 		if isUploadTemporary(item.Path) || isCopyTemporary(item.Path) || (item.Info.Kind != KindFile && item.Info.Kind != KindDirectory) {
 			continue
@@ -1823,16 +1830,17 @@ func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, ba
 				continue
 			}
 			if err != nil {
-				return nil, err
+				return nil, written, err
 			}
 			id = entry.ID
+			written++
 		}
 		seen[item.Info.Inode] = struct{}{}
 		if item.Info.Kind == KindDirectory {
 			parentIDs[item.Path] = id
 		}
 	}
-	return seen, nil
+	return seen, written, nil
 }
 
 // removeStaleCopies deletes copy temporaries that no copy holds. A copy

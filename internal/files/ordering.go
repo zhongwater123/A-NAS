@@ -16,7 +16,9 @@ import (
 // back.
 type spaceOrder struct {
 	mu sync.Mutex
-	// generation counts changes begun and ended and scans written.
+	// generation counts changes begun and ended and scans that changed
+	// rows when written. A scan that found the rows as they were leaves it,
+	// so listing folders does not stop a longer scan from being written.
 	generation uint64
 	changes    int
 	writing    bool
@@ -86,6 +88,7 @@ func (o *spaceOrder) observe() (uint64, bool) {
 
 // beginWrite starts writing a scan begun at generation. It reports false,
 // and the scan is to be discarded, when anything changed the rows since.
+// endWrite ends the write.
 func (o *spaceOrder) beginWrite(generation uint64) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -93,7 +96,6 @@ func (o *spaceOrder) beginWrite(generation uint64) bool {
 		return false
 	}
 	o.writing = true
-	o.generation++
 	return true
 }
 
@@ -104,7 +106,6 @@ func (o *spaceOrder) lock(ctx context.Context) error {
 		o.mu.Lock()
 		if o.changes == 0 && !o.writing {
 			o.writing = true
-			o.generation++
 			o.mu.Unlock()
 			return nil
 		}
@@ -125,14 +126,18 @@ func (s *Service) scanAlone(ctx context.Context, spaceID string, scan func() err
 	if err := order.lock(ctx); err != nil {
 		return err
 	}
-	defer order.endWrite()
+	defer order.endWrite(true)
 	return scan()
 }
 
-func (o *spaceOrder) endWrite() {
+// endWrite ends a write, which changed rows or not.
+func (o *spaceOrder) endWrite(changed bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.writing = false
+	if changed {
+		o.generation++
+	}
 	o.wake()
 }
 

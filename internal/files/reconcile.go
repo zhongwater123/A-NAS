@@ -130,8 +130,9 @@ func (s *Service) reconcile(ctx context.Context, spaceID, root string, sc scope)
 	if !order.beginWrite(generation) {
 		return false, nil
 	}
-	defer order.endWrite()
-	return true, s.writeScan(ctx, spaceID, root, sc, scanned)
+	changed, err := s.writeScan(ctx, spaceID, root, sc, scanned)
+	order.endWrite(changed)
+	return err == nil, err
 }
 
 // directoryScope returns the path of a catalogued folder relative to the
@@ -209,12 +210,12 @@ func below(relative string) (from, to string) {
 	return relative + "/", relative + "0"
 }
 
-// dropMissing handles the rows a pass did not find. A pass over the whole
-// space deletes them. A partial pass unplaces them, since the file may have
-// moved elsewhere in the space, where a later pass keeps its ID; a shallow
-// pass moves the rows below an unplaced folder along with it, since it
-// does not cover them.
-func dropMissing(ctx context.Context, q queryer, spaceID string, sc scope, known map[uint64]knownRow, seen map[uint64]struct{}) error {
+// dropMissing handles the rows a pass did not find, and reports whether it
+// wrote any. A pass over the whole space deletes them. A partial pass
+// unplaces them, since the file may have moved elsewhere in the space,
+// where a later pass keeps its ID; a shallow pass moves the rows below an
+// unplaced folder along with it, since it does not cover them.
+func dropMissing(ctx context.Context, q queryer, spaceID string, sc scope, known map[uint64]knownRow, seen map[uint64]struct{}) (bool, error) {
 	var missing []knownRow
 	for inode, row := range known {
 		if _, ok := seen[inode]; !ok {
@@ -222,25 +223,28 @@ func dropMissing(ctx context.Context, q queryer, spaceID string, sc scope, known
 		}
 	}
 	sort.Slice(missing, func(i, j int) bool { return missing[i].relativePath < missing[j].relativePath })
+	wrote := false
 	for _, row := range missing {
 		switch {
 		case sc.whole():
 			if _, err := q.ExecContext(ctx, "DELETE FROM entries WHERE id = ?", row.id); err != nil {
-				return err
+				return wrote, err
 			}
 		case strings.HasPrefix(row.relativePath, unplacedPrefix):
+			continue
 		default:
 			if _, err := q.ExecContext(ctx, "UPDATE entries SET relative_path = ? WHERE id = ?", unplacedPath(row.id), row.id); err != nil {
-				return err
+				return wrote, err
 			}
 			if sc.shallow && row.kind == EntryKindDirectory {
 				if err := movePrefix(ctx, q, spaceID, row.relativePath, unplacedPath(row.id)); err != nil {
-					return err
+					return wrote, err
 				}
 			}
 		}
+		wrote = true
 	}
-	return nil
+	return wrote, nil
 }
 
 // moveBelow moves the rows below a folder whose row moved from one path to

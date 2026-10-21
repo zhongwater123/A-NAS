@@ -335,6 +335,50 @@ func TestTreeReconcilesOnlyTheFolderBelow(t *testing.T) {
 	}
 }
 
+// Listing folders that did not change while a pass over the whole space
+// scans does not discard that pass: on a busy space it would never be
+// written, and rows of deleted files would never go.
+func TestListingDuringAWholePassLetsItBeWritten(t *testing.T) {
+	f := newScopeFixture(t)
+	documents := f.mkdir("", "文档")
+	other := f.mkdir("", "其他")
+	f.upload(other.ID, "不变.txt", "same")
+	gone := f.upload(documents.ID, "已删.txt", "gone")
+	if err := os.Remove(filepath.Join(f.root, "文档", "已删.txt")); err != nil {
+		t.Fatal(err)
+	}
+	held := newPause()
+	f.fs.hooks(func(path string) {
+		if path == f.root {
+			held.hold()
+		}
+	}, nil)
+	defer f.fs.hooks(nil, nil)
+	defer held.let()
+	passed := make(chan error, 1)
+	go func() {
+		_, err := f.service.Tree(f.ctx, f.owner, f.space.ID, "")
+		passed <- err
+	}()
+	<-held.reached
+	for range 3 {
+		if got := f.ids(other.ID); len(got) != 1 {
+			t.Fatalf("其他 lists %v during the pass", got)
+		}
+	}
+	held.let()
+	if err := <-passed; err != nil {
+		t.Fatalf("Tree() error = %v", err)
+	}
+	var rows int
+	if err := f.db.QueryRow("SELECT COUNT(*) FROM entries WHERE id = ?", gone.ID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatal("the pass over the whole space was discarded: the deleted file's row is still there")
+	}
+}
+
 // Passes over the whole space run one at a time, and callers that waited
 // for one share the next; the background loop skips a space just passed.
 func TestPassesOverTheWholeSpaceAreShared(t *testing.T) {
