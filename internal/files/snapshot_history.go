@@ -189,7 +189,7 @@ func (s *Service) RemovedEntries(ctx context.Context, actor accounts.User, space
 		return nil, false, err
 	}
 	// SMB changes reach the catalog only when the space is reconciled.
-	if err := s.reconcile(ctx, space, root); err != nil {
+	if err := s.reconcileWhole(ctx, space, root); err != nil {
 		return nil, false, err
 	}
 	snapshots, err := s.spaceSnapshots(ctx, spaceID, "")

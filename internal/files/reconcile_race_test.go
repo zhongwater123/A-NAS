@@ -88,6 +88,13 @@ type raceFixture struct {
 
 func newRaceFixture(t *testing.T) *raceFixture {
 	t.Helper()
+	return newRaceFixtureOn(t, func(fsys files.FileSystem) files.FileSystem { return fsys })
+}
+
+// newRaceFixtureOn is newRaceFixture with wrap between the hooks and the
+// volume.
+func newRaceFixtureOn(t *testing.T, wrap func(files.FileSystem) files.FileSystem) *raceFixture {
+	t.Helper()
 	ctx := context.Background()
 	accountStore, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
 	if err != nil {
@@ -109,7 +116,7 @@ func newRaceFixture(t *testing.T) *raceFixture {
 	fixture := &raceFixture{
 		t: t, ctx: ctx, owner: owner, space: findPrivateSpace(t, mustSpaces(t, accountService, owner)),
 		root: filepath.Join(volume, "spaces", "private", "owner"),
-		fs:   &hookedFileSystem{FileSystem: files.NewRootFileSystem(volume, true)},
+		fs:   &hookedFileSystem{FileSystem: wrap(files.NewRootFileSystem(volume, true))},
 		db:   catalogDB(t, catalogPath),
 	}
 	fixture.service = files.NewService(catalog, volume, accountService, files.Options{
@@ -356,6 +363,7 @@ func TestDeleteAndRestoreWhileReconcilingAlwaysSucceed(t *testing.T) {
 		func() error { _, err := f.service.List(f.ctx, f.owner, f.space.ID, ""); return err },
 		func() error { _, err := f.service.ListTrash(f.ctx, f.owner); return err },
 		func() error { return f.service.ReconcileVisibleSpaces(f.ctx, f.owner) },
+		func() error { _, err := f.service.Tree(f.ctx, f.owner, f.space.ID, ""); return err },
 	} {
 		background.Add(1)
 		go func() {

@@ -294,7 +294,7 @@ func (s *Service) ListSnapshotEntries(ctx context.Context, actor accounts.User, 
 		return nil, err
 	}
 	if parentID == "" {
-		if err := s.reconcile(ctx, space, s.spaceRoot(space)); err != nil {
+		if err := s.reconcileWhole(ctx, space, s.spaceRoot(space)); err != nil {
 			return nil, err
 		}
 	}

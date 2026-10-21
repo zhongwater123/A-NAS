@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // spaceOrder orders the writers of one space's catalog rows (#164). Changes
@@ -21,6 +22,13 @@ type spaceOrder struct {
 	writing    bool
 	// idle is closed and replaced whenever changes reaches 0 or a write ends.
 	idle chan struct{}
+	// wholeSlot lets one pass over the whole space run at a time (see
+	// reconcileWhole). wholeStarted numbers those passes, wholeWritten is
+	// the last one that wrote its scan and wholeAt when that one began.
+	wholeSlot    chan struct{}
+	wholeStarted uint64
+	wholeWritten uint64
+	wholeAt      time.Time
 }
 
 func (s *Service) order(spaceID string) *spaceOrder {
@@ -28,7 +36,7 @@ func (s *Service) order(spaceID string) *spaceOrder {
 	defer s.ordersMu.Unlock()
 	order, ok := s.orders[spaceID]
 	if !ok {
-		order = &spaceOrder{idle: make(chan struct{})}
+		order = &spaceOrder{idle: make(chan struct{}), wholeSlot: make(chan struct{}, 1)}
 		s.orders[spaceID] = order
 	}
 	return order

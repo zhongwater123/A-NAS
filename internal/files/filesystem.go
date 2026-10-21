@@ -64,6 +64,8 @@ type ScanSkip struct {
 	Prefixes []string `json:"prefixes,omitempty"`
 	// Opaque prefixes name directories that are listed but not entered.
 	Opaque []string `json:"opaque,omitempty"`
+	// Shallow lists the directory's children without entering any of them.
+	Shallow bool `json:"shallow,omitempty"`
 	// Strict refuses a disappearing or unreadable child instead of returning
 	// an incomplete tree. Limit bounds memory for explicit share selections.
 	Strict bool `json:"strict,omitempty"`
@@ -78,5 +80,5 @@ func (s ScanSkip) matches(name string) bool {
 }
 
 func (s ScanSkip) opaque(name string) bool {
-	return slices.ContainsFunc(s.Opaque, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
+	return s.Shallow || slices.ContainsFunc(s.Opaque, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
 }
