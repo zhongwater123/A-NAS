@@ -44,10 +44,15 @@ export function useStoragePlan(): StoragePlanFlow {
   const [phrase, setPhrase] = useState("");
   const [busy, setBusy] = useState<PlanStep>();
   const [error, setError] = useState("");
-  const run = async (step: PlanStep, action: () => Promise<StoragePlan>) => {
+  // reread is how a plan that stopped is shown: its own failure says why.
+  const run = async (step: PlanStep, action: () => Promise<StoragePlan>, reread?: () => Promise<StoragePlan>) => {
     setBusy(step); setError("");
     try { setPlan(await action()); }
-    catch (caught) { setError(storageErrorText(caught)); }
+    catch (caught) {
+      const stopped = reread && (caught as { code?: string } | undefined)?.code === "operation_needs_attention";
+      try { if (stopped) setPlan(await reread()); else setError(storageErrorText(caught)); }
+      catch { setError(storageErrorText(caught)); }
+    }
     finally { setBusy(undefined); }
   };
   const planID = plan?.id;
@@ -70,7 +75,7 @@ export function useStoragePlan(): StoragePlanFlow {
     plan, phrase, busy, error, setPhrase, resume,
     generate: async (diskIDs, layout) => { setPhrase(""); await run("plan", () => createStoragePlan(diskIDs, layout)); },
     confirm: async () => { if (plan) await run("confirm", () => confirmStoragePlan(plan.id, phrase)); },
-    execute: async () => { if (plan) await run("execute", () => executeStoragePlan(plan.id)); },
+    execute: async () => { if (plan) await run("execute", () => executeStoragePlan(plan.id), () => getStoragePlan(plan.id)); },
     cancel: async () => {
       if (plan?.state !== "planned" && plan?.state !== "confirmed") { setPlan(undefined); setPhrase(""); setError(""); return true; }
       setBusy("cancel"); setError("");

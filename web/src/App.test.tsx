@@ -1230,7 +1230,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; unfinishedPlans?: unknown[]; operation?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[]; hostState?: unknown } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; unfinishedPlans?: unknown[]; operation?: unknown; executeFails?: boolean; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[]; hostState?: unknown } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
@@ -1258,7 +1258,7 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
     if (path === "/api/v1/storage/plans") return ok({ items: options.unfinishedPlans ?? [] });
     if (path.startsWith("/api/v1/operations/")) return ok(options.operation ?? { ...(options.storagePlan as object), state: "succeeded" });
     if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/confirm")) return ok({ ...(options.storagePlan as object), state: "confirmed" });
-    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute")) return ok({ ...(options.storagePlan as object), state: "succeeded" });
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute")) return options.executeFails ? failure(503, "operation_needs_attention") : ok({ ...(options.storagePlan as object), state: "succeeded" });
     if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/cancel")) return ok({ ...(options.storagePlan as object), state: "cancelled" });
     if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion")) return { ok: true, status: 202, headers: new Headers({ "Content-Length": "0" }), json: async () => undefined } as Response;
     if (path === "/api/v1/users" && init?.method === "POST") {
@@ -1801,6 +1801,29 @@ describe("Settings", () => {
     await user.click(within(wizard).getByRole("button", { name: "重试" }));
     expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/storage/plans/plan%3Astopped/execute" && init?.method === "POST")).toBe(true);
     expect(await within(wizard).findByText("数据卷已创建")).toBeTruthy();
+  }, 15000);
+
+  it("shows why a retried plan stopped again", async () => {
+    const plan = {
+      id: "plan:again", kind: "add_disks", layout: "mirror", capacityAfterBytes: 512000000000,
+      disks: [{ id: "disk:fake-data-02", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "again-fingerprint", signatures: [] }],
+      confirmationPhrase: "ERASE data-02", actions: [], state: "needs_attention", step: "erase", expiresAt: "2026-10-21T09:10:00Z",
+      failure: "the Host Agent stopped during the erase step; retrying continues after the steps that are done",
+    };
+    installAPI({
+      unfinishedPlans: [plan], storagePlan: plan, executeFails: true,
+      operation: { ...plan, step: "erase", failure: "disk identity changed after planning" },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(await within(settings).findByRole("button", { name: "查看并处理" }));
+    const wizard = within(settings).getByRole("region", { name: "设置硬盘用途" });
+    await user.click(within(wizard).getByRole("button", { name: "重试" }));
+    expect(await within(wizard).findByText(/disk identity changed after planning/)).toBeTruthy();
+    expect(within(wizard).queryByText(/the Host Agent stopped during the erase step/)).toBeNull();
+    expect(within(wizard).queryByRole("alert")).toBeNull();
   }, 15000);
 
   it("shows how far a conversion has come and continues a stopped one", async () => {
