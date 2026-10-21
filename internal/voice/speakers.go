@@ -17,13 +17,18 @@ import (
 // (docs/research/voiceprint-evaluation.md). Scores are the cosine of two
 // speakers' profiles.
 const (
-	// AutoThreshold names a speaker after a person without asking.
-	AutoThreshold = 0.62
-	// SuggestThreshold offers the person as "可能是".
-	SuggestThreshold = 0.50
+	// AutoThreshold names a speaker after a person without asking: no
+	// member of a group was named after another there, whether they spoke
+	// for 2 minutes, 30 s or 10 s.
+	AutoThreshold = 0.74
+	// SuggestThreshold offers the person as "可能是": the one same-person
+	// pair below it was a 10 s profile that scored 0.24.
+	SuggestThreshold = 0.60
 	// SameVoiceThreshold joins the speakers of two pieces of a long
-	// recording into one.
-	SameVoiceThreshold = 0.62
+	// recording into one. Joining the halves of each meeting this way made
+	// no wrong join with 30 s or more of speech and left 2–6 % of the
+	// voices apart, which 合并发言人 puts together.
+	SameVoiceThreshold = 0.70
 	// ClusterDistance groups sentences by voice when the recognition
 	// service told no speakers apart: cosine distance below it is one voice.
 	ClusterDistance = 1 - 0.50
