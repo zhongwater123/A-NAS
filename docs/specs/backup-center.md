@@ -122,6 +122,7 @@
 
 - 个人空间只由所有者创建、删除、保留和设置计划；共享空间只由管理员管理，所有成员可以浏览和恢复。管理员查看模式只读：不能为被查看的空间拍摄、删除快照或设置计划（`403`）。
 - 有效账号的个人空间与共享空间都有默认计划；已禁用账号的个人空间不再自动拍摄，已有快照保留。计划时间按设备时区计算。调度器每分钟检查一次：计划在修改之后到达的最近一个时间点尚未被成功的拍摄覆盖时立即拍摄；同一时间点失败后 15 分钟重试。拍摄不需要用户会话，由 Host Agent 创建 Btrfs 只读快照，与手动快照相同。
+- 空间里有多少文件都能拍摄：快照中的文件清单逐行传给 Product Service，不受单次回复大小限制。拍摄失败或被中断（关闭标签页、服务停止）时，已创建的快照随即删除，不会留在数据卷上占用空间。Product Service 启动后（数据卷离线时等它上线）以及之后每小时清扫一次：删除数据卷上没有记录的快照（例如断电或崩溃时正在拍摄的），删除快照已不在数据卷上的记录并写审计 `snapshot.missing`；正在拍摄的快照不受影响，数据卷不是预期的那块时不清扫。删除快照时数据卷上已经没有它也算删除成功，记录随之删除。
 - 定时快照命名为“定时快照 YYYY-MM-DD HH:MM”（拍摄时刻），创建者记为 `system`。每次成功拍摄后，按保留方式删除该空间不再保留的定时快照并写审计 `snapshot.expired`；删除失败只记录日志，留到下一次。改小保留或换保留方式在下一次成功拍摄时生效。关闭计划不删除已有快照。
 - 固定份数为 1–100。智能保留按设备时区把定时快照分到小时、天、ISO 周与月，每类保留最近若干个有快照的时段中各自最新的一份；各类的保留合起来去重，每份快照只算一次。各项不小于 0、至少一项大于 0、合计不超过 100；每天拍摄的计划不能按小时保留，每周拍摄的计划不能按小时或天保留。固定份数时各项必须为 0；不带保留方式的请求按固定份数处理。每份快照在目录中为每个文件保存一行，份数上限防止目录无限增长。频率仅限每小时、每天、每周，时间为 `HH:MM`，星期为 0（周日）到 6。
 - 快照目录记录每个文件的大小与修改时间；更新前拍摄的快照没有修改时间，这些快照中的同名文件不合并版本，在界面上显示为“版本”，比较时只看大小。旧目录升级时补齐快照的文件数与总大小，旧计划按固定份数处理。
@@ -137,10 +138,11 @@
 
 ## 验收证据
 
-- Go 测试：[快照计划与恢复测试](../../internal/files/schedule_test.go) 覆盖每小时计划只在设置后的时间点运行、同一时间点只拍一次、只保留最新 N 份定时快照且不删手动快照、保留转为手动、关机后只补拍一次、数据卷离线时记录失败并在 15 分钟后重试、每周计划的下次时间、所有者与管理员的权限、非法计划、文件夹整体恢复与同名冲突、按名称查找与版本合并、`%` 转义、快照下载，以及旧目录升级补齐文件数与总大小。[历史版本与差异测试](../../internal/files/snapshot_history_test.go) 覆盖智能保留在每小时与每天计划下按小时、天、ISO 周与月留下的快照、非法的保留设置、历史版本与“与现在相同”、快照中的已修改、已不在空间中与内有变化、还原此版本把当前文件移入回收站并保留修改时间、整份快照恢复与同名冲突，以及最近删除只列最上层项目、给出文件夹总计与消失时间、标出仍在回收站中的项目。[文件代理测试](../../internal/filebroker/broker_test.go) 覆盖以用户身份设置修改时间、拒绝文件夹与数据卷以外的路径。[产品 API 测试](../../internal/httpapi/snapshots_test.go) 以会话驱动全部接口并逐个按 [OpenAPI](../../api/openapi.yaml) 校验请求与响应，覆盖管理员查看模式与其他成员的 `403`。
+- Go 测试：[快照计划与恢复测试](../../internal/files/schedule_test.go) 覆盖每小时计划只在设置后的时间点运行、同一时间点只拍一次、只保留最新 N 份定时快照且不删手动快照、保留转为手动、关机后只补拍一次、数据卷离线时记录失败并在 15 分钟后重试、每周计划的下次时间、所有者与管理员的权限、非法计划、文件夹整体恢复与同名冲突、按名称查找与版本合并、`%` 转义、快照下载，以及旧目录升级补齐文件数与总大小。[历史版本与差异测试](../../internal/files/snapshot_history_test.go) 覆盖智能保留在每小时与每天计划下按小时、天、ISO 周与月留下的快照、非法的保留设置、历史版本与“与现在相同”、快照中的已修改、已不在空间中与内有变化、还原此版本把当前文件移入回收站并保留修改时间、整份快照恢复与同名冲突，以及最近删除只列最上层项目、给出文件夹总计与消失时间、标出仍在回收站中的项目。[文件代理测试](../../internal/filebroker/broker_test.go) 覆盖以用户身份设置修改时间、拒绝文件夹与数据卷以外的路径。[快照清扫测试](../../internal/files/snapshot_sweep_test.go) 覆盖清单失败或请求结束时删除已拍的快照、删除数据卷上已没有的快照、清扫删除无记录的快照与无快照的记录且离线时不动、清扫不碰正在拍摄的快照、调度器启动即清扫、2 万个文件的定时快照，以及开发用目录后端的清扫；[Host Agent 客户端测试](../../internal/hoststate/agent/agent_test.go) 以 10 万个对象的清单验证流式传输，并拒绝中途失败、缺少结束行或总数不符的清单。[产品 API 测试](../../internal/httpapi/snapshots_test.go) 以会话驱动全部接口并逐个按 [OpenAPI](../../api/openapi.yaml) 校验请求与响应，覆盖管理员查看模式与其他成员的 `403`。
 - React 行为测试：[备份中心测试](../../web/src/backup/BackupCenter.test.tsx) 覆盖保护概览与只列自己的空间、“能防范什么”、未开启时首要操作为开启定时快照、读完之前不下结论、恢复到原文件夹及同名时改名、打开对话框就避开已占用的名称并能在文件管理中显示、计划草稿只在保存时提交且共享计划对成员只读、默认方案与“自定义”、方案保存的计划与“还原”、智能保留的建议值随频率变化与保存内容、快照中的差异标记与“与现在不同”、整份快照恢复、跨空间的最近删除列表与按空间筛选、回收站入口与恢复、跨空间查找结果的版本、“当前版本”与“已不在空间中”；[历史版本测试](../../web/src/backup/VersionsDialog.test.tsx) 覆盖还原较早版本与另存一份；[桌面测试](../../web/src/App.test.tsx) 确认桌面只有“备份中心”入口。
 - 性能：合成目录上的查询开销见 [C 端功能评审](../research/backup-center-review-2026-10.md#性能)。
 - 浏览器检查：Fake 模式预览中以两周的手动与定时快照、编辑、SMB 式删除与改名检查概览（全部开启与部分开启）、快照时间线的增减标记与差异标记、整份快照恢复、跨空间的最近删除与回收站提示、保护方案与自定义、保留示意、文件管理的历史版本、窄窗口布局。
+- 系统测试：[系统测试](../../scripts/system-test.sh)在真实安装、Host Agent 与 Btrfs 数据卷上拍摄含 10 万个文件的空间并在备份中心列出，删除数据卷上已没有的快照，并在 Product Service 重启后确认无记录的快照子卷与无快照的记录都被清扫。
 - 实机：按[实验存储手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)第 4 步在实验 NAS 上验证定时快照、智能保留、最近删除与还原此版本。
 
 ## 关联
@@ -149,6 +151,7 @@
 - 研究：[备份中心 C 端功能评审](../research/backup-center-review-2026-10.md)
 - 架构：[存储与文件架构](../architecture/storage-and-files.md#快照)
 - ADR：[ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)
-- 代码：[快照服务](../../internal/files/snapshot.go)、[快照计划与保留](../../internal/files/schedule.go)、[历史版本与差异](../../internal/files/snapshot_history.go)、[Btrfs 快照执行器](../../internal/hostops/linux/snapshot.go)、[文件代理协议](../../internal/filebroker/protocol.go)、[产品 API](../../internal/httpapi/product.go)、[接口契约](../../api/openapi.yaml)、[备份中心窗口](../../web/src/backup/BackupCenter.tsx)、[恢复对话框](../../web/src/backup/RestoreDialog.tsx)、[历史版本对话框](../../web/src/backup/VersionsDialog.tsx)
-- 测试：[快照计划与恢复测试](../../internal/files/schedule_test.go)、[历史版本与差异测试](../../internal/files/snapshot_history_test.go)、[产品 API 测试](../../internal/httpapi/snapshots_test.go)、[备份中心测试](../../web/src/backup/BackupCenter.test.tsx)、[历史版本测试](../../web/src/backup/VersionsDialog.test.tsx)
-- Issue：[#27 备份与恢复](https://github.com/zhongwater123/A-NAS/issues/27)、[#25 USB 存储](https://github.com/zhongwater123/A-NAS/issues/25)
+- 代码：[快照服务](../../internal/files/snapshot.go)、[快照计划与保留](../../internal/files/schedule.go)、[历史版本与差异](../../internal/files/snapshot_history.go)、[Btrfs 快照执行器](../../internal/hostops/linux/snapshot.go)、[Host Agent 快照接口](../../internal/hoststate/agent/agent.go)、[文件代理协议](../../internal/filebroker/protocol.go)、[产品 API](../../internal/httpapi/product.go)、[接口契约](../../api/openapi.yaml)、[备份中心窗口](../../web/src/backup/BackupCenter.tsx)、[恢复对话框](../../web/src/backup/RestoreDialog.tsx)、[历史版本对话框](../../web/src/backup/VersionsDialog.tsx)
+- 测试：[快照计划与恢复测试](../../internal/files/schedule_test.go)、[快照清扫测试](../../internal/files/snapshot_sweep_test.go)、[Host Agent 客户端测试](../../internal/hoststate/agent/agent_test.go)、[历史版本与差异测试](../../internal/files/snapshot_history_test.go)、[产品 API 测试](../../internal/httpapi/snapshots_test.go)、[备份中心测试](../../web/src/backup/BackupCenter.test.tsx)、[历史版本测试](../../web/src/backup/VersionsDialog.test.tsx)
+- 调查：[快照清单超过 1 MiB 即失败并留下孤儿子卷](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)
+- Issue：[#162 快照清单上限与孤儿子卷](https://github.com/zhongwater123/A-NAS/issues/162)、[#27 备份与恢复](https://github.com/zhongwater123/A-NAS/issues/27)、[#25 USB 存储](https://github.com/zhongwater123/A-NAS/issues/25)
