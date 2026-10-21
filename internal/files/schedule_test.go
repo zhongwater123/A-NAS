@@ -58,6 +58,8 @@ type snapshotFixture struct {
 	shared        accounts.Space
 	clock         *testClock
 	volume        *switchableVolume
+	// backend replaces the development snapshot backend when set before open.
+	backend files.SnapshotBackend
 }
 
 // at is a local time on 2026-10-12, a Monday, plus whole days.
@@ -116,6 +118,7 @@ func (f *snapshotFixture) open() *files.Service {
 	f.t.Cleanup(func() { _ = catalog.Close() })
 	f.files = files.NewService(catalog, f.volumeRoot, f.accounts, files.Options{
 		DisableCapacityReserve: true, VolumeGuard: f.volume, Now: f.clock.Now, Location: shanghai,
+		SnapshotBackend: f.backend,
 	})
 	return f.files
 }

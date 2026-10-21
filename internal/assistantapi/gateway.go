@@ -55,12 +55,10 @@ type upstream struct {
 	// watching are the live sessions the window opened. Hermes sends a
 	// session's events only to the connection that opened it last; the other
 	// windows of the member that have it open get them from here.
-	watching map[string]bool
-	// controlling are the live sessions whose browser this window registered as.
-	controlling map[string]bool
-	ready       json.RawMessage
-	closed      chan struct{}
-	closeOnce   sync.Once
+	watching  map[string]bool
+	ready     json.RawMessage
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
 type forwardedCall struct {
@@ -243,7 +241,7 @@ func (h *handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	m := h.member(account)
 	u := &upstream{h: h, m: m, conn: conn, session: token, browser: browser,
 		forwarded: map[string]forwardedCall{}, waiters: map[string]chan frame{}, serverRequests: map[string]string{},
-		watching: map[string]bool{}, controlling: map[string]bool{}, closed: make(chan struct{})}
+		watching: map[string]bool{}, closed: make(chan struct{})}
 	m.mu.Lock()
 	m.upstreams[u] = struct{}{}
 	m.mu.Unlock()
@@ -436,13 +434,9 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 	_ = json.Unmarshal(call.params["session_id"], &session)
 	switch call.method {
 	case "browser.controller.register":
-		u.mu.Lock()
-		u.controlling[session] = true
-		u.mu.Unlock()
+		u.m.becomeBrowser(session, u)
 	case "browser.controller.detach":
-		u.mu.Lock()
-		delete(u.controlling, session)
-		u.mu.Unlock()
+		u.m.leaveBrowser(u, session)
 	case "session.create", "session.resume", "session.activate":
 		var live, stored string
 		_ = json.Unmarshal(result["session_id"], &live)
@@ -525,6 +519,10 @@ func (u *upstream) readBrowser(ctx context.Context) {
 			u.toBrowser(rpcError(f.ID, code, err.Error()))
 			continue
 		}
+		if f.Method == "browser.controller.register" && u.m.browserTaken(unquote(params["session_id"]), u) {
+			u.toBrowser(rpcError(f.ID, codeInvalidParams, "another window is the browser of the turn under way"))
+			continue
+		}
 		u.mu.Lock()
 		u.next++
 		id := "b" + strconv.Itoa(u.next)
@@ -542,22 +540,52 @@ func (u *upstream) readBrowser(ctx context.Context) {
 
 // detachControllers ends the window's part as the browser of its sessions once
 // it left: a turn going on without it then has no browser tools, instead of
-// commands that wait for a window that is gone.
+// commands that wait for a window that is gone. A session whose browser is now
+// another window keeps it.
 func (u *upstream) detachControllers(ctx context.Context) {
-	u.mu.Lock()
-	sessions := make([]string, 0, len(u.controlling))
-	for session := range u.controlling {
-		sessions = append(sessions, session)
-	}
-	u.controlling = map[string]bool{}
-	u.mu.Unlock()
-	for _, session := range sessions {
+	for _, session := range u.m.leaveBrowser(u, "") {
 		detachCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if _, err := u.call(detachCtx, "browser.controller.detach", map[string]string{"session_id": session}); err != nil {
 			u.h.logger.Debug("assistant browser not detached", "account", u.m.account, "session", session, "error", err)
 		}
 		cancel()
 	}
+}
+
+// becomeBrowser records the window that registered last as the session's
+// browser: Hermes sends the session's commands to it alone from now on.
+func (m *member) becomeBrowser(session string, u *upstream) {
+	if !runtimeIDPattern.MatchString(session) {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.session(session).browser = u
+}
+
+// browserTaken reports whether a turn runs on the session with another window
+// as its browser: that window stays its browser until the turn ends, so a step
+// and its confirmation never move to another device mid-turn (#160).
+func (m *member) browserTaken(session string, u *upstream) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.sessions[session]
+	return s != nil && s.turn && s.browser != nil && s.browser != u
+}
+
+// leaveBrowser forgets u as the browser of one session, or of all its
+// sessions when session is empty, and returns the sessions it was the browser of.
+func (m *member) leaveBrowser(u *upstream, session string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var left []string
+	for id, s := range m.sessions {
+		if s.browser == u && (session == "" || id == session) {
+			s.browser = nil
+			left = append(left, id)
+		}
+	}
+	return left
 }
 
 // local answers the methods that are the Product Service's own.

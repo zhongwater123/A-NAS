@@ -152,42 +152,47 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
     window.setTimeout(() => void refreshSessions(), 4000);
   }, [refreshSessions, refreshBusy]);
   // VNAS operates the WebOS page it is on as Hermes's browser for its live
-  // conversation (Hermes's browser control). A step that deletes, replaces or
-  // resets something waits here for the member.
+  // conversation (Hermes's browser control). A step whose writes delete, move,
+  // share or change settings, and any step in the terminal, Docker or 应用中心,
+  // waits here for the member.
   const [controlAsk, setControlAsk] = useState<{ danger: Danger; until: number; answer(allowed: boolean): void }>();
   const asking = useRef<(allowed: boolean) => void>(undefined);
+  // One card at a time: a write that arrives while another card is open waits its turn.
+  const cards = useRef(Promise.resolve());
   const controller = useMemo(() => new WebosController({
     exclude: (element) => Boolean(element.closest(".app-window-assistant, .vt-toasts, .vnas-control-ring")),
-    confirm: (danger) => new Promise<boolean>((resolve) => {
-      let timer = 0;
-      const answer = (allowed: boolean) => {
-        window.clearTimeout(timer);
-        asking.current = undefined;
-        setControlAsk(undefined);
-        resolve(allowed);
-      };
-      asking.current = answer;
-      timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
-      setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
-    }),
+    confirm: (danger) => {
+      const shown = cards.current.then(() => new Promise<boolean>((resolve) => {
+        let timer = 0;
+        const answer = (allowed: boolean) => {
+          window.clearTimeout(timer);
+          asking.current = undefined;
+          setControlAsk(undefined);
+          resolve(allowed);
+        };
+        asking.current = answer;
+        timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
+        setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
+      }));
+      cards.current = shown.then(() => undefined);
+      return shown;
+    },
   }), []);
-  // A live session is registered once per connection.
-  const controlled = useRef(new Map<string, Promise<void>>());
+  useEffect(() => controller.install(), [controller]);
+  // The window that sends a prompt is the conversation's browser for its turn:
+  // it registers again before every prompt, so the steps and their cards stay
+  // on the device the member is using; a window that only shows the
+  // conversation never registers (#160). These are the live sessions this
+  // connection registered for.
+  const controlled = useRef(new Set<string>());
   const generation = useRef(gateway.generation);
   if (generation.current !== gateway.generation) {
     generation.current = gateway.generation;
     controlled.current.clear();
   }
-  const onLive = useCallback((liveId: string) => {
-    let registered = controlled.current.get(liveId);
-    if (!registered) {
-      registered = gateway.client.request("browser.controller.register", {
-        session_id: liveId, protocol_version: 1, controller_id: "vnas-window", browser_profile_id: "webos", capabilities: CONTROL_CAPABILITIES,
-      }).then(() => undefined, () => { controlled.current.delete(liveId); });
-      controlled.current.set(liveId, registered);
-    }
-    return registered;
-  }, [gateway.client]);
+  const beforePrompt = useCallback((liveId: string) => gateway.client.request("browser.controller.register", {
+    session_id: liveId, protocol_version: 1, controller_id: "vnas-window", browser_profile_id: "webos", capabilities: CONTROL_CAPABILITIES,
+  }).then(() => { controlled.current.add(liveId); }, () => { controlled.current.delete(liveId); }), [gateway.client]);
   useEffect(() => gateway.client.onEvent((event) => {
     const type = event.type as string;
     const session = typeof event.session_id === "string" ? event.session_id : "";
@@ -207,7 +212,7 @@ export function AssistantPanel({ username, onShowPhoto, focus, onFocusHandled }:
       .catch(() => undefined);
   }), [gateway.client, controller]);
 
-  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, onLive });
+  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
   const { send, cancel } = thread;
 
   // Results of scheduled tasks the member has not read; opening a run reads its task's.

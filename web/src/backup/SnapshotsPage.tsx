@@ -208,7 +208,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
   };
 
   return (
-    <section className="bk-browser" aria-label={`快照 ${snapshot.name}`}>
+    <section className="bk-browser" aria-label={`快照 ${snapshot.name}`} data-vnas-private="快照里的文件">
       <header className="bk-browser-head">
         {onBack && <button type="button" className="bk-icon-button" aria-label="返回快照列表" onClick={onBack}><ArrowLeft /></button>}
         <div className="bk-browser-title">

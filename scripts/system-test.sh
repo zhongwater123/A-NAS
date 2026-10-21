@@ -509,6 +509,69 @@ check "SMB delete appears in the member's Web recycle bin" \
   grep -qx alice-smb.txt <(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[].name')
 check "SMB-deleted bytes are in the same recycle bin" in_trash alice "$data/spaces/private/alice" /tmp/alice-smb.txt
 
+# --- Snapshots (#162): a space of 100,000 files, far beyond the 1 MiB the
+# Host Agent's reply used to be cut at, and the sweep that removes what a
+# failed or interrupted snapshot leaves on the volume or in the catalog.
+alice_root="$data/spaces/private/alice"
+subvolume_of() { # SNAPSHOT_ID -> the Host Agent's subvolume path for it
+  printf '%s/.a-nas-snapshots/%s' "$data" "$(printf 'a-nas:snapshot:v1\0%s' "$1" | sha256sum | cut -c1-32)"
+}
+snapshot_ids() { curl -fsS -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/snapshots" | jq -r '.items[].id'; }
+take_snapshot() { # NAME -> the snapshot JSON
+  curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$1\"}" "$api/api/v1/spaces/$alice_private/snapshots"
+}
+as alice python3 - "$alice_root/快照压力" <<'PY'
+import os, sys
+for folder in range(100):
+    path = os.path.join(sys.argv[1], f"文件夹 {folder:03d}")
+    os.makedirs(path)
+    for index in range(1000):
+        open(os.path.join(path, f"照片_{index:04d}.jpg"), "wb").close()
+PY
+large_snapshot=$(take_snapshot 十万个文件 || true)
+large_snapshot_id=$(jq -r '.id // empty' <<<"$large_snapshot" 2>/dev/null || true)
+check "a snapshot of a space with 100,000 files succeeds" \
+  test "$(jq -r '.fileCount // 0' <<<"$large_snapshot" 2>/dev/null || echo 0)" -ge 100000
+check "the backup center lists it" grep -qx "$large_snapshot_id" <(snapshot_ids)
+check "its folders can be browsed" grep -qx 快照压力 \
+  <(curl -fsS -b /tmp/alice.jar "$api/api/v1/snapshots/$large_snapshot_id/entries" | jq -r '.items[].name')
+# Later sections list this space; keep them quick.
+rm -rf "$alice_root/快照压力"
+gone_snapshot=$(take_snapshot 卷上已删除 | jq -r '.id // empty' || true)
+btrfs subvolume delete "$(subvolume_of "$gone_snapshot")" >/dev/null 2>&1 || true
+check "a snapshot already gone from the volume can still be deleted" \
+  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/snapshots/$gone_snapshot")" = 204
+check "its record is gone" denied grep -qx "$gone_snapshot" <(snapshot_ids)
+# What a crash leaves: a subvolume without a record and a record without a
+# subvolume. The Product Service sweeps both when it starts.
+systemctl stop anas-api
+orphan="$data/.a-nas-snapshots/ffffffffffffffffffffffffffffffff"
+btrfs subvolume snapshot -r "$alice_root" "$orphan" >/dev/null
+setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$alice_private" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect("/var/lib/a-nas/files.db")
+db.execute("INSERT INTO snapshots(id, space_id, name, origin, created_by, created_at, file_count, size_bytes)"
+           " VALUES(?,?,?,?,?,?,?,?)", ("snapshot:lost", sys.argv[1], "卷上已没有", "manual", "system", "2026-10-20T00:00:00Z", 0, 0))
+db.commit()
+PY
+systemctl start anas-api
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+lost_record_gone() { snapshot_ids >/tmp/snapshot-ids.txt && ! grep -qx snapshot:lost /tmp/snapshot-ids.txt; }
+for _ in $(seq 1 100); do test ! -e "$orphan" && lost_record_gone && break; sleep 0.2; done
+check "on start the Product Service deletes a snapshot nobody records" test ! -e "$orphan"
+check "and the record of a snapshot gone from the volume" lost_record_gone
+check "recorded snapshots survive the sweep" test -d "$(subvolume_of "$large_snapshot_id")"
+check "the sweep is in the activity log" grep -qx snapshot.missing \
+  <(curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=file" | jq -r '.items[].action')
+# A copy that a restart cut short leaves a hidden duplicate; listing the
+# space removes it.
+as alice mkdir -p "$alice_root/.a-nas-copy-0123456789abcdef/副本"
+as alice touch "$alice_root/.a-nas-copy-0123456789abcdef/副本/a.jpg"
+curl -fsS -o /dev/null -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/entries" || true
+check "listing a space removes a copy that a restart cut short" test ! -e "$alice_root/.a-nas-copy-0123456789abcdef"
+
 # --- Photos: the photo service's own identity, the member's own library.
 python3 - /tmp/photo.png <<'PY'
 import struct, sys, zlib

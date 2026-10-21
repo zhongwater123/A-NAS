@@ -1,7 +1,7 @@
 import { type DetailedError, Upload } from "tus-js-client";
 import { useSyncExternalStore } from "react";
 
-import { csrfHeaders, sessionEnded } from "../api";
+import { APIError, csrfHeaders, passWriteGate, sessionEnded } from "../api";
 import { RateMeter } from "./meter";
 import {
   cancelTransfer, clearFinishedTransfers, createDownload, getTransfer, listTransfers, pauseTransfer, removeTransfer,
@@ -106,6 +106,10 @@ export interface ClassifiedFailure { kind: FailureKind; code: string; message: s
 // product API answers JSON errors; tusd's own protocol errors are text.
 export function classifyUploadError(error: Error): ClassifiedFailure {
   const detailed = error as Partial<DetailedError>;
+  // The member did not allow the VNAS step that started it; a retry must not
+  // outlast the step and go without asking.
+  const cause = detailed.causingError;
+  if (cause instanceof APIError && cause.code === "not_allowed_for_vnas") return { kind: "denied", code: cause.code, message: cause.message };
   if (!detailed.originalRequest) return { kind: "file", code: "file_unreadable", message: error.message };
   const response = detailed.originalResponse;
   const status = response?.getStatus() ?? 0;
@@ -456,8 +460,13 @@ export class TransferStore {
         filename: task.name, spaceId: task.target.spaceId, parentId: task.target.parentId, relativePath: task.directories.join("/"),
         conflict: task.conflict, lastModified: String(task.file.lastModified || 0), batch: task.batch,
       },
-      // The token can change when the same account signs in again.
-      onBeforeRequest: (request) => { for (const [name, value] of Object.entries(csrfHeaders())) request.setHeader(name, value); },
+      // The token can change when the same account signs in again. Creating
+      // the upload is the write a VNAS step may have to ask the member about
+      // (a conflict answered with 替换); its parts follow from it.
+      onBeforeRequest: async (request) => {
+        for (const [name, value] of Object.entries(csrfHeaders())) request.setHeader(name, value);
+        if (request.getMethod() === "POST") await passWriteGate("POST", request.getURL());
+      },
       onUploadUrlAvailable: () => {
         const id = upload.url ? decodeURIComponent(upload.url.slice(upload.url.lastIndexOf("/") + 1)) : "";
         if (id && id !== this.find(task.key)?.transferId) this.update(task.key, { transferId: id });

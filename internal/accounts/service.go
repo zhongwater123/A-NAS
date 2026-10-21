@@ -149,16 +149,6 @@ var localConsoleExpiry = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.
 // LocalConsole reports a session signed in on the device's own screen.
 func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpiry) }
 
-type AuditEvent struct {
-	ID           string    `json:"id"`
-	ActorUserID  string    `json:"actorUserId,omitempty"`
-	Action       string    `json:"action"`
-	ResourceType string    `json:"resourceType"`
-	ResourceID   string    `json:"resourceId"`
-	OccurredAt   time.Time `json:"occurredAt"`
-	Detail       string    `json:"detail,omitempty"`
-}
-
 type CredentialRequest struct {
 	UserID         string
 	PrivateSpaceID string
@@ -763,31 +753,6 @@ func (s *Service) ActiveUsers(ctx context.Context) ([]User, error) {
 		users = append(users, user)
 	}
 	return users, rows.Err()
-}
-
-func (s *Service) ListAudit(ctx context.Context, actor User) ([]AuditEvent, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
-		return nil, ErrForbidden
-	}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, actor_user_id, action, resource_type, resource_id, occurred_at, detail
-FROM audit_events ORDER BY occurred_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var events []AuditEvent
-	for rows.Next() {
-		var event AuditEvent
-		var actorID sql.NullString
-		var occurredAt string
-		if err := rows.Scan(&event.ID, &actorID, &event.Action, &event.ResourceType, &event.ResourceID, &occurredAt, &event.Detail); err != nil {
-			return nil, err
-		}
-		event.ActorUserID = actorID.String
-		event.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		events = append(events, event)
-	}
-	return events, rows.Err()
 }
 
 func (s *Service) ListSpaces(ctx context.Context, actor User) ([]Space, error) {

@@ -100,7 +100,7 @@ export function FindPage() {
             <>
               <p className="bk-result-count">找到 {result.items.length} 项{result.truncated ? "，结果较多，只显示前一部分；请输入更完整的名称" : ""}</p>
               {result.unreachable.length > 0 && <Notice tone="warning">{result.unreachable.map(spaceLabel).join("、")}暂时无法查找，结果中不含它的文件。</Notice>}
-              <ul className="bk-matches">
+              <ul className="bk-matches" data-vnas-private="快照里找到的文件">
                 {result.items.map(({ space, item }) => <MatchCard key={`${space.id}:${item.path}`} space={space} match={item} query={result.query} />)}
               </ul>
             </>
@@ -197,7 +197,7 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
     );
   }
   return (
-    <section className="bk-removed" aria-label="最近删除或移走">
+    <section className="bk-removed" aria-label="最近删除或移走" data-vnas-private="快照里最近删除或移走的文件">
       <header className="bk-section-head">
         <div>
           <h3><History />最近删除或移走</h3>
