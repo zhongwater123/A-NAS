@@ -441,7 +441,9 @@ type fakeWorker struct {
 	probe       mediaworker.Probe
 	cover       []byte
 	unavailable bool
-	requests    []mediaworker.AudioRequest
+	// coverless makes rendering a cover find no worker.
+	coverless bool
+	requests  []mediaworker.AudioRequest
 }
 
 func (w *fakeWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
@@ -451,6 +453,9 @@ func (w *fakeWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error)
 	return w.probe, nil
 }
 func (w *fakeWorker) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	if w.coverless {
+		return nil, mediaworker.ErrUnavailable
+	}
 	return w.cover, nil
 }
 func (w *fakeWorker) Image(context.Context, *os.File, int) ([]byte, error) {
@@ -544,6 +549,42 @@ func TestWithoutAWorkerDecodedFormatsKeepTheirNames(t *testing.T) {
 	g.scan(t, g.admin)
 	if back, ok := g.tracks(t, g.admin)["Back"]; !ok || back.DurationMs != 3000 {
 		t.Fatalf("after the worker returned = %+v (%v)", back, ok)
+	}
+}
+
+func TestLengthsAndCoversWaitForAWorkerThatIsAway(t *testing.T) {
+	// Opus has no Go reader for its length: the worker measures it once the
+	// tags are read, and a worker that is away leaves it for the next scan
+	// instead of recording it as unknown for good.
+	worker := &fakeWorker{unavailable: true}
+	f := newFixtureWith(t, worker)
+	write(t, filepath.Join(f.shared, "晚风.opus"), []byte("OggS opus"))
+	f.scan(t, f.admin)
+	if song, ok := f.tracks(t, f.admin)["晚风"]; !ok || song.DurationMs != 0 {
+		t.Fatalf("track while the worker was away = %+v (%v)", song, ok)
+	}
+	worker.unavailable = false
+	worker.probe = mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "ogg", Duration: 61.5}}
+	f.scan(t, f.admin)
+	if song := f.tracks(t, f.admin)["晚风"]; song.DurationMs != 61500 {
+		t.Fatalf("length after the worker returned = %d ms, want 61500", song.DurationMs)
+	}
+
+	// An embedded cover only the worker renders waits with its file.
+	worker.coverless, worker.cover = true, pngImage(t, 90)
+	worker.probe = mediaworker.Probe{
+		Format:  mediaworker.ProbeFormat{Name: "ape", Duration: 3, Tags: map[string]string{"Title": "封面"}},
+		Streams: []mediaworker.ProbeStream{{Index: 0, Type: "audio", Codec: "ape"}, {Index: 1, Type: "video", Codec: "mjpeg", AttachedPic: true}},
+	}
+	write(t, filepath.Join(f.shared, "cover.ape"), []byte("MAC"))
+	f.scan(t, f.admin)
+	if song, ok := f.tracks(t, f.admin)["封面"]; ok {
+		t.Fatalf("indexed without the cover the worker could not render: %+v", song)
+	}
+	worker.coverless = false
+	f.scan(t, f.admin)
+	if song, ok := f.tracks(t, f.admin)["封面"]; !ok || song.CoverID == "" {
+		t.Fatalf("track after the worker returned = %+v (%v)", song, ok)
 	}
 }
 
