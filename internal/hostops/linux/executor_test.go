@@ -9,47 +9,33 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestCreateVolumeResolvesStableIDAndWritesUUIDMountUnit(t *testing.T) {
-	diskID, _ := hoststate.NewResourceID("disk:test-data")
-	disk := hoststate.Disk{
-		ID: diskID, Model: "Test Data Disk", Transport: hoststate.TransportSATA,
-		CapacityBytes: 512_000_000_000, Role: hoststate.DiskRoleUnassigned,
-	}
-	resolver := fixedResolver{device: linux.BlockDevice{Disk: disk, DevicePath: "/dev/sdb", PartitionPath: "/dev/sdb1"}}
-	runner := &recordingRunner{}
-	systemRoot := t.TempDir()
-	mountPoint := filepath.Join(t.TempDir(), "data")
-	executor := linux.NewExecutor(resolver, runner, linux.Options{
-		SystemRoot: systemRoot, MountPoint: mountPoint, MountUnitName: "a-nas-data.mount",
-	})
+	host := newDiskHost(t, "disk:test-data")
+	executor := host.executor()
 
-	volume, err := executor.CreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:test", Disks: []storage.DiskTarget{{DiskID: disk.ID.String(), Fingerprint: storage.FingerprintDisk(disk)}}, Layout: storage.LayoutSingle,
-	})
-	if err != nil {
-		t.Fatalf("CreateVolume() error = %v", err)
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:test", storage.LayoutSingle, host.targets("disk:test-data")...))
+	if operation.State != storage.OperationSucceeded || operation.Volume == nil {
+		t.Fatalf("operation = %+v, want succeeded", operation)
 	}
-	if got, want := volume.FilesystemUUID, "11111111-2222-3333-4444-555555555555"; got != want {
+	if got, want := operation.Volume.FilesystemUUID, host.uuid(1); got != want {
 		t.Fatalf("filesystem UUID = %q, want %q", got, want)
 	}
-	unitPath := filepath.Join(systemRoot, "etc", "systemd", "system", "a-nas-data.mount")
-	unit, err := os.ReadFile(unitPath)
+	unit, err := os.ReadFile(filepath.Join(host.systemRoot, "etc", "systemd", "system", "a-nas-data.mount"))
 	if err != nil {
 		t.Fatalf("read mount unit: %v", err)
 	}
-	if !strings.Contains(string(unit), "What=UUID=11111111-2222-3333-4444-555555555555") || !strings.Contains(string(unit), "Options=noatime,compress=zstd:3,nodev,nosuid,noexec") {
+	if !strings.Contains(string(unit), "What=UUID="+host.uuid(1)) || !strings.Contains(string(unit), "Options=noatime,compress=zstd:3,nodev,nosuid,noexec") {
 		t.Fatalf("mount unit does not bind the verified UUID and safe options:\n%s", unit)
 	}
-	if len(runner.commands) < 7 {
-		t.Fatalf("commands = %#v, want destructive steps plus mount setup", runner.commands)
+	if len(host.lines()) < 7 {
+		t.Fatalf("commands = %#v, want destructive steps plus mount setup", host.lines())
 	}
-	for _, command := range runner.commands {
-		if strings.Contains(strings.Join(command.args, " "), "disk:test-data") {
-			t.Fatalf("stable ID leaked into a host command: %#v", command)
+	for _, line := range host.lines() {
+		if strings.Contains(line, "disk:test-data") {
+			t.Fatalf("stable ID leaked into a host command: %q", line)
 		}
 	}
 }
@@ -134,12 +120,6 @@ func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testin
 	if strings.Contains(err.Error(), request.Password) {
 		t.Fatalf("SetCredential() error exposed the password: %v", err)
 	}
-}
-
-type fixedResolver struct{ device linux.BlockDevice }
-
-func (r fixedResolver) ResolveDevice(context.Context, string) (linux.BlockDevice, error) {
-	return r.device, nil
 }
 
 type recordedCommand struct {

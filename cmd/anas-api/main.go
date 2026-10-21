@@ -180,6 +180,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer storageService.Close()
 	volumeRoot := strings.TrimSpace(os.Getenv("ANAS_DATA_MOUNT"))
 	if volumeRoot == "" {
 		if live {

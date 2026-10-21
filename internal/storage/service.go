@@ -35,6 +35,12 @@ var (
 	ErrLayoutTooSmall     = errors.New("the files on the data volume do not fit the layout")
 	ErrNoConversion       = errors.New("the data volume is not converting")
 	ErrOperationAttention = errors.New("operation needs administrator attention")
+	// ErrVolumeExists: the host shows a data volume, or a mount unit for
+	// one, that the plan did not make.
+	ErrVolumeExists = errors.New("a data volume this plan did not make is already on the host")
+	// ErrOperationNotFound: the host has no operation for the plan; it
+	// never received it.
+	ErrOperationNotFound = errors.New("the host has no operation for the plan")
 )
 
 // maxPlanDisks bounds one plan; a home NAS has a handful of bays.
@@ -105,10 +111,13 @@ type ExecutionPlan struct {
 	ConfirmationPhrase  string    `json:"confirmationPhrase"`
 	Actions             []Action  `json:"actions"`
 	State               PlanState `json:"state"`
-	CreatedAt           time.Time `json:"createdAt"`
-	ExpiresAt           time.Time `json:"expiresAt"`
-	Failure             string    `json:"failure,omitempty"`
-	Volume              *Volume   `json:"volume,omitempty"`
+	// Step is the step the host is at while the plan runs, or the one it
+	// stopped in when the plan needs attention.
+	Step      OperationStep `json:"step,omitempty"`
+	CreatedAt time.Time     `json:"createdAt"`
+	ExpiresAt time.Time     `json:"expiresAt"`
+	Failure   string        `json:"failure,omitempty"`
+	Volume    *Volume       `json:"volume,omitempty"`
 }
 
 // UnmarshalJSON also reads plans stored before data volumes could span
@@ -221,9 +230,16 @@ type AddDisksRequest struct {
 	Layout         Layout
 }
 
+// VolumeExecutor runs a plan's operation on the host. Starting reports the
+// operation without waiting for it to end; for a plan the host already has
+// an operation for, it starts nothing new: it reports one that runs or
+// succeeded, and continues one that failed or was interrupted after the
+// steps that are done.
 type VolumeExecutor interface {
-	CreateVolume(context.Context, CreateVolumeRequest) (Volume, error)
-	AddDisks(context.Context, AddDisksRequest) (Volume, error)
+	StartCreateVolume(context.Context, CreateVolumeRequest) (VolumeOperation, error)
+	StartAddDisks(context.Context, AddDisksRequest) (VolumeOperation, error)
+	// VolumeOperation reports the plan's operation, or ErrOperationNotFound.
+	VolumeOperation(context.Context, string) (VolumeOperation, error)
 	// ContinueConversion starts converting the data volume to its layout
 	// again now, instead of at the Host Agent's next check.
 	ContinueConversion(context.Context) error
@@ -233,6 +249,9 @@ type Options struct {
 	Now   func() time.Time
 	NewID func() string
 	Store *Store
+	// PollInterval is how often a running operation is asked about; one
+	// second when zero.
+	PollInterval time.Duration
 }
 
 type Store struct{ db *sql.DB }
@@ -269,14 +288,20 @@ CREATE TABLE IF NOT EXISTS audit_events (
 func (s *Store) Close() error { return s.db.Close() }
 
 type Service struct {
-	reader   hoststate.Reader
-	executor VolumeExecutor
-	now      func() time.Time
-	newID    func() string
+	reader       hoststate.Reader
+	executor     VolumeExecutor
+	now          func() time.Time
+	newID        func() string
+	pollInterval time.Duration
 
-	mu    sync.Mutex
-	plans map[string]ExecutionPlan
-	store *Store
+	ctx       context.Context
+	stop      context.CancelFunc
+	followers sync.WaitGroup
+
+	mu        sync.Mutex
+	plans     map[string]ExecutionPlan
+	following map[string]bool
+	store     *Store
 }
 
 func NewService(reader hoststate.Reader, executor VolumeExecutor, options Options) *Service {
@@ -294,9 +319,29 @@ func OpenService(reader hoststate.Reader, executor VolumeExecutor, options Optio
 	if newID == nil {
 		newID = randomID
 	}
-	service := &Service{reader: reader, executor: executor, now: now, newID: newID, plans: make(map[string]ExecutionPlan), store: options.Store}
+	pollInterval := options.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+	service := &Service{
+		reader: reader, executor: executor, now: now, newID: newID, pollInterval: pollInterval,
+		plans: make(map[string]ExecutionPlan), following: make(map[string]bool), store: options.Store,
+	}
+	service.ctx, service.stop = context.WithCancel(context.Background())
 	if err := service.loadPlans(context.Background()); err != nil {
+		service.stop()
 		return nil, err
+	}
+	// The Host Agent went on with a plan that ran when the service stopped.
+	for _, plan := range service.plans {
+		if plan.State != PlanStateRunning {
+			continue
+		}
+		if executor == nil {
+			_, _ = service.needsAttention(plan.ID, errors.New("volume executor is unavailable"))
+			continue
+		}
+		service.follow(plan.ID)
 	}
 	return service, nil
 }
@@ -321,6 +366,9 @@ func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layou
 	state, err := s.reader.Read(ctx)
 	if err != nil {
 		return ExecutionPlan{}, err
+	}
+	if !exists && unrecordedVolume(state) {
+		return ExecutionPlan{}, ErrVolumeExists
 	}
 	disks := make([]hoststate.Disk, 0, len(ids))
 	for _, id := range ids {
@@ -400,6 +448,17 @@ func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layou
 		return ExecutionPlan{}, err
 	}
 	return clonePlan(plan), nil
+}
+
+// unrecordedVolume reports whether the host shows a data volume although
+// no plan here made one: an interrupted plan made it, or its record is
+// gone. A new volume on other disks would leave it behind with the files
+// on it (issue #165), so the plan that made it is retried instead.
+func unrecordedVolume(state hoststate.State) bool {
+	if state.DataVolume != nil {
+		return true
+	}
+	return slices.ContainsFunc(state.Disks, func(disk hoststate.Disk) bool { return disk.Role == hoststate.DiskRoleData })
 }
 
 // runningPlanLocked refuses a new plan while another one runs.
@@ -509,6 +568,11 @@ func (s *Service) ConfirmPlan(ctx context.Context, planID, phrase string) (Execu
 	return clonePlan(plan), nil
 }
 
+// ExecutePlan starts the confirmed plan on the host and returns it running,
+// or ended when the host finished at once. The Host Agent runs the
+// operation apart from this request, and the service follows it until it
+// ends. A plan that needs attention is retried the same way: the Host Agent
+// checks the disks again and continues after the steps that are done.
 func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan, error) {
 	s.mu.Lock()
 	plan, ok := s.plans[planID]
@@ -516,22 +580,36 @@ func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan
 		s.mu.Unlock()
 		return ExecutionPlan{}, ErrPlanNotFound
 	}
-	if plan.State == PlanStateSucceeded {
+	retry := plan.State == PlanStateNeedsAttention
+	switch plan.State {
+	case PlanStateSucceeded, PlanStateRunning:
 		s.mu.Unlock()
 		return clonePlan(plan), nil
-	}
-	if !s.now().UTC().Before(plan.ExpiresAt) {
-		plan.State = PlanStateExpired
-		s.plans[planID] = plan
-		_ = s.savePlanLocked(ctx, plan)
-		s.mu.Unlock()
-		return clonePlan(plan), ErrPlanExpired
-	}
-	if plan.State != PlanStateConfirmed {
+	case PlanStateConfirmed:
+		if !s.now().UTC().Before(plan.ExpiresAt) {
+			plan.State = PlanStateExpired
+			s.plans[planID] = plan
+			_ = s.savePlanLocked(ctx, plan)
+			s.mu.Unlock()
+			return clonePlan(plan), ErrPlanExpired
+		}
+	case PlanStateNeedsAttention:
+		// The ten minutes do not apply: the plan has run, and its disks
+		// may no longer be unused.
+		if s.runningPlanLocked() != nil || s.supersededLocked(plan) {
+			s.mu.Unlock()
+			return clonePlan(plan), ErrPlanState
+		}
+	default:
 		s.mu.Unlock()
 		return clonePlan(plan), ErrPlanState
 	}
-	plan.State = PlanStateRunning
+	current, exists := s.currentVolumeLocked()
+	if retry && exists != (plan.Kind == PlanKindAddDisks) {
+		s.mu.Unlock()
+		return clonePlan(plan), ErrPlanState
+	}
+	plan.State, plan.Step, plan.Failure = PlanStateRunning, "", ""
 	s.plans[planID] = plan
 	if err := s.savePlanLocked(ctx, plan); err != nil {
 		s.mu.Unlock()
@@ -542,57 +620,63 @@ func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan
 	if s.executor == nil {
 		return s.needsAttention(planID, errors.New("volume executor is unavailable"))
 	}
-	state, err := s.reader.Read(ctx)
-	if err != nil {
-		return s.needsAttention(planID, err)
-	}
-	s.mu.Lock()
-	current, exists := s.currentVolumeLocked()
-	s.mu.Unlock()
 	targets := make([]DiskTarget, 0, len(plan.Disks))
 	for _, planned := range plan.Disks {
-		disk, err := eligibleDisk(state, planned.ID, current.FilesystemUUID)
-		if err != nil || FingerprintDisk(disk) != planned.Fingerprint {
-			return s.needsAttention(planID, ErrDiskChanged)
-		}
 		targets = append(targets, DiskTarget{DiskID: planned.ID, Fingerprint: planned.Fingerprint})
 	}
-	var volume Volume
-	switch {
-	case plan.Kind == PlanKindCreateVolume && !exists:
-		volume, err = s.executor.CreateVolume(ctx, CreateVolumeRequest{PlanID: plan.ID, Disks: targets, Layout: plan.Layout})
-	case plan.Kind == PlanKindAddDisks && exists:
-		observed := observeVolume(current, state)
-		if observed.State != VolumeStateAvailable || observed.Conversion != nil || state.DataVolume == nil {
+	// Closing the page must not stop the start halfway either.
+	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), operationCallTimeout)
+	defer cancel()
+	// A first run checks the host here as well, to answer at once; a retry
+	// leaves that to the Host Agent, which knows the steps that are done.
+	if !retry {
+		state, err := s.reader.Read(startCtx)
+		if err != nil {
+			return s.needsAttention(planID, err)
+		}
+		for _, planned := range plan.Disks {
+			disk, err := eligibleDisk(state, planned.ID, current.FilesystemUUID)
+			if err != nil || FingerprintDisk(disk) != planned.Fingerprint {
+				return s.needsAttention(planID, ErrDiskChanged)
+			}
+		}
+		switch {
+		case plan.Kind == PlanKindCreateVolume && !exists:
+			if unrecordedVolume(state) {
+				return s.needsAttention(planID, ErrVolumeExists)
+			}
+		case plan.Kind == PlanKindAddDisks && exists:
+			observed := observeVolume(current, state)
+			if observed.State != VolumeStateAvailable || observed.Conversion != nil || state.DataVolume == nil {
+				return s.needsAttention(planID, ErrVolumeChanged)
+			}
+		default:
 			return s.needsAttention(planID, ErrVolumeChanged)
 		}
-		volume, err = s.executor.AddDisks(ctx, AddDisksRequest{
+	}
+	var operation VolumeOperation
+	var err error
+	if plan.Kind == PlanKindCreateVolume {
+		operation, err = s.executor.StartCreateVolume(startCtx, CreateVolumeRequest{PlanID: plan.ID, Disks: targets, Layout: plan.Layout})
+	} else {
+		operation, err = s.executor.StartAddDisks(startCtx, AddDisksRequest{
 			PlanID: plan.ID, FilesystemUUID: current.FilesystemUUID, Disks: targets, Layout: plan.Layout,
 		})
-		volume.ID, volume.FilesystemUUID = current.ID, current.FilesystemUUID
-		volume.DiskIDs = append(append([]string(nil), observed.DiskIDs...), diskIDsOf(plan.Disks)...)
-	default:
-		return s.needsAttention(planID, ErrVolumeChanged)
 	}
 	if err != nil {
-		return s.needsAttention(planID, err)
+		// The Host Agent may have started the operation before the answer
+		// was lost; only one it never received is known to change nothing.
+		found, lookupErr := s.executor.VolumeOperation(startCtx, planID)
+		switch {
+		case errors.Is(lookupErr, ErrOperationNotFound):
+			return s.needsAttention(planID, err)
+		case lookupErr != nil:
+			s.follow(planID)
+			return s.GetPlan(planID)
+		}
+		operation = found
 	}
-	volume.Layout = plan.Layout
-	if plan.Kind == PlanKindCreateVolume {
-		volume.DiskIDs = diskIDsOf(plan.Disks)
-	}
-
-	s.mu.Lock()
-	plan = s.plans[planID]
-	plan.State = PlanStateSucceeded
-	plan.Volume = &volume
-	s.plans[planID] = plan
-	if err := s.savePlanLocked(ctx, plan); err != nil {
-		s.mu.Unlock()
-		return ExecutionPlan{}, err
-	}
-	s.mu.Unlock()
-	return clonePlan(plan), nil
+	return s.track(planID, operation)
 }
 
 // CancelPlan gives up a plan that has not run, so that the administrator
@@ -631,10 +715,19 @@ func (s *Service) GetPlan(planID string) (ExecutionPlan, error) {
 }
 
 func (s *Service) needsAttention(planID string, cause error) (ExecutionPlan, error) {
+	return s.stopped(planID, "", cause)
+}
+
+// stopped records that the plan's operation stopped in the step, before it
+// could finish. Only a running plan stops: another caller may have ended it.
+func (s *Service) stopped(planID string, step OperationStep, cause error) (ExecutionPlan, error) {
 	s.mu.Lock()
 	plan := s.plans[planID]
-	plan.State = PlanStateNeedsAttention
-	plan.Failure = cause.Error()
+	if plan.State != PlanStateRunning {
+		s.mu.Unlock()
+		return clonePlan(plan), nil
+	}
+	plan.State, plan.Step, plan.Failure = PlanStateNeedsAttention, step, cause.Error()
 	s.plans[planID] = plan
 	_ = s.savePlanLocked(context.Background(), plan)
 	s.mu.Unlock()
@@ -824,13 +917,6 @@ func (s *Service) loadPlans(ctx context.Context) error {
 		return err
 	}
 	for _, plan := range plans {
-		if plan.State == PlanStateRunning {
-			plan.State = PlanStateNeedsAttention
-			plan.Failure = "host service restarted while the destructive operation was running; inspect the disk before retrying"
-			if err := s.savePlanLocked(ctx, plan); err != nil {
-				return err
-			}
-		}
 		s.plans[plan.ID] = plan
 	}
 	return nil

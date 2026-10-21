@@ -455,12 +455,20 @@ func (failingCredentials) DisableCredential(context.Context, string) error { ret
 
 type apiVolumeExecutor struct{}
 
-func (apiVolumeExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+func (apiVolumeExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, Layout: request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
 }
 
-func (apiVolumeExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
-	return storage.Volume{FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable}, nil
+func (apiVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (apiVolumeExecutor) VolumeOperation(context.Context, string) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{}, storage.ErrOperationNotFound
 }
 
 func (apiVolumeExecutor) ContinueConversion(context.Context) error { return storage.ErrNoConversion }
