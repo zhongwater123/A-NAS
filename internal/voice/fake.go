@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/voiceworker"
@@ -38,10 +39,56 @@ func (w WorkerVoiceprints) Cluster(ctx context.Context, samples []int16, spans [
 
 // FakeRecognizer is the development stand-in for the recognition service: a
 // conversation of two or three voices, a sentence every few seconds, chosen
-// by the audio's bytes so the same file always reads the same.
-type FakeRecognizer struct{}
+// by the audio's bytes so the same file always reads the same. Its tasks
+// live in memory, so after a restart they are lost and submitted again.
+type FakeRecognizer struct {
+	// Delay is how long a task stays queued, as the real service's do.
+	Delay time.Duration
+	mu    sync.Mutex
+	tasks map[string]fakeTask
+}
 
-func (FakeRecognizer) Ready(context.Context) bool { return true }
+type fakeTask struct {
+	ready       time.Time
+	recognition Recognition
+}
+
+func (*FakeRecognizer) Ready(context.Context) bool { return true }
+
+func (r *FakeRecognizer) Submit(ctx context.Context, audio []byte, request RecognizeRequest) (Task, error) {
+	recognition, err := fakeRecognition(ctx, audio, request)
+	if err != nil {
+		return Task{}, err
+	}
+	task := Task{ID: requestID()}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tasks == nil {
+		r.tasks = map[string]fakeTask{}
+	}
+	r.tasks[task.ID] = fakeTask{ready: time.Now().Add(r.Delay), recognition: recognition}
+	return task, nil
+}
+
+func (r *FakeRecognizer) Result(_ context.Context, task Task) (Recognition, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	found, ok := r.tasks[task.ID]
+	switch {
+	case !ok:
+		return Recognition{}, ErrRecognitionLost
+	case time.Now().Before(found.ready):
+		return Recognition{}, ErrRecognizing
+	}
+	return found.recognition, nil
+}
+
+func (r *FakeRecognizer) Release(_ context.Context, task Task) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tasks, task.ID)
+	return nil
+}
 
 var fakeLines = []string{
 	"好，我们开始吧，今天主要对一下下周家里装修的安排。",
@@ -58,7 +105,7 @@ var fakeLines = []string{
 	"好，那今天就到这里，有问题随时在群里说。",
 }
 
-func (FakeRecognizer) Recognize(ctx context.Context, audio []byte, request RecognizeRequest) (Recognition, error) {
+func fakeRecognition(ctx context.Context, audio []byte, request RecognizeRequest) (Recognition, error) {
 	if err := ctx.Err(); err != nil {
 		return Recognition{}, err
 	}

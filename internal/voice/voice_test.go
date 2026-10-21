@@ -106,23 +106,56 @@ func (m *testMedia) Speech(_ context.Context, file *os.File, request mediaworker
 }
 
 // scriptedRecognizer answers each piece with sentences every 5 seconds, by
-// voice label in turn.
+// voice label in turn; hold keeps its tasks queued.
 type scriptedRecognizer struct {
-	ready  bool
-	labels []string
-	err    error
-	mu     sync.Mutex
-	calls  []RecognizeRequest
+	ready    bool
+	labels   []string
+	err      error
+	hold     bool
+	mu       sync.Mutex
+	calls    []RecognizeRequest
+	tasks    map[string]RecognizeRequest
+	released []string
 }
 
-func (r *scriptedRecognizer) Ready(context.Context) bool { return r.ready }
-
-func (r *scriptedRecognizer) Recognize(_ context.Context, _ []byte, request RecognizeRequest) (Recognition, error) {
+func (r *scriptedRecognizer) Ready(context.Context) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ready
+}
+
+func (r *scriptedRecognizer) Submit(_ context.Context, _ []byte, request RecognizeRequest) (Task, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.calls = append(r.calls, request)
-	r.mu.Unlock()
 	if r.err != nil {
-		return Recognition{}, r.err
+		return Task{}, r.err
+	}
+	if r.tasks == nil {
+		r.tasks = map[string]RecognizeRequest{}
+	}
+	task := Task{ID: fmt.Sprintf("task-%d", len(r.calls)), Object: fmt.Sprintf("a-nas-voice/task-%d.ogg", len(r.calls))}
+	r.tasks[task.ID] = request
+	return task, nil
+}
+
+func (r *scriptedRecognizer) Release(_ context.Context, task Task) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.released = append(r.released, task.ID)
+	delete(r.tasks, task.ID)
+	return nil
+}
+
+func (r *scriptedRecognizer) Result(_ context.Context, task Task) (Recognition, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	request, ok := r.tasks[task.ID]
+	switch {
+	case !ok:
+		return Recognition{}, ErrRecognitionLost
+	case r.hold:
+		return Recognition{}, ErrRecognizing
 	}
 	var recognition Recognition
 	for at, i := int64(0), 0; at+4000 <= request.Duration.Milliseconds(); at, i = at+5000, i+1 {
@@ -137,6 +170,8 @@ func (r *scriptedRecognizer) Recognize(_ context.Context, _ []byte, request Reco
 
 type fixture struct {
 	service    *Service
+	store      *Store
+	options    Options
 	files      *testFiles
 	media      *testMedia
 	recognizer *scriptedRecognizer
@@ -172,6 +207,8 @@ func newFixture(t *testing.T, options Options) *fixture {
 		return append([]accounts.Session(nil), f.sessions...)
 	}
 	options.Poll = 20 * time.Millisecond
+	options.ResultPoll = 5 * time.Millisecond
+	f.store, f.options = store, options
 	f.service = New(store, f.files, options)
 	f.service.Run()
 	t.Cleanup(func() {
@@ -179,6 +216,14 @@ func newFixture(t *testing.T, options Options) *fixture {
 		_ = store.Close()
 	})
 	return f
+}
+
+// restart stops the service and starts another on the same database, as a
+// restart of the Product Service does.
+func (f *fixture) restart() {
+	f.service.Close()
+	f.service = New(f.store, f.files, f.options)
+	f.service.Run()
 }
 
 // settle waits until no recording or job is queued or running.
@@ -436,12 +481,16 @@ func TestRecordingsWaitForTheirMemberAndTheRecognizer(t *testing.T) {
 
 func TestRejectedCredentialsFailAndRetryStartsAgain(t *testing.T) {
 	f := newFixture(t, Options{})
+	f.recognizer.mu.Lock()
 	f.recognizer.err = fmt.Errorf("%w: Invalid X-Api-Key", ErrRecognizerRejected)
+	f.recognizer.mu.Unlock()
 	detail := f.imported(t, alice, "file:a", ImportRequest{})
 	if detail.Status != StatusFailed || detail.Error == nil || detail.Error.Code != FailRejected {
 		t.Fatalf("detail = %+v", detail.Recording)
 	}
+	f.recognizer.mu.Lock()
 	f.recognizer.err = nil
+	f.recognizer.mu.Unlock()
 	if _, err := f.service.Retry(context.Background(), alice, detail.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -544,16 +593,28 @@ func TestRecognizerSettingsAreAdministratorsAndNeverShowTheSecret(t *testing.T) 
 	if _, err := f.service.RecognizerSettings(context.Background(), alice); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("a member reads settings: %v", err)
 	}
-	if _, err := f.service.SetRecognizer(context.Background(), bob, RecognizerCredentials{Mode: ModeAppKey, AppID: "123"}); !errors.Is(err, ErrInvalid) {
+	storage := StorageInput{Region: "cn-beijing", Bucket: "family-voice", AccessKeyID: "AKLTexample1234", SecretAccessKey: "secret-key-wxyz"}
+	if _, err := f.service.SetRecognizer(context.Background(), bob, RecognizerCredentials{Mode: ModeAppKey, AppID: "123", Storage: storage}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("APP ID without token = %v", err)
 	}
-	settings, err := f.service.SetRecognizer(context.Background(), bob, RecognizerCredentials{Mode: ModeAppKey, AppID: " 1234567 ", AccessToken: "secret-token-abcd"})
-	if err != nil || !settings.Configured || settings.AppID != "1234567" || settings.SecretHint != "••••abcd" || settings.UpdatedBy != "bob" {
+	for _, wrong := range []StorageInput{
+		{Region: "mars-1", Bucket: "family-voice", AccessKeyID: "AK", SecretAccessKey: "SK"},
+		{Region: "cn-beijing", Bucket: "Family_Voice", AccessKeyID: "AK", SecretAccessKey: "SK"},
+		{Region: "cn-beijing", Bucket: "family-voice", AccessKeyID: "AK"},
+	} {
+		if _, err := f.service.SetRecognizer(context.Background(), bob, RecognizerCredentials{Mode: ModeAPIKey, APIKey: "key", Storage: wrong}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("storage %+v = %v", wrong, err)
+		}
+	}
+	settings, err := f.service.SetRecognizer(context.Background(), bob, RecognizerCredentials{Mode: ModeAppKey, AppID: " 1234567 ", AccessToken: "secret-token-abcd", Storage: storage})
+	if err != nil || !settings.Configured || settings.AppID != "1234567" || settings.SecretHint != "••••abcd" || settings.UpdatedBy != "bob" ||
+		settings.Storage == nil || settings.Storage.Bucket != "family-voice" || settings.Storage.AccessKeyHint != "••••1234" || settings.Storage.SecretHint != "••••wxyz" ||
+		len(settings.Regions) == 0 {
 		t.Fatalf("SetRecognizer() = %+v, %v", settings, err)
 	}
 	encoded, _ := json.Marshal(settings)
-	if strings.Contains(string(encoded), "secret-token") {
-		t.Fatalf("settings show the secret: %s", encoded)
+	if strings.Contains(string(encoded), "secret-token") || strings.Contains(string(encoded), "secret-key") || strings.Contains(string(encoded), "AKLTexample") {
+		t.Fatalf("settings show a secret: %s", encoded)
 	}
 	if !f.service.Status(context.Background()).Recognizer.Available {
 		t.Fatal("status should say the recognizer is configured")
@@ -566,71 +627,376 @@ func TestRecognizerSettingsAreAdministratorsAndNeverShowTheSecret(t *testing.T) 
 	}
 }
 
-func TestDoubaoSpeaksTheFlashProtocol(t *testing.T) {
-	var got struct {
-		header http.Header
-		body   doubaoRequest
+func TestRecognitionTasksOutliveARestartAndGoWithTheirRecording(t *testing.T) {
+	f := newFixture(t, Options{})
+	hold := func(on bool) {
+		f.recognizer.mu.Lock()
+		f.recognizer.hold = on
+		f.recognizer.mu.Unlock()
 	}
-	status := "20000000"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got.header = r.Header.Clone()
-		got.body = doubaoRequest{}
-		_ = json.NewDecoder(r.Body).Decode(&got.body)
-		w.Header().Set("X-Api-Status-Code", status)
-		w.Header().Set("X-Api-Message", "OK")
-		w.Header().Set("X-Tt-Logid", "log-1")
-		switch status {
-		case "45000010":
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"code":45000010,"message":"Invalid X-Api-Key"}`))
-			return
+	saved := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		var count int
+		for time.Now().Before(deadline) {
+			_ = f.store.db.QueryRow("SELECT COUNT(*) FROM recognition_tasks").Scan(&count)
+			if count == want {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
-		_, _ = w.Write([]byte(`{"audio_info":{"duration":5200},"result":{"text":"你好。我在。","utterances":[
-{"start_time":100,"end_time":900,"text":"你好。","additions":{"speaker":"1"}},
-{"start_time":1200,"end_time":2600,"text":"我在。","additions":{"speaker":2}},
-{"start_time":3000,"end_time":3100,"text":"  "}]}}`))
-	}))
-	defer server.Close()
-	credentials := DoubaoCredentials{APIKey: "new-console-key"}
-	doubao := Doubao{URL: server.URL, Credentials: func(context.Context) (DoubaoCredentials, error) { return credentials, nil }}
-	result, err := doubao.Recognize(context.Background(), []byte("OggS"), RecognizeRequest{Hotwords: []string{"张三", "张三", ""}, Duration: 5 * time.Second})
+		t.Fatalf("saved tasks = %d, want %d", count, want)
+	}
+	submitted := func() int {
+		f.recognizer.mu.Lock()
+		defer f.recognizer.mu.Unlock()
+		return len(f.recognizer.calls)
+	}
+	hold(true)
+	f.files.add(t, alice.ID, "file:a", "a.m4a", 8)
+	first, err := f.service.Import(context.Background(), alice, ImportRequest{FileID: "file:a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Utterances) != 2 || result.Utterances[0].Speaker != "1" || result.Utterances[1].Speaker != "2" || result.Utterances[1].EndMs != 2600 {
-		t.Fatalf("Recognize() = %+v", result)
+	saved(1)
+	// After a restart the service asks for the same task's result.
+	f.restart()
+	hold(false)
+	f.settle(t)
+	if detail, _ := f.service.Get(context.Background(), alice, first.ID); detail.Status != StatusReady || len(detail.Utterances) == 0 {
+		t.Fatalf("after the restart = %+v", detail.Recording)
 	}
-	if got.header.Get("X-Api-Key") != "new-console-key" || got.header.Get("X-Api-Resource-Id") != DoubaoResource || got.header.Get("X-Api-Sequence") != "-1" ||
-		len(got.header.Get("X-Api-Request-Id")) != 36 || got.header.Get("X-Api-App-Key") != "" {
-		t.Fatalf("headers = %v", got.header)
+	saved(0)
+	if submitted() != 1 || len(f.recognizer.released) != 1 || f.recognizer.released[0] != "task-1" {
+		t.Fatalf("submitted %d, released %v", submitted(), f.recognizer.released)
 	}
-	if got.body.Audio.Format != "ogg" || got.body.Audio.Codec != "opus" || got.body.Audio.Data != "T2dnUw==" || !got.body.Request.EnableSpeakerInfo ||
-		got.body.Request.SSDVersion != "200" || !got.body.Request.ShowUtterances || got.body.Request.Corpus == nil ||
-		got.body.Request.Corpus.Context != `{"hotwords":[{"word":"张三"}]}` {
-		t.Fatalf("body = %+v", got.body)
-	}
-	credentials = DoubaoCredentials{AppID: "app", AccessToken: "token"}
-	if _, err := doubao.Recognize(context.Background(), []byte("OggS"), RecognizeRequest{Language: "en-US"}); err != nil {
+	// A task the service no longer knows is submitted once more.
+	hold(true)
+	f.files.add(t, alice.ID, "file:b", "b.m4a", 8)
+	second, err := f.service.Import(context.Background(), alice, ImportRequest{FileID: "file:b"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got.header.Get("X-Api-App-Key") != "app" || got.header.Get("X-Api-Access-Key") != "token" || got.body.Audio.Language != "en-US" || got.body.Request.SSDVersion != "" {
-		t.Fatalf("old console request = %v %+v", got.header, got.body)
+	saved(1)
+	f.restart()
+	f.recognizer.mu.Lock()
+	f.recognizer.tasks, f.recognizer.hold = nil, false
+	f.recognizer.mu.Unlock()
+	f.settle(t)
+	if detail, _ := f.service.Get(context.Background(), alice, second.ID); detail.Status != StatusReady || submitted() != 3 {
+		t.Fatalf("after losing the task = %+v, submitted %d", detail.Recording, submitted())
 	}
-	for code, want := range map[string]error{"45000010": ErrRecognizerRejected, "55000031": ErrRecognizerBusy, "45000151": ErrNotAudio} {
-		status = code
-		if _, err := doubao.Recognize(context.Background(), []byte("OggS"), RecognizeRequest{}); !errors.Is(err, want) {
+	// Removing a recording that is still being recognised lets go of its task.
+	hold(true)
+	f.files.add(t, alice.ID, "file:c", "c.m4a", 8)
+	third, err := f.service.Import(context.Background(), alice, ImportRequest{FileID: "file:c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved(1)
+	if err := f.service.Delete(context.Background(), alice, third.ID); err != nil {
+		t.Fatal(err)
+	}
+	saved(0)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.recognizer.mu.Lock()
+		released := strings.Join(f.recognizer.released, ",")
+		f.recognizer.mu.Unlock()
+		if strings.HasSuffix(released, "task-4") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("released = %s, want task-4 last", released)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// memoryRelay keeps relayed audio in memory, by bucket.
+type memoryRelay struct {
+	mu      sync.Mutex
+	objects map[string][]byte
+	deleted []string
+}
+
+type bucketRelay struct {
+	*memoryRelay
+	bucket string
+}
+
+func (r bucketRelay) Put(_ context.Context, key string, audio []byte) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.objects[r.bucket+"/"+key] = audio
+	return "https://" + r.bucket + ".relay.test/" + key + "?X-Tos-Signature=signed", nil
+}
+
+func (r bucketRelay) Delete(_ context.Context, key string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deleted = append(r.deleted, r.bucket+"/"+key)
+	delete(r.objects, r.bucket+"/"+key)
+	return nil
+}
+
+func TestDoubaoSubmitsARelayedRecordingAndAsksForItsResult(t *testing.T) {
+	var mu sync.Mutex
+	var submitted struct {
+		header http.Header
+		body   doubaoRequest
+	}
+	var queried http.Header
+	submitStatus, queryStatus := "20000000", "20000001"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		status := queryStatus
+		if r.URL.Path == "/submit" {
+			submitted.header = r.Header.Clone()
+			submitted.body = doubaoRequest{}
+			_ = json.NewDecoder(r.Body).Decode(&submitted.body)
+			status = submitStatus
+		} else {
+			queried = r.Header.Clone()
+		}
+		w.Header().Set("X-Api-Status-Code", status)
+		w.Header().Set("X-Api-Message", "OK")
+		w.Header().Set("X-Tt-Logid", "log-1")
+		switch {
+		case status == "45000010":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":45000010,"message":"Invalid X-Api-Key"}`))
+		case r.URL.Path == "/query" && status == "20000000":
+			_, _ = w.Write([]byte(`{"audio_info":{"duration":5200},"result":{"text":"你好。我在。","utterances":[
+{"start_time":100,"end_time":900,"text":"你好。","additions":{"speaker":"1"}},
+{"start_time":1200,"end_time":2600,"text":"我在。","additions":{"speaker":2}},
+{"start_time":3000,"end_time":3100,"text":"  "}]}}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer server.Close()
+	relay := &memoryRelay{objects: map[string][]byte{}}
+	storage := StorageCredentials{Region: "cn-beijing", Bucket: "family-voice", AccessKeyID: "AK", SecretAccessKey: "SK"}
+	credentials := DoubaoCredentials{APIKey: "new-console-key", Storage: storage}
+	doubao := Doubao{
+		SubmitURL: server.URL + "/submit", QueryURL: server.URL + "/query",
+		Credentials: func(context.Context) (DoubaoCredentials, error) { return credentials, nil },
+		Relay:       func(s StorageCredentials) Relay { return bucketRelay{relay, s.Bucket} },
+	}
+	ctx := context.Background()
+	task, err := doubao.Submit(ctx, []byte("OggS"), RecognizeRequest{Hotwords: []string{"张三", "张三", ""}, Duration: 40 * time.Minute, Scene: "meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(task.ID) != 36 || task.Object != "a-nas-voice/"+task.ID+".ogg" || task.Bucket != "family-voice" || task.Region != "cn-beijing" ||
+		string(relay.objects["family-voice/"+task.Object]) != "OggS" {
+		t.Fatalf("task = %+v, relayed = %v", task, relay.objects)
+	}
+	if submitted.header.Get("X-Api-Key") != "new-console-key" || submitted.header.Get("X-Api-Resource-Id") != "volc.seedasr.auc" ||
+		submitted.header.Get("X-Api-Request-Id") != task.ID || submitted.header.Get("X-Api-Sequence") != "-1" || submitted.header.Get("X-Api-App-Key") != "" {
+		t.Fatalf("submit headers = %v", submitted.header)
+	}
+	body := submitted.body
+	if body.Audio.URL != "https://family-voice.relay.test/"+task.Object+"?X-Tos-Signature=signed" || body.Audio.Format != "ogg" || body.Audio.Codec != "opus" ||
+		body.Audio.Rate != 16000 || !body.Request.EnableSpeakerInfo || body.Request.SSDVersion != "300" || body.Request.SSDMode != 0 ||
+		!body.Request.ShowUtterances || body.Request.Corpus == nil || body.Request.Corpus.Context != `{"hotwords":[{"word":"张三"}]}` {
+		t.Fatalf("submit body = %+v", body)
+	}
+	if _, err := doubao.Result(ctx, task); !errors.Is(err, ErrRecognizing) || queried.Get("X-Api-Request-Id") != task.ID || queried.Get("X-Api-Key") != "new-console-key" {
+		t.Fatalf("while processing: %v, headers %v", err, queried)
+	}
+	mu.Lock()
+	queryStatus = "20000000"
+	mu.Unlock()
+	result, err := doubao.Result(ctx, task)
+	if err != nil || len(result.Utterances) != 2 || result.Utterances[0].Speaker != "1" || result.Utterances[1].Speaker != "2" || result.Utterances[1].EndMs != 2600 {
+		t.Fatalf("Result() = %+v, %v", result, err)
+	}
+	for code, want := range map[string]error{"20000002": ErrRecognizing, "45000010": ErrRecognizerRejected, "55000031": ErrRecognizerBusy,
+		"45000131": ErrRecognizerBusy, "45000151": ErrNotAudio, "45000001": ErrRecognitionLost, "45000099": ErrRecognitionFailed} {
+		mu.Lock()
+		queryStatus = code
+		mu.Unlock()
+		if _, err := doubao.Result(ctx, task); !errors.Is(err, want) {
 			t.Errorf("status %s: error = %v, want %v", code, err, want)
 		}
 	}
-	status = "20000003"
-	if result, err := doubao.Recognize(context.Background(), []byte("OggS"), RecognizeRequest{}); err != nil || len(result.Utterances) != 0 {
+	mu.Lock()
+	queryStatus = "20000003"
+	mu.Unlock()
+	if result, err := doubao.Result(ctx, task); err != nil || len(result.Utterances) != 0 {
 		t.Fatalf("silence = %+v, %v", result, err)
 	}
-	credentials = DoubaoCredentials{}
-	if _, err := doubao.Recognize(context.Background(), []byte("OggS"), RecognizeRequest{}); !errors.Is(err, ErrRecognizerUnconfigured) {
-		t.Fatalf("no credentials = %v", err)
+	// The relayed audio is deleted from the bucket it was put in, even after
+	// an administrator chose another bucket.
+	credentials.Storage.Bucket = "other-bucket"
+	if err := doubao.Release(ctx, task); err != nil || len(relay.deleted) != 1 || relay.deleted[0] != "family-voice/"+task.Object {
+		t.Fatalf("Release() = %v, deleted %v", err, relay.deleted)
+	}
+	// The old console's keys; a language the service separates no speakers in.
+	credentials = DoubaoCredentials{AppID: "app", AccessToken: "token", Storage: storage}
+	if _, err := doubao.Submit(ctx, []byte("OggS"), RecognizeRequest{Language: "en-US", Duration: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if submitted.header.Get("X-Api-App-Key") != "app" || submitted.header.Get("X-Api-Access-Key") != "token" || submitted.body.Audio.Language != "en-US" ||
+		submitted.body.Request.EnableSpeakerInfo || submitted.body.Request.SSDVersion != "" {
+		t.Fatalf("old console request = %v %+v", submitted.header, submitted.body)
+	}
+	// A refused submission deletes what it relayed.
+	mu.Lock()
+	submitStatus = "45000010"
+	mu.Unlock()
+	if _, err := doubao.Submit(ctx, []byte("OggS"), RecognizeRequest{}); !errors.Is(err, ErrRecognizerRejected) {
+		t.Fatalf("refused submission = %v", err)
+	}
+	for key := range relay.objects {
+		if key == "family-voice/a-nas-voice/"+submitted.header.Get("X-Api-Request-Id")+".ogg" {
+			t.Fatalf("the refused task's audio stayed: %v", relay.objects)
+		}
+	}
+	// Without a relay bucket the recognizer is not configured.
+	credentials = DoubaoCredentials{APIKey: "key"}
+	if _, err := doubao.Submit(ctx, []byte("OggS"), RecognizeRequest{}); !errors.Is(err, ErrRecognizerUnconfigured) || doubao.Ready(ctx) {
+		t.Fatalf("no bucket = %v", err)
 	}
 }
+
+func TestSpeakerSeparationFollowsDoubaosBestPractice(t *testing.T) {
+	for _, c := range []struct {
+		request RecognizeRequest
+		version string
+		mode    int
+	}{
+		{RecognizeRequest{Duration: 2 * time.Minute, Scene: "meeting"}, "200", 0},
+		{RecognizeRequest{Duration: 20 * time.Minute, Scene: "call"}, "200", 1},
+		{RecognizeRequest{Duration: 20 * time.Minute, Scene: "memo"}, "200", 1},
+		{RecognizeRequest{Duration: 20 * time.Minute, Scene: "lecture"}, "300", 0},
+		{RecognizeRequest{Duration: 20 * time.Minute}, "300", 0},
+	} {
+		if version, mode := speakerSeparation(c.request); version != c.version || mode != c.mode {
+			t.Errorf("speakerSeparation(%+v) = %s/%d, want %s/%d", c.request, version, mode, c.version, c.mode)
+		}
+	}
+}
+
+func TestTOSRelaysThroughABucketWithPresignedURLs(t *testing.T) {
+	var mu sync.Mutex
+	var requests []string
+	objects := map[string][]byte{}
+	refuse := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		signed := r.Header.Get("Authorization") != "" || r.URL.Query().Get("X-Tos-Signature") != ""
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.Header().Set("X-Tos-Request-Id", "req-1")
+		if refuse || !signed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"Code":"AccessDenied","Message":"Access Denied","RequestId":"req-1"}`))
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			objects[r.URL.Path], _ = io.ReadAll(r.Body)
+		case http.MethodGet:
+			_, _ = w.Write(objects[r.URL.Path])
+		case http.MethodDelete:
+			delete(objects, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	relay := TOS{Credentials: StorageCredentials{Region: "cn-beijing", Bucket: "family-voice", AccessKeyID: "AK", SecretAccessKey: "SK", Endpoint: server.URL}}
+	ctx := context.Background()
+	url, err := relay.Put(ctx, "a-nas-voice/x.ogg", []byte("OggS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(objects["/family-voice/a-nas-voice/x.ogg"]) != "OggS" || !strings.HasPrefix(url, server.URL+"/family-voice/a-nas-voice/x.ogg?") ||
+		!strings.Contains(url, "X-Tos-Signature=") || !strings.Contains(url, "X-Tos-Expires=86400") {
+		t.Fatalf("Put() = %s, objects %v", url, objects)
+	}
+	// The presigned URL reads the audio without credentials, as Doubao does.
+	response, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloaded, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if string(downloaded) != "OggS" {
+		t.Fatalf("downloaded %q", downloaded)
+	}
+	if err := relay.Delete(ctx, "a-nas-voice/x.ogg"); err != nil || len(objects) != 0 {
+		t.Fatalf("Delete() = %v, objects %v", err, objects)
+	}
+	mu.Lock()
+	refuse = true
+	mu.Unlock()
+	if _, err := relay.Put(ctx, "a-nas-voice/y.ogg", []byte("OggS")); !errors.Is(err, ErrRelayRejected) || !errors.Is(err, ErrRecognizerRejected) {
+		t.Fatalf("refused Put() = %v", err)
+	}
+	server.Close()
+	if _, err := relay.Put(ctx, "a-nas-voice/z.ogg", []byte("OggS")); !errors.Is(err, ErrRecognizerBusy) {
+		t.Fatalf("unreachable Put() = %v", err)
+	}
+}
+
+func TestConnectionTestRelaysASecondOfSilence(t *testing.T) {
+	queryStatus := "20000003"
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("X-Api-Status-Code", "20000000")
+		if r.URL.Path == "/query" {
+			w.Header().Set("X-Api-Status-Code", queryStatus)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	relay := &memoryRelay{objects: map[string][]byte{}}
+	f := newFixture(t, Options{})
+	f.service.recognizer = Doubao{
+		SubmitURL: server.URL + "/submit", QueryURL: server.URL + "/query", Credentials: f.store.DoubaoCredentials,
+		Relay: func(s StorageCredentials) Relay { return bucketRelay{relay, s.Bucket} },
+	}
+	credentials := &RecognizerCredentials{Mode: ModeAPIKey, APIKey: "key", Storage: StorageInput{Region: "cn-beijing", Bucket: "family-voice", AccessKeyID: "AK", SecretAccessKey: "SK"}}
+	if _, err := f.service.TestRecognizer(context.Background(), alice, credentials); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("a member tests = %v", err)
+	}
+	result, err := f.service.TestRecognizer(context.Background(), bob, credentials)
+	if err != nil || !result.OK || result.Queued || len(relay.objects) != 0 || len(relay.deleted) != 1 {
+		t.Fatalf("TestRecognizer() = %+v, %v; relayed %v, deleted %v", result, err, relay.objects, relay.deleted)
+	}
+	// A long queue still proves the keys and the bucket.
+	saved := testWait
+	testWait = 20 * time.Millisecond
+	t.Cleanup(func() { testWait = saved })
+	mu.Lock()
+	queryStatus = "20000002"
+	mu.Unlock()
+	if result, err := f.service.TestRecognizer(context.Background(), bob, credentials); err != nil || !result.OK || !result.Queued || len(relay.deleted) != 2 {
+		t.Fatalf("queued test = %+v, %v", result, err)
+	}
+	// A relay that refuses the access key is named as the cause.
+	f.service.recognizer = Doubao{
+		SubmitURL: server.URL + "/submit", QueryURL: server.URL + "/query", Credentials: f.store.DoubaoCredentials,
+		Relay: func(StorageCredentials) Relay { return refusingRelay{} },
+	}
+	if result, err := f.service.TestRecognizer(context.Background(), bob, credentials); err != nil || result.OK || result.Code != "storage_rejected" {
+		t.Fatalf("refused relay = %+v, %v", result, err)
+	}
+}
+
+type refusingRelay struct{}
+
+func (refusingRelay) Put(context.Context, string, []byte) (string, error) {
+	return "", fmt.Errorf("%w: %w: TOS AccessDenied", ErrRecognizerRejected, ErrRelayRejected)
+}
+
+func (refusingRelay) Delete(context.Context, string) error { return nil }
 
 func TestChatModelPostsToTheGatewaySocket(t *testing.T) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("voice-gateway-%d.sock", time.Now().UnixNano()))

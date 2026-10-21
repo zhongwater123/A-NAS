@@ -142,6 +142,13 @@ CREATE TABLE IF NOT EXISTS summaries (
     PRIMARY KEY (recording_id, template)
 );
 -- The recognition service's credentials, which an administrator enters.
+CREATE TABLE IF NOT EXISTS recognition_tasks (
+    recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    piece INTEGER NOT NULL,
+    task TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    PRIMARY KEY (recording_id, piece)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

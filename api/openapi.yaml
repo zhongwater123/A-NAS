@@ -2382,13 +2382,13 @@ paths:
   /api/v1/voice/settings/recognizer:
     get:
       operationId: getVoiceRecognizerSettings
-      summary: "The recognition service's credentials, masked; administrators only"
+      summary: "The recognition service's credentials and the TOS bucket that relays recordings to it, masked; administrators only"
       responses:
         "200": { description: Settings, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerSettings" } } } }
         "403": { $ref: "#/components/responses/ProductError" }
     put:
       operationId: setVoiceRecognizerSettings
-      summary: "Save Doubao's credentials: the new console's API Key, or the old console's APP ID and Access Token; administrators only"
+      summary: "Save Doubao's credentials (the new console's API Key, or the old console's APP ID and Access Token) and the TOS bucket with its access key; administrators only"
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerCredentials" } } } }
       responses:
@@ -2405,7 +2405,7 @@ paths:
   /api/v1/voice/settings/recognizer/test:
     post:
       operationId: testVoiceRecognizer
-      summary: "Send a second of silence with the given credentials, or the saved ones without a body; administrators only"
+      summary: "Relay a second of silence through TOS and submit it, with the given credentials or the saved ones without a body; administrators only"
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerCredentials" } } } }
       responses:
@@ -6229,32 +6229,53 @@ components:
     VoiceRecognizerSettings:
       type: object
       additionalProperties: false
-      required: [provider, configured]
+      required: [provider, configured, regions]
       properties:
         provider: { type: string, enum: [doubao] }
-        configured: { type: boolean }
+        configured: { type: boolean, description: Both Doubao's credentials and the relay bucket are saved. }
         mode: { type: string, enum: [apiKey, appKey] }
         appId: { type: string }
         secretHint: { type: string, description: The secret's last four characters. }
+        storage:
+          type: object
+          additionalProperties: false
+          required: [region, bucket, accessKeyHint, secretHint]
+          properties:
+            region: { type: string }
+            bucket: { type: string }
+            accessKeyHint: { type: string, description: The access key ID's last four characters. }
+            secretHint: { type: string, description: The secret access key's last four characters. }
+        regions: { type: array, description: The TOS regions to choose from., items: { type: string } }
         updatedBy: { type: string }
         updatedAt: { type: string, format: date-time }
     VoiceRecognizerCredentials:
       type: object
       additionalProperties: false
-      required: [mode]
+      required: [mode, storage]
       properties:
         mode: { type: string, enum: [apiKey, appKey] }
         apiKey: { type: string, maxLength: 200 }
         appId: { type: string, maxLength: 200 }
         accessToken: { type: string, maxLength: 200 }
+        storage:
+          type: object
+          description: The Volcengine TOS bucket that relays recordings to Doubao, and an access key that may write and delete in it.
+          additionalProperties: false
+          required: [region, bucket, accessKeyId, secretAccessKey]
+          properties:
+            region: { type: string, maxLength: 64 }
+            bucket: { type: string, maxLength: 63 }
+            accessKeyId: { type: string, maxLength: 200 }
+            secretAccessKey: { type: string, maxLength: 200 }
     VoiceRecognizerTest:
       type: object
       additionalProperties: false
       required: [ok]
       properties:
         ok: { type: boolean }
-        code: { type: string, enum: [unconfigured, rejected, unreachable, failed] }
+        code: { type: string, enum: [unconfigured, rejected, unreachable, storage_rejected, storage_unreachable, failed] }
         message: { type: string }
+        queued: { type: boolean, description: Doubao took the test task but had not finished it within the wait. }
     VoiceImport:
       type: object
       additionalProperties: false

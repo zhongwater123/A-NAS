@@ -278,11 +278,30 @@ type MediaWorker interface {
 	Speech(ctx context.Context, file *os.File, request mediaworker.SpeechRequest) (io.ReadCloser, error)
 }
 
-// Recognizer transcribes speech. Audio is Ogg Opus, 16 kHz mono.
+// Recognizer transcribes speech. Audio is Ogg Opus, 16 kHz mono. The
+// service works on a task: Submit hands the audio over, Result is asked
+// until the transcript is ready and Release lets go of what the task kept.
+// Tasks are saved, so after a restart the service asks for the same result
+// instead of paying for the recording again.
 type Recognizer interface {
 	// Ready says whether an administrator configured it.
 	Ready(ctx context.Context) bool
-	Recognize(ctx context.Context, audio []byte, request RecognizeRequest) (Recognition, error)
+	Submit(ctx context.Context, audio []byte, request RecognizeRequest) (Task, error)
+	// Result returns ErrRecognizing while the service is still at it.
+	Result(ctx context.Context, task Task) (Recognition, error)
+	// Release deletes what the task relayed, once the result is in, the
+	// task failed or its recording was removed.
+	Release(ctx context.Context, task Task) error
+}
+
+// Task is one submitted recognition, as saved between restarts.
+type Task struct {
+	ID string `json:"id"`
+	// Object, Bucket and Region say where the audio waits for the service
+	// to download it.
+	Object string `json:"object,omitempty"`
+	Bucket string `json:"bucket,omitempty"`
+	Region string `json:"region,omitempty"`
 }
 
 // RecognizeRequest describes one piece of a recording.
@@ -293,6 +312,9 @@ type RecognizeRequest struct {
 	Hotwords []string
 	// Duration is how long the audio lasts.
 	Duration time.Duration
+	// Scene is the summary template chosen at import, a hint of whether
+	// this is a meeting, a call or a memo.
+	Scene string
 }
 
 // Recognition is what the recognition service heard in one request.
@@ -316,6 +338,12 @@ var (
 	ErrRecognizerBusy = errors.New("the recognition service is busy")
 	// ErrRecognizerUnconfigured: no administrator configured the service.
 	ErrRecognizerUnconfigured = errors.New("the recognition service is not configured")
+	// ErrRecognizing: the task is queued or running; ask again later.
+	ErrRecognizing = errors.New("the recognition service is still recognising")
+	// ErrRecognitionLost: the service no longer knows the task.
+	ErrRecognitionLost = errors.New("the recognition service no longer knows the task")
+	// ErrRecognitionFailed: the service could not recognise the recording.
+	ErrRecognitionFailed = errors.New("the recognition service could not recognise the recording")
 )
 
 // TextModel translates and summarises.

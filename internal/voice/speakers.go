@@ -24,8 +24,8 @@ const (
 	// SuggestThreshold offers the person as "可能是": the one same-person
 	// pair below it was a 10 s profile that scored 0.24.
 	SuggestThreshold = 0.60
-	// SameVoiceThreshold joins the speakers of two pieces of a long
-	// recording into one. Joining the halves of each meeting this way made
+	// SameVoiceThreshold joins the speakers of two pieces of a recording
+	// recognised in pieces (Options.Chunk) into one. Joining the halves of each meeting this way made
 	// no wrong join with 30 s or more of speech and left 2–6 % of the
 	// voices apart, which 合并发言人 puts together.
 	SameVoiceThreshold = 0.70

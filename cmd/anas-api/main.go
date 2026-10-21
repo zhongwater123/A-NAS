@@ -465,7 +465,7 @@ func configuredVoice(live bool, store *voice.Store, fileService *files.Service, 
 	case "doubao":
 		options.Recognizer = voice.Doubao{Credentials: store.DoubaoCredentials}
 	case "fake":
-		options.Recognizer = voice.FakeRecognizer{}
+		options.Recognizer = &voice.FakeRecognizer{Delay: 3 * time.Second}
 	case "disabled":
 	default:
 		return nil, errors.New("ANAS_VOICE_RECOGNIZER must be doubao, fake or disabled")

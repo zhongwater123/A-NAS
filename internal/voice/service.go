@@ -35,11 +35,14 @@ type Options struct {
 	Now      func() time.Time
 	Random   io.Reader
 	Logger   *slog.Logger
-	// Chunk is how much audio one recognition request carries; it defaults
-	// to an hour, about 11 MB of Opus.
+	// Chunk is how much audio one recognition task carries; it defaults to
+	// MaxDuration, so a recording is one task (about 54 MB of Opus at most).
 	Chunk time.Duration
 	// Poll is how often waiting recordings are looked at again.
 	Poll time.Duration
+	// ResultPoll is the first wait before asking for a recognition's
+	// result; the waits double up to maxResultPoll.
+	ResultPoll time.Duration
 }
 
 // Service is 语音处理.
@@ -56,6 +59,7 @@ type Service struct {
 	logger      *slog.Logger
 	chunk       time.Duration
 	poll        time.Duration
+	resultPoll  time.Duration
 
 	base   context.Context
 	cancel context.CancelFunc
@@ -75,7 +79,7 @@ func New(store *Store, fileService Files, options Options) *Service {
 	service := &Service{
 		store: store, files: fileService, media: options.Media, recognizer: options.Recognizer,
 		textModel: options.TextModel, voiceprints: options.Voiceprints, sessions: options.Sessions,
-		now: options.Now, random: options.Random, logger: options.Logger, chunk: options.Chunk, poll: options.Poll,
+		now: options.Now, random: options.Random, logger: options.Logger, chunk: options.Chunk, poll: options.Poll, resultPoll: options.ResultPoll,
 		base: base, cancel: cancel, audio: make(chan struct{}, 1), text: make(chan struct{}, 1),
 		running: map[string]context.CancelFunc{},
 	}
@@ -89,7 +93,10 @@ func New(store *Store, fileService Files, options Options) *Service {
 		service.logger = slog.Default()
 	}
 	if service.chunk <= 0 {
-		service.chunk = time.Hour
+		service.chunk = MaxDuration
+	}
+	if service.resultPoll <= 0 {
+		service.resultPoll = 2 * time.Second
 	}
 	if service.poll <= 0 {
 		service.poll = 30 * time.Second
@@ -156,7 +163,7 @@ type ComponentStatus struct {
 func (s *Service) Status(ctx context.Context) Status {
 	status := Status{Templates: Templates, Languages: Languages, SpokenLanguages: SpokenLanguages}
 	if s.recognizer != nil {
-		status.Recognizer = ComponentStatus{Available: s.recognizer.Ready(ctx), Name: "豆包语音 · 录音文件识别极速版"}
+		status.Recognizer = ComponentStatus{Available: s.recognizer.Ready(ctx), Name: "豆包语音 · 录音文件识别 2.0"}
 	}
 	if s.textModel != nil {
 		status.TextModel = ComponentStatus{Available: true, Name: s.textModel.Name()}
@@ -617,8 +624,13 @@ func (s *Service) Delete(ctx context.Context, actor accounts.User, id string) er
 		}
 	}
 	s.mu.Unlock()
+	tasks := s.savedTasks(ctx, id)
 	if _, err := s.store.db.ExecContext(ctx, "DELETE FROM recordings WHERE id = ?", id); err != nil {
 		return err
+	}
+	// The relayed audio goes too; the recording's tasks rows went with it.
+	for _, task := range tasks {
+		go s.release(task)
 	}
 	return s.rematch(ctx, actor.ID)
 }

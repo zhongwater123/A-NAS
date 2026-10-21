@@ -103,7 +103,7 @@ func voiceAPI(t *testing.T) voiceContract {
 		t.Fatal(err)
 	}
 	service := voice.New(voiceStore, fileService, voice.Options{
-		Media: voiceMedia{}, Recognizer: voice.FakeRecognizer{}, TextModel: voice.FakeTextModel{}, Voiceprints: voice.FakeVoiceprints{},
+		Media: voiceMedia{}, Recognizer: &voice.FakeRecognizer{}, TextModel: voice.FakeTextModel{}, Voiceprints: voice.FakeVoiceprints{},
 		Sessions: func(context.Context) []accounts.Session { return []accounts.Session{{Token: "contract", User: admin}} },
 		Poll:     20 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

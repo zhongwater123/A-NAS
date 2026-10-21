@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,8 +19,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
-// maxOpusBytes bounds one recognition request's audio; the service takes 100 MB.
-const maxOpusBytes = 90 << 20
+// maxOpusBytes bounds one recognition task's audio; the service takes
+// 512 MB and five hours of 24 kbit/s Opus is about 54 MB.
+const maxOpusBytes = 256 << 20
 
 // busyRetries are the waits before trying a busy recognition service again
 // within one attempt; after them the recording waits for the next poll.
@@ -106,6 +108,10 @@ func (s *Service) process(id string) {
 		s.wait(id, waiting.reason)
 	case errors.Is(err, ErrRecognizerRejected):
 		s.fail(id, FailRejected, err)
+	case errors.Is(err, errRecognitionTimeout):
+		s.fail(id, FailRecognizer, err)
+	case errors.Is(err, ErrRecognitionFailed), errors.Is(err, ErrRecognitionLost):
+		s.retryOrFail(current, FailRecognizer, err)
 	case errors.Is(err, ErrNotAudio):
 		s.fail(id, FailNotAudio, err)
 	case errors.Is(err, ErrTooLong):
@@ -221,8 +227,8 @@ func (s *Service) transcribe(ctx context.Context, current job) error {
 		start := time.Duration(index) * s.chunk
 		length := min(s.chunk, duration-start)
 		s.stage(recording.ID, StageRecognizing, 0.8*float64(index)/float64(pieces))
-		recognition, err := s.recognizePiece(ctx, content.Reader, start, length, RecognizeRequest{
-			Language: recording.Language, Hotwords: hotwords, Duration: length,
+		recognition, err := s.recognizePiece(ctx, recording.ID, index, content.Reader, start, length, RecognizeRequest{
+			Language: recording.Language, Hotwords: hotwords, Duration: length, Scene: recording.Template,
 		})
 		if err != nil {
 			return err
@@ -237,36 +243,166 @@ func (s *Service) transcribe(ctx context.Context, current job) error {
 	return s.saveTranscript(ctx, current, duration, utterances, speakers, model)
 }
 
-func (s *Service) recognizePiece(ctx context.Context, file *os.File, start, length time.Duration, request RecognizeRequest) (Recognition, error) {
+// recognizePiece has the recognition service transcribe one piece: it asks
+// for the result of the piece's saved task, or submits the piece's audio as
+// a new task and saves it first.
+func (s *Service) recognizePiece(ctx context.Context, recordingID string, index int, file *os.File, start, length time.Duration, request RecognizeRequest) (Recognition, error) {
+	task, submitted, found := s.savedTask(ctx, recordingID, index)
+	for lost := 0; ; lost++ {
+		if !found {
+			var err error
+			task, err = s.submitPiece(ctx, file, start, length, request)
+			if err != nil {
+				return Recognition{}, err
+			}
+			submitted = s.now()
+			encoded, _ := json.Marshal(task)
+			if _, err := s.store.db.ExecContext(ctx, "INSERT OR REPLACE INTO recognition_tasks (recording_id, piece, task, submitted_at) VALUES (?, ?, ?, ?)",
+				recordingID, index, string(encoded), formatTime(submitted)); err != nil {
+				s.release(task)
+				return Recognition{}, err
+			}
+		}
+		recognition, err := s.awaitResult(ctx, task, submitted)
+		var waiting waitError
+		if ctx.Err() != nil || errors.As(err, &waiting) {
+			// Shutting down or busy: the next pass asks for the same task.
+			// Deleted: Delete releases it.
+			return Recognition{}, err
+		}
+		_, _ = s.store.db.ExecContext(context.WithoutCancel(ctx), "DELETE FROM recognition_tasks WHERE recording_id = ? AND piece = ?", recordingID, index)
+		s.release(task)
+		if errors.Is(err, ErrRecognitionLost) && lost == 0 {
+			s.logger.Warn("recognition task lost; submitting the piece again", "recording", recordingID, "piece", index, "error", err)
+			found = false
+			continue
+		}
+		return recognition, err
+	}
+}
+
+// submitPiece decodes the piece and submits it, trying a busy service again.
+func (s *Service) submitPiece(ctx context.Context, file *os.File, start, length time.Duration, request RecognizeRequest) (Task, error) {
 	stream, err := s.media.Speech(ctx, file, mediaworker.SpeechRequest{Format: mediaworker.SpeechOpus, Start: start.Seconds(), Duration: length.Seconds()})
 	if err != nil {
-		return Recognition{}, err
+		return Task{}, err
 	}
 	audio, err := io.ReadAll(io.LimitReader(stream, maxOpusBytes+1))
 	_ = stream.Close()
 	if err != nil {
-		return Recognition{}, err
+		return Task{}, err
 	}
 	if len(audio) > maxOpusBytes {
-		return Recognition{}, fmt.Errorf("%w: a piece is larger than the service takes", ErrTooLong)
+		return Task{}, fmt.Errorf("%w: a piece is larger than the service takes", ErrTooLong)
 	}
 	for attempt := 0; ; attempt++ {
-		recognition, err := s.recognizer.Recognize(ctx, audio, request)
+		task, err := s.recognizer.Submit(ctx, audio, request)
 		if errors.Is(err, ErrRecognizerUnconfigured) {
-			return Recognition{}, waitError{WaitRecognizer}
+			return Task{}, waitError{WaitRecognizer}
 		}
 		if !errors.Is(err, ErrRecognizerBusy) {
-			return recognition, err
+			return task, err
 		}
 		if attempt >= len(busyRetries) {
 			s.logger.Warn("recognition service busy", "error", err)
-			return Recognition{}, waitError{WaitBusy}
+			return Task{}, waitError{WaitBusy}
+		}
+		select {
+		case <-ctx.Done():
+			return Task{}, ctx.Err()
+		case <-time.After(busyRetries[attempt]):
+		}
+	}
+}
+
+// Recognition results are asked for with growing waits; a task the service
+// has not finished after resultDeadline is given up.
+const (
+	maxResultPoll  = 30 * time.Second
+	resultDeadline = 24 * time.Hour
+	// busyQueries is how many failed queries in a row make the recording
+	// wait for the next pass, which asks for the same task.
+	busyQueries = 10
+)
+
+var errRecognitionTimeout = fmt.Errorf("%w: no result a day after the recording was submitted", ErrRecognitionFailed)
+
+func (s *Service) awaitResult(ctx context.Context, task Task, submitted time.Time) (Recognition, error) {
+	wait, failed := s.resultPoll, 0
+	for {
+		recognition, err := s.recognizer.Result(ctx, task)
+		switch {
+		case err == nil:
+			return recognition, nil
+		case errors.Is(err, ErrRecognizing):
+			failed = 0
+		case errors.Is(err, ErrRecognizerBusy):
+			if failed++; failed >= busyQueries {
+				s.logger.Warn("recognition results unavailable", "error", err)
+				return Recognition{}, waitError{WaitBusy}
+			}
+		case errors.Is(err, ErrRecognizerUnconfigured):
+			return Recognition{}, waitError{WaitRecognizer}
+		default:
+			return Recognition{}, err
+		}
+		if s.now().Sub(submitted) > resultDeadline {
+			return Recognition{}, errRecognitionTimeout
 		}
 		select {
 		case <-ctx.Done():
 			return Recognition{}, ctx.Err()
-		case <-time.After(busyRetries[attempt]):
+		case <-time.After(wait):
 		}
+		wait = min(2*wait, maxResultPoll)
+	}
+}
+
+// savedTask is the piece's submitted task, if one is waiting for its result.
+func (s *Service) savedTask(ctx context.Context, recordingID string, index int) (Task, time.Time, bool) {
+	var encoded, at string
+	if s.store.db.QueryRowContext(ctx, "SELECT task, submitted_at FROM recognition_tasks WHERE recording_id = ? AND piece = ?", recordingID, index).Scan(&encoded, &at) != nil {
+		return Task{}, time.Time{}, false
+	}
+	var task Task
+	if json.Unmarshal([]byte(encoded), &task) != nil || task.ID == "" {
+		return Task{}, time.Time{}, false
+	}
+	submitted := parseTime(at)
+	if submitted.IsZero() {
+		submitted = s.now()
+	}
+	return task, submitted, true
+}
+
+// savedTasks are all of a recording's submitted tasks.
+func (s *Service) savedTasks(ctx context.Context, recordingID string) []Task {
+	rows, err := s.store.db.QueryContext(ctx, "SELECT task FROM recognition_tasks WHERE recording_id = ?", recordingID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var tasks []Task
+	for rows.Next() {
+		var encoded string
+		var task Task
+		if rows.Scan(&encoded) == nil && json.Unmarshal([]byte(encoded), &task) == nil {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+// release deletes what a task relayed; a bucket lifecycle rule clears what
+// could not be deleted.
+func (s *Service) release(task Task) {
+	if s.recognizer == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := s.recognizer.Release(ctx, task); err != nil {
+		s.logger.Warn("delete the relayed recording", "task", task.ID, "object", task.Object, "error", err)
 	}
 }
 
