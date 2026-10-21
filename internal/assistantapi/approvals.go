@@ -110,6 +110,9 @@ type liveSession struct {
 	submit   *startedCall
 	stopping bool
 	owner    *upstream
+	// browser is the connection whose window registered last as the
+	// session's browser (Hermes's browser control).
+	browser *upstream
 }
 
 type startedCall struct {

@@ -33,11 +33,11 @@ interface Callbacks {
   /** A turn ended, or the assistant renamed the conversation. */
   onChanged(): void;
   /**
-   * The window holds a live session: it makes itself the session's browser
-   * (Hermes's browser control) before a prompt goes in, so the turn has the
-   * browser tools.
+   * A prompt is about to go in: the window makes itself the session's browser
+   * (Hermes's browser control) first, so the turn has the browser tools and
+   * its steps come to the window the member sends from.
    */
-  onLive?(liveId: string): Promise<void>;
+  beforePrompt?(liveId: string): Promise<void>;
 }
 
 const COLS = 100;
@@ -149,7 +149,6 @@ export function useAssistantThread(gateway: AssistantGateway, storedId: string |
       .then((result) => {
         if (shown.current !== storedId) return;
         adopt(result.session_id);
-        void notify.current.onLive?.(result.session_id).catch(() => undefined);
         if (result.running) {
           setRunning(true);
           updateReply((message) => message);
@@ -236,7 +235,7 @@ export function useAssistantThread(gateway: AssistantGateway, storedId: string |
         shown.current = session.stored_session_id;
         notify.current.onCreated(session.stored_session_id);
       }
-      await notify.current.onLive?.(id).catch(() => undefined);
+      await notify.current.beforePrompt?.(id).catch(() => undefined);
       await client.request("prompt.submit", { session_id: id, text: input });
     } catch {
       setError("VNAS 暂时没有响应，请稍后再试");

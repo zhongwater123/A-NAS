@@ -317,12 +317,12 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	if got, want := volumes.Code, http.StatusOK; got != want || !bytes.Contains(volumes.Body.Bytes(), []byte(`"id":"volume:data"`)) {
 		t.Fatalf("volumes status/body = %d/%s, want persisted volume", got, volumes.Body.String())
 	}
-	auditRequest := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
-	auditRequest.AddCookie(responseCookies[0])
-	audit := httptest.NewRecorder()
-	handler.ServeHTTP(audit, auditRequest)
-	if got, want := audit.Code, http.StatusOK; got != want || !bytes.Contains(audit.Body.Bytes(), []byte("file.uploaded")) {
-		t.Fatalf("audit status/body = %d/%s, want operation evidence", got, audit.Body.String())
+	activityRequest := httptest.NewRequest(http.MethodGet, "/api/v1/activity", nil)
+	activityRequest.AddCookie(responseCookies[0])
+	activityLog := httptest.NewRecorder()
+	handler.ServeHTTP(activityLog, activityRequest)
+	if got, want := activityLog.Code, http.StatusOK; got != want || !bytes.Contains(activityLog.Body.Bytes(), []byte("file.uploaded")) {
+		t.Fatalf("activity status/body = %d/%s, want operation evidence", got, activityLog.Body.String())
 	}
 }
 

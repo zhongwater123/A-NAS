@@ -10,7 +10,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -236,7 +235,6 @@ func (h *productHandler) routes() {
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/execute", h.withMutation(h.handleExecuteStoragePlan))
 	h.mux.HandleFunc("POST /api/v1/storage/plans/{planID}/cancel", h.withMutation(h.handleCancelStoragePlan))
 	h.mux.HandleFunc("GET /api/v1/operations/{operationID}", h.withSession(h.handleOperation))
-	h.mux.HandleFunc("GET /api/v1/audit", h.withSession(h.handleAudit))
 	h.mux.HandleFunc("GET /api/v1/activity", h.withSession(h.handleActivity))
 	h.mux.HandleFunc("GET /api/v1/system-logs", h.withSession(h.handleSystemLogs))
 	h.mux.HandleFunc("GET /api/v1/local-display", h.handleLocalDisplay)
@@ -1007,56 +1005,6 @@ func (h *productHandler) handleOperation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	writeJSON(w, http.StatusOK, plan)
-}
-
-type auditRecord struct {
-	ID           string    `json:"id"`
-	ActorUserID  string    `json:"actorUserId,omitempty"`
-	Action       string    `json:"action"`
-	ResourceType string    `json:"resourceType"`
-	ResourceID   string    `json:"resourceId"`
-	OccurredAt   time.Time `json:"occurredAt"`
-	Detail       string    `json:"detail,omitempty"`
-}
-
-func (h *productHandler) handleAudit(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-	if !h.requireAdministrator(w, session) {
-		return
-	}
-	accountEvents, err := h.accounts.ListAudit(r.Context(), session.User)
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-	var records []auditRecord
-	for _, event := range accountEvents {
-		records = append(records, auditRecord(event))
-	}
-	if h.files != nil {
-		fileEvents, err := h.files.ListAudit(r.Context(), session.User)
-		if err != nil {
-			h.internalError(w, r, err)
-			return
-		}
-		for _, event := range fileEvents {
-			records = append(records, auditRecord(event))
-		}
-	}
-	if h.storage != nil {
-		storageEvents, err := h.storage.ListAudit(r.Context())
-		if err != nil {
-			h.internalError(w, r, err)
-			return
-		}
-		for _, event := range storageEvents {
-			records = append(records, auditRecord(event))
-		}
-	}
-	sort.Slice(records, func(i, j int) bool { return records[i].OccurredAt.After(records[j].OccurredAt) })
-	if records == nil {
-		records = []auditRecord{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": records})
 }
 
 func (h *productHandler) requireAdministrator(w http.ResponseWriter, session accounts.Session) bool {

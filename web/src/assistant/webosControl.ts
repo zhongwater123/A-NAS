@@ -2,12 +2,20 @@
 // browser control, ADR 0024 decision 8): Hermes's own browser tools read the page
 // as a list of controls with refs and act on them by ref, here, in the member's
 // own browser and session. The VNAS window itself is never part of the page it
-// reads or acts on, and the page is never navigated away. A control that deletes,
-// replaces or resets something, and anything in 设置's 存储, 用户与权限 and 终端,
-// waits for the member to allow it (user decision, 2026-10-20).
+// reads or acts on, and the page is never navigated away.
+//
+// What a control is called is no boundary (#160): the page's writes are. A step
+// VNAS takes holds the writes it causes until the member allows the ones that
+// delete, move, share, copy or change settings (webosWrites.ts, user decision
+// 2026-10-21). The terminal, Docker and 应用中心 reach the host, so every step
+// there waits for the member first. What the member may see but VNAS may not
+// (another member's space under a viewing grant, snapshots) is marked
+// data-vnas-private and never read or acted on.
 import { computeAccessibleName, getRole } from "dom-accessibility-api";
 
+import { setWriteGate } from "../api";
 import "./webosControl.css";
+import { writeRisk } from "./webosWrites";
 
 /** What the member is asked to allow. */
 export interface Danger {
@@ -36,19 +44,79 @@ const INTERACTIVE = new Set([
 ]);
 // What counts as a control inside an element that is focusable only to pass focus on.
 const CONTROLS = "button, a[href], input, select, textarea, [role=button], [role=link], [role=menuitem], [role=tab], [role=option], [role=checkbox], [role=switch], [contenteditable=true], [contenteditable='']";
-const DANGER_WORDS = /删除|移除|清空|彻底|永久|替换|覆盖|格式化|抹掉|擦除|重置|停用|禁用|卸载|移出|退出登录|注销|还原/;
-const DANGER_SECTIONS = ["存储", "用户与权限", "终端"];
+/** Windows where every step waits for the member: what runs there reaches the host. */
+const GUARDED_WINDOWS: Array<[string, string]> = [[".app-window-docker", "Docker"], [".app-window-store", "应用中心"]];
+const GUARDED_SECTIONS = ["终端"];
+/** What VNAS never reads or acts on; the value says what it is. */
+const PRIVATE = "[data-vnas-private]";
+/** Keys VNAS may press: moving around, confirming and closing; Backspace and Delete only while editing text. */
+const KEYS = new Set(["Enter", "Escape", "Tab", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
+const EDITING_KEYS = new Set(["Backspace", "Delete"]);
 /** Hermes truncates snapshots over 15000 characters; this stays under. */
 const SNAPSHOT_LIMIT = 14_000;
-/** How long an allowed step covers the further steps in the same window. */
+/** How long an allowed step in a guarded window covers the further steps in it. */
 const GRANT_MS = 30_000;
+/** How long after a step the page's writes count as the step's, unless the member acted since. */
+const STEP_WRITES_MS = 15_000;
+/** How long a step waits for the writes it causes before it answers. */
+const SETTLE_MS = 400;
+/** The member's own input; VNAS's events are never trusted. */
+const MEMBER_INPUT = ["pointerdown", "keydown", "drop"];
+
+/** One click, input or key press of VNAS, and what the member said about its writes. */
+interface Step {
+  seq: number;
+  at: number;
+  danger: Omit<Danger, "why">;
+  /** The member's answer about the step's writes, asked once for all of them. */
+  answer?: Promise<boolean>;
+  why?: string;
+  allowed?: boolean;
+}
 
 export class WebosController {
   private refs = new Map<string, Element>();
   private last?: Element;
   private grant?: { window: Element | null; until: number };
+  // The member's own input and VNAS's steps, in one order: a write belongs to
+  // VNAS's last step unless the member acted after it.
+  private seq = 0;
+  private memberSeq = 0;
+  private step?: Step;
 
   constructor(private options: ControllerOptions) {}
+
+  /**
+   * Holds the page's writes for the member while VNAS operates the desktop;
+   * the returned function stops. The member's own presses, keys and drops
+   * outside the VNAS window end VNAS's claim on the writes that follow.
+   */
+  install(): () => void {
+    const member = (event: Event) => {
+      if (!event.isTrusted || (event.target instanceof Element && this.options.exclude(event.target))) return;
+      this.memberSeq = ++this.seq;
+    };
+    for (const type of MEMBER_INPUT) window.addEventListener(type, member, true);
+    const release = setWriteGate((method, path) => this.write(method, path));
+    return () => {
+      for (const type of MEMBER_INPUT) window.removeEventListener(type, member, true);
+      release();
+    };
+  }
+
+  /** Whether a write the page is about to send may go. */
+  write(method: string, path: string): Promise<boolean> {
+    const why = writeRisk(method, path);
+    const step = this.step;
+    if (!why || !step || this.memberSeq > step.seq || Date.now() - step.at > STEP_WRITES_MS) return Promise.resolve(true);
+    if (step.allowed !== undefined) return Promise.resolve(step.allowed);
+    step.why ??= why;
+    step.answer ??= this.options.confirm({ ...step.danger, why: step.why }).then((allowed) => {
+      step.allowed = allowed;
+      return allowed;
+    });
+    return step.answer;
+  }
 
   /** Carries out one of Hermes's browser commands; the result goes back as the tool's result. */
   async run(action: string, args: Record<string, unknown>): Promise<unknown> {
@@ -83,6 +151,11 @@ export class WebosController {
     for (const element of Array.from(node.children)) {
       if (this.options.exclude(element) || !visible(element)) continue;
       const indent = "  ".repeat(depth);
+      const kept = element.getAttribute("data-vnas-private");
+      if (kept !== null) {
+        lines.push(`${indent}- region "${clip(kept, 60)}（VNAS 不能查看）"`);
+        continue;
+      }
       if (element.classList.contains("app-window")) {
         lines.push(`${indent}- window "${clip(element.getAttribute("aria-label") ?? "", 60)}"`);
         this.walk(element, depth + 1, full, lines);
@@ -114,40 +187,56 @@ export class WebosController {
     if (!element || !element.isConnected || !visible(element)) {
       throw new ControlError(`${ref} 已经不在页面上了，请先用 browser_snapshot 重新查看`);
     }
+    hidden(element);
     return element;
   }
 
-  private async allowed(element: Element, verb: string): Promise<void> {
-    const danger = this.danger(element, verb);
-    if (!danger) return;
-    const window = element.closest(".app-window");
-    if (this.grant && this.grant.window === window && Date.now() < this.grant.until) return;
-    if (!(await this.options.confirm(danger))) {
-      throw new ControlError(`成员没有允许这一步（${danger.what}），没有执行`);
+  /**
+   * Begins a step on the element: a step in a guarded window waits for the
+   * member before anything happens, and the writes it causes wait for them
+   * (unless they already allowed the step).
+   */
+  private async begin(element: Element, what: string): Promise<Step> {
+    const step: Step = { seq: ++this.seq, at: Date.now(), danger: { what: `${what}${inDialog(element)}`, where: windowTitle(element) } };
+    const guarded = this.guarded(element, what);
+    if (guarded) {
+      const window = element.closest(".app-window");
+      if (!this.grant || this.grant.window !== window || Date.now() >= this.grant.until) {
+        if (!(await this.options.confirm(guarded))) throw new ControlError(`成员没有允许这一步（${guarded.what}），没有执行`);
+        this.grant = { window, until: Date.now() + GRANT_MS };
+      }
+      step.allowed = true;
+      step.at = Date.now();
     }
-    this.grant = { window, until: Date.now() + GRANT_MS };
+    this.step = step;
+    return step;
   }
 
-  /** Whether acting on the element needs the member: what deletes, replaces or resets, and the risky parts of 设置. */
-  danger(element: Element, verb: string): Danger | undefined {
-    const name = nameOf(element);
-    const where = windowTitle(element);
+  /** After a step's events: the writes it caused have gone, or the member did not allow them. */
+  private async settle(step: Step): Promise<void> {
+    await new Promise((resolve) => window.setTimeout(resolve, SETTLE_MS));
+    if (step.answer && !(await step.answer)) {
+      throw new ControlError(`成员没有允许这一步（${step.danger.what}：${step.why}），NAS 上什么都没有改`);
+    }
+  }
+
+  /** Whether every step on the element waits for the member: the terminal, Docker and 应用中心. */
+  guarded(element: Element, what: string): Danger | undefined {
     const settings = element.closest(".app-window-settings");
     if (settings && element.closest(".set-main")) {
       const section = settings.querySelector('.set-nav [aria-current="page"]')?.textContent?.trim() ?? "";
-      const risky = DANGER_SECTIONS.find((label) => section.includes(label));
-      if (risky) return { what: `${verb}“${clip(name, 40)}”`, where: `设置 · ${risky}`, why: `“${risky}”里的操作都要你先允许` };
+      const risky = GUARDED_SECTIONS.find((label) => section.includes(label));
+      if (risky) return { what, where: `设置 · ${risky}`, why: `“${risky}”里的操作都要你先允许` };
     }
-    if (element.closest(".xterm")) return { what: `${verb}到终端`, where, why: "终端里的输入会直接运行" };
-    if (verb === "点击" && (DANGER_WORDS.test(name) || /\bdanger\b/.test(String((element as HTMLElement).className ?? "")))) {
-      return { what: `点击“${clip(name, 40)}”`, where, why: "这一步可能删除、替换或改动内容" };
-    }
+    if (element.closest(".xterm")) return { what, where: windowTitle(element), why: "终端里的输入会直接运行" };
+    const window = GUARDED_WINDOWS.find(([selector]) => element.closest(selector));
+    if (window) return { what, where: window[1], why: `“${window[1]}”里的操作都要你先允许` };
     return undefined;
   }
 
   private async click(ref: string) {
     const element = this.lookup(ref);
-    await this.allowed(element, "点击");
+    const step = await this.begin(element, `点击“${labelOf(element)}”`);
     this.last = element;
     (element as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" });
     flash(element);
@@ -166,12 +255,13 @@ export class WebosController {
     } else {
       element.dispatchEvent(new MouseEvent("click", at));
     }
+    await this.settle(step);
     return { clicked: `@${ref.replace(/^@/, "")}`, element: describe(element) };
   }
 
   private async type(ref: string, text: string) {
     const element = this.lookup(ref);
-    await this.allowed(element, "输入");
+    const step = await this.begin(element, `在“${labelOf(element)}”里输入“${clip(text, 40)}”`);
     this.last = element;
     flash(element);
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
@@ -188,20 +278,29 @@ export class WebosController {
     } else {
       throw new ControlError(`${describe(element)} 不能输入文字`);
     }
+    await this.settle(step);
     return { typed: `@${ref.replace(/^@/, "")}`, element: describe(element) };
   }
 
-  private async press(key: string) {
-    if (!key) throw new ControlError("没有说要按哪个键");
+  private async press(given: string) {
+    if (!given) throw new ControlError("没有说要按哪个键");
+    const key = given === "Space" ? " " : given;
     // The member's own typing in VNAS is never the target.
     const active = document.activeElement;
     const target = active && active !== document.body && !this.options.exclude(active) ? active : this.last ?? document.body;
-    if (target !== document.body) await this.allowed(target, `按 ${key}`);
+    if (!KEYS.has(key) && !(EDITING_KEYS.has(key) && editsText(target))) {
+      throw new ControlError(EDITING_KEYS.has(key)
+        ? `${key} 只能在输入框里用来删字；要删除或移走内容，请点界面上的按钮`
+        : `不能按 ${given}；可以按 Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`);
+    }
+    hidden(target);
+    const step = await this.begin(target, target === document.body ? `按 ${given}` : `在“${labelOf(target)}”上按 ${given}`);
     const init = { key, bubbles: true, cancelable: true, composed: true };
     const accepted = target.dispatchEvent(new KeyboardEvent("keydown", init));
     if (accepted && key === "Enter" && (target instanceof HTMLInputElement) && target.form) target.form.requestSubmit();
     target.dispatchEvent(new KeyboardEvent("keyup", init));
-    return { pressed: key, on: target === document.body ? "页面" : describe(target) };
+    await this.settle(step);
+    return { pressed: given, on: target === document.body ? "页面" : describe(target) };
   }
 
   private scroll(direction: "up" | "down") {
@@ -267,6 +366,32 @@ function states(element: Element): string {
 
 function windowTitle(element: Element): string {
   return element.closest(".app-window")?.getAttribute("aria-label") ?? "桌面";
+}
+
+/** Refuses an element VNAS may not read or act on. */
+function hidden(element: Element) {
+  const region = element.closest(PRIVATE);
+  if (region) throw new ControlError(`这里是${region.getAttribute("data-vnas-private")}，VNAS 不能查看或操作`);
+}
+
+/** The control's name for the member; the terminal is the terminal. */
+function labelOf(element: Element): string {
+  return element.closest(".xterm") ? "终端" : clip(nameOf(element), 40);
+}
+
+/** The app's own dialog the element is in, which says what its 确定 confirms. */
+function inDialog(element: Element): string {
+  const dialog = element.closest('[role="dialog"], [role="alertdialog"]');
+  if (!dialog || dialog.classList.contains("app-window")) return "";
+  const name = clip(computeAccessibleName(dialog), 40);
+  return name ? `（“${name}”）` : "";
+}
+
+/** Whether Backspace and Delete edit text here rather than act on what is selected. */
+function editsText(element: Element): boolean {
+  if (element instanceof HTMLTextAreaElement) return !element.readOnly;
+  if (element instanceof HTMLInputElement) return !element.readOnly && !["checkbox", "radio", "button", "submit", "reset", "file", "image", "range", "color"].includes(element.type);
+  return element instanceof HTMLElement && element.isContentEditable;
 }
 
 function describe(element: Element): string {

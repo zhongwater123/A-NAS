@@ -60,6 +60,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。
 - Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由列表时增量扫描吸收。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
+- 对账与 Web 变更按空间排序（[调查](../investigations/2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)）。删除、恢复、清除、移动、复制、上传与新建文件夹从第一次文件操作到其行提交为止处于“在途”；对账与 Samba 回收导入记下扫描开始时的代次，开始时有变更在途、或扫描期间有变更开始或结束，就整体丢弃这次扫描：变更自己的行已是最新，SMB 的改动由下一轮补上。扫描结果在一个事务内写入，期间同一空间的新变更等待。必须拿到结果的扫描（上传完成时的文件夹已被 SMB 移走，分享选择的文件夹内容）先等在途变更结束，再独占扫描与写入。扫描到的 inode 属于回收站行时，回收站仍持有该 inode 或无法确认就不收录，否则删除这条过期的回收站行；打开条目时路径上的 inode 必须与记录一致，不一致视为不存在。
 - 后台每 5 分钟的目录对账、Samba 回收导入和回收站到期清除只为本进程见过且仍有效的会话执行；长期未登录用户在下次登录时补做。
 
 ## 文件代理
@@ -134,4 +135,5 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [`api/openapi.yaml`](../../api/openapi.yaml)
 - [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md) 与[数据卷操作](../../internal/hostops/linux/volume.go)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
+- [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)
 - [相册存储区修复](../../internal/hostops/linux/photos.go)
