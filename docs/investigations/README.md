@@ -39,6 +39,8 @@
 
 - [2026-10-20：VNAS 自建的技能不出现在“记忆”中](2026-10-20-assistant-skills-hidden-by-name.md)（fixed locally；待部署验收）
 
+- [2026-10-21：过期的目录对账扫描改写回收站行，文件夹无法恢复](2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)（fixed locally；待部署验收）
+
 - [2026-10-21：快照清单超过 1 MiB 即失败，并留下孤儿子卷](2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)（fixed locally；待部署验收）
 
 ## 使用方式

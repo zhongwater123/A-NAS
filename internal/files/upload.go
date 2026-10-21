@@ -236,6 +236,11 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	if err != nil {
 		return CommittedUpload{}, err
 	}
+	done, err := s.change(ctx, space.ID)
+	if err != nil {
+		return CommittedUpload{}, err
+	}
+	defer done()
 	temporary := filepath.Join(parentPath, upload.temporary)
 	s.keepModTime(ctx, temporary, upload.modTime)
 	replaced := false
@@ -315,7 +320,7 @@ func (s *Service) uploadParent(ctx context.Context, space accounts.Space, root s
 			return parentPath, nil
 		}
 	}
-	if err := s.reconcile(ctx, space, root); err != nil {
+	if err := s.reconcileNow(ctx, space, root); err != nil {
 		return "", err
 	}
 	parentPath, err = s.parentPath(ctx, root, space.ID, upload.ParentID)
@@ -337,6 +342,11 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	if err := checkNewName(name); err != nil {
 		return Entry{}, "", err
 	}
+	done, err := s.change(ctx, spaceID)
+	if err != nil {
+		return Entry{}, "", err
+	}
+	defer done()
 	// A folder already there in another letter case is the same folder to an
 	// SMB client, so the upload goes into it.
 	if twin, found, err := s.caseTwin(ctx, spaceID, parentID, name, ""); err != nil {
@@ -366,7 +376,7 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	if err != nil {
 		return Entry{}, "", ErrInvalidName
 	}
-	entry, err := s.registerInfo(ctx, spaceID, parentID, filepath.ToSlash(relative), info)
+	entry, err := s.registerInfo(ctx, s.store.db, root, spaceID, parentID, filepath.ToSlash(relative), info)
 	if err != nil {
 		return Entry{}, "", err
 	}
@@ -378,6 +388,7 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 
 // trashForReplacement moves the file at target to the actor's trash so an
 // upload can take its place. A folder is kept, and the upload goes beside it.
+// The caller's change must be in flight.
 func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, spaceID, root, parentID, target string) (bool, error) {
 	info, err := s.fs.Lstat(ctx, target)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -393,7 +404,7 @@ func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, 
 	if err != nil {
 		return false, ErrInvalidName
 	}
-	existing, err := s.registerInfo(ctx, spaceID, parentID, filepath.ToSlash(relative), info)
+	existing, err := s.registerInfo(ctx, s.store.db, root, spaceID, parentID, filepath.ToSlash(relative), info)
 	if err != nil {
 		return false, err
 	}

@@ -26,7 +26,8 @@
 | `共享空间/Agent空间/<其他成员>` | 可以 | 不可以 |
 | 本人的私有图库、共享图库 | 可以（列表、元数据、搜索、缩略图） | 不可以 |
 | 快照、其他成员的个人空间、私有图库与回收站（包括管理员已获查看授权的） | 不可以 | 不可以 |
-| 系统设置、应用、宿主机、局域网与外网 | 不可以 | 不可以 |
+| 系统设置、应用、宿主机、局域网与外网 | 不可以（操作桌面时见下一行） | 不可以（同上） |
+| 成员的 WebOS 桌面（VNAS 窗口里对话时） | 成员看得到的窗口；只读查看的他人空间与图库、快照里的内容除外 | 像成员一样操作；删除、移动、改名、分享、复制、恢复、问题反馈与设置类的写入先经成员允许，终端、Docker 与应用中心里的每一步先经允许 |
 
 ## 名称与外观
 
@@ -203,17 +204,42 @@
 - When：VNAS 处理这句话。
 - Then：VNAS 用 Hermes 的浏览器工具查看桌面（每个打开的窗口和它的控件），在成员自己的浏览器里点击程序坞、窗口里的按钮、输入框，就像成员自己操作；被点的控件闪一下黑框，成员能看到它在哪里操作。“处理过程”里显示“查看桌面”“点击”“输入”“按键”“滚动”。VNAS 自己的窗口不在它看到的桌面里，输入框里的密码也看不到。它不能打开网址，也不会离开这个桌面。
 
-### 确认会删除或替换内容的一步
+### 确认会删除、移动、分享或改动设置的一步
 
-- Given：VNAS 在桌面上要点“删除”“替换”“清空”“还原”这类按钮，或在“设置”的存储、用户与权限、终端里操作。
+- Given：VNAS 在桌面上的一步（点击、输入后按 Enter、按键）让页面向 NAS 发出删除、移到回收站、移动、改名、粘贴、分享或发消息给成员、复制、恢复、问题反馈，或改动设置、账号、存储、应用与容器的请求，不论按钮叫什么名字（2026-10-21 用户决定，[#160](https://github.com/zhongwater123/A-NAS/issues/160)）。
+- When：页面要发出这个请求。
+- Then：请求先停住，VNAS 窗口里出现一张卡片，例如“VNAS 想点击‘确定’（‘移到回收站？’）”，写明在哪个窗口、会做什么（“这一步会删除内容”）、多少秒内不回答就不执行。成员点“允许”，这一步引起的请求才发出；点“不允许”或 25 秒内不回答，请求不发出，应用显示“没有允许 VNAS 这一步，什么都没有改”，VNAS 照实告诉成员。同一步引起的几个请求只问一次。新建文件夹、相册、合集与歌单，加入相册、合集与歌单，收藏、标签、播放进度与已读不问；没有列出的请求一律先问。
+- 只看、打开窗口、进入文件夹、搜索不问。成员自己在桌面上点了或按了键之后，或 VNAS 的一步过去 15 秒后，页面的写入算成员自己的。
+
+### 终端、Docker 与应用中心里的每一步先问
+
+- Given：VNAS 要在“设置”的终端、Docker 或应用中心里点击、输入或按键。
 - When：轮到这一步。
-- Then：VNAS 窗口里出现一张卡片“VNAS 想点击‘删除’”，写明在哪个窗口、多少秒内不回答就不执行。成员点“允许”才执行，之后 30 秒内同一窗口里应用自己的确认（例如再点一次“删除”）不再重复询问；点“不允许”或 25 秒内不回答，这一步不执行，VNAS 照实告诉成员。
+- Then：先出现卡片“VNAS 想点击‘停止’”（在“Docker”中），成员允许才执行，之后 30 秒内同一窗口里的后续步骤（例如应用自己的“确定”）不再重复询问；不允许或 25 秒内不回答，这一步不执行。这几处的操作直接作用于宿主机与容器。
+
+### VNAS 看不到的内容
+
+- Given：管理员在文件管理或相册里打开了对某位成员的只读查看，或备份中心里打开了快照中的文件、找回结果或历史版本。
+- When：VNAS 查看桌面。
+- Then：这些区域在它看到的桌面里只是一行“他人的个人空间（只读查看）（VNAS 不能查看）”，里面的文件名、照片与文字都不在其中，也点不了。
+
+### 按键
+
+- Given：VNAS 要按键。
+- When：它按 Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home 或 End，或在输入框里按 Backspace、Delete。
+- Then：按在它上一次操作的控件上（不会落到 VNAS 的输入框）。在输入框以外按 Backspace、Delete，或按组合键与其他键，这一步被拒绝，VNAS 改用界面上的按钮。
 
 ### 没有 VNAS 窗口时不能操作桌面
 
 - Given：定时任务在运行，或成员关掉了 VNAS 窗口而回合还在继续。
 - When：VNAS 想操作桌面。
 - Then：它没有浏览器工具（窗口离开时注销），会说明需要在 VNAS 窗口里对话才能操作桌面。成员另一个打开着同一对话的窗口只跟着显示回复，不会也去点击。
+
+### 在哪个窗口发消息，就在哪个窗口操作
+
+- Given：同一成员在电脑和客厅电视上都打开着同一段对话。
+- When：成员在电脑上发消息。
+- Then：电脑上的 VNAS 窗口在发出这句话前成为这一轮的浏览器，操作与确认卡片都只出现在电脑上；这一轮进行中，电视上的窗口不能接手。下一轮从哪个窗口发，就由哪个窗口操作；关掉不再操作的那个窗口，不影响正在操作的窗口。
 
 ### 助手在回答之后记下的内容
 
@@ -249,7 +275,7 @@
 - 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已改为 `hermes serve` 与回合内审批，在开发机上用真实模型跑通：卡片只出现在提交它的对话中，侧栏标“等你确认”；同一成员另一个窗口打开这个对话后看到同一张卡片并确认，两个窗口都显示已完成，文件已修改、旧版本在回收站；不回答时卡片在等待时限后变为超时，文件不变（[研究](../research/hermes-agent-runtime.md#集成会话闸门与产品服务的转发2026-10-15开发机)）。拒绝、停止与部分失败在浏览器中尚未验收。“记忆”页已在原型中用真实模型验收查看、逐条删除与连同对话全部清除。
 - 契约测试：`/api/v1/assistant` 每个接口的请求与响应符合 [OpenAPI](../../api/openapi.yaml)；管理员与其他成员到不了别人的实例；写操作需要 CSRF 令牌（[`assistant_test.go`](../../internal/httpapi/assistant_test.go)）。网关只放行白名单中的方法、参数与事件，审批只经卡片接口回答，窗口离开后回合期间保持到实例的连接，同一对话在多个窗口中都收到事件（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）。
 - 定时任务：任务列表不转出 Hermes 的内部字段（主目录、模型、投递目标、运行的系统提示），按名称或格式不对的编号到不了 Hermes，立即运行等几秒后答“已开始”，删除先删运行（[`tasks_test.go`](../../internal/assistantapi/tasks_test.go)）；登录期间每个结束的运行只告知一次，静默的运行记为已读（同一文件）；每个任务至多一条未读通知（[`assistanttasks_test.go`](../../internal/accounts/assistanttasks_test.go)）；窗口与桌面提示见 [`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)。真实沙箱中任务在实例停止时按时运行、以成员身份写助手目录、要改个人空间的被拒绝（[`cron.sh`](../../ai/assistant-spike/cron.sh)），系统测试在真实安装器上检查唤醒、按时运行、产品服务列出任务与告知结果（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
-- 操作桌面：页面快照只含窗口与控件、不含 VNAS 自己与密码，按编号点击、输入（React 能收到）与按键（不落到 VNAS 的输入框），删除类控件与设置的存储页先问成员、拒绝时不点击、允许后同一窗口一段时间内不重复问（[`webosControl.test.ts`](../../web/src/assistant/webosControl.test.ts)）；网关只放行 VNAS 窗口这一种控制器和它的能力，命令只到注册的窗口，窗口离开即注销（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）；真实沙箱中旧令牌被拒绝、登录过的窗口注册、模型只拿到窗口提供的浏览器工具、命令往返（[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh)）。
+- 操作桌面：页面快照只含窗口与控件、不含 VNAS 自己、密码与标为不可查看的区域，按编号点击、输入（React 能收到）与按键（不落到 VNAS 的输入框）；剪切后粘贴到共享空间、分享、表单里按 Enter 引起的写入在成员允许前不发出，同一步的几个写入只问一次，无害的写入与没有列出的写入分别放行与询问，VNAS 的一步过去之后页面自己的写入不问；输入框外的 Delete 与组合键被拒绝；终端与 Docker 里的一步先问、拒绝时不点击、允许后同一窗口一段时间内不重复问（[`webosControl.test.ts`](../../web/src/assistant/webosControl.test.ts)）；网关只放行 VNAS 窗口这一种控制器和它的能力，命令只到注册的窗口，回合进行中另一个窗口不能注册，回合之间发消息的窗口接手，不再操作的窗口离开时不注销正在操作的窗口（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）；真实沙箱中旧令牌被拒绝、登录过的窗口注册、模型只拿到窗口提供的浏览器工具、命令往返（[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh)）。
 - Hermes 自己的登录：文件代理用实例密钥登录、缓存令牌、实例拒绝后重新登录一次，密钥错误时不可用（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/assistantlogin`](../../internal/assistantlogin/login_test.go)、[`login_test.go`](../../internal/assistantapi/login_test.go)）。
 - 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 
@@ -259,6 +285,6 @@
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
 - 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
-- 操作桌面：窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts)，系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
+- 操作桌面：窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts) 与写入清单 [`webosWrites.ts`](../../web/src/assistant/webosWrites.ts)，页面写入的闸门在 [`api.ts`](../../web/src/api.ts) 的 `apiFetch` 与 `uploadForm`，问题 [#160](https://github.com/zhongwater123/A-NAS/issues/160)，系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
 - 定时任务：产品服务 [`tasks.go`](../../internal/assistantapi/tasks.go) 与 [`tasknotices.go`](../../internal/assistantapi/tasknotices.go)，通知 [`internal/accounts/assistanttasks.go`](../../internal/accounts/assistanttasks.go)，窗口 [`TasksView.tsx`](../../web/src/assistant/TasksView.tsx) 与桌面提示 [`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)，唤醒 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)，系统技能 [`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md)
 - 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)
