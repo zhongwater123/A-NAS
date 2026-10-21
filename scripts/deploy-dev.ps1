@@ -30,6 +30,8 @@ param(
     # Where the animal model that deploy\models\dinov2-small.json pins lives
     # (docs/architecture/photo-people.md#宠物).
     [string]$AnimalEmbedderDirectory = 'D:\A-NAS-models\pets\dinov2-small',
+    # The voice Worker's speaker model (ADR 0027).
+    [string]$SpeakerEmbedderDirectory = 'D:\A-NAS-models\speaker',
 
     [switch]$StageOnly
 )
@@ -118,12 +120,14 @@ try {
     $faceDetectorManifestPath = Join-Path $repoRoot 'deploy\models\yunet-2026may.json'
     $faceEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\auraface-v1.json'
     $animalEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\dinov2-small.json'
+    $speakerEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\campplus-zh-en-advanced.json'
     $models = @(
         @{ Manifest = $modelManifestPath; Directory = $ModelDirectory },
         @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory },
         @{ Manifest = $faceDetectorManifestPath; Directory = $FaceDetectorDirectory },
         @{ Manifest = $faceEmbedderManifestPath; Directory = $FaceEmbedderDirectory },
-        @{ Manifest = $animalEmbedderManifestPath; Directory = $AnimalEmbedderDirectory }
+        @{ Manifest = $animalEmbedderManifestPath; Directory = $AnimalEmbedderDirectory },
+        @{ Manifest = $speakerEmbedderManifestPath; Directory = $SpeakerEmbedderDirectory }
     )
     foreach ($model in $models) {
         $model.Pinned = Get-Content -LiteralPath $model.Manifest -Raw | ConvertFrom-Json
@@ -193,6 +197,8 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas.slice'); Destination = "${target}:$release/anas-system.slice.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.socket'); Destination = "${target}:$release/anas-ai-system.socket.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.service'); Destination = "${target}:$release/anas-ai-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-voice.socket'); Destination = "${target}:$release/anas-voice-system.socket.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-voice.service'); Destination = "${target}:$release/anas-voice-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media.socket'); Destination = "${target}:$release/anas-media-system.socket.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media@.service'); Destination = "${target}:$release/anas-media-system@.service.incoming" },
         @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
@@ -201,6 +207,7 @@ try {
         @{ Source = $faceDetectorManifestPath; Destination = "${target}:$release/ai-face-detector.json.incoming" },
         @{ Source = $faceEmbedderManifestPath; Destination = "${target}:$release/ai-face-embedder.json.incoming" },
         @{ Source = $animalEmbedderManifestPath; Destination = "${target}:$release/ai-animal-embedder.json.incoming" },
+        @{ Source = $speakerEmbedderManifestPath; Destination = "${target}:$release/ai-speaker-embedder.json.incoming" },
         @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },

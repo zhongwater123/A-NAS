@@ -43,12 +43,13 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
   exit 2
 fi
-# Local AI is part of every release (ADR 0016): the Worker's code, its units,
-# and manifests that pin its models and Python runtime by content. Each model
+# Local AI is part of every release (ADR 0016): the Workers' code, their units,
+# and manifests that pin their models and Python runtime by content. Each model
 # has a role: its manifest is ai/ROLE.json and the release links its file as
-# ai/ROLE.EXTENSION, where the Worker's unit looks for it.
-ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)
-for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
+# ai/ROLE.EXTENSION, where the Worker's unit looks for it. The voice Worker's
+# speaker model (ADR 0027) is one more role in the same runtime.
+ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx speaker-embedder:onnx)
+for file in anas-system.slice anas-ai-system.socket anas-ai-system.service anas-voice-system.socket anas-voice-system.service ai/anas_ai/worker.py ai/anas_ai/voice.py ai/runtime.json; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing local AI file: $source_release/$file" >&2
     exit 2
@@ -267,6 +268,7 @@ printf '%s\n' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
   'ANAS_MEDIA_SOCKET=/run/a-nas-media/media.sock' \
+  'ANAS_VOICE_SOCKET=/run/a-nas-voice/voice.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
@@ -311,6 +313,11 @@ install -d -o root -g root -m 0755 /etc/systemd/system/anas-ai.service.d
 printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\nCPUQuota=%s%%\n' \
   "$cores" "$((cores > 2 ? (cores - 2) * 100 : 100))" > /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
+# The voice Worker (ADR 0027) keeps the same reserve.
+install -o root -g root -m 0644 "$source_release/anas-voice-system.socket" /etc/systemd/system/anas-voice.socket
+install -o root -g root -m 0644 "$source_release/anas-voice-system.service" /etc/systemd/system/anas-voice.service
+install -d -o root -g root -m 0755 /etc/systemd/system/anas-voice.service.d
+install -o root -g root -m 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf /etc/systemd/system/anas-voice.service.d/cpu-reserve.conf
 install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
 install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
@@ -328,9 +335,9 @@ systemctl daemon-reload
 systemctl enable --now smbd.service
 # A running Worker belongs to the previous release; the next connection starts
 # this release's.
-systemctl stop anas-ai.service
-systemctl enable anas-ai.socket
-systemctl restart anas-ai.socket
+systemctl stop anas-ai.service anas-voice.service
+systemctl enable anas-ai.socket anas-voice.socket
+systemctl restart anas-ai.socket anas-voice.socket
 # Each connection runs its own media worker; streams already playing finish
 # with the previous release.
 systemctl enable anas-media.socket
@@ -346,7 +353,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-media.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-voice.socket anas-media.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

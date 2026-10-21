@@ -1,0 +1,10 @@
+{
+  "name": "campplus-zh-en-advanced",
+  "kind": "3d-speaker",
+  "source": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models",
+  "revision": "speaker-recongition-models (release tag, spelled as upstream spells it); the file's SHA-256 matches the release's checksum.txt",
+  "file": "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+  "sizeBytes": 28281164,
+  "sha256": "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2",
+  "license": "Apache-2.0 (iic/speech_campplus_sv_zh_en_16k-common_advanced v1.0.0 on ModelScope, from 3D-Speaker; trained on large Chinese and English speaker sets). sherpa-onnx's export of those weights to ONNX; sherpa-onnx is Apache-2.0."
+}

@@ -146,7 +146,7 @@ install_trial() {
 # photo service's socket for assistants, as drop-ins that survive deploys.
 product_on() {
   say "--- the session gate, and photos for the assistants"
-  bash /spike/product-settings.sh on
+  TRIAL_MODEL=$model bash /spike/product-settings.sh on
 }
 
 verify() {
