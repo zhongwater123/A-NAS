@@ -801,7 +801,7 @@ transcribed() { # the recording is ready, with voices that have voiceprints
 }
 check "the recording is decoded in the media worker and its voices embedded in the voice Worker" transcribed
 check "the voice Worker runs under its own dynamic identity" dynamic_identity anas-voice.service
-check "the voice Worker embeds with the release's speaker model" bash -c"curl -fsS -b /tmp/alice.jar '$api/api/v1/voice/status' | jq -e --arg model '$speaker_model' '.voiceprints.name | startswith(\$model)' >/dev/null"
+check "the voice Worker embeds with the release's speaker model" bash -c "curl -fsS -b /tmp/alice.jar '$api/api/v1/voice/status' | jq -e --arg model '$speaker_model' '.voiceprints.name | startswith(\$model)' >/dev/null"
 check "the recording plays for its member" bash -c \
   "curl -s --max-time 30 -b /tmp/alice.jar '$api/api/v1/voice/recordings/$recording/audio' | head -c 12 | grep -aq ftyp"
 cat > /usr/local/lib/anas-voice-probe.py <<'PY'
