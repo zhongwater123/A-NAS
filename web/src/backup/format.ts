@@ -25,6 +25,15 @@ export function formatDay(value: string | Date, now = new Date()): string {
   return date.getFullYear() === now.getFullYear() ? `${month} ${weekdays[date.getDay()]}` : `${date.getFullYear()}年${month}`;
 }
 
+// formatShortDay names a day without its weekday, for narrow places.
+export function formatShortDay(value: string | Date, now = new Date()): string {
+  const date = new Date(value);
+  const days = dayDifference(date, now);
+  if (Math.abs(days) <= 1) return formatDay(date, now);
+  const month = `${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === now.getFullYear() ? month : `${date.getFullYear()}年${month}`;
+}
+
 export function formatDateTime(value: string | Date, now = new Date()): string {
   const date = new Date(value);
   const days = dayDifference(date, now);

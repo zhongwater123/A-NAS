@@ -1,4 +1,4 @@
-import { ArchiveRestore, ChevronRight, CornerLeftUp, Folder, FolderOpen, MapPin } from "lucide-react";
+import { ArchiveRestore, ChevronRight, CornerLeftUp, Folder, FolderOpen, MapPin, Trash2 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { APIError, listEntries, type FileEntry, type Space } from "../api";
@@ -18,26 +18,42 @@ export interface RestoreRequest {
   whole?: boolean;
   // name is the name the dialog starts with, when not the entry's own.
   name?: string;
+  // inTrash says the recycle bin holds an item deleted from the same path,
+  // with the content it had when it was deleted.
+  inTrash?: boolean;
 }
 
-interface Crumb { id: string; name: string }
+export interface Crumb { id: string; name: string }
+
+// The folder's names in the way the server compares them: letter case aside,
+// as SMB clients cannot tell such names apart.
+const nameKey = (name: string) => name.trim().toLowerCase();
 
 // After this long a restore offers to continue in the background.
 const backgroundAfter = 1200;
 
-export function RestoreDialog({ request, onClose, onBackground, onRestored, onFailed }: {
+export function RestoreDialog({ request, onClose, onBackground, onRestored, onFailed, onOpenTrash }: {
   request: RestoreRequest;
   onClose: () => void;
   onBackground: () => void;
-  onRestored: (entry: FileEntry, location: string) => void;
+  onRestored: (entry: FileEntry, location: string, folders: Crumb[]) => void;
   onFailed: (message: string) => void;
+  onOpenTrash?: () => void;
 }) {
   const { space, snapshot, entry } = request;
+  const initialName = request.name ?? entry.name;
   const [target, setTarget] = useState<Crumb[]>();
   const [missing, setMissing] = useState("");
   const [original, setOriginal] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [name, setName] = useState(request.name ?? entry.name);
+  const [name, setName] = useState(initialName);
+  // The names in the target folder, so a clash shows before restoring.
+  const [taken, setTaken] = useState<Set<string>>();
+  // The name the dialog put in place of a taken one, while it is unchanged.
+  const [suggested, setSuggested] = useState("");
+  // The listing below reads the name as it is when the listing returns.
+  const latest = useRef({ name, suggested });
+  latest.current = { name, suggested };
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -70,7 +86,33 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
     return () => { live = false; };
   }, [request.folders, space.id]);
 
+  // When the target already holds the name, the dialog suggests a new one
+  // instead of letting the restore fail; back where the name is free, it
+  // returns to the original.
+  useEffect(() => {
+    if (!target) return;
+    let live = true;
+    setTaken(undefined);
+    listEntries(space.id, target.at(-1)?.id ?? "")
+      .then((items) => {
+        if (!live) return;
+        const names = new Set(items.map((item) => nameKey(item.name)));
+        setTaken(names);
+        const { name: current, suggested: offered } = latest.current;
+        if (current === initialName && names.has(nameKey(initialName))) {
+          const next = restoredName(initialName, entry.kind);
+          setName(next); setSuggested(next);
+        } else if (offered && current === offered && !names.has(nameKey(initialName))) {
+          setName(initialName); setSuggested("");
+        }
+      })
+      .catch(() => { if (live) setTaken(new Set()); });
+    return () => { live = false; };
+  }, [target, space.id, initialName, entry.kind]);
+
   const location = [spaceLabel(space), ...(target ?? []).map((crumb) => crumb.name)].join(" / ");
+  const clash = !busy && name.trim() !== "" && Boolean(taken?.has(nameKey(name)));
+  const alternative = restoredName(name.trim() || initialName, entry.kind);
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -82,7 +124,7 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
     try {
       const parentId = target.at(-1)?.id ?? "";
       const restored = request.whole ? await restoreSnapshot(snapshot.id, parentId, finalName) : await restoreEntry(snapshot.id, entry.id, parentId, finalName);
-      onRestored(restored, location);
+      onRestored(restored, location, target);
     } catch (caught) {
       const message = messageOf(caught);
       if (hiddenRef.current) {
@@ -115,12 +157,19 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
         {busy && slow
           ? <button type="button" className="bk-secondary" onClick={toBackground}>在后台继续</button>
           : <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>取消</button>}
-        <button type="submit" form="bk-restore-form" className="bk-primary" disabled={!target || busy || !name.trim()}>
+        <button type="submit" form="bk-restore-form" className="bk-primary" disabled={!target || busy || !name.trim() || clash}>
           {busy ? <><Spinner small />正在恢复…</> : "恢复"}
         </button>
       </>}
     >
       <form id="bk-restore-form" className="bk-restore" onSubmit={(event) => void submit(event)}>
+        {request.inTrash && (
+          <div className="bk-trash-hint">
+            <Trash2 />
+            <span>回收站里还有它，那里是删除前最后的样子；快照里的是 {formatDateTime(snapshot.createdAt)} 的样子。</span>
+            {onOpenTrash && <button type="button" className="bk-link" onClick={() => { onOpenTrash(); onClose(); }}>去回收站还原</button>}
+          </div>
+        )}
         <div className="bk-restore-source">
           <EntryIcon kind={entry.kind} />
           <div>
@@ -145,13 +194,19 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
 
         <label className="bk-field">
           <span className="bk-field-label">{request.whole ? "新文件夹名称" : "名称"}</span>
-          <input data-autofocus value={name} disabled={busy} onChange={(event) => { setName(event.target.value); setConflict(false); setError(""); }} aria-label="恢复后的名称" />
+          <input data-autofocus value={name} disabled={busy} onChange={(event) => { setName(event.target.value); setSuggested(""); setConflict(false); setError(""); }} aria-label="恢复后的名称" />
+          {suggested && name === suggested && (
+            <small className="bk-field-note">
+              {original ? "原位置" : "这里"}已有“{initialName}”，所以换了个名字另存一份，不会覆盖它。
+              {original && entry.kind === "file" && !request.whole && "想直接换回旧版本，可在文件管理中右键这个文件，选“历史版本”。"}
+            </small>
+          )}
         </label>
 
-        {error && (
+        {(clash || error) && (
           <div className="bk-inline-error" role="alert">
-            <span>{error}</span>
-            {conflict && <button type="button" className="bk-link" onClick={() => { setName(restoredName(entry.name, entry.kind)); setConflict(false); setError(""); }}>改用“{restoredName(entry.name, entry.kind)}”</button>}
+            <span>{clash ? `“${location}”中已有名为“${name.trim()}”的项目。` : error}</span>
+            {(clash || conflict) && <button type="button" className="bk-link" onClick={() => { setName(alternative); setSuggested(""); setConflict(false); setError(""); }}>改用“{alternative}”</button>}
           </div>
         )}
         <p className="bk-fine">

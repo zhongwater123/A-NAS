@@ -71,7 +71,7 @@
 .mc-link { display: inline-flex; align-items: center; gap: 2px; border: 0; padding: 4px 6px; border-radius: 7px; color: var(--mc-muted); background: transparent; font-size: 12px; font-weight: 600; }
 .mc-link:hover { color: var(--mc-ink); }
 .mc-link svg { width: 14px; height: 14px; }
-.mc-round { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--mc-line-2); border-radius: 50%; color: var(--mc-ink); background: rgba(255, 255, 255, .07); backdrop-filter: blur(12px); transition: background .15s, color .15s, transform .15s; }
+.mc-round { position: relative; width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--mc-line-2); border-radius: 50%; color: var(--mc-ink); background: rgba(255, 255, 255, .07); backdrop-filter: blur(12px); transition: background .15s, color .15s, transform .15s; }
 .mc-round:hover { background: rgba(255, 255, 255, .14); transform: translateY(-1px); }
 .mc-round svg { width: 18px; height: 18px; }
 .mc-round.on { color: #fff; border-color: transparent; background: var(--mc-accent-2); }
@@ -121,6 +121,7 @@
 .mc-state > svg { width: 46px; height: 46px; color: #3b4558; }
 .mc-state h2 { margin: 6px 0 0; color: var(--mc-ink); font-size: 17px; }
 .mc-state p { max-width: 380px; margin: 0 0 8px; color: var(--mc-muted); line-height: 1.6; }
+.mc-state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .mc-spinner { width: 28px; height: 28px; display: inline-block; border: 3px solid rgba(255, 255, 255, .12); border-top-color: var(--mc-accent); border-radius: 50%; animation: mc-spin .8s linear infinite; }
 .mc-spinner.small { width: 20px; height: 20px; border-width: 2px; }
 .mc-spinner.tiny { width: 14px; height: 14px; flex: none; margin-top: 1px; border-width: 2px; }
@@ -388,12 +389,15 @@
 .mc-detail-plot { max-width: 680px; margin: 20px 0 0; color: #c6cedb; font-size: 13.5px; line-height: 1.8; }
 .mc-detail-collections { margin: 12px 0 0; color: var(--mc-muted); font-size: 12.5px; }
 .mc-detail-facts { max-width: 760px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 22px; margin: 26px 0 0; padding: 16px 18px; border: 1px solid var(--mc-line); border-radius: 14px; background: rgba(255, 255, 255, .03); }
-.mc-detail-facts div { min-width: 0; display: grid; gap: 3px; }
+.mc-detail-facts div { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .mc-detail-facts dt { display: flex; align-items: center; gap: 5px; color: var(--mc-muted); font-size: 11.5px; }
 .mc-detail-facts dt svg { width: 13px; height: 13px; }
 .mc-detail-facts dd { margin: 0; overflow: hidden; color: var(--mc-ink-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .mc-detail-facts dd.warn { color: var(--mc-gold); white-space: normal; }
-.mc-detail-facts .mc-detail-file dd { display: flex; align-items: center; overflow: visible; }
+/* A file name is often long: it takes the whole row and wraps rather than running into the next fact. */
+.mc-detail-facts .mc-detail-file { grid-column: 1 / -1; }
+.mc-detail-facts .mc-detail-file dd { display: flex; align-items: center; overflow: visible; white-space: normal; }
+.mc-detail-file .mc-editable-text { white-space: normal; overflow-wrap: anywhere; }
 .mc-detail-file .mc-editable { min-width: 0; display: flex; align-items: center; color: var(--mc-ink); }
 
 /* Names renamed in place */
@@ -435,7 +439,8 @@
 .mc-episode-art { position: relative; width: clamp(150px, 20cqw, 230px); flex: none; aspect-ratio: 16 / 9; overflow: hidden; border: 0; border-radius: 10px; padding: 0; background: var(--mc-surface); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
 .mc-episode-play { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .35); opacity: 0; transition: opacity .2s; }
 .mc-episode-play svg { width: 38px; height: 38px; padding: 10px; border-radius: 50%; color: #0b0e14; background: rgba(255, 255, 255, .92); fill: currentColor; }
-.mc-episode-art:hover .mc-episode-play { opacity: 1; }
+.mc-episode { cursor: pointer; }
+.mc-episode:hover .mc-episode-play { opacity: 1; }
 .mc-episode-text { min-width: 0; flex: 1; display: grid; gap: 4px; }
 .mc-episode-text strong { display: flex; align-items: baseline; gap: 10px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .mc-episode-number { min-width: 22px; color: var(--mc-muted); font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -455,6 +460,7 @@
 .mc-dialog-backdrop { position: absolute; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(4, 6, 10, .62); backdrop-filter: blur(6px); animation: mc-pop .18s ease; }
 .mc-dialog { width: min(440px, 100%); max-height: 100%; display: flex; flex-direction: column; gap: 14px; overflow: hidden; padding: 22px; border: 1px solid var(--mc-line-2); border-radius: 18px; background: linear-gradient(180deg, #1a2030, #141924); box-shadow: 0 40px 100px rgba(0, 0, 0, .6); animation: mc-rise .22s var(--mc-ease); }
 .mc-dialog.wide { width: min(700px, 100%); padding: 0; gap: 0; }
+.mc-dialog:focus { outline: none; }
 .mc-dialog h3 { margin: 0; font-size: 17px; }
 .mc-dialog-sub { margin: -8px 0 0; color: var(--mc-muted); }
 .mc-dialog-message { color: var(--mc-ink-2); line-height: 1.7; }
@@ -507,6 +513,16 @@
 .mc-check { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 1.5px solid #5a6578; border-radius: 6px; padding: 0; color: #fff; background: transparent; transition: background .12s, border-color .12s; }
 .mc-picker-row.selected .mc-check { border-color: var(--mc-accent-2); background: var(--mc-accent-2); }
 .mc-check svg { width: 13px; height: 13px; stroke-width: 3; }
+.mc-picker-pick { min-width: 0; flex: 1; height: 38px; display: flex; align-items: center; gap: 10px; border: 0; padding: 0 8px 0 0; color: var(--mc-ink); background: transparent; text-align: left; }
+.mc-picker-pick:focus-visible { outline-offset: -2px; border-radius: 8px; }
+.mc-picker-pick > svg { width: 17px; height: 17px; color: #ffd27a; }
+.mc-picker-pick > span:last-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-picker-enter { width: 32px; height: 32px; flex: none; display: grid; place-items: center; margin-right: 3px; border: 0; border-radius: 8px; color: var(--mc-muted); background: transparent; transition: background .12s, color .12s; }
+.mc-picker-enter:hover { color: var(--mc-ink); background: rgba(255, 255, 255, .08); }
+.mc-picker-enter svg { width: 16px; height: 16px; }
+.mc-picker-row.current { margin-bottom: 4px; background: rgba(255, 255, 255, .035); }
+.mc-picker-row.current.selected { background: rgba(76, 157, 255, .1); }
+.mc-picker-row.current .mc-picker-pick > svg { color: var(--mc-accent); }
 .mc-picker-open { min-width: 0; flex: 1; height: 36px; display: flex; align-items: center; gap: 9px; border: 0; padding: 0 8px; color: var(--mc-ink); background: transparent; text-align: left; }
 .mc-picker-open svg { width: 17px; height: 17px; color: #ffd27a; }
 .mc-picker-open svg:last-child { width: 15px; height: 15px; color: var(--mc-muted); opacity: 0; }
@@ -691,6 +707,27 @@
 .mc-player-button.labeled { width: auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; font-size: 13px; font-weight: 650; }
 .mc-player-button.labeled svg { width: 18px; height: 18px; }
 
+/* The pause the viewer sees, and what a key just did */
+.mc-player-center { position: absolute; z-index: 2; left: 50%; top: 50%; width: 76px; height: 76px; display: grid; place-items: center; margin: -38px 0 0 -38px; border: 0; border-radius: 50%; color: #fff; background: rgba(12, 15, 22, .55); backdrop-filter: blur(10px); box-shadow: 0 0 0 1px rgba(255, 255, 255, .16), 0 18px 48px rgba(0, 0, 0, .45); animation: mc-center-in .22s var(--mc-ease); transition: background .15s, transform .15s var(--mc-ease); }
+.mc-player-center:hover { background: rgba(53, 104, 237, .88); transform: scale(1.06); }
+.mc-player-center svg { width: 32px; height: 32px; margin-left: 4px; fill: currentColor; }
+@keyframes mc-center-in { from { opacity: 0; transform: scale(.86); } }
+.mc-notice { position: absolute; z-index: 3; left: 50%; top: 18%; display: inline-flex; align-items: center; gap: 9px; padding: 9px 17px 9px 14px; border-radius: 22px; color: #fff; background: rgba(12, 15, 22, .74); backdrop-filter: blur(12px); box-shadow: 0 12px 34px rgba(0, 0, 0, .4); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; translate: -50% 0; pointer-events: none; animation: mc-notice .9s ease forwards; }
+.mc-notice svg { width: 19px; height: 19px; }
+@keyframes mc-notice { 0% { opacity: 0; transform: translateY(6px); } 14% { opacity: 1; transform: none; } 72% { opacity: 1; } 100% { opacity: 0; } }
+.mc-skip-icon { position: relative; display: grid; place-items: center; }
+.mc-skip-icon small { position: absolute; padding-top: 1px; font-size: 8px; font-weight: 800; letter-spacing: -.4px; line-height: 1; font-variant-numeric: tabular-nums; }
+
+/* Tooltips name an icon's action, and its key, a moment after the pointer rests on it. */
+@media (hover: hover) {
+  .mc-app [data-tip]::after { content: attr(data-tip); position: absolute; z-index: 8; left: 50%; bottom: calc(100% + 8px); padding: 5px 9px; border-radius: 8px; color: #f1f4f9; background: rgba(16, 19, 27, .96); box-shadow: 0 8px 22px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .08); font-size: 12px; font-weight: 600; letter-spacing: 0; line-height: 1.3; text-shadow: none; white-space: nowrap; opacity: 0; translate: -50% 0; transform: translateY(4px); pointer-events: none; transition: opacity .14s, transform .14s var(--mc-ease); }
+  .mc-app [data-tip]:hover::after, .mc-app [data-tip]:focus-visible::after { opacity: 1; transform: none; transition-delay: .35s; }
+  .mc-app [data-tip][aria-expanded="true"]::after { display: none; }
+  .mc-app [data-tip-at~="start"]::after { left: 0; translate: 0 0; }
+  .mc-app [data-tip-at~="end"]::after { left: auto; right: 0; translate: 0 0; }
+  .mc-app [data-tip-at~="below"]::after { top: calc(100% + 8px); bottom: auto; transform: translateY(-4px); }
+}
+
 /* Picking another episode or title while playing */
 .mc-player { --mc-panel-w: min(380px, 92%); }
 .mc-player.paneled .mc-player-top, .mc-player.paneled .mc-player-bottom { right: var(--mc-panel-w); }
@@ -747,7 +784,7 @@
 .mc-resume button svg { width: 14px; height: 14px; }
 .mc-next { position: absolute; right: 24px; bottom: 120px; display: grid; justify-items: start; gap: 6px; padding: 16px 18px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 16px; color: #eef2f8; background: rgba(18, 22, 31, .92); backdrop-filter: blur(12px); box-shadow: 0 20px 50px rgba(0, 0, 0, .5); animation: mc-rise .3s var(--mc-ease); }
 .mc-next span { color: #aab3c2; font-size: 12px; }
-.mc-next strong { font-size: 30px; font-variant-numeric: tabular-nums; }
+.mc-next strong { max-width: 280px; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .mc-next div { display: flex; gap: 8px; }
 
 /* Narrow windows */

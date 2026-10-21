@@ -178,6 +178,19 @@ func (e *Executor) AddDisks(ctx context.Context, request storage.AddDisksRequest
 	if output, err := e.runner.Run(ctx, "btrfs", append(add, e.mountPoint), ""); err != nil {
 		return storage.Volume{}, commandError("btrfs device add failed", err, output)
 	}
+	// udev probed the new partitions while they were still wiped and hears
+	// nothing of the superblock the kernel wrote; probe them again so lsblk
+	// and blkid agree before the next boot. Host state does not depend on it
+	// (it reads the members from sysfs), so a failure is only logged.
+	trigger := []string{"trigger", "--action=change"}
+	for _, device := range devices {
+		trigger = append(trigger, device.PartitionPath)
+	}
+	if output, err := e.runner.Run(ctx, "udevadm", trigger, ""); err != nil {
+		e.logger.WarnContext(ctx, "udev did not re-probe the added disks", "error", commandError("udevadm trigger", err, output))
+	} else if output, err := e.runner.Run(ctx, "udevadm", []string{"settle", "--timeout=10"}, ""); err != nil {
+		e.logger.WarnContext(ctx, "udev did not settle after adding disks", "error", commandError("udevadm settle", err, output))
+	}
 	// The disks belong to the volume now; record the layout before anything
 	// else can fail, so the Host Agent's check converts to it regardless.
 	marker.Layout = request.Layout

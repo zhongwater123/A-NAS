@@ -10,12 +10,14 @@ import "./viewer.css";
 // FileViewer shows the images and PDFs of the open folder over the file
 // manager, one at a time, straight from the file endpoint; nothing is saved
 // until the user asks for a download (docs/specs/basic-storage-and-sharing.md).
-export function FileViewer({ entries, index, onIndex, onClose, onDownload }: {
+export function FileViewer({ entries, index, onIndex, onClose, onDownload, vnasPrivate }: {
   entries: FileEntry[];
   index: number;
   onIndex: (index: number) => void;
   onClose: () => void;
   onDownload: (entry: FileEntry) => void;
+  /** Set when VNAS may not read what is shown (assistant/webosControl.ts). */
+  vnasPrivate?: string;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const entry = entries[index];
@@ -42,7 +44,7 @@ export function FileViewer({ entries, index, onIndex, onClose, onDownload }: {
 
   const details = [formatBytes(entry.sizeBytes), size && `${size.width} × ${size.height}`, many && `${index + 1} / ${entries.length}`].filter(Boolean).join(" · ");
   return (
-    <div ref={layer} className="fv-layer" role="dialog" aria-modal="true" aria-label={`预览 ${entry.name}`} tabIndex={-1} onKeyDown={keyDown}>
+    <div ref={layer} className="fv-layer" role="dialog" aria-modal="true" aria-label={`预览 ${entry.name}`} tabIndex={-1} onKeyDown={keyDown} data-vnas-private={vnasPrivate}>
       <header className="fv-bar">
         <div className="fv-title">
           <strong title={entry.name}>{entry.name}</strong>

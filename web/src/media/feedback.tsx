@@ -137,6 +137,9 @@ export function RenameDialog({ title, onClose, onDone }: { title: Title; onClose
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  // The form holds focus while the name loads, so Escape already closes it.
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => { form.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     let live = true;
     const loaded = show
@@ -179,7 +182,7 @@ export function RenameDialog({ title, onClose, onDone }: { title: Title; onClose
     : "同名的字幕、NFO 和海报会一起改名，文件管理和 SMB 中看到的也是新名字。播放进度和收藏都保留，片名会按新文件名重新识别。";
   return (
     <div className="mc-dialog-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
-      <form className="mc-dialog" role="dialog" aria-modal="true" aria-label={what} onSubmit={(event) => void submit(event)}
+      <form ref={form} tabIndex={-1} className="mc-dialog" role="dialog" aria-modal="true" aria-label={what} onSubmit={(event) => void submit(event)}
         onKeyDown={(event) => { if (event.key === "Escape" && !saving) { event.stopPropagation(); onClose(); } }}>
         <h3>{what}</h3>
         <p className="mc-dialog-sub">{label}</p>

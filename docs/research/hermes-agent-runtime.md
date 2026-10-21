@@ -1070,6 +1070,14 @@ managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带
 - spike（重新构建、带 0002 的运行环境）：探针 39 项；[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh) 8 项（旧令牌被拒、没有窗口的会话没有浏览器工具、别的连接注册不了、模型只拿到窗口的五种工具、命令往返且被包成不可信内容）；`cron.sh` 8 项；`serve-terminal.sh` 14 项（任何进程环境里都没有密钥，沙箱里只有散列）。
 - 预览：上面几轮。
 
+### 架构审查 #160 之后（2026-10-21）
+
+[#160](https://github.com/zhongwater123/A-NAS/issues/160) 指出上面的确认只按控件名称判断、只管点击：“分享”“剪切”“粘贴”“移到回收站”、查看器里的 Delete 键和表单里的 Enter 都不经确认，快照还会读到只读查看的他人空间与快照。用户决定只问破坏与泄露类的写入、不加每轮开关、快照按 #160 排除（ADR 0024 决定 8）。
+
+**上游的多窗口语义**（`gateway/browser_control_broker.py`、`tui_gateway/methods_browser_control.py`，main c5a3c0f8）：控制器的身份是 principal、profile、会话、`controller_id`、浏览器名与传输类型，不含连接；同一身份再次 `register` 只是换成新的连接（`attach` 的“重连”分支），所以后注册的窗口接手。`detach` 先检查调用的连接是不是记录的主人，不是就答 4403，什么都不做。原来的窗口在每次 `session.resume` 时注册并按连接缓存，于是只显示对话的窗口（例如电视）可能后注册而接手，之后在电脑上发的消息的操作与卡片出现在电视上；接手的窗口关掉后，电脑上的窗口因为缓存不再注册，后面的回合没有浏览器工具。
+
+**改法**：窗口只在发出提示前注册，每次都注册；产品服务记下每段对话的浏览器连接，回合进行中拒绝别的连接注册，连接离开时只注销它仍是浏览器的对话（`TestTheWindowIsTheBrowserOfItsOwnSessionOnly`）。确认改为拦页面的写入：产品 API 的写入都经 `apiFetch` 或 `uploadForm`，VNAS 的一步之后 15 秒内、成员没有自己操作时，这一步引起的写入按 [`webosWrites.ts`](../../web/src/assistant/webosWrites.ts) 的清单放行或先问；一步之后等 0.4 秒，写入被拒绝时这一步的结果告诉模型“NAS 上什么都没有改”。区分成员与 VNAS 靠事件的 `isTrusted`：VNAS 派发的事件都不是可信的。终端（WebSocket）、Docker 与应用中心的每一步仍在点击前先问。
+
 ## 关联
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)

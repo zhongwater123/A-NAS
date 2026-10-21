@@ -1,5 +1,5 @@
 import { Check, FileVideo, Heart, Languages, ListPlus, Play, RotateCcw, Star, Subtitles } from "lucide-react";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatBytes } from "../bytes";
 import { Empty, Loading, messageOf } from "./Browse";
@@ -91,11 +91,11 @@ export function VideoPage({ id, refreshKey, onBack, onError }: { id: string; ref
           <div className="mc-detail-actions">
             <button type="button" className="mc-primary" onClick={() => actions.play(detail)}><Play />{resuming ? "继续播放" : "播放"}</button>
             {resuming && <button type="button" className="mc-glass" onClick={() => actions.play(detail, true)}><RotateCcw />从头播放</button>}
-            <button type="button" className={`mc-round ${detail.favorite ? "on" : ""}`} aria-pressed={detail.favorite} aria-label={detail.favorite ? "取消收藏" : "收藏"} title={detail.favorite ? "取消收藏" : "收藏"}
+            <button type="button" className={`mc-round ${detail.favorite ? "on" : ""}`} aria-pressed={detail.favorite} aria-label={detail.favorite ? "取消收藏" : "收藏"} data-tip={detail.favorite ? "取消收藏" : "收藏"}
               onClick={() => { actions.toggleFavorite(detail); setDetail({ ...detail, favorite: !detail.favorite }); }}><Heart /></button>
-            <button type="button" className={`mc-round ${watched ? "on" : ""}`} aria-pressed={watched} aria-label={watched ? "标记为未看" : "标记为已看"} title={watched ? "标记为未看" : "标记为已看"}
+            <button type="button" className={`mc-round ${watched ? "on" : ""}`} aria-pressed={watched} aria-label={watched ? "标记为未看" : "标记为已看"} data-tip={watched ? "标记为未看" : "标记为已看"}
               onClick={() => { actions.setWatched(detail, !watched); setDetail({ ...detail, progress: { position: 0, duration: detail.duration ?? 0, watched: !watched } }); }}><Check /></button>
-            {detail.type !== "episode" && <button type="button" className="mc-round" aria-label="加入合集" title="加入合集" onClick={() => actions.addToCollection(detail)}><ListPlus /></button>}
+            {detail.type !== "episode" && <button type="button" className="mc-round" aria-label="加入合集" data-tip="加入合集" onClick={() => actions.addToCollection(detail)}><ListPlus /></button>}
           </div>
           {detail.plot && <p className="mc-detail-plot">{detail.plot}</p>}
           {(detail.collections.length > 0 || detail.collection) && (
@@ -132,11 +132,22 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
   };
   const share = progressShare(episode.progress);
   const watched = Boolean(episode.progress?.watched);
+  // Pressing anywhere on the row plays the episode. On its title a second
+  // press renames it instead, so the title waits a moment before playing.
+  const pending = useRef(0);
+  useEffect(() => () => window.clearTimeout(pending.current), []);
+  const press = (event: MouseEvent<HTMLLIElement>) => {
+    const target = event.target as HTMLElement;
+    window.clearTimeout(pending.current);
+    if (target.closest("button, input, .mc-editable.editing")) return;
+    if (!target.closest(".mc-editable")) { actions.play(title); return; }
+    if (event.detail === 1) pending.current = window.setTimeout(() => actions.play(title), 280);
+  };
   const name = episode.title === `第 ${episode.episode} 集`
     ? <span className="mc-editable-text">{episode.title}</span>
     : <><span className="mc-episode-number">{episode.episode || "·"}</span><span className="mc-editable-text">{episode.title}</span></>;
   return (
-    <li className={`mc-episode ${current ? "current" : ""}`}>
+    <li className={`mc-episode ${current ? "current" : ""}`} onClick={press}>
       <button type="button" className="mc-episode-art" onClick={() => actions.play(title)} aria-label={`播放${episodeName(episode)}`}>
         <Artwork title={{ ...title, artwork: episode.artwork.thumb ? episode.artwork : show.artwork }} kind="thumb" fallback="backdrop" label={false} />
         <span className="mc-episode-play"><Play /></span>
@@ -149,7 +160,7 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
         <small>{[runtime(episode.duration), watched ? "已看完" : episode.progress?.position ? remaining(episode.progress.position, episode.progress.duration) : ""].filter(Boolean).join(" · ")}</small>
         {episode.plot && <p>{episode.plot}</p>}
       </div>
-      <button type="button" className={`mc-round small ${watched ? "on" : ""}`} aria-pressed={watched} aria-label={watched ? "标记为未看" : "标记为已看"} title={watched ? "标记为未看" : "标记为已看"}
+      <button type="button" className={`mc-round small ${watched ? "on" : ""}`} aria-pressed={watched} aria-label={watched ? "标记为未看" : "标记为已看"} data-tip={watched ? "标记为未看" : "标记为已看"} data-tip-at="end"
         onClick={() => actions.setWatched(title, !watched)}><Check /></button>
     </li>
   );
@@ -197,11 +208,11 @@ export function ShowPage({ id, refreshKey, onBack, onError }: { id: string; refr
           <Meta title={detail} extra={[`${detail.seasons} 季`, `${detail.episodes} 集`]} />
           <div className="mc-detail-actions">
             <button type="button" className="mc-primary" onClick={playNext} disabled={!next}><Play />{nextLabel}</button>
-            <button type="button" className={`mc-round ${detail.favorite ? "on" : ""}`} aria-pressed={detail.favorite} aria-label={detail.favorite ? "取消收藏" : "收藏"} title={detail.favorite ? "取消收藏" : "收藏"}
+            <button type="button" className={`mc-round ${detail.favorite ? "on" : ""}`} aria-pressed={detail.favorite} aria-label={detail.favorite ? "取消收藏" : "收藏"} data-tip={detail.favorite ? "取消收藏" : "收藏"}
               onClick={() => { actions.toggleFavorite(detail); setDetail({ ...detail, favorite: !detail.favorite }); }}><Heart /></button>
-            <button type="button" className={`mc-round ${allWatched ? "on" : ""}`} aria-pressed={allWatched} aria-label={allWatched ? "全部标记为未看" : "全部标记为已看"} title={allWatched ? "全部标记为未看" : "全部标记为已看"}
+            <button type="button" className={`mc-round ${allWatched ? "on" : ""}`} aria-pressed={allWatched} aria-label={allWatched ? "全部标记为未看" : "全部标记为已看"} data-tip={allWatched ? "全部标记为未看" : "全部标记为已看"}
               onClick={() => actions.setWatched(detail, !allWatched)}><Check /></button>
-            <button type="button" className="mc-round" aria-label="加入合集" title="加入合集" onClick={() => actions.addToCollection(detail)}><ListPlus /></button>
+            <button type="button" className="mc-round" aria-label="加入合集" data-tip="加入合集" onClick={() => actions.addToCollection(detail)}><ListPlus /></button>
           </div>
           {detail.plot && <p className="mc-detail-plot">{detail.plot}</p>}
           <p className="mc-detail-collections">已看 {detail.watchedEpisodes ?? 0} / {detail.episodes} 集{detail.collections.length ? ` · 合集：${detail.collections.map((item) => item.name).join("、")}` : ""}</p>

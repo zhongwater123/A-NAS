@@ -478,7 +478,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "voice" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><VoicePanel userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} /></Suspense>}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
-			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
+			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onShowInFiles={showInFiles} onOpenTrash={() => openWindow("trash")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
 			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} onShowPhoto={showPhoto} focus={assistantFocus} onFocusHandled={assistantFocusHandled} /></Suspense>}
@@ -596,6 +596,10 @@ type FileBrowserItem = {
 	resource?: FileResource;
 	planned?: boolean;
 };
+
+// What VNAS never reads or acts on (assistant/webosControl.ts): another member's
+// space open under a viewing grant is beyond what the assistant may read.
+const othersSpace = "他人的个人空间（只读查看）";
 
 const personalFileResources: FileBrowserItem[] = [
 	{ id: "resource:photos", name: "图库", kind: "resource", type: "图库投影", detail: "个人图库", modifiedAt: "", sizeBytes: 0, resource: "photos" },
@@ -1005,7 +1009,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 					<button className={`file-tree-root ${active ? "active" : ""}`} aria-expanded={active && !collapsed} onClick={() => toggleSpace(space)}>
 						<ChevronDown className={!active || collapsed ? "collapsed" : ""} /><span className={`file-tree-icon ${space.kind}`}>{space.kind === "shared" ? <UsersRound /> : space.viewing ? <ShieldCheck /> : <FolderOpen />}</span><strong>{label}</strong><small>{space.kind === "shared" ? "共享" : space.name}</small>
 					</button>
-					{active && !collapsed && <div className="file-tree-branch">
+					{active && !collapsed && <div className="file-tree-branch" data-vnas-private={space.viewing ? othersSpace : undefined}>
 						{space.kind === "private" && !space.viewing && personalFileResources.map((resource) => <button key={resource.id} className="file-tree-child resource" disabled={resource.planned} onClick={() => resource.resource === "photos" ? onOpenPhotos() : resource.resource === "movies" ? onOpenMedia() : resource.resource === "music" && onOpenMusic()}><span>{itemIcon(resource)}</span><strong>{resource.name}</strong><small>{resource.planned ? "规划中" : "打开"}</small></button>)}
 						<button className={`file-tree-child ${trail.length === 0 ? "current" : ""}`} onClick={() => navigateTo(0)}><span><FolderClosed /></span><strong>根目录</strong></button>
 						{trail.map((item, index) => <button key={item.id} className={`file-tree-child path ${index === trail.length - 1 ? "current" : ""}`} onClick={() => navigateTo(index + 1)}><span><FolderClosed /></span><strong>{item.name}</strong></button>)}
@@ -1021,7 +1025,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 
 		<div className="file-pane-resizer" role="separator" aria-label="调整目录栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPaneResize("left", event)} onKeyDown={(event) => resizePaneWithKeyboard("left", event)} />
 
-		<section className="file-browser" aria-label="文件浏览器" {...dragEvents}>
+		<section className="file-browser" aria-label="文件浏览器" data-vnas-private={viewing ? othersSpace : undefined} {...dragEvents}>
 			<div className="file-navigation-bar">
 				<div className="file-history-actions">
 					<button className="file-icon-button" aria-label="后退" title="后退" disabled={!trail.length || loading} onClick={() => navigateTo(trail.length - 1)}><ArrowLeft /></button>
@@ -1103,12 +1107,12 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 
 		<div className="file-pane-resizer" role="separator" aria-label="调整详细信息栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginPaneResize("right", event)} onKeyDown={(event) => resizePaneWithKeyboard("right", event)} />
 
-		<aside className="file-inspector" aria-label="详细信息">
+		<aside className="file-inspector" aria-label="详细信息" data-vnas-private={viewing ? othersSpace : undefined}>
 			<header>详细信息</header>
 			{selectedItems.length > 1 ? <div className="file-inspector-empty"><Copy /><strong>已选择 {selectedItems.length} 个项目</strong><span>可通过工具栏或右键菜单批量剪切、复制和删除</span></div> : selectedItem ? <><div className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${(isPreviewableImage(selectedItem.name) || isVideoFile(selectedItem.name)) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}>{inspectorPreview}</div><div className="file-inspector-copy"><h3>{selectedItem.name}</h3><p>{selectedItem.type}</p><dl><dt>资源类型</dt><dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd><dt>内容</dt><dd>{selectedItem.kind === "file" ? formatBytes(selectedItem.sizeBytes) : selectedItem.detail}</dd><dt>所在位置</dt><dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>{selectedItem.modifiedAt && <><dt>修改时间</dt><dd>{formatFileDate(selectedItem.modifiedAt)}</dd></>}</dl>{selectedItem.entry?.kind === "file" && !viewing && <button className="file-inspector-action" onClick={() => setVersionsOf(selectedItem.entry)}><History />历史版本</button>}{selectedItem.resource === "photos" && <p className="file-inspector-hint">这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。</p>}{selectedItem.resource === "movies" && <p className="file-inspector-hint">打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。</p>}{selectedItem.resource === "music" && <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>}{selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}</div></> : <div className="file-inspector-empty"><FolderOpen /><strong>选择一个项目</strong><span>详细信息会显示在这里</span></div>}
 		</aside>
 
-		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+		{contextMenu && <div className="file-context-menu" role="menu" aria-label="文件操作" data-vnas-private={viewing ? othersSpace : undefined} style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
 			{contextMenu.item ? <>
 				<button role="menuitem" disabled={Boolean(contextMenu.item.planned)} onClick={() => { openItem(contextMenu.item!); setContextMenu(undefined); }}>{contextMenu.item.entry?.kind === "file" ? isViewable(contextMenu.item.name) ? <Eye /> : <Download /> : <FolderOpen />}<span>{contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name) ? "预览" : contextMenu.item.entry?.kind === "file" && selectedEntries.length <= 1 ? "下载" : "打开"}</span></button>
 				{contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name) && selectedEntries.length <= 1 && <button role="menuitem" onClick={() => { download([contextMenu.item!.entry!]); setContextMenu(undefined); }}><Download /><span>下载</span></button>}
@@ -1131,7 +1135,7 @@ function FilePanel({ userID, navigation, onNavigated, onOpenTransfers, onOpenPho
 		</div>}
 
 		{versionsOf && selectedSpace && <VersionsDialog file={versionsOf} space={selectedSpace} folders={trail.map((item) => item.name)} onClose={() => setVersionsOf(undefined)} onChanged={() => { void refresh(spaceID, parentID); void refreshVolume(); }} />}
-		{viewingIndex >= 0 && <FileViewer entries={viewable} index={viewingIndex} onIndex={(index) => showViewer(viewable[index])} onClose={() => setViewingID("")} onDownload={(entry) => download([entry])} />}
+		{viewingIndex >= 0 && <FileViewer entries={viewable} index={viewingIndex} onIndex={(index) => showViewer(viewable[index])} onClose={() => setViewingID("")} onDownload={(entry) => download([entry])}  vnasPrivate={viewing ? othersSpace : undefined} />}
 		{pendingDelete && <div className="file-dialog-backdrop"><section className="file-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="file-delete-title"><span className="file-confirm-icon"><Trash2 /></span><div><h3 id="file-delete-title">移到回收站？</h3><p>{pendingDelete.length === 1 ? `“${pendingDelete[0].name}”` : `选中的 ${pendingDelete.length} 个项目`}将移到回收站，可在 30 天内恢复。</p></div><div className="file-confirm-actions"><button disabled={Boolean(activity)} onClick={() => setPendingDelete(undefined)}>取消</button><button className="danger-button" disabled={Boolean(activity)} onClick={() => void removeEntry()}>{activity ? "正在移动…" : "移到回收站"}</button></div></section></div>}
 		{renaming && <div className="file-dialog-backdrop"><form className="file-rename-dialog" aria-label={`重命名 ${renaming.name}`} onSubmit={(event) => void renameEntry(event)}><span><Pencil /></span><div><h3>重命名</h3><p>为“{renaming.name}”输入新名称。</p><input autoFocus name="name" aria-label="新名称" defaultValue={renaming.name} required /></div><footer><button type="button" disabled={Boolean(activity)} onClick={() => setRenaming(undefined)}>取消</button><button className="primary" disabled={Boolean(activity)}>保存</button></footer></form></div>}
 	</div>;

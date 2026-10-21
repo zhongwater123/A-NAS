@@ -29,6 +29,7 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 const api = vi.hoisted(() => ({ sessionEnded: vi.fn() }));
 vi.mock("../api", async (original) => ({ ...(await original<typeof import("../api")>()), sessionEnded: api.sessionEnded }));
 
+import { APIError } from "../api";
 import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
 import type { Transfer } from "./transfersApi";
 
@@ -282,5 +283,13 @@ describe("classifyUploadError", () => {
     expect(classifyUploadError(failure("POST", 423, JSON.stringify({ error: { code: "volume_unavailable" } }))).kind).toBe("volume");
     expect(classifyUploadError(failure("POST", 403, JSON.stringify({ error: { code: "forbidden" } }))).kind).toBe("denied");
     expect(classifyUploadError(failure("PATCH", 410, JSON.stringify({ error: { code: "canceled" } }))).kind).toBe("canceled");
+  });
+  it("never retries an upload the member did not allow VNAS to start", () => {
+    // tus-js-client wraps what onBeforeRequest threw, without a response.
+    const refused = Object.assign(new Error("tus: failed to create upload"), {
+      originalRequest: { getMethod: () => "POST" }, originalResponse: null,
+      causingError: new APIError(403, "not_allowed_for_vnas", "没有允许 VNAS 这一步，什么都没有改"),
+    });
+    expect(classifyUploadError(refused)).toEqual({ kind: "denied", code: "not_allowed_for_vnas", message: "没有允许 VNAS 这一步，什么都没有改" });
   });
 });

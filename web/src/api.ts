@@ -54,10 +54,32 @@ export function onSessionEnded(listener: () => void): () => void {
 // upload part that tus-js-client sent.
 export function sessionEnded() { sessionEndedListener?.(); }
 
+// A write gate holds every write the page sends (any method but GET, HEAD and
+// OPTIONS) until it says whether the write may go: VNAS's controller asks the
+// member about the writes its steps on the desktop cause (assistant/webosControl.ts).
+export type WriteGate = (method: string, path: string) => Promise<boolean>;
+let writeGate: WriteGate | undefined;
+export function setWriteGate(gate: WriteGate): () => void {
+  writeGate = gate;
+  return () => { if (writeGate === gate) writeGate = undefined; };
+}
+
+// passWriteGate waits for the write gate, and throws when the write may not go;
+// requests sent outside apiFetch (tus-js-client's upload creation) call it too.
+export async function passWriteGate(method: string, url: string) {
+  const verb = method.toUpperCase();
+  if (!writeGate || verb === "GET" || verb === "HEAD" || verb === "OPTIONS") return;
+  if (!(await writeGate(verb, new URL(url, window.location.href).pathname))) {
+    throw new APIError(403, "not_allowed_for_vnas", "没有允许 VNAS 这一步，什么都没有改");
+  }
+}
+
 // apiFetch is fetch for product API calls. Once signed in, every 401 means the
 // session ended (expired, signed out elsewhere or the account was disabled);
 // wrong passwords are 401 only at login, before any listener exists.
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const given = input instanceof Request ? input : undefined;
+  await passWriteGate(init?.method ?? given?.method ?? "GET", given?.url ?? String(input));
   const response = await fetch(input, init);
   if (response.status === 401) sessionEndedListener?.();
   return response;
@@ -242,7 +264,8 @@ export async function request<T>(path: string, init: RequestInit = {}, mutation 
 
 // uploadForm posts a multipart form like request does, reporting upload
 // progress as a fraction; fetch cannot report it.
-export function uploadForm<T>(path: string, body: FormData, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<T> {
+export async function uploadForm<T>(path: string, body: FormData, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<T> {
+  await passWriteGate("POST", path);
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", path);
@@ -335,3 +358,4 @@ export const createStoragePlan = (diskIds: string[], layout?: VolumeLayout) => r
 export const continueVolumeConversion = (volumeId: string) => request<void>(`/api/v1/volumes/${encodeURIComponent(volumeId)}/conversion`, json({}), true);
 export const confirmStoragePlan = (id: string, confirmationPhrase: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/confirm`, json({ confirmationPhrase }), true);
 export const executeStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/execute`, json({}), true);
+export const cancelStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/cancel`, json({}), true);

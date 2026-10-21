@@ -28,6 +28,7 @@
 - [2026-10-14：Apple Live Photo 配对标识被 EXIF 库遗漏](2026-10-14-live-photo-identifiers.md)（fixed locally）
 
 - [2026-10-14：视频缩略图重访重复解码与队列阻塞](2026-10-14-file-preview-cache.md)（fixed locally；Experimental NAS verification pending）
+- [2026-10-20：加入数据卷的硬盘在重启前仍显示为未使用](2026-10-20-added-disk-shown-unused-until-reboot.md)（fixed locally in PR #149；Experimental NAS verification pending）
 
 - [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
 - [2026-10-15：Host Agent 每次请求都读 SMART，读盘超时被杀](2026-10-15-host-agent-smart-on-every-request.md)（fixed locally；Experimental NAS verification pending）

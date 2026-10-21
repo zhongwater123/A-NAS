@@ -85,7 +85,7 @@ func (r *Reader) RefreshSMART(ctx context.Context) error {
 		r.finishSMARTRefresh(nil, false)
 		return err
 	}
-	_, targets, err := parseDisks(contents, nil)
+	_, targets, err := parseDisks(contents, nil, nil)
 	if err != nil {
 		r.finishSMARTRefresh(nil, false)
 		return err

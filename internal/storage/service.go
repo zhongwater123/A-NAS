@@ -50,6 +50,8 @@ const (
 	PlanStateFailed         PlanState = "failed"
 	PlanStateNeedsAttention PlanState = "needs_attention"
 	PlanStateExpired        PlanState = "expired"
+	// PlanStateCancelled: the administrator gave the plan up before it ran.
+	PlanStateCancelled PlanState = "cancelled"
 )
 
 // PlanKind is what a plan does to the data volume.
@@ -187,16 +189,6 @@ type Conversion struct {
 	TotalBytes     uint64          `json:"totalBytes"`
 }
 
-type AuditEvent struct {
-	ID           string    `json:"id"`
-	ActorUserID  string    `json:"actorUserId"`
-	Action       string    `json:"action"`
-	ResourceType string    `json:"resourceType"`
-	ResourceID   string    `json:"resourceId"`
-	OccurredAt   time.Time `json:"occurredAt"`
-	Detail       string    `json:"detail,omitempty"`
-}
-
 // DiskTarget is a disk the Host Agent erases, with the fingerprint it must
 // still have.
 type DiskTarget struct {
@@ -301,14 +293,16 @@ func OpenService(reader hoststate.Reader, executor VolumeExecutor, options Optio
 
 // PlanVolume plans erasing the disks: it creates the data volume with the
 // layout when there is none, and otherwise adds them to it and converts it
-// to the layout. An empty layout creates a single disk or a mirror.
+// to the layout. An empty layout creates a single disk or a mirror. The new
+// plan takes the place of any that has not run, which is cancelled: a page
+// reload forgets a pending plan, and it must not hold the next one back.
 func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layout) (ExecutionPlan, error) {
 	ids, err := distinctDiskIDs(diskIDs)
 	if err != nil {
 		return ExecutionPlan{}, err
 	}
 	s.mu.Lock()
-	err = s.pendingPlanLocked(s.now().UTC())
+	err = s.runningPlanLocked()
 	current, exists := s.currentVolumeLocked()
 	s.mu.Unlock()
 	if err != nil {
@@ -376,11 +370,20 @@ func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layou
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.pendingPlanLocked(now); err != nil {
+	if err := s.runningPlanLocked(); err != nil {
 		return ExecutionPlan{}, err
 	}
 	if latest, stillExists := s.currentVolumeLocked(); stillExists != exists || latest.FilesystemUUID != current.FilesystemUUID {
 		return ExecutionPlan{}, ErrPlanState
+	}
+	for id, pending := range s.plans {
+		if pending.State == PlanStatePlanned || pending.State == PlanStateConfirmed {
+			pending.State = PlanStateCancelled
+			s.plans[id] = pending
+			if err := s.savePlanLocked(context.Background(), pending); err != nil {
+				return ExecutionPlan{}, err
+			}
+		}
 	}
 	s.plans[plan.ID] = plan
 	if err := s.savePlanLocked(context.Background(), plan); err != nil {
@@ -389,11 +392,10 @@ func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layou
 	return clonePlan(plan), nil
 }
 
-// pendingPlanLocked refuses a new plan while another one runs or can still
-// be confirmed.
-func (s *Service) pendingPlanLocked(now time.Time) error {
+// runningPlanLocked refuses a new plan while another one runs.
+func (s *Service) runningPlanLocked() error {
 	for _, existing := range s.plans {
-		if existing.State == PlanStateRunning || ((existing.State == PlanStatePlanned || existing.State == PlanStateConfirmed) && now.Before(existing.ExpiresAt)) {
+		if existing.State == PlanStateRunning {
 			return ErrPlanState
 		}
 	}
@@ -583,6 +585,31 @@ func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan
 	return clonePlan(plan), nil
 }
 
+// CancelPlan gives up a plan that has not run, so that the administrator
+// can leave it or plan again at once instead of waiting for it to expire.
+// Nothing has touched a disk before a plan runs.
+func (s *Service) CancelPlan(ctx context.Context, planID string) (ExecutionPlan, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	plan, ok := s.plans[planID]
+	if !ok {
+		return ExecutionPlan{}, ErrPlanNotFound
+	}
+	switch plan.State {
+	case PlanStateCancelled:
+		return clonePlan(plan), nil
+	case PlanStatePlanned, PlanStateConfirmed:
+	default:
+		return clonePlan(plan), ErrPlanState
+	}
+	plan.State = PlanStateCancelled
+	s.plans[planID] = plan
+	if err := s.savePlanLocked(ctx, plan); err != nil {
+		return ExecutionPlan{}, err
+	}
+	return clonePlan(plan), nil
+}
+
 func (s *Service) GetPlan(planID string) (ExecutionPlan, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -734,29 +761,6 @@ func (s *Service) DataVolumeFilesystemUUID() string {
 		return ""
 	}
 	return found.FilesystemUUID
-}
-
-func (s *Service) ListAudit(ctx context.Context) ([]AuditEvent, error) {
-	if s.store == nil {
-		return nil, nil
-	}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, actor_user_id, action, resource_type, resource_id, occurred_at, detail
-FROM audit_events ORDER BY occurred_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var events []AuditEvent
-	for rows.Next() {
-		var event AuditEvent
-		var occurredAt string
-		if err := rows.Scan(&event.ID, &event.ActorUserID, &event.Action, &event.ResourceType, &event.ResourceID, &occurredAt, &event.Detail); err != nil {
-			return nil, err
-		}
-		event.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		events = append(events, event)
-	}
-	return events, rows.Err()
 }
 
 func (s *Service) loadPlans(ctx context.Context) error {

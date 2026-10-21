@@ -450,11 +450,58 @@ func TestTheWindowIsTheBrowserOfItsOwnSessionOnly(t *testing.T) {
 		t.Fatalf("registration refused: %s", response.Error)
 	}
 	// A second window with the conversation open follows its turn, but the
-	// browser commands go to the window that is the session's browser only.
+	// browser commands go to the window that is the session's browser only,
+	// and the second cannot become the browser while that turn runs.
 	second := h.open()
 	second.call("session.resume", `{"session_id":"`+fakeStored+`","cols":80}`)
 	first.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"browse"}`)
-	command := first.waitFor(func(f frame) bool { return isEvent(f, "browser.controller.command") })
+	command := waitBrowse(t, first)
+	if response := second.call("browser.controller.register", fmt.Sprintf(register, `["browser_snapshot"]`)); len(response.Error) == 0 {
+		t.Fatal("another window became the browser of a turn under way")
+	}
+	answerBrowse(t, first, command, `- button \"相册\" [ref=e1]`)
+	second.waitFor(func(f frame) bool {
+		if isEvent(f, "browser.controller.command") {
+			t.Fatal("a browser command reached another window")
+		}
+		return isEvent(f, "message.complete") && strings.Contains(string(f.Params), "相册")
+	})
+	// Between turns the window the member sends from becomes the browser.
+	if response := second.call("browser.controller.register", fmt.Sprintf(register, `["browser_snapshot"]`)); len(response.Error) > 0 {
+		t.Fatalf("registration between turns refused: %s", response.Error)
+	}
+	second.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"browse"}`)
+	answerBrowse(t, second, waitBrowse(t, second), `- button \"音乐\" [ref=e1]`)
+	second.waitFor(func(f frame) bool {
+		return isEvent(f, "message.complete") && strings.Contains(string(f.Params), "音乐")
+	})
+	// The window that is no longer the browser leaves without detaching the
+	// session from the one that is.
+	_ = first.conn.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.serve.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first window's connection stayed open")
+	}
+	if strings.Contains(strings.Join(h.serve.methodsSeen(), "\n"), "browser.controller.detach") {
+		t.Fatal("a window that was not the browser detached the session")
+	}
+	// The window that leaves stops being the session's browser.
+	_ = second.conn.Close(websocket.StatusNormalClosure, "")
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(strings.Join(h.serve.methodsSeen(), "\n"), "browser.controller.detach") {
+		if time.Now().After(deadline) {
+			t.Fatalf("no detach after the window left: %v", h.serve.methodsSeen())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// waitBrowse waits for the browser_snapshot of the fake's browse turn at the
+// window that is the session's browser, and returns its command id.
+func waitBrowse(t *testing.T, w *window) string {
+	t.Helper()
+	command := w.waitFor(func(f frame) bool { return isEvent(f, "browser.controller.command") })
 	var ev struct {
 		Payload struct {
 			CommandID string `json:"command_id"`
@@ -465,24 +512,14 @@ func TestTheWindowIsTheBrowserOfItsOwnSessionOnly(t *testing.T) {
 	if ev.Payload.Action != "browser_snapshot" {
 		t.Fatalf("command = %s", command.Params)
 	}
-	if response := first.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"`+ev.Payload.CommandID+
-		`","ok":true,"result":{"snapshot":"- button \"相册\" [ref=e1]"}}`); len(response.Error) > 0 {
+	return ev.Payload.CommandID
+}
+
+func answerBrowse(t *testing.T, w *window, commandID, snapshot string) {
+	t.Helper()
+	if response := w.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"`+commandID+
+		`","ok":true,"result":{"snapshot":"`+snapshot+`"}}`); len(response.Error) > 0 {
 		t.Fatalf("result refused: %s", response.Error)
-	}
-	second.waitFor(func(f frame) bool {
-		if isEvent(f, "browser.controller.command") {
-			t.Fatal("a browser command reached another window")
-		}
-		return isEvent(f, "message.complete") && strings.Contains(string(f.Params), "相册")
-	})
-	// The window that leaves stops being the session's browser.
-	_ = first.conn.Close(websocket.StatusNormalClosure, "")
-	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(strings.Join(h.serve.methodsSeen(), "\n"), "browser.controller.detach") {
-		if time.Now().After(deadline) {
-			t.Fatalf("no detach after the window left: %v", h.serve.methodsSeen())
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 
