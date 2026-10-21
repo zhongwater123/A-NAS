@@ -85,16 +85,6 @@ type TrashItem struct {
 	PurgeAt time.Time `json:"purgeAt"`
 }
 
-type AuditEvent struct {
-	ID           string    `json:"id"`
-	ActorUserID  string    `json:"actorUserId"`
-	Action       string    `json:"action"`
-	ResourceType string    `json:"resourceType"`
-	ResourceID   string    `json:"resourceId"`
-	OccurredAt   time.Time `json:"occurredAt"`
-	Detail       string    `json:"detail,omitempty"`
-}
-
 type Policy interface {
 	ListSpaces(context.Context, accounts.User) ([]accounts.Space, error)
 	CanAccessSpace(context.Context, accounts.User, string, bool) (bool, error)
@@ -668,29 +658,6 @@ func (s *Service) trashItem(ctx context.Context, trashID string) (TrashItem, err
 		return TrashItem{}, ErrNotFound
 	}
 	return item, err
-}
-
-func (s *Service) ListAudit(ctx context.Context, actor accounts.User) ([]AuditEvent, error) {
-	if actor.Role != accounts.RoleAdmin || actor.Status != accounts.UserStatusActive {
-		return nil, ErrForbidden
-	}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, actor_user_id, action, resource_type, resource_id, occurred_at, detail
-FROM audit_events ORDER BY occurred_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var events []AuditEvent
-	for rows.Next() {
-		var event AuditEvent
-		var occurredAt string
-		if err := rows.Scan(&event.ID, &event.ActorUserID, &event.Action, &event.ResourceType, &event.ResourceID, &occurredAt, &event.Detail); err != nil {
-			return nil, err
-		}
-		event.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		events = append(events, event)
-	}
-	return events, rows.Err()
 }
 
 // purgeExpiredTrash removes the actor's own expired trash items. Items in a

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -134,7 +135,7 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if len(volumes) != 1 || volumes[0].ID != "volume:data" {
 		t.Fatalf("volumes = %#v", volumes)
 	}
-	audit, err := restarted.ListAudit(ctx)
+	audit, err := restarted.Activity(ctx, activity.Query{Limit: activity.MaxLimit})
 	if err != nil {
 		t.Fatal(err)
 	}

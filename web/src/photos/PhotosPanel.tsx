@@ -824,6 +824,9 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       className={`ph-app${sidebarOpen ? " nav-open" : ""}${narrow ? " narrow" : ""}${selection.selected.size ? " selecting" : ""}${dragging ? " dragging" : ""}`}
       tabIndex={-1}
       onKeyDown={keyDown}
+      // Another member's library under a viewing grant is beyond what VNAS may
+      // read (assistant/webosControl.ts); the member ends the viewing first.
+      data-vnas-private={viewingLibrary ? "他人的图库（只读查看）" : undefined}
       {...dropHandlers}
     >
       {sidebarOpen && (

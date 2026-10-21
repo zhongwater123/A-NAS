@@ -331,7 +331,9 @@ describe("MediaCenter", () => {
       ["/api/v1/uploads", "space:shared", "file:movies", "Heat (1995).zh.srt"],
     ]);
     const headers: Record<string, string> = {};
-    tus.uploads[0].options.onBeforeRequest({ setHeader: (name: string, value: string) => { headers[name] = value; } });
+    await tus.uploads[0].options.onBeforeRequest({
+      getMethod: () => "POST", getURL: () => "/api/v1/uploads", setHeader: (name: string, value: string) => { headers[name] = value; },
+    });
     expect(headers["X-CSRF-Token"]).toBe("csrf");
     act(() => { for (const upload of tus.uploads) upload.options.onSuccess(); });
     await waitFor(() => expect(within(dialog).getAllByText("已上传")).toHaveLength(2));
