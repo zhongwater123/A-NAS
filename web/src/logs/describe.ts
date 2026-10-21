@@ -78,6 +78,7 @@ const fileVerbs: Record<string, Verb> = {
   "snapshot.deleted": { named: (item) => ["删除了快照", item], counted: (n) => `删除了 ${n} 个快照` },
   "snapshot.kept": { named: (item) => ["把定时快照保留为手动快照", item], counted: (n) => `保留了 ${n} 个定时快照` },
   "snapshot.expired": { named: (item) => ["清理了到期的定时快照", item], counted: (n) => `清理了 ${n} 个到期的定时快照` },
+  "snapshot.missing": { named: (item) => ["移除了数据卷上已不存在的快照", item], counted: (n) => `移除了 ${n} 个数据卷上已不存在的快照` },
   "snapshot.folder_restored": { counted: (n) => `从快照恢复了 ${n} 个文件夹` },
 };
 

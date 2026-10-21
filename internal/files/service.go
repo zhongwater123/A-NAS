@@ -350,9 +350,14 @@ type Service struct {
 	// scheduledSpaces lets the development snapshot backend find spaces that
 	// scheduled snapshots reach before any request prepared them.
 	scheduledSpaces map[string]accounts.Space
-	// uploads holds the temporaries of pending uploads by name.
-	uploadsMu sync.Mutex
-	uploads   map[string]struct{}
+	// temporaries holds the temporaries of pending uploads and copies by
+	// name; reconciliation removes the ones nobody holds.
+	temporariesMu sync.Mutex
+	temporaries   map[string]struct{}
+	// takingSnapshots holds the snapshots being taken. snapshotsMu also
+	// orders sweeps against them (see SweepSnapshots).
+	snapshotsMu     sync.Mutex
+	takingSnapshots map[string]struct{}
 }
 
 func NewService(store *Store, volumeRoot string, policy Policy, options Options) *Service {
@@ -370,7 +375,7 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
 		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: options.FileSystem,
 		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
-		uploads: make(map[string]struct{}),
+		temporaries: make(map[string]struct{}), takingSnapshots: make(map[string]struct{}),
 	}
 	if service.location == nil {
 		service.location = time.Local
@@ -1234,7 +1239,11 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	if err := s.ensureCapacity(size); err != nil {
 		return Entry{}, "", err
 	}
-	temporary := filepath.Join(parent, ".a-nas-copy-"+safeSegment(s.randomID("copy")))
+	temporary := filepath.Join(parent, copyTemporaryPrefix+safeSegment(s.randomID("copy")))
+	// Held from before it exists until it is renamed or removed; one that a
+	// restart leaves behind, reconciliation removes.
+	s.holdTemporary(filepath.Base(temporary), true)
+	defer s.holdTemporary(filepath.Base(temporary), false)
 	if err := s.fs.Copy(ctx, source, temporary); err != nil {
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
 		return Entry{}, "", err
@@ -1336,14 +1345,14 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 	if err != nil {
 		return Entry{}, err
 	}
-	s.holdUpload(filepath.Base(temporaryPath), true)
+	s.holdTemporary(filepath.Base(temporaryPath), true)
 	committed := false
 	defer func() {
 		_ = temporary.Close()
 		if !committed {
 			_ = s.fs.Remove(context.WithoutCancel(ctx), temporaryPath)
 		}
-		s.holdUpload(filepath.Base(temporaryPath), false)
+		s.holdTemporary(filepath.Base(temporaryPath), false)
 	}()
 	buffer := make([]byte, 1024*1024)
 	for {
@@ -1589,11 +1598,16 @@ func scanEntry(row rowScanner) (Entry, error) {
 	return entry, nil
 }
 
-// reconcileSkip hides A-NAS bookkeeping and in-flight copies. Upload
-// temporaries are scanned but never catalogued, so that stale ones are found.
+// copyTemporaryPrefix names the hidden duplicate a copy writes before it
+// takes the target's name.
+const copyTemporaryPrefix = ".a-nas-copy-"
+
+// reconcileSkip hides A-NAS bookkeeping. Upload temporaries are scanned and
+// copy temporaries listed without their contents, but neither is
+// catalogued, so that stale ones are found.
 var reconcileSkip = ScanSkip{
-	Names:    []string{".a-nas-trash", ".a-nas-snapshots", ".a-nas-stale"},
-	Prefixes: []string{".a-nas-copy-"},
+	Names:  []string{".a-nas-trash", ".a-nas-snapshots", ".a-nas-stale"},
+	Opaque: []string{copyTemporaryPrefix},
 }
 
 func (s *Service) reconcile(ctx context.Context, space accounts.Space, root string) error {
@@ -1603,10 +1617,14 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 	}
 	parentIDs := map[string]string{".": ""}
 	seen := make(map[uint64]struct{})
-	var temporaries []ScanEntry
+	var temporaries, copies []ScanEntry
 	for _, item := range scanned {
 		if isUploadTemporary(item.Path) {
 			temporaries = append(temporaries, item)
+			continue
+		}
+		if strings.HasPrefix(path.Base(item.Path), copyTemporaryPrefix) {
+			copies = append(copies, item)
 			continue
 		}
 		if item.Info.Kind != KindFile && item.Info.Kind != KindDirectory {
@@ -1647,7 +1665,20 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 		}
 	}
 	s.removeStaleUploads(ctx, root, temporaries)
+	s.removeStaleCopies(ctx, root, copies)
 	return nil
+}
+
+// removeStaleCopies deletes copy temporaries that no copy holds. A copy
+// stopped by a restart or a crash leaves a hidden duplicate, which SMB
+// would still show. Ones the actor may not delete are left for someone who may.
+func (s *Service) removeStaleCopies(ctx context.Context, root string, copies []ScanEntry) {
+	for _, item := range copies {
+		if s.temporaryHeld(item.Info.Name) {
+			continue
+		}
+		_ = s.fs.RemoveAll(ctx, filepath.Join(root, filepath.FromSlash(item.Path)))
+	}
 }
 
 // ensureCapacity checks the whole data volume, which the Product Service can
