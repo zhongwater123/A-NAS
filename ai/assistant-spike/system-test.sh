@@ -104,6 +104,10 @@ fold() {
 }
 assistant_probe() { # ACCOUNT LEAST_PASSES
   systemctl start "anas-assistant-probe@$1.service" || true
+  # The oneshot has exited, but journald reads its stdout stream on its own time: a short
+  # probe's lines could still be on their way (CI once read none of owner's). Have journald
+  # take in everything written so far before reading it.
+  journalctl --sync || true
   fold "assistant sandbox ($1)" < <(journalctl -u "anas-assistant-probe@$1.service" -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)' || true)
   check "the probe ran in $1's sandbox" test "$folded" -ge "$2"
 }
