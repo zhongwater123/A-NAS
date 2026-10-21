@@ -1,6 +1,6 @@
 # EmbeddingGemma 2 文本向量：任务前缀、社区微调与我们的微调流程
 
-> 状态：脚本与离线测试完成；基座基线已在 CPU 开发机上跑（sentence-transformers 运行时）：短文本分类 60 条、仓库文档检索 1308 段 42 问；MediaPipe 运行时的对照、微调与微调权重转 LiteRT 未做  
+> 状态：脚本与离线测试完成；基座基线已在 CPU 开发机上跑（sentence-transformers 运行时）：短文本分类 60 条、仓库文档检索 1308 段 42 问、实验 NAS 的真实反馈与日志；MediaPipe 运行时的对照、微调与微调权重转 LiteRT 未做  
 > 更新日期：2026-10-21  
 > 适用范围：EmbeddingGemma 2 的文本编码器（270M），与相册 Worker 同一模型文件 `embeddinggemma-2-740m@e7a8a2204b91`；只讨论文本对文本的用法  
 > 关联：[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)、[标签校准与中文检索评估](photo-ai-label-calibration.md)、[`ai/finetune/`](../../ai/finetune/)、[`ai/tests/test_finetune.py`](../../ai/tests/test_finetune.py)
@@ -47,9 +47,10 @@ Hugging Face 上 `google/embeddinggemma-2` 下有 119 个微调、`embeddinggemm
 | `embedders.py` | 统一接口：`ProviderEmbedder`（Worker 的 MediaPipe 路径 + 自选前缀）、`HttpEmbedder`（OpenAI 兼容 `/v1/embeddings`）、`HashEmbedder`（字符 n-gram 哈希，无模型时的分数下限）、`CachedEmbedder`（按文本落盘） | 标准库 |
 | `similarity.py` | `rank`（Top-K）、`find_duplicates`（近似重复分组）、`classify_by_examples`（按样例分类） | 标准库 |
 | `server.py` | 把 HF 权重（基座或微调后）起成 `/v1/embeddings` 服务，只加载文本编码器；`--fake` 用哈希向量联调 | sentence-transformers（另一个 venv，见 `requirements.txt`） |
-| `build_triplets.py` | 带标签文本（同标签互为正例）和标注对 → 三元组 JSONL；用当前模型挖难负例 | 标准库 |
+| `build_triplets.py` | 带标签文本（同标签互为正例）、标注对、`--doc-queries` 的问答对 → 三元组 JSONL；用当前模型挖难负例 | 标准库 |
 | `eval.py` | 同一份三元组当检索任务：Hit@1 / Hit@5 / MRR@10 / 正负例相似度差；可评 `--model`（MediaPipe）、`--embed-url`（HF）或哈希 | 标准库（`--model` 需 Worker 运行环境） |
 | `eval_docs.py` + `docs_queries.json` | 文档检索：把 `docs/` 按标题切段当语料，42 个中文问题各标明答案段落，算段落级与文件级 Hit@k / MRR；`--mode sts` 对照前缀，`--dim` 从全维缓存截断 | 标准库 |
+| `eval_dedup.py` | 一批真实文本的相似度分布、各阈值下的近似重复分组、按样例分类的打标率；`--strip-template` 先剥掉反馈模板 | 标准库 |
 | `train.py` | LawVault 配方：MatryoshkaLoss(MNRL)，lr 2e-5，3 epoch，batch 32，bf16，只训文本编码器，留 15% 验证 | GPU + sentence-transformers |
 
 流程（在 `ai/` 目录下）：
@@ -97,6 +98,19 @@ python -m finetune.eval finetune/data/triplets.jsonl --embed-url http://127.0.0.
 - **问句找段落要用检索前缀。** 两边都换成 STS 前缀后 Hit@1 从 0.619 掉到 0.429（文件级 0.833 → 0.667），Hit@5 持平：STS 前缀是给对称的句子比对用的，不对称的问答检索要用 query / document 前缀。
 - 语料包含本文自身（研究文档不在跳过列表里），42 问没有一问以本文为答案，不影响结论。
 
+### 真实数据：实验 NAS 的问题反馈与系统日志
+
+2026-10-21 用测试工具只读取回实验 NAS 的 21 条问题反馈（16 条已解决）和近 7 天的 500 条系统日志（按消息去重 247 种，8 个服务），加上 2026-10-13 n8n 真实崩溃日志 13 行，用 `eval_dedup.py` 看相似度分布、近似重复分组与按样例归类。文本留在开发机，不进仓库。
+
+| 数据 | 两两相似度 中位 / P99 / 最高 | 结论 |
+|---|---|---|
+| 问题反馈 20 条（STS 前缀） | 0.792 / 0.891 / 0.938；剥掉模板后 0.791 / 0.856 / 0.906 | 最像的几对全是同一模板（`【… 体验建议】… 复现：桌面→…`）下内容不同的建议，模板头部把分数撑到 0.94；剥掉后降到 0.91，仍是"回收站列表缺信息"和"快照列表缺信息"这类同类建议。两条十字以内的短句（"文件管理有问题"对"这里是问题反馈"）得 0.88。去重前必须剥模板，短文本不能只看向量。 |
+| 系统日志 247 种消息 | 0.796 / 0.951 / 0.999 | 阈值 0.95：39 组、覆盖 148 条，合并的正是同一消息的不同参数（`anas-media@0/1/2`、同一堆栈帧的不同地址）；0.90 开始把不相干的并进一组（最大组 78 条），0.85 几乎全并成一组。日志按语义合并用 0.95。 |
+| 系统日志按 17 条故障样例归类 | — | 健康机器的日志：阈值 0.90 只有 1 条被打标签，且确实是权限警告（`mkdir -p failed for path /.config/…`，0.907）；0.85 误报 12 条（"server running" 判成数据库类），0.80 误报 208 条。 |
+| n8n 崩溃日志 13 行按样例归类 | 0.853 / 1.000 / 1.000 | `EACCES: permission denied, open '/home/node/…'` 得 0.958 归为权限类（正确）；堆栈帧行在 0.84–0.86 被归到各类（应视为无标签）。归类阈值取 0.92 上下能同时拦住健康日志和堆栈噪声。 |
+
+三元组数据加入 42 个文档问答对后为 274 条（`build_triplets.py --doc-queries`）；问答对是不对称的，训练时应用 query / document 前缀，`train.py` 目前只支持单一前缀，待改。
+
 ### 运行时的两个发现
 
 - **CPU 上不要用 bf16。** 这台开发机（Intel Core Ultra 5 225U，无 AVX-512 / AMX）上 bf16 靠软件模拟：8 段典型长度的文档 bf16 246 s、fp32 42.8 s，慢 5.7 倍。`server.py` 改为 CPU 默认 fp32、GPU 默认 bf16（`--dtype` 可指定）。官方只禁 fp16，没有提 CPU 上 bf16 的代价。
@@ -114,7 +128,7 @@ python -m finetune.eval finetune/data/triplets.jsonl --embed-url http://127.0.0.
 - **阈值是经验值。** `similarity.py` 的用例阈值参考官方示例的分数分布，没在我们的数据上调过。
 - **双重前缀。** TEI 的 `/embed` 会按 `prompt_name` 自己加前缀，接那种服务时关掉 `HttpEmbedder(add_prefix=False)`。
 - **只跑了一条运行时。** 基线用的是 sentence-transformers 在 CPU 上加载 Hugging Face 权重；Worker 走的 MediaPipe + LiteRT 没有在这台机器上跑（没有开发镜像），两条运行时的向量是否一致待对照。`train.py` 和 `eval.py --model` 只做了依赖缺失路径的检查，离线测试在 [`ai/tests/test_finetune.py`](../../ai/tests/test_finetune.py)（`make ai-test`）。
-- **数据还小。** 分类数据 60 条，是为了把流程跑通；文档检索 42 问是真实文档但问题由人工撰写，数量也只够看趋势。要用各场景的真实文本（OCR 输出、对话片段、日志、成员真实提问）重做。
+- **数据还小。** 分类数据 60 条，是为了把流程跑通；文档检索 42 问是真实文档但问题由人工撰写；真实反馈只有 21 条、没有人工标注的重复对，日志只有一台健康机器 7 天的。要攒各场景的真实文本（OCR 输出、对话片段、更多机器的日志、成员真实提问）和标注。
 
 ## 来源
 

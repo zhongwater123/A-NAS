@@ -251,5 +251,36 @@ class EvalDocsTest(unittest.TestCase):
             p.write_text("内容", encoding="utf-8")
             self.assertEqual(_read_text(p), "内容")
 
+class EvalDedupTest(unittest.TestCase):
+    def test_strip_template_and_load_texts(self):
+        from finetune import eval_dedup
+        t = eval_dedup.strip_template("【A 测试｜文件】上传失败 版本：0.3.1 复现：2026-10-13 点上传")
+        self.assertNotIn("【", t)
+        self.assertNotIn("0.3.1", t)
+        self.assertNotIn("2026-10-13", t)
+        self.assertIn("上传失败", t)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("已登录" + chr(10) + json.dumps({"items": [{"text": " a  b "}, {"text": ""}, {"text": "c"}]}, ensure_ascii=False))
+            self.assertEqual(eval_dedup.load_texts(path, "items.text"), ["a b", "c"])
+
+    def test_doc_query_pairs(self):
+        from finetune import build_triplets
+        nl = chr(10)
+        with tempfile.TemporaryDirectory() as d:
+            docs = os.path.join(d, "docs")
+            os.makedirs(docs)
+            with open(os.path.join(docs, "a.md"), "w", encoding="utf-8") as f:
+                f.write(nl.join(["# 标题", "", "## 回收站", "", "照片删除后进入回收站，三十天内可以恢复。", ""]))
+            q = os.path.join(d, "q.json")
+            with open(q, "w", encoding="utf-8") as f:
+                json.dump([{"q": "删掉的照片多久能恢复", "target": "a.md#回收站"},
+                           {"q": "不存在的", "target": "a.md#没有这节"}], f, ensure_ascii=False)
+            pairs = build_triplets.doc_query_pairs(q, docs)
+            self.assertEqual(len(pairs), 1)
+            self.assertEqual(pairs[0]["a"], "删掉的照片多久能恢复")
+            self.assertIn("三十天", pairs[0]["b"])
+
 if __name__ == "__main__":
     unittest.main()
