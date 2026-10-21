@@ -1,0 +1,48 @@
+[Unit]
+Description=A-NAS voice Worker
+Documentation=https://github.com/zhongwater123/A-NAS
+Requires=anas-voice.socket
+After=anas-voice.socket
+
+[Service]
+Type=simple
+# Turns the speech the Product Service passes as a memory descriptor into
+# speaker vectors, so voiceprints are computed on the device. It has no
+# network and no data volume, so neither recordings nor voiceprints can leave
+# the device through it (ADR 0027); the system test proves both.
+User=a-nas-voice
+DynamicUser=true
+# The installer links the release's runtime and speaker model to the copies it
+# keeps once per content under /opt/a-nas, shared with the photo AI Worker.
+Environment=PYTHONPATH=/opt/a-nas/current/ai
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.voice --speaker-model /opt/a-nas/current/ai/speaker-embedder.onnx --speaker-manifest /opt/a-nas/current/ai/speaker-embedder.json
+UMask=0077
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+# The speaker model is 28 MB; with ONNX Runtime and half an hour of samples
+# the Worker stayed under 400 MB on the development machine
+# (docs/research/voiceprint-evaluation.md).
+MemoryHigh=768M
+MemoryMax=1G
+# Like the photo AI Worker it may use every core but two
+# (anas-voice.service.d/cpu-reserve.conf) and gives way to the device's other
+# work.
+Slice=anas-ai.slice

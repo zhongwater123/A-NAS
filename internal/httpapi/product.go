@@ -31,6 +31,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/voiceapi"
 )
 
 const sessionCookieName = "anas_session"
@@ -75,6 +76,11 @@ type ProductDependencies struct {
 	// only their own assistant, and receives the user through
 	// assistantapi.WithUser.
 	Assistant http.Handler
+	// Voice serves /api/v1/voice, 语音处理, to every signed-in user, each
+	// reaching only their own recordings, and receives the user through
+	// voiceapi.WithUser; the session token stays in the context for the File
+	// Broker.
+	Voice http.Handler
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.
 	SystemLogs systemlog.Reader
@@ -106,6 +112,7 @@ type productHandler struct {
 	feedback   http.Handler
 	transfers  http.Handler
 	assistant  http.Handler
+	voice      http.Handler
 	systemLogs systemlog.Reader
 	dataSource DataSource
 	changed    func(context.Context, accounts.User, string)
@@ -130,7 +137,7 @@ func NewProduct(dependencies ProductDependencies) http.Handler {
 		previews: dependencies.FilePreviews,
 		terminal: dependencies.Terminal, containers: dependencies.Containers, apps: dependencies.Apps, shortcuts: dependencies.AppShortcuts,
 		shares: dependencies.Shares, photos: dependencies.Photos, media: dependencies.Media, music: dependencies.Music, feedback: dependencies.Feedback,
-		transfers: dependencies.Transfers, assistant: dependencies.Assistant, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
+		transfers: dependencies.Transfers, assistant: dependencies.Assistant, voice: dependencies.Voice, systemLogs: dependencies.SystemLogs, dataSource: dependencies.DataSource,
 		personalization: dependencies.Personalization, changed: dependencies.FilesChanged, logger: logger, mux: http.NewServeMux(),
 	}
 	handler.routes()
@@ -166,6 +173,9 @@ func (h *productHandler) routes() {
 	}
 	if h.assistant != nil {
 		h.mux.Handle(assistantapi.PathPrefix+"/", h.withUser(h.assistant, assistantapi.WithUser))
+	}
+	if h.voice != nil {
+		h.mux.Handle(voiceapi.PathPrefix+"/", h.withUser(h.voice, voiceapi.WithUser))
 	}
 	if h.transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {

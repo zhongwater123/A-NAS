@@ -28,5 +28,10 @@ six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be89
 # one dependency it does not share with MediaPipe.
 onnxruntime==1.31.0 --hash=sha256:37fd78cee5160c7a43a1730ccb3682ffd880af9c9e80385d625c0c2f8b125809
 protobuf==7.36.2 --hash=sha256:89f23aa53c24553a2416fd4fd1ec06f74fa42b14b546d8883128813f775bbfd2
+# The voice Worker (docs/architecture/voice.md): sherpa-onnx's speaker
+# embedding extractor and fast clustering. sherpa-onnx-core carries its own
+# ONNX Runtime, used by nothing else.
+sherpa-onnx==1.13.8 --hash=sha256:0e5d870fb0648befb94e260c11de4cf4b293b2a90a63e3a6a2869be698927bc4
+sherpa-onnx-core==1.13.8 --hash=sha256:4da90acf435373d7b2ba9cc0be806e7e274d28f63f5780880b5dea6721626e36
 # Left out: sounddevice (with cffi and pycparser) serves only MediaPipe's
 # audio tasks.

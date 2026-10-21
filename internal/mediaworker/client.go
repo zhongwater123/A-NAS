@@ -51,6 +51,26 @@ type AudioRequest struct {
 	Bits       int
 }
 
+// SpeechRequest decodes the first audio stream to 16 kHz mono in Format
+// (SpeechOpus or SpeechPCM) from Start for Duration seconds, 0 meaning to
+// the end.
+type SpeechRequest struct {
+	Format   string
+	Start    float64
+	Duration float64
+}
+
+// Speaker decodes audio for speech services. It is not part of Worker, so the
+// apps' test workers need not implement it.
+type Speaker interface {
+	Speech(ctx context.Context, file *os.File, request SpeechRequest) (io.ReadCloser, error)
+}
+
+var (
+	_ Speaker = Client{}
+	_ Speaker = Local{}
+)
+
 // Client reaches the sandboxed worker through its socket; systemd starts a
 // worker for each connection.
 type Client struct {
@@ -202,6 +222,11 @@ func audio(ctx context.Context, dial dialer, file *os.File, options AudioRequest
 	return call(ctx, dial, request, file)
 }
 
+func speech(ctx context.Context, dial dialer, file *os.File, options SpeechRequest) (io.ReadCloser, error) {
+	request := Request{Op: OpSpeech, Format: options.Format, Start: options.Start, Duration: options.Duration, Stream: -1, AudioTrack: -1}
+	return call(ctx, dial, request, file)
+}
+
 func (c Client) Probe(ctx context.Context, file *os.File) (Probe, error) {
 	return probe(ctx, c.dial, file)
 }
@@ -221,6 +246,10 @@ func (c Client) Audio(ctx context.Context, file *os.File, options AudioRequest) 
 	return audio(ctx, c.dial, file, options)
 }
 
+func (c Client) Speech(ctx context.Context, file *os.File, options SpeechRequest) (io.ReadCloser, error) {
+	return speech(ctx, c.dial, file, options)
+}
+
 func (l Local) Probe(ctx context.Context, file *os.File) (Probe, error) {
 	return probe(ctx, l.dial, file)
 }
@@ -238,6 +267,10 @@ func (l Local) Stream(ctx context.Context, file *os.File, options StreamRequest)
 }
 func (l Local) Audio(ctx context.Context, file *os.File, options AudioRequest) (io.ReadCloser, error) {
 	return audio(ctx, l.dial, file, options)
+}
+
+func (l Local) Speech(ctx context.Context, file *os.File, options SpeechRequest) (io.ReadCloser, error) {
+	return speech(ctx, l.dial, file, options)
 }
 
 // LocalTools finds FFmpeg on PATH, or returns false.

@@ -36,6 +36,15 @@ const (
 	OpStream = "stream"
 	// OpAudio decodes the first audio stream to FLAC.
 	OpAudio = "audio"
+	// OpSpeech decodes the first audio stream for speech services: 16 kHz
+	// mono, as Ogg Opus or as raw 16-bit little-endian samples.
+	OpSpeech = "speech"
+)
+
+// Speech formats.
+const (
+	SpeechOpus = "opus"
+	SpeechPCM  = "pcm"
 )
 
 var (
@@ -79,6 +88,9 @@ type Request struct {
 	// sample, 16 or 24. Start is shared with Stream.
 	SampleRate int `json:"sampleRate,omitempty"`
 	Bits       int `json:"bits,omitempty"`
+	// Speech: Format is SpeechOpus or SpeechPCM, from Start for Duration
+	// seconds (0 to the end).
+	Duration float64 `json:"duration,omitempty"`
 }
 
 type Response struct {
@@ -113,6 +125,10 @@ func (r Request) Validate() error {
 	case OpAudio:
 		if !finiteIn(r.Start, 0, 1e6) || r.SampleRate != 0 && (r.SampleRate < 8000 || r.SampleRate > 384000) || r.Bits != 16 && r.Bits != 24 {
 			return errors.New("invalid audio request")
+		}
+	case OpSpeech:
+		if r.Format != SpeechOpus && r.Format != SpeechPCM || !finiteIn(r.Start, 0, 1e6) || !finiteIn(r.Duration, 0, 1e6) {
+			return errors.New("invalid speech request")
 		}
 	case OpStream:
 		if !finiteIn(r.Start, 0, 1e6) || r.AudioTrack < -1 || r.AudioTrack > 64 || r.MaxBitrate < 0 || r.MaxBitrate > 100_000 ||

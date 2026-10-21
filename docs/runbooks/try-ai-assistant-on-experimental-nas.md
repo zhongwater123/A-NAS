@@ -1,7 +1,7 @@
 # 在实验 NAS 上试用 AI 助手（云端模型）
 
 状态：draft
-更新时间：2026-10-16
+更新时间：2026-10-21
 
 ## 目的
 
@@ -79,6 +79,7 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 - 2026-10-16 之后的 bundle 带上了后台复盘工具白名单的上游修复，并为每个账号启用每周的闲时整理（`anas-assistant-curator@<账号>.timer`，`check` 的最后一行 `PASS weekly curator`）；`update` 一并换上（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理2026-10-16开发机)）。
 - 2026-10-19 之后的 bundle 接上相册（`check` 的最后两行 `PASS photo service ...`），并把会话闸门从 `/etc/a-nas/*.env` 移到 drop-in；`update` 删掉环境文件里旧的那一行。之后的正式部署不再需要重新加它（[研究](../research/hermes-agent-runtime.md#相册接入试用与回复中的照片2026-10-19开发机)）。
 - 2026-10-20 之后的 bundle 开启定时任务：装上唤醒服务 `anas-assistant-cron-waker.service` 与运行单元 `anas-assistant-cron@.service`（`check` 多一行 `PASS scheduled tasks are started when due`），以及系统技能 `anas-scheduled-tasks`。任务列表、立即运行与桌面提示在产品服务中，要正式部署带上它们才有（[研究](../research/hermes-agent-runtime.md#定时任务2026-10-20开发机)）。
+- 带“语音处理”的 bundle 在产品服务的 drop-in 里再写上模型网关的套接字与模型名（`ANAS_TEXT_MODEL_SOCKET`、`ANAS_TEXT_MODEL`，取 `ANAS_TRIAL_MODEL`），语音处理的翻译与总结才可用（[ADR 0027](../adr/0027-transcribe-in-the-cloud-and-keep-voiceprints-on-the-device.md)）；正式部署带语音处理的产品服务后执行一次 `update`。之前的 bundle 不写这两行，翻译与总结显示“未接入”，转写不受影响。
 - 带“VNAS 操作 WebOS”的 bundle 把实例换成 Hermes 自己的登录，旧的产品服务连不上它，带登录的产品服务也登不进旧实例，所以**同一次维护里先正式部署产品服务（含 Host Agent 的文件代理），再立即 `update`**；中间这一会儿 VNAS 不可用。它带上 `hermes-patches/0002` 与系统技能 `anas-desktop`，删掉旧的 `anas-assistant-token@.service`（[研究](../research/hermes-agent-runtime.md#让-vnas-操作-webos2026-10-20开发机)）。
 
 ## 验证

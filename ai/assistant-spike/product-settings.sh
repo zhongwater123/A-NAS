@@ -7,8 +7,10 @@
 #   product-settings.sh on     the session gate (decision 10) in the Host Agent and the Product
 #                              Service, and the photo service's socket for members' assistants
 #                              (decision 6, #113) with the Host Agent's lookup of members by
-#                              UID behind it; restarts the Host Agent, the photo service and
-#                              the Product Service
+#                              UID behind it; 语音处理's translations and summaries through the
+#                              same model gateway (ADR 0027), with the model TRIAL_MODEL names
+#                              (default deepseek-flash); restarts the Host Agent, the photo
+#                              service and the Product Service
 #   product-settings.sh off    undo, and restart them
 #   product-settings.sh state  one line saying what is on
 #
@@ -19,6 +21,11 @@ gate=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
 photos=/run/a-nas-photos-assistant/assistant.sock
 units=/etc/systemd/system
 dropin=assistant-trial.conf
+# 语音处理 translates and summarises with the assistant's model, through the gateway that holds
+# its key (ADR 0027).
+gateway=/run/anas-assistant-gw/model.sock
+model=${TRIAL_MODEL:-deepseek-flash}
+[[ $model =~ ^[A-Za-z0-9._:-]+$ ]] || { echo "TRIAL_MODEL is not a model name" >&2; exit 2; }
 services=(anas-host-agent anas-api anas-photos)
 
 restart() {
@@ -48,7 +55,8 @@ on() {
   for service in "${services[@]}"; do install -d -m 0755 "$units/$service.service.d"; done
   printf '[Service]\nEnvironment=%s\n# Members by UID, for the photo service'"'"'s socket for assistants.\nEnvironment=ANAS_PHOTO_ASSISTANT_LOOKUP=1\n' \
     "$gate" > "$units/anas-host-agent.service.d/$dropin"
-  printf '[Service]\nEnvironment=%s\n' "$gate" > "$units/anas-api.service.d/$dropin"
+  printf '[Service]\nEnvironment=%s\n# 语音处理: the model gateway and the model.\nEnvironment=ANAS_TEXT_MODEL_SOCKET=%s\nEnvironment=ANAS_TEXT_MODEL=%s\n' \
+    "$gate" "$gateway" "$model" > "$units/anas-api.service.d/$dropin"
   printf '[Unit]\nWants=anas-photos-assistant.socket\nAfter=anas-photos-assistant.socket\n\n[Service]\nSockets=anas-photos-assistant.socket\nEnvironment=ANAS_PHOTOS_ASSISTANT_SOCKET=%s\n' \
     "$photos" > "$units/anas-photos.service.d/$dropin"
   install -m 0644 "$here/anas-photos-assistant.socket" "$units/anas-photos-assistant.socket"

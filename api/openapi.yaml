@@ -2390,6 +2390,239 @@ paths:
             image/gif: { schema: { type: string, format: binary } }
             image/webp: { schema: { type: string, format: binary } }
         "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/status:
+    get:
+      operationId: getVoiceStatus
+      summary: "Which parts of 语音处理 this device has, with the scene templates and languages it offers"
+      responses:
+        "200": { description: Status, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceStatus" } } } }
+  /api/v1/voice/settings/recognizer:
+    get:
+      operationId: getVoiceRecognizerSettings
+      summary: "The recognition service's credentials and the TOS bucket that relays recordings to it, masked; administrators only"
+      responses:
+        "200": { description: Settings, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerSettings" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+    put:
+      operationId: setVoiceRecognizerSettings
+      summary: "Save Doubao's credentials (the new console's API Key, or the old console's APP ID and Access Token) and the TOS bucket with its access key; administrators only"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerCredentials" } } } }
+      responses:
+        "200": { description: Settings, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerSettings" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: clearVoiceRecognizerSettings
+      summary: Forget the credentials; administrators only
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Forgotten }
+        "403": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/settings/recognizer/test:
+    post:
+      operationId: testVoiceRecognizer
+      summary: "Relay a second of silence through TOS and submit it, with the given credentials or the saved ones without a body; administrators only"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerCredentials" } } } }
+      responses:
+        "200": { description: The outcome, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecognizerTest" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings:
+    get:
+      operationId: listVoiceRecordings
+      summary: "The member's recordings, newest first"
+      responses:
+        "200": { description: Recordings, content: { application/json: { schema: { type: object, additionalProperties: false, required: [recordings], properties: { recordings: { type: array, items: { $ref: "#/components/schemas/VoiceRecording" } } } } } } }
+    post:
+      operationId: importVoiceRecording
+      summary: "Import an audio file the member can read; it is queued for recognition, and the translation and summary chosen run after"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceImport" } } } }
+      responses:
+        "201": { description: The queued recording, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecording" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}:
+    parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }]
+    get:
+      operationId: getVoiceRecording
+      summary: A recording with its transcript, speakers, translations and summaries
+      responses:
+        "200": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+    patch:
+      operationId: renameVoiceRecording
+      summary: "Set the title; an empty title returns to the file's name"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [title], properties: { title: { type: string, maxLength: 120 } } } } } }
+      responses:
+        "200": { description: The recording, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecording" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteVoiceRecording
+      summary: "Remove the recording and all derived from it from 语音处理; the file stays, and what it taught voiceprints is forgotten"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/retry:
+    post:
+      operationId: retryVoiceRecording
+      summary: Queue a failed or waiting recording again, from the start
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: The queued recording, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecording" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/audio:
+    get:
+      operationId: getVoiceRecordingAudio
+      summary: "Play the recording: the file with ranges, or with start, for a recording marked transcode, its audio decoded to FLAC from there"
+      parameters:
+        - { $ref: "#/components/parameters/VoiceRecordingID" }
+        - { name: start, in: query, required: false, description: Seconds from the start; only for recordings browsers cannot play., schema: { type: number, minimum: 0 } }
+      responses:
+        "200":
+          description: The audio
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/mp4: { schema: { type: string, format: binary } }
+            audio/aac: { schema: { type: string, format: binary } }
+            audio/wav: { schema: { type: string, format: binary } }
+            audio/ogg: { schema: { type: string, format: binary } }
+            audio/webm: { schema: { type: string, format: binary } }
+            audio/flac: { schema: { type: string, format: binary } }
+            application/octet-stream: { schema: { type: string, format: binary } }
+        "206": { description: Part of the file, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/utterances/{seq}:
+    patch:
+      operationId: editVoiceUtterance
+      summary: "Correct a sentence's text or give it to another speaker"
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { name: seq, in: path, required: true, schema: { type: integer, minimum: 1 } }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, minProperties: 1, properties: { text: { type: string, minLength: 1, maxLength: 4000 }, speaker: { type: string } } } } } }
+      responses:
+        "200": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/speakers/{speakerKey}:
+    put:
+      operationId: assignVoiceSpeaker
+      summary: "Name a speaker after a person, found or created by name, which teaches that person's voiceprint and may name the voice in the member's other recordings"
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { $ref: "#/components/parameters/VoiceSpeakerKey" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { personId: { type: string }, name: { type: string, maxLength: 40 } } } } } }
+      responses:
+        "200": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/speakers/{speakerKey}/reject:
+    post:
+      operationId: rejectVoicePerson
+      summary: "Say the speaker is not that person: the name or suggestion goes and is never offered for this speaker again"
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { $ref: "#/components/parameters/VoiceSpeakerKey" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [personId], properties: { personId: { type: string } } } } } }
+      responses:
+        "200": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/speakers/{speakerKey}/merge:
+    post:
+      operationId: mergeVoiceSpeakers
+      summary: Make two voices of a recording one
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { $ref: "#/components/parameters/VoiceSpeakerKey" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [into], properties: { into: { type: string } } } } } }
+      responses:
+        "200": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/translations:
+    post:
+      operationId: requestVoiceTranslation
+      summary: Queue a translation of the transcript, again when one exists
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [language], properties: { language: { type: string } } } } } }
+      responses:
+        "202": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/translations/{language}:
+    delete:
+      operationId: deleteVoiceTranslation
+      summary: Remove a translation
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { name: language, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/summaries:
+    post:
+      operationId: requestVoiceSummary
+      summary: Queue a summary with a scene template, again when one exists
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [template], properties: { template: { type: string } } } } } }
+      responses:
+        "202": { description: The recording with its transcript and results, content: { application/json: { schema: { $ref: "#/components/schemas/VoiceRecordingDetail" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/recordings/{recordingId}/summaries/{template}:
+    delete:
+      operationId: deleteVoiceSummary
+      summary: Remove a summary
+      parameters: [{ $ref: "#/components/parameters/VoiceRecordingID" }, { name: template, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/people:
+    get:
+      operationId: listVoicePeople
+      summary: "The people the member named in recordings, with what their voiceprints learned from"
+      responses:
+        "200": { description: People, content: { application/json: { schema: { type: object, additionalProperties: false, required: [people], properties: { people: { type: array, items: { $ref: "#/components/schemas/VoicePerson" } } } } } } }
+  /api/v1/voice/people/{personId}:
+    parameters: [{ $ref: "#/components/parameters/VoicePersonID" }]
+    patch:
+      operationId: renameVoicePerson
+      summary: Rename a person everywhere they appear
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 40 } } } } } }
+      responses:
+        "200": { description: The person, content: { application/json: { schema: { $ref: "#/components/schemas/VoicePerson" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+    delete:
+      operationId: deleteVoicePerson
+      summary: "Forget a person and their voiceprint; the speakers named after them are 发言人 N again"
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Forgotten }
+        "404": { $ref: "#/components/responses/ProductError" }
+  /api/v1/voice/people/{personId}/merge:
+    post:
+      operationId: mergeVoicePeople
+      summary: "Make two people one: the first's speakers are named after the second, whose voiceprint learns theirs"
+      parameters: [{ $ref: "#/components/parameters/VoicePersonID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [into], properties: { into: { type: string } } } } } }
+      responses:
+        "200": { description: The person merged into, content: { application/json: { schema: { $ref: "#/components/schemas/VoicePerson" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
   /api/v1/transfers:
     get:
       operationId: listTransfers
@@ -3249,6 +3482,9 @@ components:
     CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
     FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
     TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
+    VoiceRecordingID: { name: recordingId, in: path, required: true, schema: { type: string } }
+    VoiceSpeakerKey: { name: speakerKey, in: path, required: true, schema: { type: string } }
+    VoicePersonID: { name: personId, in: path, required: true, schema: { type: string } }
     AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).", schema: { type: string, pattern: "^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$" } }
     AssistantTaskID: { name: taskId, in: path, required: true, description: "A Hermes cron job id; a job's name is not accepted.", schema: { type: string, pattern: "^[0-9a-f]{12}$" } }
     AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
@@ -5975,3 +6211,247 @@ components:
       - requestId
       - entryIds
       - target
+    VoiceComponent:
+      type: object
+      additionalProperties: false
+      required: [available]
+      properties:
+        available: { type: boolean }
+        name: { type: string }
+    VoiceLanguage:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { type: string }
+        name: { type: string }
+    VoiceTemplate:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, sections, actions]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        sections: { type: array, items: { type: object, additionalProperties: false, required: [key, title], properties: { key: { type: string }, title: { type: string } } } }
+        actions: { type: boolean, description: The summary lists the tasks agreed on. }
+    VoiceStatus:
+      type: object
+      additionalProperties: false
+      required: [recognizer, textModel, voiceprints, decoder, templates, languages, spokenLanguages]
+      properties:
+        recognizer: { $ref: "#/components/schemas/VoiceComponent" }
+        textModel: { $ref: "#/components/schemas/VoiceComponent" }
+        voiceprints: { $ref: "#/components/schemas/VoiceComponent" }
+        decoder: { $ref: "#/components/schemas/VoiceComponent" }
+        templates: { type: array, items: { $ref: "#/components/schemas/VoiceTemplate" } }
+        languages: { type: array, description: Translation targets., items: { $ref: "#/components/schemas/VoiceLanguage" } }
+        spokenLanguages: { type: array, items: { $ref: "#/components/schemas/VoiceLanguage" } }
+    VoiceRecognizerSettings:
+      type: object
+      additionalProperties: false
+      required: [provider, configured, regions]
+      properties:
+        provider: { type: string, enum: [doubao] }
+        configured: { type: boolean, description: Both Doubao's credentials and the relay bucket are saved. }
+        mode: { type: string, enum: [apiKey, appKey] }
+        appId: { type: string }
+        secretHint: { type: string, description: The secret's last four characters. }
+        storage:
+          type: object
+          additionalProperties: false
+          required: [region, bucket, accessKeyHint, secretHint]
+          properties:
+            region: { type: string }
+            bucket: { type: string }
+            accessKeyHint: { type: string, description: The access key ID's last four characters. }
+            secretHint: { type: string, description: The secret access key's last four characters. }
+        regions: { type: array, description: The TOS regions to choose from., items: { type: string } }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    VoiceRecognizerCredentials:
+      type: object
+      additionalProperties: false
+      required: [mode, storage]
+      properties:
+        mode: { type: string, enum: [apiKey, appKey] }
+        apiKey: { type: string, maxLength: 200 }
+        appId: { type: string, maxLength: 200 }
+        accessToken: { type: string, maxLength: 200 }
+        storage:
+          type: object
+          description: The Volcengine TOS bucket that relays recordings to Doubao, and an access key that may write and delete in it.
+          additionalProperties: false
+          required: [region, bucket, accessKeyId, secretAccessKey]
+          properties:
+            region: { type: string, maxLength: 64 }
+            bucket: { type: string, maxLength: 63 }
+            accessKeyId: { type: string, maxLength: 200 }
+            secretAccessKey: { type: string, maxLength: 200 }
+    VoiceRecognizerTest:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        code: { type: string, enum: [unconfigured, rejected, unreachable, storage_rejected, storage_unreachable, failed] }
+        message: { type: string }
+        queued: { type: boolean, description: Doubao took the test task but had not finished it within the wait. }
+    VoiceImport:
+      type: object
+      additionalProperties: false
+      required: [fileId]
+      properties:
+        fileId: { type: string }
+        language: { type: string }
+        template: { type: string }
+        translateTo: { type: string }
+        hotwords: { type: array, maxItems: 100, items: { type: string, maxLength: 30 } }
+    VoiceFailure:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    VoiceRecording:
+      type: object
+      additionalProperties: false
+      required: [id, fileId, spaceId, name, title, titleEdited, sizeBytes, durationMs, language, template, translateTo, hotwords, status, progress, transcode, speakers, people, textRevision, namesRevision, voiceprints, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        fileId: { type: string, description: The file's stable ID in its space. }
+        spaceId: { type: string }
+        name: { type: string, description: The file's name when it was imported. }
+        title: { type: string, maxLength: 120 }
+        titleEdited: { type: boolean }
+        sizeBytes: { type: integer, minimum: 0 }
+        durationMs: { type: integer, minimum: 0 }
+        language: { type: string, description: "The spoken language chosen, \"\" for automatic." }
+        template: { type: string, description: "The scene of the summary made after recognition, \"\" for none." }
+        translateTo: { type: string }
+        hotwords: { type: array, items: { type: string } }
+        status: { type: string, enum: [queued, processing, waiting, ready, failed] }
+        stage: { type: string, enum: [preparing, recognizing, identifying] }
+        waiting: { type: string, enum: [sign_in, recognizer, busy], description: "sign_in: its member has not signed in since the Product Service started; recognizer: no administrator configured recognition; busy: the service was busy and is tried again." }
+        progress: { type: number, minimum: 0, maximum: 1 }
+        error: { $ref: "#/components/schemas/VoiceFailure" }
+        transcode: { type: boolean, description: "Browsers cannot play the file: play /audio?start= from a position." }
+        speakers: { type: integer, minimum: 0 }
+        people: { type: array, items: { type: string } }
+        preview: { type: string }
+        textRevision: { type: integer, minimum: 0 }
+        namesRevision: { type: integer, minimum: 0 }
+        voiceprints: { type: boolean, description: The speakers have voice vectors. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        processedAt: { type: string, format: date-time }
+    VoiceRecordingDetail:
+      type: object
+      additionalProperties: false
+      required: [id, fileId, spaceId, name, title, titleEdited, sizeBytes, durationMs, language, template, translateTo, hotwords, status, progress, transcode, speakers, people, textRevision, namesRevision, voiceprints, createdAt, updatedAt, utterances, speakerList, translations, summaries]
+      properties:
+        id: { type: string }
+        fileId: { type: string, description: The file's stable ID in its space. }
+        spaceId: { type: string }
+        name: { type: string, description: The file's name when it was imported. }
+        title: { type: string, maxLength: 120 }
+        titleEdited: { type: boolean }
+        sizeBytes: { type: integer, minimum: 0 }
+        durationMs: { type: integer, minimum: 0 }
+        language: { type: string, description: "The spoken language chosen, \"\" for automatic." }
+        template: { type: string, description: "The scene of the summary made after recognition, \"\" for none." }
+        translateTo: { type: string }
+        hotwords: { type: array, items: { type: string } }
+        status: { type: string, enum: [queued, processing, waiting, ready, failed] }
+        stage: { type: string, enum: [preparing, recognizing, identifying] }
+        waiting: { type: string, enum: [sign_in, recognizer, busy], description: "sign_in: its member has not signed in since the Product Service started; recognizer: no administrator configured recognition; busy: the service was busy and is tried again." }
+        progress: { type: number, minimum: 0, maximum: 1 }
+        error: { $ref: "#/components/schemas/VoiceFailure" }
+        transcode: { type: boolean, description: "Browsers cannot play the file: play /audio?start= from a position." }
+        speakers: { type: integer, minimum: 0 }
+        people: { type: array, items: { type: string } }
+        preview: { type: string }
+        textRevision: { type: integer, minimum: 0 }
+        namesRevision: { type: integer, minimum: 0 }
+        voiceprints: { type: boolean, description: The speakers have voice vectors. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        processedAt: { type: string, format: date-time }
+        utterances: { type: array, items: { $ref: "#/components/schemas/VoiceUtterance" } }
+        speakerList: { type: array, items: { $ref: "#/components/schemas/VoiceSpeaker" } }
+        translations: { type: array, items: { $ref: "#/components/schemas/VoiceTranslation" } }
+        summaries: { type: array, items: { $ref: "#/components/schemas/VoiceSummary" } }
+    VoiceUtterance:
+      type: object
+      additionalProperties: false
+      required: [seq, startMs, endMs, speaker, text, edited]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        startMs: { type: integer, minimum: 0 }
+        endMs: { type: integer, minimum: 0 }
+        speaker: { type: string }
+        text: { type: string }
+        edited: { type: boolean }
+    VoiceSpeaker:
+      type: object
+      additionalProperties: false
+      required: [key, number, label, speechMs, voiceprint]
+      properties:
+        key: { type: string }
+        number: { type: integer, minimum: 1 }
+        label: { type: string, description: "The person's name, or 发言人 N." }
+        personId: { type: string }
+        assigned: { type: string, enum: [auto, user], description: "auto: the voice matched a person's voiceprint; user: the member named the speaker." }
+        score: { type: number }
+        suggestion: { type: object, additionalProperties: false, required: [personId, name, score], properties: { personId: { type: string }, name: { type: string }, score: { type: number } } }
+        speechMs: { type: integer, minimum: 0 }
+        voiceprint: { type: boolean }
+    VoiceTranslation:
+      type: object
+      additionalProperties: false
+      required: [language, status, revision, progress, lines, updatedAt]
+      properties:
+        language: { type: string }
+        status: { type: string, enum: [queued, running, ready, failed] }
+        error: { $ref: "#/components/schemas/VoiceFailure" }
+        revision: { type: integer, minimum: 0, description: The text revision translated; older than the recording's means out of date. }
+        model: { type: string }
+        progress: { type: number, minimum: 0, maximum: 1 }
+        lines: { type: array, items: { type: object, additionalProperties: false, required: [seq, text], properties: { seq: { type: integer }, text: { type: string } } } }
+        updatedAt: { type: string, format: date-time }
+    VoiceSummary:
+      type: object
+      additionalProperties: false
+      required: [template, status, textRevision, namesRevision, updatedAt]
+      properties:
+        template: { type: string }
+        status: { type: string, enum: [queued, running, ready, failed] }
+        error: { $ref: "#/components/schemas/VoiceFailure" }
+        textRevision: { type: integer, minimum: 0 }
+        namesRevision: { type: integer, minimum: 0 }
+        model: { type: string }
+        content: { $ref: "#/components/schemas/VoiceSummaryContent" }
+        updatedAt: { type: string, format: date-time }
+    VoiceSummaryContent:
+      type: object
+      additionalProperties: false
+      required: [title, overview, sections, actions, keywords]
+      properties:
+        title: { type: string }
+        overview: { type: string }
+        sections: { type: array, items: { type: object, additionalProperties: false, required: [key, title, items], properties: { key: { type: string }, title: { type: string }, items: { type: array, items: { type: string } } } } }
+        actions: { type: array, items: { type: object, additionalProperties: false, required: [task], properties: { task: { type: string }, owner: { type: string }, due: { type: string } } } }
+        keywords: { type: array, items: { type: string } }
+    VoicePerson:
+      type: object
+      additionalProperties: false
+      required: [id, name, samples, recordings, speechMs, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        samples: { type: integer, minimum: 0, description: Speakers the member named after them that have voice vectors. }
+        recordings: { type: integer, minimum: 0 }
+        speechMs: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

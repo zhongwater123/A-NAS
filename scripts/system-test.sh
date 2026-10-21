@@ -23,7 +23,9 @@
 # naming the model and detector files, ANAS_AI_FACES the directory holding
 # the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces) and
 # ANAS_AI_PETS the one holding the animal model (dinov2-small/, as
-# D:\A-NAS-models\pets), it installs the real runtime and models instead.
+# D:\A-NAS-models\pets), it installs the real runtime and models instead;
+# ANAS_AI_SPEAKER names the directory holding the voice Worker's speaker model
+# (D:\A-NAS-models\speaker).
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -39,8 +41,9 @@ if [[ "${1:-}" != --inside ]]; then
     [[ -f "${ANAS_AI_DETECTOR:-}" ]] || { echo "ANAS_AI_DETECTOR must name the detector file" >&2; exit 2; }
     [[ -d "${ANAS_AI_FACES:-}" ]] || { echo "ANAS_AI_FACES must name the face models' directory" >&2; exit 2; }
     [[ -d "${ANAS_AI_PETS:-}" ]] || { echo "ANAS_AI_PETS must name the animal model's directory" >&2; exit 2; }
+    [[ -d "${ANAS_AI_SPEAKER:-}" ]] || { echo "ANAS_AI_SPEAKER must name the speaker model's directory" >&2; exit 2; }
     real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
-      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro")
+      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro" -v "$ANAS_AI_SPEAKER:/ai-speaker:ro")
   fi
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
@@ -86,11 +89,14 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   ln -s "/ai-faces/$(jq -r .name "$ai/face-embedder.json" | cut -d - -f 1)/$(jq -r .file "$ai/face-embedder.json")" "$ai/face-embedder.onnx"
   cp /src/deploy/models/dinov2-small.json "$ai/animal-embedder.json"
   ln -s "/ai-pets/dinov2-small/$(jq -r .file "$ai/animal-embedder.json")" "$ai/animal-embedder.onnx"
+  cp /src/deploy/models/campplus-zh-en-advanced.json "$ai/speaker-embedder.json"
+  ln -s "/ai-speaker/$(jq -r .file "$ai/speaker-embedder.json")" "$ai/speaker-embedder.onnx"
   cp /src/build/ai-runtime.json "$ai/runtime.json"
   ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
   detector_model="$(jq -r .name "$ai/detector.json")@$(jq -r .sha256 "$ai/detector.json" | cut -c1-12)+"
   face_model="$(jq -r .name "$ai/face-detector.json")@$(jq -r .sha256 "$ai/face-detector.json" | cut -c1-12)+"
   animal_model="$(jq -r .name "$ai/animal-embedder.json")@$(jq -r .sha256 "$ai/animal-embedder.json" | cut -c1-12)+"
+  speaker_model="$(jq -r .name "$ai/speaker-embedder.json")@$(jq -r .sha256 "$ai/speaker-embedder.json" | cut -c1-12)+"
 else
   head -c 65536 /dev/urandom > "$ai/model.litertlm"
   printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
@@ -104,8 +110,12 @@ else
     printf '{"name":"system-test-%s","kind":"sface","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' "$role" \
       "$(stat -c %s "$ai/$role.onnx")" "$(sha256sum "$ai/$role.onnx" | cut -d ' ' -f 1)" > "$ai/$role.json"
   done
+  head -c 2048 /dev/urandom > "$ai/speaker-embedder.onnx"
+  printf '{"name":"system-test-speaker","kind":"3d-speaker","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' \
+    "$(stat -c %s "$ai/speaker-embedder.onnx")" "$(sha256sum "$ai/speaker-embedder.onnx" | cut -d ' ' -f 1)" > "$ai/speaker-embedder.json"
   face_model=fake-faces
   animal_model=fake-animals
+  speaker_model=fake-speakers
   install -d "$ai/venv/bin"
   ln -s /usr/bin/python3 "$ai/venv/bin/python"
   printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
@@ -118,9 +128,16 @@ else
   install -d /etc/systemd/system/anas-ai.service.d
   printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals\n' \
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
+  install -d /etc/systemd/system/anas-voice.service.d
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.voice --fake\n' \
+    > /etc/systemd/system/anas-voice.service.d/system-test.conf
 fi
+# 语音处理 recognises speech with the development stand-in, which needs no
+# network or credentials; everything else runs as in production.
+install -d /etc/systemd/system/anas-api.service.d
+printf '[Service]\nEnvironment=ANAS_VOICE_RECOGNIZER=fake\n' > /etc/systemd/system/anas-api.service.d/system-test.conf
 # Each model role's file is kept once by content: as many as distinct pins.
-models_kept=$(for role in model detector face-detector face-embedder animal-embedder; do jq -r .sha256 "$ai/$role.json"; done | sort -u | wc -l)
+models_kept=$(for role in model detector face-detector face-embedder animal-embedder speaker-embedder; do jq -r .sha256 "$ai/$role.json"; done | sort -u | wc -l)
 # AI starts once the photo library has gone unused for this long, so that the
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
@@ -136,17 +153,20 @@ stage() {
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
   install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
   install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
+  install -m 0644 /src/deploy/systemd/system/anas-voice.socket "$1/anas-voice-system.socket"
+  install -m 0644 /src/deploy/systemd/system/anas-voice.service "$1/anas-voice-system.service"
   install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
   install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
-    "$ai/animal-embedder.json" "$ai/runtime.json" "$1/ai/"
+    "$ai/animal-embedder.json" "$ai/speaker-embedder.json" "$ai/runtime.json" "$1/ai/"
   ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
   ln -s "$ai/detector.onnx" "$1/ai/detector.onnx"
   ln -s "$ai/face-detector.onnx" "$1/ai/face-detector.onnx"
   ln -s "$ai/face-embedder.onnx" "$1/ai/face-embedder.onnx"
   ln -s "$ai/animal-embedder.onnx" "$1/ai/animal-embedder.onnx"
+  ln -s "$ai/speaker-embedder.onnx" "$1/ai/speaker-embedder.onnx"
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
@@ -817,6 +837,68 @@ check "the media probe finds the network and data volume outside the sandbox" de
 check "the media worker's sandbox has no network, data volume or Product Service state" \
   systemctl start anas-media-probe.service
 journalctl -u anas-media-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
+
+# --- 语音处理 (ADR 0027): a member's recording is read as the member, decoded in
+# the media worker and embedded by the voice Worker, which has neither network
+# nor the data volume. Recognition is the development stand-in here.
+check "the installer enables the voice Worker socket" systemctl is-enabled --quiet anas-voice.socket
+check "only the Product Service reaches the voice Worker socket" \
+  test "$(stat -c '%a %U %G' /run/a-nas-voice/voice.sock)" = "660 root a-nas"
+check "the release links the speaker model kept once by content" \
+  test "$(readlink /opt/a-nas/current/ai/speaker-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/speaker-embedder.json")/$(jq -r .file "$ai/speaker-embedder.json")"
+check "the voice Worker may use every core but two" \
+  test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-voice.service)" = "${ai_cores}s"
+ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=220:duration=12" -f lavfi -i "sine=frequency=660:duration=12" \
+  -filter_complex "[0][1]amerge=inputs=2" -ac 2 -c:a aac /tmp/meeting.m4a
+meeting_file=$(upload /tmp/alice.jar "$alice_csrf" "$alice_private" /tmp/meeting.m4a meeting.m4a || true)
+recording=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d "{\"fileId\":\"$meeting_file\"}" "$api/api/v1/voice/recordings" | jq -r .id || true)
+check "a member imports her recording" test -n "$recording" -a "$recording" != null
+check "another member cannot see it" test "$(status_of -b /tmp/owner.jar "$api/api/v1/voice/recordings/$recording")" = 404
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+transcribed() { # the recording is ready, with voices that have voiceprints
+  local detail
+  for _ in $(seq 1 120); do
+    detail=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/voice/recordings/$recording" || true)
+    jq -e '.status == "ready" and (.utterances | length) > 0 and .voiceprints == true
+      and ([.speakerList[] | select(.voiceprint)] | length) > 0' <<<"$detail" >/dev/null && return
+    jq -e '.status == "failed"' <<<"$detail" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  echo "$detail" | jq -c '{status, stage, waiting, error}' 2>/dev/null || true
+  return 1
+}
+check "the recording is decoded in the media worker and its voices embedded in the voice Worker" transcribed
+check "the voice Worker runs under its own dynamic identity" dynamic_identity anas-voice.service
+check "the voice Worker embeds with the release's speaker model" bash -c "curl -fsS -b /tmp/alice.jar '$api/api/v1/voice/status' | jq -e --arg model '$speaker_model' '.voiceprints.name | startswith(\$model)' >/dev/null"
+check "the recording plays for its member" bash -c \
+  "curl -s --max-time 30 -b /tmp/alice.jar '$api/api/v1/voice/recordings/$recording/audio' | head -c 12 | grep -aq ftyp"
+cat > /usr/local/lib/anas-voice-probe.py <<'PY'
+import os, socket, sys
+leaks = []
+for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
+    try:
+        socket.socket(family, kind).close()
+        leaks.append(f"opened a {family.name} socket")
+    except OSError:
+        pass
+for path in ("/srv/a-nas/data", "/var/lib/a-nas"):
+    try:
+        os.listdir(path)
+        leaks.append(f"listed {path}")
+    except OSError:
+        pass
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/runtime/bin/python /usr/local/lib/anas-voice-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
+  /etc/systemd/system/anas-voice.service > /etc/systemd/system/anas-voice-probe.service
+systemctl daemon-reload
+check "the voice probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-voice-probe.py
+check "the voice Worker's sandbox opens no network socket and cannot read the data volume or Product Service state" \
+  systemctl start anas-voice-probe.service
+journalctl -u anas-voice-probe.service -o cat --no-pager | grep -E 'contained|opened|listed' | tail -n 1 || true
 
 # --- One password for Web and SMB.
 new_password=$(secret)

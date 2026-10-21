@@ -94,6 +94,8 @@ install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
 install -m 0644 anas-system.slice.incoming anas-system.slice
 install -m 0644 anas-ai-system.socket.incoming anas-ai-system.socket
 install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
+install -m 0644 anas-voice-system.socket.incoming anas-voice-system.socket
+install -m 0644 anas-voice-system.service.incoming anas-voice-system.service
 install -m 0644 anas-media-system.socket.incoming anas-media-system.socket
 install -m 0644 anas-media-system@.service.incoming anas-media-system@.service
 # Local AI (ADR 0016): the Worker's code and the manifests of the models and
@@ -105,7 +107,7 @@ install -d -m 0750 ai
 tar -C ai --strip-components=1 -xf ai-worker.tar.incoming
 install -m 0644 ai-runtime.json.incoming ai/runtime.json
 manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
-for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx; do
+for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx speaker-embedder:onnx; do
   name=${role%%:*}
   install -m 0644 "ai-$name.json.incoming" "ai/$name.json"
   sha=$(manifest_field "ai/$name.json" sha256)
@@ -125,6 +127,8 @@ rm -f \
   anas-system.slice.incoming \
   anas-ai-system.socket.incoming \
   anas-ai-system.service.incoming \
+  anas-voice-system.socket.incoming \
+  anas-voice-system.service.incoming \
   anas-media-system.socket.incoming \
   anas-media-system@.service.incoming \
   ai-worker.tar.incoming \
@@ -133,6 +137,7 @@ rm -f \
   ai-face-detector.json.incoming \
   ai-face-embedder.json.incoming \
   ai-animal-embedder.json.incoming \
+  ai-speaker-embedder.json.incoming \
   ai-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \

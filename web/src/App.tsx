@@ -1,5 +1,6 @@
 import {
   ArrowDownUp,
+  AudioLines,
   ArrowLeft,
   ArrowDown,
   ArrowRight,
@@ -102,8 +103,10 @@ const AssistantPanel = lazy(() => import("./assistant/AssistantPanel").then((mod
 // The transfer center loads when first opened; the desktop only needs its
 // status-bar pill and toasts.
 const TransferCenter = lazy(() => import("./transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })));
+// 语音处理 loads when first opened.
+const VoicePanel = lazy(() => import("./voice/VoicePanel").then((module) => ({ default: module.VoicePanel })));
 
-type WindowID = "shares" | "files" | "transfers" | "photos" | "media" | "music" | "trash" | "backup" | "settings" | "docker" | "store" | "assistant";
+type WindowID = "shares" | "files" | "transfers" | "photos" | "media" | "music" | "voice" | "trash" | "backup" | "settings" | "docker" | "store" | "assistant";
 
 interface WindowModel {
   id: WindowID;
@@ -138,6 +141,7 @@ const initialWindows: WindowModel[] = [
 	{ id: "photos", title: "相册", open: false, minimized: false, maximized: false, x: 250, y: 64, width: 960, height: 660, z: 2, opened: 0 },
 	{ id: "media", title: "影视中心", open: false, minimized: false, maximized: false, x: 210, y: 46, width: 1120, height: 720, z: 2, opened: 0 },
 	{ id: "music", title: "音乐", open: false, minimized: false, maximized: false, x: 240, y: 56, width: 1080, height: 700, z: 2, opened: 0 },
+	{ id: "voice", title: "语音处理", open: false, minimized: false, maximized: false, x: 220, y: 48, width: 1140, height: 720, z: 2, opened: 0 },
 	{ id: "trash", title: "回收站", open: false, minimized: false, maximized: false, x: 260, y: 76, width: 920, height: 620, z: 2, opened: 0 },
 	{ id: "backup", title: "备份中心", open: false, minimized: false, maximized: false, x: 220, y: 52, width: 1080, height: 700, z: 2, opened: 0 },
   { id: "settings", title: "设置", open: false, minimized: false, maximized: false, x: 300, y: 76, width: 920, height: 620, z: 1, opened: 0 },
@@ -160,6 +164,7 @@ const windowIcons: Record<WindowID, AppGlyph> = {
   photos: PhotosGlyph,
   media: MediaCenterGlyph,
   music: Music2,
+  voice: AudioLines,
   trash: Trash2,
   backup: BackupCenterGlyph,
   settings: Settings,
@@ -179,6 +184,7 @@ const windowTones: Record<WindowID, string> = {
   photos: "photos",
   media: "video",
   music: "music",
+  voice: "voice",
   trash: "trash",
   backup: "backup",
   settings: "settings",
@@ -391,6 +397,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
     ...(session.user.role === "admin" ? [{ id: "docker", label: "Docker", ariaLabel: "打开 Docker", keywords: "容器 镜像 container", tone: "docker", icon: <DockerGlyph />, active: isOpen("docker"), onClick: () => openWindow("docker") }] : []),
     { id: "photos", label: "相册", ariaLabel: "打开相册", keywords: "照片 图片 图库 photo", tone: "photos", icon: <PhotosGlyph />, active: isOpen("photos"), onClick: () => openWindow("photos") },
     { id: "music", label: "音乐", ariaLabel: "打开音乐", keywords: "歌曲 专辑 歌手 歌单 播放 music", tone: "music", icon: <Music2 />, active: isOpen("music"), onClick: () => openWindow("music") },
+    { id: "voice", label: "语音处理", ariaLabel: "打开语音处理", keywords: "语音 录音 转写 转文字 会议纪要 字幕 翻译 总结 发言人 声纹 asr voice", tone: "voice", icon: <AudioLines />, active: isOpen("voice"), onClick: () => openWindow("voice") },
     assistantReady
       ? { id: "ai", label: "VNAS", ariaLabel: "打开 VNAS", keywords: "vnas 助手 智能 问答 聊天 assistant ai", tone: "ai", icon: <AssistantGlyph />, active: isOpen("assistant"), onClick: () => openWindow("assistant") }
       : { id: "ai", label: "VNAS", ariaLabel: "VNAS，规划中", tone: "ai", icon: <AssistantGlyph />, disabled: true },
@@ -469,6 +476,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
 			  {window.id === "photos" && <PhotosPanel userId={session.user.id} userName={displayName(session.user)} isAdmin={session.user.role === "admin"} focus={photoFocus} onFocusHandled={() => setPhotoFocus(undefined)} />}
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
+			  {window.id === "voice" && <Suspense fallback={<div className="center-state"><span className="loader" /></div>}><VoicePanel userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} /></Suspense>}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
 			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onShowInFiles={showInFiles} onOpenTrash={() => openWindow("trash")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}

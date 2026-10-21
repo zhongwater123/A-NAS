@@ -104,11 +104,26 @@ ops-check:
 	grep -Fq -- '--detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
-	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx speaker-embedder:onnx)' scripts/install-v1.0.1-system-services.sh
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'MemoryMax=3G' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'Slice=anas-ai.slice' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'ListenStream=/run/a-nas-voice/voice.sock' deploy/systemd/system/anas-voice.socket
+	grep -Fq '"/run/a-nas-voice/voice.sock"' cmd/anas-api/main.go
+	grep -Fqx 'SocketGroup=a-nas' deploy/systemd/system/anas-voice.socket
+	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-voice.socket
+	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-voice.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-voice.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-voice.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas' deploy/systemd/system/anas-voice.service
+	grep -Fqx 'Slice=anas-ai.slice' deploy/systemd/system/anas-voice.service
+	grep -Fq -- '--speaker-model /opt/a-nas/current/ai/speaker-embedder.onnx --speaker-manifest /opt/a-nas/current/ai/speaker-embedder.json' deploy/systemd/system/anas-voice.service
+	grep -Fq 'anas-voice-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'anas-voice-system.socket.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-speaker-embedder.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ANAS_VOICE_SOCKET=/run/a-nas-voice/voice.sock' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'anas-voice.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'CPUWeight=10' deploy/systemd/system/anas.slice
 	grep -Fq 'anas-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq '/etc/systemd/system/anas.slice' scripts/install-v1.0.1-system-services.sh
