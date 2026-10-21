@@ -47,7 +47,7 @@ func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
 		client.do(http.MethodGet, path, "", nil, http.StatusUnauthorized)
 	}
 	for _, name := range []string{"owner", "member"} {
-		session, err := service.Authenticate(ctx, name, name+" password for testing")
+		session, err := service.Authenticate(signedInDirectly(ctx), name, name+" password for testing")
 		if err != nil {
 			t.Fatal(err)
 		}

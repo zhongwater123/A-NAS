@@ -270,6 +270,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	// Writes need the CSRF token like every other product write.
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/approvals/req-1/confirm", nil)
 	request.AddCookie(asAlice.cookie)
+	request.Header.Set("X-Forwarded-For", asAlice.forwardedFor)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {

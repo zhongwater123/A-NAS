@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -216,17 +216,26 @@ func (b *bufferedResponse) Write(data []byte) (int, error) {
 	return b.body.Write(data)
 }
 
-// withClientOrigin records where a sign-in or sign-out came from. The LAN
-// entry (Caddy, ADR 0012) is the only proxy and sets X-Forwarded-For to the
-// client's address; anything else connected over loopback directly.
+// withClientOrigin records where a sign-in or sign-out came from.
 func withClientOrigin(r *http.Request) context.Context {
-	origin := accounts.ClientOrigin{Via: accounts.ViaLoopback}
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		origin.Via = accounts.ViaLAN
-		hops := strings.Split(forwarded, ",")
-		if address := strings.TrimSpace(hops[len(hops)-1]); net.ParseIP(address) != nil {
-			origin.Address = address
-		}
+	return accounts.WithClientOrigin(r.Context(), clientOrigin(r))
+}
+
+// clientOrigin is where a request came from, which sessions are also bound
+// to. The LAN entry (Caddy, ADR 0012) is the only proxy and sets
+// X-Forwarded-For to the client's address; the Product Service listens on
+// loopback only, so anything else connected over loopback directly.
+func clientOrigin(r *http.Request) accounts.ClientOrigin {
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if forwarded == "" && r.Header.Get("Forwarded") == "" {
+		return accounts.ClientOrigin{Via: accounts.ViaLoopback}
 	}
-	return accounts.WithClientOrigin(r.Context(), origin)
+	origin := accounts.ClientOrigin{Via: accounts.ViaLAN}
+	hops := strings.Split(forwarded, ",")
+	address := strings.TrimSpace(hops[len(hops)-1])
+	// Caddy writes a link-local client's address with its zone.
+	if _, err := netip.ParseAddr(address); err == nil {
+		origin.Address = address
+	}
+	return origin
 }

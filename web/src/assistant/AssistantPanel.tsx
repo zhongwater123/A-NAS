@@ -634,6 +634,29 @@ function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWi
   );
 }
 
+// Pictures in an answer load only from A-NAS itself. An outside address
+// would have the member's browser fetch it, carrying whatever the model put in
+// it, which the sandbox having no network is meant to rule out (ADR 0024); the
+// desktop's CSP blocks such images too (issue #161). It shows as a link the
+// member may open instead.
+function MarkdownImage({ src, alt, node: _node, ...rest }: ComponentPropsWithoutRef<"img"> & { node?: unknown }) {
+  if (typeof src === "string" && onDevice(src)) return <img src={src} alt={alt} {...rest} />;
+  return (
+    <a className="as-outside-image" href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer" title="外部图片不会自动加载">
+      <ImageIcon />{alt || "外部图片"}
+    </a>
+  );
+}
+
+function onDevice(src: string) {
+  if (/^data:image\//i.test(src)) return true;
+  try {
+    return new URL(src, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 // More than this many photos show as the first ones and a count.
 const ANSWER_PHOTOS = 12;
 
@@ -1014,7 +1037,7 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, CodeHeader };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, img: MarkdownImage, CodeHeader };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
