@@ -34,6 +34,11 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: "no file descriptor"}, nil)
 	}
 	defer file.Close()
+	if request.Ack {
+		if err := writeFrame(conn, Response{Accepted: true}, nil); err != nil {
+			return err
+		}
+	}
 	// The descriptor shares its offset with the sender's, which an earlier
 	// operation on the same file may have moved; fd: reads from the offset.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {

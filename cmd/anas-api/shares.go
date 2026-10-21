@@ -32,7 +32,7 @@ func runShareService(logger *slog.Logger) error {
 		SocketPath:   environment("ANAS_SHARES_SOCKET", "/run/a-nas-shares/shares.sock"),
 		BridgeSocket: environment("ANAS_SHARE_FILES_SOCKET", "/run/a-nas-share-files/files.sock"),
 		Sessions:     sessionlookup.NewClient(environment("ANAS_SHARE_SESSION_SOCKET", "/run/a-nas-share-sessions/shares.sock")),
-		Logger:       logger, Media: mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")},
+		Logger:       logger, Media: mediaWorkerClient(),
 	})
 }
 
