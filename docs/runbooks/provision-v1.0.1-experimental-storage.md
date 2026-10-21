@@ -115,7 +115,7 @@ rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）�
 1. 在本地 Kiosk 的“设置 → 存储 → 初始化数据卷”（`173cbb5499ce` 及更早版本为“存储初始化”）打开候选盘。
 2. 保存页面显示的稳定 ID、型号、容量、指纹、动作、确认短语和过期时间。
 3. 再次对照机箱盘位或购买记录；只有完全一致时输入确认短语。
-4. 执行后等待状态 `succeeded`。任何服务重启、超时或 `needs_attention` 都停止操作，不生成第二个计划，先导出日志和 `lsblk --json --output NAME,PATH,SERIAL,WWN,MODEL,SIZE,TRAN,RM,TYPE,FSTYPE,MOUNTPOINTS`。
+4. 执行后等待状态 `succeeded`。执行在设备上进行，关闭页面或重启产品服务不会打断它，向导显示进行到哪一步。Host Agent 重启、超时或 `needs_attention` 时停止操作，不生成第二个计划，先导出日志和 `lsblk --json --output NAME,PATH,SERIAL,WWN,MODEL,SIZE,TRAN,RM,TYPE,FSTYPE,MOUNTPOINTS`；核对是计划中的硬盘后，在向导中重试同一计划，它从停下处继续，并接管它已经建出的数据卷（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）。
 
 完成标准：`findmnt /srv/a-nas/data` 显示 Btrfs 与预期 UUID；`systemctl cat srv-a\x2dnas-data.mount` 显示安全挂载选项；`.a-nas-volume.json` 位于已挂载数据卷内。
 

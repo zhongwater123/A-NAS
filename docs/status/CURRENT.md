@@ -18,7 +18,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 - 磁盘状态包含稳定 ID、removable/in-use、文件系统、SMART、温度、数据卷资格及拒绝原因；公开接口不返回设备路径。
 - 设置“概览”此前一直显示“健康未评估”：Linux 读取器把系统健康固定为未知，SMART 加入后没有人把它汇总起来。现在产品服务按[系统健康](../specs/system-health.md)从磁盘 SMART 与温度、数据卷挂载、只读状态、剩余空间和 Btrfs 错误计数评估，概览的“健康检查”列出每项原因与处理办法；Host Agent 为数据盘新增只读状态与错误计数。尚未合并、未部署，部署后在实验 NAS 的概览核对结果。
 - 2026-10-15 问题反馈中 Host Agent 读硬盘信息间歇超时被杀（24 小时 49 次、每次约 1 秒）：每个状态请求都同步运行每块盘的 smartctl，文件服务在每个文件请求前确认数据卷时也读一次，调用方 3 秒超时即杀掉 smartctl，文件请求随之报告数据卷不可用（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。修复让 SMART 由 Host Agent 在后台每 10 分钟至多读一次、只读健康与温度、不唤醒待机的硬盘，数据卷确认改用已初始化卷的记录，尚未合并、未部署；部署后核对日志中被杀与超时的条数、大文件夹的加载耗时，以及数据盘能否待机。
-- 存储计划持久化于 SQLite，支持十分钟过期、确认短语、执行前身份复核、幂等成功结果和中断后 `needs_attention`。
+- 存储计划持久化于 SQLite，支持十分钟过期、确认短语、执行前身份复核、幂等成功结果和中断后 `needs_attention`。2026-10-21 复核 [#165](https://github.com/zhongwater123/A-NAS/issues/165) 属实：执行绑定浏览器请求，关闭页面会中途杀死磁盘命令，被打断的建卷无法恢复，重试还可能改写已有数据卷的挂载单元。修复让 Host Agent 在后台执行并按计划 ID 记日志、产品轮询、`needs_attention` 可安全重试并接管本计划建出的卷、加盘先记冗余方式（[调查](../investigations/2026-10-21-storage-plan-bound-to-browser-request.md)）；尚未合并、未部署，部署须同时更新 Host Agent 与产品服务。
 - Linux 执行器使用固定命令创建 GPT、单盘 Btrfs、UUID mount unit、空间子卷和卷身份标记；文件服务在缺少真实 Btrfs/标记时拒绝写入。
 - 本机设备启用、Argon2id、服务端会话、CSRF、管理员/成员、个人空间和唯一 Shared Policy 已实现；首次启用只要求账号和密码。
 - Web 文件管理、Samba、回收站、手动快照、审计、产品 API 和 React 页面已实现并有自动化覆盖。

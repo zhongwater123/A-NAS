@@ -1,7 +1,7 @@
 # 硬盘用途与数据卷冗余
 
 状态：M1 implemented（尚未部署）；M2、M3 draft
-更新时间：2026-10-20
+更新时间：2026-10-21
 
 ## 目标
 
@@ -151,7 +151,7 @@
   - 计划确认前后、执行前点“取消计划”或关闭按钮（`POST /api/v1/storage/plans/{planId}/cancel`，状态 `cancelled`），之后可以立即生成新计划；
   - 计划结束后点“完成”或“关闭”。
 
-  取消的计划没有碰过任何硬盘。
+  取消的计划没有碰过任何硬盘。执行中可以关闭设置窗口或页面，见下文“执行在设备上进行”。
 - 哪块盘属于数据卷、哪块盘正在使用，以内核为准。宿主机状态从 sysfs 的 `fs/btrfs/<uuid>/devices` 认出数据卷的每块成员盘，任何已挂载 Btrfs 的设备都算使用中。`lsblk` 的文件系统类型与 UUID 来自 udev 数据库，`btrfs device add` 之后它在重启前一直把新分区显示为空白；只按它判断，刚加入的盘会重新显示为“未使用”，并且可以被再次清除（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）。加盘后 Host Agent 还会让 udev 重新探测新分区。
 - 同一时间只有一个有效计划：生成新计划会取消尚未执行的旧计划（页面刷新后界面不再记得它），只有执行中的计划会挡住新计划（`409 plan_state_conflict`）。数据卷正在转换、重建或缺少硬盘时，只能执行更换硬盘，其他计划返回 `409 volume_busy`。
 - 执行前，Host Agent 重新枚举并核对：
@@ -159,9 +159,12 @@
   - 数据卷的文件系统 UUID、成员与冗余方式，变化时返回 `volume_changed`。
 - 新盘加入后即属于数据卷，即使后台转换随后失败（例如空间不足或 I/O 错误）。目标冗余方式记在卷标记 `.a-nas-volume.json` 的 `layout` 中，Host Agent 在启动时和每 15 分钟检查一次，只转换还不在目标方式中的数据（`soft` 过滤），所以停下的转换会接着做。
 - 转换停下时，卡片显示“转换为镜像已暂停”、已转换的比例，说明系统会自动继续、停下的原因记在“日志”的系统日志中，并提供“继续转换”（`POST /api/v1/volumes/{volumeId}/conversion`）立即再试。文件不丢，冗余以实际为准。
-- 执行中重启：
-  - 清除、分区、加入阶段被中断时，计划进入 `needs_attention`，与现有规则一样不自动重做。
+- 执行在设备上进行（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）：
+  - 关闭窗口、刷新页面、断网或重启产品服务都不会打断它。执行接口返回 `202` 与进行中的计划；向导显示进行到哪一步（清除硬盘、格式化、挂载、准备空间、加入数据卷），并写明可以关闭页面。页面回来时，存储页找回进行中的计划（`GET /api/v1/storage/plans`）并接着显示。
+  - 执行中 Host Agent 重启或断电时，计划进入 `needs_attention`，不自动重做。存储页显示“上次的存储操作没有完成”与停下的步骤，“查看并处理”打开向导，“重试”再次执行同一计划：设备再核对一次硬盘身份，已经完成的步骤不会重做。新卷挂载前从头清除并格式化，挂载后只补齐剩下的准备；已加入数据卷的硬盘不再清除。之后运行过的新计划取代它，提示随之消失。
+  - 加盘时目标冗余方式在加入硬盘之前就记进卷标记；硬盘已经加入、进程却被杀时，Host Agent 的检查照样按它转换。
   - 转换阶段被中断时（停止 Host Agent 或关机会取消正在进行的 balance），由 Host Agent 的检查接着转换。
+- 没有登记数据卷、设备上却挂载着一个（例如中断的初始化留下的）时，不能新建（`409 volume_exists`，“设备上已经有一个没有登记的数据卷……”），应重试留下它的那次计划来接管它。Host Agent 也拒绝覆盖指向其他数据卷的挂载配置：数据卷离线时用别的盘新建，会让原来的卷在下次开机时被遗忘、它的硬盘显示为未使用并可被清除。
 - 容量取文件系统按冗余方式折算后的值。转换期间混合了两种方式，可用空间是估算；写入保留规则不变（容量的 5%，至少 10 GiB）。
 - 容量不同的硬盘可以组合，可用容量按上表计算并在选择时显示。
 - 计划、确认、执行写入活动日志；转换的开始、完成或停下写入 Host Agent 的系统日志。
@@ -179,6 +182,14 @@ M1：
 - React（[`App.test.tsx`](../../web/src/App.test.tsx)、[`layouts.test.ts`](../../web/src/settings/layouts.test.ts)）：发现未使用的硬盘、旧数据与不合格原因、用途与冗余方式、带旧签名的计划、加入后的完成提示、转换进度与继续转换、两块盘新建时选择扩容。
 - root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go)）：回环设备上的真实 Btrfs 单盘加入第二块后，按卷标记转为镜像。
 - 实机：按[运行手册](../runbooks/add-a-disk-to-the-data-volume.md)在实验 NAS 上把 `sda` 加入数据卷并转为镜像，Scrub 没有错误。
+
+执行在设备上进行（[#165](https://github.com/zhongwater123/A-NAS/issues/165)，[调查](../investigations/2026-10-21-storage-plan-bound-to-browser-request.md)）：
+
+- 存储服务（[`operation_test.go`](../../internal/storage/operation_test.go)）：请求结束后计划接着运行并被跟随到结束、产品服务重启后接着跟随、Host Agent 没收到的计划进入 `needs_attention`、停下的计划交给 Host Agent 重试并接管它建出的卷、之后运行过的计划取代停下的计划、没有登记的数据卷挡住新建。
+- Host Agent（[`volume_test.go`](../../internal/hostops/linux/volume_test.go)、[`volume_internal_test.go`](../../internal/hostops/linux/volume_internal_test.go)）：请求被取消后操作照常完成；在清除、格式化、挂载、准备每一步停下后，重启的 Host Agent 报告 `interrupted` 与步骤，重试只在卷挂载前重新清除与格式化；命令被杀后重试；拒绝不是本计划建出的卷与指向它的挂载配置；接管本计划建出的卷；加盘先记下冗余方式，硬盘加入后被杀，重试跳过已加入的硬盘；同一时间只运行一个操作，日志在重启后仍在；待定的冗余方式在设备齐全后生效。
+- root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go)）：真实 Btrfs 上先记下镜像、再加入硬盘，检查把它转为镜像。
+- 接口契约（[`storage_test.go`](../../internal/httpapi/storage_test.go)）与 Host Agent IPC（[`agent_test.go`](../../internal/hoststate/agent/agent_test.go)）：执行返回 `202` 与步骤、`GET /api/v1/storage/plans`、`GET /v1/storage/operations/{planId}` 与错误码。
+- React（[`App.test.tsx`](../../web/src/App.test.tsx)）：页面回来后接着显示进行中的计划直到完成；停下的计划显示步骤并重试。
 
 M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test.sh`](../../scripts/system-test.sh)）、更换与移除的 root 集成测试，以及拔盘开机、接回恢复的实机验证。
 - 实机：按运行手册在实验 NAS 上：
