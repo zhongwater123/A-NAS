@@ -51,7 +51,7 @@ Hugging Face 上 `google/embeddinggemma-2` 下有 119 个微调、`embeddinggemm
 | `eval.py` | 同一份三元组当检索任务：Hit@1 / Hit@5 / MRR@10 / 正负例相似度差；可评 `--model`（MediaPipe）、`--embed-url`（HF）或哈希 | 标准库（`--model` 需 Worker 运行环境） |
 | `eval_docs.py` + `docs_queries.json` | 文档检索：把 `docs/` 按标题切段当语料，42 个中文问题各标明答案段落，算段落级与文件级 Hit@k / MRR；`--mode sts` 对照前缀，`--dim` 从全维缓存截断 | 标准库 |
 | `eval_dedup.py` | 一批真实文本的相似度分布、各阈值下的近似重复分组、按样例分类的打标率；`--strip-template` 先剥掉反馈模板 | 标准库 |
-| `train.py` | LawVault 配方：MatryoshkaLoss(MNRL)，lr 2e-5，3 epoch，batch 32，bf16，只训文本编码器，留 15% 验证 | GPU + sentence-transformers |
+| `train.py` | LawVault 配方：MatryoshkaLoss(MNRL)，lr 2e-5，3 epoch，batch 32，只训文本编码器，留 15% 验证；前缀按三元组来源逐行拼入（`docq:` 的问答对用 query / document，其余 STS）；`--dtype`（CPU fp32 / GPU bf16）、`--limit`、`--max-seq-length` 供冒烟 | sentence-transformers（真训练要 GPU） |
 
 流程（在 `ai/` 目录下）：
 
@@ -109,7 +109,11 @@ python -m finetune.eval finetune/data/triplets.jsonl --embed-url http://127.0.0.
 | 系统日志按 17 条故障样例归类 | — | 健康机器的日志：阈值 0.90 只有 1 条被打标签，且确实是权限警告（`mkdir -p failed for path /.config/…`，0.907）；0.85 误报 12 条（"server running" 判成数据库类），0.80 误报 208 条。 |
 | n8n 崩溃日志 13 行按样例归类 | 0.853 / 1.000 / 1.000 | `EACCES: permission denied, open '/home/node/…'` 得 0.958 归为权限类（正确）；堆栈帧行在 0.84–0.86 被归到各类（应视为无标签）。归类阈值取 0.92 上下能同时拦住健康日志和堆栈噪声。 |
 
-三元组数据加入 42 个文档问答对后为 274 条（`build_triplets.py --doc-queries`）；问答对是不对称的，训练时应用 query / document 前缀，`train.py` 目前只支持单一前缀，待改。
+三元组数据加入 42 个文档问答对后为 274 条（`build_triplets.py --doc-queries`，来源标 `docq:`）；问答对是不对称的，`train.py` 与 `eval.py` 对它们用 query / document 前缀，其余三元组用 STS 前缀。
+
+### 训练脚本的冒烟（CPU）
+
+2026-10-21 用 24 条三元组（18 训练、6 验证）在 CPU 上跑 `train.py --dtype fp32 --max-seq-length 256 --epochs 1 --batch 4`：加载约 1 分钟，5 步训练 1070 s（每步 214 s），loss 3.08（MatryoshkaLoss 四个维度之和），验证集 6 条前后都是 1.0（数据太少，正例本来就比负例近），保存的 fp32 文本编码器 1.1 GB，`server.py --model` 能直接加载。结论只有一条：脚本从读数据到保存全程可用；CPU 不能用来真训练，274 条三元组 3 epoch 要约 12 小时，GPU 上是分钟级。
 
 ### 运行时的两个发现
 

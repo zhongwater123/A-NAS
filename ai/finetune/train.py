@@ -70,10 +70,16 @@ def main(argv: list[str]) -> None:
         from datasets import Dataset
         from sentence_transformers import (SentenceTransformer, SentenceTransformerTrainer,
                                            SentenceTransformerTrainingArguments)
-        from sentence_transformers.evaluation import TripletEvaluator
-        from sentence_transformers.losses import (CachedMultipleNegativesRankingLoss, MatryoshkaLoss,
-                                                  MultipleNegativesRankingLoss)
-        from sentence_transformers.training_args import BatchSamplers
+        try:   # sentence-transformers 6 把这些搬到了 sentence_transformer 子包；旧路径仍可用但有弃用警告
+            from sentence_transformers.sentence_transformer.evaluation import TripletEvaluator
+            from sentence_transformers.sentence_transformer.losses import (CachedMultipleNegativesRankingLoss,
+                                                                           MatryoshkaLoss, MultipleNegativesRankingLoss)
+            from sentence_transformers.sentence_transformer.training_args import BatchSamplers
+        except ImportError:
+            from sentence_transformers.evaluation import TripletEvaluator
+            from sentence_transformers.losses import (CachedMultipleNegativesRankingLoss, MatryoshkaLoss,
+                                                      MultipleNegativesRankingLoss)
+            from sentence_transformers.training_args import BatchSamplers
     except ImportError as e:
         sys.exit(f"缺少依赖（{e}）：pip install -r finetune/requirements.txt")
 
