@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/activity"
 )
 
 func TestLibraryViewingIsGrantedApartFromSpaceViewing(t *testing.T) {
@@ -104,7 +105,7 @@ func TestLibraryViewingIsGrantedApartFromSpaceViewing(t *testing.T) {
 		t.Fatalf("expired grant still listed: %+v", viewings)
 	}
 
-	events, err := service.ListAudit(ctx, admin)
+	events, err := service.Activity(ctx, admin, activity.Query{Limit: activity.MaxLimit})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/activity"
 )
 
 func TestFailedViewingGrantIsRevokedAndNeitherNotifiedNorActive(t *testing.T) {
@@ -133,7 +134,7 @@ func TestAdministrativeViewingIsAuthenticatedReadOnlyAuditedAndTemporary(t *test
 	if remaining, _ := service.Notifications(ctx, alice); len(remaining) != 0 {
 		t.Fatalf("acknowledged notification is still shown: %#v", remaining)
 	}
-	events, err := service.ListAudit(ctx, admin)
+	events, err := service.Activity(ctx, admin, activity.Query{Limit: activity.MaxLimit})
 	if err != nil || !hasAudit(events, "space.viewing_started", aliceSpace) {
 		t.Fatalf("audit = %#v, %v; want space.viewing_started", events, err)
 	}
@@ -261,7 +262,7 @@ func containsSpace(spaces []accounts.Space, spaceID string) bool {
 	return false
 }
 
-func hasAudit(events []accounts.AuditEvent, action, resourceID string) bool {
+func hasAudit(events []activity.Event, action, resourceID string) bool {
 	for _, event := range events {
 		if event.Action == action && event.ResourceID == resourceID {
 			return true

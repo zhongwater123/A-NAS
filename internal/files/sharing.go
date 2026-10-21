@@ -112,33 +112,41 @@ func (s *Service) ShareSelection(ctx context.Context, actor accounts.User, ids [
 		skip := archiveSkip
 		skip.Strict = true
 		skip.Limit = max(1, 10000-len(result))
-		children, err := s.fs.Scan(ctx, full, skip)
+		// The folder's contents are catalogued from the scan, which a change
+		// to the space during it would make stale.
+		err = s.scanAlone(ctx, item.entry.SpaceID, func() error {
+			children, err := s.fs.Scan(ctx, full, skip)
+			if err != nil {
+				return err
+			}
+			parents := map[string]string{"": item.entry.ID}
+			for _, child := range children {
+				if child.Info.Kind != KindFile && child.Info.Kind != KindDirectory {
+					return ErrUnsupportedType
+				}
+				parent := path.Dir(child.Path)
+				if parent == "." {
+					parent = ""
+				}
+				parentID, ok := parents[parent]
+				if !ok {
+					return ErrInvalidSelection
+				}
+				entry, err := s.registerInfo(ctx, s.store.db, item.root, item.entry.SpaceID, parentID, path.Join(item.relative, child.Path), child.Info)
+				if err != nil {
+					return err
+				}
+				if err := appendSource(entry, path.Join(name, child.Path), child.Info); err != nil {
+					return err
+				}
+				if child.Info.Kind == KindDirectory {
+					parents[child.Path] = entry.ID
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, err
-		}
-		parents := map[string]string{"": item.entry.ID}
-		for _, child := range children {
-			if child.Info.Kind != KindFile && child.Info.Kind != KindDirectory {
-				return nil, ErrUnsupportedType
-			}
-			parent := path.Dir(child.Path)
-			if parent == "." {
-				parent = ""
-			}
-			parentID, ok := parents[parent]
-			if !ok {
-				return nil, ErrInvalidSelection
-			}
-			entry, err := s.registerInfo(ctx, item.entry.SpaceID, parentID, path.Join(item.relative, child.Path), child.Info)
-			if err != nil {
-				return nil, err
-			}
-			if err := appendSource(entry, path.Join(name, child.Path), child.Info); err != nil {
-				return nil, err
-			}
-			if child.Info.Kind == KindDirectory {
-				parents[child.Path] = entry.ID
-			}
 		}
 	}
 	return result, nil

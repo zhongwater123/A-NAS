@@ -49,6 +49,9 @@ type contractClient struct {
 	router  routers.Router
 	cookie  *http.Cookie
 	csrf    string
+	// forwardedFor is the LAN address the client signed in from, which its
+	// requests keep coming from through Caddy (ADR 0012).
+	forwardedFor string
 }
 
 // do sends a request, checks its status and validates request and response
@@ -65,6 +68,9 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 		}
 		if method != http.MethodGet && c.csrf != "" {
 			request.Header.Set("X-CSRF-Token", c.csrf)
+		}
+		if c.forwardedFor != "" {
+			request.Header.Set("X-Forwarded-For", c.forwardedFor)
 		}
 		for name, value := range headers {
 			request.Header.Set(name, value)

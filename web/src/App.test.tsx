@@ -1230,7 +1230,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[]; hostState?: unknown } = {}) {
+function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; unfinishedPlans?: unknown[]; operation?: unknown; executeFails?: boolean; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[]; hostState?: unknown } = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
@@ -1254,9 +1254,11 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
     if (path.startsWith("/api/v1/files/") && path.includes("/content")) return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
     if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
-	if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
+    if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
+    if (path === "/api/v1/storage/plans") return ok({ items: options.unfinishedPlans ?? [] });
+    if (path.startsWith("/api/v1/operations/")) return ok(options.operation ?? { ...(options.storagePlan as object), state: "succeeded" });
     if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/confirm")) return ok({ ...(options.storagePlan as object), state: "confirmed" });
-    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute")) return ok({ ...(options.storagePlan as object), state: "succeeded" });
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute")) return options.executeFails ? failure(503, "operation_needs_attention") : ok({ ...(options.storagePlan as object), state: "succeeded" });
     if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/cancel")) return ok({ ...(options.storagePlan as object), state: "cancelled" });
     if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion")) return { ok: true, status: 202, headers: new Headers({ "Content-Length": "0" }), json: async () => undefined } as Response;
     if (path === "/api/v1/users" && init?.method === "POST") {
@@ -1757,6 +1759,71 @@ describe("Settings", () => {
     await user.click(within(settings).getByRole("button", { name: "生成格式化计划" }));
     await user.click(await within(settings).findByRole("button", { name: "取消计划并关闭" }));
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
+  }, 15000);
+
+  it("follows a plan that runs on the device when the page comes back", async () => {
+    const plan = {
+      id: "plan:run", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
+      disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "run-fingerprint", signatures: [] }],
+      confirmationPhrase: "ERASE data-01", actions: [], state: "running", step: "format", expiresAt: "2099-01-01T00:00:00Z",
+    };
+    const fetchMock = installAPI({ unfinishedPlans: [plan], operation: { ...plan, state: "succeeded", step: undefined } });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    const wizard = await within(settings).findByRole("region", { name: "初始化数据卷" });
+    expect(within(wizard).getByText("正在格式化，固态硬盘可能要几分钟…")).toBeTruthy();
+    expect(within(wizard).getByText(/关闭这个窗口或页面不会打断它/)).toBeTruthy();
+    expect(await within(wizard).findByText("数据卷已创建", undefined, { timeout: 5000 })).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/operations/plan%3Arun")).toBe(true);
+  }, 15000);
+
+  it("offers to retry a plan that stopped on the device", async () => {
+    const plan = {
+      id: "plan:stopped", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
+      disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "stopped-fingerprint", signatures: [] }],
+      confirmationPhrase: "ERASE data-01", actions: [], state: "needs_attention", step: "mount", expiresAt: "2026-10-21T09:10:00Z",
+      failure: "the Host Agent stopped during the mount step; retrying continues after the steps that are done",
+    };
+    const fetchMock = installAPI({ unfinishedPlans: [plan], storagePlan: plan });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("上次的存储操作没有完成")).toBeTruthy();
+    expect(within(settings).getByText(/创建数据卷在“挂载”这一步停下了/)).toBeTruthy();
+
+    await user.click(within(settings).getByRole("button", { name: "查看并处理" }));
+    const wizard = within(settings).getByRole("region", { name: "初始化数据卷" });
+    expect(within(wizard).getByText("需要人工处理")).toBeTruthy();
+    expect(within(wizard).getByText(/已经完成的步骤不会重做/)).toBeTruthy();
+    await user.click(within(wizard).getByRole("button", { name: "重试" }));
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/storage/plans/plan%3Astopped/execute" && init?.method === "POST")).toBe(true);
+    expect(await within(wizard).findByText("数据卷已创建")).toBeTruthy();
+  }, 15000);
+
+  it("shows why a retried plan stopped again", async () => {
+    const plan = {
+      id: "plan:again", kind: "add_disks", layout: "mirror", capacityAfterBytes: 512000000000,
+      disks: [{ id: "disk:fake-data-02", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "again-fingerprint", signatures: [] }],
+      confirmationPhrase: "ERASE data-02", actions: [], state: "needs_attention", step: "erase", expiresAt: "2026-10-21T09:10:00Z",
+      failure: "the Host Agent stopped during the erase step; retrying continues after the steps that are done",
+    };
+    installAPI({
+      unfinishedPlans: [plan], storagePlan: plan, executeFails: true,
+      operation: { ...plan, step: "erase", failure: "disk identity changed after planning" },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    await user.click(await within(settings).findByRole("button", { name: "查看并处理" }));
+    const wizard = within(settings).getByRole("region", { name: "设置硬盘用途" });
+    await user.click(within(wizard).getByRole("button", { name: "重试" }));
+    expect(await within(wizard).findByText(/disk identity changed after planning/)).toBeTruthy();
+    expect(within(wizard).queryByText(/the Host Agent stopped during the erase step/)).toBeNull();
+    expect(within(wizard).queryByRole("alert")).toBeNull();
   }, 15000);
 
   it("shows how far a conversion has come and continues a stopped one", async () => {

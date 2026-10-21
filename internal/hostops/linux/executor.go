@@ -33,6 +33,9 @@ type BlockDevice struct {
 
 type DeviceResolver interface {
 	ResolveDevice(context.Context, string) (BlockDevice, error)
+	// MountedDataVolume is the Btrfs filesystem mounted at the data mount
+	// point, with the disks the kernel lists for it, or nil.
+	MountedDataVolume(context.Context) (*hoststate.DataVolume, error)
 }
 
 type HostStateResolver struct {
@@ -48,6 +51,17 @@ func (r HostStateResolver) ResolveDevice(ctx context.Context, diskID string) (Bl
 		return BlockDevice{}, err
 	}
 	return BlockDevice{Disk: device.Disk, DevicePath: device.DevicePath, PartitionPath: device.PartitionPath}, nil
+}
+
+func (r HostStateResolver) MountedDataVolume(ctx context.Context) (*hoststate.DataVolume, error) {
+	if r.Reader == nil {
+		return nil, errors.New("Linux host-state reader is unavailable")
+	}
+	state, err := r.Reader.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return state.DataVolume, nil
 }
 
 type CommandRunner interface {
@@ -93,6 +107,15 @@ type Executor struct {
 	logger        *slog.Logger
 	conversionMu  sync.Mutex
 	converting    bool
+	// markerMu orders changes to the data-volume marker.
+	markerMu sync.Mutex
+	// operations is the journal of data-volume operations by plan ID.
+	operationsMu    sync.Mutex
+	operations      map[string]*volumeOperation
+	operationsPath  string
+	operationsError error
+	// operating is the plan whose operation runs now; one runs at a time.
+	operating string
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -132,6 +155,8 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.viewingError = executor.loadViewingRegistry()
 	executor.appsPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "app-identities.json")
 	executor.appsError = executor.loadAppsRegistry()
+	executor.operationsPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "volume-operations.json")
+	executor.operationsError = executor.loadOperations()
 	return executor
 }
 

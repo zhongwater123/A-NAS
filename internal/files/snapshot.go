@@ -98,10 +98,27 @@ type SnapshotVersion struct {
 
 // SnapshotBackend accepts stable space and snapshot identities. Implementations
 // own the mapping to Btrfs subvolumes or deterministic development directories.
+// Create and Delete may be repeated: taking a snapshot that exists and
+// deleting one that does not both succeed, so a caller that lost an answer
+// retries or cleans up by the snapshot's ID.
 type SnapshotBackend interface {
-	Create(context.Context, string, string) ([]SnapshotObject, error)
-	Open(context.Context, string, string) (io.ReadCloser, SnapshotObject, error)
-	Delete(context.Context, string, string) error
+	Create(ctx context.Context, spaceID, snapshotID string) error
+	// Objects calls visit for every file and folder a snapshot holds, each
+	// folder before its contents, and stops at the first error. A snapshot
+	// that does not exist fails with ErrNotFound.
+	Objects(ctx context.Context, snapshotID string, visit func(SnapshotObject) error) error
+	Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, SnapshotObject, error)
+	Delete(ctx context.Context, spaceID, snapshotID string) error
+	// Prune deletes every snapshot that keep does not name and reports which
+	// of keep exist.
+	Prune(ctx context.Context, keep []string) (SnapshotPrune, error)
+}
+
+// SnapshotPrune is the outcome of a Prune: the kept snapshots that exist and
+// how many snapshots nobody keeps were deleted.
+type SnapshotPrune struct {
+	Present []string `json:"present"`
+	Removed int      `json:"removed"`
 }
 
 const (
@@ -110,6 +127,9 @@ const (
 	snapshotSearchPaths = 100
 	snapshotSearchRows  = 5000
 	snapshotColumns     = "id, space_id, name, origin, created_by, created_at, file_count, size_bytes"
+	// snapshotDiscardTimeout bounds removing a snapshot whose taking failed,
+	// which also runs while the service stops.
+	snapshotDiscardTimeout = 10 * time.Second
 )
 
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
@@ -153,22 +173,42 @@ func (s *Service) createSnapshot(ctx context.Context, spaceID, actorID, name str
 		return Snapshot{}, ErrConflict
 	}
 	snapshot := Snapshot{ID: s.randomID("snapshot"), SpaceID: spaceID, Name: name, Origin: origin, CreatedBy: actorID, CreatedAt: s.now().UTC()}
-	objects, err := s.snapshots.Create(ctx, spaceID, snapshot.ID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	// The backend has taken the snapshot; remove it again unless the catalog records it.
+	// Until the catalog records it, the snapshot is this call's to remove:
+	// sweeps leave it alone, and any failure, a closed tab or a stopping
+	// service included, deletes it again. What a crash leaves, the next
+	// sweep removes.
+	s.holdSnapshot(snapshot.ID, true)
 	committed := false
 	defer func() {
 		if !committed {
-			_ = s.snapshots.Delete(context.WithoutCancel(ctx), spaceID, snapshot.ID)
+			s.discardSnapshot(ctx, spaceID, snapshot.ID)
 		}
+		s.holdSnapshot(snapshot.ID, false)
 	}()
-	for _, object := range objects {
-		if object.Kind == EntryKindFile {
+	if err := s.snapshots.Create(ctx, spaceID, snapshot.ID); err != nil {
+		return Snapshot{}, err
+	}
+	// The whole listing is read before the catalog is written, so the
+	// single-connection catalog stays free while the backend walks the snapshot.
+	var objects []SnapshotObject
+	folders := map[string]bool{"": true}
+	if err := s.snapshots.Objects(ctx, snapshot.ID, func(object SnapshotObject) error {
+		if !folders[object.ParentKey] {
+			return errors.New("snapshot backend returned an object before its parent")
+		}
+		switch object.Kind {
+		case EntryKindDirectory:
+			folders[object.Key] = true
+		case EntryKindFile:
 			snapshot.FileCount++
 			snapshot.SizeBytes += object.SizeBytes
+		default:
+			return errors.New("snapshot backend returned an object of an unknown kind")
 		}
+		objects = append(objects, object)
+		return nil
+	}); err != nil {
+		return Snapshot{}, err
 	}
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -187,21 +227,20 @@ VALUES(?,?,?,?,?,?,?,?)`)
 		return Snapshot{}, err
 	}
 	defer insert.Close()
-	idsByKey := map[string]string{"": ""}
+	// Only folders are parents, so only their entry IDs are remembered.
+	folderIDs := map[string]string{"": ""}
 	for _, object := range objects {
-		parentID, ok := idsByKey[object.ParentKey]
-		if !ok {
-			return Snapshot{}, errors.New("snapshot backend returned an object before its parent")
-		}
 		entryID := s.randomID("snapshot-entry")
 		modifiedAt := ""
 		if !object.ModifiedAt.IsZero() {
 			modifiedAt = formatTime(object.ModifiedAt)
 		}
-		if _, err := insert.ExecContext(ctx, entryID, snapshot.ID, parentID, object.Name, object.Kind, object.SizeBytes, object.Key, modifiedAt); err != nil {
+		if _, err := insert.ExecContext(ctx, entryID, snapshot.ID, folderIDs[object.ParentKey], object.Name, object.Kind, object.SizeBytes, object.Key, modifiedAt); err != nil {
 			return Snapshot{}, err
 		}
-		idsByKey[object.Key] = entryID
+		if object.Kind == EntryKindDirectory {
+			folderIDs[object.Key] = entryID
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Snapshot{}, err
@@ -560,12 +599,102 @@ func (s *Service) DeleteSnapshot(ctx context.Context, actor accounts.User, snaps
 	return s.audit(ctx, actor.ID, "snapshot.deleted", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 }
 
+// deleteSnapshot removes a snapshot and then its record. A snapshot the
+// backend no longer has counts as removed, so a record whose removal was
+// interrupted can still go.
 func (s *Service) deleteSnapshot(ctx context.Context, snapshot Snapshot) error {
-	if err := s.snapshots.Delete(ctx, snapshot.SpaceID, snapshot.ID); err != nil {
+	if err := s.snapshots.Delete(ctx, snapshot.SpaceID, snapshot.ID); err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
 	_, err := s.store.db.ExecContext(ctx, "DELETE FROM snapshots WHERE id = ?", snapshot.ID)
 	return err
+}
+
+// discardSnapshot deletes a snapshot the catalog never recorded, even after
+// ctx ended. One the backend cannot delete now is left to the next sweep.
+func (s *Service) discardSnapshot(ctx context.Context, spaceID, snapshotID string) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotDiscardTimeout)
+	defer cancel()
+	_ = s.snapshots.Delete(cleanup, spaceID, snapshotID)
+}
+
+// holdSnapshot marks a snapshot as being taken, which keeps sweeps from
+// removing it before the catalog records it.
+func (s *Service) holdSnapshot(snapshotID string, held bool) {
+	s.snapshotsMu.Lock()
+	defer s.snapshotsMu.Unlock()
+	if held {
+		s.takingSnapshots[snapshotID] = struct{}{}
+	} else {
+		delete(s.takingSnapshots, snapshotID)
+	}
+}
+
+// SnapshotSweep reports what a sweep removed.
+type SnapshotSweep struct {
+	// Snapshots counts snapshots on the data volume that the catalog did not
+	// record, such as those a crash left while one was being taken.
+	Snapshots int
+	// Records names the catalog records whose snapshot was gone.
+	Records []Snapshot
+}
+
+// SweepSnapshots makes the data volume and the catalog agree: it deletes the
+// snapshots the catalog does not record and the records whose snapshot is
+// gone. It runs only while the intended data volume is mounted.
+func (s *Service) SweepSnapshots(ctx context.Context) (SnapshotSweep, error) {
+	if !s.allowUnverifiedVolume {
+		if s.volumeGuard == nil || s.volumeGuard.Check(ctx, s.volumeRoot, false) != nil {
+			return SnapshotSweep{}, ErrVolumeUnavailable
+		}
+	}
+	// Held for the whole sweep: a snapshot taken meanwhile waits to be held
+	// until the sweep is done, so it is never mistaken for one nobody keeps.
+	s.snapshotsMu.Lock()
+	defer s.snapshotsMu.Unlock()
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+snapshotColumns+" FROM snapshots ORDER BY created_at")
+	if err != nil {
+		return SnapshotSweep{}, err
+	}
+	var recorded []Snapshot
+	for rows.Next() {
+		snapshot, err := scanSnapshot(rows)
+		if err != nil {
+			_ = rows.Close()
+			return SnapshotSweep{}, err
+		}
+		recorded = append(recorded, snapshot)
+	}
+	if err := rows.Close(); err != nil {
+		return SnapshotSweep{}, err
+	}
+	keep := make([]string, 0, len(recorded)+len(s.takingSnapshots))
+	for _, snapshot := range recorded {
+		keep = append(keep, snapshot.ID)
+	}
+	for id := range s.takingSnapshots {
+		keep = append(keep, id)
+	}
+	pruned, err := s.snapshots.Prune(ctx, keep)
+	if err != nil {
+		return SnapshotSweep{}, err
+	}
+	sweep := SnapshotSweep{Snapshots: pruned.Removed}
+	present := make(map[string]bool, len(pruned.Present))
+	for _, id := range pruned.Present {
+		present[id] = true
+	}
+	for _, snapshot := range recorded {
+		if present[snapshot.ID] {
+			continue
+		}
+		if _, err := s.store.db.ExecContext(ctx, "DELETE FROM snapshots WHERE id = ?", snapshot.ID); err != nil {
+			return sweep, err
+		}
+		_ = s.audit(ctx, systemActor, "snapshot.missing", snapshot.SpaceID, snapshot.ID, snapshot.Name)
+		sweep.Records = append(sweep.Records, snapshot)
+	}
+	return sweep, nil
 }
 
 // KeepSnapshot turns a scheduled snapshot into a manual one, so the space's
@@ -610,19 +739,33 @@ func newDirectorySnapshotBackend(baseRoot string, resolve func(string) (string, 
 	return &directorySnapshotBackend{baseRoot: baseRoot, resolve: resolve}
 }
 
-func (b *directorySnapshotBackend) Create(_ context.Context, spaceID, snapshotID string) ([]SnapshotObject, error) {
+func (b *directorySnapshotBackend) base() string {
+	return filepath.Join(b.baseRoot, ".a-nas-snapshots")
+}
+
+func (b *directorySnapshotBackend) root(snapshotID string) string {
+	return filepath.Join(b.base(), safeSegment(snapshotID))
+}
+
+// Create copies the space into the snapshot's directory with the times its
+// files and folders had, as a Btrfs snapshot keeps them.
+func (b *directorySnapshotBackend) Create(ctx context.Context, spaceID, snapshotID string) error {
 	sourceRoot, err := b.resolve(spaceID)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	base := filepath.Join(b.baseRoot, ".a-nas-snapshots")
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		return nil, err
+	targetRoot := b.root(snapshotID)
+	if _, err := os.Lstat(targetRoot); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-	targetRoot := filepath.Join(base, safeSegment(snapshotID))
+	if err := os.MkdirAll(b.base(), 0o700); err != nil {
+		return err
+	}
 	temporary := targetRoot + ".incoming"
 	if err := os.Mkdir(temporary, 0o750); err != nil {
-		return nil, err
+		return err
 	}
 	committed := false
 	defer func() {
@@ -630,64 +773,44 @@ func (b *directorySnapshotBackend) Create(_ context.Context, spaceID, snapshotID
 			_ = os.RemoveAll(temporary)
 		}
 	}()
-	var objects []SnapshotObject
-	err = filepath.WalkDir(sourceRoot, func(path string, item os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	var folders []SnapshotObject
+	if err := WalkSnapshot(ctx, sourceRoot, func(object SnapshotObject) error {
+		destination := filepath.Join(temporary, filepath.FromSlash(object.Key))
+		if object.Kind == EntryKindDirectory {
+			folders = append(folders, object)
+			return os.Mkdir(destination, 0o750)
 		}
-		if path == sourceRoot {
-			return nil
-		}
-		if strings.HasPrefix(item.Name(), ".a-nas-") {
-			if item.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		info, err := item.Info()
-		if err != nil {
+		if err := copyRegularFile(filepath.Join(sourceRoot, filepath.FromSlash(object.Key)), destination, 0o440); err != nil {
 			return err
 		}
-		if info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		relative, err := filepath.Rel(sourceRoot, path)
-		if err != nil {
+		return os.Chtimes(destination, object.ModifiedAt, object.ModifiedAt)
+	}); err != nil {
+		return err
+	}
+	// Deepest first, as filling a folder changes its time.
+	for index := len(folders) - 1; index >= 0; index-- {
+		folder := folders[index]
+		if err := os.Chtimes(filepath.Join(temporary, filepath.FromSlash(folder.Key)), folder.ModifiedAt, folder.ModifiedAt); err != nil {
 			return err
 		}
-		destination := filepath.Join(temporary, relative)
-		kind := EntryKindFile
-		if info.IsDir() {
-			kind = EntryKindDirectory
-			if err := os.Mkdir(destination, 0o750); err != nil {
-				return err
-			}
-		} else if err := copyRegularFile(path, destination, 0o440); err != nil {
-			return err
-		}
-		key := filepath.ToSlash(relative)
-		parentKey := filepath.ToSlash(filepath.Dir(relative))
-		if parentKey == "." {
-			parentKey = ""
-		}
-		objects = append(objects, SnapshotObject{Key: key, ParentKey: parentKey, Name: info.Name(), Kind: kind, SizeBytes: info.Size(), ModifiedAt: info.ModTime().UTC()})
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	if err := os.Rename(temporary, targetRoot); err != nil {
-		return nil, err
+		return err
 	}
 	committed = true
-	return objects, nil
+	return nil
+}
+
+func (b *directorySnapshotBackend) Objects(ctx context.Context, snapshotID string, visit func(SnapshotObject) error) error {
+	root := b.root(snapshotID)
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+		return ErrNotFound
+	}
+	return WalkSnapshot(ctx, root, visit)
 }
 
 func (b *directorySnapshotBackend) Open(_ context.Context, snapshotID, key string) (io.ReadCloser, SnapshotObject, error) {
-	root := filepath.Join(b.baseRoot, ".a-nas-snapshots", safeSegment(snapshotID))
+	root := b.root(snapshotID)
 	path := filepath.Join(root, filepath.FromSlash(key))
 	if !withinRoot(root, path) {
 		return nil, SnapshotObject{}, ErrNotFound
@@ -707,11 +830,90 @@ func (b *directorySnapshotBackend) Open(_ context.Context, snapshotID, key strin
 }
 
 func (b *directorySnapshotBackend) Delete(_ context.Context, _ string, snapshotID string) error {
-	root := filepath.Join(b.baseRoot, ".a-nas-snapshots", safeSegment(snapshotID))
-	if !withinRoot(filepath.Join(b.baseRoot, ".a-nas-snapshots"), root) {
+	root := b.root(snapshotID)
+	if !withinRoot(b.base(), root) {
 		return ErrNotFound
 	}
 	return os.RemoveAll(root)
+}
+
+// Prune also removes the copies that a stopped Create left unfinished.
+func (b *directorySnapshotBackend) Prune(_ context.Context, keep []string) (SnapshotPrune, error) {
+	wanted := make(map[string]string, len(keep))
+	for _, id := range keep {
+		wanted[safeSegment(id)] = id
+	}
+	pruned := SnapshotPrune{Present: []string{}}
+	items, err := os.ReadDir(b.base())
+	if errors.Is(err, os.ErrNotExist) {
+		return pruned, nil
+	}
+	if err != nil {
+		return SnapshotPrune{}, err
+	}
+	for _, item := range items {
+		if id, ok := wanted[item.Name()]; ok {
+			pruned.Present = append(pruned.Present, id)
+			continue
+		}
+		if _, ok := wanted[strings.TrimSuffix(item.Name(), ".incoming")]; ok {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(b.base(), item.Name())); err != nil {
+			return SnapshotPrune{}, err
+		}
+		pruned.Removed++
+	}
+	return pruned, nil
+}
+
+// WalkSnapshot calls visit for the files and folders below root in
+// pre-order, so each folder comes before its contents. It leaves out A-NAS
+// bookkeeping, symlinks and special files, and stops when ctx ends.
+func WalkSnapshot(ctx context.Context, root string, visit func(SnapshotObject) error) error {
+	return filepath.WalkDir(root, func(path string, item os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if strings.HasPrefix(item.Name(), ".a-nas-") {
+			if item.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := item.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		parentKey := filepath.ToSlash(filepath.Dir(relative))
+		if parentKey == "." {
+			parentKey = ""
+		}
+		kind := EntryKindFile
+		if info.IsDir() {
+			kind = EntryKindDirectory
+		}
+		return visit(SnapshotObject{
+			Key: filepath.ToSlash(relative), ParentKey: parentKey, Name: info.Name(), Kind: kind, SizeBytes: info.Size(),
+			ModifiedAt: info.ModTime().UTC(),
+		})
+	})
 }
 
 // copyRegularFile copies one file for the development snapshot backend, which

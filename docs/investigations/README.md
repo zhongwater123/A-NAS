@@ -40,6 +40,11 @@
 - [2026-10-20：VNAS 自建的技能不出现在“记忆”中](2026-10-20-assistant-skills-hidden-by-name.md)（fixed locally；待部署验收）
 - [2026-10-21：VNAS 长对话中窗口崩溃，回答过的确认卡片堆在输入框上方](2026-10-21-vnas-window-crash-and-stacked-cards.md)（fixed locally；崩溃的确切报错待取得，待部署验收）
 
+- [2026-10-21：存储计划执行绑定浏览器请求，被打断的建卷无法恢复](2026-10-21-storage-plan-bound-to-browser-request.md)（fixed locally；Experimental NAS verification pending）
+- [2026-10-21：过期的目录对账扫描改写回收站行，文件夹无法恢复](2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)（fixed locally；待部署验收）
+
+- [2026-10-21：快照清单超过 1 MiB 即失败，并留下孤儿子卷](2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)（fixed locally；待部署验收）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

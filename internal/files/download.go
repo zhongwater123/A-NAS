@@ -21,7 +21,7 @@ var ErrInvalidSelection = errors.New("download selection is invalid")
 // archive downloads.
 var archiveSkip = ScanSkip{
 	Names:    reconcileSkip.Names,
-	Prefixes: append([]string{uploadTemporaryPrefix}, reconcileSkip.Prefixes...),
+	Prefixes: []string{uploadTemporaryPrefix, copyTemporaryPrefix},
 }
 
 // ArchiveItem is a file or folder of an archive download.

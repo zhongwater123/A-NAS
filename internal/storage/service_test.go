@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -134,7 +135,7 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if len(volumes) != 1 || volumes[0].ID != "volume:data" {
 		t.Fatalf("volumes = %#v", volumes)
 	}
-	audit, err := restarted.ListAudit(ctx)
+	audit, err := restarted.Activity(ctx, activity.Query{Limit: activity.MaxLimit})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,15 +244,24 @@ func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
 	return r.state, nil
 }
 
-func (e *recordingExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
+// recordingExecutor finishes every operation at once.
+func (e *recordingExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
 	e.executedDiskID = request.Disks[0].DiskID
 	e.created = request
-	return storage.Volume{ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable}, nil
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable,
+	}}, nil
 }
 
-func (e *recordingExecutor) AddDisks(_ context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
+func (e *recordingExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
 	e.added = append(e.added, request)
-	return storage.Volume{FilesystemUUID: request.FilesystemUUID, State: storage.VolumeStateAvailable}, nil
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (e *recordingExecutor) VolumeOperation(context.Context, string) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{}, storage.ErrOperationNotFound
 }
 
 func (e *recordingExecutor) ContinueConversion(context.Context) error {

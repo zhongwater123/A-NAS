@@ -282,6 +282,8 @@
 .as-photo-ref svg { width: 13px; height: 13px; flex: none; align-self: center; color: var(--as-muted); }
 .as-photo-ref:hover:not(:disabled) { text-decoration-color: currentColor; }
 .as-photo-ref:disabled { cursor: default; }
+.as-outside-image { display: inline-flex; align-items: baseline; gap: 4px; color: var(--as-ink-2); }
+.as-outside-image svg { width: 13px; height: 13px; flex: none; align-self: center; color: var(--as-muted); }
 .as-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; max-width: 600px; margin: 12px 0 2px; }
 .as-gallery.one { grid-template-columns: minmax(0, 360px); }
 .as-gallery-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 0; border: 0; color: var(--as-ink-2); background: none; font: inherit; text-align: left; cursor: zoom-in; }

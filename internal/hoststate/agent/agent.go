@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -49,6 +50,9 @@ func SocketPath() (string, error) {
 type Client struct {
 	httpClient      *http.Client
 	operationClient *http.Client
+	// listingClient reads snapshot object listings, which take as long as
+	// walking a space; its limit only stops a Host Agent that hangs.
+	listingClient *http.Client
 }
 
 func NewClient(socketPath string) *Client {
@@ -62,6 +66,7 @@ func NewClient(socketPath string) *Client {
 	return &Client{
 		httpClient:      &http.Client{Transport: transport, Timeout: requestTimeout},
 		operationClient: &http.Client{Transport: transport, Timeout: 15 * time.Minute},
+		listingClient:   &http.Client{Transport: transport, Timeout: time.Hour},
 	}
 }
 
@@ -173,6 +178,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleContinueConversion(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, volumeOperationsPath) {
+		h.handleVolumeOperation(w, r)
+		return
+	}
 	if r.URL.Path == "/v1/accounts/credential" {
 		h.handleSetCredential(w, r)
 		return
@@ -198,7 +207,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/v1/snapshots" {
-		h.handleCreateSnapshot(w, r)
+		h.handleSnapshots(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/snapshots/") {
@@ -241,9 +250,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, documentFromDomain(state))
 }
 
-func (h *handler) handleCreateSnapshot(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
+// handleSnapshots takes a snapshot (POST) or keeps only the named ones (PUT).
+func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPost+", "+http.MethodPut)
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
@@ -251,18 +261,39 @@ func (h *handler) handleCreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
 		return
 	}
+	if r.Method == http.MethodPut {
+		var request snapshotKeepDocument
+		if err := decodeRequest(r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+			return
+		}
+		pruned, err := h.snapshots.Prune(r.Context(), request.Keep)
+		if errors.Is(err, files.ErrVolumeUnavailable) {
+			writeError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+			return
+		}
+		if err != nil {
+			h.logger.ErrorContext(r.Context(), "prune snapshots failed", "error", err)
+			writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+			return
+		}
+		if pruned.Removed > 0 {
+			h.logger.InfoContext(r.Context(), "deleted snapshots nobody keeps", "count", pruned.Removed)
+		}
+		writeJSON(w, http.StatusOK, pruned)
+		return
+	}
 	var request snapshotDocument
 	if err := decodeRequest(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	objects, err := h.snapshots.Create(r.Context(), request.SpaceID, request.SnapshotID)
-	if err != nil {
+	if err := h.snapshots.Create(r.Context(), request.SpaceID, request.SnapshotID); err != nil {
 		h.logger.ErrorContext(r.Context(), "create snapshot failed", "snapshot", request.SnapshotID, "error", err)
 		writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, snapshotObjectsDocument{Items: objects})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request) {
@@ -279,11 +310,19 @@ func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request)
 	if r.Method == http.MethodDelete && suffix == "" {
 		spaceID := r.URL.Query().Get("spaceId")
 		if err := h.snapshots.Delete(r.Context(), spaceID, snapshotID); err != nil {
+			if errors.Is(err, files.ErrNotFound) {
+				writeError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
+				return
+			}
 			h.logger.ErrorContext(r.Context(), "delete snapshot failed", "snapshot", snapshotID, "error", err)
 			writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == http.MethodGet && suffix == "objects" {
+		h.streamSnapshotObjects(w, r, snapshotID)
 		return
 	}
 	if r.Method == http.MethodGet && suffix == "object" {
@@ -308,6 +347,45 @@ func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request)
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 }
 
+// streamSnapshotObjects writes a snapshot's objects as they are walked, one
+// JSON line each, and ends with a line that counts them. A walk that fails
+// after the first line ends with an error line instead, so a reader never
+// takes a cut-off listing for a whole one.
+func (h *handler) streamSnapshotObjects(w http.ResponseWriter, r *http.Request, snapshotID string) {
+	encoder := json.NewEncoder(w)
+	started, count := false, 0
+	start := func() {
+		if !started {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.WriteHeader(http.StatusOK)
+			started = true
+		}
+	}
+	err := h.snapshots.Objects(r.Context(), snapshotID, func(object files.SnapshotObject) error {
+		start()
+		count++
+		return encoder.Encode(snapshotObjectLine{Object: &object})
+	})
+	if err != nil && !started {
+		if errors.Is(err, files.ErrNotFound) {
+			writeError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
+			return
+		}
+		h.logger.ErrorContext(r.Context(), "list snapshot objects failed", "snapshot", snapshotID, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+		return
+	}
+	start()
+	if err != nil {
+		if r.Context().Err() == nil {
+			h.logger.ErrorContext(r.Context(), "list snapshot objects failed", "snapshot", snapshotID, "error", err)
+		}
+		_ = encoder.Encode(snapshotObjectLine{Error: &errorDetail{Code: "operation_failed", Message: "snapshot operation failed"}})
+		return
+	}
+	_ = encoder.Encode(snapshotObjectLine{End: &snapshotObjectsEnd{Count: count}})
+}
+
 func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -323,15 +401,14 @@ func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	volume, err := h.volume.CreateVolume(r.Context(), storage.CreateVolumeRequest{
+	operation, err := h.volume.StartCreateVolume(r.Context(), storage.CreateVolumeRequest{
 		PlanID: document.PlanID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "create volume failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		h.writeVolumeOperationError(w, r, "start creating the data volume failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, volume)
+	writeJSON(w, http.StatusOK, operation)
 }
 
 func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
@@ -349,15 +426,51 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	volume, err := h.volume.AddDisks(r.Context(), storage.AddDisksRequest{
+	operation, err := h.volume.StartAddDisks(r.Context(), storage.AddDisksRequest{
 		PlanID: document.PlanID, FilesystemUUID: document.FilesystemUUID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "add disks to the data volume failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		h.writeVolumeOperationError(w, r, "start adding disks to the data volume failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, volume)
+	writeJSON(w, http.StatusOK, operation)
+}
+
+// handleVolumeOperation reports a plan's data-volume operation, which runs
+// on after the request that started it.
+func (h *handler) handleVolumeOperation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	planID := strings.TrimPrefix(r.URL.Path, volumeOperationsPath)
+	if planID == "" || strings.Contains(planID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "plan ID is invalid")
+		return
+	}
+	operation, err := h.volume.VolumeOperation(r.Context(), planID)
+	if err != nil {
+		h.writeVolumeOperationError(w, r, "read the data-volume operation failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, operation)
+}
+
+func (h *handler) writeVolumeOperationError(w http.ResponseWriter, r *http.Request, message string, err error) {
+	switch {
+	case errors.Is(err, storage.ErrOperationNotFound):
+		writeError(w, http.StatusNotFound, operationNotFoundCode, "the plan has no data-volume operation")
+	case errors.Is(err, storage.ErrPlanState):
+		writeError(w, http.StatusConflict, operationConflictCode, "another data-volume operation is running, or the plan asked for another one")
+	default:
+		h.logger.ErrorContext(r.Context(), message, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+	}
 }
 
 func (h *handler) handleContinueConversion(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +559,7 @@ func (h *handler) writeAccountError(w http.ResponseWriter, err error) {
 const (
 	identityConflictCode  = "identity_conflict"
 	volumeUnavailableCode = "volume_unavailable"
+	snapshotNotFoundCode  = "snapshot_not_found"
 )
 
 func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request) {
@@ -484,7 +598,12 @@ type addDisksDocument struct {
 	Layout         storage.Layout       `json:"layout"`
 }
 
-const noConversionCode = "no_conversion"
+const (
+	noConversionCode      = "no_conversion"
+	operationNotFoundCode = "operation_not_found"
+	operationConflictCode = "operation_conflict"
+	volumeOperationsPath  = "/v1/storage/operations/"
+)
 
 type credentialDocument struct {
 	UserID         string        `json:"userId"`
@@ -567,9 +686,25 @@ type snapshotDocument struct {
 	SnapshotID string `json:"snapshotId"`
 }
 
-type snapshotObjectsDocument struct {
-	Items []files.SnapshotObject `json:"items"`
+type snapshotKeepDocument struct {
+	Keep []string `json:"keep"`
 }
+
+// snapshotObjectLine is one line of a snapshot object listing: an object,
+// the end of the listing, or the error that cut it short.
+type snapshotObjectLine struct {
+	Object *files.SnapshotObject `json:"object,omitempty"`
+	End    *snapshotObjectsEnd   `json:"end,omitempty"`
+	Error  *errorDetail          `json:"error,omitempty"`
+}
+
+type snapshotObjectsEnd struct {
+	Count int `json:"count"`
+}
+
+// maxSnapshotObjectLine bounds one line of a listing, far above the longest
+// path Linux allows even with every byte escaped.
+const maxSnapshotObjectLine = 1 << 20
 
 func decodeRequest(r *http.Request, target any) error {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
@@ -580,19 +715,25 @@ func decodeRequest(r *http.Request, target any) error {
 	return ensureEndOfJSON(decoder)
 }
 
-func (c *Client) CreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	var response storage.Volume
+func (c *Client) StartCreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+	var response storage.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes", createVolumeDocument{
 		PlanID: request.PlanID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
 	return response, err
 }
 
-func (c *Client) AddDisks(ctx context.Context, request storage.AddDisksRequest) (storage.Volume, error) {
-	var response storage.Volume
+func (c *Client) StartAddDisks(ctx context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	var response storage.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/disks", addDisksDocument{
 		PlanID: request.PlanID, FilesystemUUID: request.FilesystemUUID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
+	return response, err
+}
+
+func (c *Client) VolumeOperation(ctx context.Context, planID string) (storage.VolumeOperation, error) {
+	var response storage.VolumeOperation
+	err := c.doJSON(ctx, c.operationClient, http.MethodGet, volumeOperationsPath+url.PathEscape(planID), nil, &response)
 	return response, err
 }
 
@@ -630,12 +771,68 @@ func (c *Client) DisableCredential(ctx context.Context, username string) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodDelete, "/v1/accounts/credential/"+url.PathEscape(username), nil, nil)
 }
 
-func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) ([]files.SnapshotObject, error) {
-	var response snapshotObjectsDocument
-	if err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/snapshots", snapshotDocument{SpaceID: spaceID, SnapshotID: snapshotID}, &response); err != nil {
-		return nil, err
+func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/snapshots", snapshotDocument{SpaceID: spaceID, SnapshotID: snapshotID}, nil)
+}
+
+// Objects reads a snapshot's listing line by line, so its size is not
+// limited, and fails unless the listing ends with the count of its objects.
+func (c *Client) Objects(ctx context.Context, snapshotID string, visit func(files.SnapshotObject) error) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://host-agent/v1/snapshots/"+url.PathEscape(snapshotID)+"/objects", nil)
+	if err != nil {
+		return err
 	}
-	return response.Items, nil
+	response, err := c.listingClient.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		var failure errorDocument
+		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&failure)
+		if response.StatusCode == http.StatusNotFound && failure.Error.Code == snapshotNotFoundCode {
+			return files.ErrNotFound
+		}
+		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
+	}
+	lines := bufio.NewScanner(response.Body)
+	lines.Buffer(make([]byte, 0, 64<<10), maxSnapshotObjectLine)
+	count := 0
+	for lines.Scan() {
+		var line snapshotObjectLine
+		decoder := json.NewDecoder(bytes.NewReader(lines.Bytes()))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&line); err != nil {
+			return fmt.Errorf("decode host agent snapshot objects: %w", err)
+		}
+		if err := ensureEndOfJSON(decoder); err != nil {
+			return err
+		}
+		switch {
+		case line.Object != nil && line.End == nil && line.Error == nil:
+			count++
+			if err := visit(*line.Object); err != nil {
+				return err
+			}
+		case line.End != nil && line.Object == nil && line.Error == nil:
+			if line.End.Count != count {
+				return fmt.Errorf("host agent counted %d snapshot objects but sent %d", line.End.Count, count)
+			}
+			if lines.Scan() {
+				return errors.New("host agent sent snapshot objects after the end")
+			}
+			return lines.Err()
+		case line.Error != nil && line.Object == nil && line.End == nil:
+			return fmt.Errorf("%w: snapshot objects: %s", ErrUnavailable, line.Error.Code)
+		default:
+			return errors.New("decode host agent snapshot objects: invalid line")
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return fmt.Errorf("%w: snapshot objects ended early", ErrUnavailable)
 }
 
 func (c *Client) Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
@@ -675,6 +872,18 @@ func (c *Client) Delete(ctx context.Context, spaceID, snapshotID string) error {
 		"/v1/snapshots/"+url.PathEscape(snapshotID)+"?spaceId="+url.QueryEscape(spaceID), nil, nil)
 }
 
+func (c *Client) Prune(ctx context.Context, keep []string) (files.SnapshotPrune, error) {
+	if keep == nil {
+		keep = []string{}
+	}
+	var response files.SnapshotPrune
+	err := c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/snapshots", snapshotKeepDocument{Keep: keep}, &response)
+	if errors.Is(err, accounts.ErrVolumeUnavailable) {
+		return files.SnapshotPrune{}, files.ErrVolumeUnavailable
+	}
+	return response, err
+}
+
 func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path string, requestBody, responseBody any) error {
 	var body io.Reader
 	if requestBody != nil {
@@ -707,6 +916,15 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		}
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == noConversionCode {
 			return storage.ErrNoConversion
+		}
+		if response.StatusCode == http.StatusNotFound && failure.Error.Code == operationNotFoundCode {
+			return storage.ErrOperationNotFound
+		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == operationConflictCode {
+			return fmt.Errorf("%w: %s", storage.ErrPlanState, failure.Error.Message)
+		}
+		if response.StatusCode == http.StatusNotFound && failure.Error.Code == snapshotNotFoundCode {
+			return files.ErrNotFound
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}

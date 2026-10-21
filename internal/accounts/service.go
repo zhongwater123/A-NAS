@@ -25,14 +25,17 @@ import (
 )
 
 var (
-	ErrSetupComplete       = errors.New("administrator setup is already complete")
-	ErrInvalidUsername     = errors.New("invalid username")
-	ErrInvalidPassword     = errors.New("invalid password")
-	ErrWeakPassword        = fmt.Errorf("%w: it must contain at least %d characters", ErrInvalidPassword, MinPasswordLength)
-	ErrPasswordTooLong     = fmt.Errorf("%w: it must contain at most %d characters", ErrInvalidPassword, MaxPasswordLength)
-	ErrPasswordCharacters  = fmt.Errorf("%w: it must not contain control characters", ErrInvalidPassword)
-	ErrInvalidCredentials  = errors.New("invalid username or password")
-	ErrSessionNotFound     = errors.New("session is invalid or expired")
+	ErrSetupComplete      = errors.New("administrator setup is already complete")
+	ErrInvalidUsername    = errors.New("invalid username")
+	ErrInvalidPassword    = errors.New("invalid password")
+	ErrWeakPassword       = fmt.Errorf("%w: it must contain at least %d characters", ErrInvalidPassword, MinPasswordLength)
+	ErrPasswordTooLong    = fmt.Errorf("%w: it must contain at most %d characters", ErrInvalidPassword, MaxPasswordLength)
+	ErrPasswordCharacters = fmt.Errorf("%w: it must not contain control characters", ErrInvalidPassword)
+	ErrInvalidCredentials = errors.New("invalid username or password")
+	ErrSessionNotFound    = errors.New("session is invalid or expired")
+	// ErrSessionElsewhere reports a valid session presented by another client
+	// than the one that signed in (issue #161).
+	ErrSessionElsewhere    = errors.New("session was signed in from another client")
 	ErrUsernameUnavailable = errors.New("username is unavailable")
 	ErrUsernameReserved    = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
 	ErrCredentialProvision = errors.New("account credential provisioning failed")
@@ -145,16 +148,6 @@ var localConsoleExpiry = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.
 
 // LocalConsole reports a session signed in on the device's own screen.
 func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpiry) }
-
-type AuditEvent struct {
-	ID           string    `json:"id"`
-	ActorUserID  string    `json:"actorUserId,omitempty"`
-	Action       string    `json:"action"`
-	ResourceType string    `json:"resourceType"`
-	ResourceID   string    `json:"resourceId"`
-	OccurredAt   time.Time `json:"occurredAt"`
-	Detail       string    `json:"detail,omitempty"`
-}
 
 type CredentialRequest struct {
 	UserID         string
@@ -302,6 +295,15 @@ CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resourc
 	}
 	// Grants made before private libraries could be viewed are for spaces.
 	if err := s.ensureColumn(ctx, "viewing_grants", "scope", "TEXT NOT NULL DEFAULT 'space'"); err != nil {
+		return err
+	}
+	// The client a session is bound to (ClientOrigin.client). Sessions from
+	// before the binding have none and are refused, except local console
+	// sessions, which were only ever granted to direct loopback connections.
+	if err := s.ensureColumn(ctx, "sessions", "client", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET client = ? WHERE client = '' AND expires_at = ?", ViaLoopback, formatTime(localConsoleExpiry)); err != nil {
 		return err
 	}
 	return s.allocateMissingIdentities(ctx)
@@ -630,8 +632,8 @@ func (s *Service) authenticate(ctx context.Context, username, password string, l
 		expiresAt = localConsoleExpiry
 	}
 	if _, err := s.store.db.ExecContext(ctx,
-		"INSERT INTO sessions(token_hash, csrf_token, user_id, expires_at, created_at) VALUES(?,?,?,?,?)",
-		tokenHash(token), csrf, user.ID, formatTime(expiresAt), formatTime(now)); err != nil {
+		"INSERT INTO sessions(token_hash, csrf_token, user_id, expires_at, created_at, client) VALUES(?,?,?,?,?,?)",
+		tokenHash(token), csrf, user.ID, formatTime(expiresAt), formatTime(now), originFrom(ctx).client()); err != nil {
 		return Session{}, err
 	}
 	s.sessions.remember(user.ID, token, expiresAt)
@@ -639,29 +641,61 @@ func (s *Service) authenticate(ctx context.Context, username, password string, l
 	return Session{Token: token, CSRFToken: csrf, ExpiresAt: expiresAt, User: user}, nil
 }
 
+// ResolveSession resolves a token the Product Service already accepted from
+// its client, or holds for background work. A token a browser presents goes
+// through ResolveClientSession instead.
 func (s *Service) ResolveSession(ctx context.Context, token string) (Session, error) {
+	session, _, err := s.lookupSession(ctx, token)
+	if err != nil {
+		return Session{}, err
+	}
+	s.sessions.remember(session.User.ID, token, session.ExpiresAt)
+	return session, nil
+}
+
+// ResolveClientSession resolves a token presented by a client, which must be
+// the client that signed in. The session cookie also reaches any other port on
+// the device's address, such as an installed app's web interface, so on its
+// own it must not be enough (issue #161).
+func (s *Service) ResolveClientSession(ctx context.Context, token string, origin ClientOrigin) (Session, error) {
+	session, client, err := s.lookupSession(ctx, token)
+	if err != nil {
+		return Session{}, err
+	}
+	// Sessions from before the binding name no client and must sign in again.
+	if client == "" {
+		return Session{}, ErrSessionNotFound
+	}
+	if want := origin.client(); client != want {
+		return Session{}, ErrSessionElsewhere
+	}
+	s.sessions.remember(session.User.ID, token, session.ExpiresAt)
+	return session, nil
+}
+
+// lookupSession returns an active session and the client it is bound to.
+func (s *Service) lookupSession(ctx context.Context, token string) (Session, string, error) {
 	var session Session
-	var expiresAt, createdAt string
+	var expiresAt, createdAt, client string
 	err := s.store.db.QueryRowContext(ctx, `
-SELECT s.csrf_token, s.expires_at, u.id, u.username, u.role, u.status, u.created_at, u.must_change_password, u.nickname, u.avatar_version
+SELECT s.csrf_token, s.expires_at, s.client, u.id, u.username, u.role, u.status, u.created_at, u.must_change_password, u.nickname, u.avatar_version
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = ?`, tokenHash(token)).Scan(
-		&session.CSRFToken, &expiresAt, &session.User.ID, &session.User.Username,
+		&session.CSRFToken, &expiresAt, &client, &session.User.ID, &session.User.Username,
 		&session.User.Role, &session.User.Status, &createdAt, &session.User.MustChangePassword,
 		&session.User.Nickname, &session.User.AvatarVersion,
 	)
 	if err != nil {
-		return Session{}, ErrSessionNotFound
+		return Session{}, "", ErrSessionNotFound
 	}
 	session.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt)
 	session.User.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	if session.User.Status != UserStatusActive || !s.now().UTC().Before(session.ExpiresAt) {
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash = ?", tokenHash(token))
 		s.sessions.forgetToken(token)
-		return Session{}, ErrSessionNotFound
+		return Session{}, "", ErrSessionNotFound
 	}
-	s.sessions.remember(session.User.ID, token, session.ExpiresAt)
-	return session, nil
+	return session, client, nil
 }
 
 // EndSession signs the session's user out; only the user's own sign-out
@@ -719,31 +753,6 @@ func (s *Service) ActiveUsers(ctx context.Context) ([]User, error) {
 		users = append(users, user)
 	}
 	return users, rows.Err()
-}
-
-func (s *Service) ListAudit(ctx context.Context, actor User) ([]AuditEvent, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
-		return nil, ErrForbidden
-	}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, actor_user_id, action, resource_type, resource_id, occurred_at, detail
-FROM audit_events ORDER BY occurred_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var events []AuditEvent
-	for rows.Next() {
-		var event AuditEvent
-		var actorID sql.NullString
-		var occurredAt string
-		if err := rows.Scan(&event.ID, &actorID, &event.Action, &event.ResourceType, &event.ResourceID, &occurredAt, &event.Detail); err != nil {
-			return nil, err
-		}
-		event.ActorUserID = actorID.String
-		event.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		events = append(events, event)
-	}
-	return events, rows.Err()
 }
 
 func (s *Service) ListSpaces(ctx context.Context, actor User) ([]Space, error) {

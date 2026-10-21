@@ -45,6 +45,8 @@ const (
 	// A failed run is retried after scheduleRetryDelay until the next run is due.
 	scheduleRetryDelay = 15 * time.Minute
 	scheduleTick       = time.Minute
+	// snapshotSweepInterval separates sweeps after the first one ran.
+	snapshotSweepInterval = time.Hour
 	// systemActor records scheduled snapshots and their expiry in the audit log.
 	systemActor = "system"
 )
@@ -360,11 +362,16 @@ func (s SnapshotSchedule) nextRun(now time.Time, location *time.Location) time.T
 }
 
 // RunSnapshotSchedules takes the snapshots that schedules are due for, looking
-// every minute until ctx ends.
+// every minute until ctx ends. It sweeps snapshots first, so what a crash
+// left is removed before new ones are taken, and then every hour.
 func (s *Service) RunSnapshotSchedules(ctx context.Context, spaces SpaceLookup, logger *slog.Logger) {
 	ticker := time.NewTicker(scheduleTick)
 	defer ticker.Stop()
+	var nextSweep time.Time
 	for {
+		if now := s.now(); !now.Before(nextSweep) {
+			nextSweep = now.Add(s.sweepSnapshots(ctx, logger))
+		}
 		if err := s.RunDueSnapshots(ctx, spaces, logger); err != nil && ctx.Err() == nil {
 			logger.ErrorContext(ctx, "snapshot schedules failed", "error", err)
 		}
@@ -373,6 +380,29 @@ func (s *Service) RunSnapshotSchedules(ctx context.Context, spaces SpaceLookup, 
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// sweepSnapshots sweeps snapshots, logs what the sweep removed and returns
+// how long to wait before the next one. While the data volume is offline it
+// tries again on the next tick.
+func (s *Service) sweepSnapshots(ctx context.Context, logger *slog.Logger) time.Duration {
+	sweep, err := s.SweepSnapshots(ctx)
+	if sweep.Snapshots > 0 {
+		logger.InfoContext(ctx, "removed snapshots that the catalog did not record", "count", sweep.Snapshots)
+	}
+	for _, snapshot := range sweep.Records {
+		logger.WarnContext(ctx, "removed the record of a snapshot that is no longer on the data volume",
+			"space_id", snapshot.SpaceID, "snapshot", snapshot.ID, "name", snapshot.Name)
+	}
+	switch {
+	case err == nil:
+		return snapshotSweepInterval
+	case errors.Is(err, ErrVolumeUnavailable) || ctx.Err() != nil:
+		return 0
+	default:
+		logger.WarnContext(ctx, "snapshot sweep failed", "error", err)
+		return scheduleRetryDelay
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 type FileSystem interface {
 	Lstat(ctx context.Context, path string) (FileInfo, error)
 	// Scan lists everything below path in pre-order. It does not follow
-	// symlinks, does not descend into skipped names, and lists unreadable
-	// directories without their contents.
+	// symlinks, does not descend into skipped names, and lists opaque and
+	// unreadable directories without their contents.
 	Scan(ctx context.Context, path string, skip ScanSkip) ([]ScanEntry, error)
 	Mkdir(ctx context.Context, path string) error
 	MkdirAll(ctx context.Context, path string) error
@@ -62,6 +62,8 @@ type ScanEntry struct {
 type ScanSkip struct {
 	Names    []string `json:"names,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
+	// Opaque prefixes name directories that are listed but not entered.
+	Opaque []string `json:"opaque,omitempty"`
 	// Strict refuses a disappearing or unreadable child instead of returning
 	// an incomplete tree. Limit bounds memory for explicit share selections.
 	Strict bool `json:"strict,omitempty"`
@@ -73,4 +75,8 @@ func (s ScanSkip) matches(name string) bool {
 		return true
 	}
 	return slices.ContainsFunc(s.Prefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
+}
+
+func (s ScanSkip) opaque(name string) bool {
+	return slices.ContainsFunc(s.Opaque, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
 }
