@@ -16,6 +16,13 @@ OP_INFO = "info"
 OP_EMBED_IMAGE = "embed_image"
 # Encodes "text" as a search query; the provider adds the model's prompt.
 OP_EMBED_QUERY = "embed_query"
+# Encodes "text" for the use "task" names, one of TEXT_TASKS: "query" is a
+# search query, as embed_query encodes it; "document" is a passage queries
+# are matched against (OCR text, notes, documents); "similarity" is one of
+# two texts compared with each other. The provider adds the model's prompt
+# for that use, so one text gets a vector per task.
+OP_EMBED_TEXT = "embed_text"
+TEXT_TASKS = ("query", "document", "similarity")
 # Finds the objects in the image; answers "model" and "boxes", each
 # [class, score, x0, y0, x1, y1] with corners as fractions of the image. The
 # caller cancels by hanging up, and then gets no answer.

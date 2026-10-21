@@ -87,12 +87,15 @@ class WorkerTest(unittest.TestCase):
         self.assertTrue(query["ok"])
         self.assertEqual(query["vector"], call(path, {"op": "embed_query", "text": "海边的猫"})["vector"])
         self.assertNotEqual(query["vector"], call(path, {"op": "embed_query", "text": "车库里的电动车"})["vector"])
+        text = call(path, {"op": "embed_text", "text": "海边的猫", "task": "query"})
+        self.assertEqual(text["vector"], query["vector"])
+        self.assertNotEqual(text["vector"], call(path, {"op": "embed_text", "text": "海边的猫", "task": "document"})["vector"])
 
     def test_rejects_requests_it_cannot_serve(self):
         path, _ = self.start(providers.FakeProvider())
         self.assertEqual(call(path, {"op": "embed_image"})["error"]["code"], protocol.CODE_INVALID_INPUT)
         self.assertEqual(call(path, {"op": "embed_image"}, self.image(b""))["error"]["code"], protocol.CODE_INVALID_INPUT)
-        self.assertEqual(call(path, {"op": "embed_text"})["error"]["code"], protocol.CODE_INTERNAL)
+        self.assertEqual(call(path, {"op": "embed_video"})["error"]["code"], protocol.CODE_INTERNAL)
         for request in ({"op": "embed_query"}, {"op": "embed_query", "text": "  "},
                         {"op": "embed_query", "text": 7}, {"op": "embed_query", "text": "猫" * (worker.MAX_QUERY_CHARS + 1)}):
             self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_INVALID_INPUT, request)
@@ -105,7 +108,8 @@ class WorkerTest(unittest.TestCase):
 
     def test_answers_unavailable_without_its_model(self):
         path, _ = self.start(None, reason="model file missing")
-        for request in ({"op": "info"}, {"op": "embed_image"}, {"op": "embed_query", "text": "猫"}):
+        for request in ({"op": "info"}, {"op": "embed_image"}, {"op": "embed_query", "text": "猫"},
+                        {"op": "embed_text", "text": "猫", "task": "document"}):
             self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_UNAVAILABLE)
 
     def test_detects_objects_with_the_fake(self):
@@ -283,6 +287,55 @@ class WorkerTest(unittest.TestCase):
         thread.join(timeout=10)
         self.assertFalse(thread.is_alive())
         self.assertLess(time.monotonic() - started, 10)
+
+
+class EmbedTextTest(unittest.TestCase):
+    """embed_text through respond(), which needs no socket: the framing is
+    the other tests' business."""
+
+    def respond(self, request, provider=None):
+        return worker.respond(request, [], provider or providers.FakeProvider(dimensions=8), None,
+                              worker.Detector(reason="no object detector"))
+
+    def test_one_text_gets_a_unit_vector_per_task(self):
+        vectors = {}
+        for task in protocol.TEXT_TASKS:
+            response = self.respond({"op": "embed_text", "text": "海边的猫", "task": task})
+            self.assertTrue(response["ok"], response)
+            self.assertEqual((response["model"], response["dimensions"]), ("fake-sha256-8", 8))
+            self.assertEqual(response, self.respond({"op": "embed_text", "text": "海边的猫", "task": task}))
+            vector = struct.unpack("<8f", base64.b64decode(response["vector"]))
+            self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=5)
+            vectors[task] = response["vector"]
+        self.assertEqual(len(set(vectors.values())), len(protocol.TEXT_TASKS))
+        self.assertEqual(vectors["query"], self.respond({"op": "embed_query", "text": "海边的猫"})["vector"])
+        other = self.respond({"op": "embed_text", "text": "车库里的电动车", "task": "document"})
+        self.assertNotEqual(vectors["document"], other["vector"])
+        longest = self.respond({"op": "embed_text", "text": "猫" * worker.MAX_TEXT_CHARS, "task": "document"})
+        self.assertTrue(longest["ok"], longest)
+
+    def test_rejects_a_missing_or_unknown_task_and_bad_text(self):
+        for request in ({"op": "embed_text", "text": "猫"},
+                        {"op": "embed_text", "text": "猫", "task": "sts"},
+                        {"op": "embed_text", "text": "猫", "task": 7},
+                        {"op": "embed_text", "text": "猫", "task": None},
+                        {"op": "embed_text", "task": "query"},
+                        {"op": "embed_text", "text": "  ", "task": "query"},
+                        {"op": "embed_text", "text": 7, "task": "query"},
+                        {"op": "embed_text", "text": "猫" * (worker.MAX_TEXT_CHARS + 1), "task": "document"}):
+            response = self.respond(request)
+            self.assertFalse(response["ok"], request)
+            self.assertEqual(response["error"]["code"], protocol.CODE_INVALID_INPUT, request)
+        self.assertIn('"task"', self.respond({"op": "embed_text", "text": "猫"})["error"]["message"])
+
+    def test_prompts_cover_the_tasks_and_search_keeps_its_prompt(self):
+        prompts = providers.MediaPipeProvider.TEXT_PROMPTS
+        self.assertEqual(tuple(prompts), protocol.TEXT_TASKS)
+        self.assertEqual(providers.MediaPipeProvider.QUERY_PROMPT, "task: search result | query: {}")
+        self.assertEqual(prompts["query"], providers.MediaPipeProvider.QUERY_PROMPT)
+        self.assertTrue(all(prompt.endswith("{}") for prompt in prompts.values()))
+        with self.assertRaises(providers.InvalidInput):
+            providers.FakeProvider().embed_text_for("猫", "sts")
 
 
 class ManifestTest(unittest.TestCase):

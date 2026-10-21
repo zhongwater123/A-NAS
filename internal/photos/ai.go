@@ -46,6 +46,17 @@ type EmbedderInfo struct {
 	Animals string
 }
 
+// TextEmbedder is the AI Worker's text encoding for uses beyond photo
+// search: OCR text, notes and documents to retrieve, or two texts compared
+// with each other. An Embedder may also be a TextEmbedder; the photo service
+// does not call it yet.
+type TextEmbedder interface {
+	// EmbedText returns the normalized vector of text used as task: "query"
+	// (as EmbedQuery), "document" or "similarity", comparable with vectors
+	// of the same model.
+	EmbedText(ctx context.Context, text, task string) ([]float32, error)
+}
+
 // Detector is the AI Worker's object detector
 // (docs/architecture/photo-objects.md). An Embedder that is also a Detector
 // gets detection jobs while its Info names a detector.

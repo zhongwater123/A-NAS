@@ -82,7 +82,9 @@ func serveOne(conn *net.UnixConn, handle Handler) {
 }
 
 // Deterministic is a Worker whose vectors come from the image bytes or the
-// query text, so equal inputs get equal vectors.
+// text and its task, so equal inputs get equal vectors: a text as a query is
+// embed_query's vector, and as a document or for similarity another one, as
+// the real prompts make it.
 func Deterministic(model string, dimensions int) Handler {
 	return func(request aiworker.Request, file *os.File) *aiworker.Response {
 		switch request.Op {
@@ -102,6 +104,20 @@ func Deterministic(model string, dimensions int) Handler {
 				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no text"}}
 			}
 			return &aiworker.Response{OK: true, Model: model, Dimensions: dimensions, Vector: Encode(hashVector([]byte(request.Text), dimensions))}
+		case aiworker.OpEmbedText:
+			switch request.Task {
+			case aiworker.TaskQuery, aiworker.TaskDocument, aiworker.TaskSimilarity:
+			default:
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "unknown task"}}
+			}
+			if request.Text == "" {
+				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no text"}}
+			}
+			content := request.Text
+			if request.Task != aiworker.TaskQuery {
+				content = request.Task + ": " + request.Text
+			}
+			return &aiworker.Response{OK: true, Model: model, Dimensions: dimensions, Vector: Encode(hashVector([]byte(content), dimensions))}
 		}
 		return &aiworker.Response{Error: &aiworker.WireError{Code: "unknown_op", Message: request.Op}}
 	}

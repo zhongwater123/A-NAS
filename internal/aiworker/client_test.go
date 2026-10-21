@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -57,6 +58,48 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	vector, err = client.EmbedQuery(context.Background(), "海边的猫")
 	if err != nil || len(vector) != 2 || vector[0] != 4 {
 		t.Fatalf("EmbedQuery() = %v, %v; want the Worker to receive the four characters", vector, err)
+	}
+}
+
+func TestTextEmbeddingCrossesTheSocket(t *testing.T) {
+	var tasks []string
+	socket := aiworkertest.Serve(t, func(request aiworker.Request, file *os.File) *aiworker.Response {
+		if request.Op == aiworker.OpEmbedText {
+			tasks = append(tasks, request.Task)
+		}
+		return aiworkertest.Deterministic("fake-1", 4)(request, file)
+	})
+	client := aiworker.Client{SocketPath: socket}
+	embed := func(text, task string) []float32 {
+		t.Helper()
+		vector, err := client.EmbedText(context.Background(), text, task)
+		if err != nil || len(vector) != 4 {
+			t.Fatalf("EmbedText(%q, %q) = %v, %v", text, task, vector, err)
+		}
+		return vector
+	}
+	query := embed("海边的猫", aiworker.TaskQuery)
+	document := embed("海边的猫", aiworker.TaskDocument)
+	similarity := embed("海边的猫", aiworker.TaskSimilarity)
+	if slices.Equal(query, document) || slices.Equal(document, similarity) || slices.Equal(query, similarity) {
+		t.Fatalf("one text must get a vector per task; got %v, %v, %v", query, document, similarity)
+	}
+	if again := embed("海边的猫", aiworker.TaskDocument); !slices.Equal(again, document) {
+		t.Fatalf("EmbedText() = %v, then %v for the same text and task", document, again)
+	}
+	asQuery, err := client.EmbedQuery(context.Background(), "海边的猫")
+	if err != nil || !slices.Equal(asQuery, query) {
+		t.Fatalf("EmbedQuery() = %v, %v; want EmbedText's query vector %v", asQuery, err, query)
+	}
+	if _, err := client.EmbedText(context.Background(), "海边的猫", "sts"); !errors.Is(err, photos.ErrAIRejected) {
+		t.Fatalf("EmbedText() with an unknown task error = %v, want ErrAIRejected", err)
+	}
+	if _, err := client.EmbedText(context.Background(), "", aiworker.TaskDocument); !errors.Is(err, photos.ErrAIRejected) {
+		t.Fatalf("EmbedText() without text error = %v, want ErrAIRejected", err)
+	}
+	want := []string{aiworker.TaskQuery, aiworker.TaskDocument, aiworker.TaskSimilarity, aiworker.TaskDocument, "sts", aiworker.TaskDocument}
+	if !slices.Equal(tasks, want) {
+		t.Fatalf("the Worker received tasks %q, want %q", tasks, want)
 	}
 }
 

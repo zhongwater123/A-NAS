@@ -82,7 +82,7 @@ M2 交付后，成员可以：
 客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
 
 - 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较；`embed_text` 把 `text`（至多 8,000 字符）按 `task` 编码，`task` 取 `query`（搜索查询，与 `embed_query` 相同）、`document`（被检索的段落：OCR 文字、笔记、文档，前缀 `title: none | text: …`）或 `similarity`（两段文字互比，前缀 `task: sentence similarity | query: …`），其他取值返回 `invalid_input`；这是 OCR 文字进搜索、助手记忆与文档检索共用的底座。前缀属于模型的使用约定，随 Worker 与模型一起更换。
 - 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
 - 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 

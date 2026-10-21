@@ -71,10 +71,18 @@ VISION_TOKENS = (70, 140)
 class MediaPipeProvider:
     """EmbeddingGemma 2 through MediaPipe's Universal Embedder."""
 
-    # EmbeddingGemma's retrieval prompt; images get none. The label
-    # calibration (docs/research/photo-ai-label-calibration.md) found it the
-    # better of the prompts tried for Chinese search.
-    QUERY_PROMPT = "task: search result | query: {}"
+    # EmbeddingGemma's prompts, one per use of a text (embed_text's "task");
+    # images get none. The label calibration
+    # (docs/research/photo-ai-label-calibration.md) found the query prompt the
+    # better of the prompts tried for Chinese search; the document and
+    # similarity prompts are the model card's, as ai/finetune/embedders.py
+    # spells them too.
+    TEXT_PROMPTS = {
+        "query": "task: search result | query: {}",
+        "document": "title: none | text: {}",
+        "similarity": "task: sentence similarity | query: {}",
+    }
+    QUERY_PROMPT = TEXT_PROMPTS["query"]
 
     def __init__(self, model_path, manifest_path, vision_tokens=70, cache_dir=None):
         if vision_tokens not in VISION_TOKENS:
@@ -121,8 +129,16 @@ class MediaPipeProvider:
     def embed_text(self, text):
         return self._vector(self._embedder.embed_text(text))
 
+    def embed_text_for(self, text, task):
+        """The vector of text used as task, one of TEXT_PROMPTS' keys."""
+        try:
+            prompt = self.TEXT_PROMPTS[task]
+        except KeyError:
+            raise InvalidInput(f"unknown text task {task!r}") from None
+        return self.embed_text(prompt.format(text))
+
     def embed_query(self, text):
-        return self.embed_text(self.QUERY_PROMPT.format(text))
+        return self.embed_text_for(text, "query")
 
     def close(self):
         self._embedder.close()
@@ -146,6 +162,15 @@ class FakeProvider:
 
     def embed_query(self, text):
         return self._vector(text.encode())
+
+    def embed_text_for(self, text, task):
+        if task not in MediaPipeProvider.TEXT_PROMPTS:
+            raise InvalidInput(f"unknown text task {task!r}")
+        if task == "query":
+            return self.embed_query(text)
+        # The task is part of the input, so one text used two ways gets two
+        # vectors, as the real prompts make it.
+        return self._vector(f"{task}: {text}".encode())
 
     def _vector(self, data):
         values = []

@@ -84,6 +84,20 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 	if a, b, c := query("海边的猫"), query("海边的猫"), query("车库里的电动车"); a[0] != b[0] || a[0] == c[0] {
 		t.Fatal("equal queries must give equal vectors and different queries different ones")
 	}
+	text := func(input, task string) []float32 {
+		t.Helper()
+		vector, err := client.EmbedText(context.Background(), input, task)
+		if err != nil || len(vector) != 768 {
+			t.Fatalf("EmbedText(%q, %q) = %d values, %v", input, task, len(vector), err)
+		}
+		return vector
+	}
+	if a, b, c := text("海边的猫", aiworker.TaskQuery), text("海边的猫", aiworker.TaskDocument), query("海边的猫"); a[0] != c[0] || a[0] == b[0] {
+		t.Fatal("a text as a query must match embed_query, and as a document differ from it")
+	}
+	if _, err := client.EmbedText(context.Background(), "海边的猫", "sts"); err == nil {
+		t.Fatal("EmbedText() with an unknown task must fail")
+	}
 	first, again, other := embed("thumbnail"), embed("thumbnail"), embed("another thumbnail")
 	var norm float64
 	for _, value := range first {

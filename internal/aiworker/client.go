@@ -34,6 +34,10 @@ const (
 	// OpEmbedQuery encodes Text as a search query; the Worker adds the
 	// model's own query prompt.
 	OpEmbedQuery = "embed_query"
+	// OpEmbedText encodes Text for the use Task names (TaskQuery,
+	// TaskDocument or TaskSimilarity); the Worker adds the model's prompt
+	// for that use, so one text gets a vector per task.
+	OpEmbedText = "embed_text"
 	// OpDetectObjects finds the objects in an image. Hanging up cancels it,
 	// and the Worker does not answer.
 	OpDetectObjects = "detect_objects"
@@ -49,6 +53,17 @@ const (
 	OpRelease = "release"
 )
 
+// Tasks a text is embedded for, Request.Task of OpEmbedText.
+const (
+	// TaskQuery is a search query, as OpEmbedQuery encodes it.
+	TaskQuery = "query"
+	// TaskDocument is a passage queries are matched against: OCR text,
+	// notes, documents.
+	TaskDocument = "document"
+	// TaskSimilarity is one of two texts compared with each other.
+	TaskSimilarity = "similarity"
+)
+
 // Error codes the Worker answers with.
 const (
 	// CodeInvalidInput: the Worker cannot read this input; the same input
@@ -62,6 +77,9 @@ const (
 type Request struct {
 	Op   string `json:"op"`
 	Text string `json:"text,omitempty"`
+	// Task is what Text is used as, for OpEmbedText: TaskQuery,
+	// TaskDocument or TaskSimilarity.
+	Task string `json:"task,omitempty"`
 	What string `json:"what,omitempty"`
 	// Boxes are the animals to embed, [x0, y0, x1, y1] as fractions.
 	Boxes [][4]float64 `json:"boxes,omitempty"`
@@ -102,8 +120,8 @@ type WireError struct {
 	Message string `json:"message"`
 }
 
-// Client implements photos.Embedder, photos.Detector, photos.FaceDetector and
-// photos.AnimalEmbedder.
+// Client implements photos.Embedder, photos.TextEmbedder, photos.Detector,
+// photos.FaceDetector and photos.AnimalEmbedder.
 type Client struct {
 	SocketPath string
 	// Timeout bounds one call, including loading the model after the Worker
@@ -113,6 +131,7 @@ type Client struct {
 
 var (
 	_ photos.Embedder       = Client{}
+	_ photos.TextEmbedder   = Client{}
 	_ photos.Detector       = Client{}
 	_ photos.FaceDetector   = Client{}
 	_ photos.AnimalEmbedder = Client{}
@@ -140,6 +159,17 @@ func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, erro
 
 func (c Client) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
 	response, err := c.call(ctx, Request{Op: OpEmbedQuery, Text: text}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return vectorOf(response)
+}
+
+// EmbedText returns the normalized vector of text used as task (TaskQuery,
+// TaskDocument or TaskSimilarity). The Worker rejects an unknown task, and
+// text that is empty or longer than it serves, as photos.ErrAIRejected.
+func (c Client) EmbedText(ctx context.Context, text, task string) ([]float32, error) {
+	response, err := c.call(ctx, Request{Op: OpEmbedText, Text: text, Task: task}, nil)
 	if err != nil {
 		return nil, err
 	}

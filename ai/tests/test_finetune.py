@@ -71,6 +71,11 @@ class ProviderEmbedderTest(unittest.TestCase):
         self.assertAlmostEqual(cosine(v, truncate(provider.embed_text(PROMPTS["query"] + "猫"), 256)), 1.0, places=6)
         self.assertLess(cosine(v, truncate(provider.embed_text("猫"), 256)), 0.5)
 
+    def test_prompts_match_the_worker(self):
+        worker_prompts = providers.MediaPipeProvider.TEXT_PROMPTS
+        for kind, task in (("query", "query"), ("document", "document"), ("sts", "similarity")):
+            self.assertEqual(PROMPTS[kind] + "{}", worker_prompts[task])
+
     def test_default_dim_from_provider(self):
         e = ProviderEmbedder(TextFakeProvider(64), add_prefix=False)
         self.assertEqual(e.dim, 64)

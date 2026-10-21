@@ -33,6 +33,11 @@ IDLE_SECONDS = 600
 MAX_IMAGE_BYTES = 32 << 20
 # The photo service sends queries of at most 200 characters.
 MAX_QUERY_CHARS = 1000
+# Documents (OCR text, notes, passages for retrieval) are longer than queries.
+# EmbeddingGemma 2 reads 8,192 tokens and the runtime drops the rest, and a
+# Chinese character is about one token, so 8,000 characters is about what the
+# model sees: a longer text only costs the Worker time. A frame holds it.
+MAX_TEXT_CHARS = 8000
 SYSTEMD_FIRST_FD = 3
 # How often a running detection checks whether the caller hung up.
 CANCEL_POLL_SECONDS = 0.05
@@ -129,6 +134,14 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_QUERY_CHARS:
             return protocol.failure(protocol.CODE_INVALID_INPUT, f"embed_query needs text of 1 to {MAX_QUERY_CHARS} characters")
         return embedded(op, provider, lambda: provider.embed_query(text))
+    if op == protocol.OP_EMBED_TEXT:
+        text, task = request.get("text"), request.get("task")
+        if task not in protocol.TEXT_TASKS:
+            tasks = ", ".join(f'"{name}"' for name in protocol.TEXT_TASKS)
+            return protocol.failure(protocol.CODE_INVALID_INPUT, f'embed_text needs "task": one of {tasks}')
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
+            return protocol.failure(protocol.CODE_INVALID_INPUT, f"embed_text needs text of 1 to {MAX_TEXT_CHARS} characters")
+        return embedded(op, provider, lambda: provider.embed_text_for(text, task))
     if op == protocol.OP_DETECT_OBJECTS:
         if detector.provider is None:
             return protocol.failure(protocol.CODE_UNAVAILABLE, detector.reason)
