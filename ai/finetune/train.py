@@ -20,7 +20,9 @@
     要上设备得先转成 .litertlm 并走模型清单；转换路径尚未验证（见研究文档"风险"）。
   - 只能 bf16 / fp32，fp16 会出 NaN（官方和社区都踩过）。
   - 留一部分三元组做验证（--eval-ratio），训练集上的分数不说明问题。
-  - 评估和线上都要带同样的任务前缀（这里用 STS 前缀，和 embedders.PROMPTS 一致）。
+  - 前缀按三元组的来源选：docq:（文档问答对）anchor 用 query、正负例用 document，其余三者都用 STS，
+    和 embedders.PROMPTS、eval.py 一致；前缀直接拼进文本，不用 trainer 的 prompts 参数（它只能按列、不能按行）。
+  - CPU 上用 --dtype fp32（bf16 在没有 AVX-512 的 CPU 上慢 6 倍），GPU 用 bf16；只做冒烟时 --limit 取前几十条。
 """
 
 from __future__ import annotations
@@ -32,6 +34,18 @@ import sys
 from pathlib import Path
 
 STS_PROMPT = "task: sentence similarity | query: "
+QUERY_PROMPT = "task: search result | query: "
+DOC_PROMPT = "title: none | text: "
+
+
+def with_prompts(rows: list[dict]) -> list[dict]:
+    """按来源把前缀拼进文本：docq: 的问答对用 query / document，其余用 STS。"""
+    out = []
+    for r in rows:
+        asym = str(r.get("source", "")).startswith("docq:")
+        a_p, d_p = (QUERY_PROMPT, DOC_PROMPT) if asym else (STS_PROMPT, STS_PROMPT)
+        out.append({"anchor": a_p + r["anchor"], "positive": d_p + r["positive"], "negative": d_p + r["negative"]})
+    return out
 
 
 def main(argv: list[str]) -> None:
@@ -46,6 +60,9 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--no-matryoshka", action="store_true")
     ap.add_argument("--eval-ratio", type=float, default=0.15)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--dtype", choices=("auto", "fp32", "bf16"), default="auto", help="auto：CPU 用 fp32，GPU 用 bf16")
+    ap.add_argument("--limit", type=int, default=0, help="只用前 N 条三元组（冒烟）")
+    ap.add_argument("--max-seq-length", type=int, default=0, help="超过此 token 数的文本截断，0=模型默认")
     args = ap.parse_args(argv)
 
     try:
@@ -61,17 +78,25 @@ def main(argv: list[str]) -> None:
         sys.exit(f"缺少依赖（{e}）：pip install -r finetune/requirements.txt")
 
     rows = [json.loads(l) for l in Path(args.triplets).read_text(encoding="utf-8").splitlines() if l.strip()]
-    rows = [{"anchor": r["anchor"], "positive": r["positive"], "negative": r["negative"]} for r in rows]
     random.Random(args.seed).shuffle(rows)
+    if args.limit:
+        rows = rows[: args.limit]
+    rows = with_prompts(rows)
     n_eval = max(1, int(len(rows) * args.eval_ratio)) if len(rows) > 10 else 0
     eval_rows, train_rows = rows[:n_eval], rows[n_eval:]
     print(f"训练 {len(train_rows)} 条，验证 {len(eval_rows)} 条")
 
+    dtype = args.dtype
+    if dtype == "auto":
+        dtype = "bf16" if torch.cuda.is_available() else "fp32"
     model = SentenceTransformer(
         args.base,
         config_kwargs={"vision_config": None, "audio_config": None},   # 只要文本编码器（270M）
-        model_kwargs={"torch_dtype": torch.bfloat16},
+        model_kwargs={"torch_dtype": torch.bfloat16 if dtype == "bf16" else torch.float32},
     )
+    if args.max_seq_length:
+        model.max_seq_length = args.max_seq_length
+    print(f"dtype {dtype}，设备 {model.device}，max_seq_length {model.max_seq_length}")
     print(model, "参数量:", sum(p.numel() for p in model.parameters()))
 
     base_loss = (CachedMultipleNegativesRankingLoss(model, mini_batch_size=8) if args.cached
@@ -81,21 +106,20 @@ def main(argv: list[str]) -> None:
     train_ds = Dataset.from_list(train_rows)
     evaluator = None
     if eval_rows:
-        evaluator = TripletEvaluator(
-            anchors=[STS_PROMPT + r["anchor"] for r in eval_rows],
-            positives=[STS_PROMPT + r["positive"] for r in eval_rows],
-            negatives=[STS_PROMPT + r["negative"] for r in eval_rows],
+        evaluator = TripletEvaluator(   # 文本已带前缀
+            anchors=[r["anchor"] for r in eval_rows],
+            positives=[r["positive"] for r in eval_rows],
+            negatives=[r["negative"] for r in eval_rows],
             name="triplets")
         print("微调前:", evaluator(model))
 
     targs = SentenceTransformerTrainingArguments(
         output_dir=args.out + "-ckpt",
-        prompts=STS_PROMPT,                   # anchor/positive/negative 都加同一个前缀
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch,
         learning_rate=args.lr,
         warmup_ratio=0.1,
-        bf16=True,
+        bf16=(dtype == "bf16"),
         batch_sampler=BatchSamplers.NO_DUPLICATES,   # in-batch negatives 不能撞上正例
         logging_steps=10,
         eval_strategy="epoch" if evaluator else "no",

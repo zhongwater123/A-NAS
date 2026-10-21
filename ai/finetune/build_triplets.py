@@ -51,7 +51,7 @@ def labeled_triplets(rows: list[dict], rng: random.Random) -> list[dict]:
     return out
 
 
-def pair_triplets(pairs: list[dict], pool: list[str], rng: random.Random) -> list[dict]:
+def pair_triplets(pairs: list[dict], pool: list[str], rng: random.Random, source: str = "pair") -> list[dict]:
     out = []
     for i, pr in enumerate(pairs):
         a, b = pr.get("a"), pr.get("b")
@@ -61,7 +61,7 @@ def pair_triplets(pairs: list[dict], pool: list[str], rng: random.Random) -> lis
         if not cands:
             continue
         for x, y in ((a, b), (b, a)):
-            out.append({"anchor": x, "positive": y, "negative": rng.choice(cands), "source": f"pair:{i}"})
+            out.append({"anchor": x, "positive": y, "negative": rng.choice(cands), "source": f"{source}:{i}"})
     return out
 
 
@@ -120,7 +120,8 @@ def main(argv: list[str]) -> None:
     pairs = [r for p in args.pairs for r in read_jsonl(p)]
     doc_pairs = doc_query_pairs(args.doc_queries, args.docs) if args.doc_queries else []
     pool = sorted({r["text"] for r in labeled if r.get("text")} | {pr[k] for pr in pairs + doc_pairs for k in ("a", "b") if pr.get(k)})
-    triplets = labeled_triplets(labeled, rng) + pair_triplets(pairs, pool, rng) + pair_triplets(doc_pairs, pool, rng)
+    # docq: 是不对称的问答对，train / eval 对它用 query / document 前缀，其余用 STS 前缀
+    triplets = labeled_triplets(labeled, rng) + pair_triplets(pairs, pool, rng) + pair_triplets(doc_pairs, pool, rng, "docq")
     if not triplets:
         sys.exit("没有产出任何三元组：--labeled 需要同一 label 至少 2 条且存在其他 label；--pairs 需要 a/b 字段。")
     changed = 0

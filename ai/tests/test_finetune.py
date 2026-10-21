@@ -282,5 +282,25 @@ class EvalDedupTest(unittest.TestCase):
             self.assertEqual(pairs[0]["a"], "删掉的照片多久能恢复")
             self.assertIn("三十天", pairs[0]["b"])
 
+class PromptSelectionTest(unittest.TestCase):
+    ROWS = [{"anchor": "问题", "positive": "段落", "negative": "别的段落", "source": "docq:0"},
+            {"anchor": "句子甲", "positive": "句子乙", "negative": "句子丙", "source": "label:x"}]
+
+    def test_eval_prompt_kinds_by_source(self):
+        akind, ckind = finetune_eval.prompt_kinds(self.ROWS)
+        self.assertEqual(akind, {"问题": "query", "句子甲": "sts"})
+        self.assertEqual(ckind, {"段落": "document", "别的段落": "document", "句子乙": "sts", "句子丙": "sts"})
+        r = finetune_eval.evaluate(self.ROWS, HashEmbedder(128))
+        self.assertEqual(r["anchors"], 2)
+
+    def test_train_with_prompts_prepends_by_source(self):
+        from finetune import train
+        rows = train.with_prompts(self.ROWS)
+        self.assertTrue(rows[0]["anchor"].startswith(train.QUERY_PROMPT))
+        self.assertTrue(rows[0]["positive"].startswith(train.DOC_PROMPT))
+        self.assertTrue(rows[1]["anchor"].startswith(train.STS_PROMPT))
+        self.assertTrue(rows[1]["negative"].startswith(train.STS_PROMPT))
+        self.assertEqual(set(rows[0]), {"anchor", "positive", "negative"})
+
 if __name__ == "__main__":
     unittest.main()
