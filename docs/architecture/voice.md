@@ -11,11 +11,13 @@ Web 语音处理（web/src/voice）
 anas-api（a-nas）
    ├── internal/voiceapi ── 只接收已确认的用户（voiceapi.WithUser）
    └── internal/voice
-         ├── voice.db（系统盘）：录音、句子、发言人与声纹、人、拒绝、译文、总结、豆包语音的密钥
+         ├── voice.db（系统盘）：录音、句子、发言人与声纹、人、拒绝、译文、总结、已提交的识别任务、豆包语音与 TOS 的密钥
          ├── 读取：files.Service.OpenContent（成员会话）──► File Broker ──► 用户身份的文件 Worker ──► 只读 fd
          ├── 解码：mediaworker.Client.Speech ──► /run/a-nas-media/media.sock ──► anas-media@（FFmpeg）
-         │        16 kHz 单声道 Ogg Opus（识别）或 s16le 样本（声纹），每段至多一小时
-         ├── 识别：voice.Doubao ──HTTPS──► openspeech.bytedance.com …/recognize/flash（豆包语音极速版）
+         │        16 kHz 单声道 Ogg Opus（识别）或 s16le 样本（声纹）
+         ├── 中转：voice.TOS ──HTTPS──► tos-<地域>.volces.com/<存储桶>/a-nas-voice/<任务>.ogg（签名链接 24 小时）
+         ├── 识别：voice.Doubao ──HTTPS──► openspeech.bytedance.com …/auc/bigmodel/submit、/query（豆包语音标准版 2.0）
+         │                                       豆包语音凭签名链接从 TOS 下载录音
          ├── 声纹：voiceworker.Client ──memfd + JSON──► /run/a-nas-voice/voice.sock（root:a-nas 0660）
          │                                                  │ 套接字激活，空闲 5 分钟退出
          │                                                  ▼
@@ -37,12 +39,15 @@ anas-api（a-nas）
 
 ## 处理流程
 
-[`pipeline.go`](../../internal/voice/pipeline.go) 中一个循环按导入顺序一次处理一段录音，另一个循环一次运行一个翻译或总结（[`textjobs.go`](../../internal/voice/textjobs.go)）。产品服务重启时，处理中的录音与运行中的任务回到排队状态，从头再来。
+[`pipeline.go`](../../internal/voice/pipeline.go) 中一个循环按导入顺序一次处理一段录音，另一个循环一次运行一个翻译或总结（[`textjobs.go`](../../internal/voice/textjobs.go)）。产品服务重启时，处理中的录音与运行中的任务回到排队状态；已提交的识别任务记在 `recognition_tasks` 中，重新处理时接着查询，不重新提交。
 
-1. **准备**：打开文件、探测时长，按 `Options.Chunk`（默认 1 小时）切成若干段。
-2. **识别**：每段请求媒体 Worker 的 `speech`（Ogg Opus，24 kbps，一小时约 11 MB），Base64 后发给豆包语音的录音文件识别极速版：一次请求返回结果，不需要标准版的提交与查询，标准版只接受识别服务能下载的公网 URL，家里的 NAS 提供不了。请求开启说话人分离（普通话或未指定语言时 `ssd_version: 200`）、标点、数字规范化与分句，`corpus.context` 带上成员的热词和已命名的人名（[`doubao.go`](../../internal/voice/doubao.go)）。`45000010` 等鉴权错误与 HTTP 401/403 记为密钥被拒绝；`55000031`、`550xxxx`、429 与 5xx 记为繁忙，先等 15 秒、1 分钟各重试一次；`20000003` 静音与 `45000002` 空音频是没有说话的结果，不是失败。
+1. **准备**：打开文件、探测时长，按 `Options.Chunk`（默认 5 小时，即录音的上限）切段，所以一段录音就是一个识别任务；更小的分段只在测试中使用。
+2. **识别**：请求媒体 Worker 的 `speech`（Ogg Opus，24 kbps，5 小时约 54 MB），交给 `Recognizer`（[`doubao.go`](../../internal/voice/doubao.go)）：
+   - **提交**：`TOS.Put` 用 TOS 官方 Go SDK 把音频放进存储桶的 `a-nas-voice/<任务 ID>.ogg`，取 24 小时有效的 GET 签名链接（[`relay.go`](../../internal/voice/relay.go)）；随后向 `…/submit` 提交，`X-Api-Request-Id` 即任务 ID，资源为 `volc.seedasr.auc`（模型 2.0）。请求开启标点、数字规范化与分句，`corpus.context` 带上成员的热词和已命名的人名；普通话或未指定语言时开启说话人分离，按[最佳实践](https://docs.volcengine.com/docs/DoubaoVoice/speaker-separation?lang=zh)选择模型：3 分钟以内用 `ssd_version` 200 普通模式，通话与语音备忘场景用 200 的长音频模式（`ssd_mode` 1），其余（会议、课堂、访谈、讲座、通用）用为长会议优化的 300。提交被拒时立即删除刚放进去的对象。任务（ID、对象、桶与地域）写入 `recognition_tasks`。
+   - **查询**：向 `…/query` 询问同一任务，首次等 2 秒，之后每次加倍、最长 30 秒。`20000001` 处理中与 `20000002` 排队继续等；`20000000` 解析句子；`20000003` 静音与 `45000002` 空音频是没有说话的结果；`45000001` 视为任务丢失，删除后重新提交一次；`45000010` 等鉴权错误与 HTTP 401/403 记为密钥被拒绝；`55000031`、`550xxxx`、`45000131`（半小时提交上限）、429 与 5xx 记为繁忙。提交 24 小时后仍无结果判为失败。
+   - **释放**：拿到结果、失败或录音被移除时删除任务行，并用当前的 Access Key 从任务记下的桶里删除对象（`Release`）；删不掉只记日志，由桶的生命周期规则清理。产品服务退出或转为等待时保留任务，下次接着查询。
 3. **声纹**：每段内，识别服务给了说话人标签时，每个标签取其句子中 1–15 秒的部分、最长的优先，共至多 120 秒（标签很多时整段至多 25 分钟），一次 `embed_speakers` 得到每个标签的单位向量（各句向量按长度加权平均）；没给标签时，长于 1 秒的句子（各截到 8 秒，至多 25 分钟，超出时均匀抽取）一次 `cluster_speech` 聚类，短句归给时间上最近的一类。样本来自同一段的一次 `speech`（s16le）解码，只保留所选的部分，装进一个 memfd 交给 Worker（[`readStretches`](../../internal/voice/pipeline.go)）。
-4. **合并各段**：按段落顺序与第一次开口的时间排列各段的声音，与已有发言人的余弦相似度不低于 `SameVoiceThreshold` 时并入（同一段的两个标签不互相合并），否则成为新发言人；发言人按全录音第一次开口的顺序编号 `s1, s2…`。
+4. **合并各段**（只在分段时）：按段落顺序与第一次开口的时间排列各段的声音，与已有发言人的余弦相似度不低于 `SameVoiceThreshold` 时并入（同一段的两个标签不互相合并），否则成为新发言人；发言人按全录音第一次开口的顺序编号 `s1, s2…`。
 5. **保存与比对**：一个事务写入句子与发言人（含声纹向量与其所用的语音时长），录音完成并记下声纹模型；随后对该成员的所有发言人重新比对（`rematch`），再排上导入时选的总结与翻译。
 
 ### 声纹比对
@@ -72,10 +77,11 @@ anas-api（a-nas）
 - 单元：[`anas-voice.socket`](../../deploy/systemd/system/anas-voice.socket) 只让 `a-nas` 组连接；[`anas-voice.service`](../../deploy/systemd/system/anas-voice.service) 以动态身份运行，`PrivateNetwork`、只允许 `AF_UNIX`、看不到数据卷与产品服务状态目录，内存上限 1 GB，和 AI Worker 一样在 `anas-ai.slice` 中让出 CPU，安装器写入与 AI Worker 相同的 CPU 预留。
 - 没有声纹 Worker 或它出错时，录音照常完成：发言人只按识别服务的标签分开、没有向量（`voiceprint_model` 为空），不参与比对。
 
-## 豆包语音的密钥
+## 豆包语音的密钥与录音中转
 
-- 管理员在设置中填写新版控制台的 API Key（`X-Api-Key`）或旧版控制台的 APP ID 与 Access Token（`X-Api-App-Key`、`X-Api-Access-Key`），保存在 `voice.db` 的 `settings` 表中；`voice.db` 在产品服务 0700 的状态目录里，其他账号读不到。接口只返回模式、APP ID、密钥的最后 4 位、设置人与时间（[`settings.go`](../../internal/voice/settings.go)）。
-- `Doubao.Credentials` 在每次请求时读取，修改立即生效；保存前先用内嵌的一秒静音（[`silence.ogg`](../../internal/voice/silence.ogg)）测试，豆包语音回答“静音音频”即表示密钥可用。
+- 管理员在设置中填写新版控制台的 API Key（`X-Api-Key`）或旧版控制台的 APP ID 与 Access Token（`X-Api-App-Key`、`X-Api-Access-Key`），以及 TOS 的地域（SDK 已知端点的地域：`cn-beijing`、`cn-beijing2`、`cn-shanghai`、`cn-guangzhou`、`ap-southeast-1`）、存储桶与 Access Key，一起保存在 `voice.db` 的 `settings` 表中（`doubao.*`、`tos.*`）；`voice.db` 在产品服务 0700 的状态目录里，其他账号读不到。接口只返回模式、APP ID、地域、桶名、密钥与 Access Key 的最后 4 位、设置人与时间（[`settings.go`](../../internal/voice/settings.go)）。两者都填好才算配置完成。
+- `Doubao.Credentials` 在每次请求时读取，修改立即生效；保存前先把内嵌的一秒静音（[`silence.ogg`](../../internal/voice/silence.ogg)）中转并提交，最多等 20 秒：豆包语音回答“静音音频”或任务仍在排队，都说明密钥与存储桶可用；结束时删除测试对象。
+- Access Key 只需要对这个桶的 `PutObject`、`GetObject`（签名链接以它的身份读取）与 `DeleteObject`；建议用子账号，并在桶上为 `a-nas-voice/` 设置 1 天过期的生命周期规则。
 
 ## 关联
 
