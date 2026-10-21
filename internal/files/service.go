@@ -353,6 +353,15 @@ type Service struct {
 	// uploads holds the temporaries of pending uploads by name.
 	uploadsMu sync.Mutex
 	uploads   map[string]struct{}
+	ordersMu  sync.Mutex
+	orders    map[string]*spaceOrder
+}
+
+// queryer is the catalog or a transaction on it.
+type queryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 func NewService(store *Store, volumeRoot string, policy Policy, options Options) *Service {
@@ -370,7 +379,7 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
 		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: options.FileSystem,
 		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
-		uploads: make(map[string]struct{}),
+		uploads: make(map[string]struct{}), orders: make(map[string]*spaceOrder),
 	}
 	if service.location == nil {
 		service.location = time.Local
@@ -477,6 +486,11 @@ func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entr
 	if err != nil {
 		return TrashItem{}, err
 	}
+	done, err := s.change(ctx, spaceID)
+	if err != nil {
+		return TrashItem{}, err
+	}
+	defer done()
 	entry, source, err := s.entryPath(ctx, root, spaceID, entryID)
 	if err != nil {
 		return TrashItem{}, err
@@ -523,7 +537,7 @@ func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entr
 	if _, err := tx.ExecContext(ctx, `
 UPDATE entries
 SET relative_path = ? || substr(relative_path, length(?) + 1), trashed = 1, trash_id = ?
-WHERE space_id = ? AND (relative_path = ? OR substr(relative_path, 1, length(?) + 1) = ? || '/')`,
+WHERE space_id = ? AND trashed = 0 AND (relative_path = ? OR substr(relative_path, 1, length(?) + 1) = ? || '/')`,
 		trashRelative, oldRelative, trashID, spaceID, oldRelative, oldRelative, oldRelative); err != nil {
 		rollback()
 		return TrashItem{}, err
@@ -706,31 +720,45 @@ FROM trash WHERE space_id = ? AND deleted_by = ? AND deleted_at <= ?`, spaceID, 
 		if !withinRoot(root, trashPath) {
 			return ErrNotFound
 		}
-		err := s.fs.RemoveAll(ctx, trashPath)
-		if errors.Is(err, ErrForbidden) || errors.Is(err, fs.ErrPermission) {
-			continue
-		}
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		s.removeEmptyTrashParents(ctx, root, item.relative)
-		tx, err := s.store.db.BeginTx(ctx, nil)
+		purged, err := s.purgeTrashContent(ctx, spaceID, root, item.id, item.relative)
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "DELETE FROM entries WHERE trash_id = ?", item.id); err == nil {
-			_, err = tx.ExecContext(ctx, "DELETE FROM trash WHERE id = ?", item.id)
+		if purged {
+			_ = s.audit(ctx, "system", "file.purged.retention", spaceID, item.entryID, item.name)
 		}
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		_ = s.audit(ctx, "system", "file.purged.retention", spaceID, item.entryID, item.name)
 	}
 	return nil
+}
+
+// purgeTrashContent removes a recycle-bin item's files and then its rows. It
+// reports false, leaving both, when the actor may not remove the files.
+func (s *Service) purgeTrashContent(ctx context.Context, spaceID, root, trashID, trashRelative string) (bool, error) {
+	done, err := s.change(ctx, spaceID)
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	err = s.fs.RemoveAll(ctx, filepath.Join(root, filepath.FromSlash(trashRelative)))
+	if errors.Is(err, ErrForbidden) || errors.Is(err, fs.ErrPermission) {
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	s.removeEmptyTrashParents(ctx, root, trashRelative)
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM entries WHERE trash_id = ?", trashID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM trash WHERE id = ?", trashID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // reconcileSambaTrash imports files that Samba recycle moved into the actor's
@@ -738,6 +766,14 @@ FROM trash WHERE space_id = ? AND deleted_by = ? AND deleted_at <= ?`, spaceID, 
 // file becomes its own trash item and its original directory is restored
 // when it still exists. Web trash items in the same directory are skipped.
 func (s *Service) reconcileSambaTrash(ctx context.Context, actor accounts.User, space accounts.Space, root string) error {
+	// A Web deletion or restore in flight has moved files that its rows do
+	// not record yet; importing them would split a deleted folder into
+	// items of its files. The next pass sees them settled.
+	order := s.order(space.ID)
+	generation, ok := order.observe()
+	if !ok {
+		return nil
+	}
 	userRelative := path.Join(".a-nas-trash", safeSegment(actor.Username))
 	entries, err := s.fs.Scan(ctx, filepath.Join(root, filepath.FromSlash(userRelative)), ScanSkip{})
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) || errors.Is(err, ErrForbidden) {
@@ -746,6 +782,10 @@ func (s *Service) reconcileSambaTrash(ctx context.Context, actor accounts.User, 
 	if err != nil {
 		return err
 	}
+	if !order.beginWrite(generation) {
+		return nil
+	}
+	defer order.endWrite()
 	known, err := s.trashPaths(ctx, space.ID)
 	if err != nil {
 		return err
@@ -900,6 +940,11 @@ FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).
 	if item.DeletedBy != actor.ID {
 		return Restored{}, ErrForbidden
 	}
+	done, err := s.change(ctx, item.SpaceID)
+	if err != nil {
+		return Restored{}, err
+	}
+	defer done()
 	toOriginal := targetParentID == ""
 	if toOriginal {
 		targetParentID = originalParentID
@@ -967,14 +1012,28 @@ FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).
 		return Restored{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// A stale scan of an earlier version could write a row of the item back
+	// to its old path in the space (#164), so its path no longer tells where
+	// it is in the item. Such rows come back under a placeholder path that
+	// the next reconciliation replaces by finding their inode, which keeps
+	// their IDs.
 	if _, err := tx.ExecContext(ctx, `
-UPDATE entries
-SET relative_path = ? || substr(relative_path, length(?) + 1), trashed = 0, trash_id = NULL
-WHERE trash_id = ?`, newRelative, trashRelative, trashID); err != nil {
+UPDATE entries SET relative_path = '.a-nas-stale/' || id, trashed = 0, trash_id = NULL
+WHERE trash_id = ?1 AND id <> ?2 AND relative_path <> ?3 AND substr(relative_path, 1, length(?3) + 1) <> ?3 || '/'`,
+		trashID, item.EntryID, trashRelative); err != nil {
 		rollback()
 		return Restored{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE entries SET parent_id = ?, name = ? WHERE id = ?", targetParentID, targetName, item.EntryID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+UPDATE entries
+SET relative_path = ? || substr(relative_path, length(?) + 1), trashed = 0, trash_id = NULL
+WHERE trash_id = ? AND id <> ?`, newRelative, trashRelative, trashID, item.EntryID); err != nil {
+		rollback()
+		return Restored{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE entries SET relative_path = ?, parent_id = ?, name = ?, trashed = 0, trash_id = NULL
+WHERE id = ? AND trash_id = ?`, newRelative, targetParentID, targetName, item.EntryID, trashID); err != nil {
 		rollback()
 		return Restored{}, err
 	}
@@ -1036,23 +1095,10 @@ FROM trash WHERE id = ?`, trashID).Scan(
 	if !withinRoot(root, trashPath) {
 		return ErrNotFound
 	}
-	if err := s.fs.RemoveAll(ctx, trashPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if purged, err := s.purgeTrashContent(ctx, item.SpaceID, root, trashID, trashRelative); err != nil {
 		return err
-	}
-	s.removeEmptyTrashParents(ctx, root, trashRelative)
-	tx, err := s.store.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM entries WHERE trash_id = ?", trashID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM trash WHERE id = ?", trashID); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
+	} else if !purged {
+		return ErrForbidden
 	}
 	return s.audit(ctx, actor.ID, "file.purged", item.SpaceID, item.EntryID, item.Name)
 }
@@ -1073,6 +1119,11 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 	if err != nil {
 		return Entry{}, err
 	}
+	done, err := s.change(ctx, spaceID)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer done()
 	entry, source, err := s.entryPath(ctx, root, spaceID, entryID)
 	if err != nil {
 		return Entry{}, err
@@ -1145,13 +1196,18 @@ func (s *Service) moveBetweenSpaces(ctx context.Context, actor accounts.User, en
 	if err != nil {
 		return Entry{}, err
 	}
+	// The copy is complete, so finish the move even if the client has gone.
+	// If removing fails part way, the next listing drops what was removed.
+	cleanup := context.WithoutCancel(ctx)
+	done, err := s.change(cleanup, spaceID)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer done()
 	var oldRelative string
 	if err := s.store.db.QueryRowContext(ctx, "SELECT relative_path FROM entries WHERE id = ?", entryID).Scan(&oldRelative); err != nil {
 		return Entry{}, err
 	}
-	// The copy is complete, so finish the move even if the client has gone.
-	// If removing fails part way, the next listing drops what was removed.
-	cleanup := context.WithoutCancel(ctx)
 	if err := s.fs.RemoveAll(cleanup, source); err != nil {
 		return Entry{}, err
 	}
@@ -1186,7 +1242,7 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	if targetSpaceID == "" {
 		targetSpaceID = spaceID
 	}
-	sourceSpace, sourceRoot, err := s.authorizedSpace(ctx, actor, spaceID, removingSource || targetSpaceID == spaceID)
+	_, sourceRoot, err := s.authorizedSpace(ctx, actor, spaceID, removingSource || targetSpaceID == spaceID)
 	if err != nil {
 		return Entry{}, "", err
 	}
@@ -1194,9 +1250,9 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	if err != nil {
 		return Entry{}, "", err
 	}
-	space, root := sourceSpace, sourceRoot
+	root := sourceRoot
 	if targetSpaceID != spaceID {
-		if space, root, err = s.authorizedSpace(ctx, actor, targetSpaceID, true); err != nil {
+		if _, root, err = s.authorizedSpace(ctx, actor, targetSpaceID, true); err != nil {
 			return Entry{}, "", err
 		}
 	}
@@ -1239,6 +1295,14 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
 		return Entry{}, "", err
 	}
+	// Reconciliation skips the temporary, so the copy becomes a change only
+	// when it takes its name.
+	done, err := s.change(ctx, targetSpaceID)
+	if err != nil {
+		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
+		return Entry{}, "", err
+	}
+	defer done()
 	if err := s.fs.Rename(ctx, temporary, target); err != nil {
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
 		if errors.Is(err, fs.ErrExist) {
@@ -1246,12 +1310,41 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 		}
 		return Entry{}, "", err
 	}
-	if err := s.reconcile(ctx, space, root); err != nil {
-		return Entry{}, "", err
-	}
-	relative, _ := filepath.Rel(root, target)
-	copied, err := s.entryByRelative(ctx, targetSpaceID, filepath.ToSlash(relative))
+	copied, err := s.registerTree(ctx, targetSpaceID, targetParentID, root, target)
 	return copied, source, err
+}
+
+// registerTree catalogs a file or folder that A-NAS has just put at target,
+// with everything below it, as reconciliation would.
+func (s *Service) registerTree(ctx context.Context, spaceID, parentID, root, target string) (Entry, error) {
+	info, err := s.fs.Lstat(ctx, target)
+	if err != nil {
+		return Entry{}, err
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+		return Entry{}, ErrNotFound
+	}
+	relative = filepath.ToSlash(relative)
+	var below []ScanEntry
+	if info.Kind == KindDirectory {
+		if below, err = s.fs.Scan(ctx, target, reconcileSkip); err != nil {
+			return Entry{}, err
+		}
+	}
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	entry, err := s.registerInfo(ctx, tx, root, spaceID, parentID, relative, info)
+	if err != nil {
+		return Entry{}, err
+	}
+	if _, err := s.registerScan(ctx, tx, root, spaceID, relative, entry.ID, below); err != nil {
+		return Entry{}, err
+	}
+	return entry, tx.Commit()
 }
 
 func (s *Service) CreateDirectory(ctx context.Context, actor accounts.User, spaceID, parentID, name string) (Entry, error) {
@@ -1267,6 +1360,11 @@ func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spac
 	if err := naming.check(name); err != nil {
 		return Entry{}, err
 	}
+	done, err := s.change(ctx, spaceID)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer done()
 	parentPath, err := s.parentPath(ctx, root, spaceID, parentID)
 	if err != nil {
 		return Entry{}, err
@@ -1372,6 +1470,13 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 		return Entry{}, err
 	}
 	s.keepModTime(ctx, temporaryPath, modTime)
+	// Reconciliation does not catalog the temporary, so the upload becomes a
+	// change only when it takes its name.
+	done, err := s.change(ctx, space.ID)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer done()
 	if err := s.fs.Rename(ctx, temporaryPath, target); errors.Is(err, fs.ErrExist) {
 		return Entry{}, ErrConflict
 	} else if err != nil {
@@ -1486,11 +1591,12 @@ func (s *Service) parentPath(ctx context.Context, root, spaceID, parentID string
 func (s *Service) entryPath(ctx context.Context, root, spaceID, entryID string) (Entry, string, error) {
 	var entry Entry
 	var relativePath, modifiedAt string
+	var inode uint64
 	err := s.store.db.QueryRowContext(ctx, `
-SELECT id, space_id, parent_id, name, kind, size_bytes, modified_at, relative_path
+SELECT id, space_id, parent_id, name, kind, size_bytes, modified_at, relative_path, inode
 FROM entries WHERE id = ? AND space_id = ? AND trashed = 0`, entryID, spaceID).Scan(
 		&entry.ID, &entry.SpaceID, &entry.ParentID, &entry.Name, &entry.Kind,
-		&entry.SizeBytes, &modifiedAt, &relativePath,
+		&entry.SizeBytes, &modifiedAt, &relativePath, &inode,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Entry{}, "", ErrNotFound
@@ -1510,7 +1616,9 @@ FROM entries WHERE id = ? AND space_id = ? AND trashed = 0`, entryID, spaceID).S
 	if err != nil {
 		return Entry{}, "", err
 	}
-	if info.Kind == KindSymlink {
+	// A row the catalog has not caught up with may name a path that now
+	// holds another object, for example a file replaced over SMB.
+	if info.Kind == KindSymlink || info.Inode != inode {
 		return Entry{}, "", ErrNotFound
 	}
 	return entry, path, nil
@@ -1525,10 +1633,14 @@ func (s *Service) registerPath(ctx context.Context, spaceID, parentID, root, pat
 	if err != nil || relativePath == "." || strings.HasPrefix(relativePath, "..") {
 		return Entry{}, ErrNotFound
 	}
-	return s.registerInfo(ctx, spaceID, parentID, filepath.ToSlash(relativePath), info)
+	return s.registerInfo(ctx, s.store.db, root, spaceID, parentID, filepath.ToSlash(relativePath), info)
 }
 
-func (s *Service) registerInfo(ctx context.Context, spaceID, parentID, relativePath string, info FileInfo) (Entry, error) {
+// errHeldInTrash says that a file found in a space is also, under the same
+// inode, in a recycle-bin item, which keeps it.
+var errHeldInTrash = fmt.Errorf("%w: the recycle bin holds the same file", ErrConflict)
+
+func (s *Service) registerInfo(ctx context.Context, q queryer, root, spaceID, parentID, relativePath string, info FileInfo) (Entry, error) {
 	kind := EntryKindFile
 	switch info.Kind {
 	case KindFile:
@@ -1541,15 +1653,22 @@ func (s *Service) registerInfo(ctx context.Context, spaceID, parentID, relativeP
 		ID: s.randomID("file"), SpaceID: spaceID, ParentID: parentID, Name: info.Name,
 		Kind: kind, SizeBytes: info.Size, ModifiedAt: info.ModTime.UTC(),
 	}
+	// The row of the inode is updated below, so it must not be a recycle-bin
+	// row: that would rewrite the item's path and hide the file.
+	if err := s.releaseTrashedInode(ctx, q, root, spaceID, info.Inode); err != nil {
+		return Entry{}, err
+	}
 	// A path now held by a different inode (for example a file replaced over
 	// SMB) must release the old row, or UNIQUE(space_id, relative_path) blocks
 	// reconciliation forever. The old row is matched again by inode if it
-	// still exists elsewhere, and deleted as missing otherwise.
-	if _, err := s.store.db.ExecContext(ctx, `UPDATE entries SET relative_path = '.a-nas-stale/' || id
-WHERE space_id = ? AND relative_path = ? AND inode <> ? AND trashed = 0`, spaceID, relativePath, info.Inode); err != nil {
+	// still exists elsewhere, and deleted as missing otherwise. A recycle-bin
+	// row holds a path of the space only when a stale scan of an earlier
+	// version wrote it there; restoring its item puts it right.
+	if _, err := q.ExecContext(ctx, `UPDATE entries SET relative_path = '.a-nas-stale/' || id
+WHERE space_id = ? AND relative_path = ? AND inode <> ?`, spaceID, relativePath, info.Inode); err != nil {
 		return Entry{}, err
 	}
-	_, err := s.store.db.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 INSERT INTO entries(id, space_id, parent_id, name, kind, relative_path, inode, size_bytes, modified_at)
 VALUES(?,?,?,?,?,?,?,?,?)
 ON CONFLICT(space_id, inode) DO UPDATE SET
@@ -1560,20 +1679,39 @@ relative_path=excluded.relative_path, size_bytes=excluded.size_bytes, modified_a
 	if err != nil {
 		return Entry{}, err
 	}
-	return s.findByInode(ctx, spaceID, info.Inode)
+	return s.findByInode(ctx, q, spaceID, info.Inode)
 }
 
-func (s *Service) findByInode(ctx context.Context, spaceID string, inode uint64) (Entry, error) {
-	row := s.store.db.QueryRowContext(ctx, `
+// releaseTrashedInode lets a file found in a space have its inode when a
+// recycle-bin row claims it but the recycle bin no longer holds it there:
+// the item's file was removed outside A-NAS and the inode number used
+// again. The stale row goes. While the recycle bin still holds the inode, or
+// the actor cannot see whether it does, the row stays and errHeldInTrash is
+// returned.
+func (s *Service) releaseTrashedInode(ctx context.Context, q queryer, root, spaceID string, inode uint64) error {
+	var id, relativePath string
+	err := q.QueryRowContext(ctx, "SELECT id, relative_path FROM entries WHERE space_id = ? AND inode = ? AND trashed = 1",
+		spaceID, inode).Scan(&id, &relativePath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(relativePath, ".a-nas-trash/") {
+		info, err := s.fs.Lstat(ctx, filepath.Join(root, filepath.FromSlash(relativePath)))
+		if (err == nil && info.Inode == inode) || (err != nil && !errors.Is(err, fs.ErrNotExist)) {
+			return errHeldInTrash
+		}
+	}
+	_, err = q.ExecContext(ctx, "DELETE FROM entries WHERE id = ?", id)
+	return err
+}
+
+func (s *Service) findByInode(ctx context.Context, q queryer, spaceID string, inode uint64) (Entry, error) {
+	row := q.QueryRowContext(ctx, `
 SELECT id, space_id, parent_id, name, kind, size_bytes, modified_at
 FROM entries WHERE space_id = ? AND inode = ?`, spaceID, inode)
-	return scanEntry(row)
-}
-
-func (s *Service) entryByRelative(ctx context.Context, spaceID, relativePath string) (Entry, error) {
-	row := s.store.db.QueryRowContext(ctx, `
-SELECT id, space_id, parent_id, name, kind, size_bytes, modified_at
-FROM entries WHERE space_id = ? AND relative_path = ? AND trashed = 0`, spaceID, relativePath)
 	return scanEntry(row)
 }
 
@@ -1596,36 +1734,54 @@ var reconcileSkip = ScanSkip{
 	Prefixes: []string{".a-nas-copy-"},
 }
 
+// reconcile brings a space's rows in line with its files, which SMB and
+// other clients change without A-NAS. A change through A-NAS that is in
+// flight, or that happens during the scan, makes the scan stale, and it is
+// discarded (see spaceOrder): the change keeps its own rows current, and the
+// next pass catches up with the rest.
 func (s *Service) reconcile(ctx context.Context, space accounts.Space, root string) error {
+	order := s.order(space.ID)
+	generation, ok := order.observe()
+	if !ok {
+		return nil
+	}
 	scanned, err := s.fs.Scan(ctx, root, reconcileSkip)
 	if err != nil {
 		return err
 	}
-	parentIDs := map[string]string{".": ""}
-	seen := make(map[uint64]struct{})
-	var temporaries []ScanEntry
-	for _, item := range scanned {
-		if isUploadTemporary(item.Path) {
-			temporaries = append(temporaries, item)
-			continue
-		}
-		if item.Info.Kind != KindFile && item.Info.Kind != KindDirectory {
-			continue
-		}
-		parentID, ok := parentIDs[path.Dir(item.Path)]
-		if !ok {
-			continue
-		}
-		entry, err := s.registerInfo(ctx, space.ID, parentID, item.Path, item.Info)
+	if !order.beginWrite(generation) {
+		return nil
+	}
+	defer order.endWrite()
+	return s.writeScan(ctx, space.ID, root, scanned)
+}
+
+// reconcileNow reconciles for a caller that depends on the result: it waits
+// for changes in flight and holds off new ones until it is done.
+func (s *Service) reconcileNow(ctx context.Context, space accounts.Space, root string) error {
+	return s.scanAlone(ctx, space.ID, func() error {
+		scanned, err := s.fs.Scan(ctx, root, reconcileSkip)
 		if err != nil {
 			return err
 		}
-		seen[item.Info.Inode] = struct{}{}
-		if item.Info.Kind == KindDirectory {
-			parentIDs[item.Path] = entry.ID
-		}
+		return s.writeScan(ctx, space.ID, root, scanned)
+	})
+}
+
+// writeScan catalogs a scan of a whole space in one transaction, drops the
+// rows of what the space no longer holds and removes stale upload
+// temporaries.
+func (s *Service) writeScan(ctx context.Context, spaceID, root string, scanned []ScanEntry) error {
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	rows, err := s.store.db.QueryContext(ctx, "SELECT inode FROM entries WHERE space_id = ? AND trashed = 0", space.ID)
+	defer func() { _ = tx.Rollback() }()
+	seen, err := s.registerScan(ctx, tx, root, spaceID, "", "", scanned)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT inode FROM entries WHERE space_id = ? AND trashed = 0", spaceID)
 	if err != nil {
 		return err
 	}
@@ -1640,14 +1796,55 @@ func (s *Service) reconcile(ctx context.Context, space accounts.Space, root stri
 			missing = append(missing, inode)
 		}
 	}
-	_ = rows.Close()
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	for _, inode := range missing {
-		if _, err := s.store.db.ExecContext(ctx, "DELETE FROM entries WHERE space_id = ? AND inode = ? AND trashed = 0", space.ID, inode); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM entries WHERE space_id = ? AND inode = ? AND trashed = 0", spaceID, inode); err != nil {
 			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	var temporaries []ScanEntry
+	for _, item := range scanned {
+		if isUploadTemporary(item.Path) {
+			temporaries = append(temporaries, item)
 		}
 	}
 	s.removeStaleUploads(ctx, root, temporaries)
 	return nil
+}
+
+// registerScan catalogs what a scan found below base (empty for the space
+// root), whose row is baseID, and returns the inodes it catalogued. Upload
+// temporaries are left out, and so is a file the recycle bin still holds,
+// with everything below it.
+func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, base, baseID string, scanned []ScanEntry) (map[uint64]struct{}, error) {
+	parentIDs := map[string]string{".": baseID}
+	seen := make(map[uint64]struct{})
+	for _, item := range scanned {
+		if isUploadTemporary(item.Path) || (item.Info.Kind != KindFile && item.Info.Kind != KindDirectory) {
+			continue
+		}
+		parentID, ok := parentIDs[path.Dir(item.Path)]
+		if !ok {
+			continue
+		}
+		entry, err := s.registerInfo(ctx, q, root, spaceID, parentID, path.Join(base, item.Path), item.Info)
+		if errors.Is(err, errHeldInTrash) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		seen[item.Info.Inode] = struct{}{}
+		if item.Info.Kind == KindDirectory {
+			parentIDs[item.Path] = entry.ID
+		}
+	}
+	return seen, nil
 }
 
 // ensureCapacity checks the whole data volume, which the Product Service can
