@@ -44,7 +44,7 @@ describe("VersionsDialog", () => {
     expect(within(dialog).getByText("个人空间 / 文档 · 现在 2.0 KiB，修改于", { exact: false })).toBeTruthy();
     const list = await within(dialog).findByRole("list", { name: "版本" });
     const [now, before] = within(list).getAllByRole("listitem");
-    expect(within(now).getByText("与现在相同")).toBeTruthy();
+    expect(within(now).getByText("当前版本")).toBeTruthy();
     expect(within(now).queryByRole("button", { name: /^还原到/ })).toBeNull();
     expect(within(before).getByText(/保存在 3 份快照中/)).toBeTruthy();
 

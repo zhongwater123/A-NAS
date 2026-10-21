@@ -17,6 +17,18 @@ const changeBadge: Record<SnapshotChange, { label: string; title: string }> = {
   inside: { label: "内有变化", title: "文件夹里有文件已删除或修改" },
 };
 
+// changeSince words how a snapshot's totals differ from the one before it,
+// so a long run of alike scheduled snapshots shows where something happened.
+// Equal totals say nothing: files can change without changing them.
+function changeSince(snapshot: Snapshot, before?: Snapshot): { text: string; tone: "more" | "less" } | undefined {
+  if (!before) return undefined;
+  const files = snapshot.fileCount - before.fileCount;
+  const bytes = snapshot.sizeBytes - before.sizeBytes;
+  if (files) return { text: `${files > 0 ? "+" : "−"}${formatCount(Math.abs(files))} 个文件`, tone: files > 0 ? "more" : "less" };
+  if (bytes) return { text: `${bytes > 0 ? "+" : "−"}${formatBytes(Math.abs(bytes))}`, tone: bytes > 0 ? "more" : "less" };
+  return undefined;
+}
+
 // snapshotTitle drops the timestamp a scheduled snapshot's name repeats.
 export const snapshotTitle = (snapshot: Pick<Snapshot, "name" | "origin">) => (snapshot.origin === "scheduled" && snapshot.name.startsWith("定时快照 ") ? "定时快照" : snapshot.name);
 
@@ -52,12 +64,13 @@ export function SnapshotsPage() {
   }, [snapshots, focus, consumeFocus]);
 
   const groups = useMemo(() => {
-    const result: { day: string; items: Snapshot[] }[] = [];
-    for (const snapshot of snapshots ?? []) {
+    const result: { day: string; items: { snapshot: Snapshot; before?: Snapshot }[] }[] = [];
+    (snapshots ?? []).forEach((snapshot, index, all) => {
       const day = formatDay(snapshot.createdAt);
-      if (result.at(-1)?.day === day) result.at(-1)!.items.push(snapshot);
-      else result.push({ day, items: [snapshot] });
-    }
+      const item = { snapshot, before: all[index + 1] };
+      if (result.at(-1)?.day === day) result.at(-1)!.items.push(item);
+      else result.push({ day, items: [item] });
+    });
     return result;
   }, [snapshots]);
 
@@ -68,7 +81,7 @@ export function SnapshotsPage() {
   return (
     <div ref={root} className="bk-page bk-snapshots-page">
       <header className="bk-page-head">
-        <div><h2>快照</h2><p>{spaceLabel(space)}的只读快照，按时间排列。</p></div>
+        <div><h2>快照</h2><p>选一个时间点，浏览{spaceLabel(space)}当时的样子。</p></div>
         <div className="bk-head-actions">
           <SpaceSwitcher spaces={spaces} value={space.id} onChange={(id) => { setSpaceId(id); setShowDetail(false); }} />
           <button type="button" className="bk-icon-button" aria-label="刷新快照" onClick={() => void refresh(space.id)}><RefreshCw /></button>
@@ -98,20 +111,30 @@ export function SnapshotsPage() {
               {groups.map((group) => (
                 <div key={group.day} className="bk-timeline-group">
                   <p className="bk-timeline-day">{group.day}<span>{group.items.length} 份</span></p>
-                  {group.items.map((snapshot) => (
-                    <button
-                      key={snapshot.id}
-                      type="button"
-                      role="option"
-                      aria-selected={snapshot.id === selected?.id}
-                      className={`bk-snap${snapshot.id === selected?.id ? " active" : ""}`}
-                      onClick={() => { setSelectedId(snapshot.id); setShowDetail(true); }}
-                    >
-                      <span className="bk-snap-time">{formatClock(snapshot.createdAt)}</span>
-                      <span className="bk-snap-main"><strong>{snapshotTitle(snapshot)}</strong><small>{formatCount(snapshot.fileCount)} 个文件 · {formatBytes(snapshot.sizeBytes)}</small></span>
-                      <OriginBadge origin={snapshot.origin} />
-                    </button>
-                  ))}
+                  {group.items.map(({ snapshot, before }) => {
+                    const change = changeSince(snapshot, before);
+                    return (
+                      <button
+                        key={snapshot.id}
+                        type="button"
+                        role="option"
+                        aria-selected={snapshot.id === selected?.id}
+                        className={`bk-snap${snapshot.id === selected?.id ? " active" : ""}${snapshot.origin === "manual" ? " manual" : ""}`}
+                        onClick={() => { setSelectedId(snapshot.id); setShowDetail(true); }}
+                      >
+                        <span className="bk-snap-time">{formatClock(snapshot.createdAt)}</span>
+                        <span className="bk-snap-main">
+                          <strong>{snapshotTitle(snapshot)}</strong>
+                          <small>
+                            {formatCount(snapshot.fileCount)} 个文件 · {formatBytes(snapshot.sizeBytes)}
+                            {change && <b className={`bk-snap-change ${change.tone}`} title={`与前一份（${formatDateTime(before!.createdAt)}）相比`}>{change.text}</b>}
+                          </small>
+                        </span>
+                        {/* The title already says 定时快照; only a manual one needs a mark. */}
+                        {snapshot.origin === "manual" && <OriginBadge origin="manual" />}
+                      </button>
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -194,7 +217,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
         </div>
         <div className="bk-browser-actions">
           <button type="button" className="bk-secondary small" disabled={busy} onClick={restoreHere}><ArchiveRestore />{trail.length ? "恢复此文件夹" : "全部恢复"}</button>
-          {manage && snapshot.origin === "scheduled" && <button type="button" className="bk-secondary small" disabled={busy} title="转为手动快照，不再被定时清理" onClick={() => void keep()}><Pin />保留</button>}
+          {manage && snapshot.origin === "scheduled" && <button type="button" className="bk-secondary small" disabled={busy} title="转为手动快照，不会再被定时清理" onClick={() => void keep()}><Pin />长期保留</button>}
           {manage && <button type="button" className="bk-secondary small danger" disabled={busy} onClick={() => setConfirming(true)}><Trash2 />删除</button>}
         </div>
       </header>

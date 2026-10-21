@@ -101,7 +101,7 @@ export function VersionsDialog({ file, space, folders, onClose, onChanged }: {
                       <strong>
                         {version.modifiedAt ? `修改于 ${formatDateTime(version.modifiedAt)}` : "版本"}
                         <span> · {formatBytes(version.sizeBytes)}</span>
-                        {version.current && <em className="current">与现在相同</em>}
+                        {version.current && <em className="current">当前版本</em>}
                       </strong>
                       <small>
                         {version.snapshots > 1
@@ -111,13 +111,16 @@ export function VersionsDialog({ file, space, folders, onClose, onChanged }: {
                     </div>
                     <div className="bk-version-actions">
                       <a className="bk-icon-button" href={snapshotDownloadURL(version.snapshotId, version.entryId)} download={entry.name} aria-label={`下载 ${versionTime(version)} 的版本`} title="下载"><Download /></a>
-                      <button type="button" className="bk-icon-button" aria-label={`把 ${versionTime(version)} 的版本另存一份`} title="另存一份" onClick={() => copy(version)}><CopyPlus /></button>
-                      {!version.current && <button type="button" className="bk-restore-button" aria-label={`还原到 ${versionTime(version)} 的版本`} onClick={() => { setReplaceError(""); setReplacing(version); }}><RotateCcw />还原</button>}
+                      <button type="button" className="bk-text-button" aria-label={`把 ${versionTime(version)} 的版本另存一份`} title="在原文件夹另存一份，不动现在的文件" onClick={() => copy(version)}><CopyPlus />另存一份</button>
+                      {!version.current && <button type="button" className="bk-restore-button" aria-label={`还原到 ${versionTime(version)} 的版本`} title="换回这个版本，现在的文件移到回收站" onClick={() => { setReplaceError(""); setReplacing(version); }}><RotateCcw />还原</button>}
                     </div>
                   </li>
                 ))}
               </ol>
             )}
+        {match && match.versions.some((version) => !version.current) && (
+          <p className="bk-fine">“还原”把文件换回那个版本，现在的文件移到回收站；“另存一份”在旁边多存一个文件，不动现在的文件。</p>
+        )}
       </Dialog>
       {replacing && (
         <Dialog

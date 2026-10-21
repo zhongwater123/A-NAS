@@ -1,4 +1,4 @@
-import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info } from "lucide-react";
+import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Space } from "../api";
@@ -41,6 +41,22 @@ const sameSettings = (left: ScheduleSettings, right: ScheduleSettings) => {
     a.retention === b.retention && sameTiers(a.tiers, b.tiers);
 };
 
+type Plan = Pick<ScheduleSettings, "frequency" | "retention" | "keep" | "tiers">;
+
+// Plans name the common choices by what they let people do, so nobody has to
+// work out frequencies and retention first. Each keeps the time already set.
+const plans: { id: string; title: string; every: string; reach: string; tag?: string; plan: Plan }[] = [
+  { id: "standard", title: "标准", tag: "默认", every: "每天一份", reach: "可回到两周内任一天", plan: { frequency: "daily", retention: "count", keep: suggestedKeep.daily, tiers: suggestedTiers("daily") } },
+  { id: "long", title: "长期", every: "每天一份，越久越疏", reach: "最远可回到约一年前", plan: { frequency: "daily", retention: "tiered", keep: suggestedKeep.daily, tiers: suggestedTiers("daily") } },
+  { id: "frequent", title: "频繁", every: "每小时一份，越久越疏", reach: "最远可回到约一年前", plan: { frequency: "hourly", retention: "tiered", keep: suggestedKeep.hourly, tiers: suggestedTiers("hourly") } },
+];
+
+// planOf names the plan a schedule follows, if any; the time does not matter.
+function planOf(settings: ScheduleSettings): string | undefined {
+  return plans.find(({ plan }) => plan.frequency === settings.frequency && plan.retention === settings.retention &&
+    (plan.retention === "count" ? plan.keep === settings.keep : sameTiers(plan.tiers, settings.tiers)))?.id;
+}
+
 // tiersAfter carries tiers over to a new frequency: suggested ones follow the
 // frequency; the person's own lose only the tiers finer than it.
 function tiersAfter(tiers: RetentionTiers, from: Frequency, to: Frequency): RetentionTiers {
@@ -55,7 +71,7 @@ export function SchedulesPage() {
   return (
     <div className="bk-page bk-schedules-page">
       <header className="bk-page-head">
-        <div><h2>定时快照</h2><p>按计划自动拍摄快照，并自动清理较早的。</p></div>
+        <div><h2>定时快照</h2><p>按计划自动拍摄快照，并自动清理较早的。选一个方案即可，之后随时可以改。</p></div>
       </header>
       <div className="bk-schedule-list">
         {spaces.map((space) => {
@@ -69,7 +85,7 @@ export function SchedulesPage() {
         <h4><Info />定时快照如何工作</h4>
         <ul>
           <li>时间按这台 A-NAS 的时区计算。设备关机时错过的时间点，开机后会补拍一次，而不是补拍每一次。</li>
-          <li>每次成功拍摄后，按保留方式自动删除更早的定时快照：“固定份数”只留最近几份；“智能保留”近期每小时或每天一份，往前每周、每月各留一份，用更少的快照回到更久以前。</li>
+          <li>每次成功拍摄后，自动删除不再需要的定时快照。“标准”只留最近 14 份；“长期”和“频繁”使用智能保留：近期每天或每小时一份，往前每周、每月各留一份，用更少的快照回到更久以前。</li>
           <li>手动快照不会被自动删除；想长期保留某份定时快照，可以在快照列表中点“保留”。</li>
           <li>如果拍摄失败（例如数据卷离线），会在 15 分钟后重试，直到下一个时间点。</li>
         </ul>
@@ -82,6 +98,8 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
   const { setSchedule, toast, data } = useBackup();
   const [draft, setDraft] = useState<ScheduleSettings>(() => settingsOf(schedule));
   const [saving, setSaving] = useState(false);
+  // custom shows the full editor; a schedule outside the plans starts there.
+  const [custom, setCustom] = useState(() => !planOf(settingsOf(schedule)));
   const stored = settingsOf(schedule);
   const dirty = !sameSettings(draft, stored);
   const readOnly = !schedule.canManage;
@@ -93,6 +111,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
     setDraft((current) => (sameSettings(current, lastSaved.current) ? next : current));
     lastSaved.current = next;
   }, [schedule]);
+  const chosen = custom ? undefined : planOf(draft);
 
   const update = (change: Partial<ScheduleSettings>) => setDraft((current) => {
     const next = { ...current, ...change };
@@ -129,16 +148,42 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
         <Switch checked={draft.enabled} disabled={busy} label={`开启${spaceLabel(space)}的定时快照`} onChange={(enabled) => update({ enabled })} />
       </header>
 
-      {draft.enabled ? (
+      {draft.enabled && readOnly ? (
+        <div className="bk-schedule-summary">
+          <p><strong>{describeSchedule(draft)}</strong> 自动拍一份 · {describeRetention(draft)}</p>
+          <RetentionStrip settings={draft} />
+        </div>
+      ) : draft.enabled ? (
         <div className="bk-schedule-form">
-          <div className="bk-row">
-            <span className="bk-row-label">频率</span>
-            <div className="bk-segmented small" role="radiogroup" aria-label="频率">
-              {frequencies.map((item) => (
-                <button key={item.value} type="button" role="radio" aria-checked={draft.frequency === item.value} className={draft.frequency === item.value ? "active" : ""} disabled={busy} onClick={() => update({ frequency: item.value })}>{item.label}</button>
-              ))}
-            </div>
+          <div className="bk-plans" role="radiogroup" aria-label="保护方案">
+            {plans.map((item) => (
+              <button
+                key={item.id} type="button" role="radio" aria-checked={chosen === item.id} className={`bk-plan${chosen === item.id ? " active" : ""}`} disabled={busy}
+                onClick={() => { setCustom(false); setDraft((current) => ({ ...current, ...item.plan })); }}
+              >
+                <span className="bk-plan-radio" aria-hidden="true" />
+                <strong>{item.title}{item.tag && <em>{item.tag}</em>}</strong>
+                <small>{item.every}</small>
+                <small className="reach">{item.reach}</small>
+              </button>
+            ))}
+            <button type="button" role="radio" aria-checked={!chosen} className={`bk-plan${chosen ? "" : " active"}`} disabled={busy} onClick={() => setCustom(true)}>
+              <span className="bk-plan-radio" aria-hidden="true" />
+              <strong><SlidersHorizontal />自定义</strong>
+              <small>自己设定拍摄频率</small>
+              <small className="reach">和保留方式</small>
+            </button>
           </div>
+          {!chosen && (
+            <div className="bk-row">
+              <span className="bk-row-label">频率</span>
+              <div className="bk-segmented small" role="radiogroup" aria-label="频率">
+                {frequencies.map((item) => (
+                  <button key={item.value} type="button" role="radio" aria-checked={draft.frequency === item.value} className={draft.frequency === item.value ? "active" : ""} disabled={busy} onClick={() => update({ frequency: item.value })}>{item.label}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {draft.frequency === "weekly" && (
             <div className="bk-row">
               <span className="bk-row-label">星期</span>
@@ -164,20 +209,24 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
             </div>
           </div>
           <div className="bk-row top">
-            <span className="bk-row-label">保留</span>
+            <span className="bk-row-label">{chosen ? "可回到" : "保留"}</span>
             <div className="bk-retention">
-              <div className="bk-segmented small" role="radiogroup" aria-label="保留方式">
-                {retentions.map((item) => (
-                  <button key={item.value} type="button" role="radio" aria-checked={draft.retention === item.value} className={draft.retention === item.value ? "active" : ""} disabled={busy} onClick={() => update({ retention: item.value })}>{item.label}</button>
-                ))}
-              </div>
-              {draft.retention === "count" ? (
-                <div className="bk-keep">
-                  <Stepper value={draft.keep} min={1} max={maxKeep} label="保留份数" disabled={busy} onChange={(keep) => update({ keep })} />
-                  <span>份定时快照</span>
-                </div>
-              ) : (
-                <TierEditor frequency={draft.frequency} tiers={draft.tiers} disabled={busy} onChange={(tiers) => update({ tiers })} />
+              {!chosen && (
+                <>
+                  <div className="bk-segmented small" role="radiogroup" aria-label="保留方式">
+                    {retentions.map((item) => (
+                      <button key={item.value} type="button" role="radio" aria-checked={draft.retention === item.value} className={draft.retention === item.value ? "active" : ""} disabled={busy} onClick={() => update({ retention: item.value })}>{item.label}</button>
+                    ))}
+                  </div>
+                  {draft.retention === "count" ? (
+                    <div className="bk-keep">
+                      <Stepper value={draft.keep} min={1} max={maxKeep} label="保留份数" disabled={busy} onChange={(keep) => update({ keep })} />
+                      <span>份定时快照</span>
+                    </div>
+                  ) : (
+                    <TierEditor frequency={draft.frequency} tiers={draft.tiers} disabled={busy} onChange={(tiers) => update({ tiers })} />
+                  )}
+                </>
               )}
               <RetentionStrip settings={draft} />
               <small className="bk-retention-note">{describeRetention(draft)}</small>
@@ -185,7 +234,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
           </div>
         </div>
       ) : (
-        <p className="bk-schedule-off">{readOnly ? "管理员尚未为共享空间开启定时快照；开启后你可以浏览和恢复其中的文件。" : "开启后按计划自动拍摄快照，并只保留最近几份。"}</p>
+        <p className="bk-schedule-off">{readOnly ? "管理员尚未为共享空间开启定时快照；开启后你可以浏览和恢复其中的文件。" : "开启后每天自动拍一份快照，误删、改坏的文件都能找回。"}</p>
       )}
 
       <ScheduleStatus schedule={schedule} offline={Boolean(data[space.id]?.offline)} />
@@ -193,8 +242,8 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
       {readOnly && draft.enabled && <p className="bk-readonly-note">共享空间的定时快照由管理员设置，你可以浏览和恢复其中的文件。</p>}
       {dirty && !readOnly && (
         <footer className="bk-save-bar">
-          <span>{draft.enabled ? `将${describeSchedule(draft)}拍摄，${draft.retention === "tiered" ? `智能保留最多 ${tierTotal(draft.tiers)} 份` : `保留 ${draft.keep} 份`}` : "将关闭定时快照，已有快照会保留"}</span>
-          <button type="button" className="bk-secondary small" disabled={saving} onClick={() => setDraft(saved)}>还原</button>
+          <span>{draft.enabled ? `将${describeSchedule(draft)} 自动拍一份，${describeRetention(draft)}` : "将关闭定时快照，已有快照会保留"}</span>
+          <button type="button" className="bk-secondary small" disabled={saving} onClick={() => { setDraft(stored); setCustom(!planOf(stored)); }}>还原</button>
           <button type="button" className="bk-primary small" disabled={saving} onClick={() => void save()}>{saving ? <><Spinner small />保存中…</> : "保存"}</button>
         </footer>
       )}

@@ -470,7 +470,7 @@ function Desktop({ session, onLogout, onUserChange }: { session: Session; onLogo
 			  {window.id === "media" && <MediaCenter userId={session.user.id} isAdmin={session.user.role === "admin"} />}
 			  {window.id === "music" && <MusicPanel userId={session.user.id} onOpenFiles={() => dispatch({ type: "open", id: "files" })} />}
 			  {window.id === "trash" && <TrashPanel onShowInFiles={showInFiles} />}
-			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onOpenFiles={() => openWindow("files")} />}
+			  {window.id === "backup" && <BackupCenter userId={session.user.id} isAdmin={session.user.role === "admin"} onShowInFiles={showInFiles} onOpenTrash={() => openWindow("trash")} />}
 			  {window.id === "docker" && <DockerPanel focus={dockerFocus} onFocusHandled={() => setDockerFocus(undefined)} onOpenStore={() => openWindow("store")} />}
 			  {window.id === "store" && <AppCenterPanel onOpenDocker={showInDocker} />}
 			  {window.id === "assistant" && <Suspense fallback={null}><AssistantPanel username={session.user.username} onShowPhoto={showPhoto} focus={assistantFocus} onFocusHandled={assistantFocusHandled} /></Suspense>}

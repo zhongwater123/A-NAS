@@ -1,46 +1,82 @@
-import { ArchiveRestore, Download, FileSearch, History, Search, X } from "lucide-react";
-import { ReactNode, useEffect, useState } from "react";
+import { ArchiveRestore, ChevronRight, Download, FileSearch, History, Layers, Search, X } from "lucide-react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 
 import type { Space } from "../api";
 import { formatBytes } from "../bytes";
 import { useBackup } from "./BackupCenter";
 import { listRemovedEntries, messageOf, searchSnapshots, snapshotDownloadURL, type RemovedEntry, type SnapshotMatch, type SnapshotVersion } from "./backupApi";
 import { formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
-import { EmptyState, EntryIcon, Notice, SpaceSwitcher, Spinner } from "./parts";
+import { EmptyState, EntryIcon, Notice, Spinner } from "./parts";
 import { snapshotTitle } from "./SnapshotsPage";
 
 const collapsedVersions = 3;
+const allSpaces = "all";
+
+interface Found<T> { space: Space; item: T }
+
+// gather asks every space in scope and keeps what the reachable ones return:
+// one space being unavailable should not hide the others' results.
+async function gather<T>(spaces: Space[], load: (space: Space) => Promise<{ items: T[]; truncated: boolean }>) {
+  const settled = await Promise.allSettled(spaces.map(async (space) => ({ space, ...(await load(space)) })));
+  const reached = settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  const failed = settled.flatMap((result, index) => (result.status === "rejected" ? [{ space: spaces[index], reason: result.reason }] : []));
+  if (!reached.length && failed.length) throw failed[0].reason;
+  return {
+    items: reached.flatMap(({ space, items }) => items.map((item): Found<T> => ({ space, item }))),
+    truncated: reached.some((result) => result.truncated),
+    unreachable: failed.map((failure) => failure.space),
+  };
+}
 
 export function FindPage() {
-  const { spaces, data, spaceId, setSpaceId, restored } = useBackup();
-  const space = spaces.find((item) => item.id === spaceId) ?? spaces[0];
+  const { spaces, data, restored } = useBackup();
+  // People rarely remember which space a lost file lived in, so finding
+  // starts across all of them.
+  const [scope, setScope] = useState(allSpaces);
   const [query, setQuery] = useState("");
-  const [result, setResult] = useState<{ query: string; items: SnapshotMatch[]; truncated: boolean }>();
+  const [result, setResult] = useState<{ query: string; items: Found<SnapshotMatch>[]; truncated: boolean; unreachable: Space[] }>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const snapshotCount = space ? data[space.id]?.snapshots?.length : undefined;
+  const targets = useMemo(() => (scope === allSpaces ? spaces : spaces.filter((space) => space.id === scope)), [scope, spaces]);
+  const noSnapshots = targets.every((space) => data[space.id]?.snapshots?.length === 0);
+  const where = targets.length === 1 ? spaceLabel(targets[0]) : "所有空间";
 
   useEffect(() => {
     const text = query.trim();
     setError("");
-    if (!text || !space) { setResult(undefined); setLoading(false); return; }
+    if (!text || !targets.length) { setResult(undefined); setLoading(false); return; }
     const controller = new AbortController();
     setLoading(true);
-    // A restore can bring a path back into the space; restored reruns the search.
+    // A restore can bring a path back into a space; restored reruns the search.
     const timer = window.setTimeout(() => {
-      searchSnapshots(space.id, text, controller.signal)
-        .then((found) => { setResult({ query: text, ...found }); setLoading(false); })
+      gather(targets, (space) => searchSnapshots(space.id, text, controller.signal))
+        .then((found) => {
+          // Exact names first, as each space already orders its own results.
+          const exact = (match: SnapshotMatch) => (match.name.toLowerCase() === text.toLowerCase() ? 0 : 1);
+          found.items.sort((a, b) => exact(a.item) - exact(b.item));
+          setResult({ query: text, ...found });
+          setLoading(false);
+        })
         .catch((caught) => { if (!controller.signal.aborted) { setError(messageOf(caught)); setLoading(false); } });
     }, 280);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [query, space, restored]);
+  }, [query, targets, restored]);
 
-  if (!space) return null;
+  if (!spaces.length) return null;
   return (
     <div className="bk-page bk-find-page">
       <header className="bk-page-head">
-        <div><h2>找回文件</h2><p>按名称在{spaceLabel(space)}的所有快照里查找文件和文件夹。</p></div>
-        <div className="bk-head-actions"><SpaceSwitcher spaces={spaces} value={space.id} onChange={setSpaceId} /></div>
+        <div><h2>找回文件</h2><p>在{where}的快照里按名称查找；想不起名字，就看下面最近删除的项目。</p></div>
+        {spaces.length > 1 && (
+          <div className="bk-head-actions">
+            <div className="bk-segmented" role="radiogroup" aria-label="查找范围">
+              <button type="button" role="radio" aria-checked={scope === allSpaces} className={scope === allSpaces ? "active" : ""} onClick={() => setScope(allSpaces)}><Layers />全部空间</button>
+              {spaces.map((space) => (
+                <button key={space.id} type="button" role="radio" aria-checked={scope === space.id} className={scope === space.id ? "active" : ""} onClick={() => setScope(space.id)}>{spaceLabel(space)}</button>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
 
       <label className="bk-search">
@@ -52,17 +88,20 @@ export function FindPage() {
 
       {error ? <Notice tone="danger">{error}</Notice>
         : !query.trim() ? (
-          snapshotCount === 0 ? (
-            <EmptyState icon={<FileSearch />} title={`${spaceLabel(space)}还没有快照`}>有了快照之后，就可以在这里找回过去的文件。</EmptyState>
-          ) : <RemovedList key={space.id} space={space} />
+          noSnapshots ? (
+            <EmptyState icon={<FileSearch />} title={`${where}还没有快照`}>有了快照之后，就可以在这里找回过去的文件。</EmptyState>
+          ) : <RemovedList key={scope} spaces={targets} />
         ) : result && result.query === query.trim() ? (
           result.items.length === 0 ? (
-            <EmptyState icon={<FileSearch />} title={`没有找到“${result.query}”`}>换一个更短的关键词试试，或者切换到另一个空间。</EmptyState>
+            <EmptyState icon={<FileSearch />} title={`没有找到“${result.query}”`}>
+              {targets.length === 1 && spaces.length > 1 ? "换一个更短的关键词，或者在全部空间中查找。" : "换一个更短的关键词试试，例如只输入名称里的一两个字。"}
+            </EmptyState>
           ) : (
             <>
               <p className="bk-result-count">找到 {result.items.length} 项{result.truncated ? "，结果较多，只显示前一部分；请输入更完整的名称" : ""}</p>
+              {result.unreachable.length > 0 && <Notice tone="warning">{result.unreachable.map(spaceLabel).join("、")}暂时无法查找，结果中不含它的文件。</Notice>}
               <ul className="bk-matches">
-                {result.items.map((match) => <MatchCard key={match.path} match={match} query={result.query} />)}
+                {result.items.map(({ space, item }) => <MatchCard key={`${space.id}:${item.path}`} space={space} match={item} query={result.query} />)}
               </ul>
             </>
           )
@@ -71,9 +110,8 @@ export function FindPage() {
   );
 }
 
-function MatchCard({ match, query }: { match: SnapshotMatch; query: string }) {
-  const { spaces, spaceId, restore } = useBackup();
-  const space = spaces.find((item) => item.id === spaceId)!;
+function MatchCard({ space, match, query }: { space: Space; match: SnapshotMatch; query: string }) {
+  const { restore } = useBackup();
   const [expanded, setExpanded] = useState(false);
   const folders = match.path.split("/").slice(0, -1);
   const versions = expanded ? match.versions : match.versions.slice(0, collapsedVersions);
@@ -102,7 +140,7 @@ function MatchCard({ match, query }: { match: SnapshotMatch; query: string }) {
               <strong>
                 {match.kind === "directory" ? "文件夹" : version.modifiedAt ? `修改于 ${formatDateTime(version.modifiedAt)}` : "版本"}
                 {match.kind === "file" && <span> · {formatBytes(version.sizeBytes)}</span>}
-                {version.current ? <em className="current">与现在相同</em> : index === 0 && match.versions.length > 1 && <em>最新</em>}
+                {version.current ? <em className="current">当前版本</em> : index === 0 && match.versions.length > 1 && <em>最新</em>}
               </strong>
               <small>
                 {version.snapshots > 1
@@ -112,7 +150,8 @@ function MatchCard({ match, query }: { match: SnapshotMatch; query: string }) {
             </div>
             <div className="bk-version-actions">
               {match.kind === "file" && <a className="bk-icon-button" href={snapshotDownloadURL(version.snapshotId, version.entryId)} download={match.name} aria-label={`下载这个版本的 ${match.name}`} title="下载"><Download /></a>}
-              <button type="button" className="bk-restore-button" onClick={() => restoreVersion(version)}><ArchiveRestore />恢复</button>
+              {/* The space already holds the current version; restoring it would only duplicate it. */}
+              {!version.current && <button type="button" className="bk-restore-button" onClick={() => restoreVersion(version)}><ArchiveRestore />恢复</button>}
             </div>
           </li>
         ))}
@@ -124,60 +163,78 @@ function MatchCard({ match, query }: { match: SnapshotMatch; query: string }) {
   );
 }
 
-// RemovedList shows what the snapshots hold that is no longer in the space,
+// RemovedList shows what the snapshots hold that is no longer in the spaces,
 // most recently gone first: what people look for when they cannot recall a name.
-function RemovedList({ space }: { space: Space }) {
-  const { restore, restored } = useBackup();
-  const [result, setResult] = useState<{ items: RemovedEntry[]; truncated: boolean }>();
+function RemovedList({ spaces }: { spaces: Space[] }) {
+  const { restore, restored, openTrash } = useBackup();
+  const [result, setResult] = useState<{ items: Found<RemovedEntry>[]; truncated: boolean; unreachable: Space[] }>();
   const [error, setError] = useState("");
 
   // A restore brings items back into the space, so the list reloads.
   useEffect(() => {
     const controller = new AbortController();
     setError("");
-    listRemovedEntries(space.id, controller.signal)
-      .then((found) => setResult(found))
+    gather(spaces, (space) => listRemovedEntries(space.id, controller.signal))
+      .then((found) => {
+        // Each space lists its newest losses first; together they keep that order.
+        found.items.sort((a, b) => b.item.lastSeenAt.localeCompare(a.item.lastSeenAt));
+        setResult(found);
+      })
       .catch((caught) => { if (!controller.signal.aborted) setError(messageOf(caught)); });
     return () => controller.abort();
-  }, [space.id, restored]);
+  }, [spaces, restored]);
 
   if (error) return <Notice tone="danger">{error}</Notice>;
   if (!result) return <div className="bk-loading inline"><Spinner />正在比对快照与现在的空间…</div>;
   if (!result.items.length) {
     return (
-      <EmptyState icon={<FileSearch />} title="快照里的文件都还在">
-        最近的快照中没有被删除或移走的项目。想找改坏之前的版本，可以在上面输入文件名。
-      </EmptyState>
+      <>
+        {result.unreachable.length > 0 && <Notice tone="warning">{result.unreachable.map(spaceLabel).join("、")}暂时无法比对。</Notice>}
+        <EmptyState icon={<FileSearch />} title="快照里的文件都还在">
+          最近的快照中没有被删除或移走的项目。想找改坏之前的版本，可以在上面输入文件名。
+        </EmptyState>
+      </>
     );
   }
   return (
     <section className="bk-removed" aria-label="最近删除或移走">
       <header className="bk-section-head">
-        <h3><History />最近删除或移走</h3>
+        <div>
+          <h3><History />最近删除或移走</h3>
+          <p>快照里有、现在空间里找不到的文件和文件夹，最近不见的在前。</p>
+        </div>
         <span>{formatCount(result.items.length)} 项{result.truncated ? "，只显示最近的一部分" : ""}</span>
       </header>
+      {result.unreachable.length > 0 && <Notice tone="warning">{result.unreachable.map(spaceLabel).join("、")}暂时无法比对，下面没有它的项目。</Notice>}
       <ul className="bk-removed-list">
-        {result.items.map((item) => {
+        {result.items.map(({ space, item }) => {
           const folders = item.path.split("/").slice(0, -1);
           const size = item.kind === "directory" ? `${formatCount(item.fileCount)} 个文件 · ${formatBytes(item.sizeBytes)}` : formatBytes(item.sizeBytes);
+          const seen = `${formatDateTime(item.lastSeenAt)} 还在`;
+          const between = item.goneBy
+            ? `${formatDateTime(item.lastSeenAt)} 的快照里还有，${formatDateTime(item.goneBy)} 的快照里已没有：在这之间被删除、移走或改了名`
+            : `最近一份快照（${formatDateTime(item.lastSeenAt)}）之后被删除、移走或改了名`;
           return (
-            <li key={item.path}>
+            <li key={`${space.id}:${item.path}`}>
               <EntryIcon kind={item.kind} />
               <div className="bk-removed-copy">
-                <strong title={item.name}>{item.name}{item.inTrash && <span className="bk-badge neutral" title="回收站里还有它，从回收站恢复可以拿回删除前的最新内容">在回收站中</span>}</strong>
+                <strong title={item.name}>
+                  {item.name}
+                  {item.inTrash && (openTrash
+                    ? <button type="button" className="bk-badge neutral link" title="回收站里还有它，从回收站还原可以拿回删除前最后的样子" onClick={openTrash}>在回收站中<ChevronRight /></button>
+                    : <span className="bk-badge neutral" title="回收站里还有它，从回收站还原可以拿回删除前最后的样子">在回收站中</span>)}
+                </strong>
                 <small title={item.path}>{[spaceLabel(space), ...folders].join(" / ")}</small>
-                <small className="bk-removed-meta">{size} · 最后见于 {formatDateTime(item.lastSeenAt)}</small>
+                <small className="bk-removed-meta">{size} · {seen}</small>
               </div>
               <span className="bk-removed-size">{size}</span>
-              <span className="bk-removed-when" title={item.goneBy ? `${formatDateTime(item.lastSeenAt)} 的快照里还有，${formatDateTime(item.goneBy)} 的快照里已没有` : `最近一份快照（${formatDateTime(item.lastSeenAt)}）之后不见的`}>
-                最后见于 {formatDateTime(item.lastSeenAt)}
-              </span>
+              <span className="bk-removed-when" title={between}>{seen}</span>
               <div className="bk-version-actions">
                 {item.kind === "file" && <a className="bk-icon-button" href={snapshotDownloadURL(item.snapshotId, item.entryId)} download={item.name} aria-label={`下载 ${item.name}`} title="下载"><Download /></a>}
                 <button
                   type="button" className="bk-restore-button" aria-label={`恢复 ${item.name}`}
                   onClick={() => restore({
-                    space, folders,
+                    space, folders, inTrash: item.inTrash,
                     snapshot: { id: item.snapshotId, name: snapshotTitle({ name: item.snapshotName, origin: item.origin }), createdAt: item.lastSeenAt },
                     entry: { id: item.entryId, name: item.name, kind: item.kind },
                   })}

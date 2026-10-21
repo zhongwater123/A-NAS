@@ -3,6 +3,7 @@ import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect
 
 import { listSpaces, type FileEntry, type Space } from "../api";
 import { BackupCenterGlyph } from "../BackupCenterGlyph";
+import type { TransferLocation } from "../transfers/transfersApi";
 
 import { createSnapshot, getSchedule, isVolumeOffline, listSnapshots, messageOf, type Snapshot, type SnapshotSchedule } from "./backupApi";
 import { ExternalPage } from "./ExternalPage";
@@ -10,7 +11,7 @@ import { FindPage } from "./FindPage";
 import { defaultSnapshotName, spaceAudience, spaceLabel } from "./format";
 import { OverviewPage } from "./OverviewPage";
 import { Dialog, Spinner, SpaceIcon, useToasts, type Toast } from "./parts";
-import { RestoreDialog, type RestoreRequest } from "./RestoreDialog";
+import { RestoreDialog, type Crumb, type RestoreRequest } from "./RestoreDialog";
 import { SchedulesPage } from "./SchedulesPage";
 import { SnapshotsPage } from "./SnapshotsPage";
 import "./backup.css";
@@ -45,7 +46,9 @@ interface Backup {
   createSnapshot: (space: Space) => void;
   restore: (request: RestoreRequest) => void;
   toast: (text: string, tone?: Toast["tone"], action?: Toast["action"]) => void;
-  openFiles?: () => void;
+  // showInFiles opens the file manager at a folder of a space.
+  showInFiles?: (space: Space, folders: Crumb[]) => void;
+  openTrash?: () => void;
 }
 
 const BackupContext = createContext<Backup | null>(null);
@@ -61,17 +64,24 @@ const narrowWidth = 720;
 
 interface RestoreJob { key: number; request: RestoreRequest; background: boolean }
 
+// Finding a lost file is why most people open the backup center, so it
+// comes right after the overview.
 const navigation: { page: Page; label: string; icon: ReactNode }[] = [
   { page: "overview", label: "概览", icon: <LayoutDashboard /> },
-  { page: "snapshots", label: "快照", icon: <Camera /> },
   { page: "find", label: "找回文件", icon: <FileSearch /> },
+  { page: "snapshots", label: "快照", icon: <Camera /> },
   { page: "schedules", label: "定时快照", icon: <CalendarClock /> },
 ];
 
 // BackupCenter is the 备份中心 window: snapshots of each space, their
 // schedules, finding and restoring files, and where backups to other disks
 // will live. The server decides every permission.
-export function BackupCenter({ userId, isAdmin, onOpenFiles }: { userId: string; isAdmin: boolean; onOpenFiles?: () => void }) {
+export function BackupCenter({ userId, isAdmin, onShowInFiles, onOpenTrash }: {
+  userId: string;
+  isAdmin: boolean;
+  onShowInFiles?: (location: TransferLocation) => void;
+  onOpenTrash?: () => void;
+}) {
   const [page, setPage] = useState<Page>("overview");
   const [spaces, setSpaces] = useState<Space[]>();
   const [failure, setFailure] = useState("");
@@ -153,11 +163,12 @@ export function BackupCenter({ userId, isAdmin, onOpenFiles }: { userId: string;
     setRestores((current) => [...current, { key: ++restoreKey.current, request, background: false }]);
   }, []);
   const finishRestore = (key: number) => setRestores((current) => current.filter((job) => job.key !== key));
+  const showInFiles = useMemo(() => onShowInFiles && ((space: Space, folders: Crumb[]) => onShowInFiles({ spaceId: space.id, spaceKind: space.kind, folders })), [onShowInFiles]);
 
   const context = useMemo<Backup>(() => ({
     userId, isAdmin, spaces: spaces ?? [], data, spaceId, setSpaceId, focus, consumeFocus, restored, navigate, refresh, setSchedule, canManage,
-    createSnapshot: setCreating, restore, toast, openFiles: onOpenFiles,
-  }), [userId, isAdmin, spaces, data, spaceId, focus, consumeFocus, restored, navigate, refresh, setSchedule, canManage, restore, toast, onOpenFiles]);
+    createSnapshot: setCreating, restore, toast, showInFiles, openTrash: onOpenTrash,
+  }), [userId, isAdmin, spaces, data, spaceId, focus, consumeFocus, restored, navigate, refresh, setSchedule, canManage, restore, toast, showInFiles, onOpenTrash]);
 
   const background = restores.filter((job) => job.background);
   const sidebarOpen = !narrow || drawer;
@@ -232,12 +243,13 @@ export function BackupCenter({ userId, isAdmin, onOpenFiles }: { userId: string;
             request={job.request}
             onClose={() => finishRestore(job.key)}
             onBackground={() => setRestores((current) => current.map((item) => (item.key === job.key ? { ...item, background: true } : item)))}
-            onRestored={(entry: FileEntry, location: string) => {
+            onRestored={(entry: FileEntry, location: string, folders: Crumb[]) => {
               finishRestore(job.key);
               setRestored((count) => count + 1);
-              toast(`已恢复“${entry.name}”到 ${location}`, "success", onOpenFiles ? { label: "打开文件管理", run: onOpenFiles } : undefined);
+              toast(`已恢复“${entry.name}”到 ${location}`, "success", showInFiles ? { label: "在文件管理中显示", run: () => showInFiles(job.request.space, folders) } : undefined);
             }}
             onFailed={(message) => { finishRestore(job.key); toast(message, "error"); }}
+            onOpenTrash={onOpenTrash}
           />
         ))}
         {toasts}
@@ -292,6 +304,7 @@ function CreateSnapshotDialog({ space, onClose, onCreated }: { space: Space; onC
         {error && <div className="bk-inline-error" role="alert"><span>{error}</span></div>}
         <ul className="bk-facts">
           <li>冻结这个空间此刻的全部文件，之后只读，可随时浏览和恢复。</li>
+          <li>适合在整理、批量改名或删除文件之前拍一份，出了差错可以整份找回。</li>
           <li>创建时几乎不占空间；之后修改或删除的文件，旧内容会保留到快照被删除。</li>
           <li>手动快照不会被定时快照的保留规则删除。</li>
         </ul>
