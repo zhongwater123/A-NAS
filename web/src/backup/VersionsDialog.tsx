@@ -69,7 +69,7 @@ export function VersionsDialog({ file, space, folders, onClose, onChanged }: {
   };
 
   return (
-    <div className="bk-layer">
+    <div className="bk-layer" data-vnas-private="快照里的历史版本">
       <Dialog
         title="历史版本"
         icon={<History />}
