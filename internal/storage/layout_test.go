@@ -195,6 +195,60 @@ func TestAnOfflineMemberOfTheVolumeIsNeverErased(t *testing.T) {
 	}
 }
 
+// A plan that has not run can be given up, or replaced by a new one, so the
+// administrator is not held in the wizard, or kept from planning again after
+// a page reload forgot it, until it expires.
+func TestAPlanThatHasNotRunCanBeCancelled(t *testing.T) {
+	ctx := context.Background()
+	executor := &recordingExecutor{}
+	ids := 0
+	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: func() string { ids++; return "plan-" + string(rune('0'+ids)) }})
+	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := service.PlanVolume(ctx, []string{"disk:fake-data-02"}, "")
+	if err != nil {
+		t.Fatalf("plan while another is pending = %v, want it to take that one's place", err)
+	}
+	if replaced, _ := service.GetPlan(plan.ID); replaced.State != storage.PlanStateCancelled {
+		t.Fatalf("replaced plan = %q, want cancelled", replaced.State)
+	}
+	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); !errors.Is(err, storage.ErrPlanState) {
+		t.Fatalf("confirm a replaced plan = %v, want ErrPlanState", err)
+	}
+	plan = replacement
+	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := service.CancelPlan(ctx, plan.ID)
+	if err != nil || cancelled.State != storage.PlanStateCancelled {
+		t.Fatalf("CancelPlan() = %+v, %v; want cancelled", cancelled, err)
+	}
+	if again, err := service.CancelPlan(ctx, plan.ID); err != nil || again.State != storage.PlanStateCancelled {
+		t.Fatalf("cancel twice = %+v, %v; want the cancelled plan again", again, err)
+	}
+	if _, err := service.ExecutePlan(ctx, plan.ID); !errors.Is(err, storage.ErrPlanState) || executor.created.PlanID != "" {
+		t.Fatalf("execute a cancelled plan = %v, executor got %+v; want refused before any disk", err, executor.created)
+	}
+	next, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	if err != nil {
+		t.Fatalf("plan after cancelling = %v, want allowed at once", err)
+	}
+	if _, err := service.ConfirmPlan(ctx, next.ID, next.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, next.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CancelPlan(ctx, next.ID); !errors.Is(err, storage.ErrPlanState) {
+		t.Fatalf("cancel a plan that ran = %v, want ErrPlanState", err)
+	}
+	if _, err := service.CancelPlan(ctx, "plan:missing"); !errors.Is(err, storage.ErrPlanNotFound) {
+		t.Fatalf("cancel a missing plan = %v, want ErrPlanNotFound", err)
+	}
+}
+
 // Plans stored before volumes could span disks named one disk at the top level.
 func TestPlansStoredForOneDiskStillRead(t *testing.T) {
 	var plan storage.ExecutionPlan

@@ -13,6 +13,56 @@ import (
 
 var filesystemUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+// btrfsDevices maps each block device of a mounted Btrfs filesystem to that
+// filesystem's UUID, from sysfs (fs/btrfs/<uuid>/devices). lsblk takes
+// FSTYPE and UUID from the udev database, which btrfs device add leaves
+// stale until the next boot: udev probes the new partition when the tool
+// closes it, still wiped, and the kernel then writes the superblock without
+// another event. The kernel's own list is right at once.
+func btrfsDevices(root fs.FS) map[string]string {
+	devices := make(map[string]string)
+	if root == nil {
+		return devices
+	}
+	members, err := fs.Glob(root, "sys/fs/btrfs/*/devices/*")
+	if err != nil {
+		return devices
+	}
+	for _, member := range members {
+		if uuid := path.Base(path.Dir(path.Dir(member))); filesystemUUIDPattern.MatchString(uuid) {
+			devices[path.Base(member)] = uuid
+		}
+	}
+	return devices
+}
+
+// dataVolumeUUID is the filesystem UUID of the Btrfs mounted at the data
+// mount point: the kernel's for the device the mount table names, or the
+// udev database's when sysfs does not list that device.
+func dataVolumeUUID(devices []blockDevice, btrfs map[string]string) string {
+	for _, name := range namesMountedAt(devices, dataMountPoint) {
+		if uuid := btrfs[name]; uuid != "" {
+			return uuid
+		}
+	}
+	return mountedBtrfsUUID(devices, dataMountPoint)
+}
+
+// holdsBtrfs reports whether the kernel lists the device, or a partition on
+// it, as a device of the mounted Btrfs filesystem with the UUID, or of any
+// mounted Btrfs when uuid is "".
+func holdsBtrfs(device blockDevice, btrfs map[string]string, uuid string) bool {
+	if member, ok := btrfs[device.Name]; ok && device.Name != "" && (uuid == "" || member == uuid) {
+		return true
+	}
+	for _, child := range device.Children {
+		if holdsBtrfs(child, btrfs, uuid) {
+			return true
+		}
+	}
+	return false
+}
+
 // readDataVolume describes the Btrfs filesystem mounted as the data volume:
 // the disks holding it, the profiles its data and metadata are in, and the
 // exclusive operation (a balance converting profiles) running on it. Profiles

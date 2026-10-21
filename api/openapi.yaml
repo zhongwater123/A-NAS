@@ -265,7 +265,8 @@ paths:
         mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
         to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable,
         volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks,
-        layout_too_small when the files would not fit.
+        layout_too_small when the files would not fit. A new plan cancels any plan that has not run; while a plan runs
+        it answers 409 plan_state_conflict.
       parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody:
         required: true
@@ -298,6 +299,17 @@ paths:
         "200": { description: Executed plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
         "409": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
+  /api/v1/storage/plans/{planId}/cancel:
+    post:
+      operationId: cancelStoragePlan
+      description: >-
+        Gives up a planned or confirmed plan, which has not touched any disk, so that a new plan can be made at once.
+        Cancelling a cancelled plan returns it again; a running or finished plan answers 409 plan_state_conflict.
+      parameters: [{ $ref: "#/components/parameters/PlanID" }, { $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { description: Cancelled plan, content: { application/json: { schema: { $ref: "#/components/schemas/StoragePlan" } } } }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
   /api/v1/operations/{operationId}:
     get:
       operationId: getOperation
@@ -4057,7 +4069,7 @@ components:
         capacityAfterBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files after the plan, before filesystem overhead." }
         confirmationPhrase: { type: string }
         actions: { type: array, items: { $ref: "#/components/schemas/StorageAction" } }
-        state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired] }
+        state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired, cancelled] }
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         failure: { type: string }
