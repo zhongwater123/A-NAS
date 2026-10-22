@@ -96,14 +96,17 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 任务分为两类，共用同一张表和租约语义：
 
 - **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。`IOWeight` 只在 BFQ 或 `io.cost` 下生效，实验 NAS 数据盘的 `mq-deadline` 下不起作用（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
+  - **经媒体 Worker 解码的任务**（HEIC 与视频的缩略图、HEIC 的检测输入）是后台工作，Worker 忙时排队等待（[准入与失败](media-center.md#准入与失败)），失败按 AI Worker 的规则分类（[`decodeFailure`](../../internal/photos/jobs.go)）：Worker 没有接下输入（不在、被 systemd 丢弃、没有解码器）时任务退回、不计次数，1 分钟后再试，循环随之暂停而不是拿每个任务去试；接下后中途停止记 `interrupted`、超时记 `io`，各计一次，3 次后失败；读不了记 `undecodable`。停止服务时，正在执行的任务带着尝试次数退回原位。此前这三种环境错误都记 `io`，Worker 几分钟不可用就会让期间导入的照片永久没有缩略图、向量、检测与人脸（[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
 - **AI 任务**：Embedding、标签、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
+
+启动恢复：每次打开相册库、在任务循环开始前，`RecoverJobs` 让崩溃或断电遗留的 `running` 任务立即重新排队，而不是等租约到期，并保留已计的次数，所以反复拖垮进程的原图仍以 `interrupted` 结束、不会在重启间无限重试；`io` 失败的任务（存储错误、Worker 超时，以及修复前被 Worker 缺席记为 `io` 的任务）重新获得 3 次尝试，因为写满的磁盘或过忙的设备此时可能已恢复。`interrupted` 不重新排队。
 
 默认执行策略：
 
 - 连续 5 分钟无前台活动后才领取新任务，并发 1，每次只让一个模型族常驻（2026-10-13 起改为按需加载、用完即放，见[物体检测的资源策略](photo-objects.md#资源策略)）。前台活动来自相册与文件 API 的用户请求（不含状态栏等定时轮询）；SMB 传输不经过产品服务，因此同时参考 Host Agent 的磁盘与网络吞吐。
 - 检测到上传、下载、播放、交互、内存压力、I/O 压力或温度上限后立即停止领取新任务；已经开始的单张原子推理允许完成。
 - 初始 systemd 预算为 `CPUQuota=200%`、`MemoryHigh=2G`、`MemoryMax=3G`、低 CPU/I/O 优先级；这些是安全起点，不是实机结论。2026-10-13 用户确定原则：闲时有多少资源就用多少，始终留出余量，用户有突发请求时正确释放；随切片 18 改为按核数减 2 的线程与上限、按需加载与卸载、可取消的检测任务（[资源策略](photo-objects.md#资源策略)）。
-- OOM、进程退出和重启只会让租约到期并重试，不得影响原图与基础相册。
+- OOM、进程退出和重启只会让任务重试（重启后由启动恢复立即重新排队，否则等租约到期），不得影响原图与基础相册。
 
 ## AI 模型基线
 

@@ -89,6 +89,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 
     产品服务与 Host Agent 须同版本部署。部署后在实机核对 `CapBnd`、`systemd-cgls` 中的 scope、裸机上 `/sys` 是否只读，以及加盘后 udev 重新探测是否仍正常；运行一周后查看 `MemoryPeak` 与 `TasksCurrent`，确认上限合适。
 26. 应用安装失败显示为“已安装”（[#169](https://github.com/zhongwater123/A-NAS/issues/169)，2026-10-21，[PR #213](https://github.com/zhongwater123/A-NAS/pull/213)，未合并、未部署）：`compose up` 出错时回滚，每个应用最近一次任务记在容器代理状态目录，代理停止时取消安装并回滚、启动时回滚中断的安装，回滚没完成的安装显示为失败，单元设 `KillMode=mixed`（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。部署须同时更新容器代理（含单元与 `daemon-reload`）与产品服务；部署后在实验 NAS 上安装时重启代理，确认显示安装被中断且没有留下容器。
+27. 媒体 Worker 的共享预算（[#168](https://github.com/zhongwater123/A-NAS/issues/168)，2026-10-21，[PR #214](https://github.com/zhongwater123/A-NAS/pull/214)，未合并、未部署）：Worker 几分钟不可用就会让期间导入的 HEIC 与视频的缩略图和 AI 永久失败，音乐中只有 Worker 能测的时长永远测不出。修复让产品、相册与分享服务从 8 个共享槽位按优先级取用 Worker，后台工作排队等待而不是失败；相册与音乐按 AI Worker 的规则区分“Worker 没接下”与“接下后失败”；相册服务启动时恢复崩溃遗留的任务与 `io` 失败的任务；所有 Worker 共用 3G 内存（[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。槽位数、分层与内存上限是估计值，待用户确认。部署须运行安装器（槽位的 tmpfiles 条目与 slice），并同时更新产品、相册与分享服务；部署后核对相册服务日志 `photo jobs recovered` 与此前失败的 HEIC 照片。
 
 ## 外部条件与限制
 

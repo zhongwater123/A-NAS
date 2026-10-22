@@ -41,11 +41,38 @@ const (
 const (
 	jobErrorUndecodable     = "undecodable"
 	jobErrorMissingOriginal = "missing_original"
-	jobErrorIO              = "io"
+	// jobErrorIO marks storage faults and a Media Worker that ran out of
+	// time. RecoverJobs gives these jobs their attempts again.
+	jobErrorIO = "io"
 	// jobErrorInterrupted marks a job whose lease ran out on every attempt,
-	// as when decoding the original keeps killing the service.
+	// as when decoding the original keeps killing the service, or whose
+	// Media Worker stopped while decoding it every time.
 	jobErrorInterrupted = "interrupted"
 )
+
+// jobWaiting is not a failure and is never stored: the Media Worker is not
+// there or the service is stopping, so the job goes back without spending
+// its attempt.
+const jobWaiting = "waiting"
+
+// decodeFailure classifies an error from decoding through the Media Worker,
+// following the AI Worker's rule (docs/architecture/photo-ai.md#协议): a
+// worker that never took the input costs nothing, one that stopped or ran
+// out of time while decoding it spends the attempt, and one that could not
+// read it fails the job.
+func decodeFailure(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return jobWaiting
+	case errors.Is(err, mediaworker.ErrInterrupted):
+		return jobErrorInterrupted
+	case errors.Is(err, mediaworker.ErrUnavailable):
+		return jobWaiting
+	case errors.Is(err, mediaworker.ErrFailed), errors.Is(err, context.DeadlineExceeded):
+		return jobErrorIO
+	}
+	return jobErrorUndecodable
+}
 
 var ErrThumbnailUnavailable = errors.New("photo thumbnail is not available yet")
 
@@ -135,9 +162,12 @@ type claimedJob struct {
 	duration float64
 }
 
-// ProcessMediaJob runs one ready media job and reports whether there was one.
-// A job whose original cannot be processed is retried with a delay and then
-// marked failed; the error returned is only for Catalog or storage faults.
+// ProcessMediaJob runs one ready media job and reports whether it finished
+// one. A job whose original cannot be processed is retried with a delay and
+// then marked failed; one that waits for the Media Worker goes back without
+// spending its attempt and reports false, so the loop pauses rather than
+// try every job against a worker that is not there. The error returned is
+// only for Catalog or storage faults.
 func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 	job, err := s.claimJob(ctx, thumbnailDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -147,7 +177,13 @@ func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	thumbnail, width, height, class := s.renderJob(ctx, job)
-	if class != "" {
+	switch {
+	case ctx.Err() != nil:
+		// Stopping: the job keeps its place and its attempt.
+		return false, s.returnJob(context.WithoutCancel(ctx), job)
+	case class == jobWaiting:
+		return false, s.releaseJob(ctx, job)
+	case class != "":
 		return true, s.failJob(ctx, job, class)
 	}
 	return true, s.completeJob(ctx, job, thumbnail, width, height)
@@ -191,8 +227,56 @@ LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.der
 	return job, err
 }
 
+// JobRecovery counts the jobs RecoverJobs put back in the queue.
+type JobRecovery struct {
+	// Resumed counts jobs a crash left running.
+	Resumed int `json:"resumed"`
+	// Requeued counts failed jobs that get their attempts again.
+	Requeued int `json:"requeued"`
+}
+
+// RecoverJobs readies the queue before any job loop runs. A stopping service
+// gives its jobs back, so a job still running was cut off by a crash or a
+// power loss: it runs again now instead of after its lease, and keeps the
+// attempt it spent, so that an original that keeps killing the service still
+// fails as interrupted. Jobs that failed on storage or on a Media Worker that
+// ran out of time (io) start over, as the disk that was full or the device
+// that was too busy may be fine now; so do those a worker that was not there
+// failed before such failures stopped counting (issue #168).
+func (s *Service) RecoverJobs(ctx context.Context) (JobRecovery, error) {
+	var recovery JobRecovery
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		now := formatTime(s.now())
+		if _, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'failed', lease_until = NULL, error_class = ?
+WHERE state = 'running' AND attempts >= ?`, jobErrorInterrupted, jobMaxAttempts); err != nil {
+			return err
+		}
+		resumed, err := tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', lease_until = NULL WHERE state = 'running'")
+		if err != nil {
+			return err
+		}
+		requeued, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
+WHERE state = 'failed' AND error_class = ?`, now, jobErrorIO)
+		if err != nil {
+			return err
+		}
+		count, err := resumed.RowsAffected()
+		recovery.Resumed = int(count)
+		if err != nil {
+			return err
+		}
+		count, err = requeued.RowsAffected()
+		recovery.Requeued = int(count)
+		return err
+	})
+	return recovery, err
+}
+
 // renderJob treats a decoder panic like an undecodable original: the same
-// bytes would panic again, and the service must keep serving.
+// bytes would panic again, and the service must keep serving. Thumbnails are
+// background work: when the Media Worker is busy they wait their turn.
 func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []byte, width, height int, class string) {
 	defer func() {
 		if recover() != nil {
@@ -207,16 +291,14 @@ func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []by
 		return nil, 0, 0, jobErrorIO
 	}
 	defer original.Close()
+	ctx = mediaworker.WithPriority(ctx, mediaworker.Background)
 	if job.video {
 		thumbnail, width, height, err = s.renderVideoFrame(ctx, original, job.duration, thumbnailEdge, thumbnailQuality)
 	} else {
 		thumbnail, width, height, err = s.renderPhoto(ctx, original, job.orientation, thumbnailEdge, thumbnailQuality)
 	}
 	if err != nil {
-		if errors.Is(err, mediaworker.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return nil, 0, 0, jobErrorIO
-		}
-		return nil, 0, 0, jobErrorUndecodable
+		return nil, 0, 0, decodeFailure(err)
 	}
 	return thumbnail, width, height, ""
 }

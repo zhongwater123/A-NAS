@@ -135,7 +135,7 @@ func runPhotoService(logger *slog.Logger) error {
 		// Without the AI component the socket is absent and photos wait for it.
 		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
 		AIQuietPeriod: quiet,
-		Photos:        photos.Options{Media: mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}},
+		Photos:        photos.Options{Media: mediaWorkerClient()},
 	})
 }
 
@@ -412,6 +412,17 @@ func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bo
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
 }
 
+// mediaWorkerClient reaches the sandboxed media worker. The Product, Photo
+// and Share Services take their turns from the same slot directory, which
+// the installer's tmpfiles entry creates, so together they never ask for
+// more workers than the socket admits.
+func mediaWorkerClient() mediaworker.Client {
+	return mediaworker.Client{
+		Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock"),
+		Slots:  environment("ANAS_MEDIA_SLOTS", "/run/a-nas-media/slots"),
+	}
+}
+
 // configuredMediaWorker picks where FFmpeg runs. Production uses the
 // sandboxed worker socket; development runs FFmpeg in this process when it
 // is installed, and otherwise the media center and music work without it.
@@ -425,7 +436,7 @@ func configuredMediaWorker(live bool) (mediaworker.Worker, error) {
 	}
 	switch mode {
 	case "socket":
-		return mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}, nil
+		return mediaWorkerClient(), nil
 	case "local":
 		if tools, ok := mediaworker.LocalTools(); ok {
 			return mediaworker.Local{Tools: tools}, nil

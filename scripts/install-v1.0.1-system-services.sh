@@ -29,7 +29,7 @@ for binary in anas-api anas-host-agent install-screensavers.sh; do
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-media-system.socket anas-media-system@.service; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-media-system.socket anas-media-system@.service anas-media-system.slice; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -167,6 +167,18 @@ install -d -o root -g root -m 0755 /etc/tmpfiles.d
 printf 'd /run/a-nas-share-files 2750 a-nas a-nas-shares -\n' > /etc/tmpfiles.d/a-nas-shares.conf
 chmod 0644 /etc/tmpfiles.d/a-nas-shares.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-shares.conf
+# The services that use the media worker take turns from these slots before
+# they connect (internal/mediaworker/admission.go): files they open read-only
+# and flock, one per worker that may run at once.
+{
+  printf 'd /run/a-nas-media 0755 root root -\n'
+  printf 'd /run/a-nas-media/slots 0750 root a-nas-photos -\n'
+  for slot in 0 1 2 3 4 5 6 7; do
+    printf 'f /run/a-nas-media/slots/%s 0440 root a-nas-photos -\n' "$slot"
+  done
+} > /etc/tmpfiles.d/a-nas-media.conf
+chmod 0644 /etc/tmpfiles.d/a-nas-media.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-media.conf
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /var/lib/a-nas/screensavers
@@ -313,6 +325,8 @@ printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\n
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
 install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
+# All media workers share one memory limit (system-anasmedia.slice).
+install -o root -g root -m 0644 "$source_release/anas-media-system.slice" /etc/systemd/system/system-anasmedia.slice
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
 if [[ "$lan_entry" == true ]]; then
   # Keep the administrator's own configuration the first time A-NAS replaces it.

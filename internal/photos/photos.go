@@ -212,8 +212,9 @@ type Options struct {
 // owned by the photo service identity; the caller proves the volume is
 // mounted before calling Open.
 type Service struct {
+	// media decodes HEIC and video. Its turns are shared with the Product
+	// and Share Services, so there is no limit of its own here.
 	media          MediaDecoder
-	decodeSlots    chan struct{}
 	db             *sql.DB
 	root           *os.Root
 	rootPath       string
@@ -307,7 +308,7 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root, media: options.Media, decodeSlots: make(chan struct{}, 2),
+		db: db, root: opened, rootPath: root, media: options.Media,
 		streamSlots: make(chan struct{}, maxVideoStreams), streamWait: videoStreamWait,
 		now: options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,

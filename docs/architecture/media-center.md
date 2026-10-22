@@ -74,9 +74,21 @@ anas-api（a-nas）
 - 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/mediaworker/protocol.go)）。
 - 请求只有五种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位，把第一条音轨解码为 FLAC，供音乐使用）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/mediaworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
 - 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
+- 客户端在请求中带 `ack`，Worker 读到请求与描述符后先回一帧 `accepted`，再开始工作并回复结果。没有 `ack` 的请求（旧客户端）直接得到结果，新客户端遇到旧 Worker 也把第一帧当作结果，所以部署时新旧进程短暂混用不会出错。
+
+## 准入与失败
+
+产品服务（影视中心、音乐、文件预览）、相册服务与分享服务共用同一个媒体 Worker。原先各自限流、互不知道对方，超过 `MaxConnections=8` 的连接被 systemd 接受后立即关闭，调用方读到 EOF 便当作 Worker 不在，后台任务因此永久失败（[#168](https://github.com/zhongwater123/A-NAS/issues/168)，[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
+
+- **共享槽位**：每个请求在连接前先取得 8 个槽位之一，应答或流关闭时放开（[`admission.go`](../../internal/mediaworker/admission.go)）。槽位是 `/run/a-nas-media/slots/0`…`7` 八个文件，由安装器的 tmpfiles 条目创建（目录 `root:a-nas-photos 0750`，文件 `0440`）；三个服务的账号都在 `a-nas-photos` 组中，以只读方式打开并 `flock(2)` 独占其一，所以 `ProtectSystem=strict` 下只读的 `/run` 就够。持有者无论怎样退出，内核都会放开它的锁。没有这个目录时（开发、测试）槽位只在本进程内。
+- **优先级**：交互请求（预览、海报、导入时的探测、字幕、实况照片的动态片段）可用全部 8 个；流（视频转换、音乐解码）最多 6 个，始终给交互留 2 个；后台工作（相册缩略图与 AI 输入、影视中心的探测与截图、音乐扫描）最多 2 个。每种优先级取自己范围内编号最高的空槽，把低编号留给其他优先级。后台请求一直等到有空槽或服务停止，不会因为忙而失败；交互等 20 秒、流等 5 秒，仍没有空槽时返回 `ErrBusy`（也是 `ErrUnavailable`，界面照旧提示稍后再试）。本进程放开的槽位立即唤醒等待者，其他进程放开的由轮询发现（交互 50 ms、流 100 ms、后台 1 秒）。调用方用 `WithPriority` 标记后台工作；`stream` 与 `audio` 默认是流，其余默认是交互。
+- **时限从取得槽位起算**：调用方用 `WithTimeout` 给出的时限不包括排队时间，例如 HEIC 解码与视频帧 30 秒、导入时的探测 15 秒、动态片段 45 秒。原先相册的 30 秒包括等待自己仅有的 2 个解码位，而播放中的实况照片整段占着其中一个，前台播放会让后台任务超时。
+- **连接上限与内存**：`anas-media.socket` 的 `MaxConnections=16` 高于槽位数，多出的部分留给调用方已放开槽位、仍在退出的 Worker，正常情况下 systemd 不再丢弃连接。所有 Worker 实例在 [`system-anasmedia.slice`](../../deploy/systemd/system/system-anasmedia.slice) 中共用 `MemoryMax=3G`（每个实例仍为 2G），超出时内核先回收、再结束这个 slice 中的 Worker，而不是设备上的其他进程；slice 位于 `system.slice` 之下而不是后台的 `anas.slice`，因为播放有人在看，`CPUWeight=50`、`IOWeight=50` 让它在争用时让出 CPU 与磁盘。权重只在同级之间比较，所以写在 slice 上，而不是彼此同级的实例上。
+- **失败分类**：Worker 回 `accepted` 之前的失败（连不上、被 systemd 丢弃、没有对应的解码器、等不到槽位）是 `ErrUnavailable`，同一请求稍后可能成功；之后连接断开是 `ErrInterrupted`（也是 `ErrUnavailable`），表示 Worker 接下了输入却停了，例如解码器耗尽内存，可能与输入有关；Worker 回答超时等无法完成是 `ErrFailed`；读不了文件是 `ErrUnreadable`。后台工作按此决定是否计入尝试：相册遵循与 AI Worker 相同的规则，见[相册的后台任务](photo-library.md#后台任务与资源隔离)；影视中心与音乐没有尝试次数，`ErrUnavailable`（包括中途停止）的文件留到下一轮，影视中心每分钟一轮，音乐在下次扫描，可读出的错误才记为失败。
 
 ## 关联
 
 - [影视中心规格](../specs/media-center.md)、[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[存储与文件架构](storage-and-files.md)
 - 代码：[`internal/media`](../../internal/media)、[`internal/mediaworker`](../../internal/mediaworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
-- 部署：[`anas-media.socket`](../../deploy/systemd/system/anas-media.socket)、[`anas-media@.service`](../../deploy/systemd/system/anas-media@.service)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
+- 部署：[`anas-media.socket`](../../deploy/systemd/system/anas-media.socket)、[`anas-media@.service`](../../deploy/systemd/system/anas-media@.service)、[`system-anasmedia.slice`](../../deploy/systemd/system/system-anasmedia.slice)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
+- 调查：[媒体 Worker 的共享预算与后台任务的永久失败](../investigations/2026-10-21-media-worker-shared-budget.md)

@@ -38,9 +38,9 @@ LockPersonality=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# A 4K HEVC transcode is the heaviest job; playback still yields to the rest
-# of the device.
+# A 4K HEVC transcode is the heaviest job. All workers together stay within
+# their slice's memory, and yield the CPU and disk to the rest of the device
+# there: weights compare only siblings, which instances are to each other.
 MemoryMax=2G
-CPUWeight=50
-IOWeight=50
+Slice=system-anasmedia.slice
 RuntimeMaxSec=8h
