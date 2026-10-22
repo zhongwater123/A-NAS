@@ -1319,11 +1319,14 @@ func (s *Service) registerTree(ctx context.Context, spaceID, parentID, root, tar
 		return Entry{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := newInode(ctx, tx, spaceID, info.Inode); err != nil {
+		return Entry{}, err
+	}
 	entry, err := s.registerInfo(ctx, tx, root, spaceID, parentID, relative, info)
 	if err != nil {
 		return Entry{}, err
 	}
-	if _, _, err := s.registerScan(ctx, tx, root, spaceID, relative, entry.ID, below, nil); err != nil {
+	if _, _, err := s.registerScan(ctx, tx, root, spaceID, relative, entry.ID, below, nil, true); err != nil {
 		return Entry{}, err
 	}
 	return entry, tx.Commit()
@@ -1369,7 +1372,7 @@ func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spac
 		}
 		return Entry{}, err
 	}
-	entry, err := s.registerPath(ctx, space.ID, parentID, root, target)
+	entry, err := s.registerCreated(ctx, space.ID, parentID, root, target)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -1465,7 +1468,7 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 		return Entry{}, err
 	}
 	committed = true
-	entry, err := s.registerPath(ctx, space.ID, parentID, root, target)
+	entry, err := s.registerCreated(ctx, space.ID, parentID, root, target)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -1606,7 +1609,9 @@ FROM entries WHERE id = ? AND space_id = ? AND trashed = 0`, entryID, spaceID).S
 	return entry, path, nil
 }
 
-func (s *Service) registerPath(ctx context.Context, spaceID, parentID, root, path string) (Entry, error) {
+// registerCreated catalogs a file or folder that A-NAS has just created at
+// path (see newInode).
+func (s *Service) registerCreated(ctx context.Context, spaceID, parentID, root, path string) (Entry, error) {
 	info, err := s.fs.Lstat(ctx, path)
 	if err != nil {
 		return Entry{}, err
@@ -1615,7 +1620,21 @@ func (s *Service) registerPath(ctx context.Context, spaceID, parentID, root, pat
 	if err != nil || relativePath == "." || strings.HasPrefix(relativePath, "..") {
 		return Entry{}, ErrNotFound
 	}
+	if err := newInode(ctx, s.store.db, spaceID, info.Inode); err != nil {
+		return Entry{}, err
+	}
 	return s.registerInfo(ctx, s.store.db, root, spaceID, parentID, filepath.ToSlash(relativePath), info)
+}
+
+// newInode drops the rows that hold the inode of an object A-NAS has just
+// created. Its inode is new, so such a row belongs to a file that is gone and
+// whose number the file system gave out again: one deleted outside A-NAS
+// that waits, unplaced, for a pass over the whole space, or a recycle-bin row
+// whose file was removed outside A-NAS. The new object must not take that
+// row's ID, which shares, transfers and libraries may still name.
+func newInode(ctx context.Context, q queryer, spaceID string, inode uint64) error {
+	_, err := q.ExecContext(ctx, "DELETE FROM entries WHERE space_id = ? AND inode = ?", spaceID, inode)
+	return err
 }
 
 // errHeldInTrash says that a file found in a space is also, under the same
@@ -1640,6 +1659,14 @@ func (s *Service) registerInfo(ctx context.Context, q queryer, root, spaceID, pa
 	moved, err := s.releaseTrashedInode(ctx, q, root, spaceID, info.Inode)
 	if err != nil {
 		return Entry{}, err
+	}
+	// Nothing keeps its inode and changes between file and folder: the row
+	// is of a file that is gone, its number given out again.
+	if moved.id != "" && moved.kind != kind {
+		if _, err := q.ExecContext(ctx, "DELETE FROM entries WHERE id = ?", moved.id); err != nil {
+			return Entry{}, err
+		}
+		moved = knownRow{}
 	}
 	// A path now held by a different inode (for example a file replaced over
 	// SMB) must release the old row, or UNIQUE(space_id, relative_path) blocks
@@ -1777,7 +1804,7 @@ func (s *Service) writeScan(ctx context.Context, spaceID, root string, sc scope,
 	if err != nil {
 		return false, err
 	}
-	seen, registered, err := s.registerScan(ctx, tx, root, spaceID, sc.relative, sc.id, scanned, known)
+	seen, registered, err := s.registerScan(ctx, tx, root, spaceID, sc.relative, sc.id, scanned, known, false)
 	if err != nil {
 		return false, err
 	}
@@ -1805,10 +1832,10 @@ func (s *Service) writeScan(ctx context.Context, spaceID, root string, sc scope,
 // registerScan catalogs what a scan found below base (empty for the space
 // root), whose row is baseID, and returns the inodes it catalogued and how
 // many rows it wrote. Rows in known, by inode, that already say what the
-// scan found are left as they are. Upload and copy temporaries are left
-// out, and so is a file the recycle bin still holds, with everything below
-// it.
-func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, base, baseID string, scanned []ScanEntry, known map[uint64]knownRow) (map[uint64]struct{}, int, error) {
+// scan found are left as they are. created says A-NAS has just made all of
+// it (see newInode). Upload and copy temporaries are left out, and so is a
+// file the recycle bin still holds, with everything below it.
+func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, base, baseID string, scanned []ScanEntry, known map[uint64]knownRow, created bool) (map[uint64]struct{}, int, error) {
 	parentIDs := map[string]string{".": baseID}
 	seen := make(map[uint64]struct{})
 	written := 0
@@ -1825,6 +1852,11 @@ func (s *Service) registerScan(ctx context.Context, q queryer, root, spaceID, ba
 		if row, ok := known[item.Info.Inode]; ok && row.unchanged(parentID, relativePath, item.Info) {
 			id = row.id
 		} else {
+			if created {
+				if err := newInode(ctx, q, spaceID, item.Info.Inode); err != nil {
+					return nil, written, err
+				}
+			}
 			entry, err := s.registerInfo(ctx, q, root, spaceID, parentID, relativePath, item.Info)
 			if errors.Is(err, errHeldInTrash) {
 				continue

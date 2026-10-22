@@ -309,6 +309,42 @@ func TestFileDeletedOverSMBIsDroppedByAWholePass(t *testing.T) {
 	}
 }
 
+// A file A-NAS creates never takes the ID of a row whose file went away,
+// even when the file system gives it that file's inode number again (ext4
+// does so at once; on CI the test above uploaded into the deleted file's
+// row).
+func TestANewFileDoesNotTakeTheIDOfAGoneOne(t *testing.T) {
+	f := newScopeFixture(t)
+	folder := f.mkdir("", "文档")
+	gone := f.upload(folder.ID, "旧.txt", "old")
+	if err := os.Remove(filepath.Join(f.root, "文档", "旧.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.ids(folder.ID); len(got) != 0 {
+		t.Fatalf("文档 lists %v, want nothing", got)
+	}
+	// The new file gets the gone file's inode number.
+	f.fs.hooks(nil, func(_, to string) {
+		if filepath.Base(to) == "新.txt" {
+			if _, err := f.db.Exec("UPDATE entries SET inode = ? WHERE id = ?", inodeOf(t, to), gone.ID); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	created := f.upload(folder.ID, "新.txt", "new")
+	f.fs.hooks(nil, nil)
+	if created.ID == gone.ID {
+		t.Fatalf("the uploaded file took the ID %s of the file deleted over SMB", gone.ID)
+	}
+	var rows int
+	if err := f.db.QueryRow("SELECT COUNT(*) FROM entries WHERE id = ?", gone.ID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatal("the gone file's row is still there")
+	}
+}
+
 // A tree below a folder scans that folder, and writes only what changed.
 func TestTreeReconcilesOnlyTheFolderBelow(t *testing.T) {
 	f := newScopeFixture(t)

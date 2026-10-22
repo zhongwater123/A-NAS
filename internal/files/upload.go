@@ -277,7 +277,7 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 		}
 	}
 	s.holdTemporary(upload.temporary, false)
-	entry, err := s.registerPath(ctx, space.ID, upload.ParentID, root, target)
+	entry, err := s.registerCreated(ctx, space.ID, upload.ParentID, root, target)
 	if err != nil {
 		return CommittedUpload{}, err
 	}
@@ -375,6 +375,11 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	relative, err := filepath.Rel(root, target)
 	if err != nil {
 		return Entry{}, "", ErrInvalidName
+	}
+	if created {
+		if err := newInode(ctx, s.store.db, spaceID, info.Inode); err != nil {
+			return Entry{}, "", err
+		}
 	}
 	entry, err := s.registerInfo(ctx, s.store.db, root, spaceID, parentID, filepath.ToSlash(relative), info)
 	if err != nil {
