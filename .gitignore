@@ -14,6 +14,14 @@ Thumbs.db
 *.key
 *.pem
 
+# Claude Code: per-session worktrees and each developer's own settings,
+# instructions and preview servers; .claude/settings.json and
+# .claude/skills/ are shared and committed
+.claude/worktrees/
+.claude/settings.local.json
+.claude/launch.json
+CLAUDE.local.md
+
 # Build, test, and cache output
 dist/
 !internal/webui/dist/
