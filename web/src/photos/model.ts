@@ -20,10 +20,15 @@ export type Place =
   | { kind: "similar"; viewing: string; asset: PhotoAsset; from: Place }
   | { kind: "image"; viewing: string; query: ImageQuery; from: Place };
 
-export interface Caller { userId: string; isAdmin: boolean; libraries: PhotoLibrary[] }
+export interface Caller {
+  userId: string;
+  isAdmin: boolean;
+  libraries: PhotoLibrary[];
+}
 
 export const libraryOf = (caller: Caller, libraryId: string) => caller.libraries.find((item) => item.id === libraryId);
-export const ownLibrary = (caller: Caller) => caller.libraries.find((item) => item.kind === "private" && item.ownerUserId === caller.userId && !item.viewing);
+export const ownLibrary = (caller: Caller) =>
+  caller.libraries.find((item) => item.kind === "private" && item.ownerUserId === caller.userId && !item.viewing);
 export const sharedLibrary = (caller: Caller) => caller.libraries.find((item) => item.kind === "shared");
 export const viewingLibrary = (caller: Caller) => caller.libraries.find((item) => item.viewing);
 
@@ -38,11 +43,15 @@ export function canChangePeople(caller: Caller, libraryId: string) {
 // The panel only hides what the photo service would refuse anyway.
 export function canChange(caller: Caller, asset: PhotoAsset) {
   const owner = libraryOf(caller, asset.libraryId);
-  return Boolean(owner && !owner.viewing && (owner.kind === "private" || asset.uploadedBy === caller.userId || caller.isAdmin));
+  return Boolean(
+    owner && !owner.viewing && (owner.kind === "private" || asset.uploadedBy === caller.userId || caller.isAdmin),
+  );
 }
 export function canEditAlbum(caller: Caller, album: PhotoAlbum) {
   const owner = libraryOf(caller, album.libraryId);
-  return Boolean(owner && !owner.viewing && (owner.kind === "private" || album.createdBy === caller.userId || caller.isAdmin));
+  return Boolean(
+    owner && !owner.viewing && (owner.kind === "private" || album.createdBy === caller.userId || caller.isAdmin),
+  );
 }
 export const canWrite = (caller: Caller, libraryId: string) => {
   const library = libraryOf(caller, libraryId);
@@ -56,11 +65,19 @@ export function libraryName(caller: Caller, library?: PhotoLibrary) {
   return `${library.ownerName ?? "成员"}的图库`;
 }
 
-export const placeLibrary = (place: Place) => "libraryId" in place ? place.libraryId : "";
+export const placeLibrary = (place: Place) => ("libraryId" in place ? place.libraryId : "");
 
 // Label categories of the vocabulary, in the order AI 聚合 shows them.
 export const categoryNames: Record<string, string> = {
-  animal: "动物", nature: "自然", scene: "场景", food: "食物", vehicle: "交通工具", activity: "运动", object: "物品", people: "人物", document: "文档",
+  animal: "动物",
+  nature: "自然",
+  scene: "场景",
+  food: "食物",
+  vehicle: "交通工具",
+  activity: "运动",
+  object: "物品",
+  people: "人物",
+  document: "文档",
 };
 // The member library a search or a cluster started from covers.
 export const placeViewing = (caller: Caller, place: Place) => {
@@ -100,7 +117,14 @@ export const fullMonthLabel = (month: string) => {
 };
 
 export function formatDateTime(value: string) {
-  return new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
+  return new Date(value).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // countLabel says how many photos and videos there are: 3 张照片, 2 个视频,
@@ -111,7 +135,8 @@ export function countLabel(total: number, videos = 0, join = "和") {
   if (!photos) return `${videos} 个视频`;
   return join === "和" ? `${photos} 张照片和 ${videos} 个视频` : `${photos} 张照片${join}${videos} 个视频`;
 }
-export const assetsLabel = (assets: PhotoAsset[]) => countLabel(assets.length, assets.filter((asset) => asset.video).length);
+export const assetsLabel = (assets: PhotoAsset[]) =>
+  countLabel(assets.length, assets.filter((asset) => asset.video).length);
 
 // clock writes a video position the way players do: 0:42, 12:05, 1:02:05.
 export function clock(seconds: number) {
@@ -159,7 +184,8 @@ const photoErrors: Record<string, string> = {
 
 // How to send the MOV a Live Photo still came without: Photos on a Mac
 // hands a browser only the still when dragged or chosen directly.
-export const liveVideoHint = "在 Mac 的“照片”App 中选中这张照片，用“文件 → 导出 → 导出未修改的原件”得到同名 MOV，上传后就会补上动态效果。";
+export const liveVideoHint =
+  "在 Mac 的“照片”App 中选中这张照片，用“文件 → 导出 → 导出未修改的原件”得到同名 MOV，上传后就会补上动态效果。";
 
 export function messageOf(error: unknown) {
   if (error instanceof APIError) return photoErrors[error.code] ?? error.message;
@@ -170,20 +196,32 @@ export const isUnavailable = (error: unknown) => error instanceof APIError && er
 
 // runEach applies an action to every item, a few at a time, and reports
 // progress; a failure does not stop the others or undo earlier successes.
-export async function runEach<T, R>(items: T[], action: (item: T) => Promise<R>, onProgress?: (done: number) => void, concurrency = 3) {
+export async function runEach<T, R>(
+  items: T[],
+  action: (item: T) => Promise<R>,
+  onProgress?: (done: number) => void,
+  concurrency = 3,
+) {
   const results: Array<{ item: T; value?: R; error?: unknown }> = [];
   let next = 0;
   let done = 0;
   const worker = async () => {
     while (next < items.length) {
       const item = items[next++];
-      try { results.push({ item, value: await action(item) }); }
-      catch (error) { results.push({ item, error }); }
+      try {
+        results.push({ item, value: await action(item) });
+      } catch (error) {
+        results.push({ item, error });
+      }
       onProgress?.(++done);
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return { succeeded: results.filter((result) => !("error" in result)), failed: results.filter((result) => "error" in result) };
+  return {
+    succeeded: results.filter((result) => !("error" in result)),
+    failed: results.filter((result) => "error" in result),
+  };
 }
 
-export const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+export const reducedMotion = () =>
+  typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;

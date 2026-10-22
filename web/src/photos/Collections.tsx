@@ -19,23 +19,49 @@ export function AlbumsView({ libraryId, readOnly, refreshKey, topInset, onOpen, 
   const [albums, setAlbums] = useState<PhotoAlbum[]>();
   useEffect(() => {
     let live = true;
-    listAlbums(libraryId).then((items) => { if (live) setAlbums(items); }, (caught) => { if (live) { setAlbums([]); onError(messageOf(caught)); } });
-    return () => { live = false; };
+    listAlbums(libraryId).then(
+      (items) => {
+        if (live) setAlbums(items);
+      },
+      (caught) => {
+        if (live) {
+          setAlbums([]);
+          onError(messageOf(caught));
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
   }, [libraryId, refreshKey]);
   return (
     <div className="ph-cards-scroll" style={{ paddingTop: topInset }}>
-      {albums === undefined ? <div className="ph-loading"><span className="ph-spinner" /></div> : (
+      {albums === undefined ? (
+        <div className="ph-loading">
+          <span className="ph-spinner" />
+        </div>
+      ) : (
         <div className="ph-cards">
           {!readOnly && (
             <button type="button" className="ph-card ph-card-new" onClick={onCreate}>
-              <span className="ph-card-cover"><FolderPlus /></span>
+              <span className="ph-card-cover">
+                <FolderPlus />
+              </span>
               <strong>新建相册</strong>
               <small>相册只是分组，照片不会被复制</small>
             </button>
           )}
           {albums.map((album) => (
-            <button type="button" key={album.id} className="ph-card" aria-label={`打开相册 ${album.name}`} onClick={() => onOpen(album)}>
-              <span className="ph-card-cover">{album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" loading="lazy" /> : <Images />}</span>
+            <button
+              type="button"
+              key={album.id}
+              className="ph-card"
+              aria-label={`打开相册 ${album.name}`}
+              onClick={() => onOpen(album)}
+            >
+              <span className="ph-card-cover">
+                {album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" loading="lazy" /> : <Images />}
+              </span>
               <strong>{album.name}</strong>
               <small>{album.photos} 张</small>
             </button>
@@ -47,7 +73,17 @@ export function AlbumsView({ libraryId, readOnly, refreshKey, topInset, onOpen, 
   );
 }
 
-export function Empty({ icon, title, text, action }: { icon: ReactNode; title: string; text: string; action?: ReactNode }) {
+export function Empty({
+  icon,
+  title,
+  text,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  text: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="ph-empty">
       <span className="ph-empty-icon">{icon}</span>

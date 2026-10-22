@@ -2,7 +2,18 @@ import { formatRate } from "../bytes";
 import type { ExternalUpload, Hold, LocalUpload, TransferRates, TransferSnapshot, UploadPhase } from "./store";
 import type { Transfer, TransferDirection, TransferLocation } from "./transfersApi";
 
-export type ItemStatus = "queued" | "pending" | "running" | "paused" | "waiting" | "conflict" | "interrupted" | "completed" | "failed" | "canceled" | "skipped";
+export type ItemStatus =
+  | "queued"
+  | "pending"
+  | "running"
+  | "paused"
+  | "waiting"
+  | "conflict"
+  | "interrupted"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "skipped";
 
 // TransferItem is one row: this browser's upload, a transfer the NAS
 // reports, or another app's upload.
@@ -54,11 +65,19 @@ const activeStatuses: ItemStatus[] = ["queued", "pending", "running", "paused", 
 export const isActive = (status: ItemStatus) => activeStatuses.includes(status);
 // Failed uploads of this browser stay with the active ones until retried or
 // dismissed; the NAS's history keeps the rest.
-export const isCurrent = (item: TransferItem) => isActive(item.status) || (item.status === "failed" && Boolean(item.local || item.external));
+export const isCurrent = (item: TransferItem) =>
+  isActive(item.status) || (item.status === "failed" && Boolean(item.local || item.external));
 
 const phaseStatus: Record<UploadPhase, ItemStatus> = {
-  queued: "queued", running: "running", paused: "paused", waiting: "waiting", conflict: "conflict",
-  completed: "completed", failed: "failed", canceled: "canceled", skipped: "skipped",
+  queued: "queued",
+  running: "running",
+  paused: "paused",
+  waiting: "waiting",
+  conflict: "conflict",
+  completed: "completed",
+  failed: "failed",
+  canceled: "canceled",
+  skipped: "skipped",
 };
 
 export function transferItems(snapshot: TransferSnapshot): TransferItem[] {
@@ -70,29 +89,68 @@ export function transferItems(snapshot: TransferSnapshot): TransferItem[] {
     return {
       // The NAS knows the folders a folder upload created; before it answers,
       // the target stands in.
-      id: upload.key, direction: "upload", kind: "file", name: upload.name, location: remote?.location ?? upload.target,
+      id: upload.key,
+      direction: "upload",
+      kind: "file",
+      name: upload.name,
+      location: remote?.location ?? upload.target,
       label: remote ? undefined : upload.target.label,
-      relativePath: upload.directories.join("/") || undefined, total: upload.size, transferred: upload.transferred, speed: upload.speed,
-      status: phaseStatus[upload.phase], failure: upload.error ? failureText(upload.error.code) : undefined, hold: upload.hold,
-      savedName: upload.savedName ?? remote?.savedName, replaced: upload.replaced ?? remote?.replaced, restarted: upload.restarted,
-      createdAt: upload.createdAt, finishedAt: upload.finishedAt, batch: upload.batch, local: upload, server: remote,
+      relativePath: upload.directories.join("/") || undefined,
+      total: upload.size,
+      transferred: upload.transferred,
+      speed: upload.speed,
+      status: phaseStatus[upload.phase],
+      failure: upload.error ? failureText(upload.error.code) : undefined,
+      hold: upload.hold,
+      savedName: upload.savedName ?? remote?.savedName,
+      replaced: upload.replaced ?? remote?.replaced,
+      restarted: upload.restarted,
+      createdAt: upload.createdAt,
+      finishedAt: upload.finishedAt,
+      batch: upload.batch,
+      local: upload,
+      server: remote,
     };
   });
   for (const transfer of snapshot.server) {
     if (owned.has(transfer.id)) continue;
     items.push({
-      id: transfer.id, direction: transfer.direction, kind: transfer.kind, name: transfer.name, location: transfer.location,
-      relativePath: transfer.relativePath, total: transfer.totalBytes, transferred: transfer.transferredBytes, speed: transfer.bytesPerSecond,
-      status: transfer.state, failure: transfer.error ? failureText(transfer.error.code) : undefined, savedName: transfer.savedName,
-      replaced: transfer.replaced, skipped: transfer.skipped, createdAt: Date.parse(transfer.createdAt) || 0,
-      finishedAt: transfer.finishedAt ? Date.parse(transfer.finishedAt) : undefined, batch: transfer.batch, server: transfer,
+      id: transfer.id,
+      direction: transfer.direction,
+      kind: transfer.kind,
+      name: transfer.name,
+      location: transfer.location,
+      relativePath: transfer.relativePath,
+      total: transfer.totalBytes,
+      transferred: transfer.transferredBytes,
+      speed: transfer.bytesPerSecond,
+      status: transfer.state,
+      failure: transfer.error ? failureText(transfer.error.code) : undefined,
+      savedName: transfer.savedName,
+      replaced: transfer.replaced,
+      skipped: transfer.skipped,
+      createdAt: Date.parse(transfer.createdAt) || 0,
+      finishedAt: transfer.finishedAt ? Date.parse(transfer.finishedAt) : undefined,
+      batch: transfer.batch,
+      server: transfer,
     });
   }
   for (const upload of snapshot.external) {
     items.push({
-      id: upload.key, direction: "upload", kind: "file", name: upload.name, label: upload.label, total: upload.size,
-      transferred: Math.round(upload.size * upload.progress), speed: 0, status: upload.phase, failure: upload.error,
-      createdAt: upload.createdAt, finishedAt: upload.finishedAt, batch: upload.batch, external: upload,
+      id: upload.key,
+      direction: "upload",
+      kind: "file",
+      name: upload.name,
+      label: upload.label,
+      total: upload.size,
+      transferred: Math.round(upload.size * upload.progress),
+      speed: 0,
+      status: upload.phase,
+      failure: upload.error,
+      createdAt: upload.createdAt,
+      finishedAt: upload.finishedAt,
+      batch: upload.batch,
+      external: upload,
     });
   }
   return items.sort((left, right) => right.createdAt - left.createdAt);
@@ -108,7 +166,19 @@ export function groupItems(items: TransferItem[], batchRates: Record<string, num
     const key = item.batch && item.direction === "upload" ? `batch:${item.batch}` : `item:${item.id}`;
     let group = byBatch.get(key);
     if (!group) {
-      group = { key, direction: item.direction, batch: key.startsWith("batch:") ? item.batch : undefined, items: [], location: item.location, label: item.label, total: 0, transferred: 0, speed: 0, createdAt: item.createdAt, counts: {} };
+      group = {
+        key,
+        direction: item.direction,
+        batch: key.startsWith("batch:") ? item.batch : undefined,
+        items: [],
+        location: item.location,
+        label: item.label,
+        total: 0,
+        transferred: 0,
+        speed: 0,
+        createdAt: item.createdAt,
+        counts: {},
+      };
       byBatch.set(key, group);
       groups.push(group);
     }
@@ -121,17 +191,30 @@ export function groupItems(items: TransferItem[], batchRates: Record<string, num
     if (item.finishedAt) group.finishedAt = Math.max(group.finishedAt ?? 0, item.finishedAt);
   }
   for (const group of groups) {
-    if (group.batch && group.items.some((item) => item.local || item.external)) group.speed = batchRates[group.batch] ?? 0;
+    if (group.batch && group.items.some((item) => item.local || item.external))
+      group.speed = batchRates[group.batch] ?? 0;
     // Once the NAS reports a batch member, its location replaces the label.
     const located = group.items.find((item) => item.location && !item.label);
-    if (located && !group.items.every((item) => item.external)) { group.location = located.location; group.label = undefined; }
+    if (located && !group.items.every((item) => item.external)) {
+      group.location = located.location;
+      group.label = undefined;
+    }
   }
   return groups;
 }
 
 // groupStatus summarises a group for its badge.
 export function groupStatus(group: TransferGroup): ItemStatus {
-  for (const status of ["conflict", "running", "waiting", "queued", "pending", "interrupted", "paused", "failed"] as ItemStatus[]) {
+  for (const status of [
+    "conflict",
+    "running",
+    "waiting",
+    "queued",
+    "pending",
+    "interrupted",
+    "paused",
+    "failed",
+  ] as ItemStatus[]) {
     if (group.counts[status]) return status;
   }
   if (group.counts.completed) return "completed";
@@ -150,15 +233,32 @@ export interface TransferTotals {
 
 // transferTotals sums the transfers; the speeds come from rates, measured
 // over all bytes moved, so many small files still show a speed.
-export function transferTotals(items: TransferItem[], rates: TransferRates = { upload: 0, download: 0, batches: {} }): TransferTotals {
+export function transferTotals(
+  items: TransferItem[],
+  rates: TransferRates = { upload: 0, download: 0, batches: {} },
+): TransferTotals {
   const current = items.filter(isCurrent);
   let total = 0;
   let done = 0;
-  const totals: TransferTotals = { uploads: 0, downloads: 0, attention: 0, uploadSpeed: 0, downloadSpeed: 0, remainingBytes: 0, progress: 0 };
+  const totals: TransferTotals = {
+    uploads: 0,
+    downloads: 0,
+    attention: 0,
+    uploadSpeed: 0,
+    downloadSpeed: 0,
+    remainingBytes: 0,
+    progress: 0,
+  };
   for (const item of current) {
     if (item.direction === "upload") totals.uploads += 1;
     else totals.downloads += 1;
-    if (item.status === "conflict" || item.status === "failed" || item.status === "waiting" || (item.status === "interrupted" && !item.local)) totals.attention += 1;
+    if (
+      item.status === "conflict" ||
+      item.status === "failed" ||
+      item.status === "waiting" ||
+      (item.status === "interrupted" && !item.local)
+    )
+      totals.attention += 1;
   }
   totals.uploadSpeed = rates.upload;
   totals.downloadSpeed = rates.download;
@@ -204,7 +304,12 @@ export function dayLabel(value: number, now = Date.now()): string {
   const difference = Math.round((start(today) - start(day)) / 86_400_000);
   if (difference === 0) return "今天";
   if (difference === 1) return "昨天";
-  return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short", year: day.getFullYear() === today.getFullYear() ? undefined : "numeric" }).format(day);
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    year: day.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  }).format(day);
 }
 
 const failures: Record<string, string> = {
@@ -238,8 +343,17 @@ export function failureText(code: string): string {
 }
 
 export const statusText: Record<ItemStatus, string> = {
-  queued: "等待中", pending: "等待浏览器", running: "传输中", paused: "已暂停", waiting: "等待恢复", conflict: "同名冲突",
-  interrupted: "已中断", completed: "已完成", failed: "失败", canceled: "已取消", skipped: "已跳过",
+  queued: "等待中",
+  pending: "等待浏览器",
+  running: "传输中",
+  paused: "已暂停",
+  waiting: "等待恢复",
+  conflict: "同名冲突",
+  interrupted: "已中断",
+  completed: "已完成",
+  failed: "失败",
+  canceled: "已取消",
+  skipped: "已跳过",
 };
 
 export const holdText: Record<Hold, { title: string; detail: string }> = {

@@ -1,60 +1,265 @@
 /* Settings → 个性化. */
-.set-tile.personalize { background: linear-gradient(160deg, #b57bff, #ec5c9a); }
-.set-tile.sleep { background: linear-gradient(160deg, #56648a, #1b2235); }
+.set-tile.personalize {
+  background: linear-gradient(160deg, #b57bff, #ec5c9a);
+}
+.set-tile.sleep {
+  background: linear-gradient(160deg, #56648a, #1b2235);
+}
 
-.pz-segmented { flex: none; display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: rgba(20, 30, 45, .06); }
-.pz-segmented button { height: 28px; padding: 0 11px; border: 0; border-radius: 7px; color: var(--set-muted); background: transparent; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background .15s, color .15s, box-shadow .15s; }
-.pz-segmented button:hover:not(:disabled, [aria-checked="true"]) { color: var(--set-text); }
-.pz-segmented button[aria-checked="true"] { color: var(--set-text); background: #fff; box-shadow: 0 1px 3px rgba(20, 30, 45, .16); }
-.pz-segmented button:disabled { cursor: default; }
-.pz-segmented button:disabled:not([aria-checked="true"]) { opacity: .55; }
+.pz-segmented {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(20, 30, 45, 0.06);
+}
+.pz-segmented button {
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--set-muted);
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+.pz-segmented button:hover:not(:disabled, [aria-checked="true"]) {
+  color: var(--set-text);
+}
+.pz-segmented button[aria-checked="true"] {
+  color: var(--set-text);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 30, 45, 0.16);
+}
+.pz-segmented button:disabled {
+  cursor: default;
+}
+.pz-segmented button:disabled:not([aria-checked="true"]) {
+  opacity: 0.55;
+}
 
 /* 桌面壁纸: a small copy of the desktop beside the picture's name and actions.
    The faint rail, status bar and dock only place the picture on a desktop. */
-.pz-wallpaper { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 18px; align-items: center; padding: 14px; }
-.pz-preview { --pz-aspect: 1.6; position: relative; width: 100%; overflow: hidden; border-radius: 10px; background-color: #031127; box-shadow: 0 0 0 1px rgba(20, 30, 45, .12), 0 8px 20px rgba(20, 30, 45, .16); }
+.pz-wallpaper {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 14px;
+}
+.pz-preview {
+  --pz-aspect: 1.6;
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background-color: #031127;
+  box-shadow:
+    0 0 0 1px rgba(20, 30, 45, 0.12),
+    0 8px 20px rgba(20, 30, 45, 0.16);
+}
 /* At most 220 px tall, so a portrait desktop does not stretch the card. */
-.pz-wallpaper .pz-preview { width: min(100%, calc(220px * var(--pz-aspect))); justify-self: center; }
-.pz-preview span { position: absolute; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
-.pz-preview-rail { left: 1.8%; top: 4%; bottom: 4%; width: 4%; border-radius: 999px; background: rgba(34, 24, 72, .42); }
-.pz-preview-status { right: 2%; top: 3%; width: 26%; height: 7.5%; background: rgba(10, 16, 34, .46); }
-.pz-preview-dock { left: 50%; bottom: 3%; width: 20%; height: 7%; transform: translateX(-50%); background: rgba(255, 255, 255, .2); }
-.pz-wallpaper-side { min-width: 0; display: grid; gap: 14px; align-content: center; }
-.pz-wallpaper-name { display: grid; gap: 3px; }
-.pz-wallpaper-name strong { font-size: 15px; font-weight: 650; }
-.pz-wallpaper-name small { color: var(--set-muted); font-size: 12px; }
-.pz-wallpaper-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.pz-confirm { display: grid; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--set-danger-soft); }
-.pz-confirm p { color: #a32c38; font-size: 12.5px; line-height: 1.5; }
-.pz-confirm div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.pz-wallpaper .pz-preview {
+  width: min(100%, calc(220px * var(--pz-aspect)));
+  justify-self: center;
+}
+.pz-preview span {
+  position: absolute;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+.pz-preview-rail {
+  left: 1.8%;
+  top: 4%;
+  bottom: 4%;
+  width: 4%;
+  border-radius: 999px;
+  background: rgba(34, 24, 72, 0.42);
+}
+.pz-preview-status {
+  right: 2%;
+  top: 3%;
+  width: 26%;
+  height: 7.5%;
+  background: rgba(10, 16, 34, 0.46);
+}
+.pz-preview-dock {
+  left: 50%;
+  bottom: 3%;
+  width: 20%;
+  height: 7%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.2);
+}
+.pz-wallpaper-side {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  align-content: center;
+}
+.pz-wallpaper-name {
+  display: grid;
+  gap: 3px;
+}
+.pz-wallpaper-name strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+.pz-wallpaper-name small {
+  color: var(--set-muted);
+  font-size: 12px;
+}
+.pz-wallpaper-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pz-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--set-danger-soft);
+}
+.pz-confirm p {
+  color: #a32c38;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.pz-confirm div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
 /* The wallpaper dialog shows the picked picture on the desktop before it is set.
    In a short settings window the preview shrinks so the buttons stay in view. */
-.wpd .avd-head, .wpd .avd-foot { flex: none; }
-.wpd-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 20px 16px; overflow: hidden; border-top: 1px solid var(--set-line); background: linear-gradient(180deg, #f7f9fc, #eef2f7); }
-.wpd-stage .pz-preview { flex: 0 1 auto; width: auto; height: min(315px, 46vh); min-height: 96px; max-width: 100%; }
-.wpd-stage p { flex: none; color: var(--set-muted); font-size: 12px; }
+.wpd .avd-head,
+.wpd .avd-foot {
+  flex: none;
+}
+.wpd-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 20px 16px;
+  overflow: hidden;
+  border-top: 1px solid var(--set-line);
+  background: linear-gradient(180deg, #f7f9fc, #eef2f7);
+}
+.wpd-stage .pz-preview {
+  flex: 0 1 auto;
+  width: auto;
+  height: min(315px, 46vh);
+  min-height: 96px;
+  max-width: 100%;
+}
+.wpd-stage p {
+  flex: none;
+  color: var(--set-muted);
+  font-size: 12px;
+}
 
 /* What the screen does after the last input: desktop, then the video, then black. */
-.pz-timeline { margin: 0; display: grid; gap: 8px; padding: 4px 14px 14px 50px; }
-.pz-track, .pz-ticks { display: grid; grid-template-columns: 22fr 46fr 32fr; }
-.pz-timeline.never .pz-track, .pz-timeline.never .pz-ticks { grid-template-columns: 22fr 78fr; }
-.pz-track { height: 38px; gap: 2px; overflow: hidden; border-radius: 10px; }
-.pz-stage { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 11px; overflow: hidden; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.pz-stage svg { width: 14px; height: 14px; flex: none; }
-.pz-stage.desktop { color: #3a4d68; background: linear-gradient(135deg, #e9f1fc, #cfdcf1); }
-.pz-stage.saver { color: #fff; background: linear-gradient(105deg, #3b2b7c, #a8447f 58%, #ee9150); text-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.pz-timeline {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  padding: 4px 14px 14px 50px;
+}
+.pz-track,
+.pz-ticks {
+  display: grid;
+  grid-template-columns: 22fr 46fr 32fr;
+}
+.pz-timeline.never .pz-track,
+.pz-timeline.never .pz-ticks {
+  grid-template-columns: 22fr 78fr;
+}
+.pz-track {
+  height: 38px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.pz-stage {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pz-stage svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.pz-stage.desktop {
+  color: #3a4d68;
+  background: linear-gradient(135deg, #e9f1fc, #cfdcf1);
+}
+.pz-stage.saver {
+  color: #fff;
+  background: linear-gradient(105deg, #3b2b7c, #a8447f 58%, #ee9150);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
 /* Set to never, the video carries on past the end of the track. */
-.pz-timeline.never .pz-stage.saver { -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
-.pz-stage.asleep { color: rgba(255, 255, 255, .62); background: #0d0f13; }
-.pz-ticks span { min-width: 0; overflow: hidden; color: var(--set-faint); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
-.pz-ticks span + span { color: var(--set-muted); font-weight: 600; }
-.pz-timeline figcaption { color: var(--set-muted); font-size: 12px; line-height: 1.6; }
+.pz-timeline.never .pz-stage.saver {
+  -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent);
+  mask-image: linear-gradient(90deg, #000 70%, transparent);
+}
+.pz-stage.asleep {
+  color: rgba(255, 255, 255, 0.62);
+  background: #0d0f13;
+}
+.pz-ticks span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--set-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pz-ticks span + span {
+  color: var(--set-muted);
+  font-weight: 600;
+}
+.pz-timeline figcaption {
+  color: var(--set-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
 
 @container settingsmain (max-width: 600px) {
-  .pz-wallpaper { grid-template-columns: minmax(0, 1fr); }
-  .pz-row { flex-wrap: wrap; }
-  .pz-row .pz-segmented { width: 100%; }
-  .pz-row .pz-segmented button { flex: 1; padding: 0 6px; }
-  .pz-timeline { padding-left: 14px; }
+  .pz-wallpaper {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pz-row {
+    flex-wrap: wrap;
+  }
+  .pz-row .pz-segmented {
+    width: 100%;
+  }
+  .pz-row .pz-segmented button {
+    flex: 1;
+    padding: 0 6px;
+  }
+  .pz-timeline {
+    padding-left: 14px;
+  }
 }

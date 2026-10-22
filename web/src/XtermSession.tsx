@@ -15,7 +15,11 @@ const theme = {
 // One xterm instance bridged to one server-side shell; remounting starts a new
 // shell. An inactive session stays mounted but hidden, so its shell keeps
 // running; it takes the keyboard again when it becomes active.
-export default function XtermSession({ active = true, onStatus, onSize }: {
+export default function XtermSession({
+  active = true,
+  onStatus,
+  onSize,
+}: {
   active?: boolean;
   onStatus: (status: SessionStatus) => void;
   onSize?: (cols: number, rows: number) => void;
@@ -52,7 +56,10 @@ export default function XtermSession({ active = true, onStatus, onSize }: {
     const refit = () => {
       if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
     };
-    focusRef.current = () => { refit(); term.focus(); };
+    focusRef.current = () => {
+      refit();
+      term.focus();
+    };
 
     const subscriptions = [
       term.onData((data) => send(encoder.encode(data))),

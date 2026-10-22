@@ -10,10 +10,21 @@ export function PersonAvatar({ who, className }: { who: Person; className: strin
   const [failed, setFailed] = useState<string>();
   const version = who.id && who.avatarVersion && failed !== who.avatarVersion ? who.avatarVersion : undefined;
   return (
-    <span className={`${className} person-avatar ${avatarTone(who.username)} ${version ? "pictured" : ""}`} aria-hidden="true">
-      {version
-        ? <img src={avatarURL(who.id!, version)} alt="" draggable={false} decoding="async" onError={() => setFailed(version)} />
-        : initial(displayName(who))}
+    <span
+      className={`${className} person-avatar ${avatarTone(who.username)} ${version ? "pictured" : ""}`}
+      aria-hidden="true"
+    >
+      {version ? (
+        <img
+          src={avatarURL(who.id!, version)}
+          alt=""
+          draggable={false}
+          decoding="async"
+          onError={() => setFailed(version)}
+        />
+      ) : (
+        initial(displayName(who))
+      )}
     </span>
   );
 }
@@ -23,7 +34,8 @@ export function avatarTone(username: string): string {
   return `avatar-c${[...username].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 6}`;
 }
 
-const graphemes = typeof Intl.Segmenter === "function" ? new Intl.Segmenter("zh-CN", { granularity: "grapheme" }) : undefined;
+const graphemes =
+  typeof Intl.Segmenter === "function" ? new Intl.Segmenter("zh-CN", { granularity: "grapheme" }) : undefined;
 
 // initial is the first character as a reader sees it, so an emoji joined
 // from several code points stays whole.

@@ -1,6 +1,19 @@
 import { request } from "../api";
 
-export type TrackFormat = "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "ape" | "wma" | "wv" | "aiff" | "dsf" | "dff";
+export type TrackFormat =
+  | "mp3"
+  | "flac"
+  | "m4a"
+  | "aac"
+  | "ogg"
+  | "opus"
+  | "wav"
+  | "ape"
+  | "wma"
+  | "wv"
+  | "aiff"
+  | "dsf"
+  | "dff";
 
 export interface Track {
   id: string;
@@ -30,7 +43,10 @@ export interface Track {
   addedAt: string;
 }
 
-export interface MusicLibrary { version: number; items: Track[] }
+export interface MusicLibrary {
+  version: number;
+  items: Track[];
+}
 
 export interface ScanStatus {
   state: "idle" | "scanning";
@@ -42,25 +58,57 @@ export interface ScanStatus {
   error?: "volume_unavailable" | "failed";
 }
 
-export interface MusicStatus { version: number; tracks: number; scan: ScanStatus }
+export interface MusicStatus {
+  version: number;
+  tracks: number;
+  scan: ScanStatus;
+}
 
-export interface MusicSource { spaceId: string; spaceKind: "private" | "shared"; folderId?: string; path: string }
-export interface MusicSources { custom: boolean; items: MusicSource[] }
+export interface MusicSource {
+  spaceId: string;
+  spaceKind: "private" | "shared";
+  folderId?: string;
+  path: string;
+}
+export interface MusicSources {
+  custom: boolean;
+  items: MusicSource[];
+}
 
-export interface Favorite { trackId: string; addedAt: string }
-export interface Play { trackId: string; playedAt: string; plays: number }
-export interface Playlist { id: string; name: string; trackIds: string[]; createdAt: string; updatedAt: string }
+export interface Favorite {
+  trackId: string;
+  addedAt: string;
+}
+export interface Play {
+  trackId: string;
+  playedAt: string;
+  plays: number;
+}
+export interface Playlist {
+  id: string;
+  name: string;
+  trackIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
 
 const base = "/api/v1/music";
 const id = encodeURIComponent;
-const json = (method: string, value: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+const json = (method: string, value: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(value),
+});
 
 export const getMusicStatus = () => request<MusicStatus>(`${base}/library`);
 export const scanMusic = () => request<MusicStatus>(`${base}/library/scan`, { method: "POST" }, true);
 export const listTracks = () => request<MusicLibrary>(`${base}/tracks`);
-export const getLyrics = async (trackId: string) => (await request<{ text: string }>(`${base}/tracks/${id(trackId)}/lyrics`)).text;
-export const streamURL = (trackId: string, start = 0) => `${base}/tracks/${id(trackId)}/stream${start > 0 ? `?start=${start.toFixed(3)}` : ""}`;
-export const coverURL = (coverId: string, size: "small" | "large" = "small") => `${base}/covers/${id(coverId)}?size=${size}`;
+export const getLyrics = async (trackId: string) =>
+  (await request<{ text: string }>(`${base}/tracks/${id(trackId)}/lyrics`)).text;
+export const streamURL = (trackId: string, start = 0) =>
+  `${base}/tracks/${id(trackId)}/stream${start > 0 ? `?start=${start.toFixed(3)}` : ""}`;
+export const coverURL = (coverId: string, size: "small" | "large" = "small") =>
+  `${base}/covers/${id(coverId)}?size=${size}`;
 
 export const listSources = () => request<MusicSources>(`${base}/sources`);
 export const setSources = (custom: boolean, items: Array<{ spaceId: string; folderId?: string }>) =>
@@ -75,9 +123,11 @@ export const clearRecent = () => request<void>(`${base}/recent`, { method: "DELE
 export const recordPlay = (trackId: string) => request<void>(`${base}/plays`, json("POST", { trackId }), true);
 
 export const listPlaylists = async () => (await request<{ items: Playlist[] }>(`${base}/playlists`)).items;
-export const createPlaylist = (name: string, trackIds: string[] = []) => request<Playlist>(`${base}/playlists`, json("POST", { name, trackIds }), true);
+export const createPlaylist = (name: string, trackIds: string[] = []) =>
+  request<Playlist>(`${base}/playlists`, json("POST", { name, trackIds }), true);
 export const updatePlaylist = (playlistId: string, change: { name?: string; trackIds?: string[] }) =>
   request<Playlist>(`${base}/playlists/${id(playlistId)}`, json("PATCH", change), true);
 export const addToPlaylist = (playlistId: string, trackIds: string[]) =>
   request<Playlist>(`${base}/playlists/${id(playlistId)}/tracks`, json("POST", { trackIds }), true);
-export const deletePlaylist = (playlistId: string) => request<void>(`${base}/playlists/${id(playlistId)}`, { method: "DELETE" }, true);
+export const deletePlaylist = (playlistId: string) =>
+  request<void>(`${base}/playlists/${id(playlistId)}`, { method: "DELETE" }, true);

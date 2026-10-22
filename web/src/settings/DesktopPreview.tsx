@@ -7,7 +7,15 @@ import "./personalization.css";
 // DesktopPreview draws a small copy of this browser's desktop with picture
 // laid out in style, so 居中 and 平铺 show the picture's size against the
 // screen it will fill. The faint rail, status bar and dock only place it.
-export function DesktopPreview({ picture, style, label }: { picture?: WallpaperPicture; style: WallpaperStyle; label: string }) {
+export function DesktopPreview({
+  picture,
+  style,
+  label,
+}: {
+  picture?: WallpaperPicture;
+  style: WallpaperStyle;
+  label: string;
+}) {
   const frame = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
@@ -22,8 +30,19 @@ export function DesktopPreview({ picture, style, label }: { picture?: WallpaperP
   const screen = { width: Math.max(1, window.innerWidth), height: Math.max(1, window.innerHeight) };
   const scale = width > 0 ? width / screen.width : 0.2;
   return (
-    <div ref={frame} className="pz-preview" role="img" aria-label={label}
-      style={{ aspectRatio: `${screen.width} / ${screen.height}`, "--pz-aspect": screen.width / screen.height, ...(picture ? drawWallpaper(style, picture, scale) : {}) } as CSSProperties}>
+    <div
+      ref={frame}
+      className="pz-preview"
+      role="img"
+      aria-label={label}
+      style={
+        {
+          aspectRatio: `${screen.width} / ${screen.height}`,
+          "--pz-aspect": screen.width / screen.height,
+          ...(picture ? drawWallpaper(style, picture, scale) : {}),
+        } as CSSProperties
+      }
+    >
       <span className="pz-preview-rail" aria-hidden="true" />
       <span className="pz-preview-status" aria-hidden="true" />
       <span className="pz-preview-dock" aria-hidden="true" />

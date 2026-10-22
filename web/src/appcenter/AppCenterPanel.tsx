@@ -75,30 +75,63 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
     return (
       <FullState icon={<CircleAlert />} title="无法连接应用中心" tone="error">
         <p>请确认容器代理正在运行。</p>
-        <button className="ac-btn primary" onClick={() => void refresh()}><RotateCw />重新连接</button>
+        <button className="ac-btn primary" onClick={() => void refresh()}>
+          <RotateCw />
+          重新连接
+        </button>
       </FullState>
     );
   }
 
   const searching = query.trim() !== "";
   const category = view.kind === "category" ? categories.find((item) => item.id === view.id) : undefined;
-  const backLabel = searching ? "搜索结果" : view.kind === "installed" ? "已安装" : category?.label ?? "发现";
+  const backLabel = searching ? "搜索结果" : view.kind === "installed" ? "已安装" : (category?.label ?? "发现");
   let page: ReactNode;
   if (!list) {
-    page = <div className="ac-loading"><span className="loader" /><p>正在载入应用…</p></div>;
+    page = (
+      <div className="ac-loading">
+        <span className="loader" />
+        <p>正在载入应用…</p>
+      </div>
+    );
   } else if (current) {
     page = (
-      <AppDetail app={current} backLabel={backLabel} onBack={() => setSelected(undefined)}
-        onInstall={() => install(current)} onUninstall={() => openModal({ kind: "uninstall", appId: current.id })} onOpenDocker={onOpenDocker && (() => onOpenDocker(current.id))} />
+      <AppDetail
+        app={current}
+        backLabel={backLabel}
+        onBack={() => setSelected(undefined)}
+        onInstall={() => install(current)}
+        onUninstall={() => openModal({ kind: "uninstall", appId: current.id })}
+        onOpenDocker={onOpenDocker && (() => onOpenDocker(current.id))}
+      />
     );
   } else if (searching) {
-    page = <SearchResults query={query} apps={search(apps, query)} onShow={show} onInstall={install} onBrowse={() => navigate({ kind: "discover" })} />;
+    page = (
+      <SearchResults
+        query={query}
+        apps={search(apps, query)}
+        onShow={show}
+        onInstall={install}
+        onBrowse={() => navigate({ kind: "discover" })}
+      />
+    );
   } else if (view.kind === "installed") {
-    page = <Installed apps={installed} onShow={show} onInstall={install} onBrowse={() => navigate({ kind: "discover" })} />;
+    page = (
+      <Installed apps={installed} onShow={show} onInstall={install} onBrowse={() => navigate({ kind: "discover" })} />
+    );
   } else if (category) {
-    page = <CategoryPage category={category} apps={apps.filter((app) => categoryOf(app) === category)} onShow={show} onInstall={install} />;
+    page = (
+      <CategoryPage
+        category={category}
+        apps={apps.filter((app) => categoryOf(app) === category)}
+        onShow={show}
+        onInstall={install}
+      />
+    );
   } else {
-    page = <Discover apps={apps} onShow={show} onInstall={install} onCategory={(id) => navigate({ kind: "category", id })} />;
+    page = (
+      <Discover apps={apps} onShow={show} onInstall={install} onCategory={(id) => navigate({ kind: "category", id })} />
+    );
   }
 
   const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -107,7 +140,11 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
       setQuery("");
     }
   };
-  const active = (next: View) => !searching && !current && view.kind === next.kind && (next.kind !== "category" || (view.kind === "category" && view.id === next.id));
+  const active = (next: View) =>
+    !searching &&
+    !current &&
+    view.kind === next.kind &&
+    (next.kind !== "category" || (view.kind === "category" && view.id === next.id));
 
   return (
     <div className="ac-shell">
@@ -116,46 +153,108 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
           <Search />
           <input
             value={query}
-            onChange={(event) => { setQuery(event.target.value); setSelected(undefined); }}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelected(undefined);
+            }}
             onKeyDown={onSearchKey}
             placeholder="搜索应用"
             aria-label="搜索应用"
           />
-          {query && <button className="ac-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}><X /></button>}
+          {query && (
+            <button className="ac-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}>
+              <X />
+            </button>
+          )}
         </label>
-        <NavItem active={active({ kind: "discover" })} onClick={() => navigate({ kind: "discover" })} icon={<span className="ac-tile discover"><Compass /></span>} label="发现" />
         <NavItem
-          active={active({ kind: "installed" })} onClick={() => navigate({ kind: "installed" })}
-          icon={<span className="ac-tile installed"><PackageCheck /></span>} label="已安装"
-          end={busyApp ? <span className="loader small" aria-label="有任务进行中" /> : installed.length > 0 && <span className="ac-count">{installed.length}</span>}
+          active={active({ kind: "discover" })}
+          onClick={() => navigate({ kind: "discover" })}
+          icon={
+            <span className="ac-tile discover">
+              <Compass />
+            </span>
+          }
+          label="发现"
+        />
+        <NavItem
+          active={active({ kind: "installed" })}
+          onClick={() => navigate({ kind: "installed" })}
+          icon={
+            <span className="ac-tile installed">
+              <PackageCheck />
+            </span>
+          }
+          label="已安装"
+          end={
+            busyApp ? (
+              <span className="loader small" aria-label="有任务进行中" />
+            ) : (
+              installed.length > 0 && <span className="ac-count">{installed.length}</span>
+            )
+          }
         />
         <p className="ac-nav-label">分类</p>
         {categories.map((item) => {
           const count = apps.filter((app) => app.category === item.id).length;
           if (list && count === 0) return null;
           return (
-            <NavItem key={item.id} active={active({ kind: "category", id: item.id })} onClick={() => navigate({ kind: "category", id: item.id })}
-              icon={<CategoryTile category={item} size="sm" />} label={item.label} end={list && <span className="ac-count muted">{count}</span>} />
+            <NavItem
+              key={item.id}
+              active={active({ kind: "category", id: item.id })}
+              onClick={() => navigate({ kind: "category", id: item.id })}
+              icon={<CategoryTile category={item} size="sm" />}
+              label={item.label}
+              end={list && <span className="ac-count muted">{count}</span>}
+            />
           );
         })}
         <footer className="ac-nav-foot">
           <ShieldCheck />
-          <span>{apps.length > 0 ? `${apps.length} 个应用均经过安全审查` : "应用均经过安全审查"}<small>清单来自 CasaOS AppStore{list?.dataSource === "simulated" ? " · 模拟数据" : ""}</small></span>
+          <span>
+            {apps.length > 0 ? `${apps.length} 个应用均经过安全审查` : "应用均经过安全审查"}
+            <small>清单来自 CasaOS AppStore{list?.dataSource === "simulated" ? " · 模拟数据" : ""}</small>
+          </span>
         </footer>
       </nav>
       <main className="ac-main" ref={main} inert={Boolean(modal)}>
-        {error && list && <div className="ac-banner-note error ac-offline"><CircleAlert />连接中断，正在显示上次读取的应用状态</div>}
+        {error && list && (
+          <div className="ac-banner-note error ac-offline">
+            <CircleAlert />
+            连接中断，正在显示上次读取的应用状态
+          </div>
+        )}
         {page}
       </main>
-      {modal?.kind === "install" && modalApp && <InstallSheet key={modalApp.id} app={modalApp} busyApp={busyApp} onChanged={refresh} onClose={closeModal} />}
-      {modal?.kind === "uninstall" && modalApp && <UninstallDialog app={modalApp} onChanged={refresh} onClose={closeModal} />}
+      {modal?.kind === "install" && modalApp && (
+        <InstallSheet key={modalApp.id} app={modalApp} busyApp={busyApp} onChanged={refresh} onClose={closeModal} />
+      )}
+      {modal?.kind === "uninstall" && modalApp && (
+        <UninstallDialog app={modalApp} onChanged={refresh} onClose={closeModal} />
+      )}
     </div>
   );
 }
 
-function NavItem({ active, onClick, icon, label, end }: { active: boolean; onClick: () => void; icon: ReactNode; label: string; end?: ReactNode }) {
+function NavItem({
+  active,
+  onClick,
+  icon,
+  label,
+  end,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  label: string;
+  end?: ReactNode;
+}) {
   return (
-    <button className={`ac-nav-item ${active ? "active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}>
+    <button
+      className={`ac-nav-item ${active ? "active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+    >
       {icon}
       <span>{label}</span>
       {end}
@@ -163,7 +262,17 @@ function NavItem({ active, onClick, icon, label, end }: { active: boolean; onCli
   );
 }
 
-function FullState({ icon, title, tone, children }: { icon: ReactNode; title: string; tone?: "error"; children: ReactNode }) {
+function FullState({
+  icon,
+  title,
+  tone,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  tone?: "error";
+  children: ReactNode;
+}) {
   return (
     <div className="ac-shell single">
       <div className="ac-empty full">
@@ -197,9 +306,12 @@ function useAppList() {
   const busy = list?.apps.some(isBusy) ?? false;
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => {
-      if (!document.hidden) void refresh();
-    }, busy ? busyPollInterval : idlePollInterval);
+    const interval = window.setInterval(
+      () => {
+        if (!document.hidden) void refresh();
+      },
+      busy ? busyPollInterval : idlePollInterval,
+    );
     const resume = () => {
       if (!document.hidden) void refresh();
     };

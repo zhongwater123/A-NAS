@@ -23,7 +23,11 @@ interface Props {
 
 const carriesPhotos = (event: DragEvent) => Array.from(event.dataTransfer.types).includes(dragType);
 const droppedIds = (event: DragEvent): string[] => {
-  try { return JSON.parse(event.dataTransfer.getData(dragType)); } catch { return []; }
+  try {
+    return JSON.parse(event.dataTransfer.getData(dragType));
+  } catch {
+    return [];
+  }
 };
 
 // dropTarget makes an element accept photos dragged from the grid.
@@ -33,56 +37,141 @@ function useDropTarget(onDrop: (ids: string[]) => void, enabled: boolean) {
   return {
     over,
     props: {
-      onDragOver: (event: DragEvent) => { if (carriesPhotos(event)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setOver(true); } },
+      onDragOver: (event: DragEvent) => {
+        if (carriesPhotos(event)) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setOver(true);
+        }
+      },
       onDragLeave: () => setOver(false),
-      onDrop: (event: DragEvent) => { if (!carriesPhotos(event)) return; event.preventDefault(); event.stopPropagation(); setOver(false); const ids = droppedIds(event); if (ids.length) onDrop(ids); },
+      onDrop: (event: DragEvent) => {
+        if (!carriesPhotos(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOver(false);
+        const ids = droppedIds(event);
+        if (ids.length) onDrop(ids);
+      },
     },
   };
 }
 
-export function Sidebar({ caller, library, place, albumsKey, count, ai, onPlace, onLibrary, onCreateAlbum, onDropOnAlbum, onDropOnLibrary }: Props) {
+export function Sidebar({
+  caller,
+  library,
+  place,
+  albumsKey,
+  count,
+  ai,
+  onPlace,
+  onLibrary,
+  onCreateAlbum,
+  onDropOnAlbum,
+  onDropOnLibrary,
+}: Props) {
   const [albums, setAlbums] = useState<PhotoAlbum[]>([]);
   const libraryId = library?.id ?? "";
   useEffect(() => {
     setAlbums([]);
     if (!libraryId) return;
     let live = true;
-    listAlbums(libraryId).then((items) => { if (live) setAlbums(items); }, () => undefined);
-    return () => { live = false; };
+    listAlbums(libraryId).then(
+      (items) => {
+        if (live) setAlbums(items);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
   }, [libraryId, albumsKey]);
   const readOnly = Boolean(library?.viewing);
-  const at = (kind: Place["kind"]) => place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
+  const at = (kind: Place["kind"]) =>
+    place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
   const viewing = readOnly ? libraryId : "";
   // Searches, AI clusters and tag groups all belong to AI 聚合.
-  const onAIPage = place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image";
+  const onAIPage =
+    place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image";
 
   return (
     <nav className="ph-sidebar" aria-label="相册导航">
       <div className="ph-libraries" role="tablist" aria-label="图库">
-        {caller.libraries.map((item) => <LibraryTab key={item.id} caller={caller} library={item} active={item.id === libraryId} onSelect={() => onLibrary(item)} onDrop={(ids) => onDropOnLibrary(item, ids)} />)}
+        {caller.libraries.map((item) => (
+          <LibraryTab
+            key={item.id}
+            caller={caller}
+            library={item}
+            active={item.id === libraryId}
+            onSelect={() => onLibrary(item)}
+            onDrop={(ids) => onDropOnLibrary(item, ids)}
+          />
+        ))}
       </div>
 
       <div className="ph-nav">
         {/* The library's photos and videos together, as in Apple's Photos. */}
-        <button type="button" className={at("timeline") ? "active" : ""} aria-current={at("timeline") ? "page" : undefined} title="图库中的全部照片和视频" onClick={() => onPlace({ kind: "timeline", libraryId })}>
-          <Images /><span>图库</span>{count !== undefined && at("timeline") && <small>{count}</small>}
+        <button
+          type="button"
+          className={at("timeline") ? "active" : ""}
+          aria-current={at("timeline") ? "page" : undefined}
+          title="图库中的全部照片和视频"
+          onClick={() => onPlace({ kind: "timeline", libraryId })}
+        >
+          <Images />
+          <span>图库</span>
+          {count !== undefined && at("timeline") && <small>{count}</small>}
         </button>
-        <button type="button" className={onAIPage ? "active" : ""} aria-current={onAIPage ? "page" : undefined} onClick={() => onPlace({ kind: "search", viewing, query: "" })}>
-          <Shapes /><span>AI 聚合</span>
+        <button
+          type="button"
+          className={onAIPage ? "active" : ""}
+          aria-current={onAIPage ? "page" : undefined}
+          onClick={() => onPlace({ kind: "search", viewing, query: "" })}
+        >
+          <Shapes />
+          <span>AI 聚合</span>
         </button>
         {!readOnly && (
-          <button type="button" className={at("trash") ? "active" : ""} aria-current={at("trash") ? "page" : undefined} onClick={() => onPlace({ kind: "trash", libraryId })}>
-            <Trash2 /><span>回收站</span>
+          <button
+            type="button"
+            className={at("trash") ? "active" : ""}
+            aria-current={at("trash") ? "page" : undefined}
+            onClick={() => onPlace({ kind: "trash", libraryId })}
+          >
+            <Trash2 />
+            <span>回收站</span>
           </button>
         )}
       </div>
 
       <div className="ph-nav-section">
-        <button type="button" className={`ph-nav-heading${at("albums") ? " active" : ""}`} aria-current={at("albums") ? "page" : undefined} onClick={() => onPlace({ kind: "albums", libraryId })}><Library /><span>相册</span><small>{albums.length || ""}</small></button>
-        {!readOnly && <button type="button" className="ph-nav-add" aria-label="新建相册" title="新建相册" onClick={onCreateAlbum}><Plus /></button>}
+        <button
+          type="button"
+          className={`ph-nav-heading${at("albums") ? " active" : ""}`}
+          aria-current={at("albums") ? "page" : undefined}
+          onClick={() => onPlace({ kind: "albums", libraryId })}
+        >
+          <Library />
+          <span>相册</span>
+          <small>{albums.length || ""}</small>
+        </button>
+        {!readOnly && (
+          <button type="button" className="ph-nav-add" aria-label="新建相册" title="新建相册" onClick={onCreateAlbum}>
+            <Plus />
+          </button>
+        )}
       </div>
       <div className="ph-album-list">
-        {albums.map((album) => <AlbumLink key={album.id} album={album} active={place.kind === "album" && place.album.id === album.id} droppable={!readOnly} onOpen={() => onPlace({ kind: "album", libraryId, album })} onDrop={(ids) => onDropOnAlbum(album, ids)} />)}
+        {albums.map((album) => (
+          <AlbumLink
+            key={album.id}
+            album={album}
+            active={place.kind === "album" && place.album.id === album.id}
+            droppable={!readOnly}
+            onOpen={() => onPlace({ kind: "album", libraryId, album })}
+            onDrop={(ids) => onDropOnAlbum(album, ids)}
+          />
+        ))}
         {!albums.length && <p className="ph-nav-empty">{readOnly ? "没有相册" : "把照片拖到这里的相册，或新建一个"}</p>}
       </div>
 
@@ -91,7 +180,19 @@ export function Sidebar({ caller, library, place, albumsKey, count, ai, onPlace,
   );
 }
 
-function LibraryTab({ caller, library, active, onSelect, onDrop }: { caller: Caller; library: PhotoLibrary; active: boolean; onSelect: () => void; onDrop: (ids: string[]) => void }) {
+function LibraryTab({
+  caller,
+  library,
+  active,
+  onSelect,
+  onDrop,
+}: {
+  caller: Caller;
+  library: PhotoLibrary;
+  active: boolean;
+  onSelect: () => void;
+  onDrop: (ids: string[]) => void;
+}) {
   const target = useDropTarget(onDrop, !library.viewing);
   const name = library.kind === "shared" ? "共享" : library.viewing ? `${library.ownerName ?? "成员"}` : "我的";
   return (
@@ -109,11 +210,31 @@ function LibraryTab({ caller, library, active, onSelect, onDrop }: { caller: Cal
   );
 }
 
-function AlbumLink({ album, active, droppable, onOpen, onDrop }: { album: PhotoAlbum; active: boolean; droppable: boolean; onOpen: () => void; onDrop: (ids: string[]) => void }) {
+function AlbumLink({
+  album,
+  active,
+  droppable,
+  onOpen,
+  onDrop,
+}: {
+  album: PhotoAlbum;
+  active: boolean;
+  droppable: boolean;
+  onOpen: () => void;
+  onDrop: (ids: string[]) => void;
+}) {
   const target = useDropTarget(onDrop, droppable);
   return (
-    <button type="button" className={`ph-album-link${active ? " active" : ""}${target.over ? " drop" : ""}`} aria-current={active ? "page" : undefined} onClick={onOpen} {...target.props}>
-      <span className="ph-album-thumb">{album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" loading="lazy" /> : <Images />}</span>
+    <button
+      type="button"
+      className={`ph-album-link${active ? " active" : ""}${target.over ? " drop" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={onOpen}
+      {...target.props}
+    >
+      <span className="ph-album-thumb">
+        {album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" loading="lazy" /> : <Images />}
+      </span>
       <span>{album.name}</span>
       <small>{album.photos}</small>
     </button>
@@ -137,15 +258,23 @@ function AICard({ ai }: { ai?: PhotoAIStatus }) {
     detail = "完成后可以按内容搜索";
   } else {
     title = `已整理 ${ai.ready} / ${total}`;
-    detail = ai.state === "paused" && ai.reason !== "foreground" ? "设备正忙，稍后继续整理" : "相册空闲 5 分钟后继续整理";
+    detail =
+      ai.state === "paused" && ai.reason !== "foreground" ? "设备正忙，稍后继续整理" : "相册空闲 5 分钟后继续整理";
   }
   return (
     <div className={`ph-ai ${ai.state}`} role="status" aria-label="本地 AI 状态">
       <Sparkles />
       <div>
         <strong>{title}</strong>
-        <small>{detail}{ai.failed ? `；${ai.failed} 张无法识别` : ""}</small>
-        {total > 0 && <span className="ph-ai-bar"><span style={{ width: `${Math.round(share * 100)}%` }} /></span>}
+        <small>
+          {detail}
+          {ai.failed ? `；${ai.failed} 张无法识别` : ""}
+        </small>
+        {total > 0 && (
+          <span className="ph-ai-bar">
+            <span style={{ width: `${Math.round(share * 100)}%` }} />
+          </span>
+        )}
       </div>
     </div>
   );

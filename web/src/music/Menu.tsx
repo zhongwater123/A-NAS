@@ -1,10 +1,27 @@
-import { ChevronRight, Disc3, Heart, HeartOff, Info, ListEnd, ListPlus, ListStart, Mic2, Play, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Disc3,
+  Heart,
+  HeartOff,
+  Info,
+  ListEnd,
+  ListPlus,
+  ListStart,
+  Mic2,
+  Play,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { type MenuTarget, useMusic } from "./context";
 import { artistKey, artistsOf } from "./library";
 
-export interface MenuState { x: number; y: number; target: MenuTarget }
+export interface MenuState {
+  x: number;
+  y: number;
+  target: MenuTarget;
+}
 
 interface Props {
   menu: MenuState;
@@ -23,8 +40,13 @@ export function TrackMenu({ menu, onClose, onRemoveFromPlaylist, onInfo }: Props
   // Leaving closes the submenu after a moment, so the pointer can cross
   // over to it without it vanishing.
   const closing = useRef<number>(undefined);
-  const openSubmenu = () => { window.clearTimeout(closing.current); setSubmenu(true); };
-  const leaveSubmenu = () => { closing.current = window.setTimeout(() => setSubmenu(false), 280); };
+  const openSubmenu = () => {
+    window.clearTimeout(closing.current);
+    setSubmenu(true);
+  };
+  const leaveSubmenu = () => {
+    closing.current = window.setTimeout(() => setSubmenu(false), 280);
+  };
   useEffect(() => () => window.clearTimeout(closing.current), []);
   useLayoutEffect(() => {
     const element = ref.current;
@@ -36,31 +58,53 @@ export function TrackMenu({ menu, onClose, onRemoveFromPlaylist, onInfo }: Props
     setPosition({ left, top, flip: left + element.offsetWidth + 220 > parent.clientWidth });
   }, [menu]);
   useEffect(() => {
-    const close = (event: Event) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const close = (event: Event) => {
+      if (!ref.current?.contains(event.target as Node)) onClose();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
     window.addEventListener("pointerdown", close, true);
     window.addEventListener("keydown", escape);
     window.addEventListener("blur", onClose);
-    return () => { window.removeEventListener("pointerdown", close, true); window.removeEventListener("keydown", escape); window.removeEventListener("blur", onClose); };
+    return () => {
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("keydown", escape);
+      window.removeEventListener("blur", onClose);
+    };
   }, [onClose]);
 
   const { ids, playlist } = menu.target;
   const single = ids.length === 1 ? music.index.byId.get(ids[0]) : undefined;
   const allFavorite = ids.every((id) => music.favorites.has(id));
-  const act = (run: () => void) => () => { run(); onClose(); };
+  const act = (run: () => void) => () => {
+    run();
+    onClose();
+  };
   const item = (icon: ReactNode, label: string, run: () => void, danger = false) => (
-    <button type="button" role="menuitem" className={danger ? "danger" : ""} onClick={act(run)}>{icon}<span>{label}</span></button>
+    <button type="button" role="menuitem" className={danger ? "danger" : ""} onClick={act(run)}>
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 
   return (
-    <div ref={ref} className="mu-menu" role="menu" style={{ left: position.left, top: position.top }} onContextMenu={(event) => event.preventDefault()}>
+    <div
+      ref={ref}
+      className="mu-menu"
+      role="menu"
+      style={{ left: position.left, top: position.top }}
+      onContextMenu={(event) => event.preventDefault()}
+    >
       {ids.length > 1 && <p className="mu-menu-title">已选 {ids.length} 首歌曲</p>}
       {item(<Play />, "播放", () => music.player.play(ids, 0))}
       {item(<ListStart />, "下一首播放", () => music.player.playNext(ids))}
       {item(<ListEnd />, "添加到播放队列", () => music.player.enqueue(ids))}
       <div className="mu-menu-sub" onPointerEnter={openSubmenu} onPointerLeave={leaveSubmenu}>
         <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={submenu} onClick={openSubmenu}>
-          <ListPlus /><span>添加到歌单</span><ChevronRight className="mu-menu-chevron" />
+          <ListPlus />
+          <span>添加到歌单</span>
+          <ChevronRight className="mu-menu-chevron" />
         </button>
         {submenu && (
           <div className={`mu-menu mu-submenu${position.flip ? " flip" : ""}`} role="menu">
@@ -68,16 +112,28 @@ export function TrackMenu({ menu, onClose, onRemoveFromPlaylist, onInfo }: Props
             {music.playlists.length > 0 && <hr />}
             <div className="mu-submenu-list">
               {music.playlists.map((list) => (
-                <button key={list.id} type="button" role="menuitem" onClick={act(() => music.addToPlaylist(list.id, ids))}><span>{list.name}</span><small>{list.trackIds.length}</small></button>
+                <button
+                  key={list.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={act(() => music.addToPlaylist(list.id, ids))}
+                >
+                  <span>{list.name}</span>
+                  <small>{list.trackIds.length}</small>
+                </button>
               ))}
             </div>
           </div>
         )}
       </div>
       <hr />
-      {item(allFavorite ? <HeartOff /> : <Heart />, allFavorite ? "取消收藏" : ids.length > 1 ? `收藏这 ${ids.length} 首` : "收藏", () => {
-        for (const id of ids) if (music.favorites.has(id) === allFavorite) music.toggleFavorite(id);
-      })}
+      {item(
+        allFavorite ? <HeartOff /> : <Heart />,
+        allFavorite ? "取消收藏" : ids.length > 1 ? `收藏这 ${ids.length} 首` : "收藏",
+        () => {
+          for (const id of ids) if (music.favorites.has(id) === allFavorite) music.toggleFavorite(id);
+        },
+      )}
       {single && <hr />}
       {single && item(<Disc3 />, "查看专辑", () => music.open({ kind: "album", id: single.albumId }))}
       {single && item(<Mic2 />, "查看歌手", () => music.open({ kind: "artist", key: artistKey(artistsOf(single)[0]) }))}

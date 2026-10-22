@@ -23,7 +23,8 @@ export function scheduleText(schedule: AssistantTask["schedule"], now = new Date
       const text = cronstrue.toString(schedule.expr, { locale: "zh_CN", use24HourTimeFormat: true });
       // cronstrue says only the time of a daily expression ("在08:00").
       const [, , day, month, weekday] = schedule.expr.trim().split(/\s+/);
-      if (day === "*" && month === "*" && weekday === "*" && text.startsWith("在")) return `每天 ${text.slice(1).trim()}`;
+      if (day === "*" && month === "*" && weekday === "*" && text.startsWith("在"))
+        return `每天 ${text.slice(1).trim()}`;
       return text;
     } catch {
       return schedule.expr;

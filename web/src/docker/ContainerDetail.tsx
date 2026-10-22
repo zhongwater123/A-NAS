@@ -1,11 +1,30 @@
-import { ChevronLeft, CircleAlert, Cpu, ExternalLink, HeartPulse, MemoryStick, Play, RotateCw, ScrollText, Square } from "lucide-react";
+import {
+  ChevronLeft,
+  CircleAlert,
+  Cpu,
+  ExternalLink,
+  HeartPulse,
+  MemoryStick,
+  Play,
+  RotateCw,
+  ScrollText,
+  Square,
+} from "lucide-react";
 import { ReactNode } from "react";
 
 import { formatBytes } from "../bytes";
 import { ContainerSummary } from "../containersApi";
 import { ContainerLogs } from "./ContainerLogs";
 import type { ContainerActions } from "./DockerPanel";
-import { AppRef, Condition, describeContainer, formatDateTime, formatPercent, standaloneTitle, webPorts } from "./model";
+import {
+  AppRef,
+  Condition,
+  describeContainer,
+  formatDateTime,
+  formatPercent,
+  standaloneTitle,
+  webPorts,
+} from "./model";
 import { ContainerGlyph, StatePill } from "./parts";
 
 export type DetailTab = "overview" | "logs";
@@ -32,38 +51,83 @@ export function ContainerDetail({ item, app, tab, backLabel, actions, onTab, onB
 
   return (
     <div className={`dk-detail ${tab}`}>
-      <button className="dk-back" onClick={onBack}><ChevronLeft />{backLabel}</button>
+      <button className="dk-back" onClick={onBack}>
+        <ChevronLeft />
+        {backLabel}
+      </button>
       <header className={`dk-head ${condition.tone}`}>
         <ContainerGlyph app={app} condition={condition} size="lg" />
         <div className="dk-head-text">
           <h2>{item.name}</h2>
-          <div className="dk-head-meta"><StatePill condition={condition} /><span>{condition.detail}</span></div>
+          <div className="dk-head-meta">
+            <StatePill condition={condition} />
+            <span>{condition.detail}</span>
+          </div>
         </div>
         <div className="dk-head-actions">
-          {primary && alive && <a className="dk-btn" href={primary.url} target="_blank" rel="noopener noreferrer" title={primary.url}><ExternalLink />打开</a>}
+          {primary && alive && (
+            <a className="dk-btn" href={primary.url} target="_blank" rel="noopener noreferrer" title={primary.url}>
+              <ExternalLink />
+              打开
+            </a>
+          )}
           {alive ? (
             <>
-              <button className="dk-btn" disabled={busy} onClick={() => actions.request(item, "restart")}>{pending === "restart" ? <span className="loader small" /> : <RotateCw />}重启</button>
-              <button className="dk-btn danger-soft" disabled={busy} onClick={() => actions.request(item, "stop")}>{pending === "stop" ? <span className="loader small" /> : <Square />}停止</button>
+              <button className="dk-btn" disabled={busy} onClick={() => actions.request(item, "restart")}>
+                {pending === "restart" ? <span className="loader small" /> : <RotateCw />}重启
+              </button>
+              <button className="dk-btn danger-soft" disabled={busy} onClick={() => actions.request(item, "stop")}>
+                {pending === "stop" ? <span className="loader small" /> : <Square />}停止
+              </button>
             </>
           ) : (
-            <button className="dk-btn primary" disabled={busy || item.state === "removing"} onClick={() => actions.request(item, "start")}>{pending === "start" ? <span className="loader small" /> : <Play />}启动</button>
+            <button
+              className="dk-btn primary"
+              disabled={busy || item.state === "removing"}
+              onClick={() => actions.request(item, "start")}
+            >
+              {pending === "start" ? <span className="loader small" /> : <Play />}启动
+            </button>
           )}
         </div>
       </header>
-      {failure && <div className="dk-note error" role="alert"><CircleAlert />{failure}</div>}
+      {failure && (
+        <div className="dk-note error" role="alert">
+          <CircleAlert />
+          {failure}
+        </div>
+      )}
 
       <div className="dk-tabs" role="tablist" aria-label="容器详情">
-        <button role="tab" aria-selected={tab === "overview"} onClick={() => onTab("overview")}>概览</button>
-        <button role="tab" aria-selected={tab === "logs"} onClick={() => onTab("logs")}><ScrollText />日志</button>
+        <button role="tab" aria-selected={tab === "overview"} onClick={() => onTab("overview")}>
+          概览
+        </button>
+        <button role="tab" aria-selected={tab === "logs"} onClick={() => onTab("logs")}>
+          <ScrollText />
+          日志
+        </button>
       </div>
 
-      {tab === "overview" ? <Overview item={item} app={app} condition={condition} onLogs={() => onTab("logs")} /> : <ContainerLogs item={item} />}
+      {tab === "overview" ? (
+        <Overview item={item} app={app} condition={condition} onLogs={() => onTab("logs")} />
+      ) : (
+        <ContainerLogs item={item} />
+      )}
     </div>
   );
 }
 
-function Overview({ item, app, condition, onLogs }: { item: ContainerSummary; app?: AppRef; condition: Condition; onLogs: () => void }) {
+function Overview({
+  item,
+  app,
+  condition,
+  onLogs,
+}: {
+  item: ContainerSummary;
+  app?: AppRef;
+  condition: Condition;
+  onLogs: () => void;
+}) {
   const ports = webPorts(item, app);
   const unpublished = item.ports.filter((port) => !port.hostPort);
   const usage = item.usage;
@@ -76,17 +140,40 @@ function Overview({ item, app, condition, onLogs }: { item: ContainerSummary; ap
       {usage && (
         <div className="dk-stats">
           <div className="dk-stat">
-            <span className="dk-stat-label"><Cpu />CPU</span>
+            <span className="dk-stat-label">
+              <Cpu />
+              CPU
+            </span>
             <strong>{formatPercent(usage.cpuPercent)}</strong>
           </div>
           <div className="dk-stat">
-            <span className="dk-stat-label"><MemoryStick />内存</span>
-            <strong>{formatBytes(usage.memoryBytes)}{usage.memoryLimitBytes > 0 && <small>/ {formatBytes(usage.memoryLimitBytes)}</small>}</strong>
-            {usage.memoryLimitBytes > 0 && <span className="dk-meter" role="meter" aria-label="内存占用" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(memoryShare * 100)}><i style={{ width: `${Math.max(2, memoryShare * 100)}%` }} /></span>}
+            <span className="dk-stat-label">
+              <MemoryStick />
+              内存
+            </span>
+            <strong>
+              {formatBytes(usage.memoryBytes)}
+              {usage.memoryLimitBytes > 0 && <small>/ {formatBytes(usage.memoryLimitBytes)}</small>}
+            </strong>
+            {usage.memoryLimitBytes > 0 && (
+              <span
+                className="dk-meter"
+                role="meter"
+                aria-label="内存占用"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(memoryShare * 100)}
+              >
+                <i style={{ width: `${Math.max(2, memoryShare * 100)}%` }} />
+              </span>
+            )}
           </div>
           {condition.health && (
             <div className="dk-stat">
-              <span className="dk-stat-label"><HeartPulse />健康检查</span>
+              <span className="dk-stat-label">
+                <HeartPulse />
+                健康检查
+              </span>
               <strong className={`dk-health ${condition.health}`}>{healthLabels[condition.health]}</strong>
             </div>
           )}
@@ -96,24 +183,58 @@ function Overview({ item, app, condition, onLogs }: { item: ContainerSummary; ap
       <section className="dk-section" aria-label="详细信息">
         <h3>详细信息</h3>
         <dl className="dk-facts">
-          <Fact label="镜像"><code>{item.image}</code></Fact>
-          <Fact label="分组">{app ? <>{app.title}<code>{item.project}</code></> : item.project ? <code>{item.project}</code> : standaloneTitle}</Fact>
+          <Fact label="镜像">
+            <code>{item.image}</code>
+          </Fact>
+          <Fact label="分组">
+            {app ? (
+              <>
+                {app.title}
+                <code>{item.project}</code>
+              </>
+            ) : item.project ? (
+              <code>{item.project}</code>
+            ) : (
+              standaloneTitle
+            )}
+          </Fact>
           <Fact label="端口">
             {ports.length === 0 && unpublished.length === 0 && <span className="dk-faint">没有发布端口</span>}
             {ports.map((port) => (
               <span className="dk-fact-port" key={port.hostPort}>
-                <code>{port.hostPort} → {port.containerPort}/tcp</code>
-                {item.state === "running" && <a href={port.url} target="_blank" rel="noopener noreferrer">打开<ExternalLink /></a>}
+                <code>
+                  {port.hostPort} → {port.containerPort}/tcp
+                </code>
+                {item.state === "running" && (
+                  <a href={port.url} target="_blank" rel="noopener noreferrer">
+                    打开
+                    <ExternalLink />
+                  </a>
+                )}
               </span>
             ))}
-            {item.ports.filter((port) => port.hostPort && port.protocol !== "tcp").map((port) => (
-              <span className="dk-fact-port" key={`${port.hostPort}/${port.protocol}`}><code>{port.hostPort} → {port.containerPort}/{port.protocol}</code></span>
-            ))}
-            {unpublished.length > 0 && <span className="dk-faint">仅容器内：{unpublished.map((port) => `${port.containerPort}/${port.protocol}`).join("、")}</span>}
+            {item.ports
+              .filter((port) => port.hostPort && port.protocol !== "tcp")
+              .map((port) => (
+                <span className="dk-fact-port" key={`${port.hostPort}/${port.protocol}`}>
+                  <code>
+                    {port.hostPort} → {port.containerPort}/{port.protocol}
+                  </code>
+                </span>
+              ))}
+            {unpublished.length > 0 && (
+              <span className="dk-faint">
+                仅容器内：{unpublished.map((port) => `${port.containerPort}/${port.protocol}`).join("、")}
+              </span>
+            )}
           </Fact>
-          <Fact label="引擎状态"><code>{item.status}</code></Fact>
+          <Fact label="引擎状态">
+            <code>{item.status}</code>
+          </Fact>
           <Fact label="创建时间">{formatDateTime(item.createdAt)}</Fact>
-          <Fact label="容器 ID"><code className="dk-id">{item.id}</code></Fact>
+          <Fact label="容器 ID">
+            <code className="dk-id">{item.id}</code>
+          </Fact>
         </dl>
       </section>
     </div>
@@ -142,8 +263,14 @@ function Diagnosis({ condition, onLogs }: { condition: Condition; onLogs: () => 
   return (
     <div className="dk-diagnosis" role="status">
       <CircleAlert />
-      <div><strong>{title}</strong><p>{detail}</p></div>
-      <button className="dk-btn" onClick={onLogs}><ScrollText />查看日志</button>
+      <div>
+        <strong>{title}</strong>
+        <p>{detail}</p>
+      </div>
+      <button className="dk-btn" onClick={onLogs}>
+        <ScrollText />
+        查看日志
+      </button>
     </div>
   );
 }

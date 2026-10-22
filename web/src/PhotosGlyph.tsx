@@ -11,7 +11,14 @@ import type { GlyphProps } from "./MediaCenterGlyph";
 export function PhotosGlyph({ size = 24, ...props }: GlyphProps) {
   const clip = `ph-glyph-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="1.2 1.6 20.8 20.8" fill="none" {...props}>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="1.2 1.6 20.8 20.8"
+      fill="none"
+      {...props}
+    >
       <defs>
         <clipPath id={clip}>
           <rect x="2.4" y="7.4" width="15.6" height="13.4" rx="2.7" />

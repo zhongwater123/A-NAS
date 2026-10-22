@@ -6,18 +6,23 @@ import { useCallback, useEffect, useState } from "react";
 const remembered = new Map<string, unknown>();
 
 export function useRemembered<T>(key: string, initial: T): [T, (next: T | ((current: T) => T)) => void] {
-  const [value, setValue] = useState<T>(() => (remembered.has(key) ? remembered.get(key) as T : initial));
-  const update = useCallback((next: T | ((current: T) => T)) => {
-    setValue((current) => {
-      const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
-      remembered.set(key, resolved);
-      return resolved;
-    });
-  }, [key]);
+  const [value, setValue] = useState<T>(() => (remembered.has(key) ? (remembered.get(key) as T) : initial));
+  const update = useCallback(
+    (next: T | ((current: T) => T)) => {
+      setValue((current) => {
+        const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
+        remembered.set(key, resolved);
+        return resolved;
+      });
+    },
+    [key],
+  );
   return [value, update];
 }
 
-export function forgetRememberedFilters() { remembered.clear(); }
+export function forgetRememberedFilters() {
+  remembered.clear();
+}
 
 // useDebounced settles typed search text before it becomes a request.
 export function useDebounced<T>(value: T, delay = 300): T {
@@ -29,20 +34,60 @@ export function useDebounced<T>(value: T, delay = 300): T {
   return settled;
 }
 
-export function SearchField({ value, onChange, label, placeholder }: { value: string; onChange: (value: string) => void; label: string; placeholder: string }) {
+export function SearchField({
+  value,
+  onChange,
+  label,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder: string;
+}) {
   return (
     <label className="lg-search">
       <Search aria-hidden="true" />
-      <input type="search" aria-label={label} placeholder={placeholder} value={value} maxLength={100} onChange={(event) => onChange(event.target.value)} />
-      {value && <button type="button" className="lg-search-clear" aria-label="清除搜索" onClick={() => onChange("")}><X /></button>}
+      <input
+        type="search"
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        maxLength={100}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {value && (
+        <button type="button" className="lg-search-clear" aria-label="清除搜索" onClick={() => onChange("")}>
+          <X />
+        </button>
+      )}
     </label>
   );
 }
 
-export function Select<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<{ id: T; label: string }>; onChange: (value: T) => void }) {
+export function Select<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ id: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
   return (
-    <select className="lg-select" aria-label={label} value={value} onChange={(event) => onChange(event.target.value as T)}>
-      {options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+    <select
+      className="lg-select"
+      aria-label={label}
+      value={value}
+      onChange={(event) => onChange(event.target.value as T)}
+    >
+      {options.map((option) => (
+        <option key={option.id} value={option.id}>
+          {option.label}
+        </option>
+      ))}
     </select>
   );
 }
@@ -53,8 +98,12 @@ export const exportLimit = 5000;
 export function downloadText(filename: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement("a");
-  link.href = url; link.download = filename; link.hidden = true;
-  document.body.appendChild(link); link.click(); link.remove();
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -64,7 +113,9 @@ export function downloadText(filename: string, text: string, type: string) {
 // apostrophe and stays text.
 export function toCSV(rows: string[][]): string {
   const text = (cell: string) => (/^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell);
-  return "﻿" + rows.map((row) => row.map((cell) => `"${text(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\r\n") + "\r\n";
+  return (
+    "﻿" + rows.map((row) => row.map((cell) => `"${text(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n") + "\r\n"
+  );
 }
 
 export function fileStamp(now = new Date()): string {

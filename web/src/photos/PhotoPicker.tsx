@@ -27,12 +27,30 @@ export function PhotoPicker({ album, onAdd, onClose }: Props) {
   const load = useCallback((cursor: string) => listTimeline(album.libraryId, cursor, 200), [album.libraryId]);
   const chosen = assets.filter((asset) => selection.selected.has(asset.id));
   return (
-    <div className="ph-dialog-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="ph-dialog ph-photo-picker" role="dialog" aria-modal="true" aria-label={`添加照片到 ${album.name}`} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <div
+      className="ph-dialog-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="ph-dialog ph-photo-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`添加照片到 ${album.name}`}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+      >
         <header>
           <h3>添加到“{album.name}”</h3>
           <small>{chosen.length ? `已选 ${chosen.length} 张` : "点选照片，可以按住勾选圈拖动或框选"}</small>
-          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}><X /></button>
+          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}>
+            <X />
+          </button>
         </header>
         <div className="ph-photo-picker-grid">
           <AssetGrid
@@ -58,8 +76,12 @@ export function PhotoPicker({ album, onAdd, onClose }: Props) {
           />
         </div>
         <footer className="ph-dialog-actions">
-          <button type="button" onClick={onClose}>取消</button>
-          <button type="button" className="primary" disabled={!chosen.length} onClick={() => onAdd(chosen)}>{chosen.length ? `添加 ${chosen.length} 张` : "添加"}</button>
+          <button type="button" onClick={onClose}>
+            取消
+          </button>
+          <button type="button" className="primary" disabled={!chosen.length} onClick={() => onAdd(chosen)}>
+            {chosen.length ? `添加 ${chosen.length} 张` : "添加"}
+          </button>
         </footer>
       </div>
     </div>

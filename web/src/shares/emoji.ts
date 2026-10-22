@@ -1,9 +1,47 @@
 export const emojiGroups = [
-  { name: "常用", icon: "⭐", items: "😀|开心 smile 😊|微笑 smile 😂|笑哭 laugh 🥰|喜欢 love 😍|爱慕 love 😎|酷 cool 🤔|思考 think 😅|汗 smile 🥲|含泪 smile 😭|哭 cry 👍|赞 good 👏|鼓掌 clap 🙏|谢谢 thanks 👀|看看 eyes ✅|完成 done ❤️|爱心 heart 🎉|庆祝 party 🔥|火 hot 💯|满分 perfect 🚀|火箭 rocket" },
-  { name: "笑脸心情", icon: "😊", items: "😃|大笑 😄|高兴 😁|露齿笑 😆|哈哈 🤣|笑倒 🙂|微笑 🙃|倒脸 😉|眨眼 😇|天使 😘|飞吻 😋|美味 😛|吐舌 😜|调皮 🤪|搞怪 🤗|拥抱 🤭|捂嘴 🤫|嘘 🤨|怀疑 😐|无语 🙄|白眼 😴|睡觉 😪|困 🥱|哈欠 🤤|口水 😷|口罩 🤒|生病 🤧|感冒 🥺|可怜 😢|伤心 😤|生气 😡|愤怒 🤯|震惊 😱|惊讶 😳|脸红 🥳|派对 🤩|崇拜 🫠|融化" },
-  { name: "手势人物", icon: "👋", items: "👋|挥手 hello 🤚|举手 ✋|停 stop 🖖|问候 👌|好 ok ✌️|胜利 victory 🤞|好运 🤟|爱你 🤘|摇滚 🤙|电话 👈|左 👉|右 👆|上 👇|下 ☝️|注意 👎|踩 👊|加油 fist ✊|拳头 🤝|握手 handshake 🙌|欢呼 👐|张开 🫶|比心 💪|努力 muscle 🧠|大脑 👨‍👩‍👧‍👦|家人 family 🧑‍💻|工作 coder" },
-  { name: "动物自然", icon: "🌿", items: "🐱|猫 cat 🐶|狗 dog 🐼|熊猫 panda 🐻|熊 bear 🐰|兔 rabbit 🦊|狐狸 fox 🐯|老虎 tiger 🐷|猪 pig 🐸|青蛙 frog 🐧|企鹅 🐦|鸟 bird 🦋|蝴蝶 🐝|蜜蜂 🐢|乌龟 🐬|海豚 🌸|花 flower 🌹|玫瑰 🌻|向日葵 🌲|树 tree 🌿|叶子 leaf 🍀|幸运 ☀️|太阳 sun 🌙|月亮 moon ⭐|星星 star 🌈|彩虹 rainbow ☁️|云 cloud ❄️|雪 snow 🌊|海浪 wave" },
-  { name: "生活物品", icon: "☕", items: "🍎|苹果 apple 🍓|草莓 🍉|西瓜 🍋|柠檬 🍊|橘子 🍇|葡萄 🍒|樱桃 🍑|桃 🍕|披萨 pizza 🍔|汉堡 burger 🍟|薯条 🍜|面条 noodles 🍚|米饭 🍰|蛋糕 cake 🎂|生日 birthday 🍦|冰淇淋 ☕|咖啡 coffee 🍵|茶 tea 🥤|饮料 🍻|干杯 cheers 🎁|礼物 gift 🎈|气球 🎊|庆祝 confetti 🏠|家 home ✈️|飞机 travel 🚗|汽车 car 🚲|自行车 💻|电脑 computer 📱|手机 phone 📷|相机 camera 🎵|音乐 music 📚|书 books 📎|附件 📁|文件夹 folder 💾|保存 save 💡|灵感 idea ⏰|闹钟 time" },
-  { name: "爱心符号", icon: "❤️", items: "🧡|橙心 heart 💛|黄心 heart 💚|绿心 heart 💙|蓝心 heart 💜|紫心 heart 🖤|黑心 heart 🤍|白心 heart 🤎|棕心 heart 💔|心碎 broken 💕|两颗心 💖|闪亮心 💗|心动 💓|心跳 ❣️|心叹号 💌|情书 💬|聊天 message 📌|置顶 pin 🔒|锁 lock 🔑|钥匙 key 🔔|通知 bell ❌|错误 no ⚠️|警告 warning ❓|疑问 question ❗|注意 important ✨|闪亮 sparkles ✔️|勾 check ➕|加 plus ➡️|右箭头 arrow 🆗|好的 ok 🆒|酷 cool" },
-].map((group) => ({ ...group, items: group.items.split(/ (?=\S+\|)/).map((item) => { const [emoji, name] = item.split("|"); return { emoji, name }; }) }));
-export const allEmoji = [...new Map(emojiGroups.flatMap((group) => group.items).map((item) => [item.emoji, item])).values()];
+  {
+    name: "常用",
+    icon: "⭐",
+    items:
+      "😀|开心 smile 😊|微笑 smile 😂|笑哭 laugh 🥰|喜欢 love 😍|爱慕 love 😎|酷 cool 🤔|思考 think 😅|汗 smile 🥲|含泪 smile 😭|哭 cry 👍|赞 good 👏|鼓掌 clap 🙏|谢谢 thanks 👀|看看 eyes ✅|完成 done ❤️|爱心 heart 🎉|庆祝 party 🔥|火 hot 💯|满分 perfect 🚀|火箭 rocket",
+  },
+  {
+    name: "笑脸心情",
+    icon: "😊",
+    items:
+      "😃|大笑 😄|高兴 😁|露齿笑 😆|哈哈 🤣|笑倒 🙂|微笑 🙃|倒脸 😉|眨眼 😇|天使 😘|飞吻 😋|美味 😛|吐舌 😜|调皮 🤪|搞怪 🤗|拥抱 🤭|捂嘴 🤫|嘘 🤨|怀疑 😐|无语 🙄|白眼 😴|睡觉 😪|困 🥱|哈欠 🤤|口水 😷|口罩 🤒|生病 🤧|感冒 🥺|可怜 😢|伤心 😤|生气 😡|愤怒 🤯|震惊 😱|惊讶 😳|脸红 🥳|派对 🤩|崇拜 🫠|融化",
+  },
+  {
+    name: "手势人物",
+    icon: "👋",
+    items:
+      "👋|挥手 hello 🤚|举手 ✋|停 stop 🖖|问候 👌|好 ok ✌️|胜利 victory 🤞|好运 🤟|爱你 🤘|摇滚 🤙|电话 👈|左 👉|右 👆|上 👇|下 ☝️|注意 👎|踩 👊|加油 fist ✊|拳头 🤝|握手 handshake 🙌|欢呼 👐|张开 🫶|比心 💪|努力 muscle 🧠|大脑 👨‍👩‍👧‍👦|家人 family 🧑‍💻|工作 coder",
+  },
+  {
+    name: "动物自然",
+    icon: "🌿",
+    items:
+      "🐱|猫 cat 🐶|狗 dog 🐼|熊猫 panda 🐻|熊 bear 🐰|兔 rabbit 🦊|狐狸 fox 🐯|老虎 tiger 🐷|猪 pig 🐸|青蛙 frog 🐧|企鹅 🐦|鸟 bird 🦋|蝴蝶 🐝|蜜蜂 🐢|乌龟 🐬|海豚 🌸|花 flower 🌹|玫瑰 🌻|向日葵 🌲|树 tree 🌿|叶子 leaf 🍀|幸运 ☀️|太阳 sun 🌙|月亮 moon ⭐|星星 star 🌈|彩虹 rainbow ☁️|云 cloud ❄️|雪 snow 🌊|海浪 wave",
+  },
+  {
+    name: "生活物品",
+    icon: "☕",
+    items:
+      "🍎|苹果 apple 🍓|草莓 🍉|西瓜 🍋|柠檬 🍊|橘子 🍇|葡萄 🍒|樱桃 🍑|桃 🍕|披萨 pizza 🍔|汉堡 burger 🍟|薯条 🍜|面条 noodles 🍚|米饭 🍰|蛋糕 cake 🎂|生日 birthday 🍦|冰淇淋 ☕|咖啡 coffee 🍵|茶 tea 🥤|饮料 🍻|干杯 cheers 🎁|礼物 gift 🎈|气球 🎊|庆祝 confetti 🏠|家 home ✈️|飞机 travel 🚗|汽车 car 🚲|自行车 💻|电脑 computer 📱|手机 phone 📷|相机 camera 🎵|音乐 music 📚|书 books 📎|附件 📁|文件夹 folder 💾|保存 save 💡|灵感 idea ⏰|闹钟 time",
+  },
+  {
+    name: "爱心符号",
+    icon: "❤️",
+    items:
+      "🧡|橙心 heart 💛|黄心 heart 💚|绿心 heart 💙|蓝心 heart 💜|紫心 heart 🖤|黑心 heart 🤍|白心 heart 🤎|棕心 heart 💔|心碎 broken 💕|两颗心 💖|闪亮心 💗|心动 💓|心跳 ❣️|心叹号 💌|情书 💬|聊天 message 📌|置顶 pin 🔒|锁 lock 🔑|钥匙 key 🔔|通知 bell ❌|错误 no ⚠️|警告 warning ❓|疑问 question ❗|注意 important ✨|闪亮 sparkles ✔️|勾 check ➕|加 plus ➡️|右箭头 arrow 🆗|好的 ok 🆒|酷 cool",
+  },
+].map((group) => ({
+  ...group,
+  items: group.items.split(/ (?=\S+\|)/).map((item) => {
+    const [emoji, name] = item.split("|");
+    return { emoji, name };
+  }),
+}));
+export const allEmoji = [
+  ...new Map(emojiGroups.flatMap((group) => group.items).map((item) => [item.emoji, item])).values(),
+];

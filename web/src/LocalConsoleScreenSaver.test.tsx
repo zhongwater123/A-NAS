@@ -22,7 +22,9 @@ const asleep = () => screen.queryByRole("dialog", { name: "息屏" });
 
 // idle lets the screen saver start and the sleep setting it then reads arrive.
 async function idle(ms = localConsoleScreenSaverIdleMs) {
-  await act(async () => { vi.advanceTimersByTime(ms); });
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+  });
 }
 
 describe("local console screen saver", () => {
@@ -52,18 +54,23 @@ describe("local console screen saver", () => {
 
   it("accepts only unique anonymous same-origin video URLs from the manifest", async () => {
     const valid = `/local-console/screensavers/${"a".repeat(64)}.mp4`;
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ videos: [valid, valid, "https://example.com/video.mp4", "/api/v1/users"] }),
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ videos: [valid, valid, "https://example.com/video.mp4", "/api/v1/users"] }),
+      }),
+    );
     await expect(loadScreenSaverVideos()).resolves.toEqual([valid]);
     expect(fetch).toHaveBeenCalledWith("/local-console/screensavers", { cache: "no-store" });
   });
 
   it("loops one random video per idle activation and samples again after activity", async () => {
     const random = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(0.99);
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} random={random} />);
+    render(
+      <LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} random={random} />,
+    );
     await act(async () => undefined);
 
     act(() => vi.advanceTimersByTime(localConsoleScreenSaverIdleMs - 1));
@@ -83,12 +90,21 @@ describe("local console screen saver", () => {
     expect(fireEvent.keyDown(window, { key: "Enter" })).toBe(false);
     expect(screen.queryByRole("dialog", { name: "屏幕保护程序" })).toBeNull();
     act(() => vi.advanceTimersByTime(localConsoleScreenSaverIdleMs));
-    expect(screen.getByRole("dialog", { name: "屏幕保护程序" }).querySelector("video")?.getAttribute("src")).toBe(videos[2]);
+    expect(screen.getByRole("dialog", { name: "屏幕保护程序" }).querySelector("video")?.getAttribute("src")).toBe(
+      videos[2],
+    );
     expect(random).toHaveBeenCalledTimes(2);
   });
 
   it("resets on activity and replaces failed videos until the pool is exhausted", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos.slice(0, 2)} loadSleepAfter={neverSleep} random={() => 0} />);
+    render(
+      <LocalConsoleScreenSaver
+        enabled
+        loadVideos={async () => videos.slice(0, 2)}
+        loadSleepAfter={neverSleep}
+        random={() => 0}
+      />,
+    );
     await act(async () => undefined);
 
     act(() => vi.advanceTimersByTime(120_000));
@@ -121,7 +137,14 @@ describe("local console screen saver", () => {
   });
 
   it("turns the screen black once the screen saver has played the set minutes", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={async () => 10} random={() => 0} />);
+    render(
+      <LocalConsoleScreenSaver
+        enabled
+        loadVideos={async () => videos}
+        loadSleepAfter={async () => 10}
+        random={() => 0}
+      />,
+    );
     await act(async () => undefined);
     await idle();
     expect(saver()?.querySelector("video")?.getAttribute("src")).toBe(videos[0]);
@@ -169,7 +192,9 @@ describe("local console screen saver", () => {
   });
 
   it("keeps the screen saver playing when set to never", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} random={() => 0} />);
+    render(
+      <LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} random={() => 0} />,
+    );
     await act(async () => undefined);
     await idle();
     act(() => vi.advanceTimersByTime(12 * 60 * minute));
@@ -178,7 +203,14 @@ describe("local console screen saver", () => {
   });
 
   it("falls back to thirty minutes when the setting cannot be read", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={() => Promise.reject(new Error("offline"))} random={() => 0} />);
+    render(
+      <LocalConsoleScreenSaver
+        enabled
+        loadVideos={async () => videos}
+        loadSleepAfter={() => Promise.reject(new Error("offline"))}
+        random={() => 0}
+      />,
+    );
     await act(async () => undefined);
     await idle();
     act(() => vi.advanceTimersByTime(defaultSleepAfterMinutes * minute - 1));
@@ -189,8 +221,18 @@ describe("local console screen saver", () => {
 
   it("ignores a setting that arrives after the idle period ended", async () => {
     let answer: ((minutes: number) => void) | undefined;
-    const loadSleepAfter = () => new Promise<number>((resolve) => { answer = resolve; });
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={loadSleepAfter} random={() => 0} />);
+    const loadSleepAfter = () =>
+      new Promise<number>((resolve) => {
+        answer = resolve;
+      });
+    render(
+      <LocalConsoleScreenSaver
+        enabled
+        loadVideos={async () => videos}
+        loadSleepAfter={loadSleepAfter}
+        random={() => 0}
+      />,
+    );
     await act(async () => undefined);
     await idle();
     fireEvent.pointerMove(window);

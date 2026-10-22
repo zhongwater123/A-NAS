@@ -4,9 +4,16 @@ import { APIError } from "./api";
 // them: they must fit the file system and work over SMB on Windows and macOS.
 
 export const nameTooLongText = "名称太长：最多 255 字节，约 85 个汉字";
-export const nameNotPortableText = "名称不能包含 \\ / : * ? \" < > | 或控制字符，不能以空格或句点结尾，也不能是 CON、NUL 等系统保留名";
+export const nameNotPortableText =
+  '名称不能包含 \\ / : * ? " < > | 或控制字符，不能以空格或句点结尾，也不能是 CON、NUL 等系统保留名';
 
-const reserved = new Set(["CON", "PRN", "AUX", "NUL", ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((digit) => [`COM${digit}`, `LPT${digit}`])]);
+const reserved = new Set([
+  "CON",
+  "PRN",
+  "AUX",
+  "NUL",
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((digit) => [`COM${digit}`, `LPT${digit}`]),
+]);
 const encoder = new TextEncoder();
 
 // nameProblem says what is wrong with a name before it is sent, or nothing.
@@ -23,9 +30,12 @@ export function nameProblem(name: string): string | undefined {
 export function nameErrorText(error: unknown): string | undefined {
   if (!(error instanceof APIError)) return undefined;
   switch (error.code) {
-    case "name_too_long": return nameTooLongText;
-    case "name_not_portable": return nameNotPortableText;
-    case "name_conflict": return "这里已有同名项目（不区分大小写）";
+    case "name_too_long":
+      return nameTooLongText;
+    case "name_not_portable":
+      return nameNotPortableText;
+    case "name_conflict":
+      return "这里已有同名项目（不区分大小写）";
   }
   return undefined;
 }

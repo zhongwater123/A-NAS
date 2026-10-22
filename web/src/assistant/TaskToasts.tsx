@@ -26,7 +26,9 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
     if (!enabled) return;
     void loadTaskNotices();
     const timer = window.setInterval(() => void loadTaskNotices(), POLL_MS);
-    const back = () => { if (document.visibilityState === "visible") void loadTaskNotices(); };
+    const back = () => {
+      if (document.visibilityState === "visible") void loadTaskNotices();
+    };
     document.addEventListener("visibilitychange", back);
     return () => {
       window.clearInterval(timer);
@@ -46,25 +48,55 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
   // The newest on top.
   const shown = showing.slice(-SHOWN).reverse();
   return (
-    <div className="vt-toasts" aria-live="polite" onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)} onBlur={() => setHeld(false)}>
+    <div
+      className="vt-toasts"
+      aria-live="polite"
+      onPointerEnter={() => setHeld(true)}
+      onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={() => setHeld(false)}
+    >
       {shown.map((item) => {
         const run = item.task as AssistantTaskNotice;
         const failed = run.status !== "ok";
         return (
-          <section key={item.id} className={`vt-toast${failed ? " failed" : ""}`} role="status" aria-label={`定时任务 ${run.name}`}>
-            <span className="vt-toast-mark"><CalendarClock /></span>
+          <section
+            key={item.id}
+            className={`vt-toast${failed ? " failed" : ""}`}
+            role="status"
+            aria-label={`定时任务 ${run.name}`}
+          >
+            <span className="vt-toast-mark">
+              <CalendarClock />
+            </span>
             <div className="vt-toast-copy">
               <small>VNAS 定时任务 · {whenText(Date.parse(run.ranAt) / 1000)}</small>
-              <strong>{run.name}{failed && <em>没有完成</em>}</strong>
+              <strong>
+                {run.name}
+                {failed && <em>没有完成</em>}
+              </strong>
               {run.summary && <p>{plainText(run.summary)}</p>}
-              <button type="button" className="vt-toast-open" onClick={() => { readTaskNotice(item.id); onOpen(run); }}>查看结果<ChevronRight /></button>
+              <button
+                type="button"
+                className="vt-toast-open"
+                onClick={() => {
+                  readTaskNotice(item.id);
+                  onOpen(run);
+                }}
+              >
+                查看结果
+                <ChevronRight />
+              </button>
             </div>
-            <button type="button" className="vt-toast-close" aria-label="关闭" onClick={() => readTaskNotice(item.id)}><X /></button>
+            <button type="button" className="vt-toast-close" aria-label="关闭" onClick={() => readTaskNotice(item.id)}>
+              <X />
+            </button>
           </section>
         );
       })}
-      {showing.length > SHOWN && <p className="vt-toast-more">还有 {showing.length - SHOWN} 个任务的结果，在 VNAS 的定时任务里查看</p>}
+      {showing.length > SHOWN && (
+        <p className="vt-toast-more">还有 {showing.length - SHOWN} 个任务的结果，在 VNAS 的定时任务里查看</p>
+      )}
     </div>
   );
 }

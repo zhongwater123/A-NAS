@@ -33,7 +33,9 @@ export function ImagePage({ snapshot, query, refreshing, embedded, onRefresh, on
       <div className="dk-page dk-page-more">
         <section className="dk-group" aria-label="镜像">
           <header className="dk-group-head">
-            <span className="dk-tile images"><Layers /></span>
+            <span className="dk-tile images">
+              <Layers />
+            </span>
             <h3>镜像</h3>
             <span className="dk-group-count">{rows.length} 个</span>
           </header>
@@ -49,9 +51,21 @@ export function ImagePage({ snapshot, query, refreshing, embedded, onRefresh, on
       <header className="dk-page-head">
         <div className="dk-page-title">
           <h2>镜像</h2>
-          {rows.length > 0 && <span className="dk-page-count">{rows.length} 个{unused > 0 && ` · ${unused} 个未被容器使用`}</span>}
+          {rows.length > 0 && (
+            <span className="dk-page-count">
+              {rows.length} 个{unused > 0 && ` · ${unused} 个未被容器使用`}
+            </span>
+          )}
         </div>
-        <button className="dk-icon-btn ghost" aria-label="刷新" title="刷新" disabled={refreshing} onClick={() => void onRefresh()}><RefreshCw className={refreshing ? "dk-spin" : ""} /></button>
+        <button
+          className="dk-icon-btn ghost"
+          aria-label="刷新"
+          title="刷新"
+          disabled={refreshing}
+          onClick={() => void onRefresh()}
+        >
+          <RefreshCw className={refreshing ? "dk-spin" : ""} />
+        </button>
       </header>
       {rows.length === 0 ? <Empty icon={<Layers />} title="还没有镜像" /> : <ImageTable rows={rows} onOpen={onOpen} />}
     </div>
@@ -64,7 +78,9 @@ function ImageTable({ rows, onOpen }: { rows: Row[]; onOpen: ImagePageProps["onO
       <div className="dk-table-row head" role="row">
         <span role="columnheader">镜像</span>
         <span role="columnheader">使用它的容器</span>
-        <span role="columnheader" className="num">大小</span>
+        <span role="columnheader" className="num">
+          大小
+        </span>
         <span role="columnheader">创建于</span>
       </div>
       {rows.map(({ image, users }) => {
@@ -72,9 +88,13 @@ function ImageTable({ rows, onOpen }: { rows: Row[]; onOpen: ImagePageProps["onO
         return (
           <div className="dk-table-row" role="row" key={image.id} aria-label={image.tags[0] ?? shortID(image.id)}>
             <span role="cell" className="dk-image-name">
-              <span className={`dk-image-glyph ${users.length ? "" : "unused"}`}><Layers /></span>
+              <span className={`dk-image-glyph ${users.length ? "" : "unused"}`}>
+                <Layers />
+              </span>
               <span className="dk-image-text">
-                <strong className={reference ? "" : "untagged"} title={image.tags.join("\n") || undefined}>{reference?.repository ?? "未标记的镜像"}</strong>
+                <strong className={reference ? "" : "untagged"} title={image.tags.join("\n") || undefined}>
+                  {reference?.repository ?? "未标记的镜像"}
+                </strong>
                 <span className="dk-image-sub">
                   {reference && <span className="dk-tag">{reference.tag}</span>}
                   {reference?.registry && <span className="dk-registry">{reference.registry}</span>}
@@ -84,12 +104,28 @@ function ImageTable({ rows, onOpen }: { rows: Row[]; onOpen: ImagePageProps["onO
               </span>
             </span>
             <span role="cell" className="dk-image-users">
-              {users.length > 0
-                ? users.map((user) => <button key={user.id} className={`dk-chip ${user.state === "running" ? "running" : ""}`} title={`查看容器 ${user.name}`} onClick={() => onOpen(user)}><i />{user.name}</button>)
-                : <span className="dk-faint">未使用</span>}
+              {users.length > 0 ? (
+                users.map((user) => (
+                  <button
+                    key={user.id}
+                    className={`dk-chip ${user.state === "running" ? "running" : ""}`}
+                    title={`查看容器 ${user.name}`}
+                    onClick={() => onOpen(user)}
+                  >
+                    <i />
+                    {user.name}
+                  </button>
+                ))
+              ) : (
+                <span className="dk-faint">未使用</span>
+              )}
             </span>
-            <span role="cell" className="num">{formatBytes(image.sizeBytes)}</span>
-            <span role="cell" title={formatDateTime(image.createdAt)}>{formatAgo(image.createdAt)}</span>
+            <span role="cell" className="num">
+              {formatBytes(image.sizeBytes)}
+            </span>
+            <span role="cell" title={formatDateTime(image.createdAt)}>
+              {formatAgo(image.createdAt)}
+            </span>
           </div>
         );
       })}

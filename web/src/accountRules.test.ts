@@ -17,7 +17,13 @@ describe("account rules", () => {
   });
 
   it("count password characters as the NAS does", () => {
-    for (const password of ["twelve chars", "  spaces count too  ", "十二个汉字也可以作为一个密码", "x".repeat(64), "😀".repeat(12)]) {
+    for (const password of [
+      "twelve chars",
+      "  spaces count too  ",
+      "十二个汉字也可以作为一个密码",
+      "x".repeat(64),
+      "😀".repeat(12),
+    ]) {
       expect(passwordProblem(password), password).toBeUndefined();
     }
     expect(passwordProblem("eleven char")).toMatch(/至少/);
@@ -30,7 +36,14 @@ describe("account rules", () => {
   });
 
   it("check nicknames as the NAS does", () => {
-    for (const nickname of ["小爱", "  Mom  ", "老 爸", "👩\u200d💻 程序员", "一".repeat(24), `${"一".repeat(24)}   `]) {
+    for (const nickname of [
+      "小爱",
+      "  Mom  ",
+      "老 爸",
+      "👩\u200d💻 程序员",
+      "一".repeat(24),
+      `${"一".repeat(24)}   `,
+    ]) {
       expect(nicknameProblem(nickname), nickname).toBeUndefined();
     }
     expect(nicknameProblem("一".repeat(25))).toMatch(/最多 24/);
@@ -45,7 +58,9 @@ describe("account rules", () => {
     expect(accountErrorText(new APIError(422, "invalid_username", "invalid username"))).toMatch(/3–32 位/);
     expect(accountErrorText(new APIError(409, "username_unavailable", "username is unavailable"))).toMatch(/换一个/);
     expect(accountErrorText(new APIError(422, "invalid_password", "invalid password"))).toMatch(/12–64/);
-    expect(accountErrorText(new APIError(401, "invalid_credentials", "username or password is invalid"))).toBe("账号或密码不正确");
+    expect(accountErrorText(new APIError(401, "invalid_credentials", "username or password is invalid"))).toBe(
+      "账号或密码不正确",
+    );
     expect(accountErrorText(new APIError(409, "conflict", "x"))).toBeUndefined();
     expect(accountErrorText(new Error("other"))).toBeUndefined();
   });

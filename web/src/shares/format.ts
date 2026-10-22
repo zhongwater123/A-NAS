@@ -5,7 +5,8 @@ import type { Job, Recipient, Share, ShareEntry } from "./api";
 export const leaf = (path: string) => path.split("/").at(-1) ?? path;
 export const parentPath = (path: string) => path.split("/").slice(0, -1).join("/");
 export const topLevel = (share: Share) => share.entries.filter((entry) => !parentPath(entry.path));
-export const fileBytes = (entries: ShareEntry[]) => entries.filter((entry) => !entry.isDir).reduce((sum, entry) => sum + entry.size, 0);
+export const fileBytes = (entries: ShareEntry[]) =>
+  entries.filter((entry) => !entry.isDir).reduce((sum, entry) => sum + entry.size, 0);
 
 // shareTitle names a share by its first top-level item and how many there are.
 export function shareTitle(share: Share): string {
@@ -22,17 +23,27 @@ export function phaseOf(share: Share, now = Date.now()): Phase {
   return share.expiresAt && new Date(share.expiresAt).getTime() <= now ? "expired" : "active";
 }
 export const isActive = (share: Share) => phaseOf(share) === "active";
-export const phaseLabel: Record<Phase, string> = { preparing: "正在准备", active: "分享中", failed: "未能发出", revoked: "已撤回", expired: "已到期" };
+export const phaseLabel: Record<Phase, string> = {
+  preparing: "正在准备",
+  active: "分享中",
+  failed: "未能发出",
+  revoked: "已撤回",
+  expired: "已到期",
+};
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 const daysAgo = (date: Date, now: Date) => Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-export const clock = (value: string) => { const date = new Date(value); return `${pad(date.getHours())}:${pad(date.getMinutes())}`; };
+export const clock = (value: string) => {
+  const date = new Date(value);
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
 
 // when is the short time a list shows: 17:08, 昨天, 10月18日.
 export function when(value: string | undefined, now = new Date()): string {
   if (!value) return "";
-  const date = new Date(value), days = daysAgo(date, now);
+  const date = new Date(value),
+    days = daysAgo(date, now);
   if (days <= 0) return clock(value);
   if (days === 1) return "昨天";
   if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日`;
@@ -41,17 +52,30 @@ export function when(value: string | undefined, now = new Date()): string {
 // moment is a day and a time: 今天 17:08, 10月18日 09:30.
 export function moment(value: string | undefined, now = new Date()): string {
   if (!value) return "";
-  const date = new Date(value), days = daysAgo(date, now);
-  const day = days === 0 ? "今天" : days === 1 ? "昨天" : days === -1 ? "明天" : date.getFullYear() === now.getFullYear() ? `${date.getMonth() + 1}月${date.getDate()}日` : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  const date = new Date(value),
+    days = daysAgo(date, now);
+  const day =
+    days === 0
+      ? "今天"
+      : days === 1
+        ? "昨天"
+        : days === -1
+          ? "明天"
+          : date.getFullYear() === now.getFullYear()
+            ? `${date.getMonth() + 1}月${date.getDate()}日`
+            : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
   return `${day} ${clock(value)}`;
 }
 // dayLabel separates a conversation by day.
 export function dayLabel(value: string, now = new Date()): string {
-  const date = new Date(value), days = daysAgo(date, now);
+  const date = new Date(value),
+    days = daysAgo(date, now);
   if (days === 0) return "今天";
   if (days === 1) return "昨天";
   const week = "日一二三四五六"[date.getDay()];
-  return date.getFullYear() === now.getFullYear() ? `${date.getMonth() + 1}月${date.getDate()}日 周${week}` : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === now.getFullYear()
+    ? `${date.getMonth() + 1}月${date.getDate()}日 周${week}`
+    : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 // remaining says how long an active share is still open; the last day is urgent.
@@ -72,18 +96,30 @@ export function unreadThreads(share: Share, userId: string): Recipient[] {
 }
 export function isUnread(share: Share, userId: string): boolean {
   // A share that ended before it was opened is no longer news.
-  if (share.sender.id !== userId && phaseOf(share) === "active" && share.recipients.some((item) => item.userId === userId && !item.viewedAt)) return true;
+  if (
+    share.sender.id !== userId &&
+    phaseOf(share) === "active" &&
+    share.recipients.some((item) => item.userId === userId && !item.viewedAt)
+  )
+    return true;
   return unreadThreads(share, userId).length > 0;
 }
 
 // receipt is what a sender sees about one recipient.
 export function receipt(item: Recipient): { text: string; tone: "muted" | "seen" | "saved" | "uncertain" } {
-  if (item.saved) return { text: `已保存 ${item.savedFiles} 个文件${item.saveUncertain ? "，另有结果待确认" : ""}`, tone: "saved" };
+  if (item.saved)
+    return { text: `已保存 ${item.savedFiles} 个文件${item.saveUncertain ? "，另有结果待确认" : ""}`, tone: "saved" };
   if (item.saveUncertain) return { text: "保存结果待确认", tone: "uncertain" };
   return item.viewedAt ? { text: "已查看", tone: "seen" } : { text: "未查看", tone: "muted" };
 }
 
-export const jobLabel: Record<string, string> = { running: "正在保存", completed: "已保存", failed: "保存失败", cancelled: "已停止", interrupted: "保存中断" };
+export const jobLabel: Record<string, string> = {
+  running: "正在保存",
+  completed: "已保存",
+  failed: "保存失败",
+  cancelled: "已停止",
+  interrupted: "保存中断",
+};
 export const jobDone = (job: Job) => job.completedIds?.length ?? 0;
 
 const apiMessages: Record<string, string> = {

@@ -15,9 +15,27 @@ export interface LayoutInfo {
 
 export const layouts: Record<VolumeLayout, LayoutInfo> = {
   single: { name: "单盘", tag: "", summary: "数据卷只在一块硬盘上", loss: "硬盘损坏会丢失全部文件", tone: "danger" },
-  mirror: { name: "镜像", tag: "RAID 1", summary: "每个文件在两块硬盘上各存一份", loss: "坏一块硬盘，文件不丢，换盘后恢复", tone: "success" },
-  span: { name: "扩容", tag: "不冗余", summary: "容量相加，每个文件只存一份", loss: "坏一块硬盘，那块盘上的文件会丢失", tone: "warning" },
-  stripe: { name: "条带", tag: "RAID 0", summary: "容量相加，文件分散写到每块硬盘，读写更快", loss: "坏一块硬盘，几乎所有文件都会丢失", tone: "danger" },
+  mirror: {
+    name: "镜像",
+    tag: "RAID 1",
+    summary: "每个文件在两块硬盘上各存一份",
+    loss: "坏一块硬盘，文件不丢，换盘后恢复",
+    tone: "success",
+  },
+  span: {
+    name: "扩容",
+    tag: "不冗余",
+    summary: "容量相加，每个文件只存一份",
+    loss: "坏一块硬盘，那块盘上的文件会丢失",
+    tone: "warning",
+  },
+  stripe: {
+    name: "条带",
+    tag: "RAID 0",
+    summary: "容量相加，文件分散写到每块硬盘，读写更快",
+    loss: "坏一块硬盘，几乎所有文件都会丢失",
+    tone: "danger",
+  },
 };
 
 // The layouts a volume of two disks or more can have, most protective first.
@@ -61,7 +79,10 @@ export function conversionPercent(conversion: VolumeConversion): number {
   return Math.min(99, Math.floor((conversion.convertedBytes / conversion.totalBytes) * 100));
 }
 
-export interface ProgressSample { at: number; bytes: number }
+export interface ProgressSample {
+  at: number;
+  bytes: number;
+}
 
 // remainingSeconds estimates how long a running conversion still takes from
 // its speed since first seen; unknown until it has run for a while.

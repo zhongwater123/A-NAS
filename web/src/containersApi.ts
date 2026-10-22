@@ -40,7 +40,10 @@ export interface ContainerLogLine {
 
 // Error codes shared by the product API and the container agent.
 export class ContainerAPIError extends Error {
-  constructor(readonly code: string, readonly status?: number) {
+  constructor(
+    readonly code: string,
+    readonly status?: number,
+  ) {
     super(`container request failed: ${code}`);
   }
 }
@@ -63,7 +66,8 @@ export async function readContainerLogs(id: string, tail = 200, signal?: AbortSi
   const value = await request(`/api/v1/containers/${id}/logs?tail=${tail}`, { signal });
   if (!isRecord(value) || !Array.isArray(value.lines)) throw new ContainerAPIError("malformed_response");
   return value.lines.filter(
-    (line): line is ContainerLogLine => isRecord(line) && (line.stream === "stdout" || line.stream === "stderr") && typeof line.text === "string",
+    (line): line is ContainerLogLine =>
+      isRecord(line) && (line.stream === "stdout" || line.stream === "stderr") && typeof line.text === "string",
   );
 }
 
@@ -78,17 +82,26 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
   if (response.status === 204) return undefined;
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const code = isRecord(body) && isRecord(body.error) && typeof body.error.code === "string" ? body.error.code : "request_failed";
+    const code =
+      isRecord(body) && isRecord(body.error) && typeof body.error.code === "string"
+        ? body.error.code
+        : "request_failed";
     throw new ContainerAPIError(code, response.status);
   }
   return body;
 }
 
 function isSnapshot(value: unknown): value is ContainerSnapshot {
-  if (!isRecord(value) || !["simulated", "live"].includes(String(value.dataSource)) || !isRecord(value.engine)) return false;
+  if (!isRecord(value) || !["simulated", "live"].includes(String(value.dataSource)) || !isRecord(value.engine))
+    return false;
   if (!Array.isArray(value.containers) || !Array.isArray(value.images)) return false;
   return value.containers.every(
-    (item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && typeof item.state === "string" && Array.isArray(item.ports),
+    (item) =>
+      isRecord(item) &&
+      typeof item.id === "string" &&
+      typeof item.name === "string" &&
+      typeof item.state === "string" &&
+      Array.isArray(item.ports),
   );
 }
 
