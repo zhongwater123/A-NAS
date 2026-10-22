@@ -6,7 +6,9 @@
     batch 128，1 epoch，10 万对，3090 上 5.5 小时，NDCG@10 +0.05；
   - ByronLeeee/EmbeddingGemma-300M-LawVault（中文法条）：MatryoshkaLoss(MNRL) 同时训 768/512/256/128，
     6.6 万条带难负例的三元组，3 epoch，Top-1 58% → 92%。
-我们的数据量小得多（几百到几千条），所以默认 3 epoch、batch 32、带 Matryoshka（线上可能用 256 维）。
+我们的数据量小得多（几百到几千条），所以默认 3 epoch、batch 16、带 Matryoshka（线上可能用 256 维）。
+batch 不取 32：批内不允许重复文本（NO_DUPLICATES），233 条训练三元组只有 226 种文本，batch 32 时
+采样器只能凑出 32、32、32、29、16、15…7 这样越来越小的批；batch 16 每轮 17 批、基本都满。
 
 用法（在 ai/ 目录下）：
   pip install -r finetune/requirements.txt       # 另一个 venv；再按显卡装对应 CUDA 的 torch
@@ -54,7 +56,7 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--base", default="google/embeddinggemma-2")
     ap.add_argument("--out", default="finetune/out/my-embeddinggemma-2")
     ap.add_argument("--epochs", type=float, default=3)
-    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--cached", action="store_true", help="用 CachedMNRL（显存小但想用大 batch 时）")
     ap.add_argument("--no-matryoshka", action="store_true")
@@ -136,11 +138,25 @@ def main(argv: list[str]) -> None:
     )
     trainer = SentenceTransformerTrainer(model=model, args=targs, train_dataset=train_ds,
                                          loss=loss, evaluator=evaluator)
-    trainer.train()
-    if evaluator:
-        print("微调后:", evaluator(model))
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    result = trainer.train()
+    after = evaluator(model) if evaluator else None
+    if after is not None:
+        print("微调后:", after)
     model.save_pretrained(args.out)
     print(f"已保存到 {args.out}；起服务：python -m finetune.server --model {args.out}")
+    # 一行机器可读的摘要，供一键脚本收集
+    summary = {
+        "train_rows": len(train_rows), "eval_rows": len(eval_rows), "steps": result.global_step,
+        "train_loss": round(float(result.training_loss), 4),
+        "train_runtime_s": round(float(result.metrics.get("train_runtime", 0.0)), 1),
+        "dtype": dtype, "device": str(model.device), "batch": args.batch, "epochs": args.epochs, "lr": args.lr,
+        "max_seq_length": model.max_seq_length,
+        "peak_vram_gb": (round(torch.cuda.max_memory_allocated() / 2**30, 2) if torch.cuda.is_available() else None),
+        "eval_after": after,
+    }
+    print("TRAIN_SUMMARY " + json.dumps(summary, ensure_ascii=False, default=str), flush=True)
 
 
 if __name__ == "__main__":
