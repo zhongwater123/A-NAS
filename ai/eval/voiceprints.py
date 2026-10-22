@@ -47,6 +47,11 @@ the other half is a split.
         --data /datasets/aishell4-test --out /datasets/runs/voiceprints-campplus-zh.json
     python -m eval.voiceprints --profiles /datasets/runs/voiceprints-campplus-zh.npz --out report.json
     python -m eval.voiceprints --halves --model ... --data ... --out halves.json
+    python -m eval.voiceprints --provider embeddinggemma --model /models/embeddinggemma-2-740m.litertlm ...
+
+--provider embeddinggemma builds the same profiles from EmbeddingGemma 2's
+audio encoder, the model the photo library ships, to see whether a general
+audio embedding tells speakers apart as a speaker model does.
 """
 
 import argparse
@@ -303,6 +308,33 @@ def evaluate(profiles_of_budget, sessions):
     }
 
 
+class GemmaAudio:
+    """EmbeddingGemma 2's audio encoder through MediaPipe, as the photo AI
+    Worker runs the model: 16 kHz mono floats in, a unit vector out."""
+
+    def __init__(self, model, cache=None):
+        import mediapipe
+        from mediapipe.tasks.python.core.base_options import BaseOptions
+        from mediapipe.tasks.python.retrieval.universal_embedder import UniversalEmbedder, UniversalEmbedderOptions
+
+        options = {"base_options": BaseOptions(model_asset_path=model), "l2_normalize": True}
+        if cache:
+            os.makedirs(cache, exist_ok=True)
+            options["cache_dir"] = cache
+        self.embedder = UniversalEmbedder.create_from_options(UniversalEmbedderOptions(**options))
+        digest = hashlib.sha256()
+        with open(model, "rb") as file:
+            for chunk in iter(lambda: file.read(1 << 20), b""):
+                digest.update(chunk)
+        name = os.path.splitext(os.path.basename(model))[0]
+        self.model = f"{name}-audio@{digest.hexdigest()[:12]}+mediapipe-{mediapipe.__version__}"
+
+    def embed(self, samples):
+        floats = (np.asarray(samples, dtype=np.float32) / 32768.0).tolist()
+        vector = np.asarray(self.embedder.embed_audio(floats).embeddings[0].embedding, dtype=np.float32)
+        return vector / np.linalg.norm(vector)
+
+
 def provider_threads(threads):
     from anas_ai import providers
 
@@ -411,6 +443,7 @@ def main():
     parser.add_argument("--threads", type=int)
     parser.add_argument("--cache", help="a directory to keep each session's first channel in")
     parser.add_argument("--halves", action="store_true", help="join the halves of each session instead")
+    parser.add_argument("--provider", choices=("3d-speaker", "embeddinggemma"), default="3d-speaker")
     args = parser.parse_args()
     if args.profiles:
         found = load_profiles(args.profiles)
@@ -427,7 +460,10 @@ def main():
     if not args.model or not args.data:
         parser.error("give --model and --data, or --profiles")
     sessions = sorted(name[:-5] for name in os.listdir(os.path.join(args.data, "wav")) if name.endswith(".flac"))
-    provider = voice.SpeakerProvider(args.model, manifest_for(args.model), args.threads)
+    if args.provider == "embeddinggemma":
+        provider = GemmaAudio(args.model, os.path.join(args.cache, "xnnpack") if args.cache else None)
+    else:
+        provider = voice.SpeakerProvider(args.model, manifest_for(args.model), args.threads)
     if args.halves:
         found = half_profiles(provider, args.data, sessions, args.cache)
         report = {"model": provider.model, "sessions": sessions,
