@@ -52,6 +52,7 @@
   - 相册：去掉自己的解码位；缩略图与 AI 输入是后台工作，`decodeFailure` 按 AI Worker 的规则分类，Worker 没接下时退回、不计次、1 分钟后再试；停止时带着次数退回；`RecoverJobs` 在任务循环前立即重新排队崩溃遗留的任务（保留次数）并让 `io` 失败的任务重新开始，修复前被 Worker 缺席记为 `io` 的任务在部署后第一次启动时恢复。代码：[`jobs.go`](../../internal/photos/jobs.go)、[`aiinput.go`](../../internal/photos/aiinput.go)、[`ai.go`](../../internal/photos/ai.go)、[`photoservice.go`](../../internal/photoservice/photoservice.go)。
   - 音乐：扫描是后台工作；Worker 不可达时只有它能测的时长与只有它能渲染的封面留到下次扫描。影视中心的探测与截图是后台工作。代码：[`scan.go`](../../internal/music/scan.go)、[`process.go`](../../internal/media/process.go)。
   - 部署：安装器写入 `/etc/tmpfiles.d/a-nas-media.conf` 创建槽位；`MaxConnections=16` 为退出中的 Worker 留出余量；所有实例在 [`system-anasmedia.slice`](../../deploy/systemd/system/system-anasmedia.slice) 中共用 `MemoryMax=3G`，权重移到 slice 上。
+- 修复在 [PR #214](https://github.com/zhongwater123/A-NAS/pull/214)。
 - 测试：
   - `internal/mediaworker`：分层预留、另一进程持有全部槽位时后台等待并在槽位放开后继续、目录缺失时退回进程内、请求放开槽位、时限不含排队、被丢弃的连接与中途停止的 Worker 分别是 `ErrUnavailable` 与 `ErrInterrupted`、旧 Worker 不回 `accepted` 也能工作（[`admission_test.go`](../../internal/mediaworker/admission_test.go)）。
   - `internal/photos`：Worker 缺席比 3 次尝试更久时缩略图与检测最终完成且次数为 0；中途停止与超时各计一次，`interrupted` 不在启动时恢复而 `io` 会；停止时任务带着次数退回；崩溃遗留的任务立即重新排队并保留次数（[`workerwait_test.go`](../../internal/photos/workerwait_test.go)）。
