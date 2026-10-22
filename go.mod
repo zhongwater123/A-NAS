@@ -2,7 +2,7 @@ module github.com/zhongwater123/A-NAS
 
 go 1.27.0
 
-toolchain go1.27.1
+toolchain go1.27.3
 
 require (
 	github.com/abema/go-mp4 v1.7.3
@@ -30,10 +30,10 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	golang.org/x/crypto v0.57.0
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
-	golang.org/x/image v0.33.0
+	golang.org/x/image v0.47.0
 	golang.org/x/mod v0.41.0
-	golang.org/x/sys v0.48.0
-	golang.org/x/text v0.42.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/text v0.43.0
 )
 
 require (
@@ -73,6 +73,6 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 )
