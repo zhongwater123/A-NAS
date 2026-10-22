@@ -16,6 +16,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
 
 type testEnv struct {
@@ -601,6 +602,20 @@ func TestStreamsSubtitlesAndArtworkGoThroughTheProcessor(t *testing.T) {
 	}
 	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("poster without one: %v", err)
+	}
+}
+
+func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
+	env.write(t, env.shared, "电影/Heat (1995)-poster.jpg", string(imagetest.PanickingPicture()))
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	movies, err := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+	if err != nil || movies.Total != 1 || !movies.Items[0].Artwork.Poster {
+		t.Fatalf("Titles() = %+v, %v", movies.Items, err)
+	}
+	if _, err := env.media.Artwork(env.ctx, env.bob, movies.Items[0].ID, "poster"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
 	}
 }
 

@@ -79,8 +79,14 @@ type WallpaperPicture struct {
 // NormalizeWallpaper decodes picture, turns it upright, scales it down to at
 // most MaxWallpaperEdge on the long side and fills transparency with the
 // backdrop. The result is a JPEG without the original's metadata, whatever was
-// uploaded, so no client decides what other people's desktops load.
+// uploaded, so no client decides what other people's desktops load. A picture
+// the decoder panics on is unsupported, like one it rejects.
 func NormalizeWallpaper(picture []byte) (data []byte, width, height int, err error) {
+	defer func() {
+		if recover() != nil {
+			data, width, height, err = nil, 0, 0, ErrUnsupportedImage
+		}
+	}()
 	if len(picture) > MaxWallpaperUploadBytes {
 		return nil, 0, 0, ErrImageTooLarge
 	}

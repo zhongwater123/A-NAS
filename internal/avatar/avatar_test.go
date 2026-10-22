@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/avatar"
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
 
 func encodePNG(t *testing.T, picture image.Image) []byte {
@@ -95,6 +96,7 @@ func TestOnlyReasonablePicturesAreAccepted(t *testing.T) {
 		"empty":      {nil, avatar.ErrUnsupported},
 		"dimensions": {huge, avatar.ErrTooLarge},
 		"bytes":      {make([]byte, avatar.MaxUploadBytes+1), avatar.ErrTooLarge},
+		"decoder":    {imagetest.PanickingPicture(), avatar.ErrUnsupported},
 	} {
 		if _, err := avatar.Normalize(test.picture); !errors.Is(err, test.want) {
 			t.Errorf("%s: Normalize() error = %v, want %v", name, err, test.want)

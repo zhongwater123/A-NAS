@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 )
 
@@ -98,6 +99,7 @@ func TestOnlyReasonableWallpapersAreAccepted(t *testing.T) {
 		"empty":      {nil, personalization.ErrUnsupportedImage},
 		"dimensions": {huge, personalization.ErrImageTooLarge},
 		"bytes":      {make([]byte, personalization.MaxWallpaperUploadBytes+1), personalization.ErrImageTooLarge},
+		"decoder":    {imagetest.PanickingPicture(), personalization.ErrUnsupportedImage},
 	} {
 		if _, _, _, err := personalization.NormalizeWallpaper(test.picture); !errors.Is(err, test.want) {
 			t.Errorf("%s: NormalizeWallpaper() error = %v, want %v", name, err, test.want)

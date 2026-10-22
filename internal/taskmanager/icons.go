@@ -23,7 +23,14 @@ const MaxIconBytes = 256 << 10
 
 // NormalizeIcon accepts installed artwork, never arbitrary file content. Raster
 // inputs become small PNGs; SVGs must be self-contained static image documents.
+// An icon the decoder panics on is dropped, like one it rejects: the Host
+// Agent reads the same file again on every refresh.
 func NormalizeIcon(data []byte) (id, dataURL string) {
+	defer func() {
+		if recover() != nil {
+			id, dataURL = "", ""
+		}
+	}()
 	if len(data) == 0 || len(data) > MaxIconBytes {
 		return "", ""
 	}
