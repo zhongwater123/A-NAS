@@ -1,16 +1,25 @@
 name: CI
 
+# A branch is checked through its pull request; main is checked after each merge.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A new push to a pull request replaces its running checks; every commit on
+# main keeps its own run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: Project checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -28,12 +37,24 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.lock).
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      # NumPy, pinned by the runtime's lock, lets the clustering tests run;
+      # the real-model tests still need model files and stay skipped.
+      - name: Install the AI test dependencies
+        run: grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
+
       - name: Run checks
         run: make check
 
   system:
     name: System test (Debian 13, systemd)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
