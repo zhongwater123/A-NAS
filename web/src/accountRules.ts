@@ -25,6 +25,7 @@ export function usernameProblem(value: string): string | undefined {
 // Lengths count characters as the server does, not UTF-16 units.
 export function passwordProblem(value: string): string | undefined {
   const length = [...value].length;
+  // oxlint-disable-next-line no-control-regex -- control characters are what it looks for
   if (/[\u0000-\u001f\u007f-\u009f]/.test(value)) return "密码不能包含换行、制表符等控制字符";
   if (length < 12) return "密码至少需要 12 个字符";
   if (length > 64 || encoder.encode(value).length > 254) return "密码最多 64 个字符";

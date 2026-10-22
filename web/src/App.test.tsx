@@ -3003,7 +3003,7 @@ describe("Avatars and nicknames", () => {
     const sent = fetchMock.mock.calls.find(
       ([path, init]) => path === "/api/v1/session/avatar" && init?.method === "PUT",
     );
-    expect((sent?.[1]?.body as Blob).type).toBe("image/jpeg");
+    expect((sent?.[1]?.body as Blob | undefined)?.type).toBe("image/jpeg");
     expect(new Headers(sent?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
     const rail = screen.getByRole("button", { name: "账号（alice）" });
     expect(rail.querySelector("img")?.getAttribute("src")).toBe("/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef");

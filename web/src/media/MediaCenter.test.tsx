@@ -250,7 +250,7 @@ describe("MediaCenter", () => {
       folderIds: ["file:movies"],
       spaceId: "space:shared",
     });
-    expect((init?.headers as Headers).get("X-CSRF-Token")).toBe("csrf");
+    expect((init?.headers as Headers | undefined)?.get("X-CSRF-Token")).toBe("csrf");
     expect(await screen.findByText("已创建“电影”，正在扫描")).toBeTruthy();
   });
 

@@ -780,7 +780,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
     ];
     const fetchMock = serve((url, init) => {
       if (url.endsWith("/restore")) {
-        items = items.filter((item) => !url.includes("photo%3At1"));
+        items = items.filter(() => !url.includes("photo%3At1"));
         return json(asset("photo:t1"));
       }
       if (url.startsWith("/api/v1/photos/trash/")) {
@@ -1607,7 +1607,7 @@ describe("PhotosPanel motion photos", () => {
     await screen.findByRole("button", { name: "查看 live.heic" });
     expect(FakeUpload.sent).toHaveLength(1);
     expect(FakeUpload.sent[0].url).toContain("/live-photos");
-    expect((FakeUpload.sent[0].body?.get("motion") as File).name).toBe("live.MOV");
+    expect((FakeUpload.sent[0].body?.get("motion") as File | undefined)?.name).toBe("live.MOV");
   });
   it("loads video only on request and removes it on navigation or failure", async () => {
     const first = asset("photo:live", { mediaType: "image/heic", motion: { kind: "live-photo", duration: 2 } });

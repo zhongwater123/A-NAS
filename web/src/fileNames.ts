@@ -21,6 +21,7 @@ export function nameProblem(name: string): string | undefined {
   if (!name.trim() || name === "." || name === "..") return "请输入名称";
   if (name.startsWith(".a-nas-")) return "以 .a-nas- 开头的名称留给 A-NAS 自己使用";
   if (encoder.encode(name).length > 255) return nameTooLongText;
+  // oxlint-disable-next-line no-control-regex -- control characters are what it looks for
   if (/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(name) || /[ .]$/.test(name)) return nameNotPortableText;
   if (reserved.has(name.split(".")[0].trimEnd().toUpperCase())) return nameNotPortableText;
   return undefined;

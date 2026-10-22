@@ -23,6 +23,9 @@ Caddyfile text eol=lf
 # git apply needs the hunks exactly as written.
 *.patch text eol=lf
 
+# Copied from Hermes by ai/assistant-spike/vendor-hermes-ui.py; GitHub folds it in diffs.
+web/src/assistant/hermes/** linguist-generated=true
+
 *.png binary
 *.jpg binary
 *.jpeg binary

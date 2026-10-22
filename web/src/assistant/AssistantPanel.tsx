@@ -732,6 +732,7 @@ class ConversationBoundary extends Component<
   }
 
   componentDidUpdate(previous: { messages: unknown }) {
+    // oxlint-disable-next-line react/no-did-update-set-state -- an error boundary resets once its input changes
     if (this.state.failed && previous.messages !== this.props.messages) this.setState({ failed: false });
   }
 
