@@ -4564,7 +4564,11 @@ components:
           type: string
         state:
           type: string
-          enum: [available, installed, installing, uninstalling]
+          description: >-
+            failed is an app whose last install failed and could not remove the containers it created; they were
+            never checked against the plan. Installing again removes them first, and uninstalling removes them. A
+            failed install that was rolled back is available, with the failed job.
+          enum: [available, installed, installing, uninstalling, failed]
         running:
           type: integer
           minimum: 0

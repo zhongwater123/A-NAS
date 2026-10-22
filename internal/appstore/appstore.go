@@ -97,6 +97,10 @@ const (
 	StateInstalled    InstallState = "installed"
 	StateInstalling   InstallState = "installing"
 	StateUninstalling InstallState = "uninstalling"
+	// StateFailed is an app whose last install failed and could not remove
+	// the containers it created; they were never checked against the plan.
+	// Installing again removes them first, and uninstalling removes them.
+	StateFailed InstallState = "failed"
 )
 
 type JobAction string
@@ -114,7 +118,8 @@ const (
 	JobFailed    JobState = "failed"
 )
 
-// Job is the latest install or uninstall run of one app.
+// Job is the latest install or uninstall run of one app. The container
+// agent keeps it across restarts.
 type Job struct {
 	AppID      string
 	Action     JobAction

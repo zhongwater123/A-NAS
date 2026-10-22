@@ -68,7 +68,15 @@ export function serviceText(service: ServiceRuntime, plan: InstallPlan): string 
 }
 
 export const isBusy = (app: CatalogApp) => app.state === "installing" || app.state === "uninstalling";
-export const installFailed = (app: CatalogApp) => app.state === "available" && app.job?.action === "install" && app.job.state === "failed";
+// A failed install was rolled back (available) or left containers behind (failed).
+export const installFailed = (app: CatalogApp) =>
+  app.state === "failed" || (app.state === "available" && app.job?.action === "install" && app.job.state === "failed");
+
+// The containers a failed install could not remove, which were never checked against its plan.
+export function leftoverText(app: CatalogApp): string | undefined {
+  if (app.state !== "failed") return undefined;
+  return `回滚没有完成：${app.total} 个容器留在 Docker 中（${app.running} 个运行中），它们没有按安装计划核对。重新安装会先删除它们，也可以在“更多操作”中卸载。`;
+}
 
 export function stateText(app: CatalogApp): string {
   switch (app.state) {
