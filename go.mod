@@ -16,6 +16,7 @@ require (
 	github.com/evanoberholster/imagemeta v1.1.0
 	github.com/getkin/kin-openapi v0.145.0
 	github.com/go-audio/wav v1.1.0
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/landlock-lsm/go-landlock v0.10.1

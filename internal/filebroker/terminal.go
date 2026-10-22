@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -22,6 +23,10 @@ import (
 
 const opTerminal = "terminal"
 
+// ShellGateArgument is the Host Agent subcommand that becomes a terminal
+// shell once the broker has moved it into its scope.
+const ShellGateArgument = "terminal-shell"
+
 const hangupGracePeriod = 2 * time.Second
 
 // serveTerminal starts a login shell as the administrator on a new PTY and
@@ -30,9 +35,9 @@ const hangupGracePeriod = 2 * time.Second
 // a session that stops being valid ends the shell.
 func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 	ctx := context.Background()
-	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-	if err != nil || !identity.Enabled {
-		_ = writeMessage(conn, response{Error: &wireError{Code: codeUnauthenticated}}, nil)
+	identity, refused := s.identify(ctx, req.Token)
+	if refused != nil {
+		_ = writeMessage(conn, response{Error: refused}, nil)
 		return
 	}
 	if identity.Role != accounts.RoleAdmin {
@@ -61,6 +66,7 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 	}()
 	recheck := time.NewTicker(s.config.TerminalRecheck)
 	defer recheck.Stop()
+	unconfirmed := 0
 	for {
 		select {
 		case <-shell.Done():
@@ -72,8 +78,9 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 			_ = writeMessage(conn, response{ExitCode: &code}, nil)
 			return
 		case <-recheck.C:
-			current, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-			if err != nil || !current.Enabled || current.Role != accounts.RoleAdmin || current.UID != identity.UID {
+			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accounts.Identity) bool {
+				return current.Role == accounts.RoleAdmin && current.UID == identity.UID
+			}) {
 				s.config.Logger.Info("terminal session no longer valid; hanging up", "username", identity.Username)
 				code := shell.HangUp(hangupGracePeriod)
 				_ = writeMessage(conn, response{ExitCode: &code}, nil)
@@ -128,11 +135,58 @@ func (s *Server) startShell(identity accounts.Identity, cols, rows uint16) (*exe
 	if !s.config.skipCredentials {
 		cmd.SysProcAttr.Credential = credential
 	}
+	var release *os.File
+	if s.config.Scopes != nil {
+		var wait *os.File
+		if wait, release, err = os.Pipe(); err != nil {
+			_ = master.Close()
+			return nil, nil, err
+		}
+		defer wait.Close()
+		cmd = gateShell(s.executable, cmd, wait)
+	}
 	if err := cmd.Start(); err != nil {
+		if release != nil {
+			_ = release.Close()
+		}
 		_ = master.Close()
 		return nil, nil, err
 	}
+	if release != nil {
+		s.place(cmd.Process.Pid, "terminal", identity.Username)
+		_, _ = release.Write([]byte{1})
+		_ = release.Close()
+	}
 	return cmd, master, nil
+}
+
+// gateShell runs the shell through the broker's own binary, which waits for
+// a byte on descriptor 3 before it becomes the shell: nothing the shell runs,
+// its profile included, happens in the Host Agent's cgroup.
+func gateShell(executable string, shell *exec.Cmd, wait *os.File) *exec.Cmd {
+	gated := exec.Command(executable)
+	gated.Args = append([]string{executable, ShellGateArgument, shell.Path}, shell.Args...)
+	gated.Dir, gated.Env = shell.Dir, shell.Env
+	gated.Stdin, gated.Stdout, gated.Stderr = shell.Stdin, shell.Stdout, shell.Stderr
+	gated.SysProcAttr = shell.SysProcAttr
+	gated.ExtraFiles = []*os.File{wait}
+	return gated
+}
+
+// RunShellGate waits until the broker releases the shell, then becomes it.
+// args are the shell's path followed by its argument list.
+func RunShellGate(args []string) error {
+	if len(args) < 2 {
+		return errors.New("the terminal gate needs the shell's path and arguments")
+	}
+	gate := os.NewFile(3, "terminal-gate")
+	var released [1]byte
+	_, err := io.ReadFull(gate, released[:])
+	_ = gate.Close()
+	if err != nil {
+		return fmt.Errorf("the File Broker did not release the shell: %w", err)
+	}
+	return syscall.Exec(args[0], args[1:], os.Environ())
 }
 
 func ttyGroup() int {

@@ -1,4 +1,4 @@
-import { Database, HardDrive, Lock, ShieldAlert, Thermometer, Unplug, type LucideIcon } from "lucide-react";
+import { Database, FolderLock, HardDrive, Lock, ShieldAlert, Thermometer, Unplug, type LucideIcon } from "lucide-react";
 
 import type { HealthFinding, HostState } from "../api";
 
@@ -33,6 +33,12 @@ export function describeFinding(finding: HealthFinding, disks: HostState["disks"
       return { icon: Database, title: `数据卷已用 ${value}%`, detail: "空间快用完了。可以清理回收站、旧快照或不需要的文件。" };
     case "volume_errors":
       return { icon: ShieldAlert, title: `数据卷记录到 ${value} 次读写或校验错误`, detail: "这是数据卷创建以来的累计次数，通常说明硬盘或线缆有问题。建议备份重要文件并检查硬盘。" };
+    case "volume_reconcile_failed":
+      return {
+        icon: FolderLock,
+        title: "数据卷的权限与共享设置没能更新",
+        detail: "设备没能修复空间的访问权限、记录账号清单或刷新 SMB 共享设置，部分文件或共享可能无法正常使用。管理员可在“设置 → 日志”的 Host Agent 中查看原因；设备每 15 分钟重试一次。",
+      };
     default:
       return { icon: ShieldAlert, title: "发现一项需要注意的状况", detail: "在存储中查看详情。" };
   }

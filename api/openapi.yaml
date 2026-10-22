@@ -3650,7 +3650,7 @@ components:
       properties:
         code:
           type: string
-          enum: [disk_failing, disk_warning, disk_health_unknown, disk_hot, volume_offline, volume_read_only, volume_full, volume_nearly_full, volume_errors]
+          enum: [disk_failing, disk_warning, disk_health_unknown, disk_hot, volume_offline, volume_read_only, volume_full, volume_nearly_full, volume_errors, volume_reconcile_failed]
         severity:
           type: string
           enum: [warning, critical]

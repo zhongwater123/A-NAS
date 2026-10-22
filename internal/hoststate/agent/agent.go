@@ -131,7 +131,9 @@ type handler struct {
 	apps        appid.Host
 	snapshots   files.SnapshotBackend
 	systemLogs  systemlog.Reader
-	logger      *slog.Logger
+	// reconcileFailed reports the last reconciliation of the data volume.
+	reconcileFailed func() bool
+	logger          *slog.Logger
 }
 
 type Services struct {
@@ -144,6 +146,9 @@ type Services struct {
 	Snapshots   files.SnapshotBackend
 	// SystemLogs reads the allowlisted service logs (ADR 0020).
 	SystemLogs systemlog.Reader
+	// ReconcileFailed reports whether the Host Agent's last reconciliation of
+	// the data volume failed; the host state carries it (#166).
+	ReconcileFailed func() bool
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -157,7 +162,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, logger: logger,
+		systemLogs: services.SystemLogs, reconcileFailed: services.ReconcileFailed, logger: logger,
 	}
 }
 
@@ -247,6 +252,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
 		return
 	}
+	state.ReconcileFailed = h.reconcileFailed != nil && h.reconcileFailed()
 	writeJSON(w, http.StatusOK, documentFromDomain(state))
 }
 
@@ -998,6 +1004,9 @@ type stateDocument struct {
 	System     systemDocument      `json:"system"`
 	Disks      []diskDocument      `json:"disks"`
 	DataVolume *dataVolumeDocument `json:"dataVolume,omitempty"`
+	// ReconcileFailed is left out unless set, so a Product Service that
+	// predates it reads a healthy Host Agent's state as before.
+	ReconcileFailed bool `json:"reconcileFailed,omitempty"`
 }
 
 type dataVolumeDocument struct {
@@ -1101,8 +1110,9 @@ func documentFromDomain(state hoststate.State) stateDocument {
 			UptimeSeconds: state.System.UptimeSeconds,
 			Health:        state.System.Health,
 		},
-		Disks:      disks,
-		DataVolume: dataVolume,
+		Disks:           disks,
+		DataVolume:      dataVolume,
+		ReconcileFailed: state.ReconcileFailed,
 	}
 }
 
@@ -1205,8 +1215,9 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			UptimeSeconds: document.System.UptimeSeconds,
 			Health:        document.System.Health,
 		},
-		Disks:      disks,
-		DataVolume: dataVolume,
+		Disks:           disks,
+		DataVolume:      dataVolume,
+		ReconcileFailed: document.ReconcileFailed,
 	}, nil
 }
 
