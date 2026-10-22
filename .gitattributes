@@ -2,6 +2,17 @@
 
 *.sh text eol=lf
 *.bash text eol=lf
+# Read on Linux as written, whatever a Windows checkout's core.autocrlf says.
+*.service text eol=lf
+*.socket text eol=lf
+*.timer text eol=lf
+*.slice text eol=lf
+*.tmpfiles text eol=lf
+*.conf text eol=lf
+*.py text eol=lf
+Makefile text eol=lf
+Caddyfile text eol=lf
+# Windows scripts keep CRLF; .editorconfig says the same.
 *.ps1 text eol=crlf
 *.cmd text eol=crlf
 *.bat text eol=crlf
