@@ -49,7 +49,7 @@ ops-check:
 	grep -Fq 'install -d -m 0700 "$$config_dir/state"' scripts/remote-activate-release.sh
 	grep -Fq 'stage-only' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-host-agent' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba /sys/devices' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api' deploy/systemd/system/anas-api.service
 	grep -Fq 'ANAS_HOST_AGENT_GROUP=a-nas' scripts/install-v1.0.1-system-services.sh
@@ -74,6 +74,7 @@ ops-check:
 	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'KillMode=mixed' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'User=a-nas-shares' deploy/systemd/system/anas-shares.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api share-service' deploy/systemd/system/anas-shares.service
 	grep -Fq 'anas-shares-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh

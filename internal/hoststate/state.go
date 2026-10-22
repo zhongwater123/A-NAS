@@ -167,6 +167,11 @@ type State struct {
 	Disks      []Disk
 	// DataVolume is nil when nothing is mounted as the data volume.
 	DataVolume *DataVolume
+	// ReconcileFailed says the Host Agent's last reconciliation of the data
+	// volume failed: repairing the space permissions, writing the identity
+	// manifest onto it or refreshing the Samba configuration for it. The Host
+	// Agent keeps serving and tries again (#166).
+	ReconcileFailed bool
 }
 
 // Reader returns one point-in-time observation of the host and its disks.

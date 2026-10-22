@@ -74,6 +74,24 @@ func TestAssistantConnectionIsCutWhenTheSessionEnds(t *testing.T) {
 	}
 }
 
+// Like a terminal, an assistant connection is not cut by a session directory
+// that cannot be read for a moment (#166).
+func TestAssistantConnectionOutlivesAPassingSessionDirectoryError(t *testing.T) {
+	h := newAssistantHarness(t)
+	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	roundTrip(t, conn, "before")
+	h.setUnreadable(errors.New("database is locked"))
+	time.Sleep(120 * time.Millisecond)
+	h.setUnreadable(nil)
+	if reply := roundTrip(t, conn, "after"); reply != "alice:after" {
+		t.Fatalf("reply after the passing error = %q", reply)
+	}
+}
+
 func TestStoppingTheBrokerCutsAssistantConnections(t *testing.T) {
 	h := newAssistantHarness(t)
 	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)

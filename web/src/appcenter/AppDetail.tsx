@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { CatalogApp } from "../appsApi";
 import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
-import { appURL, categoryOf, installFailed, openApp, useElapsed } from "./model";
+import { appURL, categoryOf, installFailed, leftoverText, openApp, useElapsed } from "./model";
 
 interface DetailProps {
   app: CatalogApp;
@@ -109,10 +109,11 @@ function HeaderActions({ app, onInstall, onUninstall, onOpenDocker }: Pick<Detai
       </div>
     );
   }
-  if (app.state === "available") {
+  if (app.state === "available" || app.state === "failed") {
     return (
       <div className="ac-app-actions">
         <button className="ac-btn primary lg" onClick={onInstall}><Download />安装</button>
+        {app.state === "failed" && <MoreMenu onUninstall={onUninstall} onOpenDocker={onOpenDocker} />}
       </div>
     );
   }
@@ -224,6 +225,7 @@ function StatusPanel({ app, onInstall, onOpenDocker }: { app: CatalogApp; onInst
   }
 
   if (installFailed(app) && app.job) {
+    const leftovers = leftoverText(app);
     return (
       <section className="ac-status-card error" aria-label="安装失败">
         <div className="ac-status-head">
@@ -234,6 +236,7 @@ function StatusPanel({ app, onInstall, onOpenDocker }: { app: CatalogApp; onInst
           </div>
           <button className="ac-btn" onClick={onInstall}><RotateCcw />重新安装</button>
         </div>
+        {leftovers && <div className="ac-banner-note warning" role="note"><TriangleAlert /><span>{leftovers}</span></div>}
         <JobOutput job={app.job} open />
       </section>
     );

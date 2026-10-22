@@ -50,7 +50,13 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer apps.Wait()
+	// An install this agent was stopped in is rolled back in the background.
+	if err := apps.Recover(); err != nil {
+		logger.Error("some app job records could not be read", "error", err)
+	}
+	// An install still running on shutdown is cancelled and rolled back
+	// before the agent exits; an uninstall is let finish.
+	defer apps.Stop()
 
 	listener, err := listen(socketPath)
 	if err != nil {

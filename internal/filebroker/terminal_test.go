@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -87,6 +88,109 @@ func TestTerminalEndsWhenTheSessionStopsBeingValid(t *testing.T) {
 	}
 }
 
+// A session directory that cannot be read for a moment, as while SQLite is
+// busy, must not hang up a working shell (#166).
+func TestTerminalOutlivesAPassingSessionDirectoryError(t *testing.T) {
+	broker := newTerminalHarness(t, "echo ready; read line; echo got:$line")
+	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	output := bufio.NewReader(shell)
+	waitForLine(t, output, "ready")
+	broker.setUnreadable(errors.New("database is locked"))
+	// Two or three rechecks fail; four in a row would end the shell.
+	time.Sleep(120 * time.Millisecond)
+	broker.setUnreadable(nil)
+	if _, err := shell.Write([]byte("hello\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForLine(t, output, "got:hello")
+}
+
+// A directory that stays unreadable cannot keep a shell alive whose session
+// may have been revoked meanwhile.
+func TestTerminalEndsWhenTheSessionDirectoryStaysUnreadable(t *testing.T) {
+	broker := newTerminalHarness(t, "echo ready; sleep 60")
+	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	waitForLine(t, bufio.NewReader(shell), "ready")
+	broker.setUnreadable(errors.New("database is locked"))
+	select {
+	case <-shell.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shell outlived a session directory that stayed unreadable")
+	}
+}
+
+func TestTerminalIsUnavailableWhileSessionsCannotBeRead(t *testing.T) {
+	broker := newTerminalHarness(t, "echo ready")
+	broker.setUnreadable(errors.New("database is locked"))
+	_, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("StartShell() error = %v, want ErrUnavailable and not a refusal", err)
+	}
+}
+
+// A shell waits until it is in its own scope, so its profile, or anything it
+// logs, never runs as part of the Host Agent (#166).
+func TestTerminalShellStartsOnlyOnceInItsScope(t *testing.T) {
+	placer := &recordingPlacer{marker: filepath.Join(t.TempDir(), "placed")}
+	broker := newTerminalHarness(t, "if test -e "+placer.marker+"; then echo in-scope; else echo too-early; fi",
+		func(config *Config) { config.Scopes = placer })
+	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	waitForLine(t, bufio.NewReader(shell), "in-scope")
+	if placed := placer.calls(); len(placed) != 1 || !strings.HasPrefix(placed[0], "terminal:owner:") {
+		t.Fatalf("placed = %v, want the owner's terminal once", placed)
+	}
+}
+
+// Without its scope the terminal still works: it is the administrator's way
+// in when something else is broken.
+func TestTerminalStartsWhenItsScopeCannotBeMade(t *testing.T) {
+	placer := &recordingPlacer{marker: filepath.Join(t.TempDir(), "placed"), fail: errors.New("systemd is gone")}
+	broker := newTerminalHarness(t, "echo ready", func(config *Config) { config.Scopes = placer })
+	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	waitForLine(t, bufio.NewReader(shell), "ready")
+}
+
+// recordingPlacer stands in for systemd: it notes each placement and leaves a
+// marker file the shell can look for.
+type recordingPlacer struct {
+	mu     sync.Mutex
+	placed []string
+	marker string
+	fail   error
+}
+
+func (p *recordingPlacer) Place(_ context.Context, pid int, what, username string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.placed = append(p.placed, fmt.Sprintf("%s:%s:%d", what, username, pid))
+	if p.fail != nil {
+		return p.fail
+	}
+	return os.WriteFile(p.marker, nil, 0o600)
+}
+
+func (p *recordingPlacer) calls() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.placed...)
+}
+
 func waitForLine(t *testing.T, reader *bufio.Reader, want string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -106,16 +210,28 @@ type terminalHarness struct {
 	client     *Client
 	mu         sync.Mutex
 	identities map[string]accounts.Identity
+	// unreadable, when set, is what every lookup fails with, as a session
+	// directory that SQLite reports busy.
+	unreadable error
 }
 
 func (h *terminalHarness) ResolveSessionIdentity(_ context.Context, token string) (accounts.Identity, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.unreadable != nil {
+		return accounts.Identity{}, h.unreadable
+	}
 	identity, ok := h.identities[token]
 	if !ok {
 		return accounts.Identity{}, accounts.ErrSessionNotFound
 	}
 	return identity, nil
+}
+
+func (h *terminalHarness) setUnreadable(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.unreadable = err
 }
 
 func (h *terminalHarness) revoke(token string) {
@@ -124,20 +240,24 @@ func (h *terminalHarness) revoke(token string) {
 	delete(h.identities, token)
 }
 
-func newTerminalHarness(t *testing.T, script string) *terminalHarness {
+func newTerminalHarness(t *testing.T, script string, adjust ...func(*Config)) *terminalHarness {
 	t.Helper()
 	h := &terminalHarness{identities: map[string]accounts.Identity{
 		"admin-token":  {Username: "owner", UID: 20100, Role: accounts.RoleAdmin, Enabled: true},
 		"member-token": {Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true},
 	}}
 	volume := t.TempDir()
-	server, err := NewServer(Config{
+	config := Config{
 		Sessions: h, VolumeRoot: volume, VolumeReady: func() bool { return true },
 		ShellCommand:    func() *exec.Cmd { return exec.Command("/bin/sh", "-c", script) },
 		LookupUID:       func(string) (int, error) { return 20100, nil },
 		TerminalRecheck: 50 * time.Millisecond,
 		skipCredentials: true,
-	})
+	}
+	for _, change := range adjust {
+		change(&config)
+	}
+	server, err := NewServer(config)
 	if err != nil {
 		t.Fatal(err)
 	}

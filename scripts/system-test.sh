@@ -253,6 +253,11 @@ check "services are active" systemctl is-active --quiet anas-host-agent anas-pho
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
+# Hardening that everything below runs under (issue #166).
+check "Host Agent holds only the capabilities its unit names" \
+  test "$(awk '/^CapBnd:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-host-agent)/status")" = 00000000012a00ff
+check "Host Agent's memory and tasks are limited" \
+  test "$(systemctl show -p MemoryMax --value anas-host-agent):$(systemctl show -p TasksMax --value anas-host-agent)" = 1073741824:512
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
 # --- Accounts: an administrator and a member, each with one Linux identity.
@@ -293,6 +298,12 @@ check "Web upload is owned by the member's UID" \
   test "$(owner_uid "$data/spaces/private/alice/alice.txt")" = "$alice_id"
 check "Web download returns the uploaded bytes" \
   cmp -s /tmp/alice.txt <(curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$alice_file/content")
+# The unit a process runs in: its cgroup's last part. The container's systemd
+# may sit below the host's cgroup root, so only the end is fixed.
+scope_of() { sed -n 's|^0::.*/||p' "/proc/$1/cgroup"; }
+alice_worker=$(pgrep -u "$alice_id" -f 'anas-host-agent file-worker' | head -n 1 || true)
+check "the member's file worker runs in a scope of its own, not the Host Agent's" \
+  grep -Eqx 'anas-files-alice-[0-9]+\.scope' <<<"$(scope_of "$alice_worker" 2>/dev/null)"
 check "member cannot list the administrator's private space" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/spaces/$owner_private/entries")" != 200
 check "member cannot download the administrator's file" \
@@ -476,6 +487,50 @@ check "the shell's exit code reaches the browser" grep -qx 'close 1000 exit 7' <
 check "the local console reaches the terminal too" \
   grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
 check "a member's session gets no shell" denied terminal "$lan" /tmp/lan.jar 'exit 0'
+# The shell runs in a scope of its own, so what it logs is not the Host
+# Agent's, even under its name (issue #166).
+forged_at=$(date '+%Y-%m-%d %H:%M:%S')
+scope_output=$(terminal "$lan" /tmp/owner-lan.jar $'echo "cgroup:$(cat /proc/self/cgroup)"\nlogger -t anas-host-agent "forged by a terminal"\nunshare --user true 2>/dev/null; echo "unshare:$?"\nexit 0\n' || true)
+check "the shell runs in a scope of its own" grep -Eqx 'cgroup:0::/(.*/)?anas-terminal-owner-[0-9]+\.scope' <<<"$scope_output"
+check "the shell cannot create namespaces" grep -qx 'unshare:[1-9][0-9]*' <<<"$scope_output"
+check "what a shell logs reaches the journal" \
+  bash -c "for _ in \$(seq 1 20); do journalctl -t anas-host-agent --since '$forged_at' -o cat --no-pager | grep -Fq 'forged by a terminal' && exit 0; sleep 0.2; done; exit 1"
+check "but not as the Host Agent's" denied journal_has anas-host-agent "$forged_at" 'forged by a terminal'
+check "nor in the Host Agent's log in Settings" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
+
+# --- A data volume the Host Agent cannot reconcile leaves it serving (issue
+# #166). Btrfs turns a volume read-only when it finds errors; a remount stands
+# in. The photo and share services hold databases open for writing on it,
+# which a read-only remount refuses.
+entries /tmp/alice.jar "$alice_private" >/dev/null || true
+scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
+systemctl stop anas-photos anas-shares
+check "the data volume remounts read-only" mount -o remount,ro "$data"
+readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-host-agent
+for _ in $(seq 1 50); do journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed' && break; sleep 0.2; done
+check "restarting the Host Agent ends the scopes it started" \
+  test -n "$scopes_before" -a -z "$(for scope in $scopes_before; do systemctl is-active --quiet "$scope" && echo "$scope"; done)"
+check "the Host Agent serves on a read-only data volume" systemctl is-active --quiet anas-host-agent
+check "it logs that it cannot reconcile the volume" journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed'
+check "and reports that in the host state" \
+  bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed == true' >/dev/null"
+check "Web files still list" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "the terminal still opens" grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
+check "the Host Agent's log still reads in Settings" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system-logs?service=host-agent&q=reconciliation' | jq -e '.items | length > 0' >/dev/null"
+check "the health check names the read-only data volume" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system' | jq -e '[.healthFindings[].code] | index(\"volume_read_only\")' >/dev/null"
+mount -o remount,rw "$data"
+writable_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-host-agent
+systemctl start anas-photos anas-shares
+check "once the volume is writable, the Host Agent reconciles it" \
+  bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
+check "and reports nothing wrong" \
+  bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
+check "sharing recovers on the writable volume" shares_ready
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"
@@ -584,7 +639,7 @@ png += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 open(sys.argv[1], "wb").write(png)
 PY
 check "photo service becomes ready on its own" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-photos -o cat --no-pager | grep -Fq 'photo service ready' && exit 0; sleep 1; done; exit 1"
+  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-photos --since '$writable_at' -o cat --no-pager | grep -Fq 'photo service ready' && exit 0; sleep 1; done; exit 1"
 library_of() { curl -fsS -b "$1" "$api/api/v1/photos/libraries" | jq -r --arg user "$2" '[.items[] | select(.kind == "private" and .ownerUserId == $user)][0].id'; }
 alice_user=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/session" | jq -r .user.id || true)
 alice_library=$(library_of /tmp/alice.jar "$alice_user" || true)

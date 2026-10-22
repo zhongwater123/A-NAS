@@ -172,6 +172,8 @@ stat -c '%a %U:%G %n' \
   /usr/local/lib/a-nas/anas-container-agent
 ```
 
+替换已在运行的代理时，`enable --now` 不会重启它，改用 `systemctl restart anas-container-agent.service`。先在应用中心确认没有正在进行的安装：停止代理会取消安装并用 `compose down` 回滚，应用显示“容器代理停止，安装被中断，已回滚”，需要重新安装；正在进行的卸载会照常完成（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
+
 完成标准：运行目录为 `750 anas-container:anas-container`，socket 为 `660 anas-container:anas-container`，二进制为 `755 root:root`。应用数据根为 `/srv/a-nas/data/apps`，共享根为 `/srv/a-nas/data/spaces/shared`；只有挂载点改变时才通过 `/etc/a-nas/container-agent.env` 修改，并且两个根仍须位于同一数据卷。
 
 启用或切换产品版本之前，从开发机上传并核对 [`scripts/verify-container-deployment.py`](../../scripts/verify-container-deployment.py) 的 SHA-256；在 NAS root 会话以产品身份执行它：

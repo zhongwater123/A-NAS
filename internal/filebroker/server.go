@@ -25,6 +25,13 @@ type SessionResolver interface {
 	ResolveSessionIdentity(context.Context, string) (accounts.Identity, error)
 }
 
+// Placer moves a process the broker started into a scope unit of its own
+// (internal/systemdscope). what says what the process does, as "terminal" or
+// "files", and username for whom.
+type Placer interface {
+	Place(ctx context.Context, pid int, what, username string) error
+}
+
 type Config struct {
 	Sessions   SessionResolver
 	VolumeRoot string
@@ -59,15 +66,22 @@ type Config struct {
 	AssistantChanges string
 	// Accounts names the account behind an assistant's UID.
 	Accounts AccountResolver
+	// Scopes moves each file worker and terminal shell out of the Host
+	// Agent's cgroup into a scope of its own (issue #166); nil leaves them in
+	// the broker's. A shell waits until it is there.
+	Scopes Placer
 
 	// skipCredentials lets unprivileged tests run workers as the test user.
 	skipCredentials bool
 }
 
 type Server struct {
-	config  Config
-	mu      sync.Mutex
-	workers map[workerKey]*worker
+	config Config
+	// executable is the running binary, which also serves as the worker, the
+	// probe and the terminal's gate.
+	executable string
+	mu         sync.Mutex
+	workers    map[workerKey]*worker
 	// assistants are the broker's copies of the assistant connections it
 	// handed out, cut when the broker stops.
 	assistants map[*net.UnixConn]struct{}
@@ -108,9 +122,10 @@ func NewServer(config Config) (*Server, error) {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
-	if config.Command == nil || config.ProbeCommand == nil {
-		executable, err := os.Executable()
-		if err != nil {
+	var executable string
+	if config.Command == nil || config.ProbeCommand == nil || config.Scopes != nil {
+		var err error
+		if executable, err = os.Executable(); err != nil {
 			return nil, fmt.Errorf("locate file worker binary: %w", err)
 		}
 		if config.Command == nil {
@@ -142,7 +157,7 @@ func NewServer(config Config) (*Server, error) {
 			return strconv.Atoi(account.Uid)
 		}
 	}
-	server := &Server{config: config, workers: make(map[workerKey]*worker), assistants: make(map[*net.UnixConn]struct{})}
+	server := &Server{config: config, executable: executable, workers: make(map[workerKey]*worker), assistants: make(map[*net.UnixConn]struct{})}
 	if config.AssistantChanges != "" {
 		server.changes = &assistantchanges.Executor{Root: config.AssistantChanges, Volume: config.VolumeRoot}
 	}
@@ -235,9 +250,9 @@ func (s *Server) dispatch(ctx context.Context, req request) (response, *os.File)
 	if !knownOps[req.Op] {
 		return response{Error: &wireError{Code: codeInvalidRequest, Message: "unknown file operation"}}, nil
 	}
-	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-	if err != nil || !identity.Enabled {
-		return response{Error: &wireError{Code: codeUnauthenticated}}, nil
+	identity, refused := s.identify(ctx, req.Token)
+	if refused != nil {
+		return response{Error: refused}, nil
 	}
 	if !s.config.VolumeReady() {
 		return response{Error: &wireError{Code: codeVolumeUnavailable}}, nil
@@ -255,6 +270,46 @@ func (s *Server) dispatch(ctx context.Context, req request) (response, *os.File)
 		return response{Error: &wireError{Code: codeUnavailable}}, nil
 	}
 	return result, file
+}
+
+// identify verifies the session behind a token. A session that is gone,
+// expired or whose user may not act is unauthenticated. A session directory
+// that cannot be read right now, as while SQLite is busy, is unavailable
+// instead, so a passing error never reads as a signed-out user (#166).
+func (s *Server) identify(ctx context.Context, token string) (accounts.Identity, *wireError) {
+	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, token)
+	switch {
+	case errors.Is(err, accounts.ErrSessionNotFound):
+		return accounts.Identity{}, &wireError{Code: codeUnauthenticated}
+	case err != nil:
+		s.config.Logger.Warn("session directory unavailable", "error", err)
+		return accounts.Identity{}, &wireError{Code: codeUnavailable, Message: "sessions cannot be verified right now"}
+	case !identity.Enabled:
+		return accounts.Identity{}, &wireError{Code: codeUnauthenticated}
+	}
+	return identity, nil
+}
+
+// unconfirmedRechecks is how many rechecks in a row may fail to read the
+// session directory before a terminal or assistant connection ends: two
+// minutes at the default interval.
+const unconfirmedRechecks = 4
+
+// recheck reports whether a terminal or an assistant connection may go on.
+// A session that is gone, or no longer passes keep, ends it at once. One the
+// directory cannot confirm ends it only after unconfirmedRechecks such
+// rechecks in a row, which unconfirmed counts: a passing error does not hang
+// up a working shell, and a directory that stays unreadable does not keep a
+// revoked one alive.
+func (s *Server) recheck(ctx context.Context, token string, unconfirmed *int, keep func(accounts.Identity) bool) bool {
+	current, err := s.config.Sessions.ResolveSessionIdentity(ctx, token)
+	if err != nil && !errors.Is(err, accounts.ErrSessionNotFound) {
+		*unconfirmed++
+		s.config.Logger.Warn("session cannot be confirmed", "error", err, "rechecks", *unconfirmed)
+		return *unconfirmed < unconfirmedRechecks
+	}
+	*unconfirmed = 0
+	return err == nil && current.Enabled && keep(current)
 }
 
 func (s *Server) worker(identity accounts.Identity) (*worker, error) {
@@ -287,8 +342,29 @@ func (s *Server) workerFor(key workerKey, identity accounts.Identity) (*worker, 
 	if err != nil {
 		return nil, err
 	}
+	// The worker reads nothing but its socket until the first request, which
+	// comes after this, so it does no work in the Host Agent's cgroup.
+	s.place(w.cmd.Process.Pid, "files", identity.Username)
 	s.workers[key] = w
 	return w, nil
+}
+
+// placeTimeout bounds asking systemd for a scope; workers start under the
+// broker's lock.
+const placeTimeout = 5 * time.Second
+
+// place moves a worker or shell into a scope of its own. Web files and the
+// terminal matter more than where they are counted, so a failure is logged
+// and the process runs on in the Host Agent's cgroup.
+func (s *Server) place(pid int, what, username string) {
+	if s.config.Scopes == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), placeTimeout)
+	defer cancel()
+	if err := s.config.Scopes.Place(ctx, pid, what, username); err != nil {
+		s.config.Logger.Error("process stays in the Host Agent's cgroup", "what", what, "username", username, "pid", pid, "error", err)
+	}
 }
 
 // credential maps an identity to the worker's UID and groups. Only accounts
