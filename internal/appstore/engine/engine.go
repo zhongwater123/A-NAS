@@ -119,8 +119,11 @@ type Store struct {
 
 	mu     sync.Mutex
 	active string
-	jobs   map[string]*appstore.Job
-	wait   sync.WaitGroup
+	// cancel ends the context of the active job; stopped refuses new jobs.
+	cancel  context.CancelCauseFunc
+	stopped bool
+	jobs    map[string]*appstore.Job
+	wait    sync.WaitGroup
 }
 
 func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, docker Inspector, runner Runner) *Store {
@@ -143,7 +146,7 @@ func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, dock
 	return store
 }
 
-// Wait blocks until running jobs finish; used on shutdown and in tests.
+// Wait blocks until running jobs finish; used in tests.
 func (s *Store) Wait() {
 	s.wait.Wait()
 }
@@ -174,7 +177,11 @@ func (s *Store) Apps(ctx context.Context) ([]appstore.AppStatus, error) {
 				})
 			}
 		}
-		if status.Total > 0 {
+		if status.Total > 0 && failedInstall(s.jobs[id]) {
+			// Containers outlived their failed install: they are reported,
+			// never shown as an installed app.
+			status.State = appstore.StateFailed
+		} else if status.Total > 0 {
 			status.State = appstore.StateInstalled
 			// Installed before secrets were generated: it still uses the
 			// manifest's own logins.
@@ -253,24 +260,41 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 	if err != nil {
 		return appstore.Job{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
 	}
-	if err := conflicts(id, plan, containers); err != nil {
+	s.mu.Lock()
+	replace := failedInstall(s.jobs[id])
+	s.mu.Unlock()
+	if err := conflicts(id, plan, containers, replace); err != nil {
 		return appstore.Job{}, err
 	}
+	leftovers := slices.ContainsFunc(containers, func(container ContainerInfo) bool { return container.AppID == id })
 
 	directory := filepath.Join(s.stateDir, "apps", id)
 	composeFile := filepath.Join(directory, "docker-compose.yml")
 	compose := []string{"compose", "--progress", "plain", "-p", plan.Project, "-f", composeFile}
 	return s.start(id, appstore.JobInstall, installTimeout, func(ctx context.Context, output io.Writer) error {
+		// What a failed install left behind goes first, so that the checks
+		// below see only this install's containers.
+		if leftovers {
+			if err := s.runner.Run(ctx, takeDown(id), output); err != nil {
+				return fmt.Errorf("remove the containers of the failed install: %w", err)
+			}
+		}
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return err
 		}
 		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
 			return err
 		}
-		if err := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans"), output); err != nil {
-			return err
+		// Compose can fail after creating some of the containers, for
+		// example on a port a host process holds or a dependency that is
+		// slow to turn healthy: those are rolled back like any other.
+		failure := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans"), output)
+		if failure != nil {
+			failure = &StartupError{Problem: "Docker Compose 没有完成启动（" + failure.Error() + "）"}
 		}
-		failure := s.mountProblems(ctx, plan)
+		if failure == nil {
+			failure = s.mountProblems(ctx, plan)
+		}
 		if failure == nil {
 			failure = s.runtimeProblems(ctx, plan)
 		}
@@ -279,24 +303,37 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		}
 		if failure == nil {
 			failure = s.startupProblem(ctx, plan.Project)
-			if failure != nil {
-				// The app's own words on why it stopped go into the output.
-				_ = s.runner.Run(ctx, append(compose, "logs", "--no-color", "--tail", "20"), output)
-			}
 		}
 		if failure == nil {
 			return nil
 		}
-		// Docker did not keep the app inside its plan, or it did not keep
-		// running: roll it back.
-		if err := s.runner.Run(ctx, append(compose, "down", "--remove-orphans"), output); err != nil {
+		if errors.Is(context.Cause(ctx), errStopping) {
+			failure = errStopping
+		} else if errors.Is(failure, appstore.ErrAppNotRunning) && ctx.Err() == nil {
+			// The app's own words on why it stopped go into the output.
+			_ = s.runner.Run(ctx, append(compose, "logs", "--no-color", "--tail", "20"), output)
+		}
+		// Docker did not start the app, keep it inside its plan or keep it
+		// running, or the agent is stopping: roll it back, even when the
+		// install was cancelled or ran out of time.
+		rollback, cancel := context.WithTimeout(context.WithoutCancel(ctx), uninstallTimeout)
+		defer cancel()
+		if err := s.runner.Run(rollback, append(compose, "down", "--remove-orphans"), output); err != nil {
 			return fmt.Errorf("%w; the install could not be rolled back: %v", failure, err)
 		}
-		if errors.Is(failure, appstore.ErrAppNotRunning) {
+		switch {
+		case errors.Is(failure, errStopping):
+			return fmt.Errorf("%w，已回滚，请重新安装", failure)
+		case errors.Is(failure, appstore.ErrAppNotRunning):
 			return fmt.Errorf("%w，安装已回滚；最近的日志见下方输出", failure)
 		}
 		return fmt.Errorf("%w; the install was rolled back", failure)
 	})
+}
+
+// failedInstall reports whether an app's latest job is an install that failed.
+func failedInstall(job *appstore.Job) bool {
+	return job != nil && job.Action == appstore.JobInstall && job.State == appstore.JobFailed
 }
 
 // checkRuntime refuses to plan on a Docker that would mount whole volumes,
@@ -476,55 +513,64 @@ func (s *Store) Uninstall(ctx context.Context, id string) (appstore.Job, error) 
 	if !installed {
 		return appstore.Job{}, appstore.ErrNotInstalled
 	}
-	// App data under the app-data root is kept; only containers and the
-	// project network are removed.
-	args := []string{"compose", "--progress", "plain", "-p", appstore.ProjectName(id), "down", "--remove-orphans"}
 	return s.start(id, appstore.JobUninstall, uninstallTimeout, func(ctx context.Context, output io.Writer) error {
-		return s.runner.Run(ctx, args, output)
+		return s.runner.Run(ctx, takeDown(id), output)
 	})
 }
 
+// takeDown is the Compose command that removes an app's containers and
+// project network; app data under the app-data root is kept.
+func takeDown(id string) []string {
+	return []string{"compose", "--progress", "plain", "-p", appstore.ProjectName(id), "down", "--remove-orphans"}
+}
+
 // start runs one job at a time in the background; run receives the job's
-// output, of which the job keeps the tail.
+// output, of which the job keeps the tail. The job is recorded before it
+// runs, so that a restart of the agent finds it (Recover).
 func (s *Store) start(id string, action appstore.JobAction, timeout time.Duration, run func(context.Context, io.Writer) error) (appstore.Job, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return appstore.Job{}, fmt.Errorf("%w: the container agent is stopping", appstore.ErrUnavailable)
+	}
 	if s.active != "" {
-		s.mu.Unlock()
 		return appstore.Job{}, appstore.ErrBusy
 	}
 	job := &appstore.Job{AppID: id, Action: action, State: appstore.JobRunning, StartedAt: s.now().UTC()}
-	s.active = id
+	if err := s.saveJob(job); err != nil {
+		return appstore.Job{}, fmt.Errorf("%w: record the job: %v", appstore.ErrUnavailable, err)
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	s.active, s.cancel = id, cancel
 	s.jobs[id] = job
-	snapshot := copyJob(job)
 	s.wait.Add(1)
-	s.mu.Unlock()
 
 	go func() {
 		defer s.wait.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		err := run(ctx, &jobWriter{store: s, job: job})
+		timed, stop := context.WithTimeout(ctx, timeout)
+		err := run(timed, &jobWriter{store: s, job: job})
+		stop()
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		job.FinishedAt = s.now().UTC()
-		job.State = appstore.JobSucceeded
-		if err != nil {
-			job.State = appstore.JobFailed
-			job.Error = err.Error()
-		}
-		s.active = ""
+		s.end(job, err)
+		s.active, s.cancel = "", nil
+		cancel(nil)
 	}()
-	return snapshot, nil
+	return copyJob(job), nil
 }
 
 // conflicts rejects installs whose ports or container names are taken by
-// containers outside the app.
-func conflicts(id string, plan appstore.Plan, containers []ContainerInfo) error {
+// containers outside the app, and installs of an installed app unless
+// replace allows the containers of a failed install.
+func conflicts(id string, plan appstore.Plan, containers []ContainerInfo, replace bool) error {
 	used := map[uint16]string{}
 	names := map[string]bool{}
 	for _, container := range containers {
 		if container.AppID == id {
-			return appstore.ErrAlreadyInstalled
+			if !replace {
+				return appstore.ErrAlreadyInstalled
+			}
+			continue
 		}
 		names[container.Name] = true
 		for _, port := range container.PublishedPorts {

@@ -88,6 +88,7 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
     - 文件 Worker 与终端 Shell 各在自己的 systemd scope 中运行，日志不再算作 Host Agent 的（[调查](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)）。
 
     产品服务与 Host Agent 须同版本部署。部署后在实机核对 `CapBnd`、`systemd-cgls` 中的 scope、裸机上 `/sys` 是否只读，以及加盘后 udev 重新探测是否仍正常；运行一周后查看 `MemoryPeak` 与 `TasksCurrent`，确认上限合适。
+26. 应用安装失败显示为“已安装”（[#169](https://github.com/zhongwater123/A-NAS/issues/169)，2026-10-21，[PR #213](https://github.com/zhongwater123/A-NAS/pull/213)，未合并、未部署）：`compose up` 出错时回滚，每个应用最近一次任务记在容器代理状态目录，代理停止时取消安装并回滚、启动时回滚中断的安装，回滚没完成的安装显示为失败，单元设 `KillMode=mixed`（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。部署须同时更新容器代理（含单元与 `daemon-reload`）与产品服务；部署后在实验 NAS 上安装时重启代理，确认显示安装被中断且没有留下容器。
 
 ## 外部条件与限制
 

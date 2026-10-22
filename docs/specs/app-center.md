@@ -1,7 +1,7 @@
 # 应用中心
 
 状态：implemented
-更新时间：2026-10-12
+更新时间：2026-10-21
 
 ## 目标
 
@@ -50,7 +50,7 @@
 
 - Given：用户已查看安装计划。
 - When：点击“确认安装”。
-- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`，再观察约 20 秒：有容器不断重启、以非零退出码退出、没有启动或健康检查失败时，取 Compose 日志最后 20 行写入输出，执行 `compose down` 回滚，任务以“容器 n8n 启动后不断重启（退出码 1），安装已回滚”这样的原因失败。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口、登录信息和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”、访问地址和登录信息，容器同时出现在 Docker 窗口。安装后才停止运行的容器在详情页逐个说明原因（不断重启、已退出及退出码、没有启动），并提示在 Docker 中查看日志。
+- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`，再观察约 20 秒：有容器不断重启、以非零退出码退出、没有启动或健康检查失败时，取 Compose 日志最后 20 行写入输出，执行 `compose down` 回滚，任务以“容器 n8n 启动后不断重启（退出码 1），安装已回滚”这样的原因失败。`up` 本身出错时（例如端口被宿主机进程占用，或 Linkwarden 的 postgres 没有及时通过健康检查，此时已有容器在运行）同样取日志并回滚，任务以“Docker Compose 没有完成启动（…），安装已回滚”失败。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口、登录信息和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”、访问地址和登录信息，容器同时出现在 Docker 窗口。安装后才停止运行的容器在详情页逐个说明原因（不断重启、已退出及退出码、没有启动），并提示在 Docker 中查看日志。
 
 ### 打开与管理已安装应用
 
@@ -81,6 +81,18 @@
 - When：出现计划过期、端口或容器名被占用、另一任务正在运行、数据卷不可用、容器代理不可达或 Compose 失败。
 - Then：在安装面板中分别提示“应用清单已变化，请重新确认安装计划”（并自动重新生成计划）“端口已被占用（端口与占用者）”“容器名已被占用”“另一个应用正在安装或卸载”“数据卷当前不可用”“无法连接容器代理”；Compose 失败时面板与详情页显示失败原因和展开的输出，并提供重新查看安装计划。未启用时显示“应用中心未启用”，无法连接时提供“重新连接”；读取过列表后连接中断时保留上次的状态并提示。
 
+### 没有回滚干净的安装
+
+- Given：安装失败，回滚的 `compose down` 也失败（例如 Docker 当时不可达），应用的容器留在 Docker 中。
+- When：查看应用中心。
+- Then：应用状态为“failed”而不是“已安装”：卡片注明“上次安装失败”并提供“安装”，不提供“打开”，也不出现在桌面；“已安装”页显示“安装失败，打开查看原因”。详情页与安装面板显示失败原因、输出和“回滚没有完成：N 个容器留在 Docker 中（M 个运行中），它们没有按安装计划核对……”，“更多操作”提供“在 Docker 中查看”与“卸载”。重新安装不返回 `already_installed`：任务先按项目 `compose down` 删除这些容器，再照常安装与核对；卸载同样删除它们。
+
+### 安装中停止或重启容器代理
+
+- Given：安装任务正在运行，部署、`apt upgrade` 或 Docker 重启停止了容器代理，或代理崩溃。
+- When：代理停止，或再次启动。
+- Then：停止时代理取消安装（终止正在运行的 Compose），用不受取消影响、最长 5 分钟的 `compose down` 回滚，任务以“容器代理停止，安装被中断，已回滚，请重新安装”失败；正在进行的卸载不取消，照常完成。代理在 60 秒停止时限内没有完成（或崩溃）时，再次启动后发现记录中仍在运行的安装，后台 `compose down` 删除它的容器，期间应用显示“安装中”、其他任务返回 `app_busy`，任务以“容器代理在安装过程中重启，安装没有完成核对，安装已回滚，请重新安装”失败；中断的卸载则重新执行 `compose down` 完成。重启前已结束的任务（成功或失败的原因与输出）在重启后照常显示。
+
 ## 边界与失败
 
 - 清单与安装策略见 [ADR 0010](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)；`catalog_test.go` 渲染每个内置应用，确保列出的应用都能通过策略。当前内置 37 个应用，来源提交为 CasaOS-AppStore `0909364`；入选标准、运行身份证据与未入选原因见[应用目录扩充评审](../research/app-catalog-review-2026-10.md)。
@@ -102,7 +114,7 @@
 - **Docker 网络**（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）：计划列出 Compose 将新建的网络，包括服务未设 `network_mode: bridge` 时的隐式 `default` 网络。清单自带 `ipam` 子网或驱动的网络被拒绝。应用有网络而 Docker 未配置 `default-address-pools` 时，规划与安装都返回 `409 address_pool_missing`。安装后，项目网络的每个子网都必须落在地址池内；有任一不在池内或无法检查时，立即 `compose down` 回滚，任务失败并写明网络与网段。
 - 局限：镜像自带身份的服务可能以 root 写入它自己的应用数据目录；初始化后降权的镜像，其入口程序与监管进程以 root 运行。rootful Docker 下，容器逃逸漏洞对以 root 运行的容器意味着宿主机 root。
 - 端口冲突检查基于 Docker 已发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
-- 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出，任务状态保存在容器代理内存中，重启后丢失但已安装状态由容器标签恢复。
+- 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出。每个应用最近一次任务（动作、状态、起止时间、输出与错误）在任务开始和结束时写入容器代理状态目录 `jobs/<app>.json`（目录 0700、文件 0600，输出可能含应用自己的日志），重启后读回；开始时写不进记录则拒绝任务（`503 apps_unavailable`）。应用状态由容器标签与这条记录共同决定：有容器且最近一次是成功的安装（或没有记录，即早于记录的安装）为“已安装”，有容器而最近一次是失败的安装为“failed”。代理单元设 `KillMode=mixed`，停止时 systemd 只向代理本身发 SIGTERM，由代理取消安装并用 Compose 回滚；60 秒后仍剩下的进程被 SIGKILL，留下的安装由下次启动回滚（[#169](https://github.com/zhongwater123/A-NAS/issues/169)）。
 - **桌面快捷方式**：`GET /api/v1/app-shortcuts` 对所有已登录账号开放，只返回已安装且有网页端口的应用的 ID、名称、网页端口、协议、路径与运行中/全部容器数，不含安装计划、Compose、登录信息或镜像；`GET /api/v1/app-shortcuts/{id}/icon` 返回应用目录中的图标（与应用中心的图标相同的缓存与沙箱头）。应用中心未启用时列表为空，容器代理不可达时返回 `503`，桌面保留上一次的图标。
 - 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求 Host 为 `localhost` 或 IP 地址（[局域网 Web 访问](lan-web-access.md)）、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
 
@@ -116,9 +128,9 @@
 - 2026-10-08 Experimental NAS（Debian 13 自带 Docker 26.1.5、Compose 2.26.1）：真实拉取并安装 OpenList 4.2.2，以 `app-openlist` 运行，见 [OpenList 运行身份调查](../investigations/2026-10-08-openlist-runtime-identity.md)。
 - 产品接口：[应用中心 API 测试](../../internal/appstoreapi/handler_test.go) 覆盖安装前预建文件夹、卸载撤销与数据卷离线拒绝；[桌面快捷方式测试](../../internal/appstoreapi/shortcuts_test.go) 覆盖只列出已安装且有网页端口的应用、未启用时为空列表、图标的沙箱头与 404/405；[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go) 另覆盖成员可以读取快捷方式与图标、未登录返回 401，且响应中没有安装细节。
 - 桌面快捷方式：[桌面测试](../../web/src/App.test.tsx) 的 “Installed apps on the desktop” 覆盖点击图标与在启动器中回车都按当前主机和网页端口在新窗口打开、未运行的应用标注“未运行”且管理员点击后打开 Docker、成员也能看到已安装的应用而未运行的不可点击。
-- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。`TestPlanRefusesADockerThatDropsVolumeSubpaths`、`TestInstallRollsBackAMountBeyondItsFolder` 与 `TestInstallKeepsMountsOnTheirFolders` 覆盖过旧的 Compose 或 Engine API 被拒绝、挂载超出计划文件夹时回滚与正确挂载时正常安装；`TestInstallRollsBackAContainerThatDoesNotRunAsPlanned`、`TestInstallRollsBackAWritableReadOnlyFolder` 与 `TestAppsReportContainersFromOlderRuntimeRules` 覆盖用户、组、能力、`no-new-privileges` 或服务与计划不符时回滚、只读挂载变成可写时回滚，以及按旧规则安装的应用被标出。
+- 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。`TestPlanRefusesADockerThatDropsVolumeSubpaths`、`TestInstallRollsBackAMountBeyondItsFolder` 与 `TestInstallKeepsMountsOnTheirFolders` 覆盖过旧的 Compose 或 Engine API 被拒绝、挂载超出计划文件夹时回滚与正确挂载时正常安装；`TestInstallRollsBackAContainerThatDoesNotRunAsPlanned`、`TestInstallRollsBackAWritableReadOnlyFolder` 与 `TestAppsReportContainersFromOlderRuntimeRules` 覆盖用户、组、能力、`no-new-privileges` 或服务与计划不符时回滚、只读挂载变成可写时回滚，以及按旧规则安装的应用被标出。[#169](https://github.com/zhongwater123/A-NAS/issues/169) 的两种情形：`TestInstallRollsBackWhenComposeFailsPartway` 让 `up` 在建出 Linkwarden 的 3 个容器中的 2 个运行后出错，确认依次执行 `up`、`logs`、`down` 且应用回到“可安装”并给出原因；`TestContainersOfAFailedInstallAreNotAnInstalledApp` 让回滚也失败，确认状态为 failed（2/3 运行、不显示登录信息），重新安装先按项目 `down` 再 `up`；`TestStoppingTheAgentRollsBackARunningInstall` 在 `up` 进行中停止代理，确认安装被取消并回滚、停止后拒绝新任务、记录为 0600，且重新启动的代理显示同一失败原因；`TestRecoverRollsBackAnInstallTheAgentDiedIn` 与 `TestRecoverFinishesAnUninstallTheAgentDiedIn` 模拟代理在安装或卸载中途被杀，确认再次启动后回滚期间显示“安装中”并拒绝其他任务，随后删除容器并报告失败，或完成卸载。
 - 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)（含分类、使用须知与链接往返，以及丢弃旧版代理的 CasaOS 分类）、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[应用中心测试](../../web/src/appcenter/AppCenterPanel.test.tsx) 覆盖分类浏览、按命中位置排序的搜索与 Esc 清空、Markdown 与使用须知（表格、无图片、新窗口链接）、A-NAS 版须知与折叠的上游原始说明及其标题层级、计划 → 进度 → 完成并按当前主机打开应用、关闭计划后焦点回到“安装”、失败原因与重新安装、重新安装时不把上一次的失败当作结果、另一任务进行时禁止确认、已安装列表与从菜单卸载（取消时焦点回到菜单按钮）、未分类应用列在“其他”、登录信息默认隐藏并可显示与复制（复制后焦点留在按钮上）、旧安装显示清单默认密码的警示、计划逐个列出服务的运行方式并说明共享空间只读、按旧规则安装的应用提示重装，写请求都带 CSRF 令牌；[桌面测试](../../web/src/App.test.tsx) 覆盖从桌面打开后按摘要安装、端口冲突提示、未启用状态、Docker 网络与地址池显示、地址池缺失与数据卷不可用提示。
+- 前端：[应用中心测试](../../web/src/appcenter/AppCenterPanel.test.tsx) 覆盖分类浏览、按命中位置排序的搜索与 Esc 清空、回滚没有完成的安装显示为失败（不显示“打开”与运行中的容器数，说明留下的容器，提供卸载与重新安装）、Markdown 与使用须知（表格、无图片、新窗口链接）、A-NAS 版须知与折叠的上游原始说明及其标题层级、计划 → 进度 → 完成并按当前主机打开应用、关闭计划后焦点回到“安装”、失败原因与重新安装、重新安装时不把上一次的失败当作结果、另一任务进行时禁止确认、已安装列表与从菜单卸载（取消时焦点回到菜单按钮）、未分类应用列在“其他”、登录信息默认隐藏并可显示与复制（复制后焦点留在按钮上）、旧安装显示清单默认密码的警示、计划逐个列出服务的运行方式并说明共享空间只读、按旧规则安装的应用提示重装，写请求都带 CSRF 令牌；[桌面测试](../../web/src/App.test.tsx) 覆盖从桌面打开后按摘要安装、端口冲突提示、未启用状态、Docker 网络与地址池显示、地址池缺失与数据卷不可用提示。
 - 2026-10-12 Chromium，模拟模式：在 1180×780（默认窗口与最大化）和 800×660（窄窗口横条）下检查发现、分类、搜索、已安装、详情、安装计划、进度、完成、卸载确认与卸载进度；以临时替换的接口数据检查安装失败、部分容器未运行与安装中的列表和详情。
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：通过产品 API 与容器代理安装 Memos——本机 Docker 无法访问 Docker Hub，首次安装如实失败并显示拉取错误；以本地镜像临时标记为 `neosmemo/memos:0.28.0` 后，安装成功（容器带 `a-nas-memos` 项目与 `io.a-nas.app` 标签，绑定目录重写到应用数据根，Docker 窗口可见），重复安装返回 `already_installed`，卸载后容器与网络删除且数据保留；过期摘要返回 `plan_changed`，跨站请求返回 `forbidden`。Chromium 中模拟模式完成浏览、计划、安装、卸载全流程，26 个图标全部加载。临时镜像标签与测试数据已清理。
 
@@ -126,8 +138,9 @@
 
 - ADR：[0010 内置清单与安装策略](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)、[0009 Docker Engine 与专用容器代理](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)、[0022 应用容器只以应用身份接触共享空间](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)
 - 调查：[应用容器拿不到共享空间的组权限，root 镜像绕过 ACL](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)
+- 调查：[安装失败的应用显示为“已安装”，容器代理重启打断安装](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)
 - 规格：[容器管理](container-management.md)
 - 运行手册：[安装 Docker 与容器代理](../runbooks/install-container-agent.md)
 - 规格：[设置](settings.md)（视觉语言）
 - 调查：[Kiosk 浏览器约束](../investigations/2026-10-06-kiosk-browser-confinement.md)
-- 代码：[`internal/appstore`](../../internal/appstore/appstore.go)、[分类](../../internal/appstore/categories.go)、[`internal/appstoreapi`](../../internal/appstoreapi/handler.go)、[应用中心界面](../../web/src/appcenter/AppCenterPanel.tsx)
+- 代码：[`internal/appstore`](../../internal/appstore/appstore.go)、[任务记录与恢复](../../internal/appstore/engine/jobs.go)、[容器代理单元](../../deploy/systemd/system/anas-container-agent.service)、[分类](../../internal/appstore/categories.go)、[`internal/appstoreapi`](../../internal/appstoreapi/handler.go)、[应用中心界面](../../web/src/appcenter/AppCenterPanel.tsx)

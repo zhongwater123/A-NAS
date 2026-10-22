@@ -5,7 +5,7 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 
 import { AppJob, AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
 import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
-import { appURL, describeError, installFailed, mountLabels, openApp, runAsLabels, runtimeSummary, serviceText, useElapsed } from "./model";
+import { appURL, describeError, installFailed, leftoverText, mountLabels, openApp, runAsLabels, runtimeSummary, serviceText, useElapsed } from "./model";
 
 interface SheetProps {
   app: CatalogApp;
@@ -261,12 +261,14 @@ function Finished({ app, onClose }: { app: CatalogApp; onClose: () => void }) {
 }
 
 function Failed({ app, onClose, onRetry }: { app: CatalogApp; onClose: () => void; onRetry: () => void }) {
+  const leftovers = leftoverText(app);
   return (
     <>
       <div className="ac-stage">
         <span className="ac-stage-icon error"><AppIcon app={app} size="lg" /><b><X /></b></span>
         <h3>{app.title} 没有安装成功</h3>
         <p role="alert">{app.job?.error || "Docker Compose 没有成功启动应用，详见下方输出。"}</p>
+        {leftovers && <div className="ac-banner-note warning" role="note"><TriangleAlert /><span>{leftovers}</span></div>}
         {app.job && <JobOutput job={app.job} open />}
       </div>
       <footer className="ac-sheet-foot">

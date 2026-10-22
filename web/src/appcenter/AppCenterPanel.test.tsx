@@ -259,6 +259,28 @@ describe("AppCenterPanel", () => {
     expect(await screen.findByRole("dialog", { name: "安装计划" })).toBeTruthy();
   });
 
+  // #169: Compose failed partway and the rollback did not finish either.
+  it("shows the containers a failed install left as a failure, never as installed", async () => {
+    const error = "Docker Compose 没有完成启动（compose command failed: exit status 1）; the install could not be rolled back";
+    serve(() => [app("linkwarden", { state: "failed", running: 2, total: 3, webPort: 3428, job: job({ appId: "linkwarden", state: "failed", error }) })]);
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+
+    expect(await screen.findByText("上次安装失败")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开 Linkwarden" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Linkwarden，安装失败" }));
+    const failed = screen.getByRole("region", { name: "安装失败" });
+    expect(within(failed).getByText(error)).toBeTruthy();
+    expect(within(failed).getByText(/3 个容器留在 Docker 中（2 个运行中）/)).toBeTruthy();
+    expect(screen.queryByText(/个容器运行中/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    expect(screen.getByRole("menuitem", { name: "卸载" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await user.click(within(failed).getByRole("button", { name: "重新安装" }));
+    expect(await screen.findByRole("dialog", { name: "安装计划" })).toBeTruthy();
+  });
+
   it("does not show an earlier failure as the result of a new install", async () => {
     const earlier = job({ state: "failed", error: "pull access denied", startedAt: "2026-10-12T08:00:00Z" });
     const retried = job({ startedAt: "2026-10-12T09:00:00Z" });
