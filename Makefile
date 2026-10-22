@@ -8,7 +8,7 @@ VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet test ai-test root-integration-test system-test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet vuln-check test ai-test root-integration-test system-test build build-binaries check check-steps clean
 
 all: check
 
@@ -140,6 +140,11 @@ ops-check:
 vet:
 	$(GO) vet ./...
 
+# Fails on known vulnerabilities that the code can reach. The scanner is pinned
+# by the tool directive in go.mod; it fetches the database from vuln.go.dev.
+vuln-check:
+	$(GO) tool govulncheck ./...
+
 test:
 	$(GO) test ./...
 
@@ -174,7 +179,7 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet test ai-test build-binaries
+check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet vuln-check test ai-test build-binaries
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
