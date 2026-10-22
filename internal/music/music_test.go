@@ -21,6 +21,7 @@ import (
 	"github.com/mewkiz/flac/meta"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -290,6 +291,29 @@ func TestScanIndexesTagsCoversLyricsAndDurations(t *testing.T) {
 	_ = stream.Reader.Close()
 	if err != nil || string(header) != "fLaC" || stream.Track.ContentType() != "audio/flac" {
 		t.Errorf("stream starts %q with %q (%v)", header, stream.Track.ContentType(), err)
+	}
+}
+
+func TestCoversThatPanicTheDecoderLeaveTheScanRunning(t *testing.T) {
+	panicking := imagetest.PanickingPicture()
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "Embedded", "song.mp3"), mp3File(10,
+		id3Frame("TIT2", text("Song")),
+		id3Frame("APIC", append(append([]byte{0}, "image/png\x00"...), append([]byte{3, 0}, panicking...)...)),
+	))
+	write(t, filepath.Join(f.shared, "Folder", "aria.flac"), flacFile(t, 44100, nil, [2]string{"TITLE", "Aria"}))
+	write(t, filepath.Join(f.shared, "Folder", "cover.jpg"), panicking)
+
+	status := f.scan(t, f.admin)
+	if status.Tracks != 2 {
+		t.Fatalf("library holds %d tracks, want 2", status.Tracks)
+	}
+	tracks := f.tracks(t, f.admin)
+	for _, title := range []string{"Song", "Aria"} {
+		track, ok := tracks[title]
+		if !ok || track.CoverID != "" {
+			t.Errorf("track %q = %+v (indexed %v), want it indexed without a cover", title, track, ok)
+		}
 	}
 }
 

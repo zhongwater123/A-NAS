@@ -34,6 +34,8 @@ const maxCoverBytes = 16 << 20
 // maxCoverPixels bounds decoded cover dimensions before any allocation.
 const maxCoverPixels = 50_000_000
 
+var errUndecodableCover = errors.New("cover picture cannot be decoded")
+
 // coverStore keeps square JPEG renditions of album art on the system disk,
 // named by the SHA-256 of the source picture: tracks of one album share a
 // rendition, and it never needs invalidating. Covers are derived data and can
@@ -76,13 +78,20 @@ func (c coverStore) Path(id, size string) (string, error) {
 }
 
 // Put stores the renditions of a picture and returns its cover ID. A picture
-// stored before is not decoded again.
-func (c coverStore) Put(picture []byte) (string, error) {
+// stored before is not decoded again. A decoder panic counts as an
+// undecodable picture: covers are decoded by background scans, and the same
+// bytes would panic again on every scan.
+func (c coverStore) Put(picture []byte) (id string, err error) {
+	defer func() {
+		if recover() != nil {
+			id, err = "", errUndecodableCover
+		}
+	}()
 	if len(picture) == 0 || len(picture) > maxCoverBytes {
 		return "", errors.New("cover picture size is out of range")
 	}
 	sum := sha256.Sum256(picture)
-	id := hex.EncodeToString(sum[:16])
+	id = hex.EncodeToString(sum[:16])
 	if _, err := c.Path(id, CoverLarge); err == nil {
 		if _, err := c.Path(id, CoverSmall); err == nil {
 			return id, nil
