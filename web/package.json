@@ -11,7 +11,8 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "vite build"
+    "build": "vite build",
+    "format": "biome format --write ."
   },
   "dependencies": {
     "@assistant-ui/core": "0.2.23",
@@ -40,6 +41,7 @@
     "tus-js-client": "4.3.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.2",
     "@testing-library/jest-dom": "6.1.2",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.7",
