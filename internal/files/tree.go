@@ -18,33 +18,36 @@ type TreeEntry struct {
 }
 
 // Tree lists everything below a directory of a space, or below the space root
-// when directoryID is empty, after reconciling the space with the file
-// system. The media center scans its libraries with it.
+// when directoryID is empty, after reconciling that part of the space with
+// the file system. The media center and music scan their libraries with it.
 func (s *Service) Tree(ctx context.Context, actor accounts.User, spaceID, directoryID string) ([]TreeEntry, error) {
 	space, root, err := s.authorizedSpace(ctx, actor, spaceID, false)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.reconcile(ctx, space, root); err != nil {
-		return nil, err
-	}
+	query := `
+SELECT id, space_id, parent_id, name, kind, size_bytes, modified_at, relative_path
+FROM entries WHERE space_id = ? AND trashed = 0`
+	arguments := []any{spaceID}
 	prefix := ""
-	if directoryID != "" {
-		var kind EntryKind
-		err := s.store.db.QueryRowContext(ctx, "SELECT kind, relative_path FROM entries WHERE id = ? AND space_id = ? AND trashed = 0",
-			directoryID, spaceID).Scan(&kind, &prefix)
-		if errors.Is(err, sql.ErrNoRows) || (err == nil && kind != EntryKindDirectory) {
-			return nil, ErrNotFound
+	if directoryID == "" {
+		if err := s.reconcileWhole(ctx, space, root); err != nil {
+			return nil, err
 		}
+	} else {
+		relative, err := s.directoryScope(ctx, space, root, directoryID)
 		if err != nil {
 			return nil, err
 		}
-		prefix += "/"
+		if _, err := s.reconcile(ctx, spaceID, root, scope{id: directoryID, relative: relative}); err != nil {
+			return nil, err
+		}
+		from, to := below(relative)
+		query += " AND relative_path >= ? AND relative_path < ?"
+		arguments = append(arguments, from, to)
+		prefix = from
 	}
-	rows, err := s.store.db.QueryContext(ctx, `
-SELECT id, space_id, parent_id, name, kind, size_bytes, modified_at, relative_path
-FROM entries WHERE space_id = ?1 AND trashed = 0 AND substr(relative_path, 1, length(?2)) = ?2
-ORDER BY relative_path`, spaceID, prefix)
+	rows, err := s.store.db.QueryContext(ctx, query+" ORDER BY relative_path", arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +59,7 @@ ORDER BY relative_path`, spaceID, prefix)
 		if err := rows.Scan(&entry.ID, &entry.SpaceID, &entry.ParentID, &entry.Name, &entry.Kind, &entry.SizeBytes, &modifiedAt, &relativePath); err != nil {
 			return nil, err
 		}
-		if strings.HasPrefix(relativePath, ".a-nas-stale/") {
+		if strings.HasPrefix(relativePath, unplacedPrefix) {
 			continue
 		}
 		entry.ModifiedAt, _ = time.Parse(time.RFC3339Nano, modifiedAt)
@@ -88,7 +91,7 @@ FROM entries WHERE id = ? AND trashed = 0`, entryID).Scan(
 	if err != nil {
 		return Entry{}, "", err
 	}
-	if !allowed || strings.HasPrefix(relativePath, ".a-nas-stale/") {
+	if !allowed || strings.HasPrefix(relativePath, unplacedPrefix) {
 		return Entry{}, "", ErrNotFound
 	}
 	entry.ModifiedAt, _ = time.Parse(time.RFC3339Nano, modifiedAt)

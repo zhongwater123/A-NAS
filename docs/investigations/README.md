@@ -47,6 +47,8 @@
 - [2026-10-21：安装失败的应用显示为“已安装”，容器代理重启打断安装](2026-10-21-failed-app-install-shown-as-installed.md)（fixed locally；Experimental NAS verification pending）
 - [2026-10-21：媒体 Worker 短暂不可用让 HEIC 与视频的缩略图和 AI 永久失败](2026-10-21-media-worker-shared-budget.md)（fixed locally；Experimental NAS verification pending）
 
+- [2026-10-21：每次列目录对账整个空间，大空间下列目录与影视扫描以十秒计](2026-10-21-whole-space-reconcile-scale.md)（fixed locally；待部署验收）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。

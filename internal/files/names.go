@@ -80,7 +80,7 @@ func checkName(name, current string) error {
 func (s *Service) caseTwin(ctx context.Context, spaceID, parentID, name, except string) (Entry, bool, error) {
 	// SQLite folds ASCII only, so the folder's names are compared here.
 	rows, err := s.store.db.QueryContext(ctx, `SELECT id, name, kind FROM entries
-WHERE space_id = ? AND parent_id = ? AND trashed = 0 AND id <> ? AND length(name) = length(?)`,
+WHERE space_id = ? AND parent_id = ? AND trashed = 0 AND id <> ? AND length(name) = length(?) AND `+placed,
 		spaceID, parentID, except, name)
 	if err != nil {
 		return Entry{}, false, err

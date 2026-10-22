@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
@@ -268,7 +269,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
     resource_id TEXT NOT NULL,
     occurred_at TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
-)`); err != nil {
+);
+` + activity.IndexStatement); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

@@ -304,8 +304,11 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 			f.mu.Unlock()
 			f.reply(conn, msg.ID, `{"scope":{"session_id":"`+fakeStored+`","controller_id":"vnas-window","capabilities":["browser_snapshot"]}}`)
 		case "browser.controller.result":
-			f.results <- string(msg.Params)
+			// The answer goes before the turn hears of the result. Otherwise the
+			// turn's message.complete can come first, and the window's call,
+			// which passes over every frame before its answer, swallows it.
 			f.reply(conn, msg.ID, `{"accepted":true}`)
+			f.results <- string(msg.Params)
 		case "browser.controller.detach":
 			f.reply(conn, msg.ID, `{"detached":true}`)
 		case "approval.respond":

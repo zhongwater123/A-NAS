@@ -14,7 +14,10 @@ import (
 func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testing.T) {
 	h := newHarness(t)
 	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
-	source := filepath.Join(h.volume, "source")
+	// The test worker holds the rename of a stuck-* file until it is
+	// released, whether or not the call is cancelled, as a rename does not
+	// look at its context.
+	source := filepath.Join(h.volume, "stuck-source")
 	target := filepath.Join(h.volume, "published")
 	if err := os.WriteFile(source, []byte("complete"), 0600); err != nil {
 		t.Fatal(err)
@@ -26,31 +29,19 @@ func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testi
 	if _, err = h.client.Lstat(ctx, source); err != nil {
 		t.Fatal(err)
 	}
-	h.server.mu.Lock()
-	var w *worker
-	for _, v := range h.server.workers {
-		w = v
+	release := func() {
+		if err := os.WriteFile(source+".release", nil, 0o600); err != nil {
+			t.Error(err)
+		}
 	}
-	h.server.mu.Unlock()
-	w.mu.Lock()
 	pub, cancel := context.WithCancel(WithSharePublication(ctx, epoch, "share"))
 	renamed := make(chan error, 1)
 	go func() { renamed <- h.client.Rename(pub, source, target) }()
-	deadline := time.Now().Add(time.Second)
-	for {
-		if !h.server.shareMu.TryLock() {
-			break
-		}
-		h.server.shareMu.Unlock()
-		if time.Now().After(deadline) {
-			w.mu.Unlock()
-			t.Fatal("publication not accepted")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	// The publication was accepted and its rename is under way.
+	waitForFile(t, source+".started")
 	cancel()
 	if err := <-renamed; !errors.Is(err, context.Canceled) {
-		w.mu.Unlock()
+		release()
 		t.Fatal(err)
 	}
 	reset := make(chan string, 1)
@@ -64,11 +55,11 @@ func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testi
 	}()
 	select {
 	case <-reset:
-		w.mu.Unlock()
+		release()
 		t.Fatal("reset returned while orphan worker could rename")
 	case <-time.After(20 * time.Millisecond):
 	}
-	w.mu.Unlock()
+	release()
 	next := <-reset
 	if err := h.client.CheckShareEpoch(context.Background(), next); err != nil {
 		t.Fatal(err)

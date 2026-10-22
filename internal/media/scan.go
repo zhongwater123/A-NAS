@@ -168,18 +168,33 @@ func (s *Service) SpaceChanged(ctx context.Context, actor accounts.User, spaceID
 	}
 }
 
-// RefreshStale scans the actor's visible libraries whose last scan is older
-// than staleScan, as the actor; opening the media center calls it.
+// RefreshStale scans the actor's visible libraries whose last scan ended
+// more than staleScan ago, as the actor; opening the media center calls it,
+// and the open media center every 20 seconds. A library already being
+// scanned, or waiting to be, is left alone: asking its scan to run once more
+// would keep a library that takes longer than staleScan to scan scanning
+// for as long as the media center stays open (#167). Web changes still ask
+// for that one more run (SpaceChanged).
 func (s *Service) RefreshStale(ctx context.Context, actor accounts.User) {
 	libraries, err := s.visibleLibraries(ctx, actor)
 	if err != nil {
 		return
 	}
 	for _, library := range libraries {
+		if s.scanBusy(library.ID) {
+			continue
+		}
 		if library.ScannedAt == "" || s.now().Sub(parseTime(library.ScannedAt)) > staleScan {
 			s.ScanInBackground(ctx, actor, library.ID)
 		}
 	}
+}
+
+// scanBusy reports whether a library is being scanned or waits to be.
+func (s *Service) scanBusy(libraryID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.queued[libraryID] > 0 || s.scanning[libraryID]
 }
 
 // Scan scans a library now as actor and returns when it is done, after any

@@ -22,8 +22,8 @@ import (
 
 func TestMain(m *testing.M) {
 	// The test binary doubles as the worker the broker spawns.
-	if len(os.Args) == 3 && os.Args[1] == WorkerArgument {
-		if err := RunWorker(os.Args[2]); err != nil {
+	if len(os.Args) >= 3 && os.Args[1] == WorkerArgument {
+		if err := runTestWorker(os.Args[2], os.Args[3:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -209,10 +209,7 @@ func TestIdleWorkersAreStoppedAndRespawned(t *testing.T) {
 		t.Fatal(err)
 	}
 	harness.server.reapIdle(time.Now().Add(time.Hour))
-	harness.server.mu.Lock()
-	remaining := len(harness.server.workers)
-	harness.server.mu.Unlock()
-	if remaining != 0 {
+	if remaining, _ := workerCounts(harness.server); remaining != 0 {
 		t.Fatalf("%d idle workers survived reaping", remaining)
 	}
 	if err := harness.client.MkdirAll(ctx, filepath.Join(harness.volume, "b")); err != nil {
@@ -293,7 +290,8 @@ type harness struct {
 	spawned atomic.Int32
 }
 
-func newHarness(t *testing.T) *harness {
+// newHarness runs a broker whose workers get options, see runTestWorker.
+func newHarness(t *testing.T, options ...string) *harness {
 	t.Helper()
 	h := &harness{volume: filepath.Join(t.TempDir(), "volume")}
 	if err := os.MkdirAll(h.volume, 0o770); err != nil {
@@ -311,7 +309,7 @@ func newHarness(t *testing.T) *harness {
 		VolumeReady: h.ready.Load,
 		Command: func(volumeRoot string) *exec.Cmd {
 			h.spawned.Add(1)
-			return exec.Command(os.Args[0], WorkerArgument, volumeRoot)
+			return exec.Command(os.Args[0], append([]string{WorkerArgument, volumeRoot}, options...)...)
 		},
 		LookupUID: func(username string) (int, error) {
 			if username == "alice" {

@@ -29,6 +29,9 @@ const (
 	opCopy       = "copy"
 	opUsage      = "usage"
 	opSetModTime = "set_mod_time"
+	// opCancel goes from the broker to a worker only: it stops the request
+	// the worker is running, which still answers.
+	opCancel = "cancel"
 )
 
 var knownOps = map[string]bool{
@@ -47,6 +50,9 @@ type request struct {
 	Target string         `json:"target,omitempty"`
 	Prefix string         `json:"prefix,omitempty"`
 	Skip   files.ScanSkip `json:"skip,omitempty"`
+	// Paged says the caller reads a scan in pages. A Product Service from
+	// before pages gets the scan in one message, never a truncated one.
+	Paged bool `json:"paged,omitempty"`
 	// ModTime is the modification time set_mod_time gives a file.
 	ModTime time.Time `json:"modTime,omitzero"`
 	Cols    uint16    `json:"cols,omitempty"`
@@ -68,6 +74,9 @@ type changeRequest struct {
 }
 
 type response struct {
+	// More says another message of the same reply follows: a scan's entries
+	// travel in pages, and only the last message carries an error or a file.
+	More    bool              `json:"more,omitempty"`
 	Error   *wireError        `json:"error,omitempty"`
 	Info    *files.FileInfo   `json:"info,omitempty"`
 	Entries []files.ScanEntry `json:"entries,omitempty"`
@@ -101,6 +110,7 @@ const (
 	codeUnavailable       = "unavailable"
 	codeInvalidRequest    = "invalid_request"
 	codeFailed            = "failed"
+	codeCanceled          = "canceled"
 	// codeChangeInvalid says why a submission of the assistant cannot be applied.
 	codeChangeInvalid = "change_invalid"
 	codeChangeDecided = "change_decided"
@@ -146,6 +156,8 @@ func (e *wireError) Is(target error) bool {
 		return target == files.ErrVolumeUnavailable
 	case codeUnavailable:
 		return target == ErrUnavailable
+	case codeCanceled:
+		return target == context.Canceled
 	}
 	return false
 }
@@ -178,8 +190,23 @@ func encodeError(err error) *wireError {
 		code = codeVolumeUnavailable
 	case errors.Is(err, syscall.ENOTEMPTY):
 		code = codeExists
+	case errors.Is(err, context.Canceled):
+		code = codeCanceled
 	}
 	return &wireError{Code: code, Message: err.Error()}
+}
+
+// pages gathers the entries of a scan that arrives in several messages.
+type pages []files.ScanEntry
+
+func (p *pages) add(page response) { *p = append(*p, page.Entries...) }
+
+// complete puts the entries gathered so far before the final message's.
+func (p pages) complete(final response) response {
+	if final.Error == nil && len(p) > 0 {
+		final.Entries = append(p, final.Entries...)
+	}
+	return final
 }
 
 // execute runs one request against fsys. The worker calls it as the user;

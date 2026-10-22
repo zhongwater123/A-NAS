@@ -22,6 +22,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/argon2"
+
+	"github.com/zhongwater123/A-NAS/internal/activity"
 )
 
 var (
@@ -281,7 +283,7 @@ CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS audit_occurred_at ON audit_events(occurred_at);
 CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resource_id, occurred_at);
 `
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+	if _, err := s.db.ExecContext(ctx, schema+activity.IndexStatement); err != nil {
 		return fmt.Errorf("migrate SQLite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"); err != nil {

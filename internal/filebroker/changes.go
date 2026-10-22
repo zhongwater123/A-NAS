@@ -59,24 +59,31 @@ func (s *Server) memberFiles(identity accounts.Identity) (files.FileSystem, erro
 		return nil, files.ErrForbidden
 	}
 	key := workerKey{uid: identity.UID, role: identity.Role, confined: true}
-	if _, err := s.workerFor(key, identity); err != nil {
+	w, err := s.takeWorker(context.Background(), key, identity)
+	if err != nil {
 		return nil, err
 	}
+	s.returnWorker(w)
 	return &fileOps{call: func(_ context.Context, req request) (response, *os.File, error) {
-		w, err := s.workerFor(key, identity)
+		// A change goes on to its end even if the call applying it goes
+		// away: stopping it halfway would leave it half applied.
+		ctx := context.Background()
+		w, err := s.takeWorker(ctx, key, identity)
 		if err != nil {
 			return response{}, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
-		result, file, err := w.call(req)
+		var entries pages
+		result, file, err := w.call(ctx, req, entries.add)
 		if err != nil {
-			s.drop(w)
+			s.dropWorker(w)
 			return response{}, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
+		s.returnWorker(w)
 		if result.Error != nil {
 			closeFile(file)
 			return response{}, nil, result.Error
 		}
-		return result, file, nil
+		return entries.complete(result), file, nil
 	}}, nil
 }
 

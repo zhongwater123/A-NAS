@@ -453,7 +453,7 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 	}
 	switch stat.Mode & unix.S_IFMT {
 	case unix.S_IFREG:
-		return copyFileAt(sourceDir, sourceName, targetDir, targetName)
+		return copyFileAt(ctx, sourceDir, sourceName, targetDir, targetName)
 	case unix.S_IFDIR:
 		if err := unix.Mkdirat(targetDir, targetName, 0o770); err != nil {
 			return err
@@ -484,7 +484,12 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 	}
 }
 
-func copyFileAt(sourceDir int, sourceName string, targetDir int, targetName string) error {
+// copyChunk is how much of a file a copy writes between checks whether it
+// was cancelled. io.CopyN keeps copy_file_range, which Btrfs answers by
+// sharing extents instead of writing the bytes again.
+const copyChunk = 64 << 20
+
+func copyFileAt(ctx context.Context, sourceDir int, sourceName string, targetDir int, targetName string) error {
 	inputFD, err := unix.Openat(sourceDir, sourceName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return err
@@ -496,7 +501,17 @@ func copyFileAt(sourceDir int, sourceName string, targetDir int, targetName stri
 		return err
 	}
 	output := os.NewFile(uintptr(outputFD), targetName)
-	_, err = io.Copy(output, input)
+	for err == nil {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+		var copied int64
+		copied, err = io.CopyN(output, input, copyChunk)
+		if errors.Is(err, io.EOF) || (err == nil && copied < copyChunk) {
+			err = nil
+			break
+		}
+	}
 	if err == nil {
 		err = output.Sync()
 	}
