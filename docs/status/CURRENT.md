@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-20
+更新时间：2026-10-21
 
 ## 当前阶段
 
@@ -81,6 +81,13 @@ v1.0.1“实验 NAS 基础存储与共享闭环”是当前主线。Experimental
 22. 相册视频（[规格](../specs/photo-video.md)，[PR #146](https://github.com/zhongwater123/A-NAS/pull/146) 2026-10-20 已合并，未部署；侧栏“照片”改名“图库”在 [PR #153](https://github.com/zhongwater123/A-NAS/pull/153)）：图库与相册可以放 MP4、MOV、MKV、AVI、MTS 等视频，按录制时间排入时间线，查看器直接播放或由媒体 Worker 实时转换后播放，视频不参与任何本地 AI 功能。格式、4 GiB 上限、封面帧、单独 MOV 的处理、幻灯片跳过视频和 AI 助手看不到视频是实现时的决定，待用户确认。Catalog 升到第 13 次迁移（新增 `videos` 表），回滚前须先彻底删除视频资产；部署后在实机上用 iPhone（HEVC、竖拍、实况 MOV）、安卓与摄像机的真实文件验收导入、封面、播放与转码负载。
 23. 硬盘用途（[规格](../specs/disk-roles-and-redundancy.md)，[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)，[PR #149](https://github.com/zhongwater123/A-NAS/pull/149) 2026-10-20 已合并，未部署）：实验 NAS 接入的第二块 ST500DM002 在“存储”中没有任何入口，因为数据卷限定单盘，且这块盘上没组装的旧 md 签名被判为使用中。M1 已实现：有未使用的硬盘时管理员可设置用途，加入数据卷并选择镜像、扩容或条带，Host Agent 在线转换并接着做被中断的转换，界面显示进度；新建数据卷也可以选多块盘；只有正在使用的阵列、卷组、加密卷或 swap 才算使用中。2026-10-20 用户在实验 NAS 上部署了 #149 的早期构建，把第二块盘加入为镜像，重启后数据卷是两块盘的 RAID1（数据、元数据与系统块都在 `raid1`）。同时发现两个问题，修复在 #149 之后的 PR 中，待合并部署后复核：加盘后在重启前仍显示为未使用（udev 数据库过期，[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）；生成计划后向导无法退出（新增取消计划）。按[手册](../runbooks/add-a-disk-to-the-data-volume.md)补做 Scrub。M2（缺盘降级挂载、更换、接回后恢复冗余）与 M3（更改冗余方式、移除硬盘）待做；备份盘仍随 [#27](https://github.com/zhongwater123/A-NAS/issues/27)。
 24. 应用与桌面同站（[#161](https://github.com/zhongwater123/A-NAS/issues/161)，2026-10-21，[PR #205](https://github.com/zhongwater123/A-NAS/pull/205)，未合并、未部署）：浏览器会把桌面会话 Cookie 发给同一地址上的已安装应用，改为会话只在登录时的客户端上有效（也满足 [#174](https://github.com/zhongwater123/A-NAS/issues/174) 的第一项：本机会话经 Caddy 使用返回 401），桌面页面禁止其他来源嵌入并加 CSP，VNAS 回答中的外部图片只显示为链接（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 决定 7）。按 #159 的顺序应在部署已暂存的 `9cda8a3` 之前合并。部署后局域网浏览器都要重新登录一次，本机屏幕保持登录；之后在实机打开一个应用的网页，确认桌面仍登录，并检查 PDF 预览、终端、VNAS 与影视、音乐播放在 CSP 下正常。
+25. Host Agent 运行健壮性（[#166](https://github.com/zhongwater123/A-NAS/issues/166)，2026-10-21，[PR #212](https://github.com/zhongwater123/A-NAS/pull/212)，未合并、未部署）：2026-10-21 复核四项仍在。修复后：
+    - Host Agent 先提供服务，再在后台对账数据卷与撤销到期授权；对账失败只记录，并作为健康项报告。
+    - 会话库读不出时返回暂不可用，不关闭共享句柄，也不挂断终端与助手。
+    - 单元加了能力上限、`Protect*` 与内存、任务上限。
+    - 文件 Worker 与终端 Shell 各在自己的 systemd scope 中运行，日志不再算作 Host Agent 的（[调查](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)）。
+
+    产品服务与 Host Agent 须同版本部署。部署后在实机核对 `CapBnd`、`systemd-cgls` 中的 scope、裸机上 `/sys` 是否只读，以及加盘后 udev 重新探测是否仍正常；运行一周后查看 `MemoryPeak` 与 `TasksCurrent`，确认上限合适。
 
 ## 外部条件与限制
 

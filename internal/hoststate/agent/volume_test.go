@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -47,6 +48,25 @@ func TestClientReadsTheDataVolumeReadOnlyStateAndErrors(t *testing.T) {
 	}
 	if got.Disks[1].FilesystemReadOnly || got.Disks[1].FilesystemErrors != nil {
 		t.Fatalf("system disk = %+v, want no data volume facts", got.Disks[1])
+	}
+}
+
+// The Host Agent reports a failed reconciliation of the data volume with its
+// state, and leaves the field out otherwise (#166).
+func TestClientReadsAFailedReconciliation(t *testing.T) {
+	state, err := fake.NewHealthy().Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failed atomic.Bool
+	handler := agent.NewOperationsHandler(agent.Services{Reader: observedState{state}, ReconcileFailed: failed.Load}, discardLogger())
+	client := agent.NewClient(serve(t, handler))
+	if got, err := client.Read(context.Background()); err != nil || got.ReconcileFailed {
+		t.Fatalf("Read() = %v, %v; want no failed reconciliation", got.ReconcileFailed, err)
+	}
+	failed.Store(true)
+	if got, err := client.Read(context.Background()); err != nil || !got.ReconcileFailed {
+		t.Fatalf("Read() = %v, %v; want the failed reconciliation", got.ReconcileFailed, err)
 	}
 }
 

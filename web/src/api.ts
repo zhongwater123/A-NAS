@@ -4,7 +4,7 @@ export type Transport = "nvme" | "sata" | "usb" | "unknown";
 export type DataSource = "simulated" | "live";
 export type HealthFindingCode =
   | "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot"
-  | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors";
+  | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
 // HealthFinding is one reason the system is not plainly healthy; value is the
 // temperature, percentage used or error count its code describes.
 export interface HealthFinding { code: HealthFindingCode; severity: "warning" | "critical"; diskId?: string; value?: number }

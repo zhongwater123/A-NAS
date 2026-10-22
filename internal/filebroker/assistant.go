@@ -35,9 +35,9 @@ var assistantAccount = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 // the connection is cut for every holder.
 func (s *Server) serveAssistant(conn *net.UnixConn, req request) {
 	ctx := context.Background()
-	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-	if err != nil || !identity.Enabled {
-		_ = writeMessage(conn, response{Error: &wireError{Code: codeUnauthenticated}}, nil)
+	identity, refused := s.identify(ctx, req.Token)
+	if refused != nil {
+		_ = writeMessage(conn, response{Error: refused}, nil)
 		return
 	}
 	if s.config.AssistantSockets == "" {
@@ -83,13 +83,13 @@ func (s *Server) serveAssistant(conn *net.UnixConn, req request) {
 	}()
 	recheck := time.NewTicker(s.config.TerminalRecheck)
 	defer recheck.Stop()
+	unconfirmed := 0
 	for {
 		select {
 		case <-closed:
 			return
 		case <-recheck.C:
-			current, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-			if err != nil || !current.Enabled || current.UID != identity.UID {
+			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accounts.Identity) bool { return current.UID == identity.UID }) {
 				s.config.Logger.Info("assistant session no longer valid; cutting the connection", "username", identity.Username)
 				cut(instance)
 				_ = writeMessage(conn, response{Error: &wireError{Code: codeUnauthenticated}}, nil)

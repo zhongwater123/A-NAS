@@ -1,7 +1,7 @@
 # 系统健康
 
 状态：implemented
-更新时间：2026-10-19
+更新时间：2026-10-21
 
 ## 目标
 
@@ -29,11 +29,13 @@
 | `disk_hot` | 机械硬盘达到 55 °C，或固态存储达到 70 °C | 注意 |
 | `volume_nearly_full` | 数据卷已用 90% 以上 | 注意 |
 | `volume_errors` | Btrfs 自数据卷创建以来累计记录到读、写、刷新、校验或代际错误 | 注意 |
+| `volume_reconcile_failed` | Host Agent 最近一次对账数据卷失败：没能修复空间权限、把身份清单写到数据卷或刷新 Samba 配置（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）；数据卷只读时不报，由 `volume_read_only` 说明 | 注意 |
 
 - SMART 结论与温度来自 Host Agent 的缓存，读取方式见[基础存储与共享](basic-storage-and-sharing.md#服务与错误)：待机的硬盘超过 24 小时没有新结果时为“未知”，因而出现 `disk_health_unknown`。
 - 只读状态取自数据卷挂载点的 `statfs` 标志。错误计数取自 sysfs 的 `/sys/fs/btrfs/<fsid>/devinfo/*/error_stats`（Linux 5.14 起），按数据卷所在设备找到文件系统，并合计它的全部设备。计数保存在文件系统中，不会自行归零；读不到时不报告该项。
 - 已用百分比与设置中的数据卷用量一致，四舍五入为整数。
 - “已创建数据卷”取自产品服务保存的存储计划，不读取主机状态。
+- 对账结果由 Host Agent 在状态文档中以 `reconcileFailed` 报告，只在失败时出现；对账在 Host Agent 启动后进行，失败后每 15 分钟重试，所以问题解决后最多 15 分钟消失（重启 Host Agent 立即重做）。
 
 ## 场景
 
@@ -55,6 +57,12 @@
 - When：读取 `GET /api/v1/host-state` 或 `GET /api/v1/system`。
 - Then：`system.health` 为 `critical`，`system.healthFindings` 为 `[{"code":"volume_offline","severity":"critical"}]`。
 
+### 数据卷对账失败
+
+- Given：Host Agent 启动时数据卷可写，但刷新 Samba 配置失败。
+- When：打开“概览”。
+- Then：健康显示“需要注意”；“健康检查”列出“数据卷的权限与共享设置没能更新”，说明部分文件或共享可能无法正常使用，管理员可在“设置 → 日志”的 Host Agent 中查看原因，设备每 15 分钟重试。Web 文件、终端与日志照常可用。
+
 ### 从未初始化数据卷
 
 - Given：新设备尚未创建数据卷，系统盘 SMART 通过。
@@ -63,7 +71,7 @@
 
 ## 边界与失败
 
-- 接口：`/api/v1/system` 与 `/api/v1/host-state` 的 `system` 增加 `healthFindings`。每项包含 `code`、`severity`（`warning` 或 `critical`），以及可选的 `diskId` 和 `value`（`disk_hot` 为摄氏度，`volume_full`、`volume_nearly_full` 为已用百分比，`volume_errors` 为错误次数）。Host Agent 的状态文档为数据盘增加 `filesystemReadOnly` 与 `filesystemErrors`，其他磁盘带上它们时，产品服务拒绝这份文档。
+- 接口：`/api/v1/system` 与 `/api/v1/host-state` 的 `system` 增加 `healthFindings`。Host Agent 的状态文档在对账失败时带 `reconcileFailed: true`，否则不带这个字段，旧版产品服务读取正常的 Host Agent 不受影响。每项包含 `code`、`severity`（`warning` 或 `critical`），以及可选的 `diskId` 和 `value`（`disk_hot` 为摄氏度，`volume_full`、`volume_nearly_full` 为已用百分比，`volume_errors` 为错误次数）。Host Agent 的状态文档为数据盘增加 `filesystemReadOnly` 与 `filesystemErrors`，其他磁盘带上它们时，产品服务拒绝这份文档。
 - 评估在产品服务中完成，Host Agent 只报告观测，因为只有产品服务知道是否创建过数据卷。Fake 读取器同样经过评估，模拟数据的健康由其中的磁盘状态决定。
 - 成员与管理员看到相同的健康与原因，不涉及个人数据。
 - 前端遇到不认识的 `code` 时显示通用说明；缺少 `healthFindings` 的旧响应按没有原因处理。
@@ -71,6 +79,8 @@
 ## 验收证据
 
 - `TestAssessTakesTheWorstObservedFact`：各条规则、最严重优先、未分配磁盘的 SMART 未知不计、尚未创建数据卷不算离线。
+- `TestAssessReportsAFailedReconciliation`、`TestClientReadsAFailedReconciliation`：对账失败成为注意项、只读时只报只读，以及 `reconcileFailed` 经 Host Agent 套接字往返。
+- 系统测试：数据卷重新挂载为只读后重启 Host Agent，它照常服务并在状态中报告对账失败，概览报告 `volume_read_only`；恢复可写后对账成功、不再报告。
 - `TestReaderReportsADataVolumeReadOnlyAndItsBtrfsErrors`、`TestBtrfsErrorsAreUnknownWithoutTheirCounters`：读取器从 `statfs` 与 sysfs 取得只读状态和错误计数。
 - `TestClientReadsTheDataVolumeReadOnlyStateAndErrors`、`TestClientRejectsDataVolumeFactsOnAnotherDisk`：Host Agent 文档的往返与校验。
 - `TestHostStateAssessesTheSystemHealth` 与 OpenAPI 契约测试：接口返回评估结果与原因。
