@@ -10,8 +10,10 @@ VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 # golangci-lint has a module of its own: in go.mod its 200-odd dependencies
 # would raise versions the product builds with (logrus, jsonschema and others).
 GOLANGCI_LINT ?= $(GO) tool -modfile=tools/golangci-lint/go.mod golangci-lint
+# Packages tested at once under the race detector, as on a 4-core CI runner.
+RACE_PARALLEL ?= 4
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test ai-test root-integration-test system-test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-test root-integration-test system-test build build-binaries check check-steps clean
 
 all: check
 
@@ -153,6 +155,10 @@ vuln-check:
 
 test:
 	$(GO) test ./...
+
+# CI runs this beside `make check`; the Web UI tests need the built assets.
+race-test: web-build
+	$(GO) test -race -p $(RACE_PARALLEL) ./...
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
