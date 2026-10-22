@@ -66,8 +66,9 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 文件代理
 
-- Product Service 的每个文件操作都携带请求的会话令牌。File Broker 以只读方式打开 `control.db` 自行校验令牌、账号状态与过期时间，不信任 Product Service 声明的身份；令牌无效、账号被禁用或数据卷不可用时拒绝，不会派生进程。
+- Product Service 的每个文件操作都携带请求的会话令牌。File Broker 以只读方式打开 `control.db` 自行校验令牌、账号状态与过期时间，不信任 Product Service 声明的身份；令牌无效、账号被禁用或数据卷不可用时拒绝，不会派生进程。`control.db` 暂时读不出（如 SQLite 忙）时返回暂不可用而不是拒绝，也不关闭文件代理、终端、助手与相册、分享查询共用的只读句柄（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）。
 - 通过校验后，Broker 为该用户（按 UID 与角色）派生 `anas-host-agent file-worker`：UID/GID 为账号 UID，附加组为 `a-nas-users`（管理员另加 `a-nas-admins`），只接受 20100–29999 内且与 `/etc/passwd` 一致的身份。工作进程拒绝以 root 运行，空闲 5 分钟后退出。同一账号最多同时有 4 个工作进程（助手“提交更改”的受限进程另算一组），每个一次执行一个操作：一个成员长时间的复制或删除不会挡住他的列目录、预览与上传，超出时排队等空闲的进程。
+- 工作进程与管理员的终端 Shell 各在一个 systemd 临时 scope（`anas-files-<账号>-<PID>.scope`、`anas-terminal-<账号>-<PID>.scope`）中运行，Host Agent 经 systemd 私有套接字创建（[`internal/systemdscope`](../../internal/systemdscope/scope.go)）：它们不计入 Host Agent 的 `MemoryMax`/`TasksMax`，写入日志也不以 Host Agent 的名义出现。scope 绑定（`BindsTo=`）Host Agent 的单元，Host Agent 停止、重启或崩溃时随之结束，与此前同在一个 cgroup 时相同。systemd 建不成 scope 时记录错误，进程留在 Host Agent 的 cgroup 中照常工作。
 - Product Service 关闭连接（浏览器离开、请求取消）时，Broker 向工作进程发送取消消息，工作进程停止正在执行的扫描、复制、删除或用量统计并照常应答，之后继续服务；复制大文件按 64 MiB 一段检查取消。助手“提交更改”的操作不随调用方取消，避免改到一半。
 - 扫描结果分页传输：每条消息最多 2048 个条目（路径很长时继续减半），Broker 收到一页转发一页，root 进程不持有整棵树。单条消息仍以 64 MiB 为上限，超出时以错误应答，工作进程不退出。分页由请求声明，旧版 Product Service 仍收到单条消息。
 - 工作进程用 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` 解析数据卷内路径：`..` 与符号链接无法越界，经过仅可穿过的容器与回收站目录只需执行权限。改名使用 `RENAME_NOREPLACE`，不会覆盖已有条目。需要 Linux 5.6 及以上内核。
@@ -103,7 +104,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 - Product Service 校验管理员密码与原因后在 `viewing_grants` 记录授权、写审计并通知所有者，再请求 Host Agent 授予；Policy 在到期或结束前把该个人空间以只读方式列给该管理员，写操作一律拒绝。
 - Host Agent 先把授权写入 `/var/lib/a-nas/viewing-grants.json`，再从空间根目录用 `O_NOFOLLOW` 文件描述符逐级为每个目录与普通文件加入 `user:<管理员>` 只读条目（目录另加默认条目），直接读写 `system.posix_acl_*` 扩展属性且不改变已有 mask。空间根、回收站根与个人回收目录的完整 ACL 在授权期间包含该条目，因此漂移修复不会将其移除。
-- Host Agent 启动时和此后每分钟撤销到期授权；数据卷离线时保留记录，卷恢复后撤销。撤销同样逐级移除条目，再恢复根目录的精确 ACL。
+- Host Agent 开始提供服务后在后台撤销到期授权，此后每分钟一次；数据卷离线时保留记录，卷恢复后撤销。撤销同样逐级移除条目，再恢复根目录的精确 ACL。大空间上撤销需要数分钟，不阻塞文件代理；其间 Product Service 已按到期时间拒绝这份授权，ACL 是第二道防线。
 - SQLite 各模块使用 WAL 和单连接串行化写事务。密码摘要、会话令牌摘要、目录、回收站、快照、计划和审计均在系统盘持久化。
 
 ## 快照
@@ -126,12 +127,13 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - Samba 配置先由 `testparm` 验证，再原子替换；reload 失败恢复旧配置。
 - 创建或重置 Samba 凭据失败时账号进入 `error` 或保持不可登录，旧会话失效。
 - 数据盘移除后系统盘上的控制面仍可启动；文件与快照接口拒绝访问，绝不回退到系统盘。
+- Host Agent 先提供服务，再在后台对账数据卷：修复空间权限、把身份清单写到数据卷、刷新 Samba 配置（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）。任何一步失败（如数据卷被 Btrfs 转为只读、身份注册表无法解析、`testparm` 或 `smbcontrol` 失败）只记录并经宿主机状态报告（`reconcileFailed`），系统健康显示[“数据卷的权限与共享设置没能更新”](../specs/system-health.md)；此后每 15 分钟重做完整对账，成功后恢复为只修权限。数据卷只读时 Web 文件可以读，写入返回卷不可用，终端与日志照常可用。原因与证据见[调查](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)。
 
 ## 关联
 
 - [ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)：本页描述的身份与授权模型
-- [Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md) 与[系统测试](../../scripts/system-test.sh)
+- [Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)、[一处故障让 Host Agent 的全部入口失效](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md) 与[系统测试](../../scripts/system-test.sh)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)、[传输中心规格](../specs/transfer-center.md)
 - [ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)：分片上传与持有的临时文件
 - [备份中心规格](../specs/backup-center.md)与[快照计划](../../internal/files/schedule.go)

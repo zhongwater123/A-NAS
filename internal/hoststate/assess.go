@@ -37,6 +37,10 @@ const (
 	// FindingVolumeErrors: Btrfs has counted errors on the data volume since
 	// it was created; Value is their number.
 	FindingVolumeErrors FindingCode = "volume_errors"
+	// FindingVolumeReconcileFailed: the Host Agent could not bring the data
+	// volume's space permissions, identity manifest or Samba configuration in
+	// line. A read-only volume already explains it and is reported instead.
+	FindingVolumeReconcileFailed FindingCode = "volume_reconcile_failed"
 )
 
 const (
@@ -76,7 +80,7 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 	add := func(code FindingCode, severity Health, disk ResourceID, value *int64) {
 		findings = append(findings, Finding{Code: code, Severity: severity, DiskID: disk, Value: value})
 	}
-	dataDisk := false
+	dataDisk, readOnly := false, false
 	for _, disk := range state.Disks {
 		inService := disk.Role == DiskRoleSystem || disk.Role == DiskRoleData
 		switch disk.Health {
@@ -102,6 +106,7 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 		}
 		dataDisk = true
 		if disk.FilesystemReadOnly {
+			readOnly = true
 			add(FindingVolumeReadOnly, HealthCritical, disk.ID, nil)
 		}
 		if disk.FilesystemCapacityBytes != nil && disk.FilesystemAvailableBytes != nil && *disk.FilesystemCapacityBytes > 0 {
@@ -121,6 +126,9 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 	}
 	if expected.DataVolume && !dataDisk {
 		add(FindingVolumeOffline, HealthCritical, ResourceID{}, nil)
+	}
+	if state.ReconcileFailed && !readOnly {
+		add(FindingVolumeReconcileFailed, HealthWarning, ResourceID{}, nil)
 	}
 	slices.SortStableFunc(findings, func(left, right Finding) int {
 		return severityRank(right.Severity) - severityRank(left.Severity)

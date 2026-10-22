@@ -38,6 +38,10 @@ func readHEICMetadata(file *os.File, location *time.Location) (metadata photoMet
 	return metadata, nil
 }
 
+// heicTimeout bounds decoding one HEIC once the Media Worker has taken it;
+// waiting for a worker does not count.
+const heicTimeout = 30 * time.Second
+
 func (s *Service) renderPhoto(ctx context.Context, file *os.File, orientation, edge, quality int) ([]byte, int, int, error) {
 	var header [32]byte
 	n, _ := file.ReadAt(header[:], 0)
@@ -47,15 +51,7 @@ func (s *Service) renderPhoto(ctx context.Context, file *os.File, orientation, e
 	if s.media == nil {
 		return nil, 0, 0, mediaworker.ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	select {
-	case s.decodeSlots <- struct{}{}:
-		defer func() { <-s.decodeSlots }()
-	case <-ctx.Done():
-		return nil, 0, 0, ctx.Err()
-	}
-	data, err := s.media.Image(ctx, file, 1600)
+	data, err := s.media.Image(mediaworker.WithTimeout(ctx, heicTimeout), file, 1600)
 	if err != nil {
 		return nil, 0, 0, err
 	}

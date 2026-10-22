@@ -94,11 +94,12 @@ func (s *Server) serveChange(req request) response {
 		return response{Error: &wireError{Code: codeUnavailable, Message: "the assistant's changes are not enabled"}}
 	}
 	ctx := context.Background()
-	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, req.Token)
-	if err != nil || !identity.Enabled {
-		return response{Error: &wireError{Code: codeUnauthenticated}}
+	identity, refused := s.identify(ctx, req.Token)
+	if refused != nil {
+		return response{Error: refused}
 	}
 	var card json.RawMessage
+	var err error
 	switch req.Op {
 	case opChangePrepare:
 		var member files.FileSystem
@@ -181,8 +182,13 @@ func (s *Server) withAssistant(next func(http.ResponseWriter, *http.Request, acc
 			return
 		}
 		user, err := s.config.Accounts.ResolveAccountUID(r.Context(), uid)
-		if err != nil {
+		switch {
+		case errors.Is(err, accounts.ErrUserNotFound):
 			http.Error(w, "not available", http.StatusForbidden)
+			return
+		case err != nil:
+			s.config.Logger.Warn("account directory unavailable", "error", err)
+			http.Error(w, "accounts cannot be verified right now", http.StatusServiceUnavailable)
 			return
 		}
 		next(w, r, accounts.Identity{Username: user.Username, Role: user.Role, UID: uid, Enabled: true})

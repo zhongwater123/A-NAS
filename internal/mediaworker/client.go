@@ -2,6 +2,7 @@ package mediaworker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -52,9 +53,11 @@ type AudioRequest struct {
 }
 
 // Client reaches the sandboxed worker through its socket; systemd starts a
-// worker for each connection.
+// worker for each connection. Slots names the slot directory shared by every
+// process that uses the socket; without it the slots are this process's own.
 type Client struct {
 	Socket string
+	Slots  string
 }
 
 // Local runs the worker's server in this process, for development without
@@ -68,18 +71,38 @@ var (
 	_ Worker = Local{}
 )
 
-type dialer func(context.Context) (*net.UnixConn, error)
+// dialer takes a slot for a request of op and connects to a worker; release
+// gives the slot back.
+type dialer func(ctx context.Context, op string) (conn *net.UnixConn, release func(), err error)
 
-func (c Client) dial(ctx context.Context) (*net.UnixConn, error) {
+func (c Client) dial(ctx context.Context, op string) (*net.UnixConn, func(), error) {
+	release, err := admit(ctx, c.Slots, priorityOf(ctx, op))
+	if err != nil {
+		return nil, nil, err
+	}
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", c.Socket)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		release()
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	return conn.(*net.UnixConn), nil
+	return conn.(*net.UnixConn), release, nil
 }
 
-func (l Local) dial(ctx context.Context) (*net.UnixConn, error) {
+func (l Local) dial(ctx context.Context, op string) (*net.UnixConn, func(), error) {
+	release, err := admit(ctx, "", priorityOf(ctx, op))
+	if err != nil {
+		return nil, nil, err
+	}
+	conn, err := l.connect(ctx)
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	return conn, release, nil
+}
+
+func (l Local) connect(ctx context.Context) (*net.UnixConn, error) {
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
@@ -104,53 +127,82 @@ func (l Local) dial(ctx context.Context) (*net.UnixConn, error) {
 	return conns[0], nil
 }
 
-// body is a response body; closing it closes the connection.
+// body is a response body; closing it closes the connection and frees its
+// slot. Once the request's context ends, reads report why.
 type body struct {
 	*net.UnixConn
+	ctx  context.Context
 	stop func() bool
+	done func()
+}
+
+func (b body) Read(p []byte) (int, error) {
+	n, err := b.UnixConn.Read(p)
+	if err != nil && b.ctx.Err() != nil {
+		return n, b.ctx.Err()
+	}
+	return n, err
 }
 
 func (b body) Close() error {
 	b.stop()
-	return b.UnixConn.Close()
+	err := b.UnixConn.Close()
+	b.done()
+	return err
 }
 
-// call sends request with file attached and returns the body after an OK
-// response. Cancelling ctx closes the connection.
+// call takes a slot, sends request with file attached and returns the body
+// after an OK response. Cancelling ctx closes the connection. Until a worker
+// acknowledges the request a failure is ErrUnavailable, as when systemd
+// drops a connection over its limit; after that it is ErrInterrupted.
 func call(ctx context.Context, dial dialer, request Request, file *os.File) (io.ReadCloser, error) {
-	conn, err := dial(ctx)
+	conn, release, err := dial(ctx, request.Op)
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := working(ctx)
+	done := func() { cancel(); release() }
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	if err := writeFrame(conn, request, file); err != nil {
+	fail := func(err error) (io.ReadCloser, error) {
 		stop()
 		_ = conn.Close()
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		done()
+		return nil, err
+	}
+	request.Ack = true
+	if err := writeFrame(conn, request, file); err != nil {
+		return fail(fmt.Errorf("%w: %v", ErrUnavailable, err))
 	}
 	var response Response
-	if _, err := readFrame(conn, &response); err != nil {
-		stop()
-		_ = conn.Close()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+	accepted := false
+	for {
+		if _, err := readFrame(conn, &response); err != nil {
+			switch {
+			case ctx.Err() != nil:
+				return fail(ctx.Err())
+			case accepted:
+				return fail(fmt.Errorf("%w: %v", ErrInterrupted, err))
+			}
+			return fail(fmt.Errorf("%w: %v", ErrUnavailable, err))
 		}
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		// A worker from before acknowledgements answers straight away.
+		if !response.Accepted || accepted {
+			break
+		}
+		accepted, response = true, Response{}
 	}
 	if !response.OK {
-		stop()
-		_ = conn.Close()
 		switch response.Code {
 		case CodeUnreadable:
-			return nil, fmt.Errorf("%w: %s", ErrUnreadable, response.Message)
+			return fail(fmt.Errorf("%w: %s", ErrUnreadable, response.Message))
 		case CodeUnavailable:
-			return nil, fmt.Errorf("%w: %s", ErrUnavailable, response.Message)
+			return fail(fmt.Errorf("%w: %s", ErrUnavailable, response.Message))
 		case CodeInvalid:
-			return nil, fmt.Errorf("%w: %s", ErrInvalid, response.Message)
+			return fail(fmt.Errorf("%w: %s", ErrInvalid, response.Message))
 		}
-		return nil, fmt.Errorf("media worker: %s", response.Message)
+		return fail(fmt.Errorf("%w: %s", ErrFailed, response.Message))
 	}
-	return body{UnixConn: conn, stop: stop}, nil
+	return body{UnixConn: conn, ctx: ctx, stop: stop, done: done}, nil
 }
 
 func readAll(ctx context.Context, dial dialer, request Request, file *os.File) ([]byte, error) {
@@ -160,13 +212,13 @@ func readAll(ctx context.Context, dial dialer, request Request, file *os.File) (
 	}
 	defer response.Close()
 	data, err := io.ReadAll(io.LimitReader(response, maxOutput[request.Op]+1))
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	switch {
+	case err == nil:
+		return data, nil
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return nil, err
 	}
-	return data, nil
+	return nil, fmt.Errorf("%w: %v", ErrInterrupted, err)
 }
 
 func probe(ctx context.Context, dial dialer, file *os.File) (Probe, error) {

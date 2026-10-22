@@ -12,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 const (
@@ -51,11 +52,13 @@ type pendingVideo struct {
 }
 
 // processPending probes durations and codecs and takes a frame of every
-// pending video, one at a time, as a user who can read it.
+// pending video, one at a time, as a user who can read it. This is
+// background work: it waits while the media worker serves people.
 func (s *Service) processPending(ctx context.Context) {
 	if s.processor == nil {
 		return
 	}
+	ctx = mediaworker.WithPriority(ctx, mediaworker.Background)
 	libraries, err := s.allLibraries(ctx)
 	if err != nil {
 		return

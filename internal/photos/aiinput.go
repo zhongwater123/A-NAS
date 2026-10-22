@@ -103,8 +103,9 @@ func (s *Service) returnDetection(ctx context.Context, input *detectionInput) er
 	return err
 }
 
-// openAIInput renders the detector's input for a claimed job. A decoder
-// panic counts as an undecodable original, as for thumbnails.
+// openAIInput renders the detector's input for a claimed job, as background
+// work, and classifies a failure as thumbnails do. A decoder panic counts as
+// an undecodable original.
 func (s *Service) openAIInput(ctx context.Context, job claimedJob) (file *os.File, class string, err error) {
 	defer func() {
 		if recover() != nil {
@@ -119,12 +120,9 @@ func (s *Service) openAIInput(ctx context.Context, job claimedJob) (file *os.Fil
 		return nil, "", err
 	}
 	defer original.Close()
-	content, _, _, err := s.renderPhoto(ctx, original, job.orientation, aiInputEdge, aiInputQuality)
+	content, _, _, err := s.renderPhoto(mediaworker.WithPriority(ctx, mediaworker.Background), original, job.orientation, aiInputEdge, aiInputQuality)
 	if err != nil {
-		if errors.Is(err, mediaworker.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return nil, jobErrorIO, nil
-		}
-		return nil, jobErrorUndecodable, nil
+		return nil, decodeFailure(err), nil
 	}
 	file, err = memoryFile(content)
 	return file, "", err

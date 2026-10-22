@@ -84,9 +84,7 @@ func (s *Service) probeMotion(ctx context.Context, clip stagedObject) (mediawork
 		return mediaworker.Probe{}, err
 	}
 	defer file.Close()
-	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	probe, err := s.media.Probe(probeCtx, file)
+	probe, err := s.media.Probe(mediaworker.WithTimeout(ctx, 15*time.Second), file)
 	if err != nil {
 		return mediaworker.Probe{}, err
 	}
@@ -150,7 +148,9 @@ type motionStream struct {
 func (s motionStream) Close() error { s.cancel(); err := s.ReadCloser.Close(); s.release(); return err }
 
 // PlayMotion produces a browser-compatible H.264/AAC stream only on demand.
-// The request owns the decoder; closing it cancels work and releases the slot.
+// The request owns the decoder; closing it cancels work and frees the
+// worker. A clip lasts seconds and someone is watching, so it is interactive
+// rather than playback that may keep its worker for hours.
 func (s *Service) PlayMotion(ctx context.Context, p Principal, id string) (io.ReadCloser, error) {
 	content, err := s.OpenMotion(ctx, p, id)
 	if err != nil {
@@ -160,19 +160,6 @@ func (s *Service) PlayMotion(ctx context.Context, p Principal, id string) (io.Re
 	if s.media == nil {
 		return nil, mediaworker.ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	select {
-	case s.decodeSlots <- struct{}{}:
-	case <-ctx.Done():
-		cancel()
-		return nil, ctx.Err()
-	}
-	release := func() { <-s.decodeSlots }
-	body, err := s.media.Stream(ctx, content.Reader, mediaworker.StreamRequest{Height: 1080, MaxBitrate: 4000, AudioTrack: 0})
-	if err != nil {
-		cancel()
-		release()
-		return nil, err
-	}
-	return motionStream{body, cancel, release}, nil
+	ctx = mediaworker.WithTimeout(mediaworker.WithPriority(ctx, mediaworker.Interactive), 45*time.Second)
+	return s.media.Stream(ctx, content.Reader, mediaworker.StreamRequest{Height: 1080, MaxBitrate: 4000, AudioTrack: 0})
 }

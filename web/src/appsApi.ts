@@ -1,6 +1,7 @@
 import { DataSource, apiFetch, csrfHeaders } from "./api";
 
-export type InstallState = "available" | "installed" | "installing" | "uninstalling";
+// failed: the last install failed and its containers could not be removed.
+export type InstallState = "available" | "installed" | "installing" | "uninstalling" | "failed";
 
 export interface AppJob {
   appId: string;

@@ -29,6 +29,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(os.Args) >= 4 && os.Args[1] == ShellGateArgument {
+		if err := RunShellGate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 	if len(os.Args) == 2 && os.Args[1] == ProbeArgument {
 		if err := RunProbe(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -145,6 +151,54 @@ func TestBrokerRefusesUnverifiedCallers(t *testing.T) {
 	}
 	if _, err := os.Stat(space); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a refused call created %s", space)
+	}
+}
+
+// A session directory that cannot be read right now says nothing about the
+// caller: file operations are unavailable, not refused (#166).
+func TestFileOperationsAreUnavailableWhileSessionsCannotBeRead(t *testing.T) {
+	server, err := NewServer(Config{
+		Sessions: resolverFunc(func(string) (accounts.Identity, error) {
+			return accounts.Identity{}, errors.New("read session directory: database is locked")
+		}),
+		VolumeRoot: t.TempDir(), VolumeReady: func() bool { return true },
+		Command:         func(volumeRoot string) *exec.Cmd { return exec.Command(os.Args[0], WorkerArgument, volumeRoot) },
+		skipCredentials: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(t.TempDir(), "broker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		server.Close()
+	})
+	err = NewClient(socket).Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
+		t.Fatalf("Mkdir() error = %v, want ErrUnavailable and not a refusal", err)
+	}
+}
+
+// Each file worker runs in a scope of its own, apart from the Host Agent's
+// cgroup (#166).
+func TestWorkersArePlacedInScopesOfTheirOwn(t *testing.T) {
+	harness := newHarness(t)
+	placer := &recordingPlacer{marker: filepath.Join(t.TempDir(), "placed")}
+	harness.server.config.Scopes = placer
+	space := filepath.Join(harness.volume, "spaces", "alice")
+	if err := os.MkdirAll(space, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.client.Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(space, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	if placed := placer.calls(); len(placed) != 1 || !strings.HasPrefix(placed[0], "files:alice:") {
+		t.Fatalf("placed = %v, want alice's worker once", placed)
 	}
 }
 

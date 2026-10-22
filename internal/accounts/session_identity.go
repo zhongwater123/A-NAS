@@ -133,7 +133,6 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&identity.Username, &identity.Ro
 		return Identity{}, ErrSessionNotFound
 	}
 	if err != nil {
-		d.reset()
 		return Identity{}, fmt.Errorf("read session directory: %w", err)
 	}
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
@@ -178,7 +177,6 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&user.UserID, &user.Username, &u
 		return SessionUser{}, ErrSessionNotFound
 	}
 	if err != nil {
-		d.reset()
 		return SessionUser{}, fmt.Errorf("read session directory: %w", err)
 	}
 	now := d.now().UTC()
@@ -188,7 +186,6 @@ WHERE s.token_hash = ?`, tokenHash(token)).Scan(&user.UserID, &user.Username, &u
 	}
 	if user.Role == RoleAdmin {
 		if user.Viewing, err = queryLibraryViewings(ctx, db, user.UserID, now); err != nil {
-			d.reset()
 			return SessionUser{}, fmt.Errorf("read viewing grants: %w", err)
 		}
 	}
@@ -215,7 +212,6 @@ WHERE l.uid = ?`, uid).Scan(&user.UserID, &user.Username, &user.Role, &status, &
 		return SessionUser{}, ErrUserNotFound
 	}
 	if err != nil {
-		d.reset()
 		return SessionUser{}, fmt.Errorf("read account directory: %w", err)
 	}
 	if status != UserStatusActive {
@@ -226,6 +222,12 @@ WHERE l.uid = ?`, uid).Scan(&user.UserID, &user.Username, &user.Role, &status, &
 
 // open connects read-only, so the root broker never writes the database or
 // creates SQLite side files owned by root next to the Product Service's.
+//
+// A failed query leaves the handle open: the File Broker, terminals,
+// assistants and the photo and share lookups all share it, and closing it
+// after one error failed every lookup waiting on it (#166). The connection is
+// reopened every minute instead, so one that went bad, or a database file
+// that was replaced, is picked up without interrupting anyone.
 func (d *SessionDirectory) open() (*sql.DB, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -237,21 +239,18 @@ func (d *SessionDirectory) open() (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	db.SetConnMaxLifetime(time.Minute)
 	d.db = db
 	return db, nil
 }
 
-func (d *SessionDirectory) reset() {
+func (d *SessionDirectory) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.db != nil {
 		_ = d.db.Close()
 		d.db = nil
 	}
-}
-
-func (d *SessionDirectory) Close() error {
-	d.reset()
 	return nil
 }
 

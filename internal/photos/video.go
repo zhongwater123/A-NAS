@@ -101,9 +101,7 @@ func (s *Service) readVideo(ctx context.Context, staged *stagedObject) error {
 		return err
 	}
 	defer file.Close()
-	probeCtx, cancel := context.WithTimeout(ctx, videoProbeTimeout)
-	defer cancel()
-	probe, err := s.media.Probe(probeCtx, file)
+	probe, err := s.media.Probe(mediaworker.WithTimeout(ctx, videoProbeTimeout), file)
 	if errors.Is(err, mediaworker.ErrUnreadable) {
 		return ErrUnsupportedType
 	}
@@ -216,14 +214,7 @@ func (s *Service) renderVideoFrame(ctx context.Context, file *os.File, duration 
 	if s.media == nil {
 		return nil, 0, 0, mediaworker.ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, frameTimeout)
-	defer cancel()
-	select {
-	case s.decodeSlots <- struct{}{}:
-		defer func() { <-s.decodeSlots }()
-	case <-ctx.Done():
-		return nil, 0, 0, ctx.Err()
-	}
+	ctx = mediaworker.WithTimeout(ctx, frameTimeout)
 	at := posterTime(duration)
 	frame, err := s.media.Frame(ctx, file, at, posterEdge)
 	if errors.Is(err, mediaworker.ErrUnreadable) && at > 0 {

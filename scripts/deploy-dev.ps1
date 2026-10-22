@@ -195,6 +195,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.service'); Destination = "${target}:$release/anas-ai-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media.socket'); Destination = "${target}:$release/anas-media-system.socket.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media@.service'); Destination = "${target}:$release/anas-media-system@.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\system-anasmedia.slice'); Destination = "${target}:$release/anas-media-system.slice.incoming" },
         @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
         @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
         @{ Source = $detectorManifestPath; Destination = "${target}:$release/ai-detector.json.incoming" },

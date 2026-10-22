@@ -39,8 +39,21 @@ const (
 )
 
 var (
-	// ErrUnavailable reports that no worker could be reached.
+	// ErrUnavailable reports that no worker took the request: none could be
+	// reached, none was free, or it has no decoder for the request. The same
+	// request may succeed later.
 	ErrUnavailable = errors.New("media worker is unavailable")
+	// ErrBusy reports that every slot a request may use stayed taken while
+	// someone waited for it. It is also ErrUnavailable.
+	ErrBusy = fmt.Errorf("%w: every slot is taken", ErrUnavailable)
+	// ErrInterrupted reports that a worker took the request and then stopped
+	// before it finished, as when its decoder ran out of memory: the input
+	// may be the cause. It is also ErrUnavailable, for callers that only
+	// tell someone to try again.
+	ErrInterrupted = fmt.Errorf("%w: it stopped before it finished", ErrUnavailable)
+	// ErrFailed reports that the worker could not finish, as when its decoder
+	// ran out of time.
+	ErrFailed = errors.New("media worker failed")
 	// ErrUnreadable reports that FFmpeg cannot read the file.
 	ErrUnreadable = errors.New("media worker cannot read the file")
 	// ErrInvalid reports a request the worker refused.
@@ -79,12 +92,19 @@ type Request struct {
 	// sample, 16 or 24. Start is shared with Stream.
 	SampleRate int `json:"sampleRate,omitempty"`
 	Bits       int `json:"bits,omitempty"`
+	// Ack asks the worker to say it has the request before it starts, so
+	// that a caller can tell a connection systemd dropped from a worker that
+	// stopped while working.
+	Ack bool `json:"ack,omitempty"`
 }
 
 type Response struct {
 	OK      bool   `json:"ok"`
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
+	// Accepted marks the acknowledgement that precedes the response when
+	// the request asked for one.
+	Accepted bool `json:"accepted,omitempty"`
 }
 
 var subtitleFormats = map[string]bool{"srt": true, "ass": true, "webvtt": true}

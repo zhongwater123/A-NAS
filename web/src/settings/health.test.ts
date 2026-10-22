@@ -23,4 +23,10 @@ describe("describeFinding", () => {
     expect(describeFinding({ code: "volume_nearly_full", severity: "warning", value: 91 }, disks).title).toBe("数据卷已用 91%");
     expect(describeFinding({ code: "volume_errors", severity: "warning", value: 3 }, disks).detail).toContain("累计");
   });
+
+  it("says where to look when the data volume could not be reconciled", () => {
+    expect(describeFinding({ code: "volume_reconcile_failed", severity: "warning" }, disks)).toMatchObject({
+      title: "数据卷的权限与共享设置没能更新", detail: expect.stringContaining("Host Agent"),
+    });
+  });
 });
