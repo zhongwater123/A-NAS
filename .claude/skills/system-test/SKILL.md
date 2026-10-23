@@ -21,7 +21,7 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
 
 ## 步骤
 
-在 Windows 开发机上，测试在 [check-in-wsl](../check-in-wsl/SKILL.md) 的 ext4 副本中运行最快：先在那里跑完 `make check-steps`，它已经构建好 Web 资源与二进制。这一步需要几十分钟，用后台任务运行，写法与 check-in-wsl 相同，只把 `make check-steps` 一行换成：
+在 Windows 开发机上，测试在 [check-in-wsl](../check-in-wsl/SKILL.md) 的 ext4 副本中运行最快：先在那里跑完 `make check-steps`，它已经构建好 Web 资源与二进制。测试本身需要几分钟，用后台任务运行，写法与 check-in-wsl 相同，只把 `make check-steps` 一行换成：
 
 ```bash
 status=0; bash scripts/system-test.sh > "$dst.system-test.log" 2>&1 || status=$?
