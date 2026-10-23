@@ -52,6 +52,8 @@ func main() {
 		return
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// Code without a logger of its own, such as decode guards, logs here too.
+	slog.SetDefault(logger)
 	if err := run(logger); err != nil {
 		logger.Error("A-NAS Host Agent stopped", "error", err)
 		os.Exit(1)

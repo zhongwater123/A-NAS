@@ -9,7 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -65,6 +68,12 @@ type Service struct {
 	random    io.Reader
 	logger    *slog.Logger
 	streams   chan struct{}
+	// decoding holds the pixels of the artwork being decoded, up to
+	// maxArtworkPixels; decodeWaiting counts the requests waiting for it,
+	// up to maxDecodeWaiting.
+	decoding         *semaphore.Weighted
+	decodeWaiting    atomic.Int64
+	maxDecodeWaiting int64
 	// streamWait is Options.StreamWait.
 	streamWait time.Duration
 	// kick wakes the background worker after a scan found new videos.
@@ -114,6 +123,7 @@ func NewService(store *Store, options Options) (*Service, error) {
 				return nil, err
 			}
 		}
+		forgetUndecodable(filepath.Join(options.CacheDir, "artwork"))
 	}
 	closing, closeService := context.WithCancel(context.Background())
 	return &Service{
@@ -121,6 +131,7 @@ func NewService(store *Store, options Options) (*Service, error) {
 		store: store, files: options.Files, spaces: options.Spaces, processor: options.Processor,
 		cacheDir: options.CacheDir, now: options.Now, random: options.Random, logger: options.Logger,
 		streams: make(chan struct{}, options.MaxStreams), streamWait: options.StreamWait, kick: make(chan struct{}, 1),
+		decoding: semaphore.NewWeighted(maxArtworkPixels), maxDecodeWaiting: maxArtworkWaiting,
 		scanning: map[string]bool{}, scanLocks: map[string]*sync.Mutex{}, sessions: options.Sessions,
 		queued: map[string]int{}, again: map[string]bool{}, pending: map[string]*time.Timer{}, changeDelay: options.ChangeDelay,
 	}, nil

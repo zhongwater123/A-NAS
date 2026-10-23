@@ -16,6 +16,8 @@ import (
 
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 const MaxIcons = 64
@@ -28,7 +30,8 @@ const MaxIconBytes = 256 << 10
 // Agent reads the same file again on every refresh.
 func NormalizeIcon(data []byte) (id, dataURL string) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("task icon", recovered)
 			id, dataURL = "", ""
 		}
 	}()

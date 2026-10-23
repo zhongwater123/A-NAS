@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,10 +18,25 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
-// maxArtworkPixels refuses images that would take too much memory to decode.
+// maxArtworkPixels bounds the memory artwork takes to decode twice: a larger
+// picture is not decoded, and the decodes in flight together hold at most
+// this many pixels (Service.decoding). However many requests arrive, that is
+// about 100 MB of JPEG or 425 MB of 16-bit PNG, and about 1 GB at the worst
+// for a crafted progressive JPEG; see
+// docs/architecture/media-center.md#海报与剧照.
 const maxArtworkPixels = 50_000_000
+
+// maxArtworkWaiting bounds the requests waiting for the decode budget, each
+// with its picture's file open; more are ErrBusy. A poster wall loads far
+// fewer at once.
+const maxArtworkWaiting = 256
+
+// errUndecodable is a picture that is not artwork: its header is unreadable
+// or out of range, or the decoder rejects or panics on it.
+var errUndecodable = errors.New("the picture cannot be decoded as artwork")
 
 type artworkSize struct {
 	name          string
@@ -159,22 +175,34 @@ func (s *Service) frame(videoID string) (Image, error) {
 }
 
 // resized returns a sidecar image scaled to fit size, read as the actor and
-// cached per file version.
+// cached per file version. A version that cannot be decoded is remembered
+// until the service restarts, so a broken picture costs one decode and one
+// log record, not one per request.
 func (s *Service) resized(ctx context.Context, actor accounts.User, entryID string, size artworkSize) (Image, error) {
 	entry, _, err := s.files.Lookup(ctx, actor, entryID)
 	if err != nil {
 		return Image{}, ErrNotFound
 	}
-	target := filepath.Join(s.cacheDir, "artwork", fmt.Sprintf("%s--%s-%d.jpg", cacheName(entryID), size.name, entry.ModifiedAt.UnixNano()))
+	version := entry.ModifiedAt.UnixNano()
+	target := filepath.Join(s.cacheDir, "artwork", fmt.Sprintf("%s--%s-%d.jpg", cacheName(entryID), size.name, version))
 	if file, err := os.Open(target); err == nil {
 		return Image{File: file, Modified: entry.ModifiedAt}, nil
+	}
+	undecodable := filepath.Join(s.cacheDir, "artwork", fmt.Sprintf("%s--undecodable-%d", cacheName(entryID), version))
+	if _, err := os.Stat(undecodable); err == nil {
+		return Image{}, ErrNotFound
 	}
 	content, err := s.files.OpenContent(ctx, actor, entryID)
 	if err != nil {
 		return Image{}, err
 	}
 	defer func() { _ = content.Reader.Close() }()
-	scaled, err := scaleArtwork(content.Reader, size)
+	scaled, err := s.scaleArtwork(ctx, content.Reader, size)
+	if errors.Is(err, errUndecodable) {
+		// A marker that cannot be written only means decoding it again.
+		_ = writeAtomically(undecodable, nil)
+		return Image{}, ErrNotFound
+	}
 	if err != nil {
 		return Image{}, err
 	}
@@ -189,23 +217,34 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 }
 
 // scaleArtwork decodes a sidecar image and encodes it as a JPEG that fits
-// size. An image the decoder panics on is not artwork, like one it rejects.
-func scaleArtwork(r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
+// size, once its pixels are free in the decode budget; waiting ends with the
+// request. An image the decoder panics on is undecodable, like one it rejects.
+func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
 	defer func() {
-		if recover() != nil {
-			encoded, err = nil, ErrNotFound
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("media artwork", recovered)
+			encoded, err = nil, errUndecodable
 		}
 	}()
 	config, _, err := image.DecodeConfig(r)
-	if err != nil || config.Width*config.Height > maxArtworkPixels {
-		return nil, ErrNotFound
+	if err != nil {
+		return nil, decodeFailure(err)
 	}
+	pixels := int64(config.Width) * int64(config.Height)
+	if config.Width <= 0 || config.Height <= 0 || pixels > maxArtworkPixels {
+		return nil, errUndecodable
+	}
+	if err := s.waitForPixels(ctx, pixels); err != nil {
+		return nil, err
+	}
+	// Released before the panic above is recovered, too.
+	defer s.decoding.Release(pixels)
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
 	decoded, err := imaging.Decode(r, imaging.AutoOrientation(true))
 	if err != nil {
-		return nil, ErrNotFound
+		return nil, decodeFailure(err)
 	}
 	scaled := decoded
 	if decoded.Bounds().Dx() > size.width || decoded.Bounds().Dy() > size.height {
@@ -216,4 +255,42 @@ func scaleArtwork(r io.ReadSeeker, size artworkSize) (encoded []byte, err error)
 		return nil, err
 	}
 	return buffer.Bytes(), nil
+}
+
+// waitForPixels takes pixels from the decode budget, waiting in turn behind
+// the decodes in flight until the request ends.
+func (s *Service) waitForPixels(ctx context.Context, pixels int64) error {
+	if s.decoding.TryAcquire(pixels) {
+		return nil
+	}
+	if s.decodeWaiting.Add(1) > s.maxDecodeWaiting {
+		s.decodeWaiting.Add(-1)
+		return ErrBusy
+	}
+	defer s.decodeWaiting.Add(-1)
+	return s.decoding.Acquire(ctx, pixels)
+}
+
+// forgetUndecodable removes the undecodable markers of directory, so that
+// each start tries such pictures once more: the decoder, or this code, may
+// have been fixed since.
+func forgetUndecodable(directory string) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "--undecodable-") {
+			_ = os.Remove(filepath.Join(directory, entry.Name()))
+		}
+	}
+}
+
+// decodeFailure tells a picture the decoder refuses from a file that could
+// not be read, which may succeed later and is not remembered.
+func decodeFailure(err error) error {
+	if _, ok := errors.AsType[*fs.PathError](err); ok {
+		return ErrNotFound
+	}
+	return errUndecodable
 }

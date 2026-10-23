@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/evanoberholster/imagemeta"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Metadata is what a photo's original says about itself, read when asked:
@@ -60,7 +62,8 @@ func (s *Service) Metadata(ctx context.Context, p Principal, assetID string) (Me
 // parser cannot read (it may panic on hostile input), has no metadata.
 func decodeMetadata(r io.ReadSeeker) (metadata Metadata) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo metadata", recovered)
 			metadata = Metadata{}
 		}
 	}()

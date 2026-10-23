@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
@@ -22,7 +23,8 @@ type MediaDecoder interface {
 
 func readHEICMetadata(file *os.File, location *time.Location) (metadata photoMetadata, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo HEIC metadata", recovered)
 			metadata = photoMetadata{}
 			err = ErrUnsupportedType
 		}

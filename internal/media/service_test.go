@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/jpeg"
 	"io"
 	"os"
 	"path/filepath"
@@ -605,18 +607,184 @@ func TestStreamsSubtitlesAndArtworkGoThroughTheProcessor(t *testing.T) {
 	}
 }
 
-func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
-	env := newTestEnv(t, nil)
-	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
-	env.write(t, env.shared, "电影/Heat (1995)-poster.jpg", string(imagetest.PanickingPicture()))
+// postered scans a movie library holding a film for each poster and returns
+// the films' title IDs by title.
+func postered(t *testing.T, env *testEnv, posters map[string][]byte) map[string]string {
+	t.Helper()
+	for name, poster := range posters {
+		env.write(t, env.shared, "电影/"+name+".mkv", "video")
+		env.write(t, env.shared, "电影/"+name+"-poster.jpg", string(poster))
+	}
 	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
 	movies, err := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
-	if err != nil || movies.Total != 1 || !movies.Items[0].Artwork.Poster {
+	if err != nil || movies.Total != len(posters) {
 		t.Fatalf("Titles() = %+v, %v", movies.Items, err)
 	}
-	if _, err := env.media.Artwork(env.ctx, env.bob, movies.Items[0].ID, "poster"); !errors.Is(err, ErrNotFound) {
+	ids := map[string]string{}
+	for _, movie := range movies.Items {
+		if !movie.Artwork.Poster {
+			t.Fatalf("%s has no poster", movie.Title)
+		}
+		ids[movie.Title] = movie.ID
+	}
+	return ids
+}
+
+func jpegPoster(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var poster bytes.Buffer
+	if err := jpeg.Encode(&poster, image.NewGray(image.Rect(0, 0, width, height)), nil); err != nil {
+		t.Fatal(err)
+	}
+	return poster.Bytes()
+}
+
+func waitUntil(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !done(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	env := newTestEnv(t, nil)
+	id := postered(t, env, map[string][]byte{"Heat (1995)": imagetest.PanickingPicture()})["Heat"]
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
 	}
+	imagetest.RequirePanicLogged(t, panics(), "media artwork", "Heat", "电影")
+	// The panicking decode gave its pixels back.
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decode budget is still held after the panic")
+	}
+	env.media.decoding.Release(maxArtworkPixels)
+
+	// The version is remembered: the file now holds a good picture, but
+	// until the catalog sees the change it is not read again.
+	env.write(t, env.shared, "电影/Heat (1995)-poster.jpg", string(jpegPoster(t, 60, 90)))
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Artwork() of a version remembered as undecodable = %v, want ErrNotFound", err)
+	}
+	// A new version is decoded.
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(env.spaceRoot(env.shared), "电影", "Heat (1995)-poster.jpg"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.files.Tree(env.ctx, env.admin, env.shared.ID, env.folder(t, env.admin, env.shared, "电影")); err != nil {
+		t.Fatal(err)
+	}
+	served, err := env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("Artwork() of the replaced picture = %v", err)
+	}
+	_ = served.File.Close()
+
+	// A restart forgets what could not be decoded, in case the decoder or
+	// this code has been fixed.
+	restarted, err := NewService(env.media.store, Options{Files: env.files, Spaces: env.accounts, CacheDir: env.media.cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restarted.Close)
+	cached, err := os.ReadDir(filepath.Join(env.media.cacheDir, "artwork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range cached {
+		if strings.Contains(entry.Name(), "--undecodable-") {
+			t.Fatalf("%s is still in the cache after a restart", entry.Name())
+		}
+	}
+}
+
+func TestArtworkDecodesShareAPixelBudget(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ids := postered(t, env, map[string][]byte{
+		"Heat (1995)":  imagetest.HeldPicture(6000, 5000), // 30 MP
+		"Up (2009)":    imagetest.HeldPicture(6000, 5000),
+		"Alien (1979)": imagetest.HeldPicture(4000, 2500), // 10 MP
+	})
+	results := make(chan error, len(ids))
+	request := func(title string) {
+		go func() {
+			served, err := env.media.Artwork(env.ctx, env.bob, ids[title], "poster")
+			if err == nil {
+				_ = served.File.Close()
+			}
+			results <- err
+		}()
+	}
+
+	request("Heat")
+	waitUntil(t, "Heat to decode", func() bool { return imagetest.HeldDecoding() == 1 })
+	// 60 MP do not fit: Up waits for Heat.
+	request("Up")
+	waitUntil(t, "Up to wait", func() bool { return env.media.decodeWaiting.Load() == 1 })
+	if decoding := imagetest.HeldDecoding(); decoding != 1 {
+		t.Fatalf("%d posters decode at once, want 1 of the two 30 MP ones", decoding)
+	}
+	imagetest.ReleaseHeld()
+	waitUntil(t, "Up to decode", func() bool { return env.media.decodeWaiting.Load() == 0 && imagetest.HeldDecoding() == 1 })
+	// 40 MP fit: Alien decodes beside Up.
+	request("Alien")
+	waitUntil(t, "Alien to decode beside Up", func() bool { return imagetest.HeldDecoding() == 2 })
+	imagetest.ReleaseHeld()
+	imagetest.ReleaseHeld()
+	for range len(ids) {
+		if err := <-results; err != nil {
+			t.Fatalf("Artwork() = %v", err)
+		}
+	}
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decodes did not give their pixels back")
+	}
+}
+
+func TestArtworkWaitsEndWithTheirRequestsAndAreBounded(t *testing.T) {
+	env := newTestEnv(t, nil)
+	id := postered(t, env, map[string][]byte{"Heat (1995)": jpegPoster(t, 60, 90)})["Heat"]
+	env.media.maxDecodeWaiting = 2
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decode budget is not free")
+	}
+	waiting, cancel := context.WithCancel(env.ctx)
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := env.media.Artwork(waiting, env.bob, id, "poster")
+			results <- err
+		}()
+	}
+	waitUntil(t, "two requests to wait", func() bool { return env.media.decodeWaiting.Load() == 2 })
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Artwork() with the queue full = %v, want ErrBusy", err)
+	}
+	cancel()
+	for range 2 {
+		if err := <-results; !errors.Is(err, context.Canceled) {
+			t.Fatalf("Artwork() whose request ended while waiting = %v, want context.Canceled", err)
+		}
+	}
+	env.media.decoding.Release(maxArtworkPixels)
+
+	served, err := env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("Artwork() with the budget free = %v", err)
+	}
+	_ = served.File.Close()
+	// A cached poster is not decoded, so it needs no budget.
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decode did not give its pixels back")
+	}
+	served, err = env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("cached Artwork() with no budget free = %v", err)
+	}
+	_ = served.File.Close()
+	env.media.decoding.Release(maxArtworkPixels)
 }
 
 func TestWebChangesRescanTheLibrariesOfTheirSpace(t *testing.T) {

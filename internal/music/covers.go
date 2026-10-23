@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/disintegration/imaging"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Cover sizes. Small covers fill track rows and album grids; large ones the
@@ -83,7 +85,8 @@ func (c coverStore) Path(id, size string) (string, error) {
 // bytes would panic again on every scan.
 func (c coverStore) Put(picture []byte) (id string, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("music cover", recovered)
 			id, err = "", errUndecodableCover
 		}
 	}()

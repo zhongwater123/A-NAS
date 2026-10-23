@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
@@ -279,7 +280,8 @@ WHERE state = 'failed' AND error_class = ?`, now, jobErrorIO)
 // background work: when the Media Worker is busy they wait their turn.
 func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []byte, width, height int, class string) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo thumbnail", recovered)
 			thumbnail, width, height, class = nil, 0, 0, jobErrorUndecodable
 		}
 	}()

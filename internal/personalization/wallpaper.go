@@ -18,6 +18,8 @@ import (
 
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // The ways the desktop can draw the wallpaper.
@@ -83,7 +85,8 @@ type WallpaperPicture struct {
 // the decoder panics on is unsupported, like one it rejects.
 func NormalizeWallpaper(picture []byte) (data []byte, width, height int, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("wallpaper", recovered)
 			data, width, height, err = nil, 0, 0, ErrUnsupportedImage
 		}
 	}()

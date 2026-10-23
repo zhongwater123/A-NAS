@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/evanoberholster/imagemeta"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // photoMetadata is what A-NAS reads from an original's header at import.
@@ -31,7 +33,8 @@ func (m photoMetadata) displaySize() (int, int) {
 func readEXIF(r io.ReadSeeker, location *time.Location) (orientation int, takenAt time.Time) {
 	orientation = 1
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo EXIF", recovered)
 			orientation, takenAt = 1, time.Time{}
 		}
 	}()
