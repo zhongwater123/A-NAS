@@ -237,10 +237,10 @@ type VolumeExecutor interface {
 }
 
 type Options struct {
-	// Now and NewID default to time.Now and random plan IDs. Requests and
-	// the goroutine that follows a running plan call them, not always under
-	// the service's lock, so they must be safe for concurrent use, as the
-	// defaults are.
+	// Now and NewID default to time.Now and random plan IDs. Planning
+	// requests call both outside the service's lock, and the goroutine that
+	// follows a running plan calls Now when it saves the plan, so both must
+	// be safe for concurrent use, as the defaults are.
 	Now   func() time.Time
 	NewID func() string
 	Store *Store

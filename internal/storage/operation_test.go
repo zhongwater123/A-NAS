@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -159,7 +160,7 @@ func TestAPlanThatStoppedIsRetriedFromTheHostAgent(t *testing.T) {
 func TestAStoppedPlanIsSupersededByAPlanThatRan(t *testing.T) {
 	host := newHostOperations()
 	service, err := storage.OpenService(fake.NewWithSpareDisk(), host, storage.Options{
-		Now:          tickingClock(time.Date(2026, time.October, 21, 9, 0, 0, 0, time.UTC)),
+		Now:          clocktest.Ticking(time.Date(2026, time.October, 21, 9, 0, 0, 0, time.UTC), time.Second).Now,
 		NewID:        planIDs(),
 		PollInterval: time.Millisecond,
 	})
@@ -269,18 +270,6 @@ func followingService(t *testing.T, reader hoststate.Reader, host storage.Volume
 	}
 	t.Cleanup(service.Close)
 	return service
-}
-
-// tickingClock moves a second each time it is read. The goroutine that
-// follows a running plan reads it while the test plans the next one.
-func tickingClock(start time.Time) func() time.Time {
-	var mu sync.Mutex
-	return func() time.Time {
-		mu.Lock()
-		defer mu.Unlock()
-		start = start.Add(time.Second)
-		return start
-	}
 }
 
 // planIDs numbers plans plan-1, plan-2 and so on, from any goroutine.

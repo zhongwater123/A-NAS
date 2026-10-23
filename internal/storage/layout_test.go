@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -80,7 +81,7 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	reader := spareDiskReader(t)
 	executor := &recordingExecutor{}
 	service := storage.NewService(reader, executor, storage.Options{
-		Now:   tickingClock(time.Date(2026, time.October, 20, 9, 0, 0, 0, time.UTC)),
+		Now:   clocktest.Ticking(time.Date(2026, time.October, 20, 9, 0, 0, 0, time.UTC), time.Second).Now,
 		NewID: planIDs(),
 	})
 	createSingleVolume(t, service)

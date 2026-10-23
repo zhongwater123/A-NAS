@@ -6,9 +6,10 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 )
 
 type testBackend struct {
@@ -47,17 +48,10 @@ func (b *testBackend) Save(ctx context.Context, u User, target Target, entries [
 	return nil
 }
 
-type testClock struct {
-	sync.Mutex
-	t time.Time
-}
-
-func (c *testClock) Now() time.Time          { c.Lock(); defer c.Unlock(); return c.t }
-func (c *testClock) Advance(d time.Duration) { c.Lock(); defer c.Unlock(); c.t = c.t.Add(d) }
-func setup(t *testing.T, b *testBackend) (*Store, *testClock) {
+func setup(t *testing.T, b *testBackend) (*Store, *clocktest.Clock) {
 	t.Helper()
 	dir := t.TempDir()
-	clock := &testClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	clock := clocktest.New(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	s, err := Open(filepath.Join(dir, "shares.db"), filepath.Join(dir, "content"), Options{Backend: b, Now: clock.Now, Active: func(context.Context, string) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)

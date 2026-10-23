@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
@@ -31,32 +31,9 @@ type testEnv struct {
 	bob      accounts.User
 	shared   accounts.Space
 	private  map[string]accounts.Space
-	clock    *testClock
-}
-
-// testClock moves a second each time it is read, so that changes made one
-// after another have different times, until a test sets it. Background scans
-// read it while the test does, so like time.Now it is safe for concurrent use.
-type testClock struct {
-	mu      sync.Mutex
-	now     time.Time
-	stopped bool
-}
-
-func (c *testClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.stopped {
-		c.now = c.now.Add(time.Second)
-	}
-	return c.now
-}
-
-// Set stops the clock at now.
-func (c *testClock) Set(now time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now, c.stopped = now, true
+	// clock ticks a second per read until a test sets it; background scans
+	// read it too.
+	clock *clocktest.Clock
 }
 
 type acceptingCredentials struct{}
@@ -127,7 +104,7 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 		t.Fatalf("open media store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	clock := &testClock{now: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
+	clock := clocktest.Ticking(time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), time.Second)
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
 		Now: clock.Now, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
