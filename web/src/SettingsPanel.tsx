@@ -150,9 +150,7 @@ export function SettingsPanel({
   // so its shell runs until the settings window closes.
   const [terminalOpened, setTerminalOpened] = useState(current === "terminal");
   const [terminalStatus, setTerminalStatus] = useState<SessionStatus>();
-  useEffect(() => {
-    if (current === "terminal") setTerminalOpened(true);
-  }, [current]);
+  if (current === "terminal" && !terminalOpened) setTerminalOpened(true);
   const navigate = (next: SettingsSection) => {
     setEditingPassword(false);
     onSectionChange(next);
@@ -813,14 +811,18 @@ function UsersSection({ currentUser, onChangeOwnPassword }: { currentUser: User;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<UserDialog>();
-  const refresh = useCallback(async () => {
-    try {
-      setUsers(await listUsers());
-      setError("");
-    } catch (caught) {
-      setError(messageOf(caught));
-    }
-  }, []);
+  const refresh = useCallback(
+    () =>
+      listUsers()
+        .then((items) => {
+          setUsers(items);
+          setError("");
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        }),
+    [],
+  );
   useEffect(() => {
     void refresh();
   }, [refresh]);

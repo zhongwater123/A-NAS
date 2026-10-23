@@ -67,17 +67,13 @@
         "src/feedback/FeedbackChannel.tsx",
         "src/feedback/FeedbackEditor.tsx",
         "src/music/MusicPanel.tsx",
-        "src/music/player.ts",
-        "src/settings/AvatarDialog.tsx",
-        "src/settings/StorageSection.tsx",
-        "src/settings/WallpaperDialog.tsx"
+        "src/music/player.ts"
       ],
       "rules": { "react-hooks-js/refs": "off" }
     },
     {
       "files": [
         "src/App.tsx",
-        "src/SettingsPanel.tsx",
         "src/appcenter/AppCenterPanel.tsx",
         "src/appcenter/InstallSheet.tsx",
         "src/appcenter/model.ts",
@@ -92,9 +88,6 @@
         "src/files/FileViewer.tsx",
         "src/music/NowPlaying.tsx",
         "src/music/SourcesDialog.tsx",
-        "src/settings/ImageSources.tsx",
-        "src/settings/StorageSection.tsx",
-        "src/settings/TerminalSection.tsx",
         "src/transfers/TransferNotices.tsx",
         "src/trash/TrashPanel.tsx",
         "src/useDesktopOrder.ts",

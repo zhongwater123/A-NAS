@@ -1,5 +1,5 @@
 import { ArrowLeft, ImagePlus, X, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 
 import { uploadAvatar, type User } from "../api";
@@ -26,8 +26,11 @@ export function AvatarDialog({ onClose, onSaved }: { onClose: () => void; onSave
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Opening another image and closing let the last one go.
   const pickedRef = useRef<Picked>(undefined);
-  pickedRef.current = picked;
+  useLayoutEffect(() => {
+    pickedRef.current = picked;
+  });
   useEffect(() => () => pickedRef.current?.revoke?.(), []);
 
   const close = useCallback(() => {
