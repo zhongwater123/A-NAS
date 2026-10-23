@@ -43,7 +43,7 @@ updates:
       # The 0.x packages get a pull request each.
       web:
         patterns: ["*"]
-        exclude-patterns: ["@xterm/addon-fit", "dom-accessibility-api"]
+        exclude-patterns: ["@xterm/addon-fit", "dom-accessibility-api", "openapi-fetch"]
         update-types: [minor, patch]
 
   # The contract's generators (Makefile, api). openapi-typescript uses

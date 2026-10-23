@@ -38,5 +38,5 @@
     // Request stubs check each request's headers as it arrives.
     "vitest/no-conditional-expect": "off"
   },
-  "ignorePatterns": ["src/assistant/hermes/**"]
+  "ignorePatterns": ["src/assistant/hermes/**", "src/api.generated.ts"]
 }

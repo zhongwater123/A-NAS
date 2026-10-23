@@ -27,6 +27,7 @@ Caddyfile text eol=lf
 web/src/assistant/hermes/** linguist-generated=true
 # Written by `make api`.
 api/openapi.bundle.yaml linguist-generated=true
+web/src/api.generated.ts linguist-generated=true
 
 *.png binary
 *.jpg binary

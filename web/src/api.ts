@@ -1,3 +1,7 @@
+import createClient from "openapi-fetch";
+
+import type { paths } from "./api.generated";
+
 export type Health = "healthy" | "warning" | "critical" | "unknown";
 export type DiskRole = "system" | "data" | "unassigned";
 export type Transport = "nvme" | "sata" | "usb" | "unknown";
@@ -395,6 +399,56 @@ export function setSession(session?: Session) {
 // csrfHeaders lets the Docker and App Center clients send the session's CSRF token on writes.
 export function csrfHeaders(): Record<string, string> {
   return csrfToken ? { "X-CSRF-Token": csrfToken } : {};
+}
+
+// csrfHeader is the header that carries the session's CSRF token on a request
+// of this method: the server checks it on every method but GET and HEAD. The
+// typed client, uploads with progress and tus all take it from here.
+export function csrfHeader(method: string): Record<string, string> {
+  const verb = method.toUpperCase();
+  return csrfToken && verb !== "GET" && verb !== "HEAD" ? { "X-CSRF-Token": csrfToken } : {};
+}
+
+// The contract requires X-CSRF-Token of every write. The client sends it
+// itself, so calls leave it out of their header parameters.
+type WithoutCSRF<Operation> = Operation extends { parameters: { header: infer Header } }
+  ? Omit<Operation, "parameters"> & {
+      parameters: Omit<Operation["parameters"], "header"> & { header?: Omit<Header, "X-CSRF-Token"> };
+    }
+  : Operation;
+type ClientPaths = { [Path in keyof paths]: { [Method in keyof paths[Path]]: WithoutCSRF<paths[Path][Method]> } };
+
+// client calls the product API with the types generated from its contract
+// (api.generated.ts, `npm run generate`). It sends what apiFetch sends, with
+// the CSRF token on writes; call turns its result into data or an APIError.
+// The page's origin is the base because a Request needs an absolute URL.
+export const client = createClient<ClientPaths>({
+  baseUrl: window.location.origin,
+  headers: { Accept: "application/json" },
+  fetch: (request) => apiFetch(request),
+});
+client.use({
+  onRequest({ request }) {
+    for (const [name, value] of Object.entries(csrfHeader(request.method))) request.headers.set(name, value);
+    return request;
+  },
+});
+
+// call waits for a client call and returns its data; a failure throws an
+// APIError with the code and message of the server's error body.
+export async function call<Data>(pending: Promise<{ data?: Data; error?: unknown; response: Response }>) {
+  const { data, error, response } = await pending;
+  if (!response.ok) throw failure(response.status, error);
+  return data as Data;
+}
+
+function failure(status: number, body: unknown): APIError {
+  const detail = isRecord(body) && isRecord(body.error) ? body.error : {};
+  return new APIError(
+    status,
+    typeof detail.code === "string" ? detail.code : "request_failed",
+    typeof detail.message === "string" ? detail.message : `请求失败 (${status})`,
+  );
 }
 
 // request sends a same-origin product API call; mutations carry the CSRF token.
