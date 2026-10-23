@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import { formatBytes } from "../bytes";
 import { isHEIFImage, isPDFPreviewable, isPreviewableImage, isTextPreviewable, isVideoFile } from "../fileTypes";
@@ -36,18 +36,25 @@ export function SharePreview({
     layer.current?.focus({ preventScroll: true });
     return () => returnTo?.focus({ preventScroll: true });
   }, []);
-  useEffect(() => {
+  // Another file starts without the last one's text or error.
+  const shown = JSON.stringify([shareId, entry.id, name]);
+  const [shownBefore, setShownBefore] = useState(shown);
+  if (shownBefore !== shown) {
+    setShownBefore(shown);
     setText(undefined);
     setError("");
+  }
+  const read = useEffectEvent((signal: AbortSignal) => readText(shareId, entry, signal));
+  useEffect(() => {
     if (!isTextPreviewable(name)) return;
     const abort = new AbortController();
-    void readText(shareId, entry, abort.signal)
+    void read(abort.signal)
       .then(setText)
       .catch((error) => {
         if (!abort.signal.aborted) setError(errorText(error));
       });
     return () => abort.abort();
-  }, [shareId, entry.id, name]);
+  }, [shown, name]);
   const step = (delta: number) => onIndex((index + delta + entries.length) % entries.length);
   const media = isPreviewableImage(name) || isHEIFImage(name);
   const save = onSave && (

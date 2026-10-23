@@ -15,10 +15,12 @@ export function useThread(shareId: string, recipientId: string) {
   const key = `${shareId}:${recipientId}`;
   const [state, setState] = useState<{ key: string; messages: Message[] }>({ key: "", messages: [] });
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
+  const [errorKey, setErrorKey] = useState(key);
+  if (errorKey !== key) {
+    setErrorKey(key);
     setError("");
-  }, [key]);
+  }
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     if (!recipientId) return;
     let stopped = false,
@@ -52,7 +54,7 @@ export function useThread(shareId: string, recipientId: string) {
       stopped = true;
       clearInterval(timer);
     };
-  }, [shareId, recipientId, revision]);
+  }, [key, shareId, recipientId, revision]);
   const loaded = state.key === key;
   return { messages: loaded ? state.messages : [], error, loaded, reload: () => setRevision((value) => value + 1) };
 }
@@ -103,23 +105,28 @@ export function Conversation({
   const active = context.active && documentVisible && visible;
   const open = isActive(share);
   // Each conversation has its own draft and read position.
-  useEffect(() => {
+  const [recipientBefore, setRecipientBefore] = useState(recipientId);
+  if (recipientBefore !== recipientId) {
+    setRecipientBefore(recipientId);
     setText("");
     setSendError("");
     setReadError("");
+    setAtBottom(true);
+  }
+  useEffect(() => {
     through.current = 0;
     attempt.current = undefined;
-    setAtBottom(true);
   }, [recipientId]);
   useEffect(() => {
     const change = () => setDocumentVisible(document.visibilityState !== "hidden");
     document.addEventListener("visibilitychange", change);
     return () => document.removeEventListener("visibilitychange", change);
   }, []);
+  const { thread: setThread, refresh } = context;
   useEffect(() => {
-    context.thread(active ? { id: share.id, recipientId } : undefined);
-    return () => context.thread(undefined);
-  }, [share.id, recipientId, active]);
+    setThread(active ? { id: share.id, recipientId } : undefined);
+    return () => setThread(undefined);
+  }, [share.id, recipientId, active, setThread]);
   useEffect(() => {
     if (!active || !atBottom || !messages.length) return;
     const last = messages[messages.length - 1].id;
@@ -132,7 +139,7 @@ export function Conversation({
         if (!stopped) {
           through.current = last;
           setReadError("");
-          context.refresh();
+          refresh();
         }
       })
       .catch((error) => {
@@ -141,7 +148,7 @@ export function Conversation({
     return () => {
       stopped = true;
     };
-  }, [active, atBottom, messages, share.id, recipientId]);
+  }, [active, atBottom, messages, share.id, recipientId, refresh]);
   const send = async () => {
     if (busy || !text.trim() || !open) return;
     setBusy(true);

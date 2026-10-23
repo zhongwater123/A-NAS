@@ -52,11 +52,6 @@
         "src/docker/DockerPanel.tsx",
         "src/media/MediaCenter.tsx",
         "src/media/Player.tsx",
-        "src/shares/Conversation.tsx",
-        "src/shares/ShareDetail.tsx",
-        "src/shares/SharePreview.tsx",
-        "src/shares/SharesProvider.tsx",
-        "src/shares/shares.test.tsx",
         "src/useHostState.ts"
       ],
       "rules": { "react-hooks-js/exhaustive-deps": "off" }
@@ -79,9 +74,7 @@
         "src/music/player.ts",
         "src/settings/AvatarDialog.tsx",
         "src/settings/StorageSection.tsx",
-        "src/settings/WallpaperDialog.tsx",
-        "src/shares/ShareDetail.tsx",
-        "src/shares/SharesProvider.tsx"
+        "src/settings/WallpaperDialog.tsx"
       ],
       "rules": { "react-hooks-js/refs": "off" }
     },
@@ -115,13 +108,6 @@
         "src/settings/ImageSources.tsx",
         "src/settings/StorageSection.tsx",
         "src/settings/TerminalSection.tsx",
-        "src/shares/Conversation.tsx",
-        "src/shares/EmojiInput.tsx",
-        "src/shares/SaveDialog.tsx",
-        "src/shares/ShareComposer.tsx",
-        "src/shares/ShareDetail.tsx",
-        "src/shares/SharePreview.tsx",
-        "src/shares/SharesPanel.tsx",
         "src/transfers/TransferNotices.tsx",
         "src/trash/TrashPanel.tsx",
         "src/useDesktopOrder.ts",

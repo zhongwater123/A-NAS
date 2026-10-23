@@ -1,4 +1,14 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Share2, X } from "lucide-react";
 import type { FileEntry } from "../api";
 import { usePeople } from "../people";
@@ -92,7 +102,9 @@ function Provider({
   const summarised = useRef(false);
   const currentThread = useRef<Focus | undefined>(undefined);
   const visible = useRef(active);
-  visible.current = active && !draft;
+  useLayoutEffect(() => {
+    visible.current = active && !draft;
+  });
   const key = `anas:shares:notifications:${userId}`;
   const [delivered, setDelivered] = useState(0);
   useEffect(() => {
@@ -186,7 +198,10 @@ function Provider({
     setFocus({ id, recipientId });
     onOpen();
   };
-  const refresh = () => setRevision((value) => value + 1);
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
+  const thread = useCallback((value?: Focus) => {
+    currentThread.current = value;
+  }, []);
   const dismiss = (key: string) => setToasts((previous) => previous.filter((item) => item.key !== key));
   return (
     <Context.Provider
@@ -199,9 +214,7 @@ function Provider({
         open,
         compose: setDraft,
         refresh,
-        thread: (value) => {
-          currentThread.current = value;
-        },
+        thread,
       }}
     >
       {children}
@@ -312,6 +325,8 @@ function NoticeToast({
   const people = usePeople();
   const [paused, setPaused] = useState(false);
   const message = toast.kind === "message";
+  const enrich = useEffectEvent(onEnrich);
+  const close = useEffectEvent(onClose);
   useEffect(() => {
     let stopped = false;
     void (async () => {
@@ -329,7 +344,7 @@ function NoticeToast({
             text = found.text;
           }
         }
-        if (!stopped) onEnrich({ share, author, text });
+        if (!stopped) enrich({ share, author, text });
       } catch {
         /* The plain wording still says what happened. */
       }
@@ -337,10 +352,10 @@ function NoticeToast({
     return () => {
       stopped = true;
     };
-  }, [toast.shareId, toast.recipientId, toast.latest]);
+  }, [toast.shareId, toast.recipientId, toast.latest, message]);
   useEffect(() => {
     if (paused) return;
-    const timer = setTimeout(onClose, toastLife);
+    const timer = setTimeout(() => close(), toastLife);
     return () => clearTimeout(timer);
   }, [paused, toast.latest]);
   const who = toast.author ? nameOf(people, toast.author.id, toast.author.username) : "";
@@ -380,9 +395,10 @@ function NoticeToast({
 
 function SummaryToast({ unread, onOpen, onClose }: { unread: Unread; onOpen: () => void; onClose: () => void }) {
   const [paused, setPaused] = useState(false);
+  const close = useEffectEvent(onClose);
   useEffect(() => {
     if (paused) return;
-    const timer = setTimeout(onClose, toastLife);
+    const timer = setTimeout(() => close(), toastLife);
     return () => clearTimeout(timer);
   }, [paused]);
   const parts = [unread.received && `${unread.received} 个收到的分享`, unread.sent && `${unread.sent} 个发出的分享`]

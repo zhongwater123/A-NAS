@@ -43,8 +43,6 @@ export function ShareComposer({
   }, []);
   useEffect(() => {
     let stopped = false;
-    setLoading(true);
-    setMemberError("");
     void listMembers()
       .then((items) => {
         if (!stopped) setMembers(items);
@@ -190,7 +188,15 @@ export function ShareComposer({
               ) : memberError ? (
                 <div className="sh-people-note">
                   <p role="alert">{memberError}</p>
-                  <button type="button" className="sh-btn small" onClick={() => setReload((value) => value + 1)}>
+                  <button
+                    type="button"
+                    className="sh-btn small"
+                    onClick={() => {
+                      setLoading(true);
+                      setMemberError("");
+                      setReload((value) => value + 1);
+                    }}
+                  >
                     重新加载
                   </button>
                 </div>

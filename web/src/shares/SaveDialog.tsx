@@ -24,15 +24,24 @@ export function SaveDialog({
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceId, setSpaceId] = useState("");
   const [trail, setTrail] = useState<FileEntry[]>([]);
-  const [folders, setFolders] = useState<FileEntry[]>([]);
   const [error, setError] = useState("");
   const [working, setWorking] = useState<"" | "save" | "create">("");
   const busy = working !== "";
+  const [folders, setFolders] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [naming, setNaming] = useState<string>();
   const attempt = useRef<{ signature: string; key: string } | undefined>(undefined);
   const layer = useRef<HTMLDivElement>(null);
   const parentId = trail.at(-1)?.id ?? "";
+  // Each folder opened shows no folders, and saving waits, until its own are listed.
+  const [listedFor, setListedFor] = useState({ spaceId, parentId });
+  if (listedFor.spaceId !== spaceId || listedFor.parentId !== parentId) {
+    setListedFor({ spaceId, parentId });
+    if (spaceId) {
+      setLoading(true);
+      setFolders([]);
+    }
+  }
   useEffect(() => {
     let stopped = false;
     void listSpaces()
@@ -56,8 +65,6 @@ export function SaveDialog({
   useEffect(() => {
     if (!spaceId) return;
     let stopped = false;
-    setLoading(true);
-    setFolders([]);
     void listEntries(spaceId, parentId)
       .then((items) => {
         if (stopped) return;

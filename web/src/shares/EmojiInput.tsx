@@ -61,9 +61,8 @@ export function EmojiInput({
     field.style.height = "auto";
     field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
   }, [value, variant]);
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
+  // A field that becomes disabled closes its picker.
+  if (disabled && open) setOpen(false);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
