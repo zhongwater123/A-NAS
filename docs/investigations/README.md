@@ -33,7 +33,7 @@
 - [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
 - [2026-10-15：Host Agent 每次请求都读 SMART，读盘超时被杀](2026-10-15-host-agent-smart-on-every-request.md)（fixed locally；Experimental NAS verification pending）
 
-- [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed locally；系统回归通过）
+- [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed；2026-10-21 部署的 `8f5b6b0b4586` 包含修复，待实机验收）
 
 - [2026-10-16：局域网 HTTP 点击发送分享无反应](2026-10-16-member-sharing-http-send.md)（fixed locally；待部署验收）
 
@@ -41,9 +41,9 @@
 - [2026-10-21：VNAS 长对话中窗口崩溃，回答过的确认卡片堆在输入框上方](2026-10-21-vnas-window-crash-and-stacked-cards.md)（fixed locally；崩溃的确切报错待取得，待部署验收）
 
 - [2026-10-21：存储计划执行绑定浏览器请求，被打断的建卷无法恢复](2026-10-21-storage-plan-bound-to-browser-request.md)（fixed locally；Experimental NAS verification pending）
-- [2026-10-21：过期的目录对账扫描改写回收站行，文件夹无法恢复](2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)（fixed locally；待部署验收）
+- [2026-10-21：过期的目录对账扫描改写回收站行，文件夹无法恢复](2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)（fixed；2026-10-21 部署，待实机验收）
 
-- [2026-10-21：快照清单超过 1 MiB 即失败，并留下孤儿子卷](2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)（fixed locally；待部署验收）
+- [2026-10-21：快照清单超过 1 MiB 即失败，并留下孤儿子卷](2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)（fixed；2026-10-21 部署，待实机验收）
 - [2026-10-21：安装失败的应用显示为“已安装”，容器代理重启打断安装](2026-10-21-failed-app-install-shown-as-installed.md)（fixed locally；Experimental NAS verification pending）
 - [2026-10-21：媒体 Worker 短暂不可用让 HEIC 与视频的缩略图和 AI 永久失败](2026-10-21-media-worker-shared-budget.md)（fixed locally；Experimental NAS verification pending）
 

@@ -2,9 +2,19 @@
 # Claude Code PostToolUse hook (.claude/settings.json): gofmt the Go file that
 # an Edit or Write just changed, so `make fmt-check` never fails on it.
 #
-# It touches only files in the checkout Claude works in: the nearest directory
-# with a go.mod above the hook input's cwd. CLAUDE_PROJECT_DIR does not name
-# that checkout in a worktree session, where it stays at the main checkout.
+# It touches only files in the checkout Claude works in: the Git working tree
+# (the nearest directory with a .git) around the hook input's cwd, if it has a
+# go.mod. A nested module such as tools/golangci-lint stays part of it.
+# CLAUDE_PROJECT_DIR does not name that checkout in a worktree session, where
+# it stays at the main checkout.
+#
+# For the same reason the hook command in settings.json runs this script from
+# the checkout around cwd when that checkout is a worktree of the same
+# repository as CLAUDE_PROJECT_DIR, so a worktree never runs the main
+# checkout's copy, which may be older or missing. Otherwise, as for a clone
+# of another repository, it runs CLAUDE_PROJECT_DIR's copy, and nothing when
+# that is missing too. The command hands git the cwd with its JSON escapes
+# still in place; Git for Windows reads D:\\A-NAS as D:\A-NAS.
 #
 # The Windows development machines have Go and jq only inside WSL
 # (docs/development/LOCAL_ENVIRONMENT.md), so there this script runs itself
@@ -46,10 +56,10 @@ cwd=$(jq -r '.cwd // empty' <<<"$input")
 [[ $file == *.go && -n $cwd ]] || exit 0
 file=$(local_path "$file") || exit 0
 checkout=$(local_path "$cwd") || exit 0
-while [[ $checkout == /?* && ! -f $checkout/go.mod ]]; do
+while [[ $checkout == /?* && ! -e $checkout/.git ]]; do
   checkout=${checkout%/*}
 done
-[[ -f $checkout/go.mod && -f $file && $file == "$checkout"/* && $file != "$checkout"/.claude/worktrees/* ]] || exit 0
+[[ -e $checkout/.git && -f $checkout/go.mod && -f $file && $file == "$checkout"/* && $file != "$checkout"/.claude/worktrees/* ]] || exit 0
 
 # A file that does not parse is reported to Claude (exit 2) and left as it is.
 if ! output=$(gofmt -w "$file" 2>&1); then

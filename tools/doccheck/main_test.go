@@ -81,11 +81,25 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 		"docs/specs/photo-people.md": "# 人物\n\n" +
 			"相册列出待合并的人物建议。<!-- doccheck: not a status -->\n" +
 			"部署进度见[当前状态](../status/CURRENT.md#已合并尚未部署)。\n",
+		"docs/investigations/2026-10-21-snapshots.md": "# 快照\n\n状态：fixed（修复未部署）\n\n## 时间线\n\n" +
+			"- Docker 与容器代理从未部署。\n" +
+			"- 项目状态一直标记“Experimental NAS 未部署”（见旧版 README）。\n",
+		"docs/architecture/photo-library.md": "13. 人物与宠物（已合并，未部署）。\n" +
+			"14. 视频（[进度](../status/CURRENT.md)）当时未部署。\n",
+		"docs/research/labels.md": "已发布，未部署的只有 beta (beta 未部署)。\n" +
+			"（见（旧版）未部署）\n" +
+			"Status: fixed, 未部署\n" +
+			"（旧版）之后未部署，(另见（附录）) 也未部署。\n",
 	})
 
 	assertProblems(t, validateDocumentationProblems(root), []string{
 		"docs/specs/music.md:3 says 未合并",
 		"docs/adr/0023-share-copies.md:3 says 待合并",
+		"docs/investigations/2026-10-21-snapshots.md:3 says 未部署",
+		"docs/architecture/photo-library.md:1 says 未部署",
+		"docs/research/labels.md:1 says 未部署",
+		"docs/research/labels.md:2 says 未部署",
+		"docs/research/labels.md:3 says 未部署",
 	})
 }
 
@@ -109,6 +123,8 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 		"docs/adr/0014-mentions-proposed.md": "# 0014\n\n状态：accepted\n",
 		"docs/adr/0015-chinese-status.md":    "# 0015\n\n状态：提议中\n",
 		"docs/adr/0016-bold-status.md":       "# 0016\n\n**状态**：proposed\n",
+		"docs/adr/0017-body-status.md":       "# 0017\n\n背景与决定。\n\n## 后果\n\n状态：accepted 的 ADR 不再改写。\n",
+		"docs/adr/0018-late-status.md":       "# 0018\n\n背景与决定。\n\n状态：accepted\n\n## 后果\n",
 		"docs/adr/README.md": "# ADR\n\n" +
 			"- [0001：已接受](0001-accepted.md)（修订 0007）\n" +
 			"- [0002：提议](0002-proposed.md)（proposed）\n" +
@@ -125,6 +141,8 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 			"- [0014：提到别的状态](0014-mentions-proposed.md)（取代 0002 的 proposed 方案）\n" +
 			"- [0015：中文状态](0015-chinese-status.md)\n" +
 			"- [0016：加粗状态](0016-bold-status.md)（proposed）\n" +
+			"- [0017：正文提到状态](0017-body-status.md)（proposed）\n" +
+			"- [0018：状态行不在标题下](0018-late-status.md)（proposed）\n" +
 			"- [0001：重复](0001-accepted.md)（proposed）\n" +
 			"\n0002 的背景见 [0002](0002-proposed.md)。\n",
 	})
@@ -134,6 +152,7 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 		"docs/adr/0004-overmarked.md says accepted but docs/adr/README.md marks it proposed",
 		"docs/adr/0008-unlisted.md is not listed in docs/adr/README.md",
 		"docs/adr/0015-chinese-status.md: start the 状态 line with proposed, accepted or superseded",
+		"docs/adr/0018-late-status.md: move the 状态 line directly under the title",
 		"docs/adr/README.md lists 0001-accepted.md more than once",
 	})
 }

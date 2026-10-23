@@ -3,20 +3,47 @@
   "permissions": {
     "deny": [
       "Read(//**/.env)",
-      "Read(//**/.env.*)",
+      "Read(//**/.env.local)",
+      "Read(//**/.env.*.local)",
+      "Read(//**/.env.development)",
+      "Read(//**/.env.production)",
+      "Read(//**/.env.staging)",
+      "Read(.env.*)",
+      "Read(!.env.example)",
       "Read(//**/*.key)",
       "Read(//**/*.pem)",
+      "Read(//**/.git-credentials)",
+      "Read(~/.config/git/credentials)",
+      "Read(~/.ssh/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/AppData/Roaming/GitHub CLI/**)",
+      "Read(~/.netrc)",
+      "Read(~/_netrc)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.claude/.credentials.json)",
       "Read(//etc/anas-spike/**)"
     ]
   },
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt.sh\"",
+            "if": "Edit(//**/*.go)",
+            "command": "input=$(cat); cwd=${input#*'\"cwd\"'}; cwd=${cwd#*'\"'}; cwd=${cwd%%'\"'*}; nl='\n'; found=$(git -C \"$cwd\" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) && [ \"${found#*\"$nl\"}\" = \"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" ] && script=${found%%\"$nl\"*}/.claude/hooks/gofmt.sh && [ -f \"$script\" ] || script=$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt.sh; [ -f \"$script\" ] || exit 0; printf '%s' \"$input\" | bash \"$script\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Write(//**/*.go)",
+            "command": "input=$(cat); cwd=${input#*'\"cwd\"'}; cwd=${cwd#*'\"'}; cwd=${cwd%%'\"'*}; nl='\n'; found=$(git -C \"$cwd\" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) && [ \"${found#*\"$nl\"}\" = \"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" ] && script=${found%%\"$nl\"*}/.claude/hooks/gofmt.sh && [ -f \"$script\" ] || script=$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt.sh; [ -f \"$script\" ] || exit 0; printf '%s' \"$input\" | bash \"$script\"",
             "timeout": 60
           }
         ]
