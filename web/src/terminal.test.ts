@@ -4,8 +4,12 @@ import { exitCodeFromReason, resizeMessage, terminalSessionURL } from "./termina
 
 describe("terminal protocol", () => {
   it("connects over the page's own origin", () => {
-    expect(terminalSessionURL({ protocol: "http:", host: "127.0.0.1:8080" })).toBe("ws://127.0.0.1:8080/api/v1/terminal/session");
-    expect(terminalSessionURL({ protocol: "https:", host: "localhost:8443" })).toBe("wss://localhost:8443/api/v1/terminal/session");
+    expect(terminalSessionURL({ protocol: "http:", host: "127.0.0.1:8080" })).toBe(
+      "ws://127.0.0.1:8080/api/v1/terminal/session",
+    );
+    expect(terminalSessionURL({ protocol: "https:", host: "localhost:8443" })).toBe(
+      "wss://localhost:8443/api/v1/terminal/session",
+    );
   });
 
   it("encodes resize control frames", () => {

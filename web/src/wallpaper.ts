@@ -23,7 +23,9 @@ export function publishWallpaper(next: Wallpaper) {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 // useWallpaper is undefined until the first read, so a chosen wallpaper does
@@ -34,12 +36,18 @@ export function useWallpaper(): Wallpaper | undefined {
     let active = true;
     const load = () => {
       void readWallpaper()
-        .then((next) => { if (active) publishWallpaper(next); })
-        .catch(() => { if (active && !current) publishWallpaper({ style: "fill" }); });
+        .then((next) => {
+          if (active) publishWallpaper(next);
+        })
+        .catch(() => {
+          if (active && !current) publishWallpaper({ style: "fill" });
+        });
     };
     load();
     const timer = window.setInterval(load, wallpaperRefreshMs);
-    const visible = () => { if (!document.hidden) load(); };
+    const visible = () => {
+      if (!document.hidden) load();
+    };
     document.addEventListener("visibilitychange", visible);
     return () => {
       active = false;
@@ -51,11 +59,17 @@ export function useWallpaper(): Wallpaper | undefined {
 }
 
 // WallpaperPicture is a picture as the desktop draws it, at its own size.
-export interface WallpaperPicture { url: string; width: number; height: number }
+export interface WallpaperPicture {
+  url: string;
+  width: number;
+  height: number;
+}
 
 export function wallpaperPicture(wallpaper: Wallpaper): WallpaperPicture {
   const picture = wallpaper.image;
-  return picture ? { url: wallpaperImageURL(picture.version), width: picture.width, height: picture.height } : { url: defaultWallpaperURL, ...defaultWallpaperSize };
+  return picture
+    ? { url: wallpaperImageURL(picture.version), width: picture.width, height: picture.height }
+    : { url: defaultWallpaperURL, ...defaultWallpaperSize };
 }
 
 // wallpaperBackground draws wallpaper as CSS backgrounds; before the first
@@ -70,7 +84,10 @@ export function wallpaperBackground(wallpaper: Wallpaper | undefined, scale = 1)
 // proportion.
 export function drawWallpaper(style: WallpaperStyle, picture: WallpaperPicture, scale = 1): CSSProperties {
   const natural = `${Math.max(1, picture.width * scale)}px ${Math.max(1, picture.height * scale)}px`;
-  const layout: Record<WallpaperStyle, Pick<CSSProperties, "backgroundSize" | "backgroundRepeat" | "backgroundPosition">> = {
+  const layout: Record<
+    WallpaperStyle,
+    Pick<CSSProperties, "backgroundSize" | "backgroundRepeat" | "backgroundPosition">
+  > = {
     fill: { backgroundSize: "cover", backgroundRepeat: "no-repeat", backgroundPosition: "center" },
     fit: { backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" },
     stretch: { backgroundSize: "100% 100%", backgroundRepeat: "no-repeat", backgroundPosition: "center" },

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/types"
@@ -73,9 +74,7 @@ var appSecrets = map[string][]secretSlot{
 // keeping the values it already has; changed says whether any was added.
 func NewSecrets(appID string, existing Secrets) (Secrets, bool) {
 	secrets := Secrets{}
-	for name, value := range existing {
-		secrets[name] = value
-	}
+	maps.Copy(secrets, existing)
 	changed := false
 	for _, slot := range appSecrets[appID] {
 		if secrets[slot.secret] == "" {

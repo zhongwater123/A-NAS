@@ -302,8 +302,7 @@ func readAll(part io.Reader, limit int64) ([]byte, error) {
 }
 
 func bodyError(err error) error {
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		return errRequestTooLarge
 	}
 	return errInvalid

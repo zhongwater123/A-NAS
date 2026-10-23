@@ -43,7 +43,11 @@ export function dayLabel(iso: string, now = new Date()): string {
   if (days === 0) return "今天";
   if (days === 1) return "昨天";
   if (days < 7) return `${days} 天前`;
-  return day.toLocaleDateString("zh-CN", { month: "long", day: "numeric", ...(day.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+  return day.toLocaleDateString("zh-CN", {
+    month: "long",
+    day: "numeric",
+    ...(day.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 export function episodeCode(season?: number, episode?: number): string {

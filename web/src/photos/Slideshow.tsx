@@ -41,8 +41,12 @@ function prepare(prepared: Prepared, asset: PhotoAsset) {
     const image = new Image();
     image.src = displayURL(asset);
     // A photo that cannot be decoded is shown as the browser manages.
-    const decoded = typeof image.decode === "function" ? image.decode().catch(() => undefined)
-      : new Promise<void>((resolve) => { image.onload = image.onerror = () => resolve(); });
+    const decoded =
+      typeof image.decode === "function"
+        ? image.decode().catch(() => undefined)
+        : new Promise<void>((resolve) => {
+            image.onload = image.onerror = () => resolve();
+          });
     const ready = Promise.race([decoded, new Promise<void>((resolve) => window.setTimeout(resolve, decodeLimit))]);
     entry = { image, ready };
     prepared.set(asset.id, entry);
@@ -59,7 +63,10 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
   const root = useRef<HTMLDivElement>(null);
   const assets = useMemo(() => all.filter((asset) => !asset.video), [all]);
   const [current, setCurrent] = useState<PhotoAsset | undefined>(() => {
-    const start = Math.max(0, all.findIndex((asset) => asset.id === startId));
+    const start = Math.max(
+      0,
+      all.findIndex((asset) => asset.id === startId),
+    );
     return all.slice(start).find((asset) => !asset.video) ?? assets[0];
   });
   const [leaving, setLeaving] = useState<PhotoAsset>();
@@ -132,15 +139,28 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
   // and past any videos after those.
   useEffect(() => {
     if (!awaitingMore) return;
-    if (assets.length > position + 1) { setAwaitingMore(false); void go(1); return; }
-    if (!more) { setAwaitingMore(false); setEnded(true); return; }
+    if (assets.length > position + 1) {
+      setAwaitingMore(false);
+      void go(1);
+      return;
+    }
+    if (!more) {
+      setAwaitingMore(false);
+      setEnded(true);
+      return;
+    }
     if (all.length) latest.current.onReveal(all[all.length - 1].id);
-    const timer = window.setTimeout(() => { setAwaitingMore(false); setEnded(true); }, moreWait);
+    const timer = window.setTimeout(() => {
+      setAwaitingMore(false);
+      setEnded(true);
+    }, moreWait);
     return () => window.clearTimeout(timer);
   }, [awaitingMore, assets.length, all.length, more]);
 
   // A view of videos alone has nothing to show.
-  useEffect(() => { if (!current) onExit(startId); }, []);
+  useEffect(() => {
+    if (!current) onExit(startId);
+  }, []);
 
   // The controls show while the pointer moves, and stay while paused.
   const idle = useRef(0);
@@ -149,7 +169,10 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
     window.clearTimeout(idle.current);
     idle.current = window.setTimeout(() => setControls(false), controlsDelay);
   }, []);
-  useEffect(() => { wake(); return () => window.clearTimeout(idle.current); }, [wake]);
+  useEffect(() => {
+    wake();
+    return () => window.clearTimeout(idle.current);
+  }, [wake]);
 
   const exit = useCallback(() => {
     const shown = latest.current.current;
@@ -174,21 +197,44 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
     };
   }, [exit]);
 
-  const step = (delta: number) => { wake(); setEnded(false); void go(delta); };
+  const step = (delta: number) => {
+    wake();
+    setEnded(false);
+    void go(delta);
+  };
   const restart = () => {
     const first = latest.current.assets[0];
     if (!first) return;
     setEnded(false);
     setPaused(false);
-    void prepare(prepared.current, first).then(() => { setLeaving(latest.current.current); setCurrent(first); });
+    void prepare(prepared.current, first).then(() => {
+      setLeaving(latest.current.current);
+      setCurrent(first);
+    });
   };
   const keyDown = (event: KeyboardEvent) => {
-    const handled = () => { event.preventDefault(); event.stopPropagation(); };
+    const handled = () => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
     switch (event.key) {
-      case "Escape": handled(); exit(); break;
-      case " ": handled(); wake(); setPaused(!paused); break;
-      case "ArrowRight": handled(); step(1); break;
-      case "ArrowLeft": handled(); step(-1); break;
+      case "Escape":
+        handled();
+        exit();
+        break;
+      case " ":
+        handled();
+        wake();
+        setPaused(!paused);
+        break;
+      case "ArrowRight":
+        handled();
+        step(1);
+        break;
+      case "ArrowLeft":
+        handled();
+        step(-1);
+        break;
     }
   };
 
@@ -209,30 +255,84 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
       onPointerMove={wake}
       onPointerDown={wake}
     >
-      {leaving && leaving.id !== current.id && <img key={`leaving-${leaving.id}`} className="ph-slide leaving" src={displayURL(leaving)} alt="" draggable={false} />}
+      {leaving && leaving.id !== current.id && (
+        <img
+          key={`leaving-${leaving.id}`}
+          className="ph-slide leaving"
+          src={displayURL(leaving)}
+          alt=""
+          draggable={false}
+        />
+      )}
       <img key={current.id} className="ph-slide" src={displayURL(current)} alt={current.name} draggable={false} />
 
       <header className="ph-slideshow-bar">
         <div className="ph-slideshow-caption">
           <strong>{dayLabel(moment)}</strong>
-          <small>{moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {count ? `${position + 1} / ${count}` : `第 ${position + 1} 张`}</small>
+          <small>
+            {moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} ·{" "}
+            {count ? `${position + 1} / ${count}` : `第 ${position + 1} 张`}
+          </small>
         </div>
-        <button type="button" aria-label="退出幻灯片" title="退出 (Esc)" onClick={exit}><X /></button>
+        <button type="button" aria-label="退出幻灯片" title="退出 (Esc)" onClick={exit}>
+          <X />
+        </button>
       </header>
-      {!ended && <div className="ph-slideshow-controls" role="toolbar" aria-label="幻灯片控制">
-        <button type="button" aria-label="上一张" title="上一张 (←)" disabled={position <= 0} onClick={() => step(-1)}><ChevronLeft /></button>
-        <button type="button" className="main" aria-label={paused ? "继续播放" : "暂停"} title={paused ? "继续 (空格)" : "暂停 (空格)"} onClick={() => { wake(); setPaused(!paused); }}>{paused ? <Play /> : <Pause />}</button>
-        <button type="button" aria-label="下一张" title="下一张 (→)" onClick={() => step(1)}><ChevronRight /></button>
-      </div>}
-      {!ended && <div className="ph-slideshow-progress" aria-hidden="true"><span key={`${current.id}:${paused}`} className={paused || awaitingMore ? "paused" : ""} style={{ animationDuration: `${slideDelay + (fade ? fadeTime : 0)}ms` }} /></div>}
-      {(slow || awaitingMore) && !ended && <div className="ph-slideshow-wait" role="status"><span className="ph-spinner" />{awaitingMore ? "正在载入后面的照片" : "正在载入下一张"}</div>}
+      {!ended && (
+        <div className="ph-slideshow-controls" role="toolbar" aria-label="幻灯片控制">
+          <button
+            type="button"
+            aria-label="上一张"
+            title="上一张 (←)"
+            disabled={position <= 0}
+            onClick={() => step(-1)}
+          >
+            <ChevronLeft />
+          </button>
+          <button
+            type="button"
+            className="main"
+            aria-label={paused ? "继续播放" : "暂停"}
+            title={paused ? "继续 (空格)" : "暂停 (空格)"}
+            onClick={() => {
+              wake();
+              setPaused(!paused);
+            }}
+          >
+            {paused ? <Play /> : <Pause />}
+          </button>
+          <button type="button" aria-label="下一张" title="下一张 (→)" onClick={() => step(1)}>
+            <ChevronRight />
+          </button>
+        </div>
+      )}
+      {!ended && (
+        <div className="ph-slideshow-progress" aria-hidden="true">
+          <span
+            key={`${current.id}:${paused}`}
+            className={paused || awaitingMore ? "paused" : ""}
+            style={{ animationDuration: `${slideDelay + (fade ? fadeTime : 0)}ms` }}
+          />
+        </div>
+      )}
+      {(slow || awaitingMore) && !ended && (
+        <div className="ph-slideshow-wait" role="status">
+          <span className="ph-spinner" />
+          {awaitingMore ? "正在载入后面的照片" : "正在载入下一张"}
+        </div>
+      )}
       {ended && (
         <div className="ph-slideshow-end" role="status">
           <strong>放完了</strong>
           <small>{`共 ${assets.length} 张照片`}</small>
           <div>
-            <button type="button" onClick={restart}><RotateCcw />从头再放</button>
-            <button type="button" className="primary" onClick={exit}>退出</button>
+            <button type="button" onClick={restart}>
+              <RotateCcw />
+              从头再放
+            </button>
+            <button type="button" className="primary" onClick={exit}>
+              退出
+            </button>
           </div>
         </div>
       )}

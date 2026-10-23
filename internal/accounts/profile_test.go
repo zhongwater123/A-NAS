@@ -75,7 +75,7 @@ func TestNicknamesAreTidiedCheckedAndShownToEveryone(t *testing.T) {
 	}{
 		{nickname: strings.Repeat("长", accounts.MaxNicknameLength+1), want: accounts.ErrInvalidNickname},
 		{nickname: "line\nbreak", want: accounts.ErrInvalidNickname},
-		{nickname: "evil‮name", want: accounts.ErrInvalidNickname},
+		{nickname: "evil\u202ename", want: accounts.ErrInvalidNickname},
 		{nickname: "OWNER", want: accounts.ErrNicknameUnavailable},
 	} {
 		if _, err := f.service.SetNickname(ctx, f.alice, test.nickname); !errors.Is(err, test.want) {

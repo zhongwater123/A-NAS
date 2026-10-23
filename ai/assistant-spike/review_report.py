@@ -6,9 +6,10 @@ every tool call the review made (#114, review.sh).
 """
 import json
 import sys
+from pathlib import Path
 
 MARK = "Review the conversation above"
-records = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8").readlines()[int(sys.argv[2]):]]
+records = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()[int(sys.argv[2]):]]
 kinds, reviews = {}, []
 for r in records:
     review = MARK in json.dumps(r["messages"], ensure_ascii=False)

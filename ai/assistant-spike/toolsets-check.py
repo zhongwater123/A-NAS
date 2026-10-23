@@ -26,7 +26,7 @@ try:
     from hermes_cli.plugins import discover_plugins
 
     discover_plugins()  # plugins may register toolsets of their own
-except Exception as exc:
+except Exception as exc:  # noqa: BLE001  any failure fails the check
     print(f"plugin discovery failed: {exc}")
     sys.exit(1)
 from model_tools import _select_tool_names

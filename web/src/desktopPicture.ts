@@ -8,7 +8,13 @@
  * menus, previews and notices laid over it. Elements `leaveOut` names are not
  * drawn, nor anything inside them; `maxEdge` bounds the picture's longer side.
  */
-export async function drawDesktop({ leaveOut, maxEdge }: { leaveOut(element: Element): boolean; maxEdge?: number }): Promise<HTMLCanvasElement> {
+export async function drawDesktop({
+  leaveOut,
+  maxEdge,
+}: {
+  leaveOut(element: Element): boolean;
+  maxEdge?: number;
+}): Promise<HTMLCanvasElement> {
   const view = { width: window.innerWidth, height: window.innerHeight };
   const sharp = Math.min(window.devicePixelRatio || 1, 2);
   const { domToCanvas } = await import("modern-screenshot");

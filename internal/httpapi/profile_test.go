@@ -60,7 +60,7 @@ func TestEveryoneChoosesTheirOwnNicknameAndAvatar(t *testing.T) {
 	}
 	owner.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"小爱"}`, nil, http.StatusConflict)
 	owner.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"ALICE"}`, nil, http.StatusConflict)
-	alice.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"a‮b"}`, nil, http.StatusUnprocessableEntity)
+	alice.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"a\u202eb"}`, nil, http.StatusUnprocessableEntity)
 	// Requests the contract itself rules out are sent around the contract client.
 	outsideContract := func(method, path, contentType, body string) int {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))

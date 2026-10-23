@@ -78,7 +78,7 @@ services:
 		t.Fatal(err)
 	}
 
-	engineClient, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	engineClient, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Fatal(err)
 	}

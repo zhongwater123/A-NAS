@@ -17,7 +17,7 @@ import (
 // Agent空间 folder not made yet, is left out.
 func confine(volumeRoot, writable string) error {
 	rules := []landlock.Rule{landlock.RODirs(volumeRoot)}
-	for _, place := range strings.Split(writable, ":") {
+	for place := range strings.SplitSeq(writable, ":") {
 		if place != "" {
 			rules = append(rules, landlock.RWDirs(place).WithRefer().IgnoreIfMissing())
 		}

@@ -209,8 +209,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		h.logger.ErrorContext(r.Context(), "app request failed", "path", r.URL.Path, "error", err)
 		message = "the container engine could not complete the request"
 	}
-	var policy *appstore.PolicyError
-	if errors.As(err, &policy) {
+	if _, ok := errors.AsType[*appstore.PolicyError](err); ok {
 		message = "this app's manifest does not meet the install policy"
 	}
 	writeError(w, status, code, message)

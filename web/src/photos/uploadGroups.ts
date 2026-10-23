@@ -3,7 +3,12 @@
 // video on its own, a MOV among them, is uploaded as it is: the server
 // completes the stills in the library still waiting for that Live Photo
 // video, by Apple's identifier, and keeps any other video as a video.
-export interface UploadGroup { file: File; motion?: File; video?: boolean; error?: string }
+export interface UploadGroup {
+  file: File;
+  motion?: File;
+  video?: boolean;
+  error?: string;
+}
 
 const ambiguousName = "同名文件不唯一，请分开选择每组 Live Photo 原件";
 const videoName = /\.(mp4|m4v|mov|qt|3gp|3g2|mkv|webm|avi|mts|m2ts)$/i;
@@ -30,6 +35,8 @@ export function groupPhotoUploads(files: File[]): UploadGroup[] {
       groups.push({ file, motion });
     }
   }
-  for (const file of files) if (isVideoFile(file) && !consumed.has(file)) groups.push(ambiguous.has(file) ? { file, error: ambiguousName } : { file, video: true });
+  for (const file of files)
+    if (isVideoFile(file) && !consumed.has(file))
+      groups.push(ambiguous.has(file) ? { file, error: ambiguousName } : { file, video: true });
   return groups;
 }

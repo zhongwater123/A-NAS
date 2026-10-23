@@ -32,7 +32,7 @@ import numpy as np
 class Occurrence:
     """One face or pet in one photo, with the truth the evaluation knows."""
 
-    __slots__ = ("key", "photo", "identity", "vector", "group")
+    __slots__ = ("group", "identity", "key", "photo", "vector")
 
     def __init__(self, key, photo, identity, vector, group=""):
         self.key = key

@@ -156,7 +156,7 @@ func TestRemoteCaptureSaveKeepsEmptyDirectoriesAndRenames(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("entries %+v", entries)
 	}
-	for n := 0; n < 2; n++ {
+	for range 2 {
 		e = backend.Save(f.bc, user(f.bob), shares.Target{RootID: f.bs, ShareID: "share"}, entries, func(id string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(contents[id])), nil }, func(_ string, publish func() error) error { return publish() }, nil)
 		if e != nil {
 			t.Fatal(e)

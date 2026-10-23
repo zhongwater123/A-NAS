@@ -272,7 +272,7 @@ func (h *handler) video(w http.ResponseWriter, r *http.Request, user accounts.Us
 // capabilities reads the browser's codec support from caps=hevc,av1,...
 func capabilities(values url.Values) media.Capabilities {
 	var caps media.Capabilities
-	for _, value := range strings.Split(values.Get("caps"), ",") {
+	for value := range strings.SplitSeq(values.Get("caps"), ",") {
 		switch strings.TrimSpace(value) {
 		case "hevc":
 			caps.HEVC = true

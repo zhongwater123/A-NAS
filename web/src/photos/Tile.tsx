@@ -22,12 +22,24 @@ interface Props {
 
 // Tile is one photo of the grid. A click opens it, or toggles it while
 // photos are being selected; the check in its corner always toggles.
-export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onToggle, onCheckDown, onDragIds, badge }: Props) {
+export const Tile = memo(function Tile({
+  box,
+  selected,
+  selecting,
+  onOpen,
+  onToggle,
+  onCheckDown,
+  onDragIds,
+  badge,
+}: Props) {
   const asset = box.item;
   // A press on the check swipes over other photos; it must not drag the tile.
   const fromCheck = useRef(false);
   const dragStart = (event: DragEvent<HTMLDivElement>) => {
-    if (fromCheck.current) { event.preventDefault(); return; }
+    if (fromCheck.current) {
+      event.preventDefault();
+      return;
+    }
     const ids = onDragIds?.(asset) ?? [asset.id];
     event.dataTransfer.setData(dragType, JSON.stringify(ids));
     event.dataTransfer.effectAllowed = "copy";
@@ -71,7 +83,11 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
             else if (asset.video) event.currentTarget.closest(".ph-tile")?.classList.add("no-picture");
           }}
         />
-        {asset.video && <span className="ph-tile-film" aria-hidden="true"><Film /></span>}
+        {asset.video && (
+          <span className="ph-tile-film" aria-hidden="true">
+            <Film />
+          </span>
+        )}
       </button>
       <button
         type="button"
@@ -81,16 +97,32 @@ export const Tile = memo(function Tile({ box, selected, selecting, onOpen, onTog
         className="ph-check"
         onPointerDown={(event) => {
           fromCheck.current = true;
-          window.addEventListener("pointerup", () => { fromCheck.current = false; }, { once: true });
+          window.addEventListener(
+            "pointerup",
+            () => {
+              fromCheck.current = false;
+            },
+            { once: true },
+          );
           onCheckDown?.(asset, event);
         }}
         onClick={(event) => onToggle(asset, event)}
       >
         <Check strokeWidth={3} />
       </button>
-      {asset.duplicate === "duplicate" && <span className="ph-tile-badge" title="本图库中已有相同照片"><Copy />重复</span>}
+      {asset.duplicate === "duplicate" && (
+        <span className="ph-tile-badge" title="本图库中已有相同照片">
+          <Copy />
+          重复
+        </span>
+      )}
       {asset.motion && <span className="ph-motion-badge">动态照片</span>}
-      {asset.video && <span className="ph-tile-video" title={`视频 · ${clock(asset.video.duration)}`}><Play />{clock(asset.video.duration)}</span>}
+      {asset.video && (
+        <span className="ph-tile-video" title={`视频 · ${clock(asset.video.duration)}`}>
+          <Play />
+          {clock(asset.video.duration)}
+        </span>
+      )}
       {badge}
     </div>
   );
@@ -102,23 +134,66 @@ export function PendingTile({ box, onRetry }: { box: Box<PendingPhoto>; onRetry:
   const item = box.item;
   const circumference = 2 * Math.PI * 15;
   return (
-    <div className={`ph-tile ph-pending ${item.state}${item.video ? " video" : ""}`} style={{ left: box.left, width: box.width, height: box.height }} title={item.error ?? item.name}>
+    <div
+      className={`ph-tile ph-pending ${item.state}${item.video ? " video" : ""}`}
+      style={{ left: box.left, width: box.width, height: box.height }}
+      title={item.error ?? item.name}
+    >
       {item.video ? (
         <>
-          <span className="ph-tile-film" aria-hidden="true"><Film /></span>
-          <video src={`${item.url}#t=0.1`} aria-label={item.name} className="loaded" muted playsInline preload="metadata" />
-          <span className="ph-tile-video"><Play />视频</span>
+          <span className="ph-tile-film" aria-hidden="true">
+            <Film />
+          </span>
+          <video
+            src={`${item.url}#t=0.1`}
+            aria-label={item.name}
+            className="loaded"
+            muted
+            playsInline
+            preload="metadata"
+          />
+          <span className="ph-tile-video">
+            <Play />
+            视频
+          </span>
         </>
-      ) : <img src={item.url} alt={item.name} className="loaded" draggable={false} />}
+      ) : (
+        <img src={item.url} alt={item.name} className="loaded" draggable={false} />
+      )}
       {item.state === "failed" ? (
-        <button type="button" className="ph-pending-failed" aria-label={`重试上传 ${item.name}`} onClick={() => onRetry(item.key)}>
-          <CircleAlert /><span>{item.error ?? "上传失败"}</span><small><RotateCcw />重试</small>
+        <button
+          type="button"
+          className="ph-pending-failed"
+          aria-label={`重试上传 ${item.name}`}
+          onClick={() => onRetry(item.key)}
+        >
+          <CircleAlert />
+          <span>{item.error ?? "上传失败"}</span>
+          <small>
+            <RotateCcw />
+            重试
+          </small>
         </button>
-      ) : item.state !== "done" && (
-        <svg className="ph-progress-ring" viewBox="0 0 36 36" role="progressbar" aria-label={`正在上传 ${item.name}`} aria-valuenow={Math.round(item.progress * 100)}>
-          <circle cx="18" cy="18" r="15" className="track" />
-          <circle cx="18" cy="18" r="15" className="value" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - (item.state === "waiting" ? 0 : Math.max(0.04, item.progress)))} />
-        </svg>
+      ) : (
+        item.state !== "done" && (
+          <svg
+            className="ph-progress-ring"
+            viewBox="0 0 36 36"
+            role="progressbar"
+            aria-label={`正在上传 ${item.name}`}
+            aria-valuenow={Math.round(item.progress * 100)}
+          >
+            <circle cx="18" cy="18" r="15" className="track" />
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              className="value"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - (item.state === "waiting" ? 0 : Math.max(0.04, item.progress)))}
+            />
+          </svg>
+        )
       )}
     </div>
   );

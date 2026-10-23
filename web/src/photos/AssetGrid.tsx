@@ -36,30 +36,36 @@ export function AssetGrid(props: Props) {
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  const fetchPage = useCallback(async (cursor: string, current: number) => {
-    busy.current = true;
-    try {
-      const page = await loadRef.current(cursor);
-      if (current !== generation.current) return;
-      setAssets((value) => cursor && value ? [...value, ...page.items] : page.items);
-      setNext(page.next);
-      onPage?.(page, !cursor);
-    } catch (caught) {
-      if (current !== generation.current) return;
-      setAssets((value) => value ?? []);
-      setNext(undefined);
-      onError(messageOf(caught));
-    } finally {
-      if (current === generation.current) busy.current = false;
-    }
-  }, [onPage, onError]);
+  const fetchPage = useCallback(
+    async (cursor: string, current: number) => {
+      busy.current = true;
+      try {
+        const page = await loadRef.current(cursor);
+        if (current !== generation.current) return;
+        setAssets((value) => (cursor && value ? [...value, ...page.items] : page.items));
+        setNext(page.next);
+        onPage?.(page, !cursor);
+      } catch (caught) {
+        if (current !== generation.current) return;
+        setAssets((value) => value ?? []);
+        setNext(undefined);
+        onError(messageOf(caught));
+      } finally {
+        if (current === generation.current) busy.current = false;
+      }
+    },
+    [onPage, onError],
+  );
 
   const keyRef = useRef(listKey);
   useEffect(() => {
     const fresh = keyRef.current !== listKey;
     keyRef.current = listKey;
     const current = ++generation.current;
-    if (fresh) { setAssets(undefined); setNext(undefined); }
+    if (fresh) {
+      setAssets(undefined);
+      setNext(undefined);
+    }
     void fetchPage("", current);
   }, [listKey, refreshKey]);
 
@@ -67,23 +73,36 @@ export function AssetGrid(props: Props) {
   usePendingThumbnails(shown, (ready) => setAssets((value) => value?.map((asset) => ready.get(asset.id) ?? asset)));
   const { split } = props;
   // Hidden photos leave the first group smaller.
-  const shownSplit = useMemo(() => split && assets && { ...split, at: assets.slice(0, split.at).filter((asset) => !hidden.has(asset.id)).length },
-    [split?.at, split?.title, split?.text, assets, hidden]);
-  const entries = useMemo(() => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end, shownSplit),
-    [shown, width, rowHeight, next, props.end, shownSplit]);
+  const shownSplit = useMemo(
+    () =>
+      split && assets && { ...split, at: assets.slice(0, split.at).filter((asset) => !hidden.has(asset.id)).length },
+    [split?.at, split?.title, split?.text, assets, hidden],
+  );
+  const entries = useMemo(
+    () => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end, shownSplit),
+    [shown, width, rowHeight, next, props.end, shownSplit],
+  );
   useEffect(() => onAssets(shown ?? []), [shown]);
   useEffect(() => onCount?.(shown && !next ? shown.length : undefined), [shown, next]);
 
   const renderTile = useTileRenderer(props, props.badge);
-  const renderEntry = (entry: Entry): ReactNode => entry.kind === "more"
-    ? <div className="ph-more"><span className="ph-spinner" />正在载入更多</div>
-    : entry.kind === "end" ? <div className="ph-end">{entry.text}</div>
-      : entry.kind === "divider" ? (
-        <div className="ph-divider" role="separator" aria-label={entry.title}>
-          <span className="ph-divider-title"><ChevronsDown />{entry.title}</span>
-          <small>{entry.text}</small>
-        </div>
-      ) : null;
+  const renderEntry = (entry: Entry): ReactNode =>
+    entry.kind === "more" ? (
+      <div className="ph-more">
+        <span className="ph-spinner" />
+        正在载入更多
+      </div>
+    ) : entry.kind === "end" ? (
+      <div className="ph-end">{entry.text}</div>
+    ) : entry.kind === "divider" ? (
+      <div className="ph-divider" role="separator" aria-label={entry.title}>
+        <span className="ph-divider-title">
+          <ChevronsDown />
+          {entry.title}
+        </span>
+        <small>{entry.text}</small>
+      </div>
+    ) : null;
 
   return (
     <PhotoScroller
@@ -93,7 +112,10 @@ export function AssetGrid(props: Props) {
       inset={gridInset}
       renderTile={renderTile}
       renderEntry={renderEntry}
-      onRange={(inView) => { if (next && !busy.current && inView.some((entry) => entry.kind === "more")) void fetchPage(next, generation.current); }}
+      onRange={(inView) => {
+        if (next && !busy.current && inView.some((entry) => entry.kind === "more"))
+          void fetchPage(next, generation.current);
+      }}
       onZoom={props.onZoom}
       onMarquee={props.onMarquee}
       onMarqueeEnd={props.onGestureEnd}
@@ -101,10 +123,18 @@ export function AssetGrid(props: Props) {
       floatingLabel={Boolean(split)}
       handle={props.scroller}
     >
-      {assets === undefined ? props.loading ?? <div className="ph-loading" style={{ paddingTop: props.topInset }}><span className="ph-spinner" /></div> : !shown?.length && (
-        // A taller toolbar, such as one with a search box under it, moves the empty state down with it.
-        <div className="ph-empty-place" style={{ top: Math.max(0, props.topInset - 72) }}>{props.empty}</div>
-      )}
+      {assets === undefined
+        ? (props.loading ?? (
+            <div className="ph-loading" style={{ paddingTop: props.topInset }}>
+              <span className="ph-spinner" />
+            </div>
+          ))
+        : !shown?.length && (
+            // A taller toolbar, such as one with a search box under it, moves the empty state down with it.
+            <div className="ph-empty-place" style={{ top: Math.max(0, props.topInset - 72) }}>
+              {props.empty}
+            </div>
+          )}
     </PhotoScroller>
   );
 }

@@ -60,8 +60,7 @@ func (h *productHandler) handleSetAvatar(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	picture, err := io.ReadAll(http.MaxBytesReader(w, r.Body, avatar.MaxUploadBytes))
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", avatar.ErrTooLarge.Error())
 		return
 	}

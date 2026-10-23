@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -788,8 +789,8 @@ func (b *directorySnapshotBackend) Create(ctx context.Context, spaceID, snapshot
 		return err
 	}
 	// Deepest first, as filling a folder changes its time.
-	for index := len(folders) - 1; index >= 0; index-- {
-		folder := folders[index]
+	for _, folder := range slices.Backward(folders) {
+
 		if err := os.Chtimes(filepath.Join(temporary, filepath.FromSlash(folder.Key)), folder.ModifiedAt, folder.ModifiedAt); err != nil {
 			return err
 		}

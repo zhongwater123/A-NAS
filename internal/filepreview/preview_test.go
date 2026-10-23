@@ -86,7 +86,7 @@ func TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit(t *testing.T) {
 	service, source, worker := fixture(t, "photo.HEIC")
 	ctx := context.Background()
 	actor := accounts.User{ID: "alice"}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		result, err := service.Render(ctx, actor, "photo", 320)
 		if err != nil || result.ContentType != "image/png" {
 			t.Fatalf("render = %v, %v", result, err)
@@ -185,7 +185,7 @@ func TestPreviewRejectsBadInputAndCancelledQueue(t *testing.T) {
 
 func TestPreviewCacheIsBounded(t *testing.T) {
 	service, _, worker := fixture(t, "photo.heic")
-	for i := 0; i < 70; i++ {
+	for i := range 70 {
 		if _, err := service.Render(context.Background(), accounts.User{}, fmt.Sprint(i), 320); err != nil {
 			t.Fatal(err)
 		}
@@ -214,8 +214,8 @@ func TestDirectoryRevisitDoesNotDecodeAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for visit := 0; visit < 2; visit++ {
-		for i := 0; i < 70; i++ {
+	for range 2 {
+		for i := range 70 {
 			if _, err := service.Render(context.Background(), accounts.User{}, fmt.Sprint(i), 320); err != nil {
 				t.Fatal(err)
 			}
@@ -331,14 +331,12 @@ func TestPersistentPreviewCorruptionAndUnavailableDiskAreMisses(t *testing.T) {
 func TestConcurrentPreviewMissesDecodeOnce(t *testing.T) {
 	service, _, worker := fixture(t, "movie.mp4")
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 20 {
+		wg.Go(func() {
 			if _, err := service.Render(context.Background(), accounts.User{}, "movie", 320); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if worker.calls != 1 {

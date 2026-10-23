@@ -225,7 +225,7 @@ def detected(detector, fd, conn, key):
     def work():
         try:
             outcome["found"] = detector.detect(data, run)
-        except BaseException as error:  # pylint: disable=broad-except
+        except BaseException as error:  # noqa: BLE001  handed to the waiting thread, which reports it
             outcome["error"] = error
 
     thread = threading.Thread(target=work, name="detect", daemon=True)

@@ -99,7 +99,7 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 			limit = hotRotationalCelsius
 		}
 		if disk.TemperatureCelsius != nil && *disk.TemperatureCelsius >= limit {
-			add(FindingDiskHot, HealthWarning, disk.ID, int64Pointer(int64(*disk.TemperatureCelsius)))
+			add(FindingDiskHot, HealthWarning, disk.ID, new(int64(*disk.TemperatureCelsius)))
 		}
 		if disk.Role != DiskRoleData {
 			continue
@@ -112,7 +112,7 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 		if disk.FilesystemCapacityBytes != nil && disk.FilesystemAvailableBytes != nil && *disk.FilesystemCapacityBytes > 0 {
 			total, available := *disk.FilesystemCapacityBytes, min(*disk.FilesystemAvailableBytes, *disk.FilesystemCapacityBytes)
 			used := total - available
-			percent := int64Pointer(int64((used*100 + total/2) / total))
+			percent := new(int64((used*100 + total/2) / total))
 			switch {
 			case available < capacity.Reserve(total):
 				add(FindingVolumeFull, HealthCritical, disk.ID, percent)
@@ -121,7 +121,7 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 			}
 		}
 		if disk.FilesystemErrors != nil && *disk.FilesystemErrors > 0 {
-			add(FindingVolumeErrors, HealthWarning, disk.ID, int64Pointer(int64(*disk.FilesystemErrors)))
+			add(FindingVolumeErrors, HealthWarning, disk.ID, new(int64(*disk.FilesystemErrors)))
 		}
 	}
 	if expected.DataVolume && !dataDisk {
@@ -150,5 +150,3 @@ func severityRank(health Health) int {
 		return 0
 	}
 }
-
-func int64Pointer(value int64) *int64 { return &value }

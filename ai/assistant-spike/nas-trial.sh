@@ -89,6 +89,7 @@ check() {
   say "accounts ($(wc -l <<<"$list")): $(tr '\n' ' ' <<<"$list")"
   local left
   left=$(leftovers)
+  # shellcheck disable=SC2001 # indents every line
   if [[ -n "$left" ]]; then say "already there (install refuses; remove first):"; sed 's/^/  /' <<<"$left"
   else say "fresh:        nothing from an earlier install"; fi
 }

@@ -64,10 +64,9 @@ class WorkerTest(unittest.TestCase):
         return path, thread
 
     def image(self, content):
-        file = tempfile.TemporaryFile()
+        file = self.enterContext(tempfile.TemporaryFile())
         file.write(content)
         file.seek(0)
-        self.addCleanup(file.close)
         return file
 
     def test_info_and_deterministic_image_vectors(self):

@@ -42,18 +42,49 @@ export interface ControllerOptions {
 export class ControlError extends Error {}
 
 const INTERACTIVE = new Set([
-  "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "tab", "menuitem",
-  "menuitemcheckbox", "menuitemradio", "option", "slider", "spinbutton", "treeitem",
+  "button",
+  "link",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "switch",
+  "tab",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "slider",
+  "spinbutton",
+  "treeitem",
 ]);
 // What counts as a control inside an element that is focusable only to pass focus on.
-const CONTROLS = "button, a[href], input, select, textarea, [role=button], [role=link], [role=menuitem], [role=tab], [role=option], [role=checkbox], [role=switch], [contenteditable=true], [contenteditable='']";
+const CONTROLS =
+  "button, a[href], input, select, textarea, [role=button], [role=link], [role=menuitem], [role=tab], [role=option], [role=checkbox], [role=switch], [contenteditable=true], [contenteditable='']";
 /** Windows where every step waits for the member: what runs there reaches the host. */
-const GUARDED_WINDOWS: Array<[string, string]> = [[".app-window-docker", "Docker"], [".app-window-store", "应用中心"]];
+const GUARDED_WINDOWS: Array<[string, string]> = [
+  [".app-window-docker", "Docker"],
+  [".app-window-store", "应用中心"],
+];
 const GUARDED_SECTIONS = ["终端"];
 /** What VNAS never reads or acts on; the value says what it is. */
 const PRIVATE = "[data-vnas-private]";
 /** Keys VNAS may press: moving around, confirming and closing; Backspace and Delete only while editing text. */
-const KEYS = new Set(["Enter", "Escape", "Tab", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
+const KEYS = new Set([
+  "Enter",
+  "Escape",
+  "Tab",
+  " ",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+]);
 const EDITING_KEYS = new Set(["Backspace", "Delete"]);
 /** Hermes truncates snapshots over 15000 characters; this stays under. */
 const SNAPSHOT_LIMIT = 14_000;
@@ -132,7 +163,8 @@ export class WebosController {
   write(method: string, path: string): Promise<boolean> {
     const why = writeRisk(method, path);
     const step = this.step;
-    if (!why || !step || this.memberSeq > step.seq || Date.now() - step.at > STEP_WRITES_MS) return Promise.resolve(true);
+    if (!why || !step || this.memberSeq > step.seq || Date.now() - step.at > STEP_WRITES_MS)
+      return Promise.resolve(true);
     if (step.allowed !== undefined) return Promise.resolve(step.allowed);
     step.why ??= why;
     step.answer ??= this.options.confirm({ ...step.danger, why: step.why }).then((allowed) => {
@@ -169,7 +201,8 @@ export class WebosController {
     const root = this.options.root?.() ?? document.body;
     this.walk(root, 0, full, lines);
     let text = lines.join("\n");
-    if (text.length > SNAPSHOT_LIMIT) text = `${text.slice(0, SNAPSHOT_LIMIT)}\n…（页面内容太多，后面的省略了；滚动或关掉不需要的窗口后再查看）`;
+    if (text.length > SNAPSHOT_LIMIT)
+      text = `${text.slice(0, SNAPSHOT_LIMIT)}\n…（页面内容太多，后面的省略了；滚动或关掉不需要的窗口后再查看）`;
     return text || "（桌面上没有可操作的内容）";
   }
 
@@ -192,7 +225,10 @@ export class WebosController {
     }
     if (data.length > SHOT_LIMIT) throw new ControlError("桌面的画面太大，没能截下来");
     return {
-      mime_type: "image/png", data, width: canvas.width, height: canvas.height,
+      mime_type: "image/png",
+      data,
+      width: canvas.width,
+      height: canvas.height,
       ...(annotate ? { annotations: labels.map(({ ref, name }) => ({ ref, name })) } : {}),
     };
   }
@@ -212,7 +248,9 @@ export class WebosController {
   /** Whether something else of the page, not VNAS's own window, lies over the middle of the control. */
   private covered(element: Element, box: DOMRect): boolean {
     if (typeof document.elementsFromPoint !== "function") return false;
-    const top = document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2).find((hit) => !this.options.exclude(hit));
+    const top = document
+      .elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      .find((hit) => !this.options.exclude(hit));
     return Boolean(top) && !(top === element || element.contains(top!) || top!.contains(element));
   }
 
@@ -231,7 +269,10 @@ export class WebosController {
         continue;
       }
       const role = roleOf(element);
-      const focusable = element.getAttribute("tabindex") !== null && (element as HTMLElement).tabIndex >= 0 && !element.querySelector(CONTROLS);
+      const focusable =
+        element.getAttribute("tabindex") !== null &&
+        (element as HTMLElement).tabIndex >= 0 &&
+        !element.querySelector(CONTROLS);
       if (INTERACTIVE.has(role) || isField(element) || isEditable(element) || focusable) {
         const ref = `e${this.refs.size + 1}`;
         this.refs.set(ref, element);
@@ -266,12 +307,17 @@ export class WebosController {
    * (unless they already allowed the step).
    */
   private async begin(element: Element, what: string): Promise<Step> {
-    const step: Step = { seq: ++this.seq, at: Date.now(), danger: { what: `${what}${inDialog(element)}`, where: windowTitle(element) } };
+    const step: Step = {
+      seq: ++this.seq,
+      at: Date.now(),
+      danger: { what: `${what}${inDialog(element)}`, where: windowTitle(element) },
+    };
     const guarded = this.guarded(element, what);
     if (guarded) {
       const window = element.closest(".app-window");
       if (!this.grant || this.grant.window !== window || Date.now() >= this.grant.until) {
-        if (!(await this.options.confirm(guarded))) throw new ControlError(`成员没有允许这一步（${guarded.what}），没有执行`);
+        if (!(await this.options.confirm(guarded)))
+          throw new ControlError(`成员没有允许这一步（${guarded.what}），没有执行`);
         this.grant = { window, until: Date.now() + GRANT_MS };
       }
       step.allowed = true;
@@ -310,10 +356,18 @@ export class WebosController {
     (element as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" });
     flash(element);
     const rect = element.getBoundingClientRect();
-    const at = { bubbles: true, cancelable: true, composed: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
-    const pointer = (type: string) => typeof PointerEvent === "function"
-      ? new PointerEvent(type, { ...at, pointerType: "mouse", isPrimary: true })
-      : new MouseEvent(type, at);
+    const at = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      button: 0,
+    };
+    const pointer = (type: string) =>
+      typeof PointerEvent === "function"
+        ? new PointerEvent(type, { ...at, pointerType: "mouse", isPrimary: true })
+        : new MouseEvent(type, at);
     element.dispatchEvent(pointer("pointerdown"));
     element.dispatchEvent(new MouseEvent("mousedown", at));
     element.dispatchEvent(pointer("pointerup"));
@@ -356,17 +410,23 @@ export class WebosController {
     const key = given === "Space" ? " " : given;
     // The member's own typing in VNAS is never the target.
     const active = document.activeElement;
-    const target = active && active !== document.body && !this.options.exclude(active) ? active : this.last ?? document.body;
+    const target =
+      active && active !== document.body && !this.options.exclude(active) ? active : (this.last ?? document.body);
     if (!KEYS.has(key) && !(EDITING_KEYS.has(key) && editsText(target))) {
-      throw new ControlError(EDITING_KEYS.has(key)
-        ? `${key} 只能在输入框里用来删字；要删除或移走内容，请点界面上的按钮`
-        : `不能按 ${given}；可以按 Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`);
+      throw new ControlError(
+        EDITING_KEYS.has(key)
+          ? `${key} 只能在输入框里用来删字；要删除或移走内容，请点界面上的按钮`
+          : `不能按 ${given}；可以按 Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`,
+      );
     }
     hidden(target);
-    const step = await this.begin(target, target === document.body ? `按 ${given}` : `在“${labelOf(target)}”上按 ${given}`);
+    const step = await this.begin(
+      target,
+      target === document.body ? `按 ${given}` : `在“${labelOf(target)}”上按 ${given}`,
+    );
     const init = { key, bubbles: true, cancelable: true, composed: true };
     const accepted = target.dispatchEvent(new KeyboardEvent("keydown", init));
-    if (accepted && key === "Enter" && (target instanceof HTMLInputElement) && target.form) target.form.requestSubmit();
+    if (accepted && key === "Enter" && target instanceof HTMLInputElement && target.form) target.form.requestSubmit();
     target.dispatchEvent(new KeyboardEvent("keyup", init));
     await this.settle(step);
     return { pressed: given, on: target === document.body ? "页面" : describe(target) };
@@ -429,7 +489,11 @@ function roleOf(element: Element): string {
 }
 
 function isField(element: Element): boolean {
-  return (element instanceof HTMLInputElement && element.type !== "hidden") || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement;
+  return (
+    (element instanceof HTMLInputElement && element.type !== "hidden") ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  );
 }
 
 function isEditable(element: Element): boolean {
@@ -437,7 +501,9 @@ function isEditable(element: Element): boolean {
 }
 
 function hasOwnText(element: Element): boolean {
-  return Array.from(element.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "");
+  return Array.from(element.childNodes).some(
+    (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
+  );
 }
 
 function textOf(element: Element): string {
@@ -452,15 +518,25 @@ function nameOf(element: Element): string {
 function states(element: Element): string {
   const parts: string[] = [];
   if (element instanceof HTMLInputElement && element.type === "password") parts.push("value=<hidden>");
-  else if ((element instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(element.type)) || element instanceof HTMLTextAreaElement) {
+  else if (
+    (element instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(element.type)) ||
+    element instanceof HTMLTextAreaElement
+  ) {
     if (element.value) parts.push(`value="${clip(element.value, 60)}"`);
   }
-  if (element instanceof HTMLSelectElement && element.selectedOptions[0]) parts.push(`value="${clip(element.selectedOptions[0].text, 40)}"`);
-  const checked = element.getAttribute("aria-checked") ?? (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? String(element.checked) : null);
+  if (element instanceof HTMLSelectElement && element.selectedOptions[0])
+    parts.push(`value="${clip(element.selectedOptions[0].text, 40)}"`);
+  const checked =
+    element.getAttribute("aria-checked") ??
+    (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)
+      ? String(element.checked)
+      : null);
   if (checked === "true") parts.push("checked");
-  if ((element as HTMLButtonElement).disabled || element.getAttribute("aria-disabled") === "true") parts.push("disabled");
+  if ((element as HTMLButtonElement).disabled || element.getAttribute("aria-disabled") === "true")
+    parts.push("disabled");
   if (element.getAttribute("aria-expanded") === "true") parts.push("expanded");
-  if (element.getAttribute("aria-selected") === "true" || element.getAttribute("aria-pressed") === "true") parts.push("selected");
+  if (element.getAttribute("aria-selected") === "true" || element.getAttribute("aria-pressed") === "true")
+    parts.push("selected");
   if (element.getAttribute("aria-current") && element.getAttribute("aria-current") !== "false") parts.push("current");
   return parts.length ? ` [${parts.join(", ")}]` : "";
 }
@@ -491,7 +567,11 @@ function inDialog(element: Element): string {
 /** Whether Backspace and Delete edit text here rather than act on what is selected. */
 function editsText(element: Element): boolean {
   if (element instanceof HTMLTextAreaElement) return !element.readOnly;
-  if (element instanceof HTMLInputElement) return !element.readOnly && !["checkbox", "radio", "button", "submit", "reset", "file", "image", "range", "color"].includes(element.type);
+  if (element instanceof HTMLInputElement)
+    return (
+      !element.readOnly &&
+      !["checkbox", "radio", "button", "submit", "reset", "file", "image", "range", "color"].includes(element.type)
+    );
   return element instanceof HTMLElement && element.isContentEditable;
 }
 
@@ -514,8 +594,12 @@ function scrollable(from?: Element): Element | undefined {
 
 /** The scrolling area of the topmost window that is not VNAS. */
 function topWindowScroller(options: ControllerOptions): Element | undefined {
-  const windows = Array.from(document.querySelectorAll(".app-window")).filter((window) => !options.exclude(window) && visible(window));
-  const top = windows.sort((a, b) => Number(getComputedStyle(b).zIndex || 0) - Number(getComputedStyle(a).zIndex || 0))[0];
+  const windows = Array.from(document.querySelectorAll(".app-window")).filter(
+    (window) => !options.exclude(window) && visible(window),
+  );
+  const top = windows.sort(
+    (a, b) => Number(getComputedStyle(b).zIndex || 0) - Number(getComputedStyle(a).zIndex || 0),
+  )[0];
   if (!top) return undefined;
   return Array.from(top.querySelectorAll("*")).find((element) => {
     const overflow = getComputedStyle(element).overflowY;
@@ -529,7 +613,12 @@ function flash(element: Element) {
   if (!rect.width && !rect.height) return;
   const ring = document.createElement("div");
   ring.className = "vnas-control-ring";
-  Object.assign(ring.style, { left: `${rect.left - 4}px`, top: `${rect.top - 4}px`, width: `${rect.width + 8}px`, height: `${rect.height + 8}px` });
+  Object.assign(ring.style, {
+    left: `${rect.left - 4}px`,
+    top: `${rect.top - 4}px`,
+    width: `${rect.width + 8}px`,
+    height: `${rect.height + 8}px`,
+  });
   document.body.appendChild(ring);
   window.setTimeout(() => ring.remove(), 900);
 }

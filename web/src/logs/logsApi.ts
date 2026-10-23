@@ -3,7 +3,11 @@ import { request } from "../api";
 export type ActivityCategory = "session" | "account" | "file" | "storage" | "photo";
 
 // nickname is the account's current nickname, shown instead of username.
-export interface ActivityAccount { id: string; username: string; nickname?: string }
+export interface ActivityAccount {
+  id: string;
+  username: string;
+  nickname?: string;
+}
 
 export interface ActivityEvent {
   id: string;
@@ -45,9 +49,19 @@ export function sinceOf(range: TimeRange, now = Date.now()): string | undefined 
   return hours ? new Date(now - hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, "Z") : undefined;
 }
 
-export interface ActivityFilters { category?: ActivityCategory; actor?: string; range: TimeRange; q: string }
+export interface ActivityFilters {
+  category?: ActivityCategory;
+  actor?: string;
+  range: TimeRange;
+  q: string;
+}
 
-export function listActivity(filters: ActivityFilters, before?: string, limit = 50, signal?: AbortSignal): Promise<ActivityPage> {
+export function listActivity(
+  filters: ActivityFilters,
+  before?: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<ActivityPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (filters.category) params.set("category", filters.category);
   if (filters.actor) params.set("actor", filters.actor);
@@ -58,7 +72,17 @@ export function listActivity(filters: ActivityFilters, before?: string, limit = 
   return request<ActivityPage>(`/api/v1/activity?${params}`, { signal });
 }
 
-export type SystemLogService = "api" | "host-agent" | "photos" | "shares" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+export type SystemLogService =
+  | "api"
+  | "host-agent"
+  | "photos"
+  | "shares"
+  | "containers"
+  | "ai"
+  | "media"
+  | "kiosk"
+  | "samba"
+  | "caddy";
 export type LogLevel = "error" | "warning" | "info" | "debug";
 
 export const systemLogServices: Array<{ id: SystemLogService; label: string; unit: string }> = [
@@ -95,9 +119,19 @@ export interface SystemLogPage {
 }
 
 // "warning" includes errors: the level is the least severe one to show.
-export interface SystemLogFilters { service?: SystemLogService; level?: "warning" | "error"; range: TimeRange; q: string }
+export interface SystemLogFilters {
+  service?: SystemLogService;
+  level?: "warning" | "error";
+  range: TimeRange;
+  q: string;
+}
 
-export function listSystemLogs(filters: SystemLogFilters, cursor: { before?: string; after?: string } = {}, limit = 200, signal?: AbortSignal): Promise<SystemLogPage> {
+export function listSystemLogs(
+  filters: SystemLogFilters,
+  cursor: { before?: string; after?: string } = {},
+  limit = 200,
+  signal?: AbortSignal,
+): Promise<SystemLogPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (filters.service) params.set("service", filters.service);
   if (filters.level) params.set("level", filters.level);

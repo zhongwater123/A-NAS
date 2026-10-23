@@ -45,7 +45,7 @@ def decide(messages):
             return decide([{"role": "user", "content": planned[len("REVIEW "):]}])
     if said.startswith("[IMPORTANT: You are running as a scheduled cron job"):
         # A scheduled job's prompt comes after Hermes's cron hint (cron/scheduler_prompt.py).
-        planned = re.search(r"^(?:CALL|SAY) .*$", said, re.M)
+        planned = re.search(r"^(?:CALL|SAY) .*$", said, re.MULTILINE)
         if planned:
             said = planned.group(0)
     if said.startswith("CALL "):

@@ -1,4 +1,17 @@
-import { Activity, BookOpen, Download, FolderSync, Images, type LucideIcon, Music, NotebookPen, Router, Shapes, Workflow, Wrench } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Download,
+  FolderSync,
+  Images,
+  type LucideIcon,
+  Music,
+  NotebookPen,
+  Router,
+  Shapes,
+  Workflow,
+  Wrench,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AppsAPIError, CatalogApp, InstallPlan, ServiceRuntime } from "../appsApi";
@@ -49,14 +62,21 @@ export function runtimeSummary(plan: InstallPlan): string {
   const account = plan.identity.username;
   if (services.length === 0) return `账号 ${account}`;
   if (services.every((service) => service.runAs === "image")) return "以镜像自带的身份运行，可能是 root";
-  if (services.some((service) => service.runAs === "image")) return `部分服务以镜像自带的身份运行，其余以 ${account} 运行`;
-  if (services.some((service) => service.runAs === "app-after-init")) return `以 root 初始化后，以独立账号 ${account} 运行`;
+  if (services.some((service) => service.runAs === "image"))
+    return `部分服务以镜像自带的身份运行，其余以 ${account} 运行`;
+  if (services.some((service) => service.runAs === "app-after-init"))
+    return `以 root 初始化后，以独立账号 ${account} 运行`;
   return `以独立账号 ${account} 运行`;
 }
 
 // What one service is allowed, in the words of the install plan.
 export function serviceText(service: ServiceRuntime, plan: InstallPlan): string {
-  const shared = service.shared === "write" ? "，经 a-nas-users 读写共享空间" : service.shared === "read" ? "，经 a-nas-users 只读访问共享空间" : "";
+  const shared =
+    service.shared === "write"
+      ? "，经 a-nas-users 读写共享空间"
+      : service.shared === "read"
+        ? "，经 a-nas-users 只读访问共享空间"
+        : "";
   switch (service.runAs) {
     case "app":
       return `UID ${plan.identity.uid}，没有特权能力${shared}`;
@@ -92,7 +112,10 @@ export function stateText(app: CatalogApp): string {
 }
 
 // The app's web interface on the address this desktop was opened from.
-export function appURL(app: Pick<CatalogApp, "webPort" | "scheme" | "path">, location: Location = window.location): string | undefined {
+export function appURL(
+  app: Pick<CatalogApp, "webPort" | "scheme" | "path">,
+  location: Location = window.location,
+): string | undefined {
   if (!app.webPort) return undefined;
   const url = new URL(location.href);
   url.protocol = `${app.scheme || "http"}:`;
@@ -113,16 +136,27 @@ export function openApp(app: Pick<CatalogApp, "webPort" | "scheme" | "path">) {
 export function search(apps: CatalogApp[], query: string): CatalogApp[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const scored = apps.map((app) => {
-    const fields: Array<[string, number]> = [[`${app.title} ${app.id}`, 8], [categoryOf(app).label, 4], [app.tagline, 3], [app.description, 1]];
+    const fields: Array<[string, number]> = [
+      [`${app.title} ${app.id}`, 8],
+      [categoryOf(app).label, 4],
+      [app.tagline, 3],
+      [app.description, 1],
+    ];
     let score = 0;
     for (const word of words) {
-      const best = Math.max(0, ...fields.filter(([text]) => text.toLowerCase().includes(word)).map(([, weight]) => weight));
+      const best = Math.max(
+        0,
+        ...fields.filter(([text]) => text.toLowerCase().includes(word)).map(([, weight]) => weight),
+      );
       if (best === 0) return { app, score: 0 };
       score += best;
     }
     return { app, score };
   });
-  return scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score).map((item) => item.app);
+  return scored
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.app);
 }
 
 export function describeError(error: unknown): string {

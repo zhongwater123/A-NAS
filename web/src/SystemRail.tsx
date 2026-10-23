@@ -27,7 +27,18 @@ interface SystemRailProps {
   onLogout: () => void;
 }
 
-export function SystemRail({ apps, session, desktopView, settingsFocused, sharesFocused, sharesUnread = 0, onOpenShares, onToggleDesktop, onOpenSettings, onLogout }: SystemRailProps) {
+export function SystemRail({
+  apps,
+  session,
+  desktopView,
+  settingsFocused,
+  sharesFocused,
+  sharesUnread = 0,
+  onOpenShares,
+  onToggleDesktop,
+  onOpenSettings,
+  onLogout,
+}: SystemRailProps) {
   const [popover, setPopover] = useState<Popover>();
   const launcherButton = useRef<HTMLButtonElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
@@ -36,64 +47,123 @@ export function SystemRail({ apps, session, desktopView, settingsFocused, shares
   const { user } = session;
   const name = displayName(user);
   const roleLabel = user.role === "admin" ? "管理员" : "成员";
-  const toggle = (next: Popover) => setPopover((current) => current === next ? undefined : next);
+  const toggle = (next: Popover) => setPopover((current) => (current === next ? undefined : next));
   const close = (returnFocus: boolean) => {
     const trigger = popover === "launcher" ? launcherButton : accountButton;
     setPopover(undefined);
     if (returnFocus) trigger.current?.focus();
   };
 
-  return <>
-    <aside className="system-rail" aria-label="系统快捷栏">
-      <div className="rail-group">
-        <RailButton
-          label="显示桌面"
-          tip={desktopView === "revealed" ? "恢复窗口" : "显示桌面"}
-          on={desktopView !== "windows"}
-          pressed={desktopView !== "windows"}
-          onClick={() => { setPopover(undefined); onToggleDesktop(); }}
-        ><Home /></RailButton>
-        <RailButton
-          ref={launcherButton}
-          label="全部应用"
-          popup={{ kind: "dialog", id: launcherID, expanded: popover === "launcher" }}
-          onClick={() => toggle("launcher")}
-        ><Grid2X2 /></RailButton>
-        <RailButton label={sharesUnread ? `打开分享（${sharesUnread} 个有新内容）` : "打开分享"} tip={sharesUnread ? `分享 · ${sharesUnread} 个有新内容` : "分享"} on={sharesFocused} onClick={() => { setPopover(undefined); onOpenShares(); }}>
-          <Share2 />{sharesUnread > 0 && <span className="rail-badge" aria-hidden="true">{sharesUnread > 99 ? "99+" : sharesUnread}</span>}
-        </RailButton>
-      </div>
-      <div className="rail-spacer" />
-      <div className="rail-group">
-        <RailButton label="打开设置" tip="设置" on={settingsFocused} onClick={() => { setPopover(undefined); onOpenSettings(); }}><Settings /></RailButton>
-        <RailButton
-          ref={accountButton}
-          className="rail-account"
-          label={`账号（${name}）`}
-          tip={`${name} · ${roleLabel}`}
-          popup={{ kind: "menu", id: accountID, expanded: popover === "account" }}
-          onClick={() => toggle("account")}
-        ><PersonAvatar who={user} className="rail-face" /></RailButton>
-      </div>
-    </aside>
+  return (
+    <>
+      <aside className="system-rail" aria-label="系统快捷栏">
+        <div className="rail-group">
+          <RailButton
+            label="显示桌面"
+            tip={desktopView === "revealed" ? "恢复窗口" : "显示桌面"}
+            on={desktopView !== "windows"}
+            pressed={desktopView !== "windows"}
+            onClick={() => {
+              setPopover(undefined);
+              onToggleDesktop();
+            }}
+          >
+            <Home />
+          </RailButton>
+          <RailButton
+            ref={launcherButton}
+            label="全部应用"
+            popup={{ kind: "dialog", id: launcherID, expanded: popover === "launcher" }}
+            onClick={() => toggle("launcher")}
+          >
+            <Grid2X2 />
+          </RailButton>
+          <RailButton
+            label={sharesUnread ? `打开分享（${sharesUnread} 个有新内容）` : "打开分享"}
+            tip={sharesUnread ? `分享 · ${sharesUnread} 个有新内容` : "分享"}
+            on={sharesFocused}
+            onClick={() => {
+              setPopover(undefined);
+              onOpenShares();
+            }}
+          >
+            <Share2 />
+            {sharesUnread > 0 && (
+              <span className="rail-badge" aria-hidden="true">
+                {sharesUnread > 99 ? "99+" : sharesUnread}
+              </span>
+            )}
+          </RailButton>
+        </div>
+        <div className="rail-spacer" />
+        <div className="rail-group">
+          <RailButton
+            label="打开设置"
+            tip="设置"
+            on={settingsFocused}
+            onClick={() => {
+              setPopover(undefined);
+              onOpenSettings();
+            }}
+          >
+            <Settings />
+          </RailButton>
+          <RailButton
+            ref={accountButton}
+            className="rail-account"
+            label={`账号（${name}）`}
+            tip={`${name} · ${roleLabel}`}
+            popup={{ kind: "menu", id: accountID, expanded: popover === "account" }}
+            onClick={() => toggle("account")}
+          >
+            <PersonAvatar who={user} className="rail-face" />
+          </RailButton>
+        </div>
+      </aside>
 
-    {popover === "launcher" && (
-      <DismissableLayer id={launcherID} className="launcher" role="dialog" label="全部应用" trigger={launcherButton} onDismiss={close}>
-        <Launcher apps={apps} onLaunch={(app) => { setPopover(undefined); app.onClick?.(); }} />
-      </DismissableLayer>
-    )}
-    {popover === "account" && (
-      <DismissableLayer id={accountID} className="account-popover" label="账号" trigger={accountButton} onDismiss={close}>
-        <AccountMenu
-          user={user}
-          roleLabel={roleLabel}
-          session={describeSession(session.expiresAt)}
-          onAccount={() => { setPopover(undefined); onOpenSettings("account"); }}
-          onLogout={() => { setPopover(undefined); onLogout(); }}
-        />
-      </DismissableLayer>
-    )}
-  </>;
+      {popover === "launcher" && (
+        <DismissableLayer
+          id={launcherID}
+          className="launcher"
+          role="dialog"
+          label="全部应用"
+          trigger={launcherButton}
+          onDismiss={close}
+        >
+          <Launcher
+            apps={apps}
+            onLaunch={(app) => {
+              setPopover(undefined);
+              app.onClick?.();
+            }}
+          />
+        </DismissableLayer>
+      )}
+      {popover === "account" && (
+        <DismissableLayer
+          id={accountID}
+          className="account-popover"
+          label="账号"
+          trigger={accountButton}
+          onDismiss={close}
+        >
+          <AccountMenu
+            user={user}
+            roleLabel={roleLabel}
+            session={describeSession(session.expiresAt)}
+            onAccount={() => {
+              setPopover(undefined);
+              onOpenSettings("account");
+            }}
+            onLogout={() => {
+              setPopover(undefined);
+              onLogout();
+            }}
+          />
+        </DismissableLayer>
+      )}
+    </>
+  );
 }
 
 interface RailButtonProps {
@@ -108,7 +178,17 @@ interface RailButtonProps {
   children: ReactNode;
 }
 
-function RailButton({ label, tip = label, on, pressed, popup, className = "", ref, onClick, children }: RailButtonProps) {
+function RailButton({
+  label,
+  tip = label,
+  on,
+  pressed,
+  popup,
+  className = "",
+  ref,
+  onClick,
+  children,
+}: RailButtonProps) {
   return (
     <button
       ref={ref}
@@ -121,14 +201,24 @@ function RailButton({ label, tip = label, on, pressed, popup, className = "", re
       onClick={onClick}
     >
       {children}
-      <span className="rail-tip" aria-hidden="true">{tip}</span>
+      <span className="rail-tip" aria-hidden="true">
+        {tip}
+      </span>
     </button>
   );
 }
 
 // DismissableLayer closes its popover on Escape, on a pointer press outside it
 // and its trigger, and when keyboard focus leaves both.
-function DismissableLayer({ id, className, role, label, trigger, onDismiss, children }: {
+function DismissableLayer({
+  id,
+  className,
+  role,
+  label,
+  trigger,
+  onDismiss,
+  children,
+}: {
   id: string;
   className: string;
   role?: "dialog";
@@ -142,12 +232,20 @@ function DismissableLayer({ id, className, role, label, trigger, onDismiss, chil
   dismiss.current = onDismiss;
 
   useEffect(() => {
-    const inside = (target: EventTarget | null) => target instanceof Node && Boolean(layer.current?.contains(target) || trigger.current?.contains(target));
-    const pointer = (event: PointerEvent) => { if (!inside(event.target)) dismiss.current(false); };
-    const key = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") dismiss.current(true); };
+    const inside = (target: EventTarget | null) =>
+      target instanceof Node && Boolean(layer.current?.contains(target) || trigger.current?.contains(target));
+    const pointer = (event: PointerEvent) => {
+      if (!inside(event.target)) dismiss.current(false);
+    };
+    const key = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") dismiss.current(true);
+    };
     window.addEventListener("pointerdown", pointer);
     window.addEventListener("keydown", key);
-    return () => { window.removeEventListener("pointerdown", pointer); window.removeEventListener("keydown", key); };
+    return () => {
+      window.removeEventListener("pointerdown", pointer);
+      window.removeEventListener("keydown", key);
+    };
   }, [trigger]);
 
   return (
@@ -159,7 +257,8 @@ function DismissableLayer({ id, className, role, label, trigger, onDismiss, chil
       aria-label={label}
       onBlur={(event) => {
         const next = event.relatedTarget;
-        if (next instanceof Node && !layer.current?.contains(next) && !trigger.current?.contains(next)) dismiss.current(false);
+        if (next instanceof Node && !layer.current?.contains(next) && !trigger.current?.contains(next))
+          dismiss.current(false);
       }}
     >
       {children}
@@ -178,23 +277,42 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
   const matches = order
     .map((id) => appsByID.get(id))
     .filter((app): app is DesktopApp => Boolean(app))
-    .filter((app) => terms.every((term) => `${app.label} ${app.id} ${app.keywords ?? ""}`.toLocaleLowerCase("zh-CN").includes(term)));
+    .filter((app) =>
+      terms.every((term) => `${app.label} ${app.id} ${app.keywords ?? ""}`.toLocaleLowerCase("zh-CN").includes(term)),
+    );
   const available = matches.filter((app) => !app.disabled);
   const planned = matches.filter((app) => app.disabled);
 
-  useEffect(() => { search.current?.focus(); }, []);
+  useEffect(() => {
+    search.current?.focus();
+  }, []);
 
   const tiles = () => Array.from(grid.current?.querySelectorAll<HTMLButtonElement>(".launcher-tile") ?? []);
-  const columns = () => grid.current ? Math.max(1, getComputedStyle(grid.current).gridTemplateColumns.split(" ").filter(Boolean).length) : 4;
+  const columns = () =>
+    grid.current
+      ? Math.max(1, getComputedStyle(grid.current).gridTemplateColumns.split(" ").filter(Boolean).length)
+      : 4;
   const searchKey = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter" && available[0]) { event.preventDefault(); onLaunch(available[0]); }
-    else if (event.key === "ArrowDown") { event.preventDefault(); tiles()[0]?.focus(); }
+    if (event.key === "Enter" && available[0]) {
+      event.preventDefault();
+      onLaunch(available[0]);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      tiles()[0]?.focus();
+    }
   };
   const gridKey = (event: KeyboardEvent<HTMLDivElement>) => {
     const all = tiles();
     const index = all.indexOf(document.activeElement as HTMLButtonElement);
     if (index < 0) return;
-    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns(), ArrowDown: columns(), Home: -index, End: all.length - 1 - index }[event.key];
+    const step = {
+      ArrowLeft: -1,
+      ArrowRight: 1,
+      ArrowUp: -columns(),
+      ArrowDown: columns(),
+      Home: -index,
+      End: all.length - 1 - index,
+    }[event.key];
     if (step === undefined) return;
     event.preventDefault();
     const target = index + step;
@@ -202,58 +320,93 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
     else all[Math.min(all.length - 1, target)]?.focus();
   };
 
-  return <>
-    <label className="launcher-search">
-      <Search aria-hidden="true" />
-      <input
-        ref={search}
-        type="search"
-        aria-label="搜索应用"
-        placeholder="搜索应用"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={searchKey}
-      />
-    </label>
-    <div className="launcher-body">
-      {available.length > 0 && <>
-        <h2 className="launcher-heading">{terms.length ? "搜索结果" : "应用"}<small>{available.length}</small></h2>
-        <div ref={grid} className="launcher-grid" onKeyDown={gridKey}>
-          {available.map((app, index) => (
-            <button
-              key={app.id}
-              className={`launcher-tile ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""} ${terms.length && index === 0 ? "suggested" : ""}`}
-              aria-label={app.ariaLabel}
-              onClick={() => onLaunch(app)}
-            >
-              <span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">{app.icon}</span>
-              <span className="launcher-label">{app.label}</span>
-              {app.note && <small className="launcher-note">{app.note}</small>}
-            </button>
-          ))}
-        </div>
-      </>}
-      {planned.length > 0 && <>
-        <h2 className="launcher-heading">规划中</h2>
-        <ul className="launcher-planned" aria-label="规划中的应用">
-          {planned.map((app) => (
-            <li key={app.id}><span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">{app.icon}</span>{app.label}</li>
-          ))}
-        </ul>
-      </>}
-      {!matches.length && <p className="launcher-empty" role="status">没有名为“{query.trim()}”的应用</p>}
-    </div>
-    <footer className="launcher-footer" aria-hidden="true">
-      <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd>选择</span>
-      <span><kbd>Enter</kbd>打开</span>
-      <span><kbd>Esc</kbd>关闭</span>
-    </footer>
-  </>;
+  return (
+    <>
+      <label className="launcher-search">
+        <Search aria-hidden="true" />
+        <input
+          ref={search}
+          type="search"
+          aria-label="搜索应用"
+          placeholder="搜索应用"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={searchKey}
+        />
+      </label>
+      <div className="launcher-body">
+        {available.length > 0 && (
+          <>
+            <h2 className="launcher-heading">
+              {terms.length ? "搜索结果" : "应用"}
+              <small>{available.length}</small>
+            </h2>
+            <div ref={grid} className="launcher-grid" onKeyDown={gridKey}>
+              {available.map((app, index) => (
+                <button
+                  key={app.id}
+                  className={`launcher-tile ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""} ${terms.length && index === 0 ? "suggested" : ""}`}
+                  aria-label={app.ariaLabel}
+                  onClick={() => onLaunch(app)}
+                >
+                  <span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">
+                    {app.icon}
+                  </span>
+                  <span className="launcher-label">{app.label}</span>
+                  {app.note && <small className="launcher-note">{app.note}</small>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {planned.length > 0 && (
+          <>
+            <h2 className="launcher-heading">规划中</h2>
+            <ul className="launcher-planned" aria-label="规划中的应用">
+              {planned.map((app) => (
+                <li key={app.id}>
+                  <span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">
+                    {app.icon}
+                  </span>
+                  {app.label}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {!matches.length && (
+          <p className="launcher-empty" role="status">
+            没有名为“{query.trim()}”的应用
+          </p>
+        )}
+      </div>
+      <footer className="launcher-footer" aria-hidden="true">
+        <span>
+          <kbd>↑</kbd>
+          <kbd>↓</kbd>
+          <kbd>←</kbd>
+          <kbd>→</kbd>选择
+        </span>
+        <span>
+          <kbd>Enter</kbd>打开
+        </span>
+        <span>
+          <kbd>Esc</kbd>关闭
+        </span>
+      </footer>
+    </>
+  );
 }
 
-function AccountMenu({ user, roleLabel, session, onAccount, onLogout }: {
+function AccountMenu({
+  user,
+  roleLabel,
+  session,
+  onAccount,
+  onLogout,
+}: {
   user: User;
   roleLabel: string;
   session: SessionDescription;
@@ -261,7 +414,9 @@ function AccountMenu({ user, roleLabel, session, onAccount, onLogout }: {
   onLogout: () => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
-  useEffect(() => { menu.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus(); }, []);
+  useEffect(() => {
+    menu.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+  }, []);
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? []);
     const index = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -271,27 +426,41 @@ function AccountMenu({ user, roleLabel, session, onAccount, onLogout }: {
     items[(next + items.length) % items.length]?.focus();
   };
 
-  return <>
-    <div className="account-card">
-      <PersonAvatar who={user} className="account-face" />
-      <div className="account-who">
-        <strong>{displayName(user)}</strong>
-        <span className="account-meta">
-          <span className="account-role">{roleLabel}</span>
-          {user.nickname && <span className="account-username">{user.username}</span>}
-        </span>
+  return (
+    <>
+      <div className="account-card">
+        <PersonAvatar who={user} className="account-face" />
+        <div className="account-who">
+          <strong>{displayName(user)}</strong>
+          <span className="account-meta">
+            <span className="account-role">{roleLabel}</span>
+            {user.nickname && <span className="account-username">{user.username}</span>}
+          </span>
+        </div>
       </div>
-    </div>
-    <p className="account-session">{session.localConsole ? <Monitor aria-hidden="true" /> : <Clock3 aria-hidden="true" />}{session.text}</p>
-    <div ref={menu} className="account-menu" role="menu" aria-label="账号操作" onKeyDown={moveFocus}>
-      <button role="menuitem" className="account-item" onClick={onAccount}><UserRound aria-hidden="true" />我的账号<small>头像、昵称与密码</small></button>
-      <div className="account-separator" role="separator" />
-      <button role="menuitem" className="account-item danger" onClick={onLogout}><LogOut aria-hidden="true" />退出登录</button>
-    </div>
-  </>;
+      <p className="account-session">
+        {session.localConsole ? <Monitor aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
+        {session.text}
+      </p>
+      <div ref={menu} className="account-menu" role="menu" aria-label="账号操作" onKeyDown={moveFocus}>
+        <button role="menuitem" className="account-item" onClick={onAccount}>
+          <UserRound aria-hidden="true" />
+          我的账号<small>头像、昵称与密码</small>
+        </button>
+        <div className="account-separator" role="separator" />
+        <button role="menuitem" className="account-item danger" onClick={onLogout}>
+          <LogOut aria-hidden="true" />
+          退出登录
+        </button>
+      </div>
+    </>
+  );
 }
 
-interface SessionDescription { localConsole: boolean; text: string }
+interface SessionDescription {
+  localConsole: boolean;
+  text: string;
+}
 
 // Local console sessions are stored with a far-future expiry and last until
 // sign-out; browser sessions expire after 12 hours.
@@ -300,6 +469,8 @@ export function describeSession(expiresAt: string, now = new Date()): SessionDes
   if (Number.isNaN(expiry.getTime())) return { localConsole: false, text: "浏览器会话" };
   if (expiry.getUTCFullYear() >= 9999) return { localConsole: true, text: "本机屏幕 · 退出前保持登录" };
   const day = expiry.toDateString() === now.toDateString() ? "今天" : `${expiry.getMonth() + 1}月${expiry.getDate()}日`;
-  const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(expiry);
+  const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
+    expiry,
+  );
   return { localConsole: false, text: `浏览器登录 · 有效至 ${day} ${time}` };
 }

@@ -28,6 +28,7 @@ expect_ok   "read another member's Agent space"  cat /nas/共享空间/Agent空�
 expect_fail "read another member's shared trash" cat /nas/共享空间/.a-nas-trash/bob/gone.txt
 expect_ok   "recursive file search over Shared"  sh -c 'rg --files -g "*" -- /nas/共享空间 >/dev/null; [ $? -le 1 ]'
 expect_ok   "recursive file search over personal" sh -c 'rg --files -g "*" -- /nas/个人空间 >/dev/null; [ $? -le 1 ]'
+# shellcheck disable=SC2012 # names listed for the log
 echo "INFO shared bin as seen: $(ls -A /nas/共享空间/.a-nas-trash | tr '
 ' ' ')"
 if [ -z "$(ls -A /srv 2>/dev/null)" ]; then ok "data volume hidden (/srv empty)"; else bad "data volume hidden" "$(ls -A /srv)"; fi

@@ -12,12 +12,17 @@ const xterm = vi.hoisted(() => ({ mounts: 0, onStatus: undefined as ((status: Se
 const tus = vi.hoisted(() => {
   class FakeUpload {
     url: string | null;
-    constructor(readonly file: File, readonly options: Record<string, any>) {
+    constructor(
+      readonly file: File,
+      readonly options: Record<string, any>,
+    ) {
       this.url = options.uploadUrl ?? null;
       uploads.push(this);
     }
     start() {}
-    abort() { return Promise.resolve(); }
+    abort() {
+      return Promise.resolve();
+    }
   }
   const uploads: FakeUpload[] = [];
   return { FakeUpload, uploads };
@@ -28,8 +33,16 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 vi.mock("react-easy-crop", async () => {
   const { useEffect } = await import("react");
   return {
-    default: function MockCropper({ image, onCropComplete }: { image: string; onCropComplete: (area: unknown, pixels: unknown) => void }) {
-      useEffect(() => { onCropComplete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 }); }, [image]);
+    default: function MockCropper({
+      image,
+      onCropComplete,
+    }: {
+      image: string;
+      onCropComplete: (area: unknown, pixels: unknown) => void;
+    }) {
+      useEffect(() => {
+        onCropComplete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 });
+      }, [image]);
       return <div data-testid="cropper" data-image={image} />;
     },
   };
@@ -50,14 +63,19 @@ vi.mock("./XtermSession", async () => {
 });
 
 const session = {
-  csrfToken: "csrf-test", expiresAt: "2026-10-07T22:00:00Z",
+  csrfToken: "csrf-test",
+  expiresAt: "2026-10-07T22:00:00Z",
   user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
 };
 
 describe("member sharing in the file manager", () => {
   it("opens sharing from the rail instead of the desktop and shares read-only files", async () => {
-    installAPI({ spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }], entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }] });
-    const user = userEvent.setup(); render(<App />);
+    installAPI({
+      spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }],
+      entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).queryByRole("button", { name: "打开分享" })).toBeNull();
     const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
@@ -73,8 +91,20 @@ describe("member sharing in the file manager", () => {
   });
 
   it("does not share administrative viewing files", async () => {
-    installAPI({ spaces: [{ id: "viewed", kind: "private", name: "Alice", ownerUserId: "alice", viewing: { grantId: "grant", expiresAt: "2099-01-01T00:00:00Z" } }], entries: [{ id: "viewed-file", spaceId: "viewed", name: "查看计划.txt", kind: "file", sizeBytes: 4 }] });
-    const user = userEvent.setup(); render(<App />);
+    installAPI({
+      spaces: [
+        {
+          id: "viewed",
+          kind: "private",
+          name: "Alice",
+          ownerUserId: "alice",
+          viewing: { grantId: "grant", expiresAt: "2099-01-01T00:00:00Z" },
+        },
+      ],
+      entries: [{ id: "viewed-file", spaceId: "viewed", name: "查看计划.txt", kind: "file", sizeBytes: 4 }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
@@ -84,13 +114,35 @@ describe("member sharing in the file manager", () => {
 });
 
 const healthyState = {
-  dataSource: "simulated", productVersion: "v1.0.1-rc.1", observedAt: "2026-10-07T10:00:00Z",
-  system: { id: "host:fake-01", hostname: "anas-fake", operatingSystem: { name: "Debian", version: "13" }, architecture: "amd64", uptimeSeconds: 3661, health: "healthy" },
-  disks: [{
-    id: "disk:fake-data-01", model: "A-NAS Fake HDD", transport: "sata", capacityBytes: 512000000000,
-    rotational: true, removable: false, inUse: false, filesystems: [], role: "unassigned", health: "healthy",
-    smartStatus: "healthy", eligibleForDataVolume: true, ineligibleReasons: [], temperatureCelsius: 31,
-  }],
+  dataSource: "simulated",
+  productVersion: "v1.0.1-rc.1",
+  observedAt: "2026-10-07T10:00:00Z",
+  system: {
+    id: "host:fake-01",
+    hostname: "anas-fake",
+    operatingSystem: { name: "Debian", version: "13" },
+    architecture: "amd64",
+    uptimeSeconds: 3661,
+    health: "healthy",
+  },
+  disks: [
+    {
+      id: "disk:fake-data-01",
+      model: "A-NAS Fake HDD",
+      transport: "sata",
+      capacityBytes: 512000000000,
+      rotational: true,
+      removable: false,
+      inUse: false,
+      filesystems: [],
+      role: "unassigned",
+      health: "healthy",
+      smartStatus: "healthy",
+      eligibleForDataVolume: true,
+      ineligibleReasons: [],
+      temperatureCelsius: 31,
+    },
+  ],
 };
 
 beforeEach(() => {
@@ -115,9 +167,24 @@ const containerSnapshot = {
       ports: [{ hostIp: "0.0.0.0", hostPort: 8096, containerPort: 8096, protocol: "tcp" }],
       usage: { cpuPercent: 12.4, memoryBytes: 641728512, memoryLimitBytes: 8589934592 },
     },
-    { id: "b".repeat(64), name: "homeassistant", image: "ghcr.io/home-assistant/home-assistant:stable", state: "exited", status: "Exited (0) 5 hours ago", createdAt: "2026-09-26T00:00:00Z", ports: [] },
+    {
+      id: "b".repeat(64),
+      name: "homeassistant",
+      image: "ghcr.io/home-assistant/home-assistant:stable",
+      state: "exited",
+      status: "Exited (0) 5 hours ago",
+      createdAt: "2026-09-26T00:00:00Z",
+      ports: [],
+    },
   ],
-  images: [{ id: "sha256:" + "c".repeat(64), tags: ["jellyfin/jellyfin:10.11"], sizeBytes: 1243000000, createdAt: "2026-09-06T00:00:00Z" }],
+  images: [
+    {
+      id: "sha256:" + "c".repeat(64),
+      tags: ["jellyfin/jellyfin:10.11"],
+      sizeBytes: 1243000000,
+      createdAt: "2026-09-06T00:00:00Z",
+    },
+  ],
 };
 
 const memosPlan = {
@@ -129,7 +196,9 @@ const memosPlan = {
   images: ["neosmemo/memos:0.28.0"],
   containers: ["memos"],
   ports: [{ hostPort: 5230, containerPort: 5230, protocol: "tcp", purpose: "WebUI 端口" }],
-  mounts: [{ hostPath: "/srv/a-nas/data/apps/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false }],
+  mounts: [
+    { hostPath: "/srv/a-nas/data/apps/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false },
+  ],
   networks: [] as string[],
   addressPools: [] as string[],
   digest: "d".repeat(64),
@@ -138,8 +207,21 @@ const memosPlan = {
 
 function appList(memos: Record<string, unknown>) {
   const base = {
-    tagline: "", description: "", notes: "", version: "1", author: "", developer: "", website: "", repo: "", docs: "", updated: "",
-    scheme: "http", path: "/", state: "available", running: 0, total: 0,
+    tagline: "",
+    description: "",
+    notes: "",
+    version: "1",
+    author: "",
+    developer: "",
+    website: "",
+    repo: "",
+    docs: "",
+    updated: "",
+    scheme: "http",
+    path: "/",
+    state: "available",
+    running: 0,
+    total: 0,
   };
   return {
     dataSource: "simulated",
@@ -158,25 +240,46 @@ const metricsState = {
   network: { receiveBytesPerSecond: 2516582, transmitBytesPerSecond: 327680 },
 };
 
-afterEach(() => { transferStore.reset(); tus.uploads.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  transferStore.reset();
+  tus.uploads.length = 0;
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("A-NAS v1.0.1 desktop", () => {
   it.each(["clip.mp4", "photo.HEIC", "photo.heif"])("shows a thumbnail for %s in file management", async (name) => {
     installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
-      entries: [{ id: "file:preview", spaceId: "space:shared", name, kind: "file", sizeBytes: 1024, modifiedAt: "2026-10-14T00:00:00Z" }],
+      entries: [
+        {
+          id: "file:preview",
+          spaceId: "space:shared",
+          name,
+          kind: "file",
+          sizeBytes: 1024,
+          modifiedAt: "2026-10-14T00:00:00Z",
+        },
+      ],
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     await within(dialog).findByText(name);
     const row = dialog.querySelector<HTMLElement>('[data-file-item="file:preview"]')!;
-    expect(row.querySelector("img")?.getAttribute("src")).toContain("/api/v1/files/file%3Apreview/preview?size=thumbnail");
+    expect(row.querySelector("img")?.getAttribute("src")).toContain(
+      "/api/v1/files/file%3Apreview/preview?size=thumbnail",
+    );
     fireEvent.error(row.querySelector("img")!);
     expect(row.querySelector("img")?.hidden).toBe(true);
     await user.click(row);
     const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
-    expect(within(inspector).getByRole("img", { name: name + " 的预览" }).getAttribute("src")).toContain("/preview?size=preview");
+    expect(
+      within(inspector)
+        .getByRole("img", { name: name + " 的预览" })
+        .getAttribute("src"),
+    ).toContain("/preview?size=preview");
     if (name !== "clip.mp4") {
       await user.dblClick(row);
       const viewer = await within(dialog).findByRole("dialog", { name: "预览 " + name });
@@ -196,11 +299,13 @@ describe("A-NAS v1.0.1 desktop", () => {
         { id: "c", spaceId: "space:shared", name: "C.bin", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-03" },
       ],
     });
-    const user = userEvent.setup(); const mounted = render(<App />);
+    const user = userEvent.setup();
+    const mounted = render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     let dialog = await screen.findByRole("dialog", { name: "文件管理" });
     const item = (id: string) => dialog.querySelector<HTMLElement>(`[data-file-item="${id}"]`)!;
-    const order = () => Array.from(dialog.querySelectorAll<HTMLElement>("[data-file-item]")).map((row) => row.dataset.fileItem);
+    const order = () =>
+      Array.from(dialog.querySelectorAll<HTMLElement>("[data-file-item]")).map((row) => row.dataset.fileItem);
     await waitFor(() => expect(order()).toEqual(["a", "b", "c"]));
     fireEvent.contextMenu(item("b"));
     await user.click(screen.getByRole("menuitem", { name: "置顶文件夹" }));
@@ -229,7 +334,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.selectOptions(within(dialog).getByLabelText("排序方式"), "name");
     await user.selectOptions(within(dialog).getByLabelText("排序方式"), "manual");
     expect(order()).toEqual(["b", "a", "c"]);
-    mounted.unmount(); render(<App />);
+    mounted.unmount();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     dialog = await screen.findByRole("dialog", { name: "文件管理" });
     await waitFor(() => expect(order()).toEqual(["b", "a", "c"]));
@@ -261,7 +367,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/setup/admin", expect.objectContaining({ method: "POST" }));
     const setupCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/setup/admin");
-    expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({ username: "owner", password: "correct horse battery staple" });
+    expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({
+      username: "owner",
+      password: "correct horse battery staple",
+    });
   });
 
   it("asks for a session that lasts until sign-out on the local console", async () => {
@@ -275,7 +384,11 @@ describe("A-NAS v1.0.1 desktop", () => {
       await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
       expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
       const setupCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/setup/admin");
-      expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({ username: "owner", password: "correct horse battery staple", localConsole: true });
+      expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({
+        username: "owner",
+        password: "correct horse battery staple",
+        localConsole: true,
+      });
     } finally {
       window.history.replaceState(null, "", "/");
     }
@@ -283,7 +396,14 @@ describe("A-NAS v1.0.1 desktop", () => {
 
   it("shows a loading state while the first host observation is pending", async () => {
     let finishRequest: ((response: Response) => void) | undefined;
-    routeFetch({ hostState: vi.fn(() => new Promise<Response>((resolve) => { finishRequest = resolve; })) });
+    routeFetch({
+      hostState: vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishRequest = resolve;
+          }),
+      ),
+    });
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -310,14 +430,47 @@ describe("A-NAS v1.0.1 desktop", () => {
   // jsdom resolves the computed styles this test checks slowly.
   it("enables file management and lists only the signed-in user's spaces", { timeout: 15_000 }, async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }, { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [
-        { id: "file:1", spaceId: "space:owner", name: "家庭", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" },
-        { id: "file:2", spaceId: "space:owner", name: "A.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" },
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+        { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" },
       ],
-      volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 480 * 1024 ** 3, availableBytes: 278 * 1024 ** 3, state: "available" }],
+      entries: [
+        {
+          id: "file:1",
+          spaceId: "space:owner",
+          name: "家庭",
+          kind: "directory",
+          sizeBytes: 0,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
+        {
+          id: "file:2",
+          spaceId: "space:owner",
+          name: "A.txt",
+          kind: "file",
+          sizeBytes: 12,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+      ],
+      volumes: [
+        {
+          id: "volume:data",
+          diskIds: ["disk:data"],
+          layout: "single",
+          capacityBytes: 480 * 1024 ** 3,
+          availableBytes: 278 * 1024 ** 3,
+          state: "available",
+        },
+      ],
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     const fileButton = within(desktop).getByRole("button", { name: "打开文件管理" });
     expect(fileButton.hasAttribute("disabled")).toBe(false);
@@ -345,46 +498,101 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(rows.find((row) => row.textContent?.includes("A.txt"))!);
     await user.click(within(dialog).getByRole("button", { name: "复制" }));
     await user.click(within(dialog).getByRole("button", { name: "粘贴" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/file%3A2/copies", expect.objectContaining({
-      method: "POST", body: JSON.stringify({ spaceId: "space:owner", parentId: "", name: "A - 副本.txt" }),
-    }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/files/file%3A2/copies",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ spaceId: "space:owner", parentId: "", name: "A - 副本.txt" }),
+      }),
+    );
     const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
     expect(within(inspector).queryByRole("button")).toBeNull();
-    await user.dblClick(within(dialog).getAllByRole("row").find((row) => row.textContent?.includes("图库"))!);
+    await user.dblClick(
+      within(dialog)
+        .getAllByRole("row")
+        .find((row) => row.textContent?.includes("图库"))!,
+    );
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
   // Switching spaces and pasting re-renders the whole file manager several times.
   it("moves a cut file into the space it is pasted in", { timeout: 15_000 }, async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }, { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [{ id: "file:film", spaceId: "space:owner", name: "Heat (1995).mp4", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" }],
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+        { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" },
+      ],
+      entries: [
+        {
+          id: "file:film",
+          spaceId: "space:owner",
+          name: "Heat (1995).mp4",
+          kind: "file",
+          sizeBytes: 12,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+      ],
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
-    await user.click((await within(dialog).findAllByRole("row")).find((row) => row.textContent?.includes("Heat (1995).mp4"))!);
+    await user.click(
+      (await within(dialog).findAllByRole("row")).find((row) => row.textContent?.includes("Heat (1995).mp4"))!,
+    );
     await user.click(within(dialog).getByRole("button", { name: "剪切" }));
     // Pasting where the file already is would do nothing.
     expect(within(dialog).getByRole("button", { name: "粘贴" }).hasAttribute("disabled")).toBe(true);
 
     await user.click(within(dialog).getByRole("button", { name: "共享空间共享" }));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "粘贴" }).hasAttribute("disabled")).toBe(false));
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "粘贴" }).hasAttribute("disabled")).toBe(false),
+    );
     await user.click(within(dialog).getByRole("button", { name: "粘贴" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/file%3Afilm", expect.objectContaining({
-      method: "PATCH", body: JSON.stringify({ spaceId: "space:shared", parentId: "", name: "Heat (1995).mp4" }),
-    })));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/files/file%3Afilm",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ spaceId: "space:shared", parentId: "", name: "Heat (1995).mp4" }),
+        }),
+      ),
+    );
     expect(within(dialog).queryByText(/已剪切/)).toBeNull();
   });
 
   it("downloads files through the transfer center only on double click and exposes the file edit context menu", async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [{ id: "file:note", spaceId: "space:owner", name: "notes.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" }],
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
+      entries: [
+        {
+          id: "file:note",
+          spaceId: "space:owner",
+          name: "notes.txt",
+          kind: "file",
+          sizeBytes: 12,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+      ],
       textPreview: "hello",
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("notes.txt"))!;
@@ -396,9 +604,22 @@ describe("A-NAS v1.0.1 desktop", () => {
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
     const created = fetchMock.mock.calls.find(([path]) => path === "/api/v1/transfers/downloads");
     expect(JSON.parse(String(created?.[1]?.body))).toEqual({ entryIds: ["file:note"] });
-    expect(click.mock.contexts[0]).toHaveProperty("href", expect.stringContaining("/api/v1/transfers/download-1/content"));
+    expect(click.mock.contexts[0]).toHaveProperty(
+      "href",
+      expect.stringContaining("/api/v1/transfers/download-1/content"),
+    );
     const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
-    manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
+    manager.getBoundingClientRect = () => ({
+      left: 50,
+      top: 70,
+      right: 950,
+      bottom: 690,
+      width: 900,
+      height: 620,
+      x: 50,
+      y: 70,
+      toJSON: () => ({}),
+    });
     fireEvent.contextMenu(row, { clientX: 120, clientY: 160 });
     const menu = await screen.findByRole("menu", { name: "文件操作" });
     expect(menu.getAttribute("style")).toContain("left: 70px");
@@ -410,16 +631,53 @@ describe("A-NAS v1.0.1 desktop", () => {
 
   it("previews images and PDFs in place on double click and keeps download a separate action", async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
       entries: [
-        { id: "file:beach", spaceId: "space:owner", name: "beach.jpg", kind: "file", sizeBytes: 20 * 1024 ** 2, modifiedAt: "2026-10-08T10:00:00Z" },
-        { id: "file:cat", spaceId: "space:owner", name: "cat.png", kind: "file", sizeBytes: 300 * 1024, modifiedAt: "2026-10-08T10:00:00Z" },
-        { id: "file:manual", spaceId: "space:owner", name: "manual.pdf", kind: "file", sizeBytes: 90 * 1024, modifiedAt: "2026-10-08T10:00:00Z" },
-        { id: "file:archive", spaceId: "space:owner", name: "photos.zip", kind: "file", sizeBytes: 5, modifiedAt: "2026-10-08T10:00:00Z" },
+        {
+          id: "file:beach",
+          spaceId: "space:owner",
+          name: "beach.jpg",
+          kind: "file",
+          sizeBytes: 20 * 1024 ** 2,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+        {
+          id: "file:cat",
+          spaceId: "space:owner",
+          name: "cat.png",
+          kind: "file",
+          sizeBytes: 300 * 1024,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+        {
+          id: "file:manual",
+          spaceId: "space:owner",
+          name: "manual.pdf",
+          kind: "file",
+          sizeBytes: 90 * 1024,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+        {
+          id: "file:archive",
+          spaceId: "space:owner",
+          name: "photos.zip",
+          kind: "file",
+          sizeBytes: 5,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
       ],
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     const rows = await within(dialog).findAllByRole("row");
@@ -431,7 +689,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.dblClick(row("beach.jpg"));
     const viewer = await within(dialog).findByRole("dialog", { name: "预览 beach.jpg" });
     expect(within(viewer).getByText("20.0 MiB · 1 / 3")).toBeTruthy();
-    expect(within(viewer).getByRole("img", { name: "beach.jpg" }).getAttribute("src")).toContain("/api/v1/files/file%3Abeach/content?disposition=inline");
+    expect(within(viewer).getByRole("img", { name: "beach.jpg" }).getAttribute("src")).toContain(
+      "/api/v1/files/file%3Abeach/content?disposition=inline",
+    );
     expect(click).not.toHaveBeenCalled();
     await user.keyboard("{ArrowRight}");
     const cat = await within(dialog).findByRole("dialog", { name: "预览 cat.png" });
@@ -445,13 +705,29 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(row("cat.png").getAttribute("aria-selected")).toBe("true");
 
     const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
-    manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
+    manager.getBoundingClientRect = () => ({
+      left: 50,
+      top: 70,
+      right: 950,
+      bottom: 690,
+      width: 900,
+      height: 620,
+      x: 50,
+      y: 70,
+      toJSON: () => ({}),
+    });
     fireEvent.contextMenu(row("beach.jpg"), { clientX: 120, clientY: 160 });
     const menu = await screen.findByRole("menu", { name: "文件操作" });
     await user.click(within(menu).getByRole("menuitem", { name: "预览" }));
-    await user.click(within(await within(dialog).findByRole("dialog", { name: "预览 beach.jpg" })).getByRole("button", { name: "关闭预览" }));
+    await user.click(
+      within(await within(dialog).findByRole("dialog", { name: "预览 beach.jpg" })).getByRole("button", {
+        name: "关闭预览",
+      }),
+    );
     fireEvent.contextMenu(row("beach.jpg"), { clientX: 120, clientY: 160 });
-    await user.click(within(await screen.findByRole("menu", { name: "文件操作" })).getByRole("menuitem", { name: "下载" }));
+    await user.click(
+      within(await screen.findByRole("menu", { name: "文件操作" })).getByRole("menuitem", { name: "下载" }),
+    );
     await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
 
     await user.dblClick(row("photos.zip"));
@@ -460,20 +736,40 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   // Opening the transfer center loads its window code on first use.
-  it("uploads picked and dropped files through the transfer center without blocking the folder", { timeout: 15_000 }, async () => {
+  it("uploads picked and dropped files through the transfer center without blocking the folder", {
+    timeout: 15_000,
+  }, async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [{ id: "file:old", spaceId: "space:shared", name: "old.txt", kind: "file", sizeBytes: 3, modifiedAt: "2026-10-08T10:00:00Z" }],
+      entries: [
+        {
+          id: "file:old",
+          spaceId: "space:shared",
+          name: "old.txt",
+          kind: "file",
+          sizeBytes: 3,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+      ],
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     await within(dialog).findByText("old.txt");
     await user.click(within(dialog).getByRole("button", { name: "上传到当前目录" }));
     expect(within(dialog).getByRole("menuitem", { name: /上传文件夹/ })).toBeTruthy();
-    await user.upload(within(dialog).getByLabelText("选择要上传的文件"), [new File(["hello"], "a.txt"), new File(["world!"], "b.txt")]);
+    await user.upload(within(dialog).getByLabelText("选择要上传的文件"), [
+      new File(["hello"], "a.txt"),
+      new File(["world!"], "b.txt"),
+    ]);
     expect(tus.uploads).toHaveLength(2);
-    expect(tus.uploads[0].options.metadata).toMatchObject({ filename: "a.txt", spaceId: "space:shared", parentId: "", conflict: "ask" });
+    expect(tus.uploads[0].options.metadata).toMatchObject({
+      filename: "a.txt",
+      spaceId: "space:shared",
+      parentId: "",
+      conflict: "ask",
+    });
     // Other commands stay available while files upload.
     expect(within(dialog).getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(false);
     tus.uploads[0].options.onProgress(5, 5);
@@ -488,7 +784,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     await waitFor(() => expect(tus.uploads).toHaveLength(3));
     expect(within(dialog).queryByText("松开即可上传")).toBeNull();
 
-    const listed = () => fetchMock.mock.calls.filter(([path]) => String(path).startsWith("/api/v1/spaces/space%3Ashared/entries")).length;
+    const listed = () =>
+      fetchMock.mock.calls.filter(([path]) => String(path).startsWith("/api/v1/spaces/space%3Ashared/entries")).length;
     const before = listed();
     tus.uploads[0].options.onSuccess();
     await waitFor(() => expect(listed()).toBeGreaterThan(before));
@@ -499,19 +796,53 @@ describe("A-NAS v1.0.1 desktop", () => {
 
   it("downloads a folder as one archive from the context menu", async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [{ id: "file:album", spaceId: "space:owner", name: "相册", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-08T10:00:00Z" }],
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
+      entries: [
+        {
+          id: "file:album",
+          spaceId: "space:owner",
+          name: "相册",
+          kind: "directory",
+          sizeBytes: 0,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+      ],
     });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
-    const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("相册") && item.textContent?.includes("文件夹"))!;
+    const row = (await within(dialog).findAllByRole("row")).find(
+      (item) => item.textContent?.includes("相册") && item.textContent?.includes("文件夹"),
+    )!;
     const manager = dialog.querySelector<HTMLElement>(".file-manager")!;
-    manager.getBoundingClientRect = () => ({ left: 50, top: 70, right: 950, bottom: 690, width: 900, height: 620, x: 50, y: 70, toJSON: () => ({}) });
+    manager.getBoundingClientRect = () => ({
+      left: 50,
+      top: 70,
+      right: 950,
+      bottom: 690,
+      width: 900,
+      height: 620,
+      x: 50,
+      y: 70,
+      toJSON: () => ({}),
+    });
     fireEvent.contextMenu(row, { clientX: 120, clientY: 160 });
-    await user.click(within(await screen.findByRole("menu", { name: "文件操作" })).getByRole("menuitem", { name: /打包下载/ }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/transfers/downloads")).toBe(true));
+    await user.click(
+      within(await screen.findByRole("menu", { name: "文件操作" })).getByRole("menuitem", { name: /打包下载/ }),
+    );
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/transfers/downloads")).toBe(true),
+    );
     const created = fetchMock.mock.calls.find(([path]) => path === "/api/v1/transfers/downloads");
     expect(JSON.parse(String(created?.[1]?.body))).toEqual({ entryIds: ["file:album"] });
   });
@@ -520,18 +851,53 @@ describe("A-NAS v1.0.1 desktop", () => {
     installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [
-        { id: "file:a", spaceId: "space:shared", name: "A.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-08T10:00:00Z" },
-        { id: "file:b", spaceId: "space:shared", name: "B.txt", kind: "file", sizeBytes: 18, modifiedAt: "2026-10-08T10:00:00Z" },
+        {
+          id: "file:a",
+          spaceId: "space:shared",
+          name: "A.txt",
+          kind: "file",
+          sizeBytes: 12,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+        {
+          id: "file:b",
+          spaceId: "space:shared",
+          name: "B.txt",
+          kind: "file",
+          sizeBytes: 18,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
       ],
       textPreview: "hello",
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
     const shell = dialog.querySelector<HTMLElement>(".file-list-shell")!;
-    shell.getBoundingClientRect = () => ({ left: 0, top: 0, right: 500, bottom: 500, width: 500, height: 500, x: 0, y: 0, toJSON: () => ({}) });
+    shell.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 500,
+      bottom: 500,
+      width: 500,
+      height: 500,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
     Array.from(shell.querySelectorAll<HTMLElement>("[data-file-item]")).forEach((row, index) => {
-      row.getBoundingClientRect = () => ({ left: 0, top: 40 + index * 50, right: 500, bottom: 88 + index * 50, width: 500, height: 48, x: 0, y: 40 + index * 50, toJSON: () => ({}) });
+      row.getBoundingClientRect = () => ({
+        left: 0,
+        top: 40 + index * 50,
+        right: 500,
+        bottom: 88 + index * 50,
+        width: 500,
+        height: 48,
+        x: 0,
+        y: 40 + index * 50,
+        toJSON: () => ({}),
+      });
     });
 
     fireEvent.pointerDown(shell, { button: 0, clientX: 480, clientY: 25 });
@@ -542,14 +908,34 @@ describe("A-NAS v1.0.1 desktop", () => {
 
   it("previews an image file in the details pane", async () => {
     installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
-      entries: [{ id: "file:photo", spaceId: "space:owner", name: "family-photo.jpg", kind: "file", sizeBytes: 2048, modifiedAt: "2026-10-08T10:00:00Z" }],
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
+      entries: [
+        {
+          id: "file:photo",
+          spaceId: "space:owner",
+          name: "family-photo.jpg",
+          kind: "file",
+          sizeBytes: 2048,
+          modifiedAt: "2026-10-08T10:00:00Z",
+        },
+      ],
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
-    const row = (await within(dialog).findAllByRole("row")).find((item) => item.textContent?.includes("family-photo.jpg"));
+    const row = (await within(dialog).findAllByRole("row")).find((item) =>
+      item.textContent?.includes("family-photo.jpg"),
+    );
     const thumbnail = row?.querySelector(".file-type-icon img");
     expect(thumbnail?.getAttribute("src")).toBe("/api/v1/files/file%3Aphoto/content?disposition=inline");
     await user.click(row!);
@@ -561,10 +947,27 @@ describe("A-NAS v1.0.1 desktop", () => {
 
   it("does not report the whole data volume as used when usage is unavailable", async () => {
     installAPI({
-      spaces: [{ id: "space:owner", kind: "private", name: "owner", ownerUserId: "user:owner", createdAt: "2026-10-07T10:00:00Z" }],
-      volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 500_107_862_016, state: "available" }],
+      spaces: [
+        {
+          id: "space:owner",
+          kind: "private",
+          name: "owner",
+          ownerUserId: "user:owner",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
+      volumes: [
+        {
+          id: "volume:data",
+          diskIds: ["disk:data"],
+          layout: "single",
+          capacityBytes: 500_107_862_016,
+          state: "available",
+        },
+      ],
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
     const dialog = await screen.findByRole("dialog", { name: "文件管理" });
@@ -575,14 +978,25 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("enables photos, trash, the backup center, and one settings entry", async () => {
-    installAPI(); const user = userEvent.setup(); render(<App />);
+    installAPI();
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
     // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
     // The terminal moved into 设置 → 终端.
-    for (const retired of ["打开系统设置", "打开资源管理", "打开存储初始化", "打开账号管理", "打开文件快照", "备份，规划中", "日志，规划中", "打开终端"]) {
+    for (const retired of [
+      "打开系统设置",
+      "打开资源管理",
+      "打开存储初始化",
+      "打开账号管理",
+      "打开文件快照",
+      "备份，规划中",
+      "日志，规划中",
+      "打开终端",
+    ]) {
       expect(within(desktop).queryByRole("button", { name: retired })).toBeNull();
     }
     await user.click(within(desktop).getByRole("button", { name: "打开相册" }));
@@ -592,12 +1006,27 @@ describe("A-NAS v1.0.1 desktop", () => {
   it("keeps the desktop usable when a blank-disk plan contains legacy null arrays", async () => {
     installAPI({
       storagePlan: {
-        id: "plan:blank", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
-        disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "blank-disk-fingerprint", signatures: null }],
-        confirmationPhrase: "ERASE data-01", actions: null, state: "planned", expiresAt: "2026-10-07T10:10:00Z",
+        id: "plan:blank",
+        kind: "create_volume",
+        layout: "single",
+        capacityAfterBytes: 512000000000,
+        disks: [
+          {
+            id: "disk:fake-data-01",
+            model: "A-NAS Fake HDD",
+            capacityBytes: 512000000000,
+            fingerprint: "blank-disk-fingerprint",
+            signatures: null,
+          },
+        ],
+        confirmationPhrase: "ERASE data-01",
+        actions: null,
+        state: "planned",
+        expiresAt: "2026-10-07T10:10:00Z",
       },
     });
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await openSettingsSection(user, desktop, "存储");
     await user.click(await screen.findByRole("button", { name: "初始化数据卷…" }));
@@ -608,11 +1037,15 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("keeps the last successful state when refresh loses connection", async () => {
-    routeFetch({ hostState: vi.fn().mockResolvedValueOnce(okResponse(healthyState)).mockResolvedValueOnce(errorResponse(503)) });
+    routeFetch({
+      hostState: vi.fn().mockResolvedValueOnce(okResponse(healthyState)).mockResolvedValueOnce(errorResponse(503)),
+    });
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }));
+    await user.click(
+      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
+    );
     expect(await screen.findByText("anas-fake")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "刷新设备状态" }));
@@ -627,7 +1060,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }));
+    await user.click(
+      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
+    );
     expect(await screen.findByText("暂时无法读取设备状态")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "重新连接" }));
@@ -646,7 +1081,9 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("opens, minimizes, and restores settings", async () => {
-    installAPI(); const user = userEvent.setup(); render(<App />);
+    installAPI();
+    const user = userEvent.setup();
+    render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
     const settings = screen.getByRole("dialog", { name: "设置" });
@@ -675,7 +1112,10 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {
-    routeFetch({ hostState: vi.fn().mockResolvedValue(okResponse(healthyState)), metrics: vi.fn().mockResolvedValue(errorResponse(503)) });
+    routeFetch({
+      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
+      metrics: vi.fn().mockResolvedValue(errorResponse(503)),
+    });
     render(<App />);
 
     const statusBar = await screen.findByRole("banner", { name: "设备状态" });
@@ -693,7 +1133,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     await screen.findByRole("region", { name: "桌面应用" });
 
     expired = true;
-    await act(async () => { vi.advanceTimersByTime(2_000); });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
     expect(await screen.findByRole("heading", { name: "登录 A-NAS" })).toBeTruthy();
     expect(screen.getByText("登录已过期，请重新登录")).toBeTruthy();
     expect(screen.queryByText(/连接中断/)).toBeNull();
@@ -759,7 +1201,12 @@ describe("A-NAS v1.0.1 desktop", () => {
     unmount();
 
     render(<App />);
-    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual(["文件管理", "回收站", "应用中心", "设置"]);
+    expect(desktopOrder(await screen.findByRole("region", { name: "桌面应用" })).slice(0, 4)).toEqual([
+      "文件管理",
+      "回收站",
+      "应用中心",
+      "设置",
+    ]);
   });
 
   it("switches focus between open apps from an icon-only dock", async () => {
@@ -801,9 +1248,15 @@ describe("A-NAS v1.0.1 desktop", () => {
     await waitFor(() => expect(screen.queryByRole("group", { name: "设置窗口预览" })).toBeNull());
 
     await user.hover(within(dock).getByRole("button", { name: "切换到回收站" }));
-    await user.click(within(await screen.findByRole("group", { name: "回收站窗口预览" })).getByRole("button", { name: "关闭回收站" }));
+    await user.click(
+      within(await screen.findByRole("group", { name: "回收站窗口预览" })).getByRole("button", { name: "关闭回收站" }),
+    );
     expect(screen.queryByRole("dialog", { name: "回收站" })).toBeNull();
-    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化设置"]);
+    expect(
+      within(dock)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["最小化设置"]);
 
     await user.hover(within(dock).getByRole("button", { name: "最小化设置" }));
     await screen.findByRole("group", { name: "设置窗口预览" });
@@ -825,10 +1278,18 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
 
     const dock = screen.getByRole("navigation", { name: "已打开窗口" });
-    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["切换到回收站", "最小化设置"]);
+    expect(
+      within(dock)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["切换到回收站", "最小化设置"]);
 
     await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
-    expect(within(dock).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["最小化回收站"]);
+    expect(
+      within(dock)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["最小化回收站"]);
   });
 
   it("keeps the system rail to working shortcuts", async () => {
@@ -836,7 +1297,13 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
     const buttons = within(rail).getAllByRole("button");
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["显示桌面", "全部应用", "打开分享", "打开设置", "账号（owner）"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "显示桌面",
+      "全部应用",
+      "打开分享",
+      "打开设置",
+      "账号（owner）",
+    ]);
     expect(buttons.some((button) => button.hasAttribute("disabled"))).toBe(false);
     expect(within(rail).getByRole("button", { name: "显示桌面" }).getAttribute("aria-pressed")).toBe("true");
   });
@@ -853,14 +1320,19 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(dock).getByRole("button", { name: "切换到文件管理" }));
     await user.click(within(dock).getByRole("button", { name: "最小化文件管理" }));
 
-    const showDesktop = within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "显示桌面" });
+    const showDesktop = within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", {
+      name: "显示桌面",
+    });
     expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
     await user.click(showDesktop);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(showDesktop.getAttribute("aria-pressed")).toBe("true");
 
     await user.click(showDesktop);
-    expect(screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"))).toEqual(["回收站", "设置"]);
+    expect(screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"))).toEqual([
+      "回收站",
+      "设置",
+    ]);
     expect(within(dock).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
     expect(within(dock).getByRole("button", { name: "恢复文件管理" })).toBeTruthy();
     expect(showDesktop.getAttribute("aria-pressed")).toBe("false");
@@ -883,8 +1355,16 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(openWindows()).toEqual(["回收站", "设置"]);
     // So does a window drag released over the wallpaper, and a press on the wallpaper that moves away.
     const titleBar = screen.getByRole("dialog", { name: "回收站" }).querySelector<HTMLElement>(".window-titlebar")!;
-    await user.pointer([{ keys: "[MouseLeft>]", target: titleBar, coords: { clientX: 400, clientY: 90 } }, { target: wallpaper, coords: { clientX: 40, clientY: 600 } }, { keys: "[/MouseLeft]" }]);
-    await user.pointer([{ keys: "[MouseLeft>]", target: wallpaper, coords: { clientX: 1200, clientY: 600 } }, { coords: { clientX: 1100, clientY: 500 } }, { keys: "[/MouseLeft]" }]);
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: titleBar, coords: { clientX: 400, clientY: 90 } },
+      { target: wallpaper, coords: { clientX: 40, clientY: 600 } },
+      { keys: "[/MouseLeft]" },
+    ]);
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: wallpaper, coords: { clientX: 1200, clientY: 600 } },
+      { coords: { clientX: 1100, clientY: 500 } },
+      { keys: "[/MouseLeft]" },
+    ]);
     expect(openWindows()).toEqual(["回收站", "设置"]);
     // The click that closes the launcher only closes it.
     await user.click(within(rail).getByRole("button", { name: "全部应用" }));
@@ -899,7 +1379,11 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(desktop);
     await user.click(showDesktop);
     expect(openWindows()).toEqual(["回收站", "设置"]);
-    expect(within(screen.getByRole("navigation", { name: "已打开窗口" })).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
+    expect(
+      within(screen.getByRole("navigation", { name: "已打开窗口" }))
+        .getByRole("button", { name: "最小化回收站" })
+        .getAttribute("aria-current"),
+    ).toBe("true");
 
     // The gaps between desktop icons count as the desktop, and a single window goes away too.
     await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
@@ -916,15 +1400,27 @@ describe("A-NAS v1.0.1 desktop", () => {
     const launcher = screen.getByRole("dialog", { name: "全部应用" });
     const search = within(launcher).getByRole("searchbox", { name: "搜索应用" });
     expect(document.activeElement).toBe(search);
-    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toContain("打开相册");
+    expect(
+      within(launcher)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toContain("打开相册");
     expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).toContain("VNAS");
 
     expect(within(launcher).getByRole("list", { name: "规划中的应用" }).textContent).not.toContain("日志");
     await user.type(search, "日志");
-    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开设置"]);
+    expect(
+      within(launcher)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["打开设置"]);
     await user.clear(search);
     await user.type(search, "命令行");
-    expect(within(launcher).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["打开设置"]);
+    expect(
+      within(launcher)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["打开设置"]);
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("dialog", { name: "全部应用" })).toBeNull();
     expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
@@ -934,7 +1430,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     stubDesktopFetch(healthyState, true);
     const user = userEvent.setup();
     render(<App />);
-    const trigger = within(await screen.findByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "全部应用" });
+    const trigger = within(await screen.findByRole("complementary", { name: "系统快捷栏" })).getByRole("button", {
+      name: "全部应用",
+    });
     await user.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     const launcher = screen.getByRole("dialog", { name: "全部应用" });
@@ -960,7 +1458,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: "登录" })).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session" && init?.method === "DELETE")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session" && init?.method === "DELETE")).toBe(
+      true,
+    );
   });
 
   it("manages containers from the Docker app", async () => {
@@ -973,25 +1473,38 @@ describe("A-NAS v1.0.1 desktop", () => {
           return { ok: true, status: 204, json: async () => undefined } as Response;
         }
         if (url.endsWith("/logs?tail=200")) {
-          return okResponse({ lines: [{ stream: "stdout", time: "2026-10-06T00:00:01Z", text: "server ready" }, { stream: "stderr", text: "warning: low disk" }] });
+          return okResponse({
+            lines: [
+              { stream: "stdout", time: "2026-10-06T00:00:01Z", text: "server ready" },
+              { stream: "stderr", text: "warning: low disk" },
+            ],
+          });
         }
         return okResponse(containerSnapshot);
       },
     });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开 Docker" }));
+    await user.click(
+      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开 Docker" }),
+    );
 
     const docker = screen.getByRole("dialog", { name: "Docker" });
     const jellyfin = await within(docker).findByRole("article", { name: "容器 jellyfin" });
     expect(within(jellyfin).getByText("运行中")).toBeTruthy();
     expect(within(jellyfin).getByText("已运行 3 小时")).toBeTruthy();
-    expect(within(jellyfin).getByRole("link", { name: "打开 jellyfin 的端口 8096" }).getAttribute("href")).toMatch(/:8096\/$/);
+    expect(within(jellyfin).getByRole("link", { name: "打开 jellyfin 的端口 8096" }).getAttribute("href")).toMatch(
+      /:8096\/$/,
+    );
     expect(within(jellyfin).getByText("12.4%")).toBeTruthy();
 
     await user.click(within(jellyfin).getByRole("button", { name: "停止 jellyfin" }));
     expect(actions).toHaveLength(0);
-    await user.click(within(within(docker).getByRole("dialog", { name: "确认停止 jellyfin" })).getByRole("button", { name: "确认停止" }));
+    await user.click(
+      within(within(docker).getByRole("dialog", { name: "确认停止 jellyfin" })).getByRole("button", {
+        name: "确认停止",
+      }),
+    );
     expect(actions).toEqual([{ id: containerSnapshot.containers[0].id, body: { action: "stop" } }]);
 
     const stopped = within(docker).getByRole("article", { name: "容器 homeassistant" });
@@ -1014,7 +1527,12 @@ describe("A-NAS v1.0.1 desktop", () => {
   it("explains when Docker management is disabled", async () => {
     routeFetch({
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      containers: async () => ({ ok: false, status: 503, json: async () => ({ error: { code: "containers_disabled", message: "disabled" } }) }) as Response,
+      containers: async () =>
+        ({
+          ok: false,
+          status: 503,
+          json: async () => ({ error: { code: "containers_disabled", message: "disabled" } }),
+        }) as Response,
     });
     const user = userEvent.setup();
     render(<App />);
@@ -1033,15 +1551,44 @@ describe("A-NAS v1.0.1 desktop", () => {
           posts.push({ url, body: JSON.parse(String(init.body)) });
           expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe(session.csrfToken);
           installed = url.endsWith("/install");
-          return { ok: true, status: 202, json: async () => ({ appId: "memos", action: "install", state: "running", startedAt: "2026-10-07T00:00:00Z", output: [] }) } as Response;
+          return {
+            ok: true,
+            status: 202,
+            json: async () => ({
+              appId: "memos",
+              action: "install",
+              state: "running",
+              startedAt: "2026-10-07T00:00:00Z",
+              output: [],
+            }),
+          } as Response;
         }
         if (url.endsWith("/plan")) return okResponse(memosPlan);
-        return okResponse(appList(installed ? { state: "installed", running: 1, total: 1, job: { appId: "memos", action: "install", state: "succeeded", startedAt: "2026-10-07T00:00:00Z", output: ["Container memos  Started"] } } : {}));
+        return okResponse(
+          appList(
+            installed
+              ? {
+                  state: "installed",
+                  running: 1,
+                  total: 1,
+                  job: {
+                    appId: "memos",
+                    action: "install",
+                    state: "succeeded",
+                    startedAt: "2026-10-07T00:00:00Z",
+                    output: ["Container memos  Started"],
+                  },
+                }
+              : {},
+          ),
+        );
       },
     });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开应用中心" }));
+    await user.click(
+      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开应用中心" }),
+    );
 
     const store = screen.getByRole("dialog", { name: "应用中心" });
     await user.click(await within(store).findByRole("button", { name: "安装 Memos" }));
@@ -1067,7 +1614,13 @@ describe("A-NAS v1.0.1 desktop", () => {
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
       apps: async (url, init) => {
         if (init?.method === "POST") {
-          return { ok: false, status: 409, json: async () => ({ error: { code: "port_in_use", message: "a published port is already in use: 5230 is used by other" } }) } as Response;
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: { code: "port_in_use", message: "a published port is already in use: 5230 is used by other" },
+            }),
+          } as Response;
         }
         if (url.endsWith("/plan")) return okResponse(memosPlan);
         return okResponse(appList({}));
@@ -1084,7 +1637,12 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     routeFetch({
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async () => ({ ok: false, status: 503, json: async () => ({ error: { code: "apps_disabled", message: "disabled" } }) }) as Response,
+      apps: async () =>
+        ({
+          ok: false,
+          status: 503,
+          json: async () => ({ error: { code: "apps_disabled", message: "disabled" } }),
+        }) as Response,
     });
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
@@ -1099,7 +1657,13 @@ describe("A-NAS v1.0.1 desktop", () => {
         if (url.endsWith("/plan")) {
           return poolConfigured
             ? okResponse({ ...memosPlan, networks: ["default"], addressPools: ["10.96.64.0/19"] })
-            : { ok: false, status: 409, json: async () => ({ error: { code: "address_pool_missing", message: "Docker has no address pool for app networks" } }) } as Response;
+            : ({
+                ok: false,
+                status: 409,
+                json: async () => ({
+                  error: { code: "address_pool_missing", message: "Docker has no address pool for app networks" },
+                }),
+              } as Response);
         }
         return okResponse(appList({}));
       },
@@ -1125,7 +1689,11 @@ describe("A-NAS v1.0.1 desktop", () => {
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
       apps: async (url, init) => {
         if (init?.method === "POST") {
-          return { ok: false, status: 423, json: async () => ({ error: { code: "volume_unavailable", message: "the data volume is not available" } }) } as Response;
+          return {
+            ok: false,
+            status: 423,
+            json: async () => ({ error: { code: "volume_unavailable", message: "the data volume is not available" } }),
+          } as Response;
         }
         if (url.endsWith("/plan")) return okResponse(memosPlan);
         return okResponse(appList({}));
@@ -1193,7 +1761,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
     expect(screen.queryByTestId("xterm-session")).toBeNull();
     // Settings reopens on the terminal with a new shell.
-    await user.click(within(screen.getByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }));
+    await user.click(
+      within(screen.getByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
+    );
     expect(await screen.findByTestId("xterm-session")).toBeTruthy();
     expect(xterm.mounts).toBe(2);
   });
@@ -1230,7 +1800,27 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 });
 
-function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; spaces?: unknown[]; entries?: unknown[]; volumes?: unknown[]; storagePlan?: unknown; unfinishedPlans?: unknown[]; operation?: unknown; executeFails?: boolean; terminalEnabled?: boolean; session?: unknown; notifications?: unknown[]; users?: unknown[]; textPreview?: string; profiles?: unknown[]; shortcuts?: unknown[]; hostState?: unknown } = {}) {
+function installAPI(
+  options: {
+    setupRequired?: boolean;
+    setupAllowed?: boolean;
+    spaces?: unknown[];
+    entries?: unknown[];
+    volumes?: unknown[];
+    storagePlan?: unknown;
+    unfinishedPlans?: unknown[];
+    operation?: unknown;
+    executeFails?: boolean;
+    terminalEnabled?: boolean;
+    session?: unknown;
+    notifications?: unknown[];
+    users?: unknown[];
+    textPreview?: string;
+    profiles?: unknown[];
+    shortcuts?: unknown[];
+    hostState?: unknown;
+  } = {},
+) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/api/v1/app-shortcuts") return ok({ items: options.shortcuts ?? [] });
@@ -1241,9 +1831,12 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
       if (nickname === "owner") return failure(409, "nickname_unavailable");
       return ok({ ...signedIn.user, nickname: nickname || undefined });
     }
-    if (path === "/api/v1/session/avatar" && init?.method === "PUT") return ok({ ...signedIn.user, avatarVersion: "0123456789abcdef" });
-    if (path === "/api/v1/session/avatar" && init?.method === "DELETE") return ok({ ...signedIn.user, avatarVersion: undefined });
-    if (path === "/api/v1/setup/status") return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
+    if (path === "/api/v1/session/avatar" && init?.method === "PUT")
+      return ok({ ...signedIn.user, avatarVersion: "0123456789abcdef" });
+    if (path === "/api/v1/session/avatar" && init?.method === "DELETE")
+      return ok({ ...signedIn.user, avatarVersion: undefined });
+    if (path === "/api/v1/setup/status")
+      return ok({ setupRequired: options.setupRequired ?? false, setupAllowed: options.setupAllowed ?? true });
     if (path === "/api/v1/setup/admin" && init?.method === "POST") return ok(session, 201);
     if (path === "/api/v1/session") return ok(options.session ?? session);
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
@@ -1252,28 +1845,63 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
-    if (path.startsWith("/api/v1/files/") && path.includes("/content")) return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
+    if (path.startsWith("/api/v1/files/") && path.includes("/content"))
+      return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
     if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
     if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
     if (path === "/api/v1/storage/plans") return ok({ items: options.unfinishedPlans ?? [] });
-    if (path.startsWith("/api/v1/operations/")) return ok(options.operation ?? { ...(options.storagePlan as object), state: "succeeded" });
-    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/confirm")) return ok({ ...(options.storagePlan as object), state: "confirmed" });
-    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute")) return options.executeFails ? failure(503, "operation_needs_attention") : ok({ ...(options.storagePlan as object), state: "succeeded" });
-    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/cancel")) return ok({ ...(options.storagePlan as object), state: "cancelled" });
-    if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion")) return { ok: true, status: 202, headers: new Headers({ "Content-Length": "0" }), json: async () => undefined } as Response;
+    if (path.startsWith("/api/v1/operations/"))
+      return ok(options.operation ?? { ...(options.storagePlan as object), state: "succeeded" });
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/confirm"))
+      return ok({ ...(options.storagePlan as object), state: "confirmed" });
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/execute"))
+      return options.executeFails
+        ? failure(503, "operation_needs_attention")
+        : ok({ ...(options.storagePlan as object), state: "succeeded" });
+    if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/cancel"))
+      return ok({ ...(options.storagePlan as object), state: "cancelled" });
+    if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion"))
+      return {
+        ok: true,
+        status: 202,
+        headers: new Headers({ "Content-Length": "0" }),
+        json: async () => undefined,
+      } as Response;
     if (path === "/api/v1/users" && init?.method === "POST") {
       const { username } = JSON.parse(String(init.body)) as { username: string };
-      return ok({ id: "user:new", username: username.trim().toLowerCase(), role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z", mustChangePassword: false }, 201);
+      return ok(
+        {
+          id: "user:new",
+          username: username.trim().toLowerCase(),
+          role: "member",
+          status: "active",
+          createdAt: "2026-10-07T10:00:00Z",
+          mustChangePassword: false,
+        },
+        201,
+      );
     }
     if (path === "/api/v1/users") return ok({ items: options.users ?? [session.user] });
     if (path === "/api/v1/trash") return ok({ items: [] });
     if (path === "/api/v1/transfers/downloads" && init?.method === "POST") {
       const { entryIds } = JSON.parse(String(init.body)) as { entryIds: string[] };
-      return ok({
-        id: "download-1", direction: "download", kind: entryIds.length > 1 ? "archive" : "file", name: entryIds.length > 1 ? "下载.zip" : "notes.txt",
-        location: { spaceId: "space:owner", spaceKind: "private", folders: [] }, totalBytes: 12, transferredBytes: 0, bytesPerSecond: 0,
-        state: "pending", contentUrl: "/api/v1/transfers/download-1/content", createdAt: "2026-10-12T10:00:00Z", updatedAt: "2026-10-12T10:00:00Z",
-      }, 201);
+      return ok(
+        {
+          id: "download-1",
+          direction: "download",
+          kind: entryIds.length > 1 ? "archive" : "file",
+          name: entryIds.length > 1 ? "下载.zip" : "notes.txt",
+          location: { spaceId: "space:owner", spaceKind: "private", folders: [] },
+          totalBytes: 12,
+          transferredBytes: 0,
+          bytesPerSecond: 0,
+          state: "pending",
+          contentUrl: "/api/v1/transfers/download-1/content",
+          createdAt: "2026-10-12T10:00:00Z",
+          updatedAt: "2026-10-12T10:00:00Z",
+        },
+        201,
+      );
     }
     return ok({ items: [] });
   });
@@ -1281,8 +1909,12 @@ function installAPI(options: { setupRequired?: boolean; setupAllowed?: boolean; 
   return mock;
 }
 
-function ok(body: unknown, status = 200) { return { ok: true, status, json: async () => body } as Response; }
-function failure(status: number, code: string) { return { ok: false, status, json: async () => ({ error: { code, message: code } }) } as Response; }
+function ok(body: unknown, status = 200) {
+  return { ok: true, status, json: async () => body } as Response;
+}
+function failure(status: number, code: string) {
+  return { ok: false, status, json: async () => ({ error: { code, message: code } }) } as Response;
+}
 
 async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, desktop: HTMLElement, section: string) {
   await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
@@ -1291,13 +1923,17 @@ async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, des
 }
 
 function desktopOrder(desktop: HTMLElement): string[] {
-  return within(desktop).getAllByRole("button").map((button) => button.textContent!.replace("规划中", ""));
+  return within(desktop)
+    .getAllByRole("button")
+    .map((button) => button.textContent!.replace("规划中", ""));
 }
 
 // jsdom has no layout; give each slot the geometry of a 3-column, 100px grid.
 function layOutGrid(desktop: HTMLElement) {
   const geometry = (slot: Element) => {
-    const index = Array.from(slot.parentElement!.children).filter((child) => child.classList.contains("desktop-slot")).indexOf(slot);
+    const index = Array.from(slot.parentElement!.children)
+      .filter((child) => child.classList.contains("desktop-slot"))
+      .indexOf(slot);
     return { left: (index % 3) * 100, top: Math.floor(index / 3) * 100 };
   };
   desktop.querySelectorAll(".desktop-slot").forEach((slot) => {
@@ -1309,7 +1945,17 @@ function layOutGrid(desktop: HTMLElement) {
     });
     slot.getBoundingClientRect = () => {
       const { left, top } = geometry(slot);
-      return { left, top, right: left + 100, bottom: top + 100, width: 100, height: 100, x: left, y: top, toJSON: () => ({}) };
+      return {
+        left,
+        top,
+        right: left + 100,
+        bottom: top + 100,
+        width: 100,
+        height: 100,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      };
     };
   });
 }
@@ -1324,7 +1970,8 @@ function routeFetch(routes: {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).startsWith("/api/v1/containers") && routes.containers) return routes.containers(String(input), init);
+      if (String(input).startsWith("/api/v1/containers") && routes.containers)
+        return routes.containers(String(input), init);
       if (String(input).startsWith("/api/v1/apps") && routes.apps) return routes.apps(String(input), init);
       switch (String(input)) {
         case "/api/v1/setup/status":
@@ -1401,7 +2048,9 @@ describe("ADR 0008 account safeguards", () => {
   });
 
   it("requires a member whose password was reset to choose a new one first", async () => {
-    const fetchMock = installAPI({ session: { ...session, user: { ...session.user, username: "alice", role: "member", mustChangePassword: true } } });
+    const fetchMock = installAPI({
+      session: { ...session, user: { ...session.user, username: "alice", role: "member", mustChangePassword: true } },
+    });
     const user = userEvent.setup();
     render(<App />);
     expect(await screen.findByRole("heading", { name: "设置新密码" })).toBeTruthy();
@@ -1412,50 +2061,84 @@ describe("ADR 0008 account safeguards", () => {
     await user.click(screen.getByRole("button", { name: "保存新密码" }));
     expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ currentPassword: "temporary password 1", newPassword: "alice chosen password" });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      currentPassword: "temporary password 1",
+      newPassword: "alice chosen password",
+    });
   });
 
   it("tells the owner when an administrator viewed the private space", async () => {
-    const fetchMock = installAPI({ notifications: [{
-      id: "notification:1", kind: "admin_viewing", actorUsername: "owner", reason: "找回照片",
-      expiresAt: "2026-10-08T10:00:00Z", createdAt: "2026-10-07T10:00:00Z",
-    }] });
+    const fetchMock = installAPI({
+      notifications: [
+        {
+          id: "notification:1",
+          kind: "admin_viewing",
+          actorUsername: "owner",
+          reason: "找回照片",
+          expiresAt: "2026-10-08T10:00:00Z",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
+    });
     const user = userEvent.setup();
     render(<App />);
     const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
     expect(within(notice).getByText(/管理员 owner .*只读查看.*原因：找回照片/)).toBeTruthy();
     await user.click(within(notice).getByRole("button", { name: "知道了" }));
     expect(screen.queryByRole("alertdialog", { name: "账号通知" })).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/notifications/notification%3A1/acknowledge", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/notifications/notification%3A1/acknowledge",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("lets an administrator start read-only viewing with a reason and password", async () => {
-    const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+    const alice = {
+      id: "user:alice",
+      username: "alice",
+      role: "member",
+      status: "active",
+      createdAt: "2026-10-07T10:00:00Z",
+    };
     const fetchMock = installAPI({ users: [session.user, alice] });
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await openSettingsSection(user, desktop, "用户与权限");
     await user.click(await screen.findByRole("button", { name: "alice 的更多操作" }));
-    await user.click(within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看个人空间…" }));
+    await user.click(
+      within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看个人空间…" }),
+    );
     const form = screen.getByRole("form", { name: "查看 alice 的个人空间" });
     await user.type(within(form).getByLabelText("查看原因"), "Alice 请求找回文件");
     await user.type(within(form).getByLabelText("你的密码"), "correct horse battery staple");
     await user.click(within(form).getByRole("button", { name: "开始只读查看" }));
     expect(await screen.findByText(/已开启对 alice 个人空间的只读查看/)).toBeTruthy();
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/users/user%3Aalice/viewing");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "correct horse battery staple", reason: "Alice 请求找回文件", scope: "space" });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      password: "correct horse battery staple",
+      reason: "Alice 请求找回文件",
+      scope: "space",
+    });
   });
 
   it("lets an administrator view a member's private photo library as its own grant", async () => {
-    const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+    const alice = {
+      id: "user:alice",
+      username: "alice",
+      role: "member",
+      status: "active",
+      createdAt: "2026-10-07T10:00:00Z",
+    };
     const fetchMock = installAPI({ users: [session.user, alice] });
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await openSettingsSection(user, desktop, "用户与权限");
     await user.click(await screen.findByRole("button", { name: "alice 的更多操作" }));
-    await user.click(within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看私有图库…" }));
+    await user.click(
+      within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看私有图库…" }),
+    );
     const form = screen.getByRole("form", { name: "查看 alice 的私有图库" });
     expect(within(form).getByText(/查看他人私有图库会写入审计/)).toBeTruthy();
     await user.type(within(form).getByLabelText("查看原因"), "找婚礼照片");
@@ -1463,14 +2146,26 @@ describe("ADR 0008 account safeguards", () => {
     await user.click(within(form).getByRole("button", { name: "开始只读查看" }));
     expect(await screen.findByText(/已开启对 alice 私有图库的只读查看，可在相册中选择/)).toBeTruthy();
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/users/user%3Aalice/viewing");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "correct horse battery staple", reason: "找婚礼照片", scope: "library" });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      password: "correct horse battery staple",
+      reason: "找婚礼照片",
+      scope: "library",
+    });
   });
 
   it("tells the owner when an administrator viewed the private photo library", async () => {
-    installAPI({ notifications: [{
-      id: "notification:2", kind: "admin_library_viewing", actorUsername: "owner", reason: "找婚礼照片",
-      expiresAt: "2026-10-08T10:00:00Z", createdAt: "2026-10-07T10:00:00Z",
-    }] });
+    installAPI({
+      notifications: [
+        {
+          id: "notification:2",
+          kind: "admin_library_viewing",
+          actorUsername: "owner",
+          reason: "找婚礼照片",
+          expiresAt: "2026-10-08T10:00:00Z",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
+      ],
+    });
     render(<App />);
     const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
     expect(within(notice).getByText(/管理员 owner .*开启了对你私有图库的只读查看.*原因：找婚礼照片/)).toBeTruthy();
@@ -1478,8 +2173,26 @@ describe("ADR 0008 account safeguards", () => {
 
   it("shows a viewed private space read-only and can end the viewing", async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:alice", kind: "private", name: "alice", ownerUserId: "user:alice", createdAt: "2026-10-07T10:00:00Z", viewing: { grantId: "viewing:1", expiresAt: "2026-10-08T10:00:00Z" } }],
-      entries: [{ id: "file:1", spaceId: "space:alice", name: "photo.jpg", kind: "file", sizeBytes: 10, modifiedAt: "2026-10-07T10:00:00Z" }],
+      spaces: [
+        {
+          id: "space:alice",
+          kind: "private",
+          name: "alice",
+          ownerUserId: "user:alice",
+          createdAt: "2026-10-07T10:00:00Z",
+          viewing: { grantId: "viewing:1", expiresAt: "2026-10-08T10:00:00Z" },
+        },
+      ],
+      entries: [
+        {
+          id: "file:1",
+          spaceId: "space:alice",
+          name: "photo.jpg",
+          kind: "file",
+          sizeBytes: 10,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
+      ],
     });
     const user = userEvent.setup();
     render(<App />);
@@ -1490,7 +2203,10 @@ describe("ADR 0008 account safeguards", () => {
     expect(screen.getByRole("button", { name: "新建" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "删除" }).hasAttribute("disabled")).toBe(true);
     await user.click(screen.getByRole("button", { name: "结束查看" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/viewing/viewing%3A1", expect.objectContaining({ method: "DELETE" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/viewing/viewing%3A1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });
 
@@ -1506,7 +2222,15 @@ describe("ADR 0008 application access", () => {
 
 describe("Installed apps on the desktop", () => {
   const immich = { id: "immich", title: "Immich", webPort: 2283, scheme: "http", path: "/", running: 4, total: 4 };
-  const navidrome = { id: "navidrome", title: "Navidrome", webPort: 4533, scheme: "http", path: "/", running: 0, total: 1 };
+  const navidrome = {
+    id: "navidrome",
+    title: "Navidrome",
+    webPort: 4533,
+    scheme: "http",
+    path: "/",
+    running: 0,
+    total: 1,
+  };
 
   it("opens an installed app's web page from its desktop icon and from the launcher", async () => {
     installAPI({ shortcuts: [immich, navidrome] });
@@ -1517,9 +2241,15 @@ describe("Installed apps on the desktop", () => {
     const icon = await within(desktop).findByRole("button", { name: "打开 Immich（新窗口）" });
     expect(icon.querySelector("img")?.getAttribute("src")).toBe("/api/v1/app-shortcuts/immich/icon");
     await user.click(icon);
-    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^http:\/\/[^/]+:2283\/$/), "_blank", "noopener,noreferrer");
+    expect(open).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^http:\/\/[^/]+:2283\/$/),
+      "_blank",
+      "noopener,noreferrer",
+    );
 
-    await user.click(within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "全部应用" }));
+    await user.click(
+      within(screen.getByRole("complementary", { name: "系统快捷栏" })).getByRole("button", { name: "全部应用" }),
+    );
     const launcher = screen.getByRole("dialog", { name: "全部应用" });
     await user.type(within(launcher).getByRole("searchbox", { name: "搜索应用" }), "immich");
     await user.keyboard("{Enter}");
@@ -1540,7 +2270,10 @@ describe("Installed apps on the desktop", () => {
   });
 
   it("shows installed apps to members, who cannot open Docker", async () => {
-    installAPI({ shortcuts: [immich, navidrome], session: { ...session, user: { ...session.user, username: "alice", role: "member" } } });
+    installAPI({
+      shortcuts: [immich, navidrome],
+      session: { ...session, user: { ...session.user, username: "alice", role: "member" } },
+    });
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(await within(desktop).findByRole("button", { name: "打开 Immich（新窗口）" })).toBeTruthy();
@@ -1550,7 +2283,13 @@ describe("Installed apps on the desktop", () => {
 });
 
 describe("Settings", () => {
-  const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+  const alice = {
+    id: "user:alice",
+    username: "alice",
+    role: "member",
+    status: "active",
+    createdAt: "2026-10-07T10:00:00Z",
+  };
 
   it("shows members their account, task manager, overview and read-only storage", async () => {
     const fetchMock = installAPI({ session: { ...session, user: alice } });
@@ -1559,8 +2298,16 @@ describe("Settings", () => {
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
     const settings = screen.getByRole("dialog", { name: "设置" });
     const sections = within(settings).getByRole("navigation", { name: "设置分区" });
-    const enabled = within(sections).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
-    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["我的账号", "概览", "任务管理器", "存储", "日志"]);
+    const enabled = within(sections)
+      .getAllByRole("button")
+      .filter((button) => !button.hasAttribute("disabled"));
+    expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual([
+      "我的账号",
+      "概览",
+      "任务管理器",
+      "存储",
+      "日志",
+    ]);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).getByText(/请联系管理员初始化/)).toBeTruthy();
     expect(within(settings).getByText("A-NAS Fake HDD")).toBeTruthy();
@@ -1579,12 +2326,20 @@ describe("Settings", () => {
     expect(within(settings).getByRole("button", { name: "日志" }).getAttribute("aria-current")).toBe("page");
     expect(within(settings).getByRole("heading", { name: "我的活动" })).toBeTruthy();
     expect(within(settings).getByRole("radio", { name: "登录" }).getAttribute("aria-checked")).toBe("true");
-    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith("/api/v1/activity?") && String(path).includes("category=session"))).toBe(true));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([path]) => String(path).startsWith("/api/v1/activity?") && String(path).includes("category=session"),
+        ),
+      ).toBe(true),
+    );
     expect(within(settings).queryByRole("tab", { name: "系统日志" })).toBeNull();
   });
 
   it("keeps showing a member who reset their password", async () => {
-    installAPI({ session: { ...session, user: alice, credentialReset: { actorUsername: "owner", at: "2026-10-14T09:10:00Z" } } });
+    installAPI({
+      session: { ...session, user: alice, credentialReset: { actorUsername: "owner", at: "2026-10-14T09:10:00Z" } },
+    });
     const user = userEvent.setup();
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "我的账号");
@@ -1611,15 +2366,32 @@ describe("Settings", () => {
     await user.click(within(form).getByRole("button", { name: "保存新密码" }));
     expect(await screen.findByText("密码已更新，SMB 凭据已同步。")).toBeTruthy();
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ currentPassword: "alice old password", newPassword: "alice new password" });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      currentPassword: "alice old password",
+      newPassword: "alice new password",
+    });
   });
 
   it("keeps a pending storage plan across sections and when settings closes", async () => {
     installAPI({
       storagePlan: {
-        id: "plan:pending", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
-        disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "pending-fingerprint", signatures: [] }],
-        confirmationPhrase: "ERASE data-01", actions: [], state: "planned", expiresAt: "2099-01-01T00:00:00Z",
+        id: "plan:pending",
+        kind: "create_volume",
+        layout: "single",
+        capacityAfterBytes: 512000000000,
+        disks: [
+          {
+            id: "disk:fake-data-01",
+            model: "A-NAS Fake HDD",
+            capacityBytes: 512000000000,
+            fingerprint: "pending-fingerprint",
+            signatures: [],
+          },
+        ],
+        confirmationPhrase: "ERASE data-01",
+        actions: [],
+        state: "planned",
+        expiresAt: "2099-01-01T00:00:00Z",
       },
     });
     const user = userEvent.setup();
@@ -1646,10 +2418,19 @@ describe("Settings", () => {
   }, 15000);
 
   it("says why the system is rated as it is and leads to storage", async () => {
-    installAPI({ hostState: { ...healthyState, system: { ...healthyState.system, health: "critical", healthFindings: [
-      { code: "volume_read_only", severity: "critical", diskId: "disk:fake-data-01" },
-      { code: "disk_hot", severity: "warning", diskId: "disk:fake-data-01", value: 57 },
-    ] } } });
+    installAPI({
+      hostState: {
+        ...healthyState,
+        system: {
+          ...healthyState.system,
+          health: "critical",
+          healthFindings: [
+            { code: "volume_read_only", severity: "critical", diskId: "disk:fake-data-01" },
+            { code: "disk_hot", severity: "warning", diskId: "disk:fake-data-01", value: 57 },
+          ],
+        },
+      },
+    });
     const user = userEvent.setup();
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "概览");
@@ -1675,7 +2456,18 @@ describe("Settings", () => {
   });
 
   it("reports unknown data volume usage instead of a full volume", async () => {
-    installAPI({ volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 500_107_862_016, state: "available", filesystemUuid: "09e275fe-794a" }] });
+    installAPI({
+      volumes: [
+        {
+          id: "volume:data",
+          diskIds: ["disk:data"],
+          layout: "single",
+          capacityBytes: 500_107_862_016,
+          state: "available",
+          filesystemUuid: "09e275fe-794a",
+        },
+      ],
+    });
     const user = userEvent.setup();
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
@@ -1687,18 +2479,66 @@ describe("Settings", () => {
   });
 
   it("adds a new disk to the data volume as a mirror", async () => {
-    const dataDisk = { ...healthyState.disks[0], id: "disk:data", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016, role: "data", inUse: true, filesystems: ["btrfs"], eligibleForDataVolume: false, ineligibleReasons: ["data_volume", "in_use"] };
-    const spareDisk = { ...healthyState.disks[0], id: "disk:spare", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016, filesystems: ["linux_raid_member"] };
-    const usbDisk = { ...healthyState.disks[0], id: "disk:usb", model: "USB Stick", transport: "usb", removable: true, eligibleForDataVolume: false, ineligibleReasons: ["unsupported_transport", "removable"] };
+    const dataDisk = {
+      ...healthyState.disks[0],
+      id: "disk:data",
+      model: "ST500DM002-1BD142",
+      capacityBytes: 500_107_862_016,
+      role: "data",
+      inUse: true,
+      filesystems: ["btrfs"],
+      eligibleForDataVolume: false,
+      ineligibleReasons: ["data_volume", "in_use"],
+    };
+    const spareDisk = {
+      ...healthyState.disks[0],
+      id: "disk:spare",
+      model: "ST500DM002-1BD142",
+      capacityBytes: 500_107_862_016,
+      filesystems: ["linux_raid_member"],
+    };
+    const usbDisk = {
+      ...healthyState.disks[0],
+      id: "disk:usb",
+      model: "USB Stick",
+      transport: "usb",
+      removable: true,
+      eligibleForDataVolume: false,
+      ineligibleReasons: ["unsupported_transport", "removable"],
+    };
     const plan = {
-      id: "plan:add", kind: "add_disks", layout: "mirror", capacityBeforeBytes: 500_107_862_016, capacityAfterBytes: 500_107_862_016,
-      disks: [{ id: "disk:spare", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016, fingerprint: "spare-fingerprint", signatures: [{ type: "linux_raid_member", label: "OrangePi3B:0" }] }],
-      confirmationPhrase: "ERASE k:spare", actions: [{ kind: "convert_layout", description: "在后台把数据卷从单盘转换为镜像（RAID 1），期间可以照常使用" }],
-      state: "planned", expiresAt: "2099-01-01T00:00:00Z",
+      id: "plan:add",
+      kind: "add_disks",
+      layout: "mirror",
+      capacityBeforeBytes: 500_107_862_016,
+      capacityAfterBytes: 500_107_862_016,
+      disks: [
+        {
+          id: "disk:spare",
+          model: "ST500DM002-1BD142",
+          capacityBytes: 500_107_862_016,
+          fingerprint: "spare-fingerprint",
+          signatures: [{ type: "linux_raid_member", label: "OrangePi3B:0" }],
+        },
+      ],
+      confirmationPhrase: "ERASE k:spare",
+      actions: [{ kind: "convert_layout", description: "在后台把数据卷从单盘转换为镜像（RAID 1），期间可以照常使用" }],
+      state: "planned",
+      expiresAt: "2099-01-01T00:00:00Z",
     };
     const fetchMock = installAPI({
       hostState: { ...healthyState, disks: [dataDisk, spareDisk, usbDisk] },
-      volumes: [{ id: "volume:data", diskIds: ["disk:data"], layout: "single", capacityBytes: 480 * 1024 ** 3, availableBytes: 280 * 1024 ** 3, state: "available", filesystemUuid: "09e275fe-794a" }],
+      volumes: [
+        {
+          id: "volume:data",
+          diskIds: ["disk:data"],
+          layout: "single",
+          capacityBytes: 480 * 1024 ** 3,
+          availableBytes: 280 * 1024 ** 3,
+          state: "available",
+          filesystemUuid: "09e275fe-794a",
+        },
+      ],
       storagePlan: plan,
     });
     const user = userEvent.setup();
@@ -1719,7 +2559,9 @@ describe("Settings", () => {
     expect(within(layouts).getByText("推荐")).toBeTruthy();
     expect(within(wizard).getByText(/不能代替备份/)).toBeTruthy();
     await user.click(within(wizard).getByRole("button", { name: "生成计划" }));
-    const created = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST");
+    const created = fetchMock.mock.calls.find(
+      ([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST",
+    );
     expect(JSON.parse(String(created?.[1]?.body))).toEqual({ diskIds: ["disk:spare"], layout: "mirror" });
 
     expect(await within(wizard).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
@@ -1737,9 +2579,23 @@ describe("Settings", () => {
   it("leaves the wizard by cancelling a plan that has not run", async () => {
     const fetchMock = installAPI({
       storagePlan: {
-        id: "plan:leave", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
-        disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "leave-fingerprint", signatures: [] }],
-        confirmationPhrase: "ERASE data-01", actions: [], state: "planned", expiresAt: "2099-01-01T00:00:00Z",
+        id: "plan:leave",
+        kind: "create_volume",
+        layout: "single",
+        capacityAfterBytes: 512000000000,
+        disks: [
+          {
+            id: "disk:fake-data-01",
+            model: "A-NAS Fake HDD",
+            capacityBytes: 512000000000,
+            fingerprint: "leave-fingerprint",
+            signatures: [],
+          },
+        ],
+        confirmationPhrase: "ERASE data-01",
+        actions: [],
+        state: "planned",
+        expiresAt: "2099-01-01T00:00:00Z",
       },
     });
     const user = userEvent.setup();
@@ -1751,7 +2607,11 @@ describe("Settings", () => {
     expect(await within(settings).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
 
     await user.click(within(settings).getByRole("button", { name: "取消计划" }));
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/storage/plans/plan%3Aleave/cancel" && init?.method === "POST")).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(
+        ([path, init]) => path === "/api/v1/storage/plans/plan%3Aleave/cancel" && init?.method === "POST",
+      ),
+    ).toBe(true);
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
     expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();
 
@@ -1763,11 +2623,29 @@ describe("Settings", () => {
 
   it("follows a plan that runs on the device when the page comes back", async () => {
     const plan = {
-      id: "plan:run", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
-      disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "run-fingerprint", signatures: [] }],
-      confirmationPhrase: "ERASE data-01", actions: [], state: "running", step: "format", expiresAt: "2099-01-01T00:00:00Z",
+      id: "plan:run",
+      kind: "create_volume",
+      layout: "single",
+      capacityAfterBytes: 512000000000,
+      disks: [
+        {
+          id: "disk:fake-data-01",
+          model: "A-NAS Fake HDD",
+          capacityBytes: 512000000000,
+          fingerprint: "run-fingerprint",
+          signatures: [],
+        },
+      ],
+      confirmationPhrase: "ERASE data-01",
+      actions: [],
+      state: "running",
+      step: "format",
+      expiresAt: "2099-01-01T00:00:00Z",
     };
-    const fetchMock = installAPI({ unfinishedPlans: [plan], operation: { ...plan, state: "succeeded", step: undefined } });
+    const fetchMock = installAPI({
+      unfinishedPlans: [plan],
+      operation: { ...plan, state: "succeeded", step: undefined },
+    });
     const user = userEvent.setup();
     render(<App />);
     await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
@@ -1781,9 +2659,24 @@ describe("Settings", () => {
 
   it("offers to retry a plan that stopped on the device", async () => {
     const plan = {
-      id: "plan:stopped", kind: "create_volume", layout: "single", capacityAfterBytes: 512000000000,
-      disks: [{ id: "disk:fake-data-01", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "stopped-fingerprint", signatures: [] }],
-      confirmationPhrase: "ERASE data-01", actions: [], state: "needs_attention", step: "mount", expiresAt: "2026-10-21T09:10:00Z",
+      id: "plan:stopped",
+      kind: "create_volume",
+      layout: "single",
+      capacityAfterBytes: 512000000000,
+      disks: [
+        {
+          id: "disk:fake-data-01",
+          model: "A-NAS Fake HDD",
+          capacityBytes: 512000000000,
+          fingerprint: "stopped-fingerprint",
+          signatures: [],
+        },
+      ],
+      confirmationPhrase: "ERASE data-01",
+      actions: [],
+      state: "needs_attention",
+      step: "mount",
+      expiresAt: "2026-10-21T09:10:00Z",
       failure: "the Host Agent stopped during the mount step; retrying continues after the steps that are done",
     };
     const fetchMock = installAPI({ unfinishedPlans: [plan], storagePlan: plan });
@@ -1799,19 +2692,40 @@ describe("Settings", () => {
     expect(within(wizard).getByText("需要人工处理")).toBeTruthy();
     expect(within(wizard).getByText(/已经完成的步骤不会重做/)).toBeTruthy();
     await user.click(within(wizard).getByRole("button", { name: "重试" }));
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/storage/plans/plan%3Astopped/execute" && init?.method === "POST")).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(
+        ([path, init]) => path === "/api/v1/storage/plans/plan%3Astopped/execute" && init?.method === "POST",
+      ),
+    ).toBe(true);
     expect(await within(wizard).findByText("数据卷已创建")).toBeTruthy();
   }, 15000);
 
   it("shows why a retried plan stopped again", async () => {
     const plan = {
-      id: "plan:again", kind: "add_disks", layout: "mirror", capacityAfterBytes: 512000000000,
-      disks: [{ id: "disk:fake-data-02", model: "A-NAS Fake HDD", capacityBytes: 512000000000, fingerprint: "again-fingerprint", signatures: [] }],
-      confirmationPhrase: "ERASE data-02", actions: [], state: "needs_attention", step: "erase", expiresAt: "2026-10-21T09:10:00Z",
+      id: "plan:again",
+      kind: "add_disks",
+      layout: "mirror",
+      capacityAfterBytes: 512000000000,
+      disks: [
+        {
+          id: "disk:fake-data-02",
+          model: "A-NAS Fake HDD",
+          capacityBytes: 512000000000,
+          fingerprint: "again-fingerprint",
+          signatures: [],
+        },
+      ],
+      confirmationPhrase: "ERASE data-02",
+      actions: [],
+      state: "needs_attention",
+      step: "erase",
+      expiresAt: "2026-10-21T09:10:00Z",
       failure: "the Host Agent stopped during the erase step; retrying continues after the steps that are done",
     };
     installAPI({
-      unfinishedPlans: [plan], storagePlan: plan, executeFails: true,
+      unfinishedPlans: [plan],
+      storagePlan: plan,
+      executeFails: true,
       operation: { ...plan, step: "erase", failure: "disk identity changed after planning" },
     });
     const user = userEvent.setup();
@@ -1828,15 +2742,36 @@ describe("Settings", () => {
 
   it("shows how far a conversion has come and continues a stopped one", async () => {
     const disks = [
-      { ...healthyState.disks[0], id: "disk:data", role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] },
-      { ...healthyState.disks[0], id: "disk:spare", role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] },
+      {
+        ...healthyState.disks[0],
+        id: "disk:data",
+        role: "data",
+        inUse: true,
+        eligibleForDataVolume: false,
+        ineligibleReasons: ["data_volume"],
+      },
+      {
+        ...healthyState.disks[0],
+        id: "disk:spare",
+        role: "data",
+        inUse: true,
+        eligibleForDataVolume: false,
+        ineligibleReasons: ["data_volume"],
+      },
     ];
     const fetchMock = installAPI({
       hostState: { ...healthyState, disks },
-      volumes: [{
-        id: "volume:data", diskIds: ["disk:data", "disk:spare"], layout: "mirror", capacityBytes: 480 * 1024 ** 3, availableBytes: 280 * 1024 ** 3, state: "available",
-        conversion: { state: "waiting", convertedBytes: 80 * 1024 ** 3, totalBytes: 200 * 1024 ** 3 },
-      }],
+      volumes: [
+        {
+          id: "volume:data",
+          diskIds: ["disk:data", "disk:spare"],
+          layout: "mirror",
+          capacityBytes: 480 * 1024 ** 3,
+          availableBytes: 280 * 1024 ** 3,
+          state: "available",
+          conversion: { state: "waiting", convertedBytes: 80 * 1024 ** 3, totalBytes: 200 * 1024 ** 3 },
+        },
+      ],
     });
     const user = userEvent.setup();
     render(<App />);
@@ -1848,7 +2783,11 @@ describe("Settings", () => {
     expect(within(settings).getByText("转换中")).toBeTruthy();
     expect(within(settings).queryByRole("button", { name: "设置用途…" })).toBeNull();
     await user.click(within(settings).getByRole("button", { name: "继续转换" }));
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/volumes/volume%3Adata/conversion" && init?.method === "POST")).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(
+        ([path, init]) => path === "/api/v1/volumes/volume%3Adata/conversion" && init?.method === "POST",
+      ),
+    ).toBe(true);
   });
 
   it("creates a mirror when two disks are chosen for a new data volume", async () => {
@@ -1869,8 +2808,13 @@ describe("Settings", () => {
     await user.click(within(wizard).getByText("扩容"));
     expect((within(wizard).getByRole("radio", { name: /扩容/ }) as HTMLInputElement).checked).toBe(true);
     await user.click(within(wizard).getByRole("button", { name: "生成格式化计划" }));
-    const created = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST");
-    expect(JSON.parse(String(created?.[1]?.body))).toEqual({ diskIds: ["disk:fake-data-01", "disk:fake-data-02"], layout: "span" });
+    const created = fetchMock.mock.calls.find(
+      ([path, init]) => path === "/api/v1/storage/plans" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(created?.[1]?.body))).toEqual({
+      diskIds: ["disk:fake-data-01", "disk:fake-data-02"],
+      layout: "span",
+    });
   }, 15000);
 
   it("resets a member password from a form inside the window", async () => {
@@ -1891,7 +2835,9 @@ describe("Settings", () => {
     await user.click(within(form).getByRole("button", { name: "确认重置" }));
     expect(await within(settings).findByText(/已重置 alice 的密码/)).toBeTruthy();
     expect(prompt).not.toHaveBeenCalled();
-    const call = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/users/user%3Aalice/credential" && init?.method === "PATCH");
+    const call = fetchMock.mock.calls.find(
+      ([path, init]) => path === "/api/v1/users/user%3Aalice/credential" && init?.method === "PATCH",
+    );
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ password: "temporary password 1" });
 
     await user.click(within(settings).getByRole("button", { name: "修改我的密码" }));
@@ -1909,7 +2855,8 @@ describe("Settings", () => {
     await user.click(await within(settings).findByRole("button", { name: "添加成员" }));
     const form = within(settings).getByRole("form", { name: "添加成员" });
     expect(within(form).getByText(/3–32 位英文字母/)).toBeTruthy();
-    const created = () => fetchMock.mock.calls.filter(([path, init]) => path === "/api/v1/users" && init?.method === "POST");
+    const created = () =>
+      fetchMock.mock.calls.filter(([path, init]) => path === "/api/v1/users" && init?.method === "POST");
 
     await user.type(within(form).getByLabelText("账号"), "Shared");
     await user.type(within(form).getByLabelText("初始密码"), "carol password 1");
@@ -1947,27 +2894,50 @@ describe("Settings", () => {
     expect(within(settings).queryByRole("form", { name: "禁用 alice" })).toBeNull();
     await user.click(within(settings).getByRole("button", { name: "alice 的更多操作" }));
     await user.click(within(settings).getByRole("menuitem", { name: "禁用账号…" }));
-    await user.click(within(within(settings).getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }));
+    await user.click(
+      within(within(settings).getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }),
+    );
     expect(await within(settings).findByText("已禁用 alice。")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/users/user%3Aalice", expect.objectContaining({ method: "DELETE" }));
   });
 });
 
 describe("Avatars and nicknames", () => {
-  const alice = { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-07T10:00:00Z" };
+  const alice = {
+    id: "user:alice",
+    username: "alice",
+    role: "member",
+    status: "active",
+    createdAt: "2026-10-07T10:00:00Z",
+  };
 
   // jsdom neither decodes images nor draws on a canvas.
   function stubPictures() {
     class DecodedImage {
-      naturalWidth = 400; naturalHeight = 320; decoding = ""; onload?: () => void; onerror?: () => void; private source = "";
-      get src() { return this.source; }
-      set src(value: string) { this.source = value; queueMicrotask(() => (value.includes("broken") ? this.onerror?.() : this.onload?.())); }
+      naturalWidth = 400;
+      naturalHeight = 320;
+      decoding = "";
+      onload?: () => void;
+      onerror?: () => void;
+      private source = "";
+      get src() {
+        return this.source;
+      }
+      set src(value: string) {
+        this.source = value;
+        queueMicrotask(() => (value.includes("broken") ? this.onerror?.() : this.onload?.()));
+      }
     }
     vi.stubGlobal("Image", DecodedImage);
-    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:avatar-source"), revokeObjectURL: vi.fn() }));
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: vi.fn(() => "blob:avatar-source"), revokeObjectURL: vi.fn() }),
+    );
     const drawImage = vi.fn();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ fillRect: vi.fn(), drawImage } as never);
-    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["jpeg"], { type: "image/jpeg" })));
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) =>
+      callback(new Blob(["jpeg"], { type: "image/jpeg" })),
+    );
     return drawImage;
   }
 
@@ -2000,7 +2970,10 @@ describe("Avatars and nicknames", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ nickname: "小爱" });
     expect(within(settings).getByRole("heading", { name: "小爱" })).toBeTruthy();
     expect(within(settings).getByText("账号名 alice")).toBeTruthy();
-    expect(within(within(settings).getByRole("navigation", { name: "设置分区" })).getByRole("button", { name: "我的账号" }).textContent).toContain("小爱");
+    expect(
+      within(within(settings).getByRole("navigation", { name: "设置分区" })).getByRole("button", { name: "我的账号" })
+        .textContent,
+    ).toContain("小爱");
     expect(screen.getByRole("button", { name: "账号（小爱）" })).toBeTruthy();
   });
 
@@ -2014,7 +2987,10 @@ describe("Avatars and nicknames", () => {
     await user.click(within(settings).getByRole("button", { name: "更换头像" }));
     const picker = within(settings).getByRole("dialog", { name: "更换头像" });
     expect(within(picker).getByRole("tab", { name: "本机图片" }).getAttribute("aria-selected")).toBe("true");
-    await user.upload(within(picker).getByLabelText("从本机选择图片"), new File(["png"], "me.png", { type: "image/png" }));
+    await user.upload(
+      within(picker).getByLabelText("从本机选择图片"),
+      new File(["png"], "me.png", { type: "image/png" }),
+    );
 
     expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe("blob:avatar-source");
     expect(within(picker).getByRole("heading", { name: "调整头像" })).toBeTruthy();
@@ -2024,15 +3000,19 @@ describe("Avatars and nicknames", () => {
 
     // The page sends the chosen square, drawn on white at no more than 512 px.
     expect(drawImage).toHaveBeenCalledWith(expect.anything(), 40, 0, 320, 320, 0, 0, 320, 320);
-    const sent = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "PUT");
-    expect((sent?.[1]?.body as Blob).type).toBe("image/jpeg");
+    const sent = fetchMock.mock.calls.find(
+      ([path, init]) => path === "/api/v1/session/avatar" && init?.method === "PUT",
+    );
+    expect((sent?.[1]?.body as Blob | undefined)?.type).toBe("image/jpeg");
     expect(new Headers(sent?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
     const rail = screen.getByRole("button", { name: "账号（alice）" });
     expect(rail.querySelector("img")?.getAttribute("src")).toBe("/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef");
 
     await user.click(within(settings).getByRole("button", { name: "移除" }));
     expect(await within(settings).findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "DELETE")).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session/avatar" && init?.method === "DELETE"),
+    ).toBe(true);
     expect(rail.querySelector("img")).toBeNull();
     expect(rail.textContent).toContain("A");
   });
@@ -2042,14 +3022,48 @@ describe("Avatars and nicknames", () => {
     installAPI({
       session: { ...session, user: alice },
       spaces: [
-        { id: "space:alice", kind: "private", name: "alice", ownerUserId: "user:alice", createdAt: "2026-10-07T10:00:00Z" },
+        {
+          id: "space:alice",
+          kind: "private",
+          name: "alice",
+          ownerUserId: "user:alice",
+          createdAt: "2026-10-07T10:00:00Z",
+        },
         { id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" },
-        { id: "space:bob", kind: "private", name: "bob", ownerUserId: "user:bob", createdAt: "2026-10-07T10:00:00Z", viewing: { grantId: "grant:1", expiresAt: "2026-10-08T10:00:00Z" } },
+        {
+          id: "space:bob",
+          kind: "private",
+          name: "bob",
+          ownerUserId: "user:bob",
+          createdAt: "2026-10-07T10:00:00Z",
+          viewing: { grantId: "grant:1", expiresAt: "2026-10-08T10:00:00Z" },
+        },
       ],
       entries: [
-        { id: "file:trip", spaceId: "space:alice", name: "海边.jpg", kind: "file", sizeBytes: 2048, modifiedAt: "2026-10-07T10:00:00Z" },
-        { id: "file:notes", spaceId: "space:alice", name: "notes.txt", kind: "file", sizeBytes: 12, modifiedAt: "2026-10-07T10:00:00Z" },
-        { id: "dir:2026", spaceId: "space:alice", name: "2026", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-07T10:00:00Z" },
+        {
+          id: "file:trip",
+          spaceId: "space:alice",
+          name: "海边.jpg",
+          kind: "file",
+          sizeBytes: 2048,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
+        {
+          id: "file:notes",
+          spaceId: "space:alice",
+          name: "notes.txt",
+          kind: "file",
+          sizeBytes: 12,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
+        {
+          id: "dir:2026",
+          spaceId: "space:alice",
+          name: "2026",
+          kind: "directory",
+          sizeBytes: 0,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
       ],
     });
     const user = userEvent.setup();
@@ -2060,11 +3074,17 @@ describe("Avatars and nicknames", () => {
     const picker = within(settings).getByRole("dialog", { name: "更换头像" });
     await user.click(within(picker).getByRole("tab", { name: "NAS 文件" }));
     const spaces = await within(picker).findByRole("group", { name: "空间" });
-    expect(within(spaces).getAllByRole("button").map((button) => button.textContent)).toEqual(["个人空间", "共享空间"]);
+    expect(
+      within(spaces)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["个人空间", "共享空间"]);
     expect(within(picker).getByRole("button", { name: "2026" })).toBeTruthy();
     expect(within(picker).queryByText("notes.txt")).toBeNull();
     await user.click(within(picker).getByRole("button", { name: "选择 海边.jpg" }));
-    expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe("/api/v1/files/file%3Atrip/content?disposition=inline");
+    expect((await within(picker).findByTestId("cropper")).getAttribute("data-image")).toBe(
+      "/api/v1/files/file%3Atrip/content?disposition=inline",
+    );
     await user.click(within(picker).getByRole("button", { name: "重新选择图片" }));
     expect(within(picker).getByRole("tab", { name: "NAS 文件" })).toBeTruthy();
     await user.keyboard("{Escape}");
@@ -2074,8 +3094,13 @@ describe("Avatars and nicknames", () => {
   it("shows other accounts by nickname and keeps the account name where it matters", async () => {
     installAPI({
       users: [session.user, { ...alice, nickname: "小爱", avatarVersion: "feedface00000000" }],
-      profiles: [{ id: "user:owner", username: "owner", nickname: "爸爸" }, { id: "user:alice", username: "alice", nickname: "小爱", avatarVersion: "feedface00000000" }],
-      notifications: [{ id: "notification:1", kind: "credential_reset", actorUsername: "owner", createdAt: "2026-10-07T10:00:00Z" }],
+      profiles: [
+        { id: "user:owner", username: "owner", nickname: "爸爸" },
+        { id: "user:alice", username: "alice", nickname: "小爱", avatarVersion: "feedface00000000" },
+      ],
+      notifications: [
+        { id: "notification:1", kind: "credential_reset", actorUsername: "owner", createdAt: "2026-10-07T10:00:00Z" },
+      ],
     });
     const user = userEvent.setup();
     render(<App />);

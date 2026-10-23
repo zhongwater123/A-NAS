@@ -9,8 +9,24 @@ import { Banner } from "./parts";
 
 export function HostStatePending({ host, inline }: { host: HostStateView; inline?: boolean }) {
   const className = inline ? "set-state" : "set-card set-state";
-  if (host.loading) return <div className={className}><span className="loader" /><h4>正在读取设备状态…</h4><p>正在连接 A-NAS 产品服务</p></div>;
-  return <div className={className}><CircleAlert /><h4>暂时无法读取设备状态</h4><p>请确认产品服务和 Host Agent 正在运行。</p><button className="set-btn primary" onClick={() => void host.refresh()}>重新连接</button></div>;
+  if (host.loading)
+    return (
+      <div className={className}>
+        <span className="loader" />
+        <h4>正在读取设备状态…</h4>
+        <p>正在连接 A-NAS 产品服务</p>
+      </div>
+    );
+  return (
+    <div className={className}>
+      <CircleAlert />
+      <h4>暂时无法读取设备状态</h4>
+      <p>请确认产品服务和 Host Agent 正在运行。</p>
+      <button className="set-btn primary" onClick={() => void host.refresh()}>
+        重新连接
+      </button>
+    </div>
+  );
 }
 
 export function HostStateBanner({ host, snapshot }: { host: HostStateView; snapshot: HostState }) {

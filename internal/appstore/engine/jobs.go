@@ -122,9 +122,7 @@ func (s *Store) Recover() error {
 	// Only one job runs at a time, so normally there is one; the agent takes
 	// no other job until all are done.
 	s.active = interrupted[0].AppID
-	s.wait.Add(1)
-	go func() {
-		defer s.wait.Done()
+	s.wait.Go(func() {
 		for _, job := range interrupted {
 			s.mu.Lock()
 			s.active = job.AppID
@@ -139,7 +137,7 @@ func (s *Store) Recover() error {
 		s.mu.Lock()
 		s.active = ""
 		s.mu.Unlock()
-	}()
+	})
 	return err
 }
 

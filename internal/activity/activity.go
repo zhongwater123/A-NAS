@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -170,10 +171,8 @@ func (q Query) Wants(categories ...Category) bool {
 		return true
 	}
 	for _, wanted := range q.Categories {
-		for _, held := range categories {
-			if wanted == held {
-				return true
-			}
+		if slices.Contains(categories, wanted) {
+			return true
 		}
 	}
 	return false

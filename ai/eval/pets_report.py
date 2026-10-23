@@ -20,8 +20,8 @@ import os
 import numpy as np
 
 from eval import datasets, people, pet_sets
+from eval.people_report import describe, sweep
 from eval.pets import Cache
-from eval.people_report import describe, run, sweep
 
 
 def collect(set_name, cache):

@@ -7,30 +7,116 @@ import { forgetRememberedFilters } from "./common";
 import { LogsSection } from "./LogsSection";
 import type { ActivityEvent, SystemLogEntry } from "./logsApi";
 
-const admin: Session = { csrfToken: "csrf", expiresAt: "2026-10-12T22:00:00Z", user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-01T00:00:00Z" } };
-const member: Session = { ...admin, user: { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-01T00:00:00Z" } };
+const admin: Session = {
+  csrfToken: "csrf",
+  expiresAt: "2026-10-12T22:00:00Z",
+  user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-01T00:00:00Z" },
+};
+const member: Session = {
+  ...admin,
+  user: { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-01T00:00:00Z" },
+};
 const alice = { id: "user:alice", username: "alice" };
 const owner = { id: "user:owner", username: "owner" };
 
 const today = (hours: number, minutes = 0) => new Date(new Date().setHours(hours, minutes, 0, 0)).toISOString();
 
 const activity: ActivityEvent[] = [
-  { id: "audit:9", occurredAt: today(0, 9), category: "session", action: "session.sign_in_failed", resourceType: "user", detail: '{"via":"lan","address":"172.18.45.99","username":"root","reason":"unknown_user"}' },
-  { id: "audit:8", occurredAt: today(0, 8), category: "file", action: "file.uploaded", actor: alice, resourceType: "file", resourceId: "entry:3", detail: "c.jpg", space: { id: "space:shared", kind: "shared" } },
-  { id: "audit:7", occurredAt: today(0, 7), category: "file", action: "file.uploaded", actor: alice, resourceType: "file", resourceId: "entry:2", detail: "b.jpg", space: { id: "space:shared", kind: "shared" } },
-  { id: "audit:6", occurredAt: today(0, 6), category: "file", action: "file.uploaded", actor: alice, resourceType: "file", resourceId: "entry:1", detail: "a.jpg", space: { id: "space:shared", kind: "shared" } },
-  { id: "audit:5", occurredAt: today(0, 5), category: "file", action: "file.uploaded", actor: alice, resourceType: "file", redacted: true, space: { id: "space:alice", kind: "private", owner: alice } },
-  { id: "audit:4", occurredAt: today(0, 4), category: "session", action: "session.signed_in", actor: alice, subject: alice, resourceType: "user", resourceId: "user:alice", detail: '{"via":"lan","address":"172.18.45.20"}' },
+  {
+    id: "audit:9",
+    occurredAt: today(0, 9),
+    category: "session",
+    action: "session.sign_in_failed",
+    resourceType: "user",
+    detail: '{"via":"lan","address":"172.18.45.99","username":"root","reason":"unknown_user"}',
+  },
+  {
+    id: "audit:8",
+    occurredAt: today(0, 8),
+    category: "file",
+    action: "file.uploaded",
+    actor: alice,
+    resourceType: "file",
+    resourceId: "entry:3",
+    detail: "c.jpg",
+    space: { id: "space:shared", kind: "shared" },
+  },
+  {
+    id: "audit:7",
+    occurredAt: today(0, 7),
+    category: "file",
+    action: "file.uploaded",
+    actor: alice,
+    resourceType: "file",
+    resourceId: "entry:2",
+    detail: "b.jpg",
+    space: { id: "space:shared", kind: "shared" },
+  },
+  {
+    id: "audit:6",
+    occurredAt: today(0, 6),
+    category: "file",
+    action: "file.uploaded",
+    actor: alice,
+    resourceType: "file",
+    resourceId: "entry:1",
+    detail: "a.jpg",
+    space: { id: "space:shared", kind: "shared" },
+  },
+  {
+    id: "audit:5",
+    occurredAt: today(0, 5),
+    category: "file",
+    action: "file.uploaded",
+    actor: alice,
+    resourceType: "file",
+    redacted: true,
+    space: { id: "space:alice", kind: "private", owner: alice },
+  },
+  {
+    id: "audit:4",
+    occurredAt: today(0, 4),
+    category: "session",
+    action: "session.signed_in",
+    actor: alice,
+    subject: alice,
+    resourceType: "user",
+    resourceId: "user:alice",
+    detail: '{"via":"lan","address":"172.18.45.20"}',
+  },
 ];
 
-const older: ActivityEvent = { id: "audit:1", occurredAt: "2026-01-05T08:00:00Z", category: "account", action: "user.created", actor: owner, subject: alice, resourceType: "user", resourceId: "user:alice", detail: "member" };
+const older: ActivityEvent = {
+  id: "audit:1",
+  occurredAt: "2026-01-05T08:00:00Z",
+  category: "account",
+  action: "user.created",
+  actor: owner,
+  subject: alice,
+  resourceType: "user",
+  resourceId: "user:alice",
+  detail: "member",
+};
 
 const logLine = (cursor: string, minutes: number, overrides: Partial<SystemLogEntry> = {}): SystemLogEntry => ({
-  cursor, time: today(0, minutes), service: "api", unit: "anas-api.service", level: "info", message: "A-NAS API listening", pid: 671, ...overrides,
+  cursor,
+  time: today(0, minutes),
+  service: "api",
+  unit: "anas-api.service",
+  level: "info",
+  message: "A-NAS API listening",
+  pid: 671,
+  ...overrides,
 });
 
 const systemLines = [
-  logLine("s=1;i=3", 30, { service: "photos", unit: "anas-photos.service", level: "error", message: "photo reconciliation failed", fields: { error: "read-only file system" } }),
+  logLine("s=1;i=3", 30, {
+    service: "photos",
+    unit: "anas-photos.service",
+    level: "error",
+    message: "photo reconciliation failed",
+    fields: { error: "read-only file system" },
+  }),
   logLine("s=1;i=2", 20, { level: "warning", message: "photo service unreachable" }),
   logLine("s=1;i=1", 10),
 ];
@@ -43,12 +129,16 @@ interface API {
 function installAPI(api: API) {
   const mock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://127.0.0.1");
-    const respond = (body: unknown, status = 200) => ({ ok: status < 400, status, headers: new Headers(), json: async () => body }) as Response;
+    const respond = (body: unknown, status = 200) =>
+      ({ ok: status < 400, status, headers: new Headers(), json: async () => body }) as Response;
     if (url.pathname === "/api/v1/users") return respond({ items: [{ ...admin.user }, { ...member.user }] });
-    if (url.pathname === "/api/v1/activity") return respond(api.activity?.(url.searchParams) ?? { items: [], scope: "all" });
+    if (url.pathname === "/api/v1/activity")
+      return respond(api.activity?.(url.searchParams) ?? { items: [], scope: "all" });
     if (url.pathname === "/api/v1/system-logs") {
       const body = api.logs?.(url.searchParams) ?? { items: [], dataSource: "simulated" };
-      return body instanceof Error ? respond({ error: { code: "logs_unavailable", message: body.message } }, 503) : respond(body);
+      return body instanceof Error
+        ? respond({ error: { code: "logs_unavailable", message: body.message } }, 503)
+        : respond(body);
     }
     return respond({ items: [] });
   });
@@ -56,13 +146,17 @@ function installAPI(api: API) {
   return mock;
 }
 
-const calls = (mock: ReturnType<typeof installAPI>, path: string) => mock.mock.calls
-  .map(([input]) => new URL(String(input), "http://127.0.0.1"))
-  .filter((url) => url.pathname === path)
-  .map((url) => url.searchParams);
+const calls = (mock: ReturnType<typeof installAPI>, path: string) =>
+  mock.mock.calls
+    .map(([input]) => new URL(String(input), "http://127.0.0.1"))
+    .filter((url) => url.pathname === path)
+    .map((url) => url.searchParams);
 
 beforeEach(() => forgetRememberedFilters());
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("activity log", () => {
   it("shows a day-grouped timeline with merged uploads, hidden names and details", async () => {
@@ -94,9 +188,14 @@ describe("activity log", () => {
 
   it("filters by category, account and text and pages back with the cursor", async () => {
     const fetchMock = installAPI({
-      activity: (params) => params.get("before")
-        ? { items: [older], scope: "all" }
-        : { items: activity.filter((item) => !params.get("category") || item.category === params.get("category")), next: params.get("category") ? undefined : "cursor-1", scope: "all" },
+      activity: (params) =>
+        params.get("before")
+          ? { items: [older], scope: "all" }
+          : {
+              items: activity.filter((item) => !params.get("category") || item.category === params.get("category")),
+              next: params.get("category") ? undefined : "cursor-1",
+              scope: "all",
+            },
     });
     const user = userEvent.setup();
     render(<LogsSection session={admin} />);
@@ -118,7 +217,13 @@ describe("activity log", () => {
   });
 
   it("says which kinds of records could not be read and offers to clear filters when empty", async () => {
-    installAPI({ activity: (params) => ({ items: params.get("category") ? [] : activity.slice(-1), scope: "all", unavailable: ["photo"] }) });
+    installAPI({
+      activity: (params) => ({
+        items: params.get("category") ? [] : activity.slice(-1),
+        scope: "all",
+        unavailable: ["photo"],
+      }),
+    });
     const user = userEvent.setup();
     render(<LogsSection session={admin} />);
     expect(await screen.findByText("相册的活动暂时无法读取，其余记录照常显示。")).toBeTruthy();
@@ -129,9 +234,18 @@ describe("activity log", () => {
   });
 
   it("exports the filtered records as CSV that Excel opens", async () => {
-    installAPI({ activity: (params) => params.get("before") ? { items: [older], scope: "all" } : { items: activity, next: "cursor-1", scope: "all" } });
+    installAPI({
+      activity: (params) =>
+        params.get("before") ? { items: [older], scope: "all" } : { items: activity, next: "cursor-1", scope: "all" },
+    });
     const blobs: Blob[] = [];
-    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: (blob: Blob) => { blobs.push(blob); return "blob:export"; } });
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: (blob: Blob) => {
+        blobs.push(blob);
+        return "blob:export";
+      },
+    });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => undefined });
     const user = userEvent.setup();
     render(<LogsSection session={admin} />);
@@ -167,7 +281,13 @@ describe("activity log", () => {
 
 describe("system log", () => {
   it("lists service lines with levels and fields and filters by level and service", async () => {
-    const fetchMock = installAPI({ logs: (params) => ({ items: systemLines.filter((line) => params.get("level") !== "error" || line.level === "error"), next: "s=1;i=1", dataSource: "simulated" }) });
+    const fetchMock = installAPI({
+      logs: (params) => ({
+        items: systemLines.filter((line) => params.get("level") !== "error" || line.level === "error"),
+        next: "s=1;i=1",
+        dataSource: "simulated",
+      }),
+    });
     const user = userEvent.setup();
     render(<LogsSection session={admin} />);
     await user.click(screen.getByRole("tab", { name: "系统日志" }));
@@ -183,7 +303,9 @@ describe("system log", () => {
     expect(within(lines[0]).getByText("s=1;i=3")).toBeTruthy();
 
     await user.click(screen.getByRole("radio", { name: "仅错误" }));
-    await waitFor(() => expect(within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")).toHaveLength(1));
+    await waitFor(() =>
+      expect(within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")).toHaveLength(1),
+    );
     expect(calls(fetchMock, "/api/v1/system-logs").at(-1)?.get("level")).toBe("error");
     await user.selectOptions(screen.getByRole("combobox", { name: "服务" }), "相册服务");
     await waitFor(() => expect(calls(fetchMock, "/api/v1/system-logs").at(-1)?.get("service")).toBe("photos"));
@@ -193,9 +315,10 @@ describe("system log", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let newer = false;
     const fetchMock = installAPI({
-      logs: (params) => params.get("after")
-        ? { items: newer ? [logLine("s=1;i=4", 40, { message: "media library rescanned" })] : [], dataSource: "live" }
-        : { items: systemLines, dataSource: "live" },
+      logs: (params) =>
+        params.get("after")
+          ? { items: newer ? [logLine("s=1;i=4", 40, { message: "media library rescanned" })] : [], dataSource: "live" }
+          : { items: systemLines, dataSource: "live" },
     });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<LogsSection session={admin} />);
@@ -203,8 +326,12 @@ describe("system log", () => {
     await screen.findByRole("log", { name: "系统日志" });
     await user.click(screen.getByRole("switch", { name: "实时" }));
     newer = true;
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    await waitFor(() => expect(within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")).toHaveLength(4));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    await waitFor(() =>
+      expect(within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")).toHaveLength(4),
+    );
     expect(calls(fetchMock, "/api/v1/system-logs").at(-1)?.get("after")).toBe("s=1;i=3");
     const first = within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")[0];
     expect(first.textContent).toContain("media library rescanned");
@@ -214,7 +341,10 @@ describe("system log", () => {
 
   it("reports a Host Agent that cannot be reached and retries", async () => {
     let failing = true;
-    installAPI({ logs: () => failing ? new Error("system logs cannot be read right now") : { items: systemLines, dataSource: "live" } });
+    installAPI({
+      logs: () =>
+        failing ? new Error("system logs cannot be read right now") : { items: systemLines, dataSource: "live" },
+    });
     const user = userEvent.setup();
     render(<LogsSection session={admin} />);
     await user.click(screen.getByRole("tab", { name: "系统日志" }));

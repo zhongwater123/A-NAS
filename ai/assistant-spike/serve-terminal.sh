@@ -24,7 +24,7 @@ run() {  # run APPROVALS FILE: the calls in FILE, approvals answered APPROVALS; 
   local out
   out=$(SERVE_CLIENT_APPROVALS=$1 "$py" /spike/serve_client.py "$user" calls "$2" 2>&1)
   printf '%s\n' "$(grep -cF "$token" <<<"$out")" > /var/tmp/terminal-token-count
-  sed "s/$token/<TOKEN>/g" <<<"$out"
+  printf '%s\n' "${out//"$token"/<TOKEN>}"
 }
 
 # A binary file in Shared, written by the member as a Web upload is.

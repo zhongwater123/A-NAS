@@ -170,9 +170,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 			}
 		}
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -183,7 +181,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 				_ = s.Maintain(context.Background())
 			}
 		}
-	}()
+	})
 	return s, nil
 }
 func (s *Store) Close() error {
@@ -409,7 +407,7 @@ func validPath(p string) bool {
 	if p == "" || len(p) > 4096 || !utf8.ValidString(p) || strings.ContainsAny(p, "\\\x00:") || strings.HasPrefix(p, "/") || path.Clean(p) != p {
 		return false
 	}
-	for _, part := range strings.Split(p, "/") {
+	for part := range strings.SplitSeq(p, "/") {
 		if part == "." || part == ".." || part == "" || len(part) > 255 {
 			return false
 		}

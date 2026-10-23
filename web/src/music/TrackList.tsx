@@ -1,6 +1,17 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Clock3, Heart, Play } from "lucide-react";
-import { DragEvent, KeyboardEvent, MouseEvent, ReactNode, RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  DragEvent,
+  KeyboardEvent,
+  MouseEvent,
+  ReactNode,
+  RefObject,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Cover, carriesTracks, dragType, Equalizer, readDrag, useMusic } from "./context";
 import { artistLine, artistKey, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
@@ -34,7 +45,15 @@ function dragLabel(count: number): HTMLElement {
 // TrackList is a virtualized song table that shares its scroll container with
 // the header above it. Click selects, Ctrl/Shift extend the selection, a
 // double click or Enter plays, and the context menu acts on the selection.
-export function TrackList({ tracks, scrollRef, numbering = "row", showAlbum = true, extra, onPlay, playlist }: TrackListProps) {
+export function TrackList({
+  tracks,
+  scrollRef,
+  numbering = "row",
+  showAlbum = true,
+  extra,
+  onPlay,
+  playlist,
+}: TrackListProps) {
   const music = useMusic();
   const listRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
@@ -45,7 +64,8 @@ export function TrackList({ tracks, scrollRef, numbering = "row", showAlbum = tr
     const list = listRef.current;
     const scroller = scrollRef.current;
     if (!list || !scroller) return;
-    const measure = () => setMargin(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    const measure = () =>
+      setMargin(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
@@ -55,7 +75,11 @@ export function TrackList({ tracks, scrollRef, numbering = "row", showAlbum = tr
   // Selection is by row; a new list starts without one.
   const identity = useMemo(() => tracks.map((track) => track.id).join("\n"), [tracks]);
   const [selectedFor, setSelectedFor] = useState(identity);
-  if (selectedFor !== identity) { setSelectedFor(identity); setSelected(new Set()); setAnchor(-1); }
+  if (selectedFor !== identity) {
+    setSelectedFor(identity);
+    setSelected(new Set());
+    setAnchor(-1);
+  }
 
   const virtualizer = useVirtualizer({
     count: tracks.length,
@@ -66,22 +90,26 @@ export function TrackList({ tracks, scrollRef, numbering = "row", showAlbum = tr
     initialRect: { width: 0, height: 900 },
   });
 
-  const select = useCallback((position: number, event: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
-    if (event.shiftKey && anchor >= 0) {
-      const range = new Set<number>();
-      for (let index = Math.min(anchor, position); index <= Math.max(anchor, position); index++) range.add(index);
-      setSelected(range);
-      return;
-    }
-    if (event.ctrlKey || event.metaKey) {
-      setSelected((current) => {
-        const next = new Set(current);
-        if (next.has(position)) next.delete(position); else next.add(position);
-        return next;
-      });
-    } else setSelected(new Set([position]));
-    setAnchor(position);
-  }, [anchor]);
+  const select = useCallback(
+    (position: number, event: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
+      if (event.shiftKey && anchor >= 0) {
+        const range = new Set<number>();
+        for (let index = Math.min(anchor, position); index <= Math.max(anchor, position); index++) range.add(index);
+        setSelected(range);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) {
+        setSelected((current) => {
+          const next = new Set(current);
+          if (next.has(position)) next.delete(position);
+          else next.add(position);
+          return next;
+        });
+      } else setSelected(new Set([position]));
+      setAnchor(position);
+    },
+    [anchor],
+  );
 
   const chosen = (position: number) => {
     const rows = selected.has(position) ? [...selected].sort((a, b) => a - b) : [position];
@@ -90,40 +118,55 @@ export function TrackList({ tracks, scrollRef, numbering = "row", showAlbum = tr
 
   const openMenu = (event: MouseEvent, position: number) => {
     event.preventDefault();
-    if (!selected.has(position)) { setSelected(new Set([position])); setAnchor(position); }
+    if (!selected.has(position)) {
+      setSelected(new Set([position]));
+      setAnchor(position);
+    }
     const { rows, ids } = chosen(position);
     music.showMenu(event, { ids, playlist: playlist ? { id: playlist.id, positions: rows } : undefined });
   };
 
   const startDrag = (event: DragEvent, position: number) => {
-    if (!selected.has(position)) { setSelected(new Set([position])); setAnchor(position); }
+    if (!selected.has(position)) {
+      setSelected(new Set([position]));
+      setAnchor(position);
+    }
     const { rows, ids } = chosen(position);
     event.dataTransfer.effectAllowed = playlist ? "copyMove" : "copy";
-    event.dataTransfer.setData(dragType, JSON.stringify({ ids, playlist: playlist ? { id: playlist.id, positions: rows } : undefined }));
+    event.dataTransfer.setData(
+      dragType,
+      JSON.stringify({ ids, playlist: playlist ? { id: playlist.id, positions: rows } : undefined }),
+    );
     event.dataTransfer.setDragImage(dragLabel(ids.length), 16, 16);
   };
 
-  const dropProps = (position: number) => playlist ? {
-    onDragOver: (event: DragEvent) => {
-      if (!carriesTracks(event.dataTransfer)) return;
-      event.preventDefault();
-      const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      setDropAt(event.clientY > box.top + box.height / 2 ? position + 1 : position);
-    },
-    onDrop: (event: DragEvent) => {
-      const payload = readDrag(event.dataTransfer);
-      const target = dropAt ?? position;
-      setDropAt(undefined);
-      if (!payload || payload.playlist?.id !== playlist.id) return;
-      event.preventDefault();
-      event.stopPropagation();
-      playlist.reorder(payload.playlist.positions, target);
-      setSelected(new Set());
-    },
-  } : {};
+  const dropProps = (position: number) =>
+    playlist
+      ? {
+          onDragOver: (event: DragEvent) => {
+            if (!carriesTracks(event.dataTransfer)) return;
+            event.preventDefault();
+            const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+            setDropAt(event.clientY > box.top + box.height / 2 ? position + 1 : position);
+          },
+          onDrop: (event: DragEvent) => {
+            const payload = readDrag(event.dataTransfer);
+            const target = dropAt ?? position;
+            setDropAt(undefined);
+            if (!payload || payload.playlist?.id !== playlist.id) return;
+            event.preventDefault();
+            event.stopPropagation();
+            playlist.reorder(payload.playlist.positions, target);
+            setSelected(new Set());
+          },
+        }
+      : {};
 
   const onKey = (event: KeyboardEvent) => {
-    if (event.key === "Enter" && selected.size) { event.preventDefault(); onPlay(Math.min(...selected)); }
+    if (event.key === "Enter" && selected.size) {
+      event.preventDefault();
+      onPlay(Math.min(...selected));
+    }
     if ((event.key === "a" || event.key === "A") && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       setSelected(new Set(tracks.map((_, position) => position)));
@@ -141,12 +184,20 @@ export function TrackList({ tracks, scrollRef, numbering = "row", showAlbum = tr
       aria-rowcount={tracks.length}
       tabIndex={0}
       onKeyDown={onKey}
-      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropAt(undefined); }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropAt(undefined);
+      }}
     >
       <div className="mu-track-head" role="row">
-        <span>#</span><span>标题</span><span className="mu-col-artist">歌手</span>{showAlbum && <span className="mu-col-album">专辑</span>}
+        <span>#</span>
+        <span>标题</span>
+        <span className="mu-col-artist">歌手</span>
+        {showAlbum && <span className="mu-col-album">专辑</span>}
         {extra && <span className="mu-col-extra">{extra.label}</span>}
-        <span className="mu-col-time" aria-label="时长"><Clock3 /></span><span />
+        <span className="mu-col-time" aria-label="时长">
+          <Clock3 />
+        </span>
+        <span />
       </div>
       <div className="mu-track-body" style={{ height: virtualizer.getTotalSize() }}>
         {items.map((item) => {
@@ -199,7 +250,25 @@ interface RowProps {
   dropProps: object;
 }
 
-function TrackRow({ track, position, top, numbering, showAlbum, extra, selected, current, paused, favorite, dropBefore, dropAfter, onSelect, onPlay, onMenu, onDragStart, dropProps }: RowProps) {
+function TrackRow({
+  track,
+  position,
+  top,
+  numbering,
+  showAlbum,
+  extra,
+  selected,
+  current,
+  paused,
+  favorite,
+  dropBefore,
+  dropAfter,
+  onSelect,
+  onPlay,
+  onMenu,
+  onDragStart,
+  dropProps,
+}: RowProps) {
   const music = useMusic();
   const number = numbering === "album" ? track.trackNo || position + 1 : position + 1;
   const artists = artistsOf(track);
@@ -219,29 +288,70 @@ function TrackRow({ track, position, top, numbering, showAlbum, extra, selected,
     >
       <span className="mu-track-index">
         {current ? <Equalizer paused={paused} /> : <span className="mu-track-number">{number}</span>}
-        <button type="button" className="mu-track-play" aria-label={`播放 ${track.title}`} onClick={(event) => { event.stopPropagation(); onPlay(position); }}><Play /></button>
+        <button
+          type="button"
+          className="mu-track-play"
+          aria-label={`播放 ${track.title}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onPlay(position);
+          }}
+        >
+          <Play />
+        </button>
       </span>
       <span className="mu-track-title">
         <Cover id={track.coverId} name={track.album || track.title} kind="track" />
         <span className="mu-track-name">
-          <strong title={track.title}>{track.title}{lossless(track) && <em className="mu-badge">{qualityOf(track)}</em>}</strong>
+          <strong title={track.title}>
+            {track.title}
+            {lossless(track) && <em className="mu-badge">{qualityOf(track)}</em>}
+          </strong>
           <small className="mu-track-sub">{artistLine(track)}</small>
         </span>
       </span>
       <span className="mu-col-artist mu-links">
         {artists.map((name, at) => (
-          <span key={name}>{at > 0 && " / "}<button type="button" onClick={(event) => { event.stopPropagation(); music.open({ kind: "artist", key: artistKey(name) }); }}>{name}</button></span>
+          <span key={name}>
+            {at > 0 && " / "}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                music.open({ kind: "artist", key: artistKey(name) });
+              }}
+            >
+              {name}
+            </button>
+          </span>
         ))}
       </span>
       {showAlbum && (
         <span className="mu-col-album mu-links">
-          <button type="button" onClick={(event) => { event.stopPropagation(); music.open({ kind: "album", id: track.albumId }); }}>{track.album || unknownAlbum}</button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              music.open({ kind: "album", id: track.albumId });
+            }}
+          >
+            {track.album || unknownAlbum}
+          </button>
         </span>
       )}
       {extra !== undefined && <span className="mu-col-extra">{extra}</span>}
       <span className="mu-col-time">{formatDuration(track.durationMs)}</span>
       <span className="mu-track-like">
-        <button type="button" className={favorite ? "on" : ""} aria-label={favorite ? "取消收藏" : "收藏"} aria-pressed={favorite} onClick={(event) => { event.stopPropagation(); music.toggleFavorite(track.id); }}>
+        <button
+          type="button"
+          className={favorite ? "on" : ""}
+          aria-label={favorite ? "取消收藏" : "收藏"}
+          aria-pressed={favorite}
+          onClick={(event) => {
+            event.stopPropagation();
+            music.toggleFavorite(track.id);
+          }}
+        >
           <Heart />
         </button>
       </span>

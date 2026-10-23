@@ -15,13 +15,22 @@ export function ObjectsStatus({ objects, results }: { objects: PhotoObjectsFound
   const things = joinWords(objects.words);
   return (
     <div className="ph-found" role="status">
-      {objects.detected > 0
-        ? <span className="ph-found-chip detected"><Scan />检测到{things}的照片 <strong>{objects.detected}</strong> 张</span>
-        : <span className="ph-found-chip none"><SearchX />没有检测到{things}</span>}
+      {objects.detected > 0 ? (
+        <span className="ph-found-chip detected">
+          <Scan />
+          检测到{things}的照片 <strong>{objects.detected}</strong> 张
+        </span>
+      ) : (
+        <span className="ph-found-chip none">
+          <SearchX />
+          没有检测到{things}
+        </span>
+      )}
       {objects.detected === 0 && results && <span className="ph-found-note">下面是画面最接近的照片</span>}
       {objects.undetected > 0 && (
         <span className="ph-found-note pending" title="本地 AI 会在设备空闲时继续识别，结果可能还会增加">
-          <Hourglass />还有 {objects.undetected} 张尚未识别完
+          <Hourglass />
+          还有 {objects.undetected} 张尚未识别完
         </span>
       )}
     </div>

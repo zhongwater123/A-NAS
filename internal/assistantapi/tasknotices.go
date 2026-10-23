@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -125,8 +126,8 @@ func (h *handler) describeRun(ctx context.Context, account string, job hermesJob
 	if err := h.restJSON(ctx, account, "/api/sessions/"+run.SessionID+"/messages?inline_images=false", &transcript); err != nil {
 		return err
 	}
-	for i := len(transcript.Messages) - 1; i >= 0; i-- {
-		message := transcript.Messages[i]
+	for _, message := range slices.Backward(transcript.Messages) {
+
 		if message.Role != "assistant" {
 			continue
 		}
@@ -204,7 +205,7 @@ func quietAnswer(answer string) bool {
 		}
 	}
 	var lines []string
-	for _, line := range strings.Split(stripped, "\n") {
+	for line := range strings.SplitSeq(stripped, "\n") {
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)
 		}

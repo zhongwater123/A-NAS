@@ -24,7 +24,6 @@ and each embedder's vectors. Runs resume where they stopped.
 """
 
 import argparse
-import io
 import os
 import time
 
@@ -102,7 +101,7 @@ class Gemma:
 
 def detect(detector, image):
     """[class, score, x0, y0, x1, y1] of the cats and dogs at their kept scores, best first."""
-    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    _, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 92])
     boxes = detector.detect(encoded.tobytes(), detector.run_options())
     return [box for box in boxes if box[0] in KEEP and box[1] >= KEEP[box[0]]]
 

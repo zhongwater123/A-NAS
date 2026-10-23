@@ -80,9 +80,8 @@ def main():
                    "annotations": [[image, categories[category], area] for image, category, area in annotations]}, file)
     print(f"{len(images)} train images, {len(annotations)} instance annotations", flush=True)
 
-    with RemoteZip(STUFF_ZIP) as archive:
-        with archive.open("annotations/stuff_train2017.json") as stream:
-            categories, annotations = compact(stream, chosen)
+    with RemoteZip(STUFF_ZIP) as archive, archive.open("annotations/stuff_train2017.json") as stream:
+        categories, annotations = compact(stream, chosen)
     with open(os.path.join(root, datasets.COCO_STUFF_TRAIN), "w", encoding="utf-8") as file:
         json.dump({"annotations": [[image, categories[category], area] for image, category, area in annotations]}, file)
     print(f"{len(annotations)} stuff annotations", flush=True)

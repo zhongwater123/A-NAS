@@ -19,7 +19,7 @@ from pathlib import Path
 
 upstream, target = Path(sys.argv[1]), Path(sys.argv[2])
 desktop, shared = upstream / "apps/desktop/src", upstream / "apps/shared/src"
-commit = subprocess.run(["git", "-C", str(upstream), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+commit = subprocess.run(["git", "-C", str(upstream), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
 
 COPY = [
     *[f"lib/chat-messages/{f}" for f in sorted(os.listdir(desktop / "lib/chat-messages")) if not f.endswith(".test.ts")],

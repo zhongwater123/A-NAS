@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -59,9 +60,7 @@ func assistantRequest(t *testing.T, socket, method, path string, header http.Hea
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}}
 	request, _ := http.NewRequest(method, "http://photos"+path, strings.NewReader(""))
-	for key, values := range header {
-		request.Header[key] = values
-	}
+	maps.Copy(request.Header, header)
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)

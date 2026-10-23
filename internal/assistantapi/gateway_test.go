@@ -52,6 +52,10 @@ func newHarness(t *testing.T) *harness {
 	return &harness{t: t, serve: serve, changes: changes, server: server}
 }
 
+// frameWait bounds the wait for one frame. It only stops a hang: under the
+// race detector the 4 MiB screenshot takes seconds to cross a CI runner.
+const frameWait = 30 * time.Second
+
 type window struct {
 	t    *testing.T
 	conn *websocket.Conn
@@ -76,7 +80,7 @@ func (w *window) send(method, params string) string {
 	w.t.Helper()
 	w.next++
 	id := "r" + string(rune('0'+w.next))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), frameWait)
 	defer cancel()
 	if err := w.conn.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":"`+id+`","method":"`+method+`","params":`+params+`}`)); err != nil {
 		w.t.Fatal(err)
@@ -93,7 +97,7 @@ func (w *window) call(method, params string) frame {
 
 func (w *window) waitFor(match func(frame) bool) frame {
 	w.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), frameWait)
 	defer cancel()
 	for {
 		_, data, err := w.conn.Read(ctx)

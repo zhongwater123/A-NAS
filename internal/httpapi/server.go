@@ -282,9 +282,10 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 		filesystems = []string{}
 	}
 	reasons := make([]string, 0, 4)
-	if disk.Role == hoststate.DiskRoleSystem {
+	switch disk.Role {
+	case hoststate.DiskRoleSystem:
 		reasons = append(reasons, "system_disk")
-	} else if disk.Role == hoststate.DiskRoleData {
+	case hoststate.DiskRoleData:
 		reasons = append(reasons, "data_volume")
 	}
 	if disk.Transport == hoststate.TransportUSB || disk.Transport == hoststate.TransportUnknown {

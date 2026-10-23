@@ -23,7 +23,28 @@ export function isPDFPreviewable(name: string): boolean {
 
 export function isTextPreviewable(name: string): boolean {
   const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-  return ["txt", "md", "markdown", "json", "yaml", "yml", "csv", "log", "xml", "html", "css", "js", "jsx", "ts", "tsx", "go", "py", "sh", "ini", "conf"].includes(extension ?? "");
+  return [
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "yaml",
+    "yml",
+    "csv",
+    "log",
+    "xml",
+    "html",
+    "css",
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "go",
+    "py",
+    "sh",
+    "ini",
+    "conf",
+  ].includes(extension ?? "");
 }
 
 export function isOfficeDocument(name: string): boolean {

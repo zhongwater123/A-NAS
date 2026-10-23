@@ -61,8 +61,8 @@ func TestAssistantConnectionIsCutWhenTheSessionEnds(t *testing.T) {
 	roundTrip(t, conn, "before")
 	h.revoke("member-token")
 	// The Product Service's copy stops working too, even if it never closes it.
-	_ = conn.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Conn.Read(make([]byte, 16)); err == nil {
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(make([]byte, 16)); err == nil {
 		t.Fatal("the connection outlived its session")
 	} else if errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatal("the connection was not cut within 5 s of the session ending")
@@ -101,8 +101,8 @@ func TestStoppingTheBrokerCutsAssistantConnections(t *testing.T) {
 	defer conn.Close()
 	roundTrip(t, conn, "before")
 	h.server.Close()
-	_ = conn.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Conn.Read(make([]byte, 16)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(make([]byte, 16)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("read after the broker stopped: %v, want the connection cut", err)
 	}
 }

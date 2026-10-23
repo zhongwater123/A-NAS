@@ -186,7 +186,7 @@ func RunShellGate(args []string) error {
 	if err != nil {
 		return fmt.Errorf("the File Broker did not release the shell: %w", err)
 	}
-	return syscall.Exec(args[0], args[1:], os.Environ())
+	return syscall.Exec(args[0], args[1:], os.Environ()) //nolint:gosec // G702: the broker built this command line from the configured shell.
 }
 
 func ttyGroup() int {

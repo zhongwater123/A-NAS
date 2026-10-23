@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,10 +108,14 @@ func TestRejectedInputAndTimeouts(t *testing.T) {
 }
 
 func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
+	// The fake serves each connection on its own goroutine.
+	var mu sync.Mutex
 	var released []string
 	socket := aiworkertest.Serve(t, func(request aiworker.Request, file *os.File) *aiworker.Response {
 		if request.Op == aiworker.OpRelease {
+			mu.Lock()
 			released = append(released, request.What)
+			mu.Unlock()
 		}
 		return aiworkertest.WithDetector(aiworkertest.Deterministic("fake-1", 2), "detector-1")(request, file)
 	})
@@ -144,8 +150,11 @@ func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
 	if err := client.Release(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
-	if len(released) != 2 || released[0] != "detector" || released[1] != "all" {
-		t.Fatalf("released %v", released)
+	mu.Lock()
+	got := slices.Clone(released)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != "detector" || got[1] != "all" {
+		t.Fatalf("released %v", got)
 	}
 
 	malformed := aiworkertest.Serve(t, func(aiworker.Request, *os.File) *aiworker.Response {

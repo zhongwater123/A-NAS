@@ -1,16 +1,76 @@
 name: CI
 
+# A branch is checked through its pull request; main is checked after each merge.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A new push to a pull request replaces its running checks; every commit on
+# main keeps its own run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: Project checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/golangci-lint/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.9.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The runner's ShellCheck is older and judges differently; this is the
+      # release the Makefile names, checked against its published SHA-256.
+      - name: Install ShellCheck
+        run: |
+          version="$(sed -n 's/^SHELLCHECK_VERSION = //p' Makefile)"
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "https://github.com/koalaman/shellcheck/releases/download/v$version/shellcheck-v$version.linux.x86_64.tar.xz"
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          sudo install "$RUNNER_TEMP/shellcheck-v$version/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+      # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.lock).
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock, lets the
+      # clustering tests run; the real-model tests need model files and stay skipped.
+      - name: Install the AI tools and test dependencies
+        run: |
+          python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r ai/requirements-dev.lock
+          grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
+
+      - name: Run checks
+        run: make check
+
+  race:
+    name: Go tests with the race detector
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -28,12 +88,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Run checks
-        run: make check
+      - name: Run the Go tests with the race detector
+        run: make race-test
 
   system:
     name: System test (Debian 13, systemd)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

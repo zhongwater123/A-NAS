@@ -5,10 +5,18 @@
 // storage, apps and containers waits for the member. A write no rule names
 // waits too, so a new route is asked about until it is listed here.
 
-interface Rule { method: string; path: RegExp; why?: string }
+interface Rule {
+  method: string;
+  path: RegExp;
+  why?: string;
+}
 
 const ID = "[^/]+";
-const route = (method: string, path: string, why?: string): Rule => ({ method, path: new RegExp(`^/api/v1/${path}$`), why });
+const route = (method: string, path: string, why?: string): Rule => ({
+  method,
+  path: new RegExp(`^/api/v1/${path}$`),
+  why,
+});
 
 const DELETES = "这一步会删除内容";
 const SHARES = "这一步会把内容分享给其他成员";
@@ -51,7 +59,11 @@ const RULES: Rule[] = [
   route("PATCH", `files/${ID}`, MOVES),
   route("POST", `(trash/${ID}|photos/assets/${ID}|snapshots/${ID}(/entries/${ID})?)/restore`, RESTORES),
   route("[A-Z]+", "feedback(/.*)?", FEEDBACK),
-  route("[A-Z]+", "(session|users|viewing|storage|volumes|wallpaper|local-display|apps|containers|snapshots)(/.*)?", SYSTEM),
+  route(
+    "[A-Z]+",
+    "(session|users|viewing|storage|volumes|wallpaper|local-display|apps|containers|snapshots)(/.*)?",
+    SYSTEM,
+  ),
   route("[A-Z]+", `spaces/${ID}/(snapshots|snapshot-schedule)`, SYSTEM),
   route("DELETE", ".*", DELETES),
 ];

@@ -23,7 +23,10 @@ export interface RestoreRequest {
   inTrash?: boolean;
 }
 
-export interface Crumb { id: string; name: string }
+export interface Crumb {
+  id: string;
+  name: string;
+}
 
 // The folder's names in the way the server compares them: letter case aside,
 // as SMB clients cannot tell such names apart.
@@ -32,7 +35,14 @@ const nameKey = (name: string) => name.trim().toLowerCase();
 // After this long a restore offers to continue in the background.
 const backgroundAfter = 1200;
 
-export function RestoreDialog({ request, onClose, onBackground, onRestored, onFailed, onOpenTrash }: {
+export function RestoreDialog({
+  request,
+  onClose,
+  onBackground,
+  onRestored,
+  onFailed,
+  onOpenTrash,
+}: {
   request: RestoreRequest;
   onClose: () => void;
   onBackground: () => void;
@@ -72,7 +82,10 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
         for (const folder of request.folders) {
           const items = await listEntries(space.id, trail.at(-1)?.id ?? "");
           const match = items.find((item) => item.kind === "directory" && item.name === folder);
-          if (!match) { lost = folder; break; }
+          if (!match) {
+            lost = folder;
+            break;
+          }
           trail.push({ id: match.id, name: match.name });
         }
       } catch (caught) {
@@ -83,7 +96,9 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
       setMissing(lost);
       setOriginal(!lost);
     })();
-    return () => { live = false; };
+    return () => {
+      live = false;
+    };
   }, [request.folders, space.id]);
 
   // When the target already holds the name, the dialog suggests a new one
@@ -101,13 +116,19 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
         const { name: current, suggested: offered } = latest.current;
         if (current === initialName && names.has(nameKey(initialName))) {
           const next = restoredName(initialName, entry.kind);
-          setName(next); setSuggested(next);
+          setName(next);
+          setSuggested(next);
         } else if (offered && current === offered && !names.has(nameKey(initialName))) {
-          setName(initialName); setSuggested("");
+          setName(initialName);
+          setSuggested("");
         }
       })
-      .catch(() => { if (live) setTaken(new Set()); });
-    return () => { live = false; };
+      .catch(() => {
+        if (live) setTaken(new Set());
+      });
+    return () => {
+      live = false;
+    };
   }, [target, space.id, initialName, entry.kind]);
 
   const location = [spaceLabel(space), ...(target ?? []).map((crumb) => crumb.name)].join(" / ");
@@ -119,24 +140,39 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
     if (!target || busy) return;
     const finalName = name.trim();
     if (!finalName) return;
-    setBusy(true); setError(""); setConflict(false);
+    setBusy(true);
+    setError("");
+    setConflict(false);
     const timer = window.setTimeout(() => setSlow(true), backgroundAfter);
     try {
       const parentId = target.at(-1)?.id ?? "";
-      const restored = request.whole ? await restoreSnapshot(snapshot.id, parentId, finalName) : await restoreEntry(snapshot.id, entry.id, parentId, finalName);
+      const restored = request.whole
+        ? await restoreSnapshot(snapshot.id, parentId, finalName)
+        : await restoreEntry(snapshot.id, entry.id, parentId, finalName);
       onRestored(restored, location, target);
     } catch (caught) {
       const message = messageOf(caught);
       if (hiddenRef.current) {
-        onFailed(entry.kind === "directory" ? `恢复“${finalName}”未完成：${message}。已恢复的部分保留在目标位置。` : `恢复“${finalName}”失败：${message}`);
+        onFailed(
+          entry.kind === "directory"
+            ? `恢复“${finalName}”未完成：${message}。已恢复的部分保留在目标位置。`
+            : `恢复“${finalName}”失败：${message}`,
+        );
         return;
       }
       const isConflict = caught instanceof APIError && caught.code === "name_conflict";
       setConflict(isConflict);
-      setError(isConflict ? `“${location}”中已有名为“${finalName}”的项目。` : entry.kind === "directory" ? `${message}。已恢复的部分保留在目标位置。` : message);
+      setError(
+        isConflict
+          ? `“${location}”中已有名为“${finalName}”的项目。`
+          : entry.kind === "directory"
+            ? `${message}。已恢复的部分保留在目标位置。`
+            : message,
+      );
     } finally {
       window.clearTimeout(timer);
-      setBusy(false); setSlow(false);
+      setBusy(false);
+      setSlow(false);
     }
   };
 
@@ -153,28 +189,69 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
       icon={<ArchiveRestore />}
       busy={busy}
       onClose={onClose}
-      footer={<>
-        {busy && slow
-          ? <button type="button" className="bk-secondary" onClick={toBackground}>在后台继续</button>
-          : <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>取消</button>}
-        <button type="submit" form="bk-restore-form" className="bk-primary" disabled={!target || busy || !name.trim() || clash}>
-          {busy ? <><Spinner small />正在恢复…</> : "恢复"}
-        </button>
-      </>}
+      footer={
+        <>
+          {busy && slow ? (
+            <button type="button" className="bk-secondary" onClick={toBackground}>
+              在后台继续
+            </button>
+          ) : (
+            <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>
+              取消
+            </button>
+          )}
+          <button
+            type="submit"
+            form="bk-restore-form"
+            className="bk-primary"
+            disabled={!target || busy || !name.trim() || clash}
+          >
+            {busy ? (
+              <>
+                <Spinner small />
+                正在恢复…
+              </>
+            ) : (
+              "恢复"
+            )}
+          </button>
+        </>
+      }
     >
       <form id="bk-restore-form" className="bk-restore" onSubmit={(event) => void submit(event)}>
         {request.inTrash && (
           <div className="bk-trash-hint">
             <Trash2 />
-            <span>回收站里还有它，那里是删除前最后的样子；快照里的是 {formatDateTime(snapshot.createdAt)} 的样子。</span>
-            {onOpenTrash && <button type="button" className="bk-link" onClick={() => { onOpenTrash(); onClose(); }}>去回收站还原</button>}
+            <span>
+              回收站里还有它，那里是删除前最后的样子；快照里的是 {formatDateTime(snapshot.createdAt)} 的样子。
+            </span>
+            {onOpenTrash && (
+              <button
+                type="button"
+                className="bk-link"
+                onClick={() => {
+                  onOpenTrash();
+                  onClose();
+                }}
+              >
+                去回收站还原
+              </button>
+            )}
           </div>
         )}
         <div className="bk-restore-source">
           <EntryIcon kind={entry.kind} />
           <div>
             <strong>{request.whole ? `快照“${snapshot.name}”的全部文件` : entry.name}</strong>
-            <small>{request.whole ? formatDateTime(snapshot.createdAt) : <>来自快照“{snapshot.name}” · {formatDateTime(snapshot.createdAt)}</>}</small>
+            <small>
+              {request.whole ? (
+                formatDateTime(snapshot.createdAt)
+              ) : (
+                <>
+                  来自快照“{snapshot.name}” · {formatDateTime(snapshot.createdAt)}
+                </>
+              )}
+            </small>
           </div>
         </div>
 
@@ -182,23 +259,57 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
           <span className="bk-field-label">恢复到</span>
           <div className={`bk-location${picking ? " open" : ""}`}>
             <MapPin />
-            <span className="bk-location-path" title={location}>{target ? location : "正在查找原位置…"}</span>
+            <span className="bk-location-path" title={location}>
+              {target ? location : "正在查找原位置…"}
+            </span>
             {original && target && !request.whole && <span className="bk-badge neutral">原位置</span>}
-            <button type="button" className="bk-link" disabled={!target || busy} onClick={() => setPicking((value) => !value)}>{picking ? "收起" : "更改"}</button>
+            <button
+              type="button"
+              className="bk-link"
+              disabled={!target || busy}
+              onClick={() => setPicking((value) => !value)}
+            >
+              {picking ? "收起" : "更改"}
+            </button>
           </div>
-          {missing && !picking && <small className="bk-field-hint">原文件夹“{missing}”已不在空间中，将恢复到它还在的上一级。</small>}
+          {missing && !picking && (
+            <small className="bk-field-hint">原文件夹“{missing}”已不在空间中，将恢复到它还在的上一级。</small>
+          )}
           {picking && target && (
-            <FolderPicker space={space} start={target} onPick={(trail) => { setTarget(trail); setOriginal(false); setMissing(""); setPicking(false); }} />
+            <FolderPicker
+              space={space}
+              start={target}
+              onPick={(trail) => {
+                setTarget(trail);
+                setOriginal(false);
+                setMissing("");
+                setPicking(false);
+              }}
+            />
           )}
         </div>
 
         <label className="bk-field">
           <span className="bk-field-label">{request.whole ? "新文件夹名称" : "名称"}</span>
-          <input data-autofocus value={name} disabled={busy} onChange={(event) => { setName(event.target.value); setSuggested(""); setConflict(false); setError(""); }} aria-label="恢复后的名称" />
+          <input
+            data-autofocus
+            value={name}
+            disabled={busy}
+            onChange={(event) => {
+              setName(event.target.value);
+              setSuggested("");
+              setConflict(false);
+              setError("");
+            }}
+            aria-label="恢复后的名称"
+          />
           {suggested && name === suggested && (
             <small className="bk-field-note">
               {original ? "原位置" : "这里"}已有“{initialName}”，所以换了个名字另存一份，不会覆盖它。
-              {original && entry.kind === "file" && !request.whole && "想直接换回旧版本，可在文件管理中右键这个文件，选“历史版本”。"}
+              {original &&
+                entry.kind === "file" &&
+                !request.whole &&
+                "想直接换回旧版本，可在文件管理中右键这个文件，选“历史版本”。"}
             </small>
           )}
         </label>
@@ -206,11 +317,29 @@ export function RestoreDialog({ request, onClose, onBackground, onRestored, onFa
         {(clash || error) && (
           <div className="bk-inline-error" role="alert">
             <span>{clash ? `“${location}”中已有名为“${name.trim()}”的项目。` : error}</span>
-            {(clash || conflict) && <button type="button" className="bk-link" onClick={() => { setName(alternative); setSuggested(""); setConflict(false); setError(""); }}>改用“{alternative}”</button>}
+            {(clash || conflict) && (
+              <button
+                type="button"
+                className="bk-link"
+                onClick={() => {
+                  setName(alternative);
+                  setSuggested("");
+                  setConflict(false);
+                  setError("");
+                }}
+              >
+                改用“{alternative}”
+              </button>
+            )}
           </div>
         )}
         <p className="bk-fine">
-          {request.whole ? "快照里的全部文件会复制到这个新文件夹中。" : entry.kind === "directory" ? "文件夹里的全部内容会一起恢复。" : ""}恢复会复制出新的项目，不会覆盖或改动空间中现有的文件。
+          {request.whole
+            ? "快照里的全部文件会复制到这个新文件夹中。"
+            : entry.kind === "directory"
+              ? "文件夹里的全部内容会一起恢复。"
+              : ""}
+          恢复会复制出新的项目，不会覆盖或改动空间中现有的文件。
         </p>
       </form>
     </Dialog>
@@ -226,35 +355,74 @@ function FolderPicker({ space, start, onPick }: { space: Space; start: Crumb[]; 
 
   useEffect(() => {
     let live = true;
-    setFolders(undefined); setError("");
+    setFolders(undefined);
+    setError("");
     listEntries(space.id, parentId)
-      .then((items) => { if (live) setFolders(items.filter((item) => item.kind === "directory")); })
-      .catch((caught) => { if (live) setError(messageOf(caught)); });
-    return () => { live = false; };
+      .then((items) => {
+        if (live) setFolders(items.filter((item) => item.kind === "directory"));
+      })
+      .catch((caught) => {
+        if (live) setError(messageOf(caught));
+      });
+    return () => {
+      live = false;
+    };
   }, [space.id, parentId]);
 
   return (
     <div className="bk-picker" role="group" aria-label="选择恢复位置">
       <nav className="bk-picker-trail" aria-label="当前位置">
-        <button type="button" onClick={() => setTrail([])}>{spaceLabel(space)}</button>
+        <button type="button" onClick={() => setTrail([])}>
+          {spaceLabel(space)}
+        </button>
         {trail.map((crumb, index) => (
-          <span key={crumb.id}><ChevronRight /><button type="button" onClick={() => setTrail(trail.slice(0, index + 1))}>{crumb.name}</button></span>
+          <span key={crumb.id}>
+            <ChevronRight />
+            <button type="button" onClick={() => setTrail(trail.slice(0, index + 1))}>
+              {crumb.name}
+            </button>
+          </span>
         ))}
       </nav>
       <div className="bk-picker-list">
-        {trail.length > 0 && <button type="button" className="bk-picker-row up" onClick={() => setTrail(trail.slice(0, -1))}><CornerLeftUp />上一级</button>}
-        {error ? <p className="bk-picker-note">{error}</p>
-          : !folders ? <p className="bk-picker-note"><Spinner small />正在读取文件夹…</p>
-            : folders.length === 0 ? <p className="bk-picker-note">这里没有子文件夹</p>
-              : folders.map((folder) => (
-                <button key={folder.id} type="button" className="bk-picker-row" onClick={() => setTrail([...trail, { id: folder.id, name: folder.name }])}>
-                  <Folder />{folder.name}<ChevronRight className="trailing" />
-                </button>
-              ))}
+        {trail.length > 0 && (
+          <button type="button" className="bk-picker-row up" onClick={() => setTrail(trail.slice(0, -1))}>
+            <CornerLeftUp />
+            上一级
+          </button>
+        )}
+        {error ? (
+          <p className="bk-picker-note">{error}</p>
+        ) : !folders ? (
+          <p className="bk-picker-note">
+            <Spinner small />
+            正在读取文件夹…
+          </p>
+        ) : folders.length === 0 ? (
+          <p className="bk-picker-note">这里没有子文件夹</p>
+        ) : (
+          folders.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              className="bk-picker-row"
+              onClick={() => setTrail([...trail, { id: folder.id, name: folder.name }])}
+            >
+              <Folder />
+              {folder.name}
+              <ChevronRight className="trailing" />
+            </button>
+          ))
+        )}
       </div>
       <div className="bk-picker-foot">
-        <span><FolderOpen />{[spaceLabel(space), ...trail.map((crumb) => crumb.name)].join(" / ")}</span>
-        <button type="button" className="bk-primary small" onClick={() => onPick(trail)}>恢复到这里</button>
+        <span>
+          <FolderOpen />
+          {[spaceLabel(space), ...trail.map((crumb) => crumb.name)].join(" / ")}
+        </span>
+        <button type="button" className="bk-primary small" onClick={() => onPick(trail)}>
+          恢复到这里
+        </button>
       </div>
     </div>
   );

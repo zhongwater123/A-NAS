@@ -1,8 +1,46 @@
 import {
-  ArrowLeft, Camera, CircleAlert, CircleMinus, Copy, Download, Eye, EyeOff, FolderMinus, FolderPlus, Hourglass, ImagePlus, Images, Merge, PanelLeft, Pencil, RefreshCw, RotateCcw,
-  ScanSearch, Search, SearchX, ShieldCheck, Hash, Shapes, Trash2, UserRound, X, ZoomIn, ZoomOut,
+  ArrowLeft,
+  Camera,
+  CircleAlert,
+  CircleMinus,
+  Copy,
+  Download,
+  Eye,
+  EyeOff,
+  FolderMinus,
+  FolderPlus,
+  Hourglass,
+  ImagePlus,
+  Images,
+  Merge,
+  PanelLeft,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  ScanSearch,
+  Search,
+  SearchX,
+  ShieldCheck,
+  Hash,
+  Shapes,
+  Trash2,
+  UserRound,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
-import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  DragEvent,
+  FormEvent,
+  KeyboardEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { endViewing } from "../api";
 import { usePeople } from "../people";
@@ -13,20 +51,82 @@ import { AlbumsView, Empty } from "./Collections";
 import { useDialogs, useToasts } from "./feedback";
 import type { GridProps } from "./grid";
 import {
-  type ImageDropProps, imageFile, type ImageQuery, ImageReading, type ImageResult, ImageSearchButton, imageSearchPage, ImageSource, isEncoded, pickImage, prepareImageQuery,
+  type ImageDropProps,
+  imageFile,
+  type ImageQuery,
+  ImageReading,
+  type ImageResult,
+  ImageSearchButton,
+  imageSearchPage,
+  ImageSource,
+  isEncoded,
+  pickImage,
+  prepareImageQuery,
 } from "./imageSearch";
 import { clampRowHeight, defaultRowHeight, maxRowHeight, minRowHeight } from "./layout";
 import {
-  assetsLabel, type Caller, canChange, canEditAlbum, countLabel, daysLeft, isUnavailable, libraryName, libraryOf, liveVideoHint, messageOf, ownLibrary, type Place, placeLibrary,
-  placeViewing, runEach, sharedLibrary,
+  assetsLabel,
+  type Caller,
+  canChange,
+  canEditAlbum,
+  countLabel,
+  daysLeft,
+  isUnavailable,
+  libraryName,
+  libraryOf,
+  liveVideoHint,
+  messageOf,
+  ownLibrary,
+  type Place,
+  placeLibrary,
+  placeViewing,
+  runEach,
+  sharedLibrary,
 } from "./model";
 import { Avatar, PeopleSettings, PersonPicker, personName } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
 import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
 import {
-  addPhotoTag, addToAlbum, attachLiveVideo, copyPhoto, createAlbum, deleteAlbum, emptyPhotoTrash, getAIStatus, getPhoto, hideAILabel, listAlbumPhotos, listAlbums, listLabelPhotos, listPhotoLibraries, listTagPhotos, removePhotoTag,
-  listPeople, listPersonPhotos, listPhotoTrash, listSimilarPhotos, downloadURL, mergePeople, purgePhoto, removeFromAlbum, removeFromPerson, renameAlbum, renamePhoto, restorePhoto, searchPhotos, trashPhoto,
-  setLibraryPeople, updatePerson, type PhotoAIStatus, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, type PhotoObjectsFound, type PhotoPerson, type PhotoSearchPage, type PhotoSimilarPage,
+  addPhotoTag,
+  addToAlbum,
+  attachLiveVideo,
+  copyPhoto,
+  createAlbum,
+  deleteAlbum,
+  emptyPhotoTrash,
+  getAIStatus,
+  getPhoto,
+  hideAILabel,
+  listAlbumPhotos,
+  listAlbums,
+  listLabelPhotos,
+  listPhotoLibraries,
+  listTagPhotos,
+  removePhotoTag,
+  listPeople,
+  listPersonPhotos,
+  listPhotoTrash,
+  listSimilarPhotos,
+  downloadURL,
+  mergePeople,
+  purgePhoto,
+  removeFromAlbum,
+  removeFromPerson,
+  renameAlbum,
+  renamePhoto,
+  restorePhoto,
+  searchPhotos,
+  trashPhoto,
+  setLibraryPeople,
+  updatePerson,
+  type PhotoAIStatus,
+  type PhotoAlbum,
+  type PhotoAsset,
+  type PhotoLibrary,
+  type PhotoObjectsFound,
+  type PhotoPerson,
+  type PhotoSearchPage,
+  type PhotoSimilarPage,
 } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { joinWords, ObjectsStatus, SimilarSource } from "./results";
@@ -52,13 +152,26 @@ const narrowWidth = 720;
 
 function useStored<T>(key: string, initial: T): [T, (value: T | ((current: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
-    try { const stored = window.localStorage.getItem(key); return stored === null ? initial : JSON.parse(stored) as T; } catch { return initial; }
+    try {
+      const stored = window.localStorage.getItem(key);
+      return stored === null ? initial : (JSON.parse(stored) as T);
+    } catch {
+      return initial;
+    }
   });
-  const set = useCallback((next: T | ((current: T) => T)) => setValue((current) => {
-    const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
-    try { window.localStorage.setItem(key, JSON.stringify(resolved)); } catch { /* private windows keep it for the session only */ }
-    return resolved;
-  }), [key]);
+  const set = useCallback(
+    (next: T | ((current: T) => T)) =>
+      setValue((current) => {
+        const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
+        try {
+          window.localStorage.setItem(key, JSON.stringify(resolved));
+        } catch {
+          /* private windows keep it for the session only */
+        }
+        return resolved;
+      }),
+    [key],
+  );
   return [value, set];
 }
 
@@ -66,14 +179,22 @@ const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve
 
 const placeKey = (place: Place) => {
   switch (place.kind) {
-    case "album": return `album:${place.album.id}`;
-    case "search": return `search:${place.viewing}:${place.query}`;
-    case "cluster": return `cluster:${place.viewing}:${place.label.id}`;
-    case "tag": return `tag:${place.viewing}:${place.tag.name}`;
-    case "person": return `person:${place.person.id}`;
-    case "similar": return `similar:${place.viewing}:${place.asset.id}`;
-    case "image": return `image:${place.viewing}:${place.query.key}`;
-    default: return `${place.kind}:${place.libraryId}`;
+    case "album":
+      return `album:${place.album.id}`;
+    case "search":
+      return `search:${place.viewing}:${place.query}`;
+    case "cluster":
+      return `cluster:${place.viewing}:${place.label.id}`;
+    case "tag":
+      return `tag:${place.viewing}:${place.tag.name}`;
+    case "person":
+      return `person:${place.person.id}`;
+    case "similar":
+      return `similar:${place.viewing}:${place.asset.id}`;
+    case "image":
+      return `image:${place.viewing}:${place.query.key}`;
+    default:
+      return `${place.kind}:${place.libraryId}`;
   }
 };
 
@@ -86,10 +207,14 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const [place, setPlaceState] = useState<Place>();
   // The photo service knows owners by account name; pages show nicknames.
   const people = usePeople();
-  const named = useMemo(() => libraries?.map((library) => {
-    const owner = people.byId(library.ownerUserId);
-    return owner?.nickname ? { ...library, ownerName: owner.nickname } : library;
-  }), [libraries, people]);
+  const named = useMemo(
+    () =>
+      libraries?.map((library) => {
+        const owner = people.byId(library.ownerUserId);
+        return owner?.nickname ? { ...library, ownerName: owner.nickname } : library;
+      }),
+    [libraries, people],
+  );
   const caller: Caller = useMemo(() => ({ userId, isAdmin, libraries: named ?? [] }), [userId, isAdmin, named]);
   const [rowHeight, setRowHeight] = useStored("a-nas.photos.rowHeight", defaultRowHeight);
   const [info, setInfo] = useStored("a-nas.photos.info", true);
@@ -163,22 +288,40 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       setPlaceState((current) => {
         const library = current && placeLibrary(current);
         if (current && (!library || items.some((item) => item.id === library))) return current;
-        const home = items.find((item) => item.kind === "private" && item.ownerUserId === userId && !item.viewing) ?? items[0];
+        const home =
+          items.find((item) => item.kind === "private" && item.ownerUserId === userId && !item.viewing) ?? items[0];
         return home ? { kind: "timeline", libraryId: home.id } : undefined;
       });
     } catch (caught) {
-      setFailure(isUnavailable(caught) ? "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册。恢复后点击重试。" : messageOf(caught));
+      setFailure(
+        isUnavailable(caught)
+          ? "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册。恢复后点击重试。"
+          : messageOf(caught),
+      );
     }
   }, [userId]);
-  useEffect(() => { void loadLibraries(); }, [loadLibraries]);
+  useEffect(() => {
+    void loadLibraries();
+  }, [loadLibraries]);
 
   // Local AI progress; polling it does not count as using the library.
   useEffect(() => {
     let live = true;
-    const poll = () => getAIStatus().then((value) => { if (live) setAI(value); }, () => { if (live) setAI(undefined); });
+    const poll = () =>
+      getAIStatus().then(
+        (value) => {
+          if (live) setAI(value);
+        },
+        () => {
+          if (live) setAI(undefined);
+        },
+      );
     void poll();
     const timer = window.setInterval(poll, aiPollInterval);
-    return () => { live = false; window.clearInterval(timer); };
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   // The window's width decides whether the sidebar docks; the toolbar's
@@ -205,27 +348,43 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   // How AI 聚合 looked when it opened a group; kept while that group is open
   // so that going back returns to the same spot.
   const aiHomeReturn = useRef<AIHomeSnapshot | undefined>(undefined);
-  const setPlace = useCallback((next: Place) => {
-    setDrawer(false);
-    if (placeKey(next) === (placeRef.current && placeKey(placeRef.current))) return;
-    const leaving = placeRef.current;
-    if (!(leaving && (leaving.kind === "cluster" || leaving.kind === "tag" || leaving.kind === "person") && next.kind === "search" && !next.query)) aiHomeReturn.current = undefined;
-    setPlaceState(next);
-    selection.clear();
-    setHidden(new Set());
-    setCount(undefined);
-    setClosest(undefined);
-    setFound(undefined);
-    setSimilarReady(undefined);
-    setImageResult(next.kind === "image" && isEncoded(next.query) ? {} : undefined);
-    setQuery(next.kind === "search" ? next.query : "");
-  }, [selection.clear]);
+  const setPlace = useCallback(
+    (next: Place) => {
+      setDrawer(false);
+      if (placeKey(next) === (placeRef.current && placeKey(placeRef.current))) return;
+      const leaving = placeRef.current;
+      if (
+        !(
+          leaving &&
+          (leaving.kind === "cluster" || leaving.kind === "tag" || leaving.kind === "person") &&
+          next.kind === "search" &&
+          !next.query
+        )
+      )
+        aiHomeReturn.current = undefined;
+      setPlaceState(next);
+      selection.clear();
+      setHidden(new Set());
+      setCount(undefined);
+      setClosest(undefined);
+      setFound(undefined);
+      setSimilarReady(undefined);
+      setImageResult(next.kind === "image" && isEncoded(next.query) ? {} : undefined);
+      setQuery(next.kind === "search" ? next.query : "");
+    },
+    [selection.clear],
+  );
 
   const libraryId = place ? placeLibrary(place) : "";
   // AI search keeps the sidebar on the library it came from.
   const lastLibrary = useRef("");
   if (libraryId) lastLibrary.current = libraryId;
-  const sideLibrary = libraryOf(caller, libraryId) ?? (place && "viewing" in place && place.viewing ? libraryOf(caller, place.viewing) : libraryOf(caller, lastLibrary.current)) ?? mine;
+  const sideLibrary =
+    libraryOf(caller, libraryId) ??
+    (place && "viewing" in place && place.viewing
+      ? libraryOf(caller, place.viewing)
+      : libraryOf(caller, lastLibrary.current)) ??
+    mine;
   const viewingLibrary = sideLibrary?.viewing ? sideLibrary : undefined;
   const readOnlyPlace = Boolean(viewingLibrary);
 
@@ -235,7 +394,8 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     if (place.kind === "album") {
       const library = libraryOf(caller, place.libraryId);
       if (!library || library.viewing) return undefined;
-      if (canEditAlbum(caller, place.album)) return { libraryId: place.libraryId, albumId: place.album.id, label: `相册“${place.album.name}”` };
+      if (canEditAlbum(caller, place.album))
+        return { libraryId: place.libraryId, albumId: place.album.id, label: `相册“${place.album.name}”` };
       return { libraryId: place.libraryId, label: libraryName(caller, library) };
     }
     const library = libraryOf(caller, placeLibrary(place)) ?? (viewingLibrary ? undefined : mine);
@@ -243,35 +403,63 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     return { libraryId: library.id, label: libraryName(caller, library) };
   }, [place, caller, mine, viewingLibrary]);
 
-  const uploads = useUploads(useCallback(({ targets, photos, videos, completed, liveStills }: UploadSummary) => {
-    setRefreshKey((value) => value + 1);
-    setAlbumsKey((value) => value + 1);
-    const kept = photos && videos ? "照片和视频" : videos ? "视频" : "照片";
-    const done = [
-      photos || videos ? `${kept}已保存到${targets.map((target) => target.label).join("、")}` : "",
-      completed ? `已为 ${completed} 张照片补上实况视频` : "",
-    ].filter(Boolean).join("；");
-    // A Mac often hands over a Live Photo's still alone; say so, and how to
-    // send the rest.
-    if (liveStills) toast({ text: `${done}；其中 ${liveStills} 张实况照片只收到了静态画面`, details: [liveVideoHint], detailsLabel: "怎么补上" });
-    else if (done) toast({ text: done });
-  }, [toast]));
+  const uploads = useUploads(
+    useCallback(
+      ({ targets, photos, videos, completed, liveStills }: UploadSummary) => {
+        setRefreshKey((value) => value + 1);
+        setAlbumsKey((value) => value + 1);
+        const kept = photos && videos ? "照片和视频" : videos ? "视频" : "照片";
+        const done = [
+          photos || videos ? `${kept}已保存到${targets.map((target) => target.label).join("、")}` : "",
+          completed ? `已为 ${completed} 张照片补上实况视频` : "",
+        ]
+          .filter(Boolean)
+          .join("；");
+        // A Mac often hands over a Live Photo's still alone; say so, and how to
+        // send the rest.
+        if (liveStills)
+          toast({
+            text: `${done}；其中 ${liveStills} 张实况照片只收到了静态画面`,
+            details: [liveVideoHint],
+            detailsLabel: "怎么补上",
+          });
+        else if (done) toast({ text: done });
+      },
+      [toast],
+    ),
+  );
   // Uploading photos and videos show in the timeline at once.
-  const pending = useMemo(() => place?.kind === "timeline" ? uploads.items.filter((item) => item.target.libraryId === place.libraryId && !item.target.albumId && !item.rejected) : [], [uploads.items, place]);
+  const pending = useMemo(
+    () =>
+      place?.kind === "timeline"
+        ? uploads.items.filter(
+            (item) => item.target.libraryId === place.libraryId && !item.target.albumId && !item.rejected,
+          )
+        : [],
+    [uploads.items, place],
+  );
   // Previews of finished uploads stay until the timeline shows the photos.
-  useEffect(() => { if (place?.kind !== "timeline" && uploads.items.some((item) => item.state === "done")) uploads.prune(); }, [uploads.items, place]);
+  useEffect(() => {
+    if (place?.kind !== "timeline" && uploads.items.some((item) => item.state === "done")) uploads.prune();
+  }, [uploads.items, place]);
   const pickFiles = () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,video/*,.mov,.mp4,.m4v,.3gp,.mkv,.webm,.avi,.mts,.m2ts";
+    input.accept =
+      "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,video/*,.mov,.mp4,.m4v,.3gp,.mkv,.webm,.avi,.mts,.m2ts";
     input.multiple = true;
-    input.onchange = () => { if (uploadTarget && input.files?.length) uploads.add(Array.from(input.files), uploadTarget); };
+    input.onchange = () => {
+      if (uploadTarget && input.files?.length) uploads.add(Array.from(input.files), uploadTarget);
+    };
     input.click();
   };
 
   // ---- Actions on photos ----
   const byId = useMemo(() => new Map(viewAssets.map((asset) => [asset.id, asset])), [viewAssets]);
-  const chosen = useMemo(() => [...selection.selected].map((id) => byId.get(id)).filter((asset): asset is PhotoAsset => Boolean(asset)), [selection.selected, byId]);
+  const chosen = useMemo(
+    () => [...selection.selected].map((id) => byId.get(id)).filter((asset): asset is PhotoAsset => Boolean(asset)),
+    [selection.selected, byId],
+  );
   const hide = (ids: string[]) => setHidden((current) => new Set([...current, ...ids]));
   const unhide = (ids: string[]) => setHidden((current) => new Set([...current].filter((id) => !ids.includes(id))));
 
@@ -289,7 +477,8 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const restore = async (assets: PhotoAsset[], fromTrash = false) => {
     const result = await batch("正在恢复", assets, (asset) => restorePhoto(asset.id));
     const ids = result.succeeded.map((entry) => entry.item.id);
-    if (fromTrash) hide(ids); else unhide(ids);
+    if (fromTrash) hide(ids);
+    else unhide(ids);
     report(`已恢复 ${assetsLabel(result.succeeded.map((entry) => entry.item))}`, result.details);
   };
   const trash = async (assets: PhotoAsset[]) => {
@@ -298,7 +487,11 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     hide(moved.map((asset) => asset.id));
     selection.clear();
     setAlbumsKey((value) => value + 1);
-    report(`已移到回收站：${moved.length} 张`, result.details, moved.length ? { action: { label: "撤销", run: () => void restore(moved) } } : undefined);
+    report(
+      `已移到回收站：${moved.length} 张`,
+      result.details,
+      moved.length ? { action: { label: "撤销", run: () => void restore(moved) } } : undefined,
+    );
   };
   const addTo = async (album: PhotoAlbum, assets: PhotoAsset[]) => {
     setPicker(undefined);
@@ -307,17 +500,30 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     selection.clear();
     setAlbumsKey((value) => value + 1);
     if (place?.kind === "album" && place.album.id === album.id) setRefreshKey((value) => value + 1);
-    report(`已加入相册“${album.name}”${copied ? `，其中 ${copied} 张已复制到${libraryName(caller, libraryOf(caller, album.libraryId))}` : ""}`, result.details,
-      place?.kind === "album" && place.album.id === album.id ? undefined : { action: { label: "查看", run: () => setPlace({ kind: "album", libraryId: album.libraryId, album }) } });
+    report(
+      `已加入相册“${album.name}”${copied ? `，其中 ${copied} 张已复制到${libraryName(caller, libraryOf(caller, album.libraryId))}` : ""}`,
+      result.details,
+      place?.kind === "album" && place.album.id === album.id
+        ? undefined
+        : { action: { label: "查看", run: () => setPlace({ kind: "album", libraryId: album.libraryId, album }) } },
+    );
   };
   const createAndAdd = async (library: PhotoLibrary, name: string, assets: PhotoAsset[]) => {
-    try { await addTo(await createAlbum(library.id, name), assets); }
-    catch (caught) { setPicker(undefined); reportError(messageOf(caught)); }
+    try {
+      await addTo(await createAlbum(library.id, name), assets);
+    } catch (caught) {
+      setPicker(undefined);
+      reportError(messageOf(caught));
+    }
   };
   const copyTo = async (library: PhotoLibrary, assets: PhotoAsset[]) => {
-    const result = await batch(`正在复制到${libraryName(caller, library)}`, assets, (asset) => copyPhoto(asset.id, library.id));
+    const result = await batch(`正在复制到${libraryName(caller, library)}`, assets, (asset) =>
+      copyPhoto(asset.id, library.id),
+    );
     selection.clear();
-    report(`已复制 ${result.succeeded.length} 张到${libraryName(caller, library)}`, result.details, { action: { label: "查看", run: () => setPlace({ kind: "timeline", libraryId: library.id }) } });
+    report(`已复制 ${result.succeeded.length} 张到${libraryName(caller, library)}`, result.details, {
+      action: { label: "查看", run: () => setPlace({ kind: "timeline", libraryId: library.id }) },
+    });
   };
   const removeFromCurrentAlbum = async (assets: PhotoAsset[]) => {
     if (place?.kind !== "album") return;
@@ -328,7 +534,14 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     selection.clear();
     setAlbumsKey((value) => value + 1);
     report(`已从“${album.name}”移出 ${removed.length} 张，照片仍在图库中`, result.details, {
-      action: { label: "撤销", run: () => void runEach(removed, (asset) => addToAlbum(album.id, asset.id)).then(() => { unhide(removed.map((asset) => asset.id)); setAlbumsKey((value) => value + 1); }) },
+      action: {
+        label: "撤销",
+        run: () =>
+          void runEach(removed, (asset) => addToAlbum(album.id, asset.id)).then(() => {
+            unhide(removed.map((asset) => asset.id));
+            setAlbumsKey((value) => value + 1);
+          }),
+      },
     });
   };
   // A wrong photo leaves the AI cluster for good; it stays in the library.
@@ -344,7 +557,10 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const takeOutOfPerson = async (assets: PhotoAsset[]) => {
     if (place?.kind !== "person") return;
     const person = place.person;
-    const result = await batch("正在移出", assets, async (asset) => { await removeFromPerson(person.id, asset.id); return asset; });
+    const result = await batch("正在移出", assets, async (asset) => {
+      await removeFromPerson(person.id, asset.id);
+      return asset;
+    });
     hide(result.succeeded.map((entry) => entry.item.id));
     selection.clear();
     report(`已从“${personName(person)}”移出 ${result.succeeded.length} 张，照片仍在图库中`, result.details);
@@ -353,15 +569,21 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   // Changing a person shows the change at once and keeps the place.
   const changePerson = async (change: { name?: string; hidden?: boolean }) => {
     if (place?.kind !== "person") return;
-    try { setPlaceState({ ...place, person: await updatePerson(place.person.id, change) }); }
-    catch (caught) { reportError(messageOf(caught)); }
+    try {
+      setPlaceState({ ...place, person: await updatePerson(place.person.id, change) });
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const namePerson = async () => {
     if (place?.kind !== "person") return;
     const person = place.person;
     const name = await dialogs.prompt({
       title: person.name ? `给“${person.name}”改名` : person.kind === "person" ? "这是谁？" : "它叫什么？",
-      label: "名字", value: person.name, confirm: "保存", maxLength: 40,
+      label: "名字",
+      value: person.name,
+      confirm: "保存",
+      maxLength: 40,
     });
     if (name === undefined || name === person.name) return;
     await changePerson({ name });
@@ -375,23 +597,37 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       const merged = await mergePeople(from.id, into.id);
       setPlace({ kind: "person", viewing: place.viewing, person: merged });
       toast({ text: `已把${from.name ? `“${from.name}”` : "这些照片"}合并到“${personName(merged)}”` });
-    } catch (caught) { reportError(messageOf(caught)); }
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const [peopleSettings, setPeopleSettings] = useState(false);
   // Off clears what was recognised, so it asks first; on starts at once.
   const setPeople = async (library: PhotoLibrary, on: boolean) => {
     const name = libraryName(caller, library);
-    if (!on && !await dialogs.confirm({
-      title: `关闭${name}的人物与宠物？`,
-      message: "这个图库里识别出的人脸与宠物会被删除，本地 AI 也不再识别新照片。起的名字和做过的更正会保留，重新开启后随识别结果回来。",
-      confirm: "关闭并删除", danger: true,
-    })) return;
+    if (
+      !on &&
+      !(await dialogs.confirm({
+        title: `关闭${name}的人物与宠物？`,
+        message:
+          "这个图库里识别出的人脸与宠物会被删除，本地 AI 也不再识别新照片。起的名字和做过的更正会保留，重新开启后随识别结果回来。",
+        confirm: "关闭并删除",
+        danger: true,
+      }))
+    )
+      return;
     try {
       const changed = await setLibraryPeople(library.id, on);
-      setLibraries((items) => items?.map((item) => item.id === changed.id ? { ...item, people: changed.people, canSetPeople: changed.canSetPeople } : item));
+      setLibraries((items) =>
+        items?.map((item) =>
+          item.id === changed.id ? { ...item, people: changed.people, canSetPeople: changed.canSetPeople } : item,
+        ),
+      );
       setRefreshKey((key) => key + 1);
       toast({ text: on ? `已开启${name}的人物与宠物，本地 AI 会在空闲时重新识别` : `已关闭${name}的人物与宠物` });
-    } catch (caught) { reportError(messageOf(caught)); }
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const openPersonById = async (personId: string) => {
     if (!place) return;
@@ -409,18 +645,40 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     hide(untagged.map((asset) => asset.id));
     selection.clear();
     report(`已从 ${untagged.length} 张照片上去掉“${name}”`, result.details, {
-      action: { label: "撤销", run: () => void runEach(untagged, (asset) => addPhotoTag(asset.id, name)).then(() => unhide(untagged.map((asset) => asset.id))) },
+      action: {
+        label: "撤销",
+        run: () =>
+          void runEach(untagged, (asset) => addPhotoTag(asset.id, name)).then(() =>
+            unhide(untagged.map((asset) => asset.id)),
+          ),
+      },
     });
   };
   const purge = async (assets: PhotoAsset[]) => {
-    if (!await dialogs.confirm({ title: `永久删除 ${assetsLabel(assets)}？`, message: "永久删除后无法恢复，照片会从所有相册中移除。", confirm: "永久删除", danger: true })) return;
+    if (
+      !(await dialogs.confirm({
+        title: `永久删除 ${assetsLabel(assets)}？`,
+        message: "永久删除后无法恢复，照片会从所有相册中移除。",
+        confirm: "永久删除",
+        danger: true,
+      }))
+    )
+      return;
     const result = await batch("正在永久删除", assets, (asset) => purgePhoto(asset.id));
     hide(result.succeeded.map((entry) => entry.item.id));
     selection.clear();
     report(`已永久删除 ${result.succeeded.length} 张`, result.details);
   };
   const download = async (assets: PhotoAsset[]) => {
-    if (assets.length > 10 && !await dialogs.confirm({ title: `下载 ${assets.length} 张原图？`, message: "浏览器会逐张下载，并可能询问是否允许下载多个文件。", confirm: "下载" })) return;
+    if (
+      assets.length > 10 &&
+      !(await dialogs.confirm({
+        title: `下载 ${assets.length} 张原图？`,
+        message: "浏览器会逐张下载，并可能询问是否允许下载多个文件。",
+        confirm: "下载",
+      }))
+    )
+      return;
     for (const [position, asset] of assets.entries()) {
       const link = document.createElement("a");
       link.href = downloadURL(asset.id);
@@ -432,77 +690,158 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     }
   };
   const renameOne = async (asset: PhotoAsset) => {
-    const name = await dialogs.prompt({ title: "重命名照片", label: "名称", value: asset.name, confirm: "重命名", maxLength: 255 });
+    const name = await dialogs.prompt({
+      title: "重命名照片",
+      label: "名称",
+      value: asset.name,
+      confirm: "重命名",
+      maxLength: 255,
+    });
     if (!name || name === asset.name) return undefined;
-    try { const value = await renamePhoto(asset.id, name); renamed.current = true; return value; }
-    catch (caught) { reportError(messageOf(caught)); return undefined; }
+    try {
+      const value = await renamePhoto(asset.id, name);
+      renamed.current = true;
+      return value;
+    } catch (caught) {
+      reportError(messageOf(caught));
+      return undefined;
+    }
   };
   const newAlbum = async (library = sideLibrary) => {
     if (!library || library.viewing) return;
-    const name = await dialogs.prompt({ title: `在${libraryName(caller, library)}新建相册`, label: "相册名称", confirm: "创建", maxLength: 100 });
+    const name = await dialogs.prompt({
+      title: `在${libraryName(caller, library)}新建相册`,
+      label: "相册名称",
+      confirm: "创建",
+      maxLength: 100,
+    });
     if (!name) return;
     try {
       const album = await createAlbum(library.id, name);
       setAlbumsKey((value) => value + 1);
       setPlace({ kind: "album", libraryId: library.id, album });
-    } catch (caught) { reportError(messageOf(caught)); }
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const renameCurrentAlbum = async () => {
     if (place?.kind !== "album") return;
-    const name = await dialogs.prompt({ title: "重命名相册", label: "相册名称", value: place.album.name, confirm: "重命名", maxLength: 100 });
+    const name = await dialogs.prompt({
+      title: "重命名相册",
+      label: "相册名称",
+      value: place.album.name,
+      confirm: "重命名",
+      maxLength: 100,
+    });
     if (!name || name === place.album.name) return;
     try {
       const album = await renameAlbum(place.album.id, name);
       setPlaceState({ ...place, album });
       setAlbumsKey((value) => value + 1);
-    } catch (caught) { reportError(messageOf(caught)); }
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const deleteCurrentAlbum = async () => {
     if (place?.kind !== "album") return;
-    if (!await dialogs.confirm({ title: `删除相册“${place.album.name}”？`, message: "只删除这个分组，其中的照片会留在图库和其他相册里。", confirm: "删除相册", danger: true })) return;
+    if (
+      !(await dialogs.confirm({
+        title: `删除相册“${place.album.name}”？`,
+        message: "只删除这个分组，其中的照片会留在图库和其他相册里。",
+        confirm: "删除相册",
+        danger: true,
+      }))
+    )
+      return;
     try {
       await deleteAlbum(place.album.id);
       setAlbumsKey((value) => value + 1);
       setPlace({ kind: "albums", libraryId: place.libraryId });
       toast({ text: `已删除相册“${place.album.name}”` });
-    } catch (caught) { reportError(messageOf(caught)); }
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const emptyTrash = async () => {
     if (place?.kind !== "trash") return;
-    if (!await dialogs.confirm({ title: "清空回收站？", message: "回收站中你可以清除的照片都会被永久删除，无法恢复。", confirm: "清空回收站", danger: true })) return;
+    if (
+      !(await dialogs.confirm({
+        title: "清空回收站？",
+        message: "回收站中你可以清除的照片都会被永久删除，无法恢复。",
+        confirm: "清空回收站",
+        danger: true,
+      }))
+    )
+      return;
     try {
       const purged = await emptyPhotoTrash(place.libraryId);
       setRefreshKey((value) => value + 1);
       toast({ text: `已永久删除 ${purged} 张照片` });
-    } catch (caught) { reportError(messageOf(caught)); }
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
   const openAlbumById = async (album: Pick<PhotoAlbum, "id" | "name" | "libraryId">) => {
     const found = (await listAlbums(album.libraryId).catch(() => [])).find((item) => item.id === album.id);
     setViewer(undefined);
-    setPlace({ kind: "album", libraryId: album.libraryId, album: found ?? { ...album, createdBy: "", createdAt: "", photos: 0 } });
+    setPlace({
+      kind: "album",
+      libraryId: album.libraryId,
+      album: found ?? { ...album, createdBy: "", createdAt: "", photos: 0 },
+    });
   };
   const stopViewing = async () => {
     if (!viewingLibrary?.viewing) return;
-    try { await endViewing(viewingLibrary.viewing.grantId); await loadLibraries(); if (mine) setPlace({ kind: "timeline", libraryId: mine.id }); }
-    catch (caught) { reportError(messageOf(caught)); }
+    try {
+      await endViewing(viewingLibrary.viewing.grantId);
+      await loadLibraries();
+      if (mine) setPlace({ kind: "timeline", libraryId: mine.id });
+    } catch (caught) {
+      reportError(messageOf(caught));
+    }
   };
 
   // Photos dragged onto the sidebar.
-  const assetsFor = (ids: string[]) => ids.map((id) => byId.get(id)).filter((asset): asset is PhotoAsset => Boolean(asset));
-  const dropOnAlbum = (album: PhotoAlbum, ids: string[]) => { const assets = assetsFor(ids); if (assets.length) void addTo(album, assets); };
+  const assetsFor = (ids: string[]) =>
+    ids.map((id) => byId.get(id)).filter((asset): asset is PhotoAsset => Boolean(asset));
+  const dropOnAlbum = (album: PhotoAlbum, ids: string[]) => {
+    const assets = assetsFor(ids);
+    if (assets.length) void addTo(album, assets);
+  };
   const dropOnLibrary = (library: PhotoLibrary, ids: string[]) => {
     const assets = assetsFor(ids).filter((asset) => asset.libraryId !== library.id);
     if (assets.length) void copyTo(library, assets);
   };
 
   // ---- Grid wiring ----
-  const openViewer = useCallback((asset: PhotoAsset, image: HTMLImageElement | null) => setViewer({ id: asset.id, origin: image?.getBoundingClientRect() }), []);
-  const zoomBy = useCallback((factor: number) => setRowHeight((value) => clampRowHeight(value * factor)), [setRowHeight]);
+  const openViewer = useCallback(
+    (asset: PhotoAsset, image: HTMLImageElement | null) =>
+      setViewer({ id: asset.id, origin: image?.getBoundingClientRect() }),
+    [],
+  );
+  const zoomBy = useCallback(
+    (factor: number) => setRowHeight((value) => clampRowHeight(value * factor)),
+    [setRowHeight],
+  );
   const grid: GridProps = {
-    rowHeight, onZoom: zoomBy, selected: selection.selected, onOpen: openViewer, onToggle: selection.toggle, onBeginSwipe: selection.beginSwipe,
-    onMarquee: selection.marquee, onGestureEnd: selection.endGesture, onBackgroundClick: selection.clear, onSelectGroup: selection.setGroup,
-    onDragIds: readOnlyPlace ? undefined : (asset) => selection.selected.has(asset.id) ? [...selection.selected] : [asset.id],
-    onAssets: setViewAssets, hidden, refreshKey, scroller, topInset,
+    rowHeight,
+    onZoom: zoomBy,
+    selected: selection.selected,
+    onOpen: openViewer,
+    onToggle: selection.toggle,
+    onBeginSwipe: selection.beginSwipe,
+    onMarquee: selection.marquee,
+    onGestureEnd: selection.endGesture,
+    onBackgroundClick: selection.clear,
+    onSelectGroup: selection.setGroup,
+    onDragIds: readOnlyPlace
+      ? undefined
+      : (asset) => (selection.selected.has(asset.id) ? [...selection.selected] : [asset.id]),
+    onAssets: setViewAssets,
+    hidden,
+    refreshKey,
+    scroller,
+    topInset,
   };
 
   const viewerIndex = viewer ? viewAssets.findIndex((asset) => asset.id === viewer.id) : -1;
@@ -518,17 +857,26 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     rename: renameOne,
     copy: (asset, library) => void copyTo(library, [asset]),
     openAlbum: (album) => void openAlbumById(album),
-    openTag: (tag) => { setViewer(undefined); if (place) setPlace({ kind: "tag", viewing: placeViewing(caller, place), tag: { name: tag, photos: 0, coverId: "" } }); },
+    openTag: (tag) => {
+      setViewer(undefined);
+      if (place)
+        setPlace({ kind: "tag", viewing: placeViewing(caller, place), tag: { name: tag, photos: 0, coverId: "" } });
+    },
     openPerson: (personId) => void openPersonById(personId),
     viewing: place ? placeViewing(caller, place) : "",
-    findSimilar: (asset) => { setViewer(undefined); if (place) setPlace({ kind: "similar", viewing: placeViewing(caller, place), asset, from: place }); },
+    findSimilar: (asset) => {
+      setViewer(undefined);
+      if (place) setPlace({ kind: "similar", viewing: placeViewing(caller, place), asset, from: place });
+    },
     slideshow: (asset) => setSlideshow(asset.id),
     attachLiveVideo: async (asset, file) => {
       try {
         const completed = await attachLiveVideo(asset.libraryId, file);
         setRefreshKey((value) => value + 1);
         toast({ text: completed.length > 1 ? `已为 ${completed.length} 张照片补上实况视频` : "已补上实况视频" });
-      } catch (caught) { reportError(messageOf(caught)); }
+      } catch (caught) {
+        reportError(messageOf(caught));
+      }
     },
     error: reportError,
   };
@@ -536,21 +884,42 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     if (!focus) return;
     let current = true;
     getPhoto(focus.assetId)
-      .then((asset) => { if (current) { setViewer(undefined); setFocused(asset); } })
-      .catch((reason) => { if (current) reportError(reason); })
+      .then((asset) => {
+        if (current) {
+          setViewer(undefined);
+          setFocused(asset);
+        }
+      })
+      .catch((reason) => {
+        if (current) reportError(reason);
+      })
       .finally(() => onFocusHandled?.());
-    return () => { current = false; };
+    return () => {
+      current = false;
+    };
     // Runs once per focus; the callbacks it uses do not decide what to show.
   }, [focus]);
   const focusedActions: ViewerActions = {
     ...viewerActions,
-    trash: (asset) => { setFocused(undefined); void trash([asset]); },
-    openTag: (tag) => { setFocused(undefined); viewerActions.openTag(tag); },
-    findSimilar: (asset) => { setFocused(undefined); viewerActions.findSimilar(asset); },
+    trash: (asset) => {
+      setFocused(undefined);
+      void trash([asset]);
+    },
+    openTag: (tag) => {
+      setFocused(undefined);
+      viewerActions.openTag(tag);
+    },
+    findSimilar: (asset) => {
+      setFocused(undefined);
+      viewerActions.findSimilar(asset);
+    },
   };
   const closeViewer = useCallback(() => {
     setViewer(undefined);
-    if (renamed.current) { renamed.current = false; setRefreshKey((value) => value + 1); }
+    if (renamed.current) {
+      renamed.current = false;
+      setRefreshKey((value) => value + 1);
+    }
     root.current?.focus();
   }, []);
 
@@ -573,17 +942,39 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (viewer || dialogs.open || picker || photoPicker) return;
     const typing = (event.target as HTMLElement).closest("input, textarea");
-    if (event.key === "Escape" && selection.selected.size && !typing) { event.preventDefault(); selection.clear(); }
-    else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !typing && place?.kind !== "albums" && !(place?.kind === "search" && !place.query)) {
+    if (event.key === "Escape" && selection.selected.size && !typing) {
+      event.preventDefault();
+      selection.clear();
+    } else if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === "a" &&
+      !typing &&
+      place?.kind !== "albums" &&
+      !(place?.kind === "search" && !place.query)
+    ) {
       event.preventDefault();
       selection.replace(viewAssets.map((asset) => asset.id));
-    } else if (event.key === "/" && !typing) { event.preventDefault(); searchInput.current?.focus(); }
+    } else if (event.key === "/" && !typing) {
+      event.preventDefault();
+      searchInput.current?.focus();
+    }
   };
   const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
-  const endDrag = () => { dragDepth.current = 0; setDragging(false); setImageOver(""); };
+  const endDrag = () => {
+    dragDepth.current = 0;
+    setDragging(false);
+    setImageOver("");
+  };
   const dropHandlers = {
-    onDragEnter: (event: DragEvent) => { if (carriesFiles(event)) { dragDepth.current++; setDragging(true); } },
-    onDragLeave: (event: DragEvent) => { if (carriesFiles(event) && --dragDepth.current <= 0) endDrag(); },
+    onDragEnter: (event: DragEvent) => {
+      if (carriesFiles(event)) {
+        dragDepth.current++;
+        setDragging(true);
+      }
+    },
+    onDragLeave: (event: DragEvent) => {
+      if (carriesFiles(event) && --dragDepth.current <= 0) endDrag();
+    },
     onDragOver: (event: DragEvent) => {
       if (!carriesFiles(event)) return;
       event.preventDefault();
@@ -604,11 +995,21 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   // place of the last one, so going back leaves the image search.
   const searchByImage = async (file: File, pasted = false) => {
     let query: ImageQuery;
-    try { query = await prepareImageQuery(file, pasted ? "粘贴的图片" : file.name || "图片"); }
-    catch { reportError("无法读取这张图片，换一张试试"); return; }
+    try {
+      query = await prepareImageQuery(file, pasted ? "粘贴的图片" : file.name || "图片");
+    } catch {
+      reportError("无法读取这张图片，换一张试试");
+      return;
+    }
     imageURLs.current.push(query.url);
     const from = placeRef.current;
-    if (from) setPlace({ kind: "image", viewing: placeViewing(caller, from), query, from: from.kind === "image" ? from.from : from });
+    if (from)
+      setPlace({
+        kind: "image",
+        viewing: placeViewing(caller, from),
+        query,
+        from: from.kind === "image" ? from.from : from,
+      });
   };
   const pickSearchImage = () => pickImage((file) => void searchByImage(file));
   // A search box takes an image dropped onto it or pasted into it.
@@ -620,7 +1021,9 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       event.dataTransfer.dropEffect = "copy";
       setImageOver(name);
     },
-    onDragLeave: (event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setImageOver(""); },
+    onDragLeave: (event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setImageOver("");
+    },
     onDrop: (event) => {
       if (!carriesFiles(event)) return;
       event.preventDefault();
@@ -641,8 +1044,23 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   if (!libraries || !place) {
     return (
       <div className="ph-app ph-app-state">
-        {failure ? <Empty icon={<CircleAlert />} title="相册暂时不可用" text={failure} action={<button type="button" className="ph-button" onClick={() => void loadLibraries()}><RefreshCw />重试</button>} />
-          : <div className="ph-loading"><span className="ph-spinner" /></div>}
+        {failure ? (
+          <Empty
+            icon={<CircleAlert />}
+            title="相册暂时不可用"
+            text={failure}
+            action={
+              <button type="button" className="ph-button" onClick={() => void loadLibraries()}>
+                <RefreshCw />
+                重试
+              </button>
+            }
+          />
+        ) : (
+          <div className="ph-loading">
+            <span className="ph-spinner" />
+          </div>
+        )}
       </div>
     );
   }
@@ -651,170 +1069,550 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   // Search results name their closest group while less related ones follow;
   // when the detector found the query's things, the status under the search
   // box names that group instead.
-  const searchDetail = (searchPeople?.length ? `${joinWords(searchPeople)}的照片 · ` : "") + (closest === undefined ? ""
-    : found && found.detected > 0 ? (count === undefined ? "" : `共 ${count} 张`)
-      : count !== undefined && closest >= count ? `找到 ${count} 张`
-        : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`);
+  const searchDetail =
+    (searchPeople?.length ? `${joinWords(searchPeople)}的照片 · ` : "") +
+    (closest === undefined
+      ? ""
+      : found && found.detected > 0
+        ? count === undefined
+          ? ""
+          : `共 ${count} 张`
+        : count !== undefined && closest >= count
+          ? `找到 ${count} 张`
+          : `最接近 ${closest} 张${count === undefined ? "" : ` · 共 ${count} 张`}`);
   const things = found ? joinWords(found.words) : "";
   // A narrowed search keeps its library only while that library is in scope.
-  const scope = place.kind === "search" && searchLibraries(caller, place.viewing).some((library) => library.id === searchLibrary) ? searchLibrary : "";
+  const scope =
+    place.kind === "search" && searchLibraries(caller, place.viewing).some((library) => library.id === searchLibrary)
+      ? searchLibrary
+      : "";
   const title = (() => {
     switch (place.kind) {
-      case "timeline": return { text: libraryName(caller, sideLibrary), detail: count === undefined ? "" : countLabel(count, videoCount, " · ") };
-      case "albums": return { text: "相册", detail: libraryName(caller, sideLibrary) };
-      case "album": return { text: place.album.name, detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`, back: { kind: "albums", libraryId: place.libraryId } as Place };
-      case "trash": return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
-      case "search": return place.query
-        ? { text: "AI 聚合", detail: [searchDetail, scopeText(caller, place.viewing, scope)].filter(Boolean).join(" · "), back: { ...place, query: "" } as Place }
-        : { text: "AI 聚合", detail: scopeText(caller, place.viewing, "") };
-      case "cluster": return { text: place.label.name, detail: `${count ?? place.label.photos} 张 · 本地 AI 聚合`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
+      case "timeline":
+        return {
+          text: libraryName(caller, sideLibrary),
+          detail: count === undefined ? "" : countLabel(count, videoCount, " · "),
+        };
+      case "albums":
+        return { text: "相册", detail: libraryName(caller, sideLibrary) };
+      case "album":
+        return {
+          text: place.album.name,
+          detail: `${count ?? place.album.photos} 张 · ${libraryName(caller, sideLibrary)}`,
+          back: { kind: "albums", libraryId: place.libraryId } as Place,
+        };
+      case "trash":
+        return { text: "回收站", detail: "照片保留 15 天后自动永久删除" };
+      case "search":
+        return place.query
+          ? {
+              text: "AI 聚合",
+              detail: [searchDetail, scopeText(caller, place.viewing, scope)].filter(Boolean).join(" · "),
+              back: { ...place, query: "" } as Place,
+            }
+          : { text: "AI 聚合", detail: scopeText(caller, place.viewing, "") };
+      case "cluster":
+        return {
+          text: place.label.name,
+          detail: `${count ?? place.label.photos} 张 · 本地 AI 聚合`,
+          back: { kind: "search", viewing: place.viewing, query: "" } as Place,
+        };
       case "tag": {
         const photos = count ?? (place.tag.photos || undefined);
-        return { text: place.tag.name, detail: photos === undefined ? "你的标签" : `${photos} 张 · 你的标签`, back: { kind: "search", viewing: place.viewing, query: "" } as Place };
+        return {
+          text: place.tag.name,
+          detail: photos === undefined ? "你的标签" : `${photos} 张 · 你的标签`,
+          back: { kind: "search", viewing: place.viewing, query: "" } as Place,
+        };
       }
-      case "person": return {
-        text: personName(place.person),
-        detail: `${count ?? place.person.photos} 张${place.person.hidden ? " · 已隐藏" : ""} · ${libraryName(caller, libraryOf(caller, place.person.libraryId))}`,
-        back: { kind: "search", viewing: place.viewing, query: "" } as Place,
-      };
-      case "similar": return { text: "相似的照片", detail: count === undefined ? "" : `${count} 张`, back: place.from };
-      case "image": return { text: "以图搜图", detail: count === undefined || imageResult?.error ? "" : `${count} 张`, back: place.from };
+      case "person":
+        return {
+          text: personName(place.person),
+          detail: `${count ?? place.person.photos} 张${place.person.hidden ? " · 已隐藏" : ""} · ${libraryName(caller, libraryOf(caller, place.person.libraryId))}`,
+          back: { kind: "search", viewing: place.viewing, query: "" } as Place,
+        };
+      case "similar":
+        return { text: "相似的照片", detail: count === undefined ? "" : `${count} 张`, back: place.from };
+      case "image":
+        return {
+          text: "以图搜图",
+          detail: count === undefined || imageResult?.error ? "" : `${count} 张`,
+          back: place.from,
+        };
     }
   })();
-  const photoGrid = place.kind === "timeline" || place.kind === "album" || place.kind === "trash" || place.kind === "cluster" || place.kind === "tag" || place.kind === "person"
-    || place.kind === "similar" || place.kind === "image"
-    || (place.kind === "search" && Boolean(place.query));
+  const photoGrid =
+    place.kind === "timeline" ||
+    place.kind === "album" ||
+    place.kind === "trash" ||
+    place.kind === "cluster" ||
+    place.kind === "tag" ||
+    place.kind === "person" ||
+    place.kind === "similar" ||
+    place.kind === "image" ||
+    (place.kind === "search" && Boolean(place.query));
   // On AI search the search box sits under the toolbar.
-  const subbar: ReactNode = place.kind === "search" && place.query ? (
-    <div className="ph-subbar ph-search-bar">
-      <form className={`ph-search wide${imageOver === "results" ? " image-drop" : ""}`} role="search" onSubmit={submitSearch} {...imageDrop("results")}>
-        <Search />
-        <input ref={searchInput} type="search" aria-label="搜索照片" placeholder={dragging ? "拖到这里，以图搜图" : "例如：海边的猫"} maxLength={200} value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setPlace({ ...place, query: "" }); } }} />
-        <ImageSearchButton onPick={pickSearchImage} />
-      </form>
-      <SearchScope caller={caller} viewing={place.viewing} value={scope} onChange={setSearchLibrary} />
-      {found && <ObjectsStatus objects={found} results={viewAssets.length > 0} />}
-    </div>
-  ) : place.kind === "similar" ? (
-    <div className="ph-subbar ph-similar-bar"><SimilarSource asset={place.asset} /></div>
-  ) : place.kind === "image" ? (
-    <div className="ph-subbar ph-similar-bar">
-      <ImageSource query={place.query} result={imageResult} over={imageOver === "source"} drop={imageDrop("source")} onReplace={pickSearchImage} />
-      {ai && ai.pending > 0 && imageResult && !imageResult.error && (
-        <span className="ph-found-note pending" title="本地 AI 会在设备空闲时继续整理，结果可能还会增加"><Hourglass />还有 {ai.pending} 张照片尚未整理完</span>
-      )}
-    </div>
-  ) : null;
+  const subbar: ReactNode =
+    place.kind === "search" && place.query ? (
+      <div className="ph-subbar ph-search-bar">
+        <form
+          className={`ph-search wide${imageOver === "results" ? " image-drop" : ""}`}
+          role="search"
+          onSubmit={submitSearch}
+          {...imageDrop("results")}
+        >
+          <Search />
+          <input
+            ref={searchInput}
+            type="search"
+            aria-label="搜索照片"
+            placeholder={dragging ? "拖到这里，以图搜图" : "例如：海边的猫"}
+            maxLength={200}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setPlace({ ...place, query: "" });
+              }
+            }}
+          />
+          <ImageSearchButton onPick={pickSearchImage} />
+        </form>
+        <SearchScope caller={caller} viewing={place.viewing} value={scope} onChange={setSearchLibrary} />
+        {found && <ObjectsStatus objects={found} results={viewAssets.length > 0} />}
+      </div>
+    ) : place.kind === "similar" ? (
+      <div className="ph-subbar ph-similar-bar">
+        <SimilarSource asset={place.asset} />
+      </div>
+    ) : place.kind === "image" ? (
+      <div className="ph-subbar ph-similar-bar">
+        <ImageSource
+          query={place.query}
+          result={imageResult}
+          over={imageOver === "source"}
+          drop={imageDrop("source")}
+          onReplace={pickSearchImage}
+        />
+        {ai && ai.pending > 0 && imageResult && !imageResult.error && (
+          <span className="ph-found-note pending" title="本地 AI 会在设备空闲时继续整理，结果可能还会增加">
+            <Hourglass />
+            还有 {ai.pending} 张照片尚未整理完
+          </span>
+        )}
+      </div>
+    ) : null;
 
   // ---- Selection bar ----
   const selectedAll = chosen.length > 0 && chosen.length === selection.selected.size;
   const allChangeable = selectedAll && chosen.every((asset) => canChange(caller, asset));
   const allWritable = selectedAll && chosen.every((asset) => !libraryOf(caller, asset.libraryId)?.viewing);
-  const copyTarget = !allWritable ? undefined
-    : chosen.every((asset) => asset.libraryId === mine?.id) ? shared
-      : chosen.every((asset) => asset.libraryId === shared?.id) ? mine : undefined;
+  const copyTarget = !allWritable
+    ? undefined
+    : chosen.every((asset) => asset.libraryId === mine?.id)
+      ? shared
+      : chosen.every((asset) => asset.libraryId === shared?.id)
+        ? mine
+        : undefined;
   // While photos are selected the toolbar turns into their actions.
   const selectionBar = selection.selected.size > 0 && (
     <div className="ph-toolbar-row ph-selection-row" role="toolbar" aria-label="所选照片的操作">
-      <button type="button" className="ph-icon-button" aria-label="取消选择" title="取消选择 (Esc)" onClick={selection.clear}><X /></button>
+      <button
+        type="button"
+        className="ph-icon-button"
+        aria-label="取消选择"
+        title="取消选择 (Esc)"
+        onClick={selection.clear}
+      >
+        <X />
+      </button>
       <strong>已选 {selection.selected.size} 张</strong>
       <span className="ph-selection-hint">按住 Shift 可连选，拖动勾选圈可批量选择</span>
-      {busy ? <span className="ph-selection-busy"><span className="ph-spinner" />{busy.label} {busy.done}/{busy.total}</span> : place.kind === "trash" ? (
+      {busy ? (
+        <span className="ph-selection-busy">
+          <span className="ph-spinner" />
+          {busy.label} {busy.done}/{busy.total}
+        </span>
+      ) : place.kind === "trash" ? (
         <>
-          <button type="button" onClick={() => void restore(chosen, true)}><RotateCcw /><span>恢复</span></button>
-          <button type="button" className="danger" onClick={() => void purge(chosen)}><Trash2 /><span>永久删除</span></button>
+          <button type="button" onClick={() => void restore(chosen, true)}>
+            <RotateCcw />
+            <span>恢复</span>
+          </button>
+          <button type="button" className="danger" onClick={() => void purge(chosen)}>
+            <Trash2 />
+            <span>永久删除</span>
+          </button>
         </>
       ) : (
         <>
-          {allWritable && <button type="button" onClick={() => setPicker(chosen)}><FolderPlus /><span>加入相册</span></button>}
-          {copyTarget && <button type="button" onClick={() => void copyTo(copyTarget, chosen)}><Copy /><span>复制到{copyTarget.kind === "shared" ? "共享" : "我的图库"}</span></button>}
-          <button type="button" onClick={() => void download(chosen)}><Download /><span>下载</span></button>
-          {place.kind === "album" && canEditAlbum(caller, place.album) && <button type="button" onClick={() => void removeFromCurrentAlbum(chosen)}><FolderMinus /><span>移出相册</span></button>}
-          {place.kind === "cluster" && allChangeable && <button type="button" title="AI 归错了？只把这些照片移出这一类" onClick={() => void takeOutOfCluster(chosen)}><CircleMinus /><span>不是{place.label.name}</span></button>}
-          {place.kind === "tag" && allChangeable && <button type="button" onClick={() => void untag(chosen)}><CircleMinus /><span>去掉标签</span></button>}
-          {place.kind === "person" && place.person.canChange && <button type="button" title="认错了？把这些照片移出，本地 AI 不会再放回来" onClick={() => void takeOutOfPerson(chosen)}><CircleMinus /><span>不是{place.person.name || "TA"}</span></button>}
-          {allChangeable && <button type="button" className="danger" onClick={() => void trash(chosen)}><Trash2 /><span>删除</span></button>}
+          {allWritable && (
+            <button type="button" onClick={() => setPicker(chosen)}>
+              <FolderPlus />
+              <span>加入相册</span>
+            </button>
+          )}
+          {copyTarget && (
+            <button type="button" onClick={() => void copyTo(copyTarget, chosen)}>
+              <Copy />
+              <span>复制到{copyTarget.kind === "shared" ? "共享" : "我的图库"}</span>
+            </button>
+          )}
+          <button type="button" onClick={() => void download(chosen)}>
+            <Download />
+            <span>下载</span>
+          </button>
+          {place.kind === "album" && canEditAlbum(caller, place.album) && (
+            <button type="button" onClick={() => void removeFromCurrentAlbum(chosen)}>
+              <FolderMinus />
+              <span>移出相册</span>
+            </button>
+          )}
+          {place.kind === "cluster" && allChangeable && (
+            <button
+              type="button"
+              title="AI 归错了？只把这些照片移出这一类"
+              onClick={() => void takeOutOfCluster(chosen)}
+            >
+              <CircleMinus />
+              <span>不是{place.label.name}</span>
+            </button>
+          )}
+          {place.kind === "tag" && allChangeable && (
+            <button type="button" onClick={() => void untag(chosen)}>
+              <CircleMinus />
+              <span>去掉标签</span>
+            </button>
+          )}
+          {place.kind === "person" && place.person.canChange && (
+            <button
+              type="button"
+              title="认错了？把这些照片移出，本地 AI 不会再放回来"
+              onClick={() => void takeOutOfPerson(chosen)}
+            >
+              <CircleMinus />
+              <span>不是{place.person.name || "TA"}</span>
+            </button>
+          )}
+          {allChangeable && (
+            <button type="button" className="danger" onClick={() => void trash(chosen)}>
+              <Trash2 />
+              <span>删除</span>
+            </button>
+          )}
         </>
       )}
     </div>
   );
 
   // ---- Main area ----
-  const emptyTimeline = readOnlyPlace
-    ? <Empty icon={<Images />} title="还没有照片" text="这个图库里还没有照片。" />
-    : <Empty icon={<ImagePlus />} title="把照片拖到这里" text="支持 JPEG、PNG、HEIC、安卓动态照片，以及 MP4、MOV 等常见视频。iPhone Live Photo 请选择未修改的照片与同名 MOV。本地 AI 在空闲时分析照片，不分析视频。" action={uploadTarget && <button type="button" className="ph-button primary" onClick={pickFiles}><ImagePlus />选择照片</button>} />;
+  const emptyTimeline = readOnlyPlace ? (
+    <Empty icon={<Images />} title="还没有照片" text="这个图库里还没有照片。" />
+  ) : (
+    <Empty
+      icon={<ImagePlus />}
+      title="把照片拖到这里"
+      text="支持 JPEG、PNG、HEIC、安卓动态照片，以及 MP4、MOV 等常见视频。iPhone Live Photo 请选择未修改的照片与同名 MOV。本地 AI 在空闲时分析照片，不分析视频。"
+      action={
+        uploadTarget && (
+          <button type="button" className="ph-button primary" onClick={pickFiles}>
+            <ImagePlus />
+            选择照片
+          </button>
+        )
+      }
+    />
+  );
   const main = (() => {
     switch (place.kind) {
       case "timeline":
-        return <Timeline key={place.libraryId} {...grid} libraryId={place.libraryId} pending={pending} onRetryUpload={uploads.retry} onReloaded={uploads.prune} onCount={(total, videos) => { setCount(total); setVideoCount(videos ?? 0); }} onError={reportError} empty={emptyTimeline} />;
+        return (
+          <Timeline
+            key={place.libraryId}
+            {...grid}
+            libraryId={place.libraryId}
+            pending={pending}
+            onRetryUpload={uploads.retry}
+            onReloaded={uploads.prune}
+            onCount={(total, videos) => {
+              setCount(total);
+              setVideoCount(videos ?? 0);
+            }}
+            onError={reportError}
+            empty={emptyTimeline}
+          />
+        );
       case "album":
-        return <AssetGrid key={place.album.id} {...grid} listKey={place.album.id} load={(cursor) => listAlbumPhotos(place.album.id, cursor)} onCount={setCount} onError={reportError}
-          empty={<Empty icon={<Images />} title="相册是空的" text="把照片从时间线拖到侧栏的这个相册，或者点“添加照片”。" action={canEditAlbum(caller, place.album) && <button type="button" className="ph-button primary" onClick={() => setPhotoPicker(place.album)}><ImagePlus />添加照片</button>} />} />;
+        return (
+          <AssetGrid
+            key={place.album.id}
+            {...grid}
+            listKey={place.album.id}
+            load={(cursor) => listAlbumPhotos(place.album.id, cursor)}
+            onCount={setCount}
+            onError={reportError}
+            empty={
+              <Empty
+                icon={<Images />}
+                title="相册是空的"
+                text="把照片从时间线拖到侧栏的这个相册，或者点“添加照片”。"
+                action={
+                  canEditAlbum(caller, place.album) && (
+                    <button type="button" className="ph-button primary" onClick={() => setPhotoPicker(place.album)}>
+                      <ImagePlus />
+                      添加照片
+                    </button>
+                  )
+                }
+              />
+            }
+          />
+        );
       case "trash":
-        return <AssetGrid key={`trash:${place.libraryId}`} {...grid} onOpen={(asset) => selection.toggle(asset, false)} onDragIds={undefined} listKey={`trash:${place.libraryId}`}
-          load={async () => ({ items: await listPhotoTrash(place.libraryId) })} onCount={setCount} onError={reportError}
-          badge={(asset) => asset.trash && <span className="ph-tile-days">{daysLeft(asset.trash.purgeAfter)} 天后删除</span>}
-          empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />} />;
+        return (
+          <AssetGrid
+            key={`trash:${place.libraryId}`}
+            {...grid}
+            onOpen={(asset) => selection.toggle(asset, false)}
+            onDragIds={undefined}
+            listKey={`trash:${place.libraryId}`}
+            load={async () => ({ items: await listPhotoTrash(place.libraryId) })}
+            onCount={setCount}
+            onError={reportError}
+            badge={(asset) =>
+              asset.trash && <span className="ph-tile-days">{daysLeft(asset.trash.purgeAfter)} 天后删除</span>
+            }
+            empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />}
+          />
+        );
       case "search":
         if (!place.query) {
-          return <AIHome viewing={place.viewing} userName={userName} snapshot={aiHomeReturn.current} refreshKey={refreshKey} topInset={topInset} ai={ai} recent={recent}
-            onSearch={startSearch} onForget={() => setRecent([])}
-            image={{ pick: pickSearchImage, over: imageOver === "hero", dragging, drop: imageDrop("hero") }}
-            onOpenCluster={(label, snapshot) => { setPlace({ kind: "cluster", viewing: place.viewing, label }); aiHomeReturn.current = snapshot; }}
-            onOpenTag={(tag, snapshot) => { setPlace({ kind: "tag", viewing: place.viewing, tag }); aiHomeReturn.current = snapshot; }}
-            onOpenPerson={(person, snapshot) => { setPlace({ kind: "person", viewing: place.viewing, person }); aiHomeReturn.current = snapshot; }}
-            onPeopleSettings={() => setPeopleSettings(true)} onError={reportError} />;
+          return (
+            <AIHome
+              viewing={place.viewing}
+              userName={userName}
+              snapshot={aiHomeReturn.current}
+              refreshKey={refreshKey}
+              topInset={topInset}
+              ai={ai}
+              recent={recent}
+              onSearch={startSearch}
+              onForget={() => setRecent([])}
+              image={{ pick: pickSearchImage, over: imageOver === "hero", dragging, drop: imageDrop("hero") }}
+              onOpenCluster={(label, snapshot) => {
+                setPlace({ kind: "cluster", viewing: place.viewing, label });
+                aiHomeReturn.current = snapshot;
+              }}
+              onOpenTag={(tag, snapshot) => {
+                setPlace({ kind: "tag", viewing: place.viewing, tag });
+                aiHomeReturn.current = snapshot;
+              }}
+              onOpenPerson={(person, snapshot) => {
+                setPlace({ kind: "person", viewing: place.viewing, person });
+                aiHomeReturn.current = snapshot;
+              }}
+              onPeopleSettings={() => setPeopleSettings(true)}
+              onError={reportError}
+            />
+          );
         }
-        return <AssetGrid key={`search:${place.query}:${scope}`} {...grid} listKey={`search:${place.viewing}:${place.query}:${scope}`} load={(cursor) => searchPhotos(place.query, place.viewing, cursor, scope)}
-          onPage={(page, first) => { if (first && "closest" in page) { setClosest((page as PhotoSearchPage).closest); setFound((page as PhotoSearchPage).objects); setSearchPeople((page as PhotoSearchPage).people); } }}
-          onCount={setCount} onError={reportError}
-          badge={scope ? undefined : sourceBadge}
-          split={closest === undefined ? undefined : found && found.detected > 0
-            ? {
-              at: closest, title: `没有检测到${things}的照片`,
-              text: found.undetected > 0 ? `按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有${things}`
-                : `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来`,
+        return (
+          <AssetGrid
+            key={`search:${place.query}:${scope}`}
+            {...grid}
+            listKey={`search:${place.viewing}:${place.query}:${scope}`}
+            load={(cursor) => searchPhotos(place.query, place.viewing, cursor, scope)}
+            onPage={(page, first) => {
+              if (first && "closest" in page) {
+                setClosest((page as PhotoSearchPage).closest);
+                setFound((page as PhotoSearchPage).objects);
+                setSearchPeople((page as PhotoSearchPage).people);
+              }
+            }}
+            onCount={setCount}
+            onError={reportError}
+            badge={scope ? undefined : sourceBadge}
+            split={
+              closest === undefined
+                ? undefined
+                : found && found.detected > 0
+                  ? {
+                      at: closest,
+                      title: `没有检测到${things}的照片`,
+                      text:
+                        found.undetected > 0
+                          ? `按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有${things}`
+                          : `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来`,
+                    }
+                  : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }
             }
-            : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }}
-          empty={found
-            ? <Empty icon={<SearchX />} title={`没有检测到${things}`} text={found.undetected > 0 ? `还有 ${found.undetected} 张照片尚未识别完，稍后再搜一次试试。` : "图库里的照片都已识别过。换个说法试试，比如“海边的日落”。"} />
-            : <Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />} />;
+            empty={
+              found ? (
+                <Empty
+                  icon={<SearchX />}
+                  title={`没有检测到${things}`}
+                  text={
+                    found.undetected > 0
+                      ? `还有 ${found.undetected} 张照片尚未识别完，稍后再搜一次试试。`
+                      : "图库里的照片都已识别过。换个说法试试，比如“海边的日落”。"
+                  }
+                />
+              ) : (
+                <Empty icon={<Search />} title="没有找到相关照片" text="换个说法试试，比如“海边的日落”“桌上的蛋糕”。" />
+              )
+            }
+          />
+        );
       case "similar":
-        return <AssetGrid key={`similar:${place.asset.id}`} {...grid} listKey={`similar:${place.viewing}:${place.asset.id}`} load={(cursor) => listSimilarPhotos(place.asset.id, place.viewing, cursor)}
-          onPage={(page, first) => { if (first) setSimilarReady((page as PhotoSimilarPage).ready); }} onCount={setCount} onError={reportError} badge={sourceBadge}
-          empty={similarReady === false
-            ? <Empty icon={<Hourglass />} title="这张照片还在整理中" text="本地 AI 会在设备空闲时整理照片，整理好后就能找到和它相似的照片。" />
-            : <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和它画面相近的照片。" />} />;
+        return (
+          <AssetGrid
+            key={`similar:${place.asset.id}`}
+            {...grid}
+            listKey={`similar:${place.viewing}:${place.asset.id}`}
+            load={(cursor) => listSimilarPhotos(place.asset.id, place.viewing, cursor)}
+            onPage={(page, first) => {
+              if (first) setSimilarReady((page as PhotoSimilarPage).ready);
+            }}
+            onCount={setCount}
+            onError={reportError}
+            badge={sourceBadge}
+            empty={
+              similarReady === false ? (
+                <Empty
+                  icon={<Hourglass />}
+                  title="这张照片还在整理中"
+                  text="本地 AI 会在设备空闲时整理照片，整理好后就能找到和它相似的照片。"
+                />
+              ) : (
+                <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和它画面相近的照片。" />
+              )
+            }
+          />
+        );
       case "image":
-        return <AssetGrid key={`image:${place.query.key}:${imageAttempt}`} {...grid} listKey={`image:${place.viewing}:${place.query.key}`} load={(cursor) => imageSearchPage(place.query, place.viewing, cursor)}
-          onPage={(_, first) => { if (first) setImageResult({}); }} onCount={setCount} badge={sourceBadge} loading={<ImageReading query={place.query} topInset={topInset} />}
-          onError={(message) => { if (imageResult === undefined) setImageResult({ error: message }); else reportError(message); }}
-          empty={imageResult?.error
-            ? <Empty icon={<CircleAlert />} title="没能识别这张图片" text={imageResult.error} action={(
-              <div className="ph-empty-actions">
-                <button type="button" className="ph-button" onClick={() => { setImageResult(undefined); setImageAttempt((value) => value + 1); }}><RefreshCw />重试</button>
-                <button type="button" className="ph-button primary" onClick={pickSearchImage}><Camera />换一张</button>
-              </div>
-            )} />
-            : ai && ai.ready === 0 && ai.pending > 0
-              ? <Empty icon={<Hourglass />} title="照片还在整理中" text="本地 AI 会在设备空闲时整理照片，整理好的照片才能用图片找到。" />
-              : <Empty icon={<ScanSearch />} title="没有找到相似的照片" text="图库里暂时没有和这张图片画面相近的照片。" />} />;
+        return (
+          <AssetGrid
+            key={`image:${place.query.key}:${imageAttempt}`}
+            {...grid}
+            listKey={`image:${place.viewing}:${place.query.key}`}
+            load={(cursor) => imageSearchPage(place.query, place.viewing, cursor)}
+            onPage={(_, first) => {
+              if (first) setImageResult({});
+            }}
+            onCount={setCount}
+            badge={sourceBadge}
+            loading={<ImageReading query={place.query} topInset={topInset} />}
+            onError={(message) => {
+              if (imageResult === undefined) setImageResult({ error: message });
+              else reportError(message);
+            }}
+            empty={
+              imageResult?.error ? (
+                <Empty
+                  icon={<CircleAlert />}
+                  title="没能识别这张图片"
+                  text={imageResult.error}
+                  action={
+                    <div className="ph-empty-actions">
+                      <button
+                        type="button"
+                        className="ph-button"
+                        onClick={() => {
+                          setImageResult(undefined);
+                          setImageAttempt((value) => value + 1);
+                        }}
+                      >
+                        <RefreshCw />
+                        重试
+                      </button>
+                      <button type="button" className="ph-button primary" onClick={pickSearchImage}>
+                        <Camera />
+                        换一张
+                      </button>
+                    </div>
+                  }
+                />
+              ) : ai && ai.ready === 0 && ai.pending > 0 ? (
+                <Empty
+                  icon={<Hourglass />}
+                  title="照片还在整理中"
+                  text="本地 AI 会在设备空闲时整理照片，整理好的照片才能用图片找到。"
+                />
+              ) : (
+                <Empty
+                  icon={<ScanSearch />}
+                  title="没有找到相似的照片"
+                  text="图库里暂时没有和这张图片画面相近的照片。"
+                />
+              )
+            }
+          />
+        );
       case "cluster":
-        return <AssetGrid key={`cluster:${place.label.id}`} {...grid} listKey={`cluster:${place.viewing}:${place.label.id}`} load={(cursor) => listLabelPhotos(place.label.id, place.viewing, cursor)}
-          onCount={setCount} onError={reportError} badge={sourceBadge}
-          empty={<Empty icon={<Shapes />} title="这一类里没有照片了" text="被移出的照片仍在图库中，只是不再归在这一类。" />} />;
+        return (
+          <AssetGrid
+            key={`cluster:${place.label.id}`}
+            {...grid}
+            listKey={`cluster:${place.viewing}:${place.label.id}`}
+            load={(cursor) => listLabelPhotos(place.label.id, place.viewing, cursor)}
+            onCount={setCount}
+            onError={reportError}
+            badge={sourceBadge}
+            empty={
+              <Empty icon={<Shapes />} title="这一类里没有照片了" text="被移出的照片仍在图库中，只是不再归在这一类。" />
+            }
+          />
+        );
       case "person":
-        return <AssetGrid key={`person:${place.person.id}`} {...grid} listKey={`person:${place.person.id}`} load={(cursor) => listPersonPhotos(place.person.id, cursor)}
-          onCount={setCount} onError={reportError}
-          empty={<Empty icon={<UserRound />} title="这里没有照片了" text="被移出的照片仍在图库中，只是不再归在这个人名下。" />} />;
+        return (
+          <AssetGrid
+            key={`person:${place.person.id}`}
+            {...grid}
+            listKey={`person:${place.person.id}`}
+            load={(cursor) => listPersonPhotos(place.person.id, cursor)}
+            onCount={setCount}
+            onError={reportError}
+            empty={
+              <Empty
+                icon={<UserRound />}
+                title="这里没有照片了"
+                text="被移出的照片仍在图库中，只是不再归在这个人名下。"
+              />
+            }
+          />
+        );
       case "tag":
-        return <AssetGrid key={`tag:${place.tag.name}`} {...grid} listKey={`tag:${place.viewing}:${place.tag.name}`} load={(cursor) => listTagPhotos(place.tag.name, place.viewing, cursor)}
-          onCount={setCount} onError={reportError} badge={sourceBadge}
-          empty={<Empty icon={<Hash />} title="没有带这个标签的照片了" text="在照片信息里给照片加上标签，就会出现在这里。" />} />;
+        return (
+          <AssetGrid
+            key={`tag:${place.tag.name}`}
+            {...grid}
+            listKey={`tag:${place.viewing}:${place.tag.name}`}
+            load={(cursor) => listTagPhotos(place.tag.name, place.viewing, cursor)}
+            onCount={setCount}
+            onError={reportError}
+            badge={sourceBadge}
+            empty={
+              <Empty
+                icon={<Hash />}
+                title="没有带这个标签的照片了"
+                text="在照片信息里给照片加上标签，就会出现在这里。"
+              />
+            }
+          />
+        );
       case "albums":
-        return <AlbumsView libraryId={place.libraryId} readOnly={readOnlyPlace} refreshKey={albumsKey} topInset={topInset} onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })} onCreate={() => void newAlbum()} onError={reportError} />;
+        return (
+          <AlbumsView
+            libraryId={place.libraryId}
+            readOnly={readOnlyPlace}
+            refreshKey={albumsKey}
+            topInset={topInset}
+            onOpen={(album) => setPlace({ kind: "album", libraryId: place.libraryId, album })}
+            onCreate={() => void newAlbum()}
+            onError={reportError}
+          />
+        );
     }
   })();
 
@@ -838,8 +1636,15 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
           count={place.kind === "timeline" ? count : undefined}
           ai={ai}
           onPlace={setPlace}
-          onLibrary={(library) => setPlace(place.kind === "albums" ? { kind: "albums", libraryId: library.id }
-            : place.kind === "trash" && !library.viewing ? { kind: "trash", libraryId: library.id } : { kind: "timeline", libraryId: library.id })}
+          onLibrary={(library) =>
+            setPlace(
+              place.kind === "albums"
+                ? { kind: "albums", libraryId: library.id }
+                : place.kind === "trash" && !library.viewing
+                  ? { kind: "trash", libraryId: library.id }
+                  : { kind: "timeline", libraryId: library.id },
+            )
+          }
           onCreateAlbum={() => void newAlbum()}
           onDropOnAlbum={dropOnAlbum}
           onDropOnLibrary={dropOnLibrary}
@@ -849,57 +1654,189 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
 
       <main className="ph-main" aria-label={title.text}>
         <header ref={toolbar} className={`ph-toolbar${selection.selected.size ? " selecting" : ""}`}>
-          {selectionBar || <div className="ph-toolbar-row">
-            <button type="button" className="ph-icon-button" aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"} aria-expanded={sidebarOpen} onClick={() => narrow ? setDrawer(!drawer) : setDocked(!docked)}><PanelLeft /></button>
-            {title.back && <button type="button" className="ph-icon-button" aria-label="返回" onClick={() => setPlace(title.back!)}><ArrowLeft /></button>}
-            {place.kind === "person" && <Avatar occurrenceId={place.person.coverId} kind={place.person.kind} size={34} className="ph-title-avatar" />}
-            <div className="ph-title">
-              <h2>{title.text}</h2>
-              {title.detail && <small>{title.detail}</small>}
+          {selectionBar || (
+            <div className="ph-toolbar-row">
+              <button
+                type="button"
+                className="ph-icon-button"
+                aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+                aria-expanded={sidebarOpen}
+                onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}
+              >
+                <PanelLeft />
+              </button>
+              {title.back && (
+                <button
+                  type="button"
+                  className="ph-icon-button"
+                  aria-label="返回"
+                  onClick={() => setPlace(title.back!)}
+                >
+                  <ArrowLeft />
+                </button>
+              )}
+              {place.kind === "person" && (
+                <Avatar
+                  occurrenceId={place.person.coverId}
+                  kind={place.person.kind}
+                  size={34}
+                  className="ph-title-avatar"
+                />
+              )}
+              <div className="ph-title">
+                <h2>{title.text}</h2>
+                {title.detail && <small>{title.detail}</small>}
+              </div>
+              {place.kind === "person" && (
+                <div className="ph-title-actions ph-person-actions">
+                  {place.person.canChange && (
+                    <>
+                      <button
+                        type="button"
+                        className={place.person.name ? "ph-icon-button" : "ph-button primary small"}
+                        aria-label={place.person.name ? "改名" : "添加名字"}
+                        title={place.person.name ? "改名" : "添加名字"}
+                        onClick={() => void namePerson()}
+                      >
+                        {place.person.name ? (
+                          <Pencil />
+                        ) : (
+                          <>
+                            <Pencil />
+                            添加名字
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="ph-icon-button"
+                        aria-label="合并到另一个人"
+                        title="和另一个人是同一个人？合并"
+                        onClick={() => setMerging(place.person)}
+                      >
+                        <Merge />
+                      </button>
+                      <button
+                        type="button"
+                        className="ph-icon-button"
+                        aria-label={place.person.hidden ? "不再隐藏" : "隐藏"}
+                        title={place.person.hidden ? "重新显示在人物与宠物中" : "不在人物与宠物中显示"}
+                        onClick={() => void changePerson({ hidden: !place.person.hidden })}
+                      >
+                        {place.person.hidden ? <Eye /> : <EyeOff />}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              {place.kind === "album" && canEditAlbum(caller, place.album) && (
+                <div className="ph-title-actions">
+                  <button
+                    type="button"
+                    className="ph-icon-button"
+                    aria-label="重命名相册"
+                    title="重命名相册"
+                    onClick={() => void renameCurrentAlbum()}
+                  >
+                    <Pencil />
+                  </button>
+                  <button
+                    type="button"
+                    className="ph-icon-button"
+                    aria-label="删除相册"
+                    title="删除相册"
+                    onClick={() => void deleteCurrentAlbum()}
+                  >
+                    <Trash2 />
+                  </button>
+                </div>
+              )}
+              {place.kind !== "search" && (
+                <form
+                  className={`ph-search${imageOver === "toolbar" ? " image-drop" : ""}`}
+                  role="search"
+                  onSubmit={submitSearch}
+                  {...imageDrop("toolbar")}
+                >
+                  <Search />
+                  <input
+                    ref={searchInput}
+                    type="search"
+                    aria-label="搜索照片"
+                    placeholder={dragging ? "拖到这里，以图搜图" : "用一句话找照片，如：海边的猫"}
+                    maxLength={200}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                  <ImageSearchButton onPick={pickSearchImage} />
+                </form>
+              )}
+              {photoGrid && (
+                <div className="ph-zoom" role="group" aria-label="照片大小">
+                  <button
+                    type="button"
+                    aria-label="缩小照片"
+                    title="缩小 (Ctrl+滚轮)"
+                    disabled={rowHeight <= minRowHeight}
+                    onClick={() => zoomBy(1 / 1.2)}
+                  >
+                    <ZoomOut />
+                  </button>
+                  <input
+                    type="range"
+                    aria-label="照片大小"
+                    min={minRowHeight}
+                    max={maxRowHeight}
+                    value={rowHeight}
+                    onChange={(event) => setRowHeight(Number(event.target.value))}
+                  />
+                  <button
+                    type="button"
+                    aria-label="放大照片"
+                    title="放大 (Ctrl+滚轮)"
+                    disabled={rowHeight >= maxRowHeight}
+                    onClick={() => zoomBy(1.2)}
+                  >
+                    <ZoomIn />
+                  </button>
+                </div>
+              )}
+              {place.kind === "album" && canEditAlbum(caller, place.album) && (
+                <button type="button" className="ph-button" onClick={() => setPhotoPicker(place.album)}>
+                  <FolderPlus />
+                  添加照片
+                </button>
+              )}
+              {place.kind === "trash" && (
+                <button type="button" className="ph-button danger" onClick={() => void emptyTrash()}>
+                  <Trash2 />
+                  清空
+                </button>
+              )}
+              {uploadTarget && place.kind !== "trash" && (
+                <button
+                  type="button"
+                  className="ph-button primary"
+                  onClick={pickFiles}
+                  title={`上传到${uploadTarget.label}`}
+                >
+                  <ImagePlus />
+                  <span>上传</span>
+                </button>
+              )}
             </div>
-            {place.kind === "person" && (
-              <div className="ph-title-actions ph-person-actions">
-                {place.person.canChange && (
-                  <>
-                    <button type="button" className={place.person.name ? "ph-icon-button" : "ph-button primary small"} aria-label={place.person.name ? "改名" : "添加名字"} title={place.person.name ? "改名" : "添加名字"} onClick={() => void namePerson()}>
-                      {place.person.name ? <Pencil /> : <><Pencil />添加名字</>}
-                    </button>
-                    <button type="button" className="ph-icon-button" aria-label="合并到另一个人" title="和另一个人是同一个人？合并" onClick={() => setMerging(place.person)}><Merge /></button>
-                    <button type="button" className="ph-icon-button" aria-label={place.person.hidden ? "不再隐藏" : "隐藏"} title={place.person.hidden ? "重新显示在人物与宠物中" : "不在人物与宠物中显示"}
-                      onClick={() => void changePerson({ hidden: !place.person.hidden })}>{place.person.hidden ? <Eye /> : <EyeOff />}</button>
-                  </>
-                )}
-              </div>
-            )}
-            {place.kind === "album" && canEditAlbum(caller, place.album) && (
-              <div className="ph-title-actions">
-                <button type="button" className="ph-icon-button" aria-label="重命名相册" title="重命名相册" onClick={() => void renameCurrentAlbum()}><Pencil /></button>
-                <button type="button" className="ph-icon-button" aria-label="删除相册" title="删除相册" onClick={() => void deleteCurrentAlbum()}><Trash2 /></button>
-              </div>
-            )}
-            {place.kind !== "search" && (
-              <form className={`ph-search${imageOver === "toolbar" ? " image-drop" : ""}`} role="search" onSubmit={submitSearch} {...imageDrop("toolbar")}>
-                <Search />
-                <input ref={searchInput} type="search" aria-label="搜索照片" placeholder={dragging ? "拖到这里，以图搜图" : "用一句话找照片，如：海边的猫"} maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} />
-                <ImageSearchButton onPick={pickSearchImage} />
-              </form>
-            )}
-            {photoGrid && (
-              <div className="ph-zoom" role="group" aria-label="照片大小">
-                <button type="button" aria-label="缩小照片" title="缩小 (Ctrl+滚轮)" disabled={rowHeight <= minRowHeight} onClick={() => zoomBy(1 / 1.2)}><ZoomOut /></button>
-                <input type="range" aria-label="照片大小" min={minRowHeight} max={maxRowHeight} value={rowHeight} onChange={(event) => setRowHeight(Number(event.target.value))} />
-                <button type="button" aria-label="放大照片" title="放大 (Ctrl+滚轮)" disabled={rowHeight >= maxRowHeight} onClick={() => zoomBy(1.2)}><ZoomIn /></button>
-              </div>
-            )}
-            {place.kind === "album" && canEditAlbum(caller, place.album) && <button type="button" className="ph-button" onClick={() => setPhotoPicker(place.album)}><FolderPlus />添加照片</button>}
-            {place.kind === "trash" && <button type="button" className="ph-button danger" onClick={() => void emptyTrash()}><Trash2 />清空</button>}
-            {uploadTarget && place.kind !== "trash" && <button type="button" className="ph-button primary" onClick={pickFiles} title={`上传到${uploadTarget.label}`}><ImagePlus /><span>上传</span></button>}
-          </div>}
+          )}
           {viewingLibrary?.viewing && (
             <div className="ph-viewing" role="status">
               <ShieldCheck />
-              <span>只读查看 {libraryName(caller, viewingLibrary)}，{new Date(viewingLibrary.viewing.expiresAt).toLocaleString("zh-CN")} 自动结束；本次访问已写入审计并通知所有者。</span>
-              <button type="button" onClick={() => void stopViewing()}>结束查看</button>
+              <span>
+                只读查看 {libraryName(caller, viewingLibrary)}，
+                {new Date(viewingLibrary.viewing.expiresAt).toLocaleString("zh-CN")}{" "}
+                自动结束；本次访问已写入审计并通知所有者。
+              </span>
+              <button type="button" onClick={() => void stopViewing()}>
+                结束查看
+              </button>
             </div>
           )}
           {subbar}
@@ -914,7 +1851,10 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
         <Viewer
           assets={viewAssets}
           index={viewerIndex}
-          onIndex={(position) => { const asset = viewAssets[position]; if (asset) setViewer({ id: asset.id }); }}
+          onIndex={(position) => {
+            const asset = viewAssets[position];
+            if (asset) setViewer({ id: asset.id });
+          }}
           onClose={closeViewer}
           origin={viewer.origin}
           returnRect={(id) => scroller.current?.revealAsset(id) ?? Promise.resolve(undefined)}
@@ -930,7 +1870,10 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
           assets={[focused]}
           index={0}
           onIndex={() => undefined}
-          onClose={() => { setFocused(undefined); root.current?.focus(); }}
+          onClose={() => {
+            setFocused(undefined);
+            root.current?.focus();
+          }}
           returnRect={() => Promise.resolve(undefined)}
           caller={caller}
           info={info}
@@ -946,15 +1889,53 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
           total={count}
           more={count === undefined || viewAssets.length < count}
           onReveal={(id) => void scroller.current?.revealAsset(id)}
-          onExit={(id) => { setSlideshow(undefined); setViewer({ id }); }}
+          onExit={(id) => {
+            setSlideshow(undefined);
+            setViewer({ id });
+          }}
         />
       )}
-      {merging && <PersonPicker person={merging} viewing={place.kind === "person" ? place.viewing : ""} onPick={(into) => void mergeInto(into)} onClose={() => setMerging(undefined)} />}
-      {picker && <AlbumPicker caller={caller} assets={picker} onPick={(album) => void addTo(album, picker)} onCreate={(library, name) => void createAndAdd(library, name, picker)} onClose={() => setPicker(undefined)} />}
-      {photoPicker && <PhotoPicker album={photoPicker} onAdd={(assets) => { setPhotoPicker(undefined); void addTo(photoPicker, assets); }} onClose={() => setPhotoPicker(undefined)} />}
-      {peopleSettings && <PeopleSettings caller={caller} onSet={(library, on) => void setPeople(library, on)} onClose={() => setPeopleSettings(false)} />}
+      {merging && (
+        <PersonPicker
+          person={merging}
+          viewing={place.kind === "person" ? place.viewing : ""}
+          onPick={(into) => void mergeInto(into)}
+          onClose={() => setMerging(undefined)}
+        />
+      )}
+      {picker && (
+        <AlbumPicker
+          caller={caller}
+          assets={picker}
+          onPick={(album) => void addTo(album, picker)}
+          onCreate={(library, name) => void createAndAdd(library, name, picker)}
+          onClose={() => setPicker(undefined)}
+        />
+      )}
+      {photoPicker && (
+        <PhotoPicker
+          album={photoPicker}
+          onAdd={(assets) => {
+            setPhotoPicker(undefined);
+            void addTo(photoPicker, assets);
+          }}
+          onClose={() => setPhotoPicker(undefined)}
+        />
+      )}
+      {peopleSettings && (
+        <PeopleSettings
+          caller={caller}
+          onSet={(library, on) => void setPeople(library, on)}
+          onClose={() => setPeopleSettings(false)}
+        />
+      )}
       {dialogs.dialog}
-      {busy && !selection.selected.size && <div className="ph-busy" role="status"><span className="ph-spinner" />{busy.label} {busy.done}/{busy.total}</div>}
+      {busy && !selection.selected.size && (
+        <div className="ph-busy" role="status">
+          <span className="ph-spinner" />
+          {busy.label} {busy.done}/{busy.total}
+        </div>
+      )}
     </div>
   );
 }

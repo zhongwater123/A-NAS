@@ -1,14 +1,23 @@
 GO ?= go
 SYSTEM_TEST_IMAGE ?= anas-systemd:trixie
-# The AI assistant's part of the system test and the scripts it runs from the spike.
-ASSISTANT_SYSTEM_TEST = $(addprefix ai/assistant-spike/,system-test.sh assistant-install.sh assistant-layout.sh seed.sh layout-acl.sh)
+# ShellCheck releases judge differently (0.11 made SC2002 optional), so ops-check
+# runs only this one; CI installs it from the release by hash.
+SHELLCHECK_VERSION = 0.11.0
+# Every tracked shell script; in a copy without .git, every *.sh file.
+SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
 NPM ?= npm
+RUFF ?= ruff
 BUILD_DIR ?= build
 VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
+# golangci-lint has a module of its own: in go.mod its 200-odd dependencies
+# would raise versions the product builds with (logrus, jsonschema and others).
+GOLANGCI_LINT ?= $(GO) tool -modfile=tools/golangci-lint/go.mod golangci-lint
+# Packages tested at once under the race detector, as on a 4-core CI runner.
+RACE_PARALLEL ?= 4
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet vuln-check test ai-test root-integration-test system-test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test build build-binaries check check-steps clean
 
 all: check
 
@@ -20,6 +29,10 @@ $(WEB_DEPS_STAMP): web/package.json web/package-lock.json
 
 web-typecheck: web-install
 	cd web && $(NPM) run typecheck
+
+# Oxlint with React's hooks rules, then Biome's formatting check.
+web-lint: web-install
+	cd web && $(NPM) run lint
 
 web-test: web-install
 	cd web && $(NPM) test
@@ -38,8 +51,10 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST) .claude/hooks/gofmt.sh
-	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST) .claude/hooks/gofmt.sh
+	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
+	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
+	shellcheck $(SHELL_SCRIPTS)
+	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
@@ -140,6 +155,9 @@ ops-check:
 vet:
 	$(GO) vet ./...
 
+go-lint:
+	$(GOLANGCI_LINT) run ./...
+
 # Fails on known vulnerabilities that the code can reach. The scanner is pinned
 # by the tool directive in go.mod; it fetches the database from vuln.go.dev.
 vuln-check:
@@ -147,6 +165,17 @@ vuln-check:
 
 test:
 	$(GO) test ./...
+
+# CI runs this beside `make check`; the Web UI tests need the built assets.
+race-test: web-build
+	$(GO) test -race -p $(RACE_PARALLEL) ./...
+
+# Ruff as ai/requirements-dev.lock pins it: another version may judge differently.
+ai-lint:
+	@want="$$(sed -n 's/^ruff==\([0-9.]*\).*/\1/p' ai/requirements-dev.lock)"; \
+	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
+	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.lock pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
+	cd ai && $(RUFF) check .
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
@@ -179,7 +208,7 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet vuln-check test ai-test build-binaries
+check-steps: web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)

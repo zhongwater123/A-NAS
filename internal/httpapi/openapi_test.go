@@ -360,9 +360,9 @@ func transfersAPI(t *testing.T) transferContract {
 	}
 	contract.download = download.ID
 	for name, target := range map[string]*string{"first.bin": &contract.upload, "second.bin": &contract.other} {
-		upload, err := service.BeginUpload(ctx, admin, transfers.UploadRequest{UploadRequest: files.UploadRequest{
+		upload, err := service.BeginUpload(ctx, admin, transfers.UploadRequest{
 			SpaceID: contract.space, Name: name, Size: 4, Conflict: files.ConflictAsk,
-		}})
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

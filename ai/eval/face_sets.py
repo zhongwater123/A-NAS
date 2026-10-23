@@ -15,7 +15,7 @@ from eval import datasets
 
 
 class Face:
-    __slots__ = ("identity", "box", "eyes", "group")
+    __slots__ = ("box", "eyes", "group", "identity")
 
     def __init__(self, identity, box=None, group="", eyes=None):
         # None for a face whose identity nobody labelled (WIDER FACE): it
@@ -30,7 +30,7 @@ class Face:
 
 
 class Photo:
-    __slots__ = ("key", "path", "faces", "library")
+    __slots__ = ("faces", "key", "library", "path")
 
     def __init__(self, key, path, faces, library=""):
         self.key = key

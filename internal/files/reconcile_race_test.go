@@ -365,9 +365,7 @@ func TestDeleteAndRestoreWhileReconcilingAlwaysSucceed(t *testing.T) {
 		func() error { return f.service.ReconcileVisibleSpaces(f.ctx, f.owner) },
 		func() error { _, err := f.service.Tree(f.ctx, f.owner, f.space.ID, ""); return err },
 	} {
-		background.Add(1)
-		go func() {
-			defer background.Done()
+		background.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -378,7 +376,7 @@ func TestDeleteAndRestoreWhileReconcilingAlwaysSucceed(t *testing.T) {
 					failure.CompareAndSwap(nil, &err)
 				}
 			}
-		}()
+		})
 	}
 	var stopping sync.Once
 	halt := func() {

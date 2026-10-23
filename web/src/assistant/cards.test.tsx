@@ -9,8 +9,12 @@ const base = { requestId: "req-3", sessionId: "0a1b2c3d", storedSessionId: "2026
 describe("cards for what the assistant asks", () => {
   it("shows a dangerous command and lets the member allow it once or for the conversation", () => {
     const onDecide = vi.fn(() => Promise.resolve());
-    const approval: Approval = { ...base, kind: "command", status: "awaiting",
-      command: { text: "rm -rf /nas/助手/旧草稿", description: "recursive delete", forSession: true } };
+    const approval: Approval = {
+      ...base,
+      kind: "command",
+      status: "awaiting",
+      command: { text: "rm -rf /nas/助手/旧草稿", description: "recursive delete", forSession: true },
+    };
     render(<CommandCard approval={approval} onDecide={onDecide} />);
     expect(screen.getByText("VNAS 想运行一条命令：会删除整个文件夹")).toBeTruthy();
     expect(screen.getByText("rm -rf /nas/助手/旧草稿")).toBeTruthy();
@@ -21,8 +25,12 @@ describe("cards for what the assistant asks", () => {
 
   it("shows a script without Hermes's wrapper, and no conversation-wide choice when Hermes offers none", () => {
     const onDecide = vi.fn(() => Promise.resolve());
-    const approval: Approval = { ...base, kind: "command", status: "awaiting",
-      command: { text: "execute_code <<'PY'\nprint(1)\nPY", script: true } };
+    const approval: Approval = {
+      ...base,
+      kind: "command",
+      status: "awaiting",
+      command: { text: "execute_code <<'PY'\nprint(1)\nPY", script: true },
+    };
     render(<CommandCard approval={approval} onDecide={onDecide} />);
     expect(screen.getByText("VNAS 想运行一段代码")).toBeTruthy();
     expect(screen.getByText("print(1)")).toBeTruthy();
@@ -33,8 +41,16 @@ describe("cards for what the assistant asks", () => {
 
   it("collects an answer from a choice and from what the member writes", () => {
     const onAnswer = vi.fn(() => Promise.resolve());
-    const approval: Approval = { ...base, requestId: "srq-00000000000b", kind: "question", status: "awaiting",
-      questions: [{ id: "q1", text: "放到哪个文件夹？", choices: ["照片 (Recommended)", "文档"] }, { id: "q2", text: "改个名字吗？" }] };
+    const approval: Approval = {
+      ...base,
+      requestId: "srq-00000000000b",
+      kind: "question",
+      status: "awaiting",
+      questions: [
+        { id: "q1", text: "放到哪个文件夹？", choices: ["照片 (Recommended)", "文档"] },
+        { id: "q2", text: "改个名字吗？" },
+      ],
+    };
     render(<QuestionCard approval={approval} onAnswer={onAnswer} onSkip={() => Promise.resolve()} />);
     const send = screen.getByRole("button", { name: "回答" }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
@@ -49,8 +65,16 @@ describe("cards for what the assistant asks", () => {
 
   it("answers as Hermes Desktop does: a choice or the text, and a list for several choices", () => {
     const onAnswer = vi.fn(() => Promise.resolve());
-    const approval: Approval = { ...base, requestId: "srq-00000000000c", kind: "question", status: "awaiting",
-      questions: [{ id: "q1", text: "放到哪里？", choices: ["照片", "文档"] }, { id: "q2", text: "哪些？", choices: ["猫", "狗"], multiSelect: true }] };
+    const approval: Approval = {
+      ...base,
+      requestId: "srq-00000000000c",
+      kind: "question",
+      status: "awaiting",
+      questions: [
+        { id: "q1", text: "放到哪里？", choices: ["照片", "文档"] },
+        { id: "q2", text: "哪些？", choices: ["猫", "狗"], multiSelect: true },
+      ],
+    };
     render(<QuestionCard approval={approval} onAnswer={onAnswer} onSkip={() => Promise.resolve()} />);
     fireEvent.click(screen.getByRole("button", { name: "照片" }));
     fireEvent.change(screen.getByLabelText("回答：放到哪里？"), { target: { value: "桌面" } });
@@ -61,5 +85,4 @@ describe("cards for what the assistant asks", () => {
     fireEvent.click(screen.getByRole("button", { name: "回答" }));
     expect(onAnswer).toHaveBeenCalledWith({ q1: "桌面", q2: JSON.stringify(["猫", "狗", "兔子"]) });
   });
-
 });

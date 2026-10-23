@@ -28,19 +28,40 @@ export function LogsSection({ session, preset }: { session: Session; preset?: Lo
     <>
       <PageHeader
         title={isAdmin ? "日志" : "我的活动"}
-        subtitle={isAdmin ? "谁在什么时候登录、做了什么，以及 A-NAS 服务的运行日志" : "你的登录与操作，以及管理员对你账号所做的事"}
+        subtitle={
+          isAdmin
+            ? "谁在什么时候登录、做了什么，以及 A-NAS 服务的运行日志"
+            : "你的登录与操作，以及管理员对你账号所做的事"
+        }
       />
       {isAdmin && (
         <div className="lg-tabs" role="tablist" aria-label="日志类型">
-          {([["activity", "活动记录", ScrollText], ["system", "系统日志", ServerCog]] as const).map(([id, label, Icon]) => (
-            <button key={id} role="tab" id={`logs-tab-${id}`} aria-selected={current === id} aria-controls={`logs-panel-${id}`}
-              className={current === id ? "active" : ""} onClick={() => setTab(id)}>
-              <Icon />{label}
+          {(
+            [
+              ["activity", "活动记录", ScrollText],
+              ["system", "系统日志", ServerCog],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              role="tab"
+              id={`logs-tab-${id}`}
+              aria-selected={current === id}
+              aria-controls={`logs-panel-${id}`}
+              className={current === id ? "active" : ""}
+              onClick={() => setTab(id)}
+            >
+              <Icon />
+              {label}
             </button>
           ))}
         </div>
       )}
-      <div role={isAdmin ? "tabpanel" : undefined} id={`logs-panel-${current}`} aria-labelledby={isAdmin ? `logs-tab-${current}` : undefined}>
+      <div
+        role={isAdmin ? "tabpanel" : undefined}
+        id={`logs-panel-${current}`}
+        aria-labelledby={isAdmin ? `logs-tab-${current}` : undefined}
+      >
         {current === "activity" ? <ActivityLog session={session} preset={preset} /> : <SystemLog />}
       </div>
     </>

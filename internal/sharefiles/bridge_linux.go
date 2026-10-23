@@ -241,16 +241,14 @@ func Serve(parent context.Context, socket string, local *Local) (func(), error) 
 				conn.Close()
 				continue
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				defer func() { <-slots }()
 				defer conn.Close()
 				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 				stopConn := context.AfterFunc(ctx, func() { conn.Close() })
 				defer stopConn()
 				serveConnection(ctx, conn, local)
-			}()
+			})
 		}
 	}()
 	var once sync.Once
@@ -432,7 +430,7 @@ func (r *Remote) reliableWithin(ctx context.Context, req wireRequest, attemptLim
 	}
 	retry, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconcileLimit)
 	defer cancel()
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		result, f, e := r.call(retry, wireRequest{Op: "status", ID: req.ID, Name: req.Op}, nil)
 		if f != nil {
 			f.Close()

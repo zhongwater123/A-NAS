@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -424,10 +425,8 @@ func casaosDescriptions(extensions types.Extensions) serviceDescriptions {
 }
 
 func appendUnique(items []string, item string) []string {
-	for _, existing := range items {
-		if existing == item {
-			return items
-		}
+	if slices.Contains(items, item) {
+		return items
 	}
 	return append(items, item)
 }

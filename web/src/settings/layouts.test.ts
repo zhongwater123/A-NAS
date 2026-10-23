@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { conversionPercent, fits, formatRemaining, layoutLabel, remainingSeconds, usableBytes, usedBytes } from "./layouts";
+import {
+  conversionPercent,
+  fits,
+  formatRemaining,
+  layoutLabel,
+  remainingSeconds,
+  usableBytes,
+  usedBytes,
+} from "./layouts";
 
 const GiB = 1024 ** 3;
 
@@ -18,8 +26,12 @@ describe("data-volume layouts", () => {
     expect(fits(500 * GiB, undefined)).toBe(true);
     expect(fits(500 * GiB, 470 * GiB)).toBe(true);
     expect(fits(500 * GiB, 480 * GiB)).toBe(false);
-    expect(usedBytes({ id: "v", diskIds: [], layout: "single", state: "available", capacityBytes: 100, availableBytes: 30 })).toBe(70);
-    expect(usedBytes({ id: "v", diskIds: [], layout: "single", state: "available", capacityBytes: 100 })).toBeUndefined();
+    expect(
+      usedBytes({ id: "v", diskIds: [], layout: "single", state: "available", capacityBytes: 100, availableBytes: 30 }),
+    ).toBe(70);
+    expect(
+      usedBytes({ id: "v", diskIds: [], layout: "single", state: "available", capacityBytes: 100 }),
+    ).toBeUndefined();
   });
 
   it("names layouts with their RAID level", () => {

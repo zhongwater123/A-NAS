@@ -187,7 +187,7 @@ func (e *Executor) makeFolders(ctx context.Context, root, path string, mode uint
 		return err
 	}
 	current := root
-	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(relative, string(filepath.Separator)) {
 		current = filepath.Join(current, part)
 		if err := e.makeFolder(ctx, current, mode, owner); err != nil {
 			return err
