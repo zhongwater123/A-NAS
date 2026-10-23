@@ -1,7 +1,7 @@
 # 相册物体检测与混合检索（切片 18）实施方案
 
-状态：accepted（2026-10-13 用户确认）；全部 10 步已在分支 `feat/photo-objects`（[#83](https://github.com/zhongwater123/A-NAS/pull/83)）实现，尚未部署。阈值文件按官方导出的模型生成，结果见[研究](../research/photo-ai-object-detection.md#官方导出与产品规则2026-10-13)
-更新时间：2026-10-13
+状态：accepted（2026-10-13 用户确认）；全部 10 步已实现（[#83](https://github.com/zhongwater123/A-NAS/pull/83)）。阈值文件按官方导出的模型生成，结果见[研究](../research/photo-ai-object-detection.md#官方导出与产品规则2026-10-13)
+更新时间：2026-10-23
 
 本文把[相册技术设计](photo-library.md)的切片 18 细化为可实现的方案：后台为每张照片检测物体，文搜图把检测结果与照片向量融合，以物体词为主的查询如实说出“检测到”或“没有检测到”，并新增以图搜图。依据见[物体检测与混合检索研究](../research/photo-ai-object-detection.md)；方案复用 M2 的 Worker、持久任务、空闲门控与内置交付（[相册本地 AI](photo-ai.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
