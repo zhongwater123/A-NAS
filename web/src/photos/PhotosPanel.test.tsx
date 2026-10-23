@@ -94,7 +94,7 @@ function serve(...routes: Route[]) {
     if (url.startsWith("/api/v1/photos/labels?") || url === "/api/v1/photos/labels")
       return json({ items: [], ready: false });
     if (url.endsWith("/timeline/months")) return json({ items: [] });
-    if (/\/assets\/[^/]+$/.test(url) && !init?.method)
+    if (/\/assets\/[^/]+$/.test(url) && (init?.method ?? "GET") === "GET")
       return json(asset(decodeURIComponent(url.split("/").at(-1) ?? "")));
     return json({ items: [] });
   });
@@ -633,7 +633,7 @@ describe("PhotosPanel viewer", () => {
     let details = asset("photo:cat");
     const fetchMock = serve(
       (url, init) => {
-        if (url === "/api/v1/photos/assets/photo%3Acat" && !init?.method) return json(details);
+        if (url === "/api/v1/photos/assets/photo%3Acat" && (init?.method ?? "GET") === "GET") return json(details);
         if (url === "/api/v1/photos/assets/photo%3Acat/tags" && init?.method === "POST") {
           details = { ...details, tags: ["小橘"] };
           return json(details);
@@ -853,7 +853,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
         items = [];
         return new Response(null, { status: 204 });
       }
-      if (url.endsWith("/trash") && !init?.method) return json({ items });
+      if (url.endsWith("/trash") && (init?.method ?? "GET") === "GET") return json({ items });
       return undefined;
     });
     const user = userEvent.setup();
@@ -1196,7 +1196,7 @@ describe("PhotosPanel people and pets", () => {
     let details: PhotoAsset = { ...asset("photo:party"), people: [{ occurrenceId: "face:1", kind: "face" }] };
     const fetchMock = serve(
       (url, init) => {
-        if (url === "/api/v1/photos/assets/photo%3Aparty" && !init?.method) return json(details);
+        if (url === "/api/v1/photos/assets/photo%3Aparty" && (init?.method ?? "GET") === "GET") return json(details);
         if (url === "/api/v1/photos/people?hidden=1") return json({ items: [ming, nameless] });
         if (url === "/api/v1/photos/assets/photo%3Aparty/people/face%3A1" && init?.method === "PUT") {
           details = { ...details, people: [{ occurrenceId: "face:1", kind: "face", personId: ming.id, name: "小明" }] };
@@ -1227,7 +1227,7 @@ describe("PhotosPanel people and pets", () => {
   it("turns people and pets off for the caller's own library after asking, and leaves the shared one to administrators", async () => {
     let mine = { ...privateLibrary, people: true, canSetPeople: true };
     const fetchMock = serve((url, init) => {
-      if (url === "/api/v1/photos/libraries" && !init?.method)
+      if (url === "/api/v1/photos/libraries" && (init?.method ?? "GET") === "GET")
         return json({ items: [{ ...sharedLibrary, people: true, canSetPeople: false }, mine] });
       if (url === "/api/v1/photos/libraries/library%3Amine" && init?.method === "PATCH") {
         mine = { ...mine, people: JSON.parse(String(init.body)).people };
