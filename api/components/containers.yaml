@@ -1,0 +1,164 @@
+parameters:
+  ContainerId:
+    name: containerId
+    in: path
+    required: true
+    description: Full 64-character engine container ID; names and short IDs are rejected.
+    schema:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+responses:
+  ContainersUnavailable:
+    description: Container management is disabled (containers_disabled) or the engine cannot be reached (containers_unavailable).
+    content:
+      application/json:
+        schema:
+          $ref: "common.yaml#/schemas/ErrorResponse"
+  ContainerRequestInvalid:
+    description: The container ID, action or tail is invalid.
+    content:
+      application/json:
+        schema:
+          $ref: "common.yaml#/schemas/ErrorResponse"
+  ContainerNotFound:
+    description: No container has this ID.
+    content:
+      application/json:
+        schema:
+          $ref: "common.yaml#/schemas/ErrorResponse"
+  ContainerEngineError:
+    description: The container engine rejected the request.
+    content:
+      application/json:
+        schema:
+          $ref: "common.yaml#/schemas/ErrorResponse"
+schemas:
+  ContainerSnapshotResponse:
+    type: object
+    additionalProperties: false
+    required: [dataSource, observedAt, engine, containers, images]
+    properties:
+      dataSource:
+        $ref: "common.yaml#/schemas/DataSource"
+      observedAt:
+        type: string
+        format: date-time
+      engine:
+        type: object
+        additionalProperties: false
+        required: [version, apiVersion]
+        properties:
+          version:
+            type: string
+          apiVersion:
+            type: string
+      containers:
+        type: array
+        items:
+          $ref: "#/schemas/Container"
+      images:
+        type: array
+        items:
+          $ref: "#/schemas/ContainerImage"
+  Container:
+    type: object
+    additionalProperties: false
+    required: [id, name, image, state, status, createdAt, ports]
+    properties:
+      id:
+        type: string
+        pattern: "^[a-f0-9]{64}$"
+      name:
+        type: string
+        minLength: 1
+      image:
+        type: string
+      imageId:
+        type: string
+        description: Engine ID of the image the container runs; omitted by container agents that predate it.
+      state:
+        type: string
+        enum: [created, running, paused, restarting, removing, exited, dead]
+      status:
+        type: string
+      createdAt:
+        type: string
+        format: date-time
+      project:
+        type: string
+        description: Compose project label, omitted for standalone containers.
+      ports:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [containerPort, protocol]
+          properties:
+            hostIp:
+              type: string
+            hostPort:
+              type: integer
+              minimum: 1
+              maximum: 65535
+            containerPort:
+              type: integer
+              minimum: 0
+              maximum: 65535
+            protocol:
+              type: string
+      usage:
+        type: object
+        additionalProperties: false
+        required: [cpuPercent, memoryBytes, memoryLimitBytes]
+        properties:
+          cpuPercent:
+            type: number
+            minimum: 0
+          memoryBytes:
+            type: integer
+            format: int64
+            minimum: 0
+          memoryLimitBytes:
+            type: integer
+            format: int64
+            minimum: 0
+  ContainerImage:
+    type: object
+    additionalProperties: false
+    required: [id, tags, sizeBytes, createdAt]
+    properties:
+      id:
+        type: string
+        minLength: 1
+      tags:
+        type: array
+        items:
+          type: string
+      sizeBytes:
+        type: integer
+        format: int64
+        minimum: 0
+      createdAt:
+        type: string
+        format: date-time
+  ContainerLogsResponse:
+    type: object
+    additionalProperties: false
+    required: [lines]
+    properties:
+      lines:
+        type: array
+        maxItems: 500
+        items:
+          type: object
+          additionalProperties: false
+          required: [stream, text]
+          properties:
+            stream:
+              type: string
+              enum: [stdout, stderr]
+            time:
+              type: string
+              format: date-time
+            text:
+              type: string

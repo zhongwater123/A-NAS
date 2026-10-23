@@ -1,0 +1,100 @@
+parameters:
+  TrackID: { name: trackId, in: path, required: true, description: The track's stable file ID in its space., schema: { type: string } }
+  PlaylistID: { name: playlistId, in: path, required: true, schema: { type: string } }
+  CoverID: { name: coverId, in: path, required: true, schema: { type: string, pattern: "^[a-f0-9]{32}$" } }
+schemas:
+  MusicStatus:
+    type: object
+    additionalProperties: false
+    required: [version, tracks, scan]
+    properties:
+      version: { type: integer, format: int64, description: Changes whenever a scan changes any track. }
+      tracks: { type: integer, minimum: 0 }
+      scan:
+        type: object
+        additionalProperties: false
+        required: [state, done, total]
+        properties:
+          state: { type: string, enum: [idle, scanning] }
+          phase: { type: string, enum: [listing, reading, measuring] }
+          done: { type: integer, minimum: 0 }
+          total: { type: integer, minimum: 0 }
+          startedAt: { type: string, format: date-time }
+          finishedAt: { type: string, format: date-time }
+          error: { type: string, enum: [volume_unavailable, failed] }
+  MusicLibrary:
+    type: object
+    additionalProperties: false
+    required: [version, items]
+    properties:
+      version: { type: integer, format: int64 }
+      items: { type: array, items: { $ref: "#/schemas/MusicTrack" } }
+  MusicTrack:
+    type: object
+    additionalProperties: false
+    required: [id, spaceId, folder, name, sizeBytes, format, title, albumId, addedAt]
+    properties:
+      id: { type: string }
+      spaceId: { type: string }
+      folder: { type: string, description: Folder path relative to the space root; empty at the root. }
+      name: { type: string }
+      sizeBytes: { type: integer, format: int64, minimum: 0 }
+      format: { type: string, enum: [mp3, flac, m4a, aac, ogg, opus, wav, ape, wma, wv, aiff, dsf, dff] }
+      codec: { type: string, description: "The audio codec, when the file's container can hold several (aac or alac in m4a), or as FFmpeg names it." }
+      title: { type: string }
+      artist: { type: string }
+      artists: { type: array, items: { type: string } }
+      album: { type: string }
+      albumArtist: { type: string }
+      albumId: { type: string }
+      genres: { type: array, items: { type: string } }
+      year: { type: integer }
+      trackNo: { type: integer }
+      discNo: { type: integer }
+      durationMs: { type: integer, format: int64, minimum: 0 }
+      coverId: { type: string }
+      lyrics: { type: boolean }
+      transcode: { type: boolean, description: "The media worker decodes this track to FLAC while it plays; its stream starts at the start parameter instead of seeking." }
+      addedAt: { type: string, format: date-time }
+  MusicSources:
+    type: object
+    additionalProperties: false
+    required: [custom, items]
+    properties:
+      custom: { type: boolean, description: False while the library covers the whole personal and shared spaces. }
+      items:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [spaceId, spaceKind, path]
+          properties:
+            spaceId: { type: string }
+            spaceKind: { type: string, enum: [private, shared] }
+            folderId: { type: string }
+            path: { type: string }
+  MusicFavorite:
+    type: object
+    additionalProperties: false
+    required: [trackId, addedAt]
+    properties:
+      trackId: { type: string }
+      addedAt: { type: string, format: date-time }
+  MusicPlay:
+    type: object
+    additionalProperties: false
+    required: [trackId, playedAt, plays]
+    properties:
+      trackId: { type: string }
+      playedAt: { type: string, format: date-time }
+      plays: { type: integer, minimum: 1 }
+  MusicPlaylist:
+    type: object
+    additionalProperties: false
+    required: [id, name, trackIds, createdAt, updatedAt]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      trackIds: { type: array, items: { type: string } }
+      createdAt: { type: string, format: date-time }
+      updatedAt: { type: string, format: date-time }

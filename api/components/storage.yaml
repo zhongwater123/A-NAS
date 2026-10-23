@@ -1,0 +1,86 @@
+parameters:
+  PlanID: { name: planId, in: path, required: true, schema: { type: string } }
+schemas:
+  VolumeLayout:
+    type: string
+    enum: [single, mirror, span, stripe]
+    description: >-
+      How the data volume keeps files on its disks (ADR 0025): single (one disk), mirror (Btrfs raid1, two copies
+      on different disks), span (capacities added, one copy of the data) or stripe (Btrfs raid0). With two disks or
+      more, metadata always has two copies.
+  Volume:
+    type: object
+    additionalProperties: false
+    required: [id, diskIds, layout, state]
+    properties:
+      id: { type: string }
+      diskIds:
+        type: array
+        items: { $ref: "common.yaml#/schemas/StableResourceID" }
+        description: The disks holding the volume as observed, or as planned while it is not mounted.
+      filesystemUuid: { type: string }
+      layout: { $ref: "#/schemas/VolumeLayout" }
+      capacityBytes: { type: integer, format: int64, minimum: 0 }
+      availableBytes: { type: integer, format: int64, minimum: 0 }
+      state: { type: string, enum: [creating, available, unavailable, read_only] }
+      conversion: { $ref: "#/schemas/VolumeConversion" }
+  VolumeConversion:
+    type: object
+    additionalProperties: false
+    required: [state, convertedBytes, totalBytes]
+    description: Present while data or metadata are outside the layout's Btrfs profiles, after disks were added.
+    properties:
+      state:
+        type: string
+        enum: [running, waiting]
+        description: "running: Btrfs converts now. waiting: the conversion stopped and continues at the Host Agent's next check."
+      convertedBytes: { type: integer, format: int64, minimum: 0 }
+      totalBytes: { type: integer, format: int64, minimum: 0 }
+  StorageAction:
+    type: object
+    additionalProperties: false
+    required: [kind, description]
+    properties:
+      kind: { type: string }
+      description: { type: string }
+  PlannedDisk:
+    type: object
+    additionalProperties: false
+    required: [id, model, capacityBytes, fingerprint, signatures]
+    properties:
+      id: { $ref: "common.yaml#/schemas/StableResourceID" }
+      model: { type: string }
+      capacityBytes: { type: integer, format: int64, minimum: 1 }
+      fingerprint: { type: string }
+      signatures:
+        type: array
+        description: Partition, filesystem and array signatures erasing the disk destroys, such as one another NAS left.
+        items:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: { type: string }
+            label: { type: string }
+  StoragePlan:
+    type: object
+    additionalProperties: false
+    required: [id, kind, layout, disks, capacityAfterBytes, confirmationPhrase, actions, state, createdAt, expiresAt]
+    properties:
+      id: { type: string }
+      kind: { type: string, enum: [create_volume, add_disks] }
+      layout: { $ref: "#/schemas/VolumeLayout" }
+      disks: { type: array, minItems: 1, items: { $ref: "#/schemas/PlannedDisk" } }
+      capacityBeforeBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files before adding disks; absent for a new volume." }
+      capacityAfterBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files after the plan, before filesystem overhead." }
+      confirmationPhrase: { type: string }
+      actions: { type: array, items: { $ref: "#/schemas/StorageAction" } }
+      state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired, cancelled] }
+      step:
+        type: string
+        enum: [erase, format, mount, prepare, add_devices]
+        description: The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
+      createdAt: { type: string, format: date-time }
+      expiresAt: { type: string, format: date-time }
+      failure: { type: string }
+      volume: { $ref: "#/schemas/Volume" }

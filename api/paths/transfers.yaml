@@ -1,0 +1,138 @@
+/api/v1/transfers:
+  get:
+    operationId: listTransfers
+    summary: "The account's transfers, newest first: every unfinished one and the latest finished ones"
+    description: "Uploads and downloads of the signed-in account only. A running upload that received nothing for 30 seconds is reported as interrupted."
+    responses:
+      "200": { description: Transfers, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/transfers.yaml#/schemas/Transfer" } } } } } } }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: clearFinishedTransfers
+    summary: Remove the account's finished transfers from the history
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Cleared }
+/api/v1/transfers/downloads:
+  post:
+    operationId: createDownload
+    summary: "Prepare a download: one file as itself, a folder or several entries of one space as a ZIP archive"
+    description: "The browser then fetches contentUrl as an ordinary download. A download nobody fetched within 15 minutes fails with not_started."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [entryIds], properties: { entryIds: { type: array, maxItems: 1000, items: { type: string } } } } } } }
+    responses:
+      "201": { description: The pending download, content: { application/json: { schema: { $ref: "../components/transfers.yaml#/schemas/Transfer" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/transfers/{transferId}:
+  parameters: [{ $ref: "../components/transfers.yaml#/parameters/TransferID" }]
+  get:
+    operationId: getTransfer
+    summary: One of the account's transfers
+    responses:
+      "200": { description: The transfer, content: { application/json: { schema: { $ref: "../components/transfers.yaml#/schemas/Transfer" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: removeTransfer
+    summary: Remove a finished transfer from the history; unfinished ones answer transfer_state
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Removed }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/transfers/{transferId}/content:
+  get:
+    operationId: getDownloadContent
+    summary: "A download's content, sent as an attachment and followed as it is sent"
+    description: "A single file honours Range and If-Range, so a browser resumes it after a dropped connection; an archive is streamed and starts over. Once the response began, a failure or a cancellation cuts the connection, so the browser never keeps a truncated file as complete. A second request while one is being sent answers transfer_state."
+    parameters: [{ $ref: "../components/transfers.yaml#/parameters/TransferID" }, { name: Range, in: header, required: false, schema: { type: string } }]
+    responses:
+      "200": { description: The whole file or the ZIP archive, content: { application/octet-stream: { schema: { type: string, format: binary } }, application/zip: { schema: { type: string, format: binary } } } }
+      "206": { description: The requested range of a file, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/transfers/{transferId}/pause:
+  post:
+    operationId: pauseUpload
+    summary: Record that the browser paused an upload, so other browsers show it paused; the next part resumes it
+    parameters: [{ $ref: "../components/transfers.yaml#/parameters/TransferID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The paused upload, content: { application/json: { schema: { $ref: "../components/transfers.yaml#/schemas/Transfer" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/transfers/{transferId}/cancel:
+  post:
+    operationId: cancelTransfer
+    summary: "Stop a transfer from any browser: an upload's bytes are discarded, a download's connection is cut"
+    parameters: [{ $ref: "../components/transfers.yaml#/parameters/TransferID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: "The canceled transfer; a finished one is returned unchanged", content: { application/json: { schema: { $ref: "../components/transfers.yaml#/schemas/Transfer" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/uploads:
+  post:
+    operationId: createUpload
+    summary: "tus 1.0 creation (ADR 0019): open an upload of one file whose parts follow by PATCH"
+    description: "Upload-Metadata carries base64 values: filename, spaceId, parentId (empty for the space root), relativePath (folders to create below it, separated by /), conflict (ask, rename or replace; default ask), lastModified (milliseconds) and batch. With conflict=ask a taken name answers name_conflict before any byte is sent; a name taken while the bytes arrive keeps both. replace sends the existing file to the trash. The whole file must fit in the volume reserve. An empty file is saved at once."
+    parameters:
+      - { $ref: "../components/common.yaml#/parameters/CSRFToken" }
+      - { $ref: "../components/transfers.yaml#/parameters/TusResumable" }
+      - { name: Upload-Length, in: header, required: true, schema: { type: integer, minimum: 0 } }
+      - { name: Upload-Metadata, in: header, required: true, schema: { type: string } }
+    responses:
+      "201":
+        description: Created; Location is the upload's address
+        headers:
+          Location: { required: true, schema: { type: string } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "429": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/uploads/{transferId}:
+  parameters: [{ $ref: "../components/transfers.yaml#/parameters/TransferID" }]
+  head:
+    operationId: getUploadOffset
+    summary: "tus offset: where to resume an upload. A completed upload reports its full length, so a browser that missed the final response does not send it again; a lost one answers 404 and starts over."
+    parameters: [{ $ref: "../components/transfers.yaml#/parameters/TusResumable" }]
+    responses:
+      "200":
+        description: The upload's offset and length
+        headers:
+          Upload-Offset: { required: true, schema: { type: integer, minimum: 0 } }
+          Upload-Length: { required: true, schema: { type: integer, minimum: 0 } }
+      "404": { description: "The upload is unknown, canceled, failed or lost in a restart" }
+  patch:
+    operationId: appendUpload
+    summary: "tus append: write a part at Upload-Offset. The last part saves the file in its folder."
+    parameters:
+      - { $ref: "../components/common.yaml#/parameters/CSRFToken" }
+      - { $ref: "../components/transfers.yaml#/parameters/TusResumable" }
+      - { name: Upload-Offset, in: header, required: true, schema: { type: integer, minimum: 0 } }
+    requestBody: { required: true, content: { application/offset+octet-stream: { schema: { type: string, format: binary } } } }
+    responses:
+      "204":
+        description: Written; Upload-Offset is the new offset
+        headers:
+          Upload-Offset: { required: true, schema: { type: integer, minimum: 0 } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "410": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: terminateUpload
+    summary: "tus termination: cancel an upload and discard its bytes"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }, { $ref: "../components/transfers.yaml#/parameters/TusResumable" }]
+    responses:
+      "204": { description: Canceled }
+      "404": { description: The upload is unknown }

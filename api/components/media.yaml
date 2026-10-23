@@ -1,0 +1,303 @@
+parameters:
+  MediaLibraryID: { name: libraryId, in: path, required: true, schema: { type: string } }
+  MediaVideoID: { name: videoId, in: path, required: true, schema: { type: string } }
+  MediaTitleID: { name: titleId, in: path, required: true, description: A video or show ID., schema: { type: string } }
+schemas:
+  MediaLibraryInput:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name: { type: string, minLength: 1, maxLength: 40 }
+      kind: { type: string, enum: [movies, shows, mixed, other], description: Required when creating. }
+      spaceId: { type: string, description: Required when creating; ignored when updating. }
+      folderIds: { type: array, minItems: 1, maxItems: 16, items: { type: string }, description: Folder file IDs of the space; required when creating. }
+  MediaLibrary:
+    type: object
+    additionalProperties: false
+    required: [id, name, kind, spaceId, spaceKind, createdBy, createdAt, folders, counts, scan, canManage, covers]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      kind: { type: string, enum: [movies, shows, mixed, other] }
+      spaceId: { type: string }
+      spaceKind: { type: string, enum: [private, shared] }
+      ownerUserId: { type: string }
+      createdBy: { type: string }
+      createdAt: { type: string, format: date-time }
+      folders:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [entryId, name, path]
+          properties:
+            entryId: { type: string }
+            name: { type: string }
+            path: { type: string }
+            missing: { type: boolean }
+      counts:
+        type: object
+        additionalProperties: false
+        required: [movies, shows, episodes, others, sizeBytes]
+        properties:
+          movies: { type: integer }
+          shows: { type: integer }
+          episodes: { type: integer }
+          others: { type: integer }
+          sizeBytes: { type: integer }
+      scan:
+        type: object
+        additionalProperties: false
+        required: [state, pending]
+        properties:
+          state: { type: string, enum: [idle, scanning, processing] }
+          pending: { type: integer, description: Videos whose durations or frames FFmpeg has yet to read. }
+          scannedAt: { type: string, format: date-time }
+          error: { type: string }
+      canManage: { type: boolean }
+      covers: { type: array, maxItems: 4, items: { type: string }, description: "Title IDs with artwork, for the library card." }
+  MediaArtwork:
+    type: object
+    additionalProperties: false
+    required: [poster, backdrop, thumb]
+    properties:
+      poster: { type: boolean }
+      backdrop: { type: boolean }
+      thumb: { type: boolean }
+      version: { type: string }
+  MediaProgress:
+    type: object
+    additionalProperties: false
+    required: [position, duration, watched]
+    properties:
+      position: { type: number }
+      duration: { type: number }
+      watched: { type: boolean }
+      playedAt: { type: string, format: date-time }
+  MediaTitle:
+    type: object
+    description: A card for a film, a show, an episode or another video.
+    required: [id, type, libraryId, title, addedAt, artwork, favorite]
+    properties:
+      id: { type: string }
+      type: { type: string, enum: [movie, show, episode, other] }
+      libraryId: { type: string }
+      title: { type: string }
+      originalTitle: { type: string }
+      year: { type: integer }
+      genres: { type: array, items: { type: string } }
+      rating: { type: number }
+      addedAt: { type: string, format: date-time }
+      duration: { type: number }
+      resolution: { type: string, enum: [4K, 1080p, 720p, SD] }
+      hdr: { type: string }
+      artwork: { $ref: "#/schemas/MediaArtwork" }
+      favorite: { type: boolean }
+      progress: { $ref: "#/schemas/MediaProgress" }
+      seasons: { type: integer }
+      episodes: { type: integer }
+      watchedEpisodes: { type: integer }
+      showId: { type: string }
+      showTitle: { type: string }
+      season: { type: integer }
+      episode: { type: integer }
+  MediaTitlePage:
+    type: object
+    additionalProperties: false
+    required: [items, total]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      total: { type: integer }
+  MediaTitleResults:
+    type: object
+    additionalProperties: false
+    required: [items, total, genres]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      total: { type: integer }
+      genres: { type: array, items: { type: string } }
+  MediaHome:
+    type: object
+    additionalProperties: false
+    required: [featured, continue, recent, movies, shows, others, favorites, libraries, scanning]
+    properties:
+      featured: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      continue: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      recent: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      movies: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      shows: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      others: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      favorites: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+      libraries: { type: integer }
+      scanning: { type: boolean }
+  MediaCollectionRef:
+    type: object
+    additionalProperties: false
+    required: [id, name]
+    properties:
+      id: { type: string }
+      name: { type: string }
+  MediaEpisode:
+    type: object
+    additionalProperties: false
+    required: [id, season, episode, title, addedAt, artwork]
+    properties:
+      id: { type: string }
+      season: { type: integer }
+      episode: { type: integer }
+      title: { type: string }
+      plot: { type: string }
+      duration: { type: number }
+      addedAt: { type: string, format: date-time }
+      artwork: { $ref: "#/schemas/MediaArtwork" }
+      progress: { $ref: "#/schemas/MediaProgress" }
+      file: { type: string, description: The episode's file name. }
+  MediaShowDetail:
+    allOf:
+      - { $ref: "#/schemas/MediaTitle" }
+      - type: object
+        required: [seasonList, collections]
+        properties:
+          plot: { type: string }
+          next: { $ref: "#/schemas/MediaEpisode" }
+          seasonList:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [number, episodes]
+              properties:
+                number: { type: integer }
+                episodes: { type: array, items: { $ref: "#/schemas/MediaEpisode" } }
+          collections: { type: array, items: { $ref: "#/schemas/MediaCollectionRef" } }
+          folder: { type: string, description: Name of the folder the show has to itself; absent when it has none. }
+          namedByNfo: { type: boolean, description: "tvshow.nfo gives the title, so renaming the show's files leaves it." }
+  MediaVideoDetail:
+    allOf:
+      - { $ref: "#/schemas/MediaTitle" }
+      - type: object
+        required: [file, probeState, audio, subtitles, collections]
+        properties:
+          plot: { type: string }
+          episodeTitle: { type: string }
+          file:
+            type: object
+            additionalProperties: false
+            required: [name, folder, sizeBytes, modifiedAt]
+            properties:
+              name: { type: string }
+              folder: { type: string }
+              sizeBytes: { type: integer }
+              modifiedAt: { type: string, format: date-time }
+          media:
+            type: object
+            additionalProperties: false
+            required: [container]
+            properties:
+              container: { type: string }
+              videoCodec: { type: string }
+              audioCodec: { type: string }
+              width: { type: integer }
+              height: { type: integer }
+              frameRate: { type: number }
+              bitrate: { type: integer }
+          namedByNfo: { type: boolean, description: "An NFO document gives the title, so renaming the file leaves it." }
+          probeState: { type: string, enum: [pending, ready, failed] }
+          audio:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [index, label, codec]
+              properties:
+                index: { type: integer }
+                label: { type: string }
+                language: { type: string }
+                codec: { type: string }
+                channels: { type: integer }
+                default: { type: boolean }
+          subtitles:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [id, label, external]
+              properties:
+                id: { type: string }
+                label: { type: string }
+                language: { type: string }
+                external: { type: boolean }
+                default: { type: boolean }
+          previousId: { type: string }
+          nextId: { type: string }
+          collections: { type: array, items: { $ref: "#/schemas/MediaCollectionRef" } }
+          collection: { type: string, description: The automatic collection an NFO file names. }
+  MediaPlayback:
+    type: object
+    additionalProperties: false
+    required: [mode, url, audio, quality, qualities]
+    properties:
+      mode: { type: string, enum: [direct, remux, transcode] }
+      url: { type: string }
+      duration: { type: number }
+      reason: { type: string }
+      audio: { type: integer }
+      quality: { type: string, enum: [original, 1080p, 720p, 480p] }
+      qualities: { type: array, items: { type: string, enum: [original, 1080p, 720p, 480p] } }
+      mime: { type: string, description: "A converted stream's MIME type with codecs, for Media Source Extensions; absent for direct play." }
+  MediaCollection:
+    type: object
+    additionalProperties: false
+    required: [id, name, automatic, count, updatedAt, covers]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      automatic: { type: boolean }
+      count: { type: integer }
+      updatedAt: { type: string, format: date-time }
+      covers: { type: array, items: { type: string } }
+  MediaCollectionDetail:
+    type: object
+    additionalProperties: false
+    required: [id, name, automatic, count, updatedAt, covers, items]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      automatic: { type: boolean }
+      count: { type: integer }
+      updatedAt: { type: string, format: date-time }
+      covers: { type: array, items: { type: string } }
+      items: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
+  MediaFolderRoot:
+    type: object
+    additionalProperties: false
+    required: [libraryId, libraryName, entryId, name, path, videos]
+    properties:
+      libraryId: { type: string }
+      libraryName: { type: string }
+      entryId: { type: string }
+      name: { type: string }
+      path: { type: string }
+      videos: { type: integer }
+      cover: { type: string }
+      missing: { type: boolean }
+  MediaFolderListing:
+    type: object
+    additionalProperties: false
+    required: [root, path, folders, videos]
+    properties:
+      root: { $ref: "#/schemas/MediaFolderRoot" }
+      path: { type: string }
+      folders:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [name, path, videos]
+          properties:
+            name: { type: string }
+            path: { type: string }
+            videos: { type: integer }
+            cover: { type: string }
+      videos: { type: array, items: { $ref: "#/schemas/MediaTitle" } }
