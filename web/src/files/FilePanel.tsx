@@ -1,0 +1,2010 @@
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
+  ClipboardPaste,
+  Clock3,
+  Copy,
+  Download,
+  Ellipsis,
+  Eye,
+  FileText,
+  FileUp,
+  Film,
+  FolderClosed,
+  FolderOpen,
+  FolderPlus,
+  FolderUp,
+  Grid2X2,
+  History,
+  Image,
+  List,
+  Music2,
+  Pencil,
+  Pin,
+  RefreshCw,
+  Scissors,
+  Search,
+  Share2,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  UsersRound,
+} from "lucide-react";
+import {
+  CSSProperties,
+  DragEvent as ReactDragEvent,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  FileEntry,
+  Space,
+  Volume,
+  copyFile,
+  createDirectory,
+  deleteFile,
+  endViewing,
+  filePreviewURL,
+  listEntries,
+  listSpaces,
+  listVolumes,
+  moveFile,
+  readFileTextPreview,
+} from "../api";
+import { accountErrorText } from "../accountRules";
+import { VersionsDialog } from "../backup/VersionsDialog";
+import { formatBytes } from "../bytes";
+import { nameErrorText, nameProblem } from "../fileNames";
+import {
+  fileTypeLabel,
+  isPreviewableImage,
+  isVideoFile,
+  isOfficeDocument,
+  isPDFPreviewable,
+  isTextPreviewable,
+} from "../fileTypes";
+import { displayName, usePeople } from "../people";
+import { useShares } from "../shares/SharesProvider";
+import { carriesFiles, PickedFile, pickedFromDrop, pickedFromInput } from "../transfers/picker";
+import { transferStore, useTransfers } from "../transfers/store";
+import type { TransferLocation } from "../transfers/transfersApi";
+import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "../useFileOrder";
+import { FileViewer } from "./FileViewer";
+import { fileVisualURL } from "./preview";
+
+type FileView = "list" | "icons";
+type FileResource = "photos" | "music" | "movies";
+type FileSelectionRect = { left: number; top: number; width: number; height: number };
+type FileContextMenu = { x: number; y: number; item?: FileBrowserItem };
+type FileBrowserItem = {
+  id: string;
+  name: string;
+  kind: "directory" | "file" | "resource";
+  type: string;
+  detail: string;
+  modifiedAt: string;
+  sizeBytes: number;
+  entry?: FileEntry;
+  resource?: FileResource;
+  planned?: boolean;
+};
+
+// What VNAS never reads or acts on (assistant/webosControl.ts): another member's
+// space open under a viewing grant is beyond what the assistant may read.
+const othersSpace = "他人的个人空间（只读查看）";
+
+const personalFileResources: FileBrowserItem[] = [
+  {
+    id: "resource:photos",
+    name: "图库",
+    kind: "resource",
+    type: "图库投影",
+    detail: "个人图库",
+    modifiedAt: "",
+    sizeBytes: 0,
+    resource: "photos",
+  },
+  {
+    id: "resource:music",
+    name: "音乐",
+    kind: "resource",
+    type: "功能入口",
+    detail: "在音乐中打开",
+    modifiedAt: "",
+    sizeBytes: 0,
+    resource: "music",
+  },
+  {
+    id: "resource:movies",
+    name: "影视",
+    kind: "resource",
+    type: "功能入口",
+    detail: "影视中心",
+    modifiedAt: "",
+    sizeBytes: 0,
+    resource: "movies",
+  },
+];
+
+interface FilePanelProps {
+  userID: string;
+  navigation?: TransferLocation;
+  onNavigated: () => void;
+  onOpenTransfers: () => void;
+  onOpenPhotos: () => void;
+  onOpenMedia: () => void;
+  onOpenMusic: () => void;
+}
+
+export function FilePanel({
+  userID,
+  navigation,
+  onNavigated,
+  onOpenTransfers,
+  onOpenPhotos,
+  onOpenMedia,
+  onOpenMusic,
+}: FilePanelProps) {
+  const shares = useShares();
+  const people = usePeople();
+  // A viewed private space is named by its owner, the way they go by.
+  const ownerName = (space: Space) => {
+    const owner = people.byId(space.ownerUserId);
+    return owner ? displayName(owner) : space.name;
+  };
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [spaceID, setSpaceID] = useState("");
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [volume, setVolume] = useState<Volume>();
+  const [trail, setTrail] = useState<Array<{ id: string; name: string }>>([]);
+  const [query, setQuery] = useState("");
+  const [view, setView] = useState<FileView>("list");
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [selectedItemID, setSelectedItemID] = useState("");
+  const [selectedItemIDs, setSelectedItemIDs] = useState<string[]>([]);
+  const [collapsedSpaceIDs, setCollapsedSpaceIDs] = useState<string[]>([]);
+  const [clipboard, setClipboard] = useState<{ entries: FileEntry[]; mode: "copy" | "move" }>();
+  const [paneWidths, setPaneWidths] = useState({ left: 205, right: 238 });
+  const [loading, setLoading] = useState(false);
+  const [activity, setActivity] = useState("");
+  const [creatingDirectory, setCreatingDirectory] = useState(false);
+  const [renaming, setRenaming] = useState<FileEntry>();
+  const [pendingDelete, setPendingDelete] = useState<FileEntry[]>();
+  // The file whose snapshot versions 历史版本 shows.
+  const [versionsOf, setVersionsOf] = useState<FileEntry>();
+  const [failedPreviewID, setFailedPreviewID] = useState("");
+  // The file the viewer shows; images and PDFs open there instead of downloading.
+  const [viewingID, setViewingID] = useState("");
+  const [textPreview, setTextPreview] = useState<{ id: string; content?: string; error?: string }>();
+  const [selectionRect, setSelectionRect] = useState<FileSelectionRect>();
+  const [contextMenu, setContextMenu] = useState<FileContextMenu>();
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState("");
+  const managerRef = useRef<HTMLDivElement>(null);
+  const listShellRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
+  const parentID = trail.at(-1)?.id ?? "";
+  const { order, save: saveOrder, storageError, scope: orderScope } = useFileOrder(userID, spaceID, parentID);
+  const { sortBy, direction: sortDirection } = order;
+  const draggedItem = useRef<{ id: string; scope: string } | undefined>(undefined);
+  const [dropTarget, setDropTarget] = useState("");
+  const transfers = useTransfers();
+
+  const list = useCallback(
+    (selected: string, parent: string) =>
+      listEntries(selected, parent)
+        .then((items) => {
+          setEntries(items);
+          setError("");
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        })
+        .finally(() => setLoading(false)),
+    [],
+  );
+  const refresh = useCallback(
+    async (selected: string, parent: string) => {
+      if (!selected) {
+        setEntries([]);
+        return;
+      }
+      setLoading(true);
+      return list(selected, parent);
+    },
+    [list],
+  );
+  const refreshVolume = useCallback(
+    () =>
+      listVolumes()
+        .then((volumes) => setVolume(volumes.find((item) => item.id === "volume:data") ?? volumes[0]))
+        .catch(() => setVolume(undefined)),
+    [],
+  );
+  const loadSpaces = useCallback(
+    () =>
+      listSpaces()
+        .then((items) => {
+          setSpaces(items);
+          setSpaceID((current) => (items.some((space) => space.id === current) ? current : (items[0]?.id ?? "")));
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        }),
+    [],
+  );
+  useEffect(() => {
+    void loadSpaces();
+    void refreshVolume();
+  }, [loadSpaces, refreshVolume]);
+  // Each folder opened lists at once.
+  const [listedFor, setListedFor] = useState<{ spaceID: string; parentID: string }>();
+  if (listedFor?.spaceID !== spaceID || listedFor.parentID !== parentID) {
+    setListedFor({ spaceID, parentID });
+    if (spaceID) setLoading(true);
+  }
+  useEffect(() => {
+    if (spaceID) void list(spaceID, parentID);
+  }, [spaceID, parentID, list]);
+  // A transfer's location opens here.
+  const [navigatedTo, setNavigatedTo] = useState<TransferLocation>();
+  if (navigatedTo !== navigation) {
+    setNavigatedTo(navigation);
+    if (navigation) {
+      setSpaceID(navigation.spaceId);
+      setTrail(navigation.folders.map((folder) => ({ id: folder.id, name: folder.name })));
+      setQuery("");
+      setSelectedItemID("");
+      setSelectedItemIDs([]);
+      setContextMenu(undefined);
+    }
+  }
+  const navigated = useEffectEvent(onNavigated);
+  useEffect(() => {
+    if (navigation) navigated();
+  }, [navigation]);
+  // Files uploaded into this space show up without a manual refresh.
+  const uploadedHere = useEffectEvent((spaceId: string) => spaceId === spaceID);
+  const refreshHere = useEffectEvent(() => {
+    void refresh(spaceID, parentID);
+    void refreshVolume();
+  });
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = transferStore.onUploaded((target) => {
+      if (!uploadedHere(target.spaceId)) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => refreshHere(), 400);
+    });
+    return () => {
+      stop();
+      clearTimeout(timer);
+    };
+  }, []);
+  // Another item gets another try at its preview.
+  const [previewedID, setPreviewedID] = useState(selectedItemID);
+  if (previewedID !== selectedItemID) {
+    setPreviewedID(selectedItemID);
+    setFailedPreviewID("");
+  }
+  useEffect(() => {
+    if (!pendingDelete && !renaming && !viewMenuOpen && !contextMenu && !uploadMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || activity) return;
+      setPendingDelete(undefined);
+      setRenaming(undefined);
+      setViewMenuOpen(false);
+      setContextMenu(undefined);
+      setUploadMenuOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [pendingDelete, renaming, viewMenuOpen, contextMenu, uploadMenuOpen, activity]);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(undefined);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+    };
+  }, [contextMenu]);
+
+  const selectedSpace = spaces.find((space) => space.id === spaceID);
+  const viewing = selectedSpace?.viewing;
+  const showResources = selectedSpace?.kind === "private" && !viewing && trail.length === 0;
+  const browserItems: FileBrowserItem[] = [
+    ...(showResources ? personalFileResources : []),
+    ...entries.map(
+      (entry) =>
+        ({
+          id: entry.id,
+          name: entry.name,
+          kind: entry.kind,
+          type: entry.kind === "directory" ? "文件夹" : fileTypeLabel(entry.name),
+          detail: entry.kind === "directory" ? "文件夹" : isViewable(entry.name) ? "双击预览" : "双击下载",
+          modifiedAt: entry.modifiedAt,
+          sizeBytes: entry.sizeBytes,
+          entry,
+        }) as FileBrowserItem,
+    ),
+  ];
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const orderedItems = sortFiles(browserItems, order);
+  const visibleItems = orderedItems.filter((item) =>
+    `${item.name} ${item.type}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery),
+  );
+  const selectedItems = browserItems.filter((item) => selectedItemIDs.includes(item.id));
+  const selectedItem = browserItems.find((item) => item.id === selectedItemID) ?? selectedItems.at(-1);
+  const selectedEntry = selectedItem?.entry;
+  const selectedEntries = selectedItems.flatMap((item) => (item.entry ? [item.entry] : []));
+  const viewable = visibleItems.flatMap((item) =>
+    item.entry?.kind === "file" && isViewable(item.name) ? [item.entry] : [],
+  );
+  const viewingIndex = viewable.findIndex((entry) => entry.id === viewingID);
+  const fileCount = visibleItems.filter((item) => item.kind === "file").length;
+  const directoryCount = visibleItems.filter((item) => item.kind === "directory").length;
+  const resourceCount = visibleItems.filter((item) => item.kind === "resource").length;
+  const totalSize = visibleItems.reduce((total, item) => total + (item.kind === "file" ? item.sizeBytes : 0), 0);
+  const selectedSpaceLabel =
+    selectedSpace?.kind === "shared"
+      ? "共享空间"
+      : selectedSpace?.viewing
+        ? `只读查看 · ${ownerName(selectedSpace)}`
+        : "个人空间";
+  const capacityBytes = volume?.capacityBytes ?? 0;
+  const usageKnown = capacityBytes > 0 && volume?.availableBytes !== undefined;
+  const availableBytes = usageKnown ? Math.min(capacityBytes, Math.max(0, volume.availableBytes!)) : 0;
+  const usedBytes = usageKnown ? capacityBytes - availableBytes : 0;
+  const usedPercent = usageKnown ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
+  const canMutateSelection = Boolean(
+    selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity,
+  );
+  const canShareSelection = Boolean(
+    selectedEntries.length && selectedEntries.length === selectedItems.length && !viewing && !activity,
+  );
+  const canRenameSelection = canMutateSelection && selectedEntries.length === 1;
+  // Snapshot versions are for the user's own spaces; viewing a member's is for browsing files.
+  const canShowVersions =
+    selectedEntries.length === 1 && selectedItems.length === 1 && selectedEntry?.kind === "file" && !viewing;
+  const selectedFolders = selectedItems.filter((item) => item.kind === "directory");
+  const canPin = selectedFolders.length > 0 && selectedFolders.length === selectedItems.length && !loading && !activity;
+  const allPinned = selectedFolders.length > 0 && selectedFolders.every((item) => isPinned(item, order));
+  const canReorder = sortBy === "manual" && !normalizedQuery && !loading && !activity;
+  const reorderPeers = selectedItem
+    ? orderedItems.filter((item) => isPinned(item, order) === isPinned(selectedItem, order))
+    : [];
+  const selectedPosition = reorderPeers.findIndex((item) => item.id === selectedItemID);
+  const canMove = (delta: number) =>
+    canReorder &&
+    selectedItems.length === 1 &&
+    selectedPosition >= 0 &&
+    Boolean(reorderPeers[selectedPosition + delta]);
+  const moveSelection = (delta: number) => {
+    if (canMove(delta))
+      saveOrder(reorderFiles(browserItems, order, selectedItemID, reorderPeers[selectedPosition + delta].id));
+  };
+  const togglePinned = () => {
+    if (!canPin) return;
+    const ids = selectedFolders.map((item) => item.id);
+    saveOrder({
+      ...order,
+      pinned: allPinned ? order.pinned.filter((id) => !ids.includes(id)) : [...new Set([...order.pinned, ...ids])],
+    });
+  };
+  const dragProps = (item: FileBrowserItem) => ({
+    draggable: canReorder,
+    onDragStart: (event: ReactDragEvent<HTMLElement>) => {
+      if (!canReorder) {
+        event.preventDefault();
+        return;
+      }
+      draggedItem.current = { id: item.id, scope: orderScope };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", item.id);
+    },
+    onDragOver: (event: ReactDragEvent<HTMLElement>) => {
+      const source = browserItems.find((candidate) => candidate.id === draggedItem.current?.id);
+      if (
+        !canReorder ||
+        draggedItem.current?.scope !== orderScope ||
+        !source ||
+        source.id === item.id ||
+        isPinned(source, order) !== isPinned(item, order)
+      )
+        return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget(item.id);
+    },
+    onDrop: (event: ReactDragEvent<HTMLElement>) => {
+      if (carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (canReorder && draggedItem.current?.scope === orderScope)
+        saveOrder(reorderFiles(browserItems, order, draggedItem.current.id, item.id));
+      draggedItem.current = undefined;
+      setDropTarget("");
+    },
+    onDragEnd: () => {
+      draggedItem.current = undefined;
+      setDropTarget("");
+    },
+    onDragLeave: () => setDropTarget(""),
+    "data-drop-target": dropTarget === item.id || undefined,
+  });
+  const canPaste = Boolean(
+    clipboard?.entries.length &&
+      !viewing &&
+      !activity &&
+      !(
+        clipboard.mode === "move" &&
+        clipboard.entries.every((entry) => entry.spaceId === spaceID && (entry.parentId ?? "") === parentID)
+      ),
+  );
+  const canDownload = Boolean(selectedEntries.length && selectedEntries.length === selectedItems.length);
+  const archiveDownload = selectedEntries.length > 1 || selectedEntries[0]?.kind === "directory";
+  const uploadsHere = transfers.uploads.filter(
+    (upload) =>
+      upload.target.spaceId === spaceID &&
+      ["queued", "running", "paused", "waiting", "conflict"].includes(upload.phase),
+  );
+  const uploadBytes = uploadsHere.reduce((sum, upload) => sum + upload.size, 0);
+  const uploadPercent = uploadBytes
+    ? Math.round((uploadsHere.reduce((sum, upload) => sum + upload.transferred, 0) / uploadBytes) * 100)
+    : 0;
+  const uploadAttention = uploadsHere.some((upload) => upload.phase === "conflict" || upload.phase === "waiting");
+
+  // A text file selected alone previews its text; a large one says why not.
+  const previewText =
+    Boolean(selectedItem?.entry) && isTextPreviewable(selectedItem?.name ?? "") && selectedItems.length === 1;
+  const previewTooLarge = previewText && (selectedItem?.sizeBytes ?? 0) > 1024 * 1024;
+  const [previewFor, setPreviewFor] = useState<{
+    id?: string;
+    entry?: FileEntry;
+    name?: string;
+    sizeBytes?: number;
+    count: number;
+  }>();
+  if (
+    !previewFor ||
+    previewFor.id !== selectedItem?.id ||
+    previewFor.entry !== selectedItem?.entry ||
+    previewFor.name !== selectedItem?.name ||
+    previewFor.sizeBytes !== selectedItem?.sizeBytes ||
+    previewFor.count !== selectedItems.length
+  ) {
+    setPreviewFor({
+      id: selectedItem?.id,
+      entry: selectedItem?.entry,
+      name: selectedItem?.name,
+      sizeBytes: selectedItem?.sizeBytes,
+      count: selectedItems.length,
+    });
+    setTextPreview(
+      !previewText || !selectedItem
+        ? undefined
+        : previewTooLarge
+          ? { id: selectedItem.id, error: "文本超过 1 MiB，请下载后查看完整内容。" }
+          : { id: selectedItem.id },
+    );
+  }
+  useEffect(() => {
+    if (!selectedItem?.entry || !isTextPreviewable(selectedItem.name) || selectedItems.length !== 1) return;
+    if (selectedItem.sizeBytes > 1024 * 1024) return;
+    let cancelled = false;
+    void readFileTextPreview(selectedItem.entry.id)
+      .then((content) => {
+        if (!cancelled) setTextPreview({ id: selectedItem.id, content });
+      })
+      .catch((caught) => {
+        if (!cancelled) setTextPreview({ id: selectedItem.id, error: messageOf(caught) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedItem?.id, selectedItem?.entry, selectedItem?.name, selectedItem?.sizeBytes, selectedItems.length]);
+
+  const chooseSpace = (nextSpaceID: string) => {
+    setSpaceID(nextSpaceID);
+    setTrail([]);
+    setQuery("");
+    setSelectedItemID("");
+    setSelectedItemIDs([]);
+    setCreatingDirectory(false);
+    setPendingDelete(undefined);
+    setRenaming(undefined);
+    setContextMenu(undefined);
+    setCollapsedSpaceIDs((current) => current.filter((id) => id !== nextSpaceID));
+  };
+  const toggleSpace = (space: Space) => {
+    if (space.id !== spaceID) {
+      chooseSpace(space.id);
+      return;
+    }
+    setCollapsedSpaceIDs((current) =>
+      current.includes(space.id) ? current.filter((id) => id !== space.id) : [...current, space.id],
+    );
+  };
+  const navigateTo = (index: number) => {
+    setTrail((value) => value.slice(0, index));
+    setQuery("");
+    setSelectedItemID("");
+    setSelectedItemIDs([]);
+    setCreatingDirectory(false);
+    setContextMenu(undefined);
+  };
+  const openDirectory = (entry: FileEntry) => {
+    setTrail((value) => [...value, { id: entry.id, name: entry.name }]);
+    setQuery("");
+    setSelectedItemID("");
+    setSelectedItemIDs([]);
+    setCreatingDirectory(false);
+    setContextMenu(undefined);
+  };
+  // Downloads go through the transfer center, which follows their progress;
+  // a folder or several items arrive as one ZIP archive.
+  const download = (targets: FileEntry[]) => {
+    if (!targets.length) return;
+    void transferStore
+      .download(targets.map((entry) => entry.id))
+      .then(() => setError(""))
+      .catch((caught) => setError(messageOf(caught)));
+  };
+  const showViewer = (entry: FileEntry) => {
+    setViewingID(entry.id);
+    setSelectedItemIDs([entry.id]);
+    setSelectedItemID(entry.id);
+  };
+  const openItem = (item: FileBrowserItem) => {
+    if (item.entry?.kind === "directory") openDirectory(item.entry);
+    else if (item.entry?.kind === "file" && isViewable(item.name)) showViewer(item.entry);
+    else if (item.entry?.kind === "file") download([item.entry]);
+    else if (item.resource === "photos") onOpenPhotos();
+    else if (item.resource === "movies") onOpenMedia();
+    else if (item.resource === "music") onOpenMusic();
+  };
+  const changeSort = (nextSort: FileSort) => {
+    saveOrder({
+      ...order,
+      sortBy: nextSort,
+      direction:
+        sortBy === nextSort
+          ? sortDirection === "ascending"
+            ? "descending"
+            : "ascending"
+          : nextSort === "modifiedAt" || nextSort === "sizeBytes"
+            ? "descending"
+            : "ascending",
+      manual: nextSort === "manual" && !order.manual.length ? orderedItems.map((item) => item.id) : order.manual,
+    });
+  };
+  const selectItem = (item: FileBrowserItem, event?: Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
+    if (event?.shiftKey && selectedItemID) {
+      const anchor = visibleItems.findIndex((candidate) => candidate.id === selectedItemID);
+      const target = visibleItems.findIndex((candidate) => candidate.id === item.id);
+      if (anchor >= 0 && target >= 0) {
+        const range = visibleItems
+          .slice(Math.min(anchor, target), Math.max(anchor, target) + 1)
+          .map((candidate) => candidate.id);
+        setSelectedItemIDs(range);
+        setSelectedItemID(item.id);
+        return;
+      }
+    }
+    if (event?.ctrlKey || event?.metaKey) {
+      setSelectedItemIDs((current) =>
+        current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
+      );
+      setSelectedItemID(item.id);
+      return;
+    }
+    setSelectedItemIDs([item.id]);
+    setSelectedItemID(item.id);
+  };
+  const showContextMenu = (event: ReactMouseEvent, item?: FileBrowserItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item && !selectedItemIDs.includes(item.id)) selectItem(item);
+    const bounds = managerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const width = 178;
+    const height = item ? 320 : 170;
+    const edge = 8;
+    setContextMenu({
+      x: Math.max(edge, Math.min(event.clientX - bounds.left, bounds.width - width - edge)),
+      y: Math.max(edge, Math.min(event.clientY - bounds.top, bounds.height - height - edge)),
+      item,
+    });
+  };
+  const beginBoxSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("[data-file-item], button, a, input, select"))
+      return;
+    const shell = listShellRef.current;
+    if (!shell) return;
+    event.preventDefault();
+    setContextMenu(undefined);
+    setSelectedItemIDs([]);
+    setSelectedItemID("");
+    const bounds = shell.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const move = (moveEvent: PointerEvent) => {
+      const left = Math.min(startX, moveEvent.clientX);
+      const top = Math.min(startY, moveEvent.clientY);
+      const right = Math.max(startX, moveEvent.clientX);
+      const bottom = Math.max(startY, moveEvent.clientY);
+      setSelectionRect({
+        left: left - bounds.left + shell.scrollLeft,
+        top: top - bounds.top + shell.scrollTop,
+        width: right - left,
+        height: bottom - top,
+      });
+      const matches = Array.from(shell.querySelectorAll<HTMLElement>("[data-file-item]"))
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top;
+        })
+        .map((element) => element.dataset.fileItem!)
+        .filter(Boolean);
+      setSelectedItemIDs(matches);
+      setSelectedItemID(matches.at(-1) ?? "");
+    };
+    const stop = () => {
+      setSelectionRect(undefined);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
+  const setPaneWidth = useCallback((side: "left" | "right", value: number) => {
+    setPaneWidths((current) => {
+      const total = managerRef.current?.clientWidth ?? 900;
+      const opposite = side === "left" ? current.right : current.left;
+      const minimum = side === "left" ? 145 : 175;
+      const maximum = Math.max(minimum, total - opposite - 295);
+      return { ...current, [side]: Math.round(Math.min(maximum, Math.max(minimum, value))) };
+    });
+  }, []);
+  const beginPaneResize = (side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.focus();
+    const startX = event.clientX;
+    const startWidth = paneWidths[side];
+    const move = (moveEvent: PointerEvent) =>
+      setPaneWidth(
+        side,
+        side === "left" ? startWidth + moveEvent.clientX - startX : startWidth - moveEvent.clientX + startX,
+      );
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
+  const resizePaneWithKeyboard = (side: "left" | "right", event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 12 : -12;
+    setPaneWidth(side, paneWidths[side] + (side === "left" ? delta : -delta));
+  };
+  const stopViewing = async () => {
+    if (!viewing) return;
+    setActivity("正在结束只读查看…");
+    try {
+      await endViewing(viewing.grantId);
+      setTrail([]);
+      await loadSpaces();
+      setError("");
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setActivity("");
+    }
+  };
+  const makeDirectory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const name = String(new FormData(form).get("name"));
+    const problem = nameProblem(name);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setActivity(`正在创建“${name}”…`);
+    try {
+      await createDirectory(spaceID, parentID, name);
+      form.reset();
+      setCreatingDirectory(false);
+      await refresh(spaceID, parentID);
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setActivity("");
+    }
+  };
+  // Uploads run in the transfer center, so the folder stays usable and a
+  // failed file does not stop the others.
+  const upload = (picked: PickedFile[]) => {
+    if (!picked.length || !selectedSpace || viewing) return;
+    transferStore.enqueue(picked, {
+      spaceId: selectedSpace.id,
+      spaceKind: selectedSpace.kind,
+      parentId: parentID,
+      folders: trail,
+    });
+  };
+  const dragEvents = {
+    onDragEnter: (event: ReactDragEvent) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (event: ReactDragEvent) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = viewing || !spaceID ? "none" : "copy";
+    },
+    onDragLeave: (event: ReactDragEvent) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (!dragDepth.current) setDragging(false);
+    },
+    onDrop: (event: ReactDragEvent) => {
+      if (!carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      if (viewing || !spaceID) return;
+      void pickedFromDrop(event.dataTransfer)
+        .then(upload)
+        .catch(() => setError("无法读取拖入的文件，请改用上传按钮选择"));
+    },
+  };
+  const pasteEntry = async () => {
+    if (!clipboard || !canPaste) return;
+    setActivity(`${clipboard.mode === "copy" ? "正在复制" : "正在移动"} ${clipboard.entries.length} 个项目…`);
+    try {
+      for (const source of clipboard.entries) {
+        const here = source.spaceId === spaceID && (source.parentId ?? "") === parentID;
+        const name = clipboard.mode === "copy" && here ? duplicateFileName(source.name) : source.name;
+        if (clipboard.mode === "copy") await copyFile(source.id, parentID, name, spaceID);
+        else if (!here) await moveFile(source.id, parentID, name, spaceID);
+      }
+      if (clipboard.mode === "move") setClipboard(undefined);
+      setSelectedItemID("");
+      setSelectedItemIDs([]);
+      await Promise.all([refresh(spaceID, parentID), refreshVolume()]);
+      setError("");
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setActivity("");
+    }
+  };
+  const renameEntry = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!renaming) return;
+    const name = String(new FormData(event.currentTarget).get("name"));
+    const problem = name === renaming.name ? undefined : nameProblem(name);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setActivity(`正在重命名“${renaming.name}”…`);
+    try {
+      await moveFile(renaming.id, parentID, name);
+      setRenaming(undefined);
+      setSelectedItemID("");
+      setSelectedItemIDs([]);
+      await refresh(spaceID, parentID);
+      setError("");
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setActivity("");
+    }
+  };
+  const removeEntry = async () => {
+    if (!pendingDelete?.length) return;
+    setActivity(`正在移动 ${pendingDelete.length} 个项目…`);
+    try {
+      for (const entry of pendingDelete) await deleteFile(entry.id);
+      setPendingDelete(undefined);
+      setSelectedItemID("");
+      setSelectedItemIDs([]);
+      await Promise.all([refresh(spaceID, parentID), refreshVolume()]);
+      setError("");
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setActivity("");
+    }
+  };
+  const itemIcon = (item: FileBrowserItem) =>
+    item.kind === "directory" ? (
+      <FolderClosed />
+    ) : item.kind === "file" ? (
+      <FileText />
+    ) : item.resource === "photos" ? (
+      <Image />
+    ) : item.resource === "music" ? (
+      <Music2 />
+    ) : (
+      <Film />
+    );
+  const itemArtwork = (item: FileBrowserItem) => (
+    <>
+      {itemIcon(item)}
+      {item.entry?.kind === "file" && (isPreviewableImage(item.name) || isVideoFile(item.name)) && (
+        <img
+          key={fileVisualURL(item.entry, "thumbnail")}
+          src={fileVisualURL(item.entry, "thumbnail")}
+          alt=""
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      )}
+    </>
+  );
+  let inspectorPreview: ReactNode;
+  if (
+    selectedItem?.entry?.kind === "file" &&
+    isPreviewableImage(selectedItem.name) &&
+    failedPreviewID !== selectedItem.id
+  ) {
+    const entry = selectedItem.entry;
+    inspectorPreview = (
+      <button
+        type="button"
+        className="file-inspector-zoom"
+        title="点击预览"
+        aria-label={`预览 ${selectedItem.name}`}
+        onClick={() => showViewer(entry)}
+      >
+        <img
+          src={fileVisualURL(entry)}
+          alt={`${selectedItem.name} 的预览`}
+          onError={() => setFailedPreviewID(selectedItem.id)}
+        />
+      </button>
+    );
+  } else if (
+    selectedItem?.entry?.kind === "file" &&
+    isVideoFile(selectedItem.name) &&
+    failedPreviewID !== selectedItem.id
+  ) {
+    inspectorPreview = (
+      <img
+        src={fileVisualURL(selectedItem.entry)}
+        alt={`${selectedItem.name} 的预览`}
+        onError={() => setFailedPreviewID(selectedItem.id)}
+      />
+    );
+  } else if (selectedItem?.entry?.kind === "file" && isPDFPreviewable(selectedItem.name)) {
+    inspectorPreview = <iframe src={filePreviewURL(selectedItem.entry.id)} title={`${selectedItem.name} 的预览`} />;
+  } else if (selectedItem?.entry?.kind === "file" && isTextPreviewable(selectedItem.name)) {
+    inspectorPreview =
+      textPreview?.content !== undefined ? (
+        <pre>{textPreview.content}</pre>
+      ) : textPreview?.error ? (
+        <span className="file-preview-message">{textPreview.error}</span>
+      ) : (
+        <span className="loader" />
+      );
+  } else if (selectedItem?.entry?.kind === "file" && isOfficeDocument(selectedItem.name)) {
+    inspectorPreview = (
+      <div className="file-preview-unavailable">
+        <FileText />
+        <strong>需要文档转换服务</strong>
+        <span>Word 与 PowerPoint 无法由浏览器原生可靠预览。</span>
+      </div>
+    );
+  } else if (selectedItem) inspectorPreview = itemIcon(selectedItem);
+  const managerStyle = {
+    "--file-left-pane": `${paneWidths.left}px`,
+    "--file-right-pane": `${paneWidths.right}px`,
+  } as CSSProperties;
+
+  return (
+    <div className="file-manager" ref={managerRef} style={managerStyle}>
+      <aside className="file-sidebar" aria-label="目录树">
+        <div className="file-sidebar-heading">
+          <strong>目录</strong>
+          <button
+            aria-label="新建文件夹"
+            disabled={!spaceID || Boolean(viewing) || Boolean(activity)}
+            onClick={() => setCreatingDirectory(true)}
+          >
+            <FolderPlus />
+          </button>
+        </div>
+        <p className="file-sidebar-label">空间</p>
+        <nav className="file-tree">
+          {spaces.map((space) => {
+            const active = space.id === spaceID;
+            const collapsed = collapsedSpaceIDs.includes(space.id);
+            const label =
+              space.kind === "shared" ? "共享空间" : space.viewing ? `只读查看 · ${ownerName(space)}` : "个人空间";
+            return (
+              <div className="file-tree-group" key={space.id}>
+                <button
+                  className={`file-tree-root ${active ? "active" : ""}`}
+                  aria-expanded={active && !collapsed}
+                  onClick={() => toggleSpace(space)}
+                >
+                  <ChevronDown className={!active || collapsed ? "collapsed" : ""} />
+                  <span className={`file-tree-icon ${space.kind}`}>
+                    {space.kind === "shared" ? <UsersRound /> : space.viewing ? <ShieldCheck /> : <FolderOpen />}
+                  </span>
+                  <strong>{label}</strong>
+                  <small>{space.kind === "shared" ? "共享" : space.name}</small>
+                </button>
+                {active && !collapsed && (
+                  <div className="file-tree-branch" data-vnas-private={space.viewing ? othersSpace : undefined}>
+                    {space.kind === "private" &&
+                      !space.viewing &&
+                      personalFileResources.map((resource) => (
+                        <button
+                          key={resource.id}
+                          className="file-tree-child resource"
+                          disabled={resource.planned}
+                          onClick={() =>
+                            resource.resource === "photos"
+                              ? onOpenPhotos()
+                              : resource.resource === "movies"
+                                ? onOpenMedia()
+                                : resource.resource === "music" && onOpenMusic()
+                          }
+                        >
+                          <span>{itemIcon(resource)}</span>
+                          <strong>{resource.name}</strong>
+                          <small>{resource.planned ? "规划中" : "打开"}</small>
+                        </button>
+                      ))}
+                    <button
+                      className={`file-tree-child ${trail.length === 0 ? "current" : ""}`}
+                      onClick={() => navigateTo(0)}
+                    >
+                      <span>
+                        <FolderClosed />
+                      </span>
+                      <strong>根目录</strong>
+                    </button>
+                    {trail.map((item, index) => (
+                      <button
+                        key={item.id}
+                        className={`file-tree-child path ${index === trail.length - 1 ? "current" : ""}`}
+                        onClick={() => navigateTo(index + 1)}
+                      >
+                        <span>
+                          <FolderClosed />
+                        </span>
+                        <strong>{item.name}</strong>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+        <div className="file-volume-card">
+          <header>
+            <strong>数据卷</strong>
+            <span className={`file-volume-state ${volume?.state ?? "unavailable"}`}>
+              {volume?.state === "available" ? "在线" : "不可用"}
+            </span>
+          </header>
+          <div
+            className={`file-volume-track ${usageKnown ? "" : "unknown"}`}
+            role="progressbar"
+            aria-label={usageKnown ? `数据卷已使用 ${usedPercent}%` : "数据卷使用情况暂不可用"}
+            aria-valuenow={usageKnown ? usedPercent : undefined}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span style={{ width: `${usedPercent}%` }} />
+          </div>
+          <div className="file-volume-values">
+            <span>已用空间</span>
+            <span>总空间</span>
+            <strong>{usageKnown ? formatBytes(usedBytes) : "—"}</strong>
+            <strong>{capacityBytes ? formatBytes(capacityBytes) : "—"}</strong>
+          </div>
+        </div>
+      </aside>
+
+      <div
+        className="file-pane-resizer"
+        role="separator"
+        aria-label="调整目录栏宽度"
+        aria-orientation="vertical"
+        tabIndex={0}
+        onPointerDown={(event) => beginPaneResize("left", event)}
+        onKeyDown={(event) => resizePaneWithKeyboard("left", event)}
+      />
+
+      <section
+        className="file-browser"
+        aria-label="文件浏览器"
+        data-vnas-private={viewing ? othersSpace : undefined}
+        {...dragEvents}
+      >
+        <div className="file-navigation-bar">
+          <div className="file-history-actions">
+            <button
+              className="file-icon-button"
+              aria-label="后退"
+              title="后退"
+              disabled={!trail.length || loading}
+              onClick={() => navigateTo(trail.length - 1)}
+            >
+              <ArrowLeft />
+            </button>
+            <button className="file-icon-button" aria-label="前进" title="前进" disabled>
+              <ArrowRight />
+            </button>
+            <button
+              className="file-icon-button"
+              aria-label="向上一级"
+              title="向上一级"
+              disabled={!trail.length || loading}
+              onClick={() => navigateTo(trail.length - 1)}
+            >
+              <ArrowUp />
+            </button>
+            <button
+              className="file-icon-button"
+              aria-label="刷新文件列表"
+              title="刷新"
+              disabled={!spaceID || loading}
+              onClick={() => {
+                void refresh(spaceID, parentID);
+                void refreshVolume();
+              }}
+            >
+              <RefreshCw className={loading ? "spinning" : ""} />
+            </button>
+          </div>
+          <select
+            className="file-space-select"
+            aria-label="空间"
+            value={spaceID}
+            onChange={(event) => chooseSpace(event.target.value)}
+          >
+            {spaces.map((space) => (
+              <option key={space.id} value={space.id}>
+                {space.kind === "shared"
+                  ? "共享空间"
+                  : space.viewing
+                    ? `只读查看 · ${ownerName(space)}`
+                    : `个人空间 · ${space.name}`}
+              </option>
+            ))}
+          </select>
+          <nav className="file-breadcrumb" aria-label="当前路径">
+            <FolderOpen />
+            <button onClick={() => navigateTo(0)}>{selectedSpaceLabel || "空间"}</button>
+            {trail.map((item, index) => (
+              <span key={item.id}>
+                <ChevronRight />
+                <button
+                  aria-current={index === trail.length - 1 ? "page" : undefined}
+                  onClick={() => navigateTo(index + 1)}
+                >
+                  {item.name}
+                </button>
+              </span>
+            ))}
+          </nav>
+          <label className="file-search">
+            <Search />
+            <input
+              type="search"
+              aria-label="搜索当前目录"
+              placeholder={`在${trail.at(-1)?.name ?? selectedSpaceLabel ?? "当前目录"}中搜索`}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="file-action-bar" aria-label="文件命令">
+          <button
+            className="file-command-button"
+            disabled={!spaceID || Boolean(viewing) || Boolean(activity)}
+            onClick={() => setCreatingDirectory((value) => !value)}
+          >
+            <FolderPlus />
+            <span>新建</span>
+          </button>
+          <i />
+          <button
+            className="file-command-button"
+            aria-label="分享"
+            title="分享给成员"
+            disabled={!canShareSelection}
+            onClick={() => shares.compose(selectedEntries)}
+          >
+            <Share2 />
+            <span>分享</span>
+          </button>
+          <button
+            className="file-command-button"
+            aria-label="剪切"
+            title="剪切"
+            disabled={!canMutateSelection}
+            onClick={() => setClipboard({ entries: selectedEntries, mode: "move" })}
+          >
+            <Scissors />
+            <span>剪切</span>
+          </button>
+          <button
+            className="file-command-button"
+            aria-label="复制"
+            title="复制"
+            disabled={!canMutateSelection}
+            onClick={() => setClipboard({ entries: selectedEntries, mode: "copy" })}
+          >
+            <Copy />
+            <span>复制</span>
+          </button>
+          <button
+            className="file-command-button"
+            aria-label="粘贴"
+            title="粘贴到当前目录"
+            disabled={!canPaste}
+            onClick={() => void pasteEntry()}
+          >
+            <ClipboardPaste />
+            <span>粘贴</span>
+          </button>
+          <button
+            className="file-command-button"
+            aria-label={archiveDownload ? "打包下载" : "下载"}
+            title={archiveDownload ? "打包为 ZIP 下载" : "下载"}
+            disabled={!canDownload}
+            onClick={() => download(selectedEntries)}
+          >
+            <Download />
+            <span>下载</span>
+          </button>
+          <button
+            className="file-command-button"
+            aria-label="重命名"
+            title="重命名"
+            disabled={!canRenameSelection}
+            onClick={() => setRenaming(selectedEntry)}
+          >
+            <Pencil />
+            <span>重命名</span>
+          </button>
+          <button
+            className="file-command-button file-command-optional"
+            aria-label="共享"
+            title="共享功能规划中"
+            disabled
+          >
+            <Share2 />
+            <span>共享</span>
+          </button>
+          <button
+            className="file-command-button danger"
+            aria-label="删除"
+            title="移到回收站"
+            disabled={!canMutateSelection}
+            onClick={() => setPendingDelete(selectedEntries)}
+          >
+            <Trash2 />
+            <span>删除</span>
+          </button>
+          <i />
+          <button
+            className="file-command-button"
+            aria-label="切换排序方向"
+            title={`按${fileSortLabel(sortBy)}${sortDirection === "ascending" ? "升序" : "降序"}`}
+            disabled={sortBy === "manual"}
+            onClick={() =>
+              saveOrder({ ...order, direction: sortDirection === "ascending" ? "descending" : "ascending" })
+            }
+          >
+            <ArrowUpDown />
+            <span>排序</span>
+          </button>
+          <div className="file-view-control">
+            <button
+              className="file-command-button"
+              aria-expanded={viewMenuOpen}
+              onClick={() => setViewMenuOpen((value) => !value)}
+            >
+              {view === "list" ? <List /> : <Grid2X2 />}
+              <span>查看</span>
+              <ChevronDown />
+            </button>
+            {viewMenuOpen && (
+              <div className="file-view-menu">
+                <button
+                  className={view === "list" ? "active" : ""}
+                  onClick={() => {
+                    setView("list");
+                    setViewMenuOpen(false);
+                  }}
+                >
+                  <List />
+                  列表视图
+                </button>
+                <button
+                  className={view === "icons" ? "active" : ""}
+                  onClick={() => {
+                    setView("icons");
+                    setViewMenuOpen(false);
+                  }}
+                >
+                  <Grid2X2 />
+                  图标视图
+                </button>
+              </div>
+            )}
+          </div>
+          <button className="file-command-button file-command-optional" aria-label="更多操作" title="更多操作" disabled>
+            <Ellipsis />
+          </button>
+          {activity && (
+            <span className="file-activity" role="status">
+              <span className="loader" />
+              {activity}
+            </span>
+          )}
+        </div>
+
+        <div className="file-order-bar" aria-label="文件排列">
+          <label>
+            排序方式
+            <select
+              aria-label="排序方式"
+              value={sortBy}
+              disabled={loading || !spaceID}
+              onChange={(event) => changeSort(event.target.value as FileSort)}
+            >
+              <option value="name">名称</option>
+              <option value="modifiedAt">修改时间</option>
+              <option value="type">类型</option>
+              <option value="sizeBytes">大小</option>
+              <option value="manual">手动排序</option>
+            </select>
+          </label>
+          <button disabled={!canPin} onClick={togglePinned}>
+            <Pin />
+            {allPinned ? "取消置顶" : "置顶文件夹"}
+          </button>
+          {sortBy === "manual" && (
+            <>
+              <button aria-label="上移所选项目" disabled={!canMove(-1)} onClick={() => moveSelection(-1)}>
+                <ArrowUp />
+                上移
+              </button>
+              <button aria-label="下移所选项目" disabled={!canMove(1)} onClick={() => moveSelection(1)}>
+                <ArrowDown />
+                下移
+              </button>
+              <span>{normalizedQuery ? "清除搜索后可调整顺序" : "拖动项目或选择后上移、下移；置顶项目保持在前"}</span>
+            </>
+          )}
+        </div>
+        {storageError && (
+          <div className="file-order-notice" role="status">
+            {storageError}
+          </div>
+        )}
+        {error && <PanelNotice error={error} />}
+        {viewing && (
+          <div className="status-banner viewing-banner" role="status">
+            <ShieldCheck />
+            <span>正在只读查看他人个人空间；访问已审计，将于 {formatFileDate(viewing.expiresAt)} 自动结束。</span>
+            <button disabled={Boolean(activity)} onClick={() => void stopViewing()}>
+              结束查看
+            </button>
+          </div>
+        )}
+        {clipboard && (
+          <div className="file-clipboard-state" role="status">
+            {clipboard.mode === "copy" ? "已复制" : "已剪切"}
+            {clipboard.entries.length === 1 ? `“${clipboard.entries[0].name}”` : ` ${clipboard.entries.length} 个项目`}
+          </div>
+        )}
+
+        {creatingDirectory && !viewing && (
+          <form className="file-create-form" aria-label="新建文件夹" onSubmit={(event) => void makeDirectory(event)}>
+            <FolderPlus />
+            <input autoFocus name="name" aria-label="新文件夹名称" placeholder="输入文件夹名称" required />
+            <button disabled={Boolean(activity)}>创建</button>
+            <button type="button" onClick={() => setCreatingDirectory(false)}>
+              取消
+            </button>
+          </form>
+        )}
+
+        <div
+          className="file-list-shell"
+          ref={listShellRef}
+          onPointerDown={beginBoxSelection}
+          onContextMenu={(event) => showContextMenu(event)}
+        >
+          {view === "list" ? (
+            <div className="file-list" role="table" aria-label="文件列表" aria-busy={loading}>
+              <div className="file-list-header" role="row">
+                <div role="columnheader" aria-sort={sortBy === "name" ? sortDirection : "none"}>
+                  <button onClick={() => changeSort("name")}>
+                    名称
+                    {sortBy === "name" && <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />}
+                  </button>
+                </div>
+                <div
+                  className="file-date-column"
+                  role="columnheader"
+                  aria-sort={sortBy === "modifiedAt" ? sortDirection : "none"}
+                >
+                  <button onClick={() => changeSort("modifiedAt")}>
+                    修改时间
+                    {sortBy === "modifiedAt" && (
+                      <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />
+                    )}
+                  </button>
+                </div>
+                <div
+                  className="file-type-column"
+                  role="columnheader"
+                  aria-sort={sortBy === "type" ? sortDirection : "none"}
+                >
+                  <button onClick={() => changeSort("type")}>
+                    类型
+                    {sortBy === "type" && <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />}
+                  </button>
+                </div>
+                <div role="columnheader" aria-sort={sortBy === "sizeBytes" ? sortDirection : "none"}>
+                  <button onClick={() => changeSort("sizeBytes")}>
+                    大小
+                    {sortBy === "sizeBytes" && (
+                      <ChevronDown className={sortDirection === "ascending" ? "ascending" : ""} />
+                    )}
+                  </button>
+                </div>
+              </div>
+              {!loading &&
+                visibleItems.map((item) => (
+                  <div
+                    className={`file-list-row ${selectedItemIDs.includes(item.id) ? "selected" : ""}`}
+                    role="row"
+                    aria-selected={selectedItemIDs.includes(item.id)}
+                    data-file-item={item.id}
+                    {...dragProps(item)}
+                    key={item.id}
+                    onClick={(event) => selectItem(item, event)}
+                    onDoubleClick={() => openItem(item)}
+                    onContextMenu={(event) => showContextMenu(event, item)}
+                  >
+                    <div className="file-name-cell" role="cell">
+                      <span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span>
+                      <span className="file-name-copy">
+                        <span>
+                          <strong>
+                            {isPinned(item, order) && <Pin className="file-pin-badge" aria-label="已置顶" />}
+                            {item.name}
+                            {item.kind === "resource" && <em>{item.planned ? "规划中" : "应用资源"}</em>}
+                          </strong>
+                          <small>{item.detail}</small>
+                        </span>
+                      </span>
+                    </div>
+                    <div className="file-date-cell file-date-column" role="cell">
+                      {item.modifiedAt ? (
+                        <>
+                          <Clock3 />
+                          {formatFileDate(item.modifiedAt)}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </div>
+                    <div className="file-type-cell file-type-column" role="cell">
+                      <span
+                        className={item.kind === "directory" ? "directory" : item.kind === "resource" ? "resource" : ""}
+                      >
+                        {item.type}
+                      </span>
+                    </div>
+                    <div className="file-size-cell" role="cell">
+                      {item.kind === "file" ? formatBytes(item.sizeBytes) : "—"}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <div className="file-icon-view" role="listbox" aria-label="文件图标">
+              {!loading &&
+                visibleItems.map((item) => (
+                  <button
+                    className={`file-icon-card ${selectedItemIDs.includes(item.id) ? "selected" : ""}`}
+                    role="option"
+                    aria-selected={selectedItemIDs.includes(item.id)}
+                    data-file-item={item.id}
+                    {...dragProps(item)}
+                    key={item.id}
+                    onClick={(event) => selectItem(item, event)}
+                    onDoubleClick={() => openItem(item)}
+                    onContextMenu={(event) => showContextMenu(event, item)}
+                  >
+                    <span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>{itemArtwork(item)}</span>
+                    <strong>
+                      {isPinned(item, order) && <Pin className="file-pin-badge" aria-label="已置顶" />}
+                      {item.name}
+                    </strong>
+                    <small>{item.detail}</small>
+                  </button>
+                ))}
+            </div>
+          )}
+          {selectionRect && <div className="file-selection-box" aria-hidden="true" style={selectionRect} />}
+          {loading ? (
+            <div className="file-empty-state" role="status">
+              <span className="loader" />
+              <strong>正在读取文件…</strong>
+              <span>正在加载这个目录的内容</span>
+            </div>
+          ) : !spaceID ? (
+            <div className="file-empty-state">
+              <FolderClosed />
+              <strong>还没有可用空间</strong>
+              <span>完成数据卷与账号设置后，空间会显示在这里。</span>
+            </div>
+          ) : !visibleItems.length && query ? (
+            <div className="file-empty-state">
+              <Search />
+              <strong>没有匹配的项目</strong>
+              <span>请尝试其他名称，或清除搜索条件。</span>
+              <button onClick={() => setQuery("")}>清除搜索</button>
+            </div>
+          ) : !visibleItems.length ? (
+            <div className="file-empty-state">
+              <FolderPlus />
+              <strong>这个文件夹是空的</strong>
+              <span>{viewing ? "这里暂时没有内容。" : "把文件或文件夹拖到这里上传，或新建文件夹开始整理。"}</span>
+            </div>
+          ) : null}
+        </div>
+        {!viewing && spaceID && (
+          <div className="file-upload-control">
+            {uploadMenuOpen && (
+              <>
+                <div className="file-upload-scrim" onPointerDown={() => setUploadMenuOpen(false)} />
+                <div className="file-upload-menu" role="menu" aria-label="上传">
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setUploadMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <FileUp />
+                    <span>
+                      <strong>上传文件</strong>
+                      <small>可多选</small>
+                    </span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setUploadMenuOpen(false);
+                      folderInputRef.current?.click();
+                    }}
+                  >
+                    <FolderUp />
+                    <span>
+                      <strong>上传文件夹</strong>
+                      <small>保留文件夹结构</small>
+                    </span>
+                  </button>
+                  <p>也可以把文件或文件夹直接拖进来</p>
+                </div>
+              </>
+            )}
+            <button
+              className="file-floating-upload"
+              aria-label="上传到当前目录"
+              title="上传到当前目录"
+              aria-haspopup="menu"
+              aria-expanded={uploadMenuOpen}
+              onClick={() => setUploadMenuOpen((value) => !value)}
+            >
+              <Upload />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              aria-label="选择要上传的文件"
+              onChange={(event) => {
+                upload(pickedFromInput(event.target.files));
+                event.target.value = "";
+              }}
+            />
+            <input
+              ref={(element) => {
+                folderInputRef.current = element;
+                element?.setAttribute("webkitdirectory", "");
+              }}
+              type="file"
+              multiple
+              hidden
+              aria-label="选择要上传的文件夹"
+              onChange={(event) => {
+                upload(pickedFromInput(event.target.files));
+                event.target.value = "";
+              }}
+            />
+          </div>
+        )}
+        {dragging && (
+          <div className={`file-drop-overlay ${viewing ? "refused" : ""}`} aria-hidden="true">
+            <div>
+              <FolderUp />
+              <strong>{viewing ? "只读查看时不能上传" : "松开即可上传"}</strong>
+              <span>
+                {viewing
+                  ? "结束查看后再上传到自己的空间。"
+                  : `上传到 ${[selectedSpaceLabel, ...trail.map((item) => item.name)].join(" › ")}，文件夹会保留结构`}
+              </span>
+            </div>
+          </div>
+        )}
+        <footer className="file-status-bar">
+          <span>
+            {resourceCount ? `${resourceCount} 个应用资源，` : ""}
+            {directoryCount ? `${directoryCount} 个文件夹` : ""}
+            {directoryCount && fileCount ? "，" : ""}
+            {fileCount ? `${fileCount} 个文件` : !directoryCount && !resourceCount ? "0 个项目" : ""}
+          </span>
+          <span>{query && `已筛选 ${visibleItems.length}/${browserItems.length} 项`}</span>
+          <span>{totalSize > 0 && `文件共 ${formatBytes(totalSize)}`}</span>
+          {uploadsHere.length > 0 && (
+            <button
+              className={`file-transfer-chip ${uploadAttention ? "attention" : ""}`}
+              title="在传输中心查看上传"
+              aria-label={
+                uploadAttention
+                  ? `${uploadsHere.length} 个上传需要处理，在传输中心查看`
+                  : `正在上传 ${uploadsHere.length} 个文件，已完成 ${uploadPercent}%，在传输中心查看`
+              }
+              onClick={onOpenTransfers}
+            >
+              <span className="file-transfer-ring" style={{ "--percent": uploadPercent } as CSSProperties} />
+              <span>
+                {uploadAttention ? `${uploadsHere.length} 个需处理` : `上传 ${uploadsHere.length} · ${uploadPercent}%`}
+              </span>
+            </button>
+          )}
+          <span>{view === "list" ? "列表视图" : "图标视图"}</span>
+        </footer>
+      </section>
+
+      <div
+        className="file-pane-resizer"
+        role="separator"
+        aria-label="调整详细信息栏宽度"
+        aria-orientation="vertical"
+        tabIndex={0}
+        onPointerDown={(event) => beginPaneResize("right", event)}
+        onKeyDown={(event) => resizePaneWithKeyboard("right", event)}
+      />
+
+      <aside className="file-inspector" aria-label="详细信息" data-vnas-private={viewing ? othersSpace : undefined}>
+        <header>详细信息</header>
+        {selectedItems.length > 1 ? (
+          <div className="file-inspector-empty">
+            <Copy />
+            <strong>已选择 {selectedItems.length} 个项目</strong>
+            <span>可通过工具栏或右键菜单批量剪切、复制和删除</span>
+          </div>
+        ) : selectedItem ? (
+          <>
+            <div
+              className={`file-inspector-preview ${selectedItem.kind} ${selectedItem.resource ?? ""} ${isPreviewableImage(selectedItem.name) || isVideoFile(selectedItem.name) ? "image" : isPDFPreviewable(selectedItem.name) ? "pdf" : isTextPreviewable(selectedItem.name) ? "text" : isOfficeDocument(selectedItem.name) ? "office" : ""}`}
+            >
+              {inspectorPreview}
+            </div>
+            <div className="file-inspector-copy">
+              <h3>{selectedItem.name}</h3>
+              <p>{selectedItem.type}</p>
+              <dl>
+                <dt>资源类型</dt>
+                <dd>{selectedItem.kind === "resource" ? "应用资源" : selectedItem.type}</dd>
+                <dt>内容</dt>
+                <dd>{selectedItem.kind === "file" ? formatBytes(selectedItem.sizeBytes) : selectedItem.detail}</dd>
+                <dt>所在位置</dt>
+                <dd>{trail.at(-1)?.name ?? selectedSpaceLabel}</dd>
+                {selectedItem.modifiedAt && (
+                  <>
+                    <dt>修改时间</dt>
+                    <dd>{formatFileDate(selectedItem.modifiedAt)}</dd>
+                  </>
+                )}
+              </dl>
+              {selectedItem.entry?.kind === "file" && !viewing && (
+                <button className="file-inspector-action" onClick={() => setVersionsOf(selectedItem.entry)}>
+                  <History />
+                  历史版本
+                </button>
+              )}
+              {selectedItem.resource === "photos" && (
+                <p className="file-inspector-hint">
+                  这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。
+                </p>
+              )}
+              {selectedItem.resource === "movies" && (
+                <p className="file-inspector-hint">
+                  打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。
+                </p>
+              )}
+              {selectedItem.resource === "music" && (
+                <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>
+              )}
+              {selectedItem.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}
+            </div>
+          </>
+        ) : (
+          <div className="file-inspector-empty">
+            <FolderOpen />
+            <strong>选择一个项目</strong>
+            <span>详细信息会显示在这里</span>
+          </div>
+        )}
+      </aside>
+
+      {contextMenu && (
+        <div
+          className="file-context-menu"
+          role="menu"
+          aria-label="文件操作"
+          data-vnas-private={viewing ? othersSpace : undefined}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {contextMenu.item ? (
+            <>
+              <button
+                role="menuitem"
+                disabled={Boolean(contextMenu.item.planned)}
+                onClick={() => {
+                  openItem(contextMenu.item!);
+                  setContextMenu(undefined);
+                }}
+              >
+                {contextMenu.item.entry?.kind === "file" ? (
+                  isViewable(contextMenu.item.name) ? (
+                    <Eye />
+                  ) : (
+                    <Download />
+                  )
+                ) : (
+                  <FolderOpen />
+                )}
+                <span>
+                  {contextMenu.item.entry?.kind === "file" && isViewable(contextMenu.item.name)
+                    ? "预览"
+                    : contextMenu.item.entry?.kind === "file" && selectedEntries.length <= 1
+                      ? "下载"
+                      : "打开"}
+                </span>
+              </button>
+              {contextMenu.item.entry?.kind === "file" &&
+                isViewable(contextMenu.item.name) &&
+                selectedEntries.length <= 1 && (
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      download([contextMenu.item!.entry!]);
+                      setContextMenu(undefined);
+                    }}
+                  >
+                    <Download />
+                    <span>下载</span>
+                  </button>
+                )}
+              {canDownload && archiveDownload && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    download(selectedEntries);
+                    setContextMenu(undefined);
+                  }}
+                >
+                  <Download />
+                  <span>{selectedEntries.length > 1 ? `打包下载 ${selectedEntries.length} 项` : "打包下载"}</span>
+                  <kbd>ZIP</kbd>
+                </button>
+              )}
+              <i />
+              <button
+                role="menuitem"
+                disabled={!canShareSelection}
+                onClick={() => {
+                  shares.compose(selectedEntries);
+                  setContextMenu(undefined);
+                }}
+              >
+                <Share2 />
+                <span>分享给成员</span>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!canMutateSelection}
+                onClick={() => {
+                  setClipboard({ entries: selectedEntries, mode: "move" });
+                  setContextMenu(undefined);
+                }}
+              >
+                <Scissors />
+                <span>剪切</span>
+                <kbd>Ctrl+X</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!canMutateSelection}
+                onClick={() => {
+                  setClipboard({ entries: selectedEntries, mode: "copy" });
+                  setContextMenu(undefined);
+                }}
+              >
+                <Copy />
+                <span>复制</span>
+                <kbd>Ctrl+C</kbd>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!canRenameSelection}
+                onClick={() => {
+                  setRenaming(selectedEntry);
+                  setContextMenu(undefined);
+                }}
+              >
+                <Pencil />
+                <span>重命名</span>
+              </button>
+              {canShowVersions && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setVersionsOf(selectedEntry);
+                    setContextMenu(undefined);
+                  }}
+                >
+                  <History />
+                  <span>历史版本</span>
+                </button>
+              )}
+              {selectedFolders.length > 0 && (
+                <button
+                  role="menuitem"
+                  disabled={!canPin}
+                  onClick={() => {
+                    togglePinned();
+                    setContextMenu(undefined);
+                  }}
+                >
+                  <Pin />
+                  <span>{allPinned ? "取消置顶" : "置顶文件夹"}</span>
+                </button>
+              )}
+              <i />
+              <button
+                className="danger"
+                role="menuitem"
+                disabled={!canMutateSelection}
+                onClick={() => {
+                  setPendingDelete(selectedEntries);
+                  setContextMenu(undefined);
+                }}
+              >
+                <Trash2 />
+                <span>移到回收站</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                role="menuitem"
+                disabled={Boolean(viewing) || Boolean(activity)}
+                onClick={() => {
+                  setCreatingDirectory(true);
+                  setContextMenu(undefined);
+                }}
+              >
+                <FolderPlus />
+                <span>新建文件夹</span>
+              </button>
+              <button
+                role="menuitem"
+                disabled={!canPaste}
+                onClick={() => {
+                  setContextMenu(undefined);
+                  void pasteEntry();
+                }}
+              >
+                <ClipboardPaste />
+                <span>粘贴</span>
+                <kbd>Ctrl+V</kbd>
+              </button>
+              <i />
+              <button
+                role="menuitem"
+                disabled={!spaceID || loading}
+                onClick={() => {
+                  setContextMenu(undefined);
+                  void refresh(spaceID, parentID);
+                  void refreshVolume();
+                }}
+              >
+                <RefreshCw />
+                <span>刷新</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {versionsOf && selectedSpace && (
+        <VersionsDialog
+          file={versionsOf}
+          space={selectedSpace}
+          folders={trail.map((item) => item.name)}
+          onClose={() => setVersionsOf(undefined)}
+          onChanged={() => {
+            void refresh(spaceID, parentID);
+            void refreshVolume();
+          }}
+        />
+      )}
+      {viewingIndex >= 0 && (
+        <FileViewer
+          entries={viewable}
+          index={viewingIndex}
+          onIndex={(index) => showViewer(viewable[index])}
+          onClose={() => setViewingID("")}
+          onDownload={(entry) => download([entry])}
+          vnasPrivate={viewing ? othersSpace : undefined}
+        />
+      )}
+      {pendingDelete && (
+        <div className="file-dialog-backdrop">
+          <section
+            className="file-confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="file-delete-title"
+          >
+            <span className="file-confirm-icon">
+              <Trash2 />
+            </span>
+            <div>
+              <h3 id="file-delete-title">移到回收站？</h3>
+              <p>
+                {pendingDelete.length === 1 ? `“${pendingDelete[0].name}”` : `选中的 ${pendingDelete.length} 个项目`}
+                将移到回收站，可在 30 天内恢复。
+              </p>
+            </div>
+            <div className="file-confirm-actions">
+              <button disabled={Boolean(activity)} onClick={() => setPendingDelete(undefined)}>
+                取消
+              </button>
+              <button className="danger-button" disabled={Boolean(activity)} onClick={() => void removeEntry()}>
+                {activity ? "正在移动…" : "移到回收站"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {renaming && (
+        <div className="file-dialog-backdrop">
+          <form
+            className="file-rename-dialog"
+            aria-label={`重命名 ${renaming.name}`}
+            onSubmit={(event) => void renameEntry(event)}
+          >
+            <span>
+              <Pencil />
+            </span>
+            <div>
+              <h3>重命名</h3>
+              <p>为“{renaming.name}”输入新名称。</p>
+              <input autoFocus name="name" aria-label="新名称" defaultValue={renaming.name} required />
+            </div>
+            <footer>
+              <button type="button" disabled={Boolean(activity)} onClick={() => setRenaming(undefined)}>
+                取消
+              </button>
+              <button className="primary" disabled={Boolean(activity)}>
+                保存
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PanelNotice({ error }: { error: string }) {
+  return (
+    <div className="status-banner error">
+      <CircleAlert />
+      {error}
+    </div>
+  );
+}
+function messageOf(error: unknown) {
+  return nameErrorText(error) ?? accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败");
+}
+
+function formatFileDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const today = new Date();
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+  return new Intl.DateTimeFormat(
+    "zh-CN",
+    sameDay
+      ? { hour: "2-digit", minute: "2-digit" }
+      : {
+          year: date.getFullYear() === today.getFullYear() ? undefined : "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        },
+  ).format(date);
+}
+
+// isViewable says whether the file manager's viewer can show a file.
+function isViewable(name: string): boolean {
+  return isPreviewableImage(name) || isPDFPreviewable(name);
+}
+
+function fileSortLabel(sort: FileSort): string {
+  return { manual: "手动排序", name: "名称", modifiedAt: "修改时间", type: "类型", sizeBytes: "大小" }[sort];
+}
+
+function duplicateFileName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return `${name} - 副本`;
+  return `${name.slice(0, dot)} - 副本${name.slice(dot)}`;
+}

@@ -110,5 +110,5 @@
 - 规格：[头像与昵称](account-profile.md)、[个性化](personalization.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[系统健康](system-health.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
-- 代码：[设置窗口](../../web/src/SettingsPanel.tsx)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[日志分区](../../web/src/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[个性化分区](../../web/src/settings/PersonalizationSection.tsx)、[桌面](../../web/src/App.tsx)
+- 代码：[设置窗口](../../web/src/SettingsPanel.tsx)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[日志分区](../../web/src/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[个性化分区](../../web/src/settings/PersonalizationSection.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)
 - 测试：[桌面测试](../../web/src/App.test.tsx)
