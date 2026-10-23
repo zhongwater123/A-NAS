@@ -116,6 +116,7 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 		"docs/adr/0014-mentions-proposed.md": "# 0014\n\n状态：accepted\n",
 		"docs/adr/0015-chinese-status.md":    "# 0015\n\n状态：提议中\n",
 		"docs/adr/0016-bold-status.md":       "# 0016\n\n**状态**：proposed\n",
+		"docs/adr/0017-body-status.md":       "# 0017\n\n背景与决定。\n\n## 后果\n\n状态：accepted 的 ADR 不再改写。\n",
 		"docs/adr/README.md": "# ADR\n\n" +
 			"- [0001：已接受](0001-accepted.md)（修订 0007）\n" +
 			"- [0002：提议](0002-proposed.md)（proposed）\n" +
@@ -132,6 +133,7 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 			"- [0014：提到别的状态](0014-mentions-proposed.md)（取代 0002 的 proposed 方案）\n" +
 			"- [0015：中文状态](0015-chinese-status.md)\n" +
 			"- [0016：加粗状态](0016-bold-status.md)（proposed）\n" +
+			"- [0017：正文提到状态](0017-body-status.md)（proposed）\n" +
 			"- [0001：重复](0001-accepted.md)（proposed）\n" +
 			"\n0002 的背景见 [0002](0002-proposed.md)。\n",
 	})

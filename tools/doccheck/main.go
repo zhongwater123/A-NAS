@@ -66,7 +66,7 @@ var (
 	adrFileName    = regexp.MustCompile(`^\d{4}-.+\.md$`)
 	adrIndexEntry  = regexp.MustCompile(`^\s*[-*]\s+\[\d{4}[^\]]*\]\(([^)]+)\)(.*)$`)
 	adrIndexMarker = regexp.MustCompile(`^\s*[（(]\s*([A-Za-z]+)`)
-	adrStatusLine  = regexp.MustCompile(`(?m)^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
+	adrStatusLine  = regexp.MustCompile(`^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
 	adrStatuses    = map[string]bool{"proposed": true, "accepted": true, "superseded": true}
 )
 
@@ -265,7 +265,7 @@ func validateADRIndex(documents map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("%s is not listed in %s", name, adrIndex))
 			continue
 		}
-		match := adrStatusLine.FindStringSubmatch(documents[name])
+		match := adrStatusLine.FindStringSubmatch(adrHeaderLine(documents[name]))
 		if match == nil {
 			continue
 		}
@@ -282,6 +282,23 @@ func validateADRIndex(documents map[string]string) []string {
 		}
 	}
 	return problems
+}
+
+// adrHeaderLine returns the first line under an ADR's title, where its 状态
+// line goes; a 状态： further down belongs to the body.
+func adrHeaderLine(content string) string {
+	titled := false
+	for line := range strings.SplitSeq(content, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+		case !titled && strings.HasPrefix(line, "# "):
+			titled = true
+		default:
+			return line
+		}
+	}
+	return ""
 }
 
 // indexedADRStatus reads the status from the marker after an index link: only
