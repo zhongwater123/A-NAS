@@ -3,74 +3,66 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
+import type {
+  AppListResponse,
+  AppShortcut,
+  AssistantStatus,
+  ContainerSnapshotResponse,
+  FileEntry,
+  HostStateResponse,
+  LocalDisplay,
+  Notification,
+  Profile,
+  Session,
+  Space,
+  StoragePlan,
+  Transfer,
+  User,
+  Volume,
+  Wallpaper,
+} from "../api.generated";
 import { transferStore } from "../transfers/store";
 import { apiError, json, stubAPI } from "./api";
+import { healthyState, metricsState, session as sessionFixture } from "./fixtures";
 
-export const session = {
-  csrfToken: "csrf-test",
-  expiresAt: "2026-10-07T22:00:00Z",
-  user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
-};
+export { healthyState, metricsState } from "./fixtures";
+export const session = sessionFixture();
 
-export const healthyState = {
-  dataSource: "simulated",
-  productVersion: "v1.0.1-rc.1",
-  observedAt: "2026-10-07T10:00:00Z",
-  system: {
-    id: "host:fake-01",
-    hostname: "anas-fake",
-    operatingSystem: { name: "Debian", version: "13" },
-    architecture: "amd64",
-    uptimeSeconds: 3661,
-    health: "healthy",
-  },
-  disks: [
-    {
-      id: "disk:fake-data-01",
-      model: "A-NAS Fake HDD",
-      transport: "sata",
-      capacityBytes: 512000000000,
-      rotational: true,
-      removable: false,
-      inUse: false,
-      filesystems: [],
-      role: "unassigned",
-      health: "healthy",
-      smartStatus: "healthy",
-      eligibleForDataVolume: true,
-      ineligibleReasons: [],
-      temperatureCelsius: 31,
-    },
-  ],
-};
-
-export const metricsState = {
-  dataSource: "simulated",
-  observedAt: "2026-10-06T00:00:00Z",
-  cpu: { usagePercent: 23.5, logicalCores: 4 },
-  memory: { totalBytes: 8589934592, usedBytes: 3435973837 },
-  network: { receiveBytesPerSecond: 2516582, transmitBytesPerSecond: 327680 },
+// What a fresh device answers to the reads the desktop makes on its own; any
+// other read gets an empty list.
+const fresh: Record<string, unknown> = {
+  "/api/v1/wallpaper": { style: "fill" } satisfies Wallpaper,
+  "/api/v1/local-display": { sleepAfterMinutes: 30 } satisfies LocalDisplay,
+  "/api/v1/assistant/status": { available: false } satisfies AssistantStatus,
+  "/api/v1/apps": { dataSource: "simulated", apps: [] } satisfies AppListResponse,
+  "/api/v1/containers": {
+    dataSource: "simulated",
+    observedAt: "2026-10-07T10:00:00Z",
+    engine: { version: "27.5.1", apiVersion: "1.47" },
+    containers: [],
+    images: [],
+  } satisfies ContainerSnapshotResponse,
 };
 
 export function installAPI(
   options: {
     setupRequired?: boolean;
     setupAllowed?: boolean;
-    spaces?: unknown[];
-    entries?: unknown[];
-    volumes?: unknown[];
-    storagePlan?: unknown;
-    unfinishedPlans?: unknown[];
-    operation?: unknown;
+    spaces?: Space[];
+    entries?: FileEntry[];
+    volumes?: Volume[];
+    storagePlan?: StoragePlan;
+    unfinishedPlans?: StoragePlan[];
+    operation?: StoragePlan;
     executeFails?: boolean;
     terminalEnabled?: boolean;
-    session?: unknown;
-    notifications?: unknown[];
-    users?: unknown[];
+    session?: Session;
+    notifications?: Notification[];
+    users?: User[];
     textPreview?: string;
-    profiles?: unknown[];
-    shortcuts?: unknown[];
-    hostState?: unknown;
+    profiles?: Profile[];
+    shortcuts?: AppShortcut[];
+    hostState?: HostStateResponse;
   } = {},
 ) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -144,11 +136,11 @@ export function installAPI(
           contentUrl: "/api/v1/transfers/download-1/content",
           createdAt: "2026-10-12T10:00:00Z",
           updatedAt: "2026-10-12T10:00:00Z",
-        },
+        } satisfies Transfer,
         201,
       );
     }
-    return ok({ items: [] });
+    return ok(fresh[path] ?? { items: [] });
   });
   stubAPI(mock);
   return mock;
@@ -181,7 +173,7 @@ export function routeFetch(routes: {
       if (String(input).startsWith("/api/v1/apps") && routes.apps) return routes.apps(String(input), init);
       switch (String(input)) {
         case "/api/v1/setup/status":
-          return okResponse({ setupRequired: false });
+          return okResponse({ setupRequired: false, setupAllowed: true });
         case "/api/v1/session":
           return okResponse(session);
         case "/api/v1/host-state":
@@ -191,7 +183,7 @@ export function routeFetch(routes: {
         case "/api/v1/terminal":
           return okResponse({ enabled: routes.terminalEnabled ?? true });
         default:
-          return okResponse({ items: [] });
+          return okResponse(fresh[String(input)] ?? { items: [] });
       }
     }),
   );

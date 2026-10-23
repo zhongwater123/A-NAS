@@ -6,6 +6,7 @@ import { setSession } from "../api";
 import type { ContainerSnapshot, ContainerSummary } from "../containersApi";
 import { DockerPanel } from "./DockerPanel";
 import { stubAPI } from "../test/api";
+import { app } from "../test/fixtures";
 
 function container(name: string, overrides: Partial<ContainerSummary> = {}): ContainerSummary {
   return {
@@ -70,7 +71,7 @@ function serve() {
       if (url === "/api/v1/apps")
         return json({
           dataSource: "live",
-          apps: [{ id: "immich", title: "Immich", webPort: 2283, scheme: "http", path: "/" }],
+          apps: [app("immich", { title: "Immich", webPort: 2283, state: "installed" })],
         });
       if (url.includes("/logs"))
         return json({ lines: [{ stream: "stderr", time: "2026-10-06T00:00:00Z", text: "redis: connection refused" }] });

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SharesProvider, useShares } from "./SharesProvider";
 import { SharesPanel } from "./SharesPanel";
+import type { Share } from "./api";
 import { stubAPI } from "../test/api";
 
 const file = {
@@ -14,10 +15,10 @@ const file = {
   sizeBytes: 2,
   modifiedAt: "2026-10-15T00:00:00Z",
 };
-const share = {
+const share: Share = {
   id: "s1",
   sender: { id: "alice", username: "Alice" },
-  status: "active",
+  status: "published",
   createdAt: "2026-10-15T00:00:00Z",
   expiresAt: "2099-01-01T00:00:00Z",
   entries: [{ id: "e1", path: "计划.txt", isDir: false, size: 2 }],

@@ -293,7 +293,7 @@ describe("the upload queue", () => {
       direction: "download",
       kind: "file",
       name: "film.mkv",
-      location: target,
+      location: { spaceId: target.spaceId, spaceKind: target.spaceKind, folders: target.folders },
       totalBytes: 100_000_000,
       transferredBytes: sent,
       bytesPerSecond: 0,

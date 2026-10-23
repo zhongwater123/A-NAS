@@ -6,30 +6,7 @@ import { setSession } from "../api";
 import type { AppJob, CatalogApp, InstallPlan } from "../appsApi";
 import { AppCenterPanel } from "./AppCenterPanel";
 import { stubAPI } from "../test/api";
-
-function app(id: string, overrides: Partial<CatalogApp> = {}): CatalogApp {
-  return {
-    id,
-    title: id[0].toUpperCase() + id.slice(1),
-    tagline: "",
-    description: "",
-    notes: "",
-    category: "notes",
-    version: "1.0",
-    author: "",
-    developer: "",
-    website: "",
-    repo: "",
-    docs: "",
-    updated: "",
-    scheme: "http",
-    path: "/",
-    state: "available",
-    running: 0,
-    total: 0,
-    ...overrides,
-  };
-}
+import { app } from "../test/fixtures";
 
 function job(overrides: Partial<AppJob> = {}): AppJob {
   return {

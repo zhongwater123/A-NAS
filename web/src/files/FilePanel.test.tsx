@@ -39,8 +39,17 @@ afterEach(() => {
 describe("member sharing in the file manager", () => {
   it("opens sharing from the rail instead of the desktop and shares read-only files", async () => {
     installAPI({
-      spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false }],
-      entries: [{ id: "shared-file", spaceId: "shared", name: "分享计划.txt", kind: "file", sizeBytes: 4 }],
+      spaces: [{ id: "shared", kind: "shared", name: "Shared", writable: false, createdAt: "2026-10-07T10:00:00Z" }],
+      entries: [
+        {
+          id: "shared-file",
+          spaceId: "shared",
+          name: "分享计划.txt",
+          kind: "file",
+          sizeBytes: 4,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
+      ],
     });
     const user = userEvent.setup();
     render(<App />);
@@ -66,10 +75,20 @@ describe("member sharing in the file manager", () => {
           kind: "private",
           name: "Alice",
           ownerUserId: "alice",
+          createdAt: "2026-10-07T10:00:00Z",
           viewing: { grantId: "grant", expiresAt: "2099-01-01T00:00:00Z" },
         },
       ],
-      entries: [{ id: "viewed-file", spaceId: "viewed", name: "查看计划.txt", kind: "file", sizeBytes: 4 }],
+      entries: [
+        {
+          id: "viewed-file",
+          spaceId: "viewed",
+          name: "查看计划.txt",
+          kind: "file",
+          sizeBytes: 4,
+          modifiedAt: "2026-10-07T10:00:00Z",
+        },
+      ],
     });
     const user = userEvent.setup();
     render(<App />);
@@ -84,7 +103,7 @@ describe("member sharing in the file manager", () => {
 describe("file manager", () => {
   it.each(["clip.mp4", "photo.HEIC", "photo.heif"])("shows a thumbnail for %s in file management", async (name) => {
     installAPI({
-      spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [
         {
           id: "file:preview",
@@ -126,7 +145,7 @@ describe("file manager", () => {
 
   it("pins folders and preserves manual ordering across views and reopening without moving files", async () => {
     const fetchMock = installAPI({
-      spaces: [{ id: "space:shared", kind: "shared", name: "Shared" }],
+      spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [
         { id: "a", spaceId: "space:shared", name: "A", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-01" },
         { id: "b", spaceId: "space:shared", name: "B", kind: "directory", sizeBytes: 0, modifiedAt: "2026-10-02" },

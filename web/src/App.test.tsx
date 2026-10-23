@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { AppListResponse as AppList, AppStatus } from "./api.generated";
 import { apiError, json } from "./test/api";
+import { app } from "./test/fixtures";
 import {
   errorResponse,
   healthyState,
@@ -84,29 +86,12 @@ const memosPlan = {
   compose: "name: a-nas-memos\n",
 };
 
-function appList(memos: Record<string, unknown>) {
-  const base = {
-    tagline: "",
-    description: "",
-    notes: "",
-    version: "1",
-    author: "",
-    developer: "",
-    website: "",
-    repo: "",
-    docs: "",
-    updated: "",
-    scheme: "http",
-    path: "/",
-    state: "available",
-    running: 0,
-    total: 0,
-  };
+function appList(memos: Partial<AppStatus>): AppList {
   return {
     dataSource: "simulated",
     apps: [
-      { ...base, id: "memos", title: "Memos", tagline: "轻量笔记", category: "notes", webPort: 5230, ...memos },
-      { ...base, id: "navidrome", title: "Navidrome", tagline: "音乐流媒体", category: "media", webPort: 4533 },
+      app("memos", { title: "Memos", tagline: "轻量笔记", category: "notes", webPort: 5230, ...memos }),
+      app("navidrome", { title: "Navidrome", tagline: "音乐流媒体", category: "media", webPort: 4533 }),
     ],
   };
 }

@@ -139,7 +139,11 @@ describe("TasksView", () => {
   });
 
   it("suggests tasks to ask for when there are none", async () => {
-    stubAPI(vi.fn(async () => json({ tasks: [] })));
+    stubAPI(
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith("/api/v1/notifications") ? json({ items: [] }) : json({ tasks: [] }),
+      ),
+    );
     const onPlan = vi.fn();
     const user = userEvent.setup();
     render(<TasksView onOpenRun={() => undefined} onPlan={onPlan} />);
