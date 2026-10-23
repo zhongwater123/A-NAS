@@ -231,11 +231,6 @@ let csrfToken = "";
 export function setSession(session?: Session) {
   csrfToken = session?.csrfToken ?? "";
 }
-// csrfHeaders lets the Docker and App Center clients send the session's CSRF token on writes.
-export function csrfHeaders(): Record<string, string> {
-  return csrfToken ? { "X-CSRF-Token": csrfToken } : {};
-}
-
 // csrfHeader is the header that carries the session's CSRF token on a request
 // of this method: the server checks it on every method but GET and HEAD. The
 // typed client, uploads with progress and tus all take it from here.
@@ -286,24 +281,7 @@ function failure(status: number, body: unknown): APIError {
   );
 }
 
-// request sends a same-origin product API call; mutations carry the CSRF token.
-export async function request<T>(path: string, init: RequestInit = {}, mutation = false): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
-  if (mutation && csrfToken) headers.set("X-CSRF-Token", csrfToken);
-  const response = await apiFetch(path, { ...init, headers, credentials: "same-origin" });
-  if (!response.ok) {
-    const body = await response
-      .json()
-      .catch(() => ({ error: { code: "request_failed", message: `请求失败 (${response.status})` } }));
-    throw new APIError(response.status, body?.error?.code ?? "request_failed", body?.error?.message ?? "请求失败");
-  }
-  // A success without a body (204, or an accepted job that reports nothing) is not JSON.
-  if (response.status === 204 || response.headers?.get("Content-Length") === "0") return undefined as T;
-  return response.json() as Promise<T>;
-}
-
-// uploadForm posts a multipart form like request does, reporting upload
+// uploadForm posts a multipart form as the client would, reporting upload
 // progress as a fraction; fetch cannot report it.
 export async function uploadForm<T>(
   path: string,
@@ -316,7 +294,7 @@ export async function uploadForm<T>(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", path);
     xhr.setRequestHeader("Accept", "application/json");
-    if (csrfToken) xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+    for (const [name, value] of Object.entries(csrfHeader("POST"))) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
     };
