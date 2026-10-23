@@ -236,8 +236,15 @@ func fillFromName(m *metadata, name string) {
 }
 
 // mp4Codec names the audio codec of an MP4 file: AAC plays in browsers, ALAC
-// does not.
-func mp4Codec(r io.ReadSeeker) string {
+// does not. It runs in readTags's deferred function, after that guard has
+// recovered, so it has a guard of its own.
+func mp4Codec(r io.ReadSeeker) (codec string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("music codec", recovered)
+			codec = ""
+		}
+	}()
 	path := mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeTrak(), mp4.BoxTypeMdia(), mp4.BoxTypeMinf(), mp4.BoxTypeStbl(), mp4.BoxTypeStsd(), mp4.StrToBoxType("alac")}
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return ""

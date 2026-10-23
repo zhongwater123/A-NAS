@@ -2,6 +2,7 @@ package photos
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -27,5 +28,18 @@ func TestRenderJobTurnsAPanicIntoAPermanentFailure(t *testing.T) {
 			return strings.HasPrefix(frame, "github.com/zhongwater123/A-NAS/internal/photos.(*Service).openObject:")
 		}) {
 		t.Fatalf("logged %+v, want the nil pointer reached from openObject", logged)
+	}
+}
+
+func TestAnUploadWhoseHeaderPanicsIsUnsupported(t *testing.T) {
+	// Here the panic comes from a service without a store, before the
+	// header is read; one in image.DecodeConfig is handled the same way.
+	panics := imagetest.LoggedPanics(t)
+	var s Service
+	if _, err := s.readMetadata(stagedObject{name: "staged", mediaType: "image/png"}); !errors.Is(err, ErrUnsupportedType) {
+		t.Fatalf("readMetadata() error = %v, want ErrUnsupportedType", err)
+	}
+	if logged := panics(); len(logged) != 1 || logged[0].Decoder != "photo import" || !strings.Contains(logged[0].Value, "nil pointer") {
+		t.Fatalf("logged %+v, want the photo import's nil pointer", logged)
 	}
 }

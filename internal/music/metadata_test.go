@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -140,5 +141,27 @@ func TestPlaybackRequestsFitWhatBrowsersPlay(t *testing.T) {
 		if got := playbackRequest(test.rate, test.bits, 5); got != test.want {
 			t.Errorf("playbackRequest(%d, %d) = %+v, want %+v", test.rate, test.bits, got, test.want)
 		}
+	}
+}
+
+// panickingReader stands for a parser that panics on whatever it reads.
+type panickingReader struct{}
+
+func (panickingReader) Read([]byte) (int, error)       { panic("music test: parser bug") }
+func (panickingReader) Seek(int64, int) (int64, error) { return 0, nil }
+
+func TestTagsOfAnM4AThatPanicsEveryParserAreEmpty(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	// The codec is read after the tag guard has recovered; its panic must
+	// not escape the scan either.
+	if tags := readTags(panickingReader{}, "m4a"); !reflect.DeepEqual(tags, metadata{}) {
+		t.Fatalf("readTags() = %+v, want no tags", tags)
+	}
+	var decoders []string
+	for _, logged := range panics() {
+		decoders = append(decoders, logged.Decoder)
+	}
+	if want := []string{"music tags", "music codec"}; !reflect.DeepEqual(decoders, want) {
+		t.Fatalf("logged panics of %q, want %q", decoders, want)
 	}
 }

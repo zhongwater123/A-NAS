@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Content objects are immutable originals stored once per SHA-256 under
@@ -197,8 +199,15 @@ func classify(header []byte, clip bool) (string, error) {
 
 // readMetadata reads only the image header and EXIF: it proves the bytes are
 // the declared format, bounds the pixel count before anything decodes them,
-// and records what the timeline needs immediately.
-func (s *Service) readMetadata(staged stagedObject) (photoMetadata, error) {
+// and records what the timeline needs immediately. A header the decoder
+// panics on is an unsupported upload.
+func (s *Service) readMetadata(staged stagedObject) (metadata photoMetadata, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo import", recovered)
+			metadata, err = photoMetadata{}, ErrUnsupportedType
+		}
+	}()
 	file, err := s.root.Open(staged.name)
 	if err != nil {
 		return photoMetadata{}, err
@@ -214,7 +223,7 @@ func (s *Service) readMetadata(staged stagedObject) (photoMetadata, error) {
 	if int64(config.Width)*int64(config.Height) > maxImagePixels {
 		return photoMetadata{}, ErrTooLarge
 	}
-	metadata := photoMetadata{width: config.Width, height: config.Height}
+	metadata = photoMetadata{width: config.Width, height: config.Height}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return photoMetadata{}, err
 	}
