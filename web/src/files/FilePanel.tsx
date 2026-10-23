@@ -48,6 +48,7 @@ import { useDragReorder } from "./useDragReorder";
 import { useFileListing } from "./useFileListing";
 import { usePaneWidths } from "./usePaneWidths";
 import { useTextPreview } from "./useTextPreview";
+import "./files.css";
 
 interface FilePanelProps {
   userID: string;
