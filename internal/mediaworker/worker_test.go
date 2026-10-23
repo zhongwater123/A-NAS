@@ -241,7 +241,7 @@ func TestRealFFmpeg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	local := Local{Tools: tools}
 	ctx := context.Background()
 	info, err := local.Probe(ctx, file)
@@ -269,7 +269,7 @@ func TestRealFFmpeg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer subtitleFile.Close()
+	defer func() { _ = subtitleFile.Close() }()
 	vtt, err := local.Subtitle(ctx, subtitleFile, SubtitleRequest{Format: "srt", Stream: -1})
 	if err != nil || !bytes.HasPrefix(vtt, []byte("WEBVTT")) || !bytes.Contains(vtt, []byte("你好")) {
 		t.Fatalf("Subtitle() = %q, %v", vtt, err)

@@ -164,7 +164,7 @@ func (h *handler) serveScreensaverFile(w http.ResponseWriter, r *http.Request, n
 		http.NotFound(w, r)
 		return
 	}
-	defer video.Close()
+	defer func() { _ = video.Close() }()
 	info, err := video.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		http.NotFound(w, r)

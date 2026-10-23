@@ -95,7 +95,7 @@ func TestConvertingVideosWaitBrieflyForAFreeSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	s.streamWait = 20 * time.Millisecond
 	for range maxVideoStreams {
 		if err := s.takeStream(context.Background()); err != nil {

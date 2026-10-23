@@ -130,7 +130,7 @@ func writeJPEG(target string, picture image.Image) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() { _ = os.Remove(temporary.Name()) }()
 	if _, err := temporary.Write(encoded.Bytes()); err != nil {
 		_ = temporary.Close()
 		return err

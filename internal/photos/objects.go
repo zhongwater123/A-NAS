@@ -203,7 +203,7 @@ func (s *Service) readMetadata(staged stagedObject) (photoMetadata, error) {
 	if err != nil {
 		return photoMetadata{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if staged.mediaType == "image/heic" {
 		return readHEICMetadata(file, s.location)
 	}
@@ -285,7 +285,7 @@ func (s *Service) syncDir(name string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 

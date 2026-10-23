@@ -26,7 +26,7 @@ func (s *Service) prepareMotion(ctx context.Context, photo stagedObject, request
 	if err != nil {
 		return nil, err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	var reader io.Reader
 	name, kind := request.MotionName, "live-photo"
 	if request.MotionContent != nil {
@@ -83,7 +83,7 @@ func (s *Service) probeMotion(ctx context.Context, clip stagedObject) (mediawork
 	if err != nil {
 		return mediaworker.Probe{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	probe, err := s.media.Probe(mediaworker.WithTimeout(ctx, 15*time.Second), file)
 	if err != nil {
 		return mediaworker.Probe{}, err
@@ -129,7 +129,7 @@ func (s *Service) OpenMotion(ctx context.Context, p Principal, id string) (Conte
 	}
 	info, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return Content{}, err
 	}
 	mediaType := "video/quicktime"
@@ -156,7 +156,7 @@ func (s *Service) PlayMotion(ctx context.Context, p Principal, id string) (io.Re
 	if err != nil {
 		return nil, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if s.media == nil {
 		return nil, mediaworker.ErrUnavailable
 	}

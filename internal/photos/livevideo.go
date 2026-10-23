@@ -42,7 +42,7 @@ func (s *Service) stillLiveID(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return appleContentID(file), nil
 }
 

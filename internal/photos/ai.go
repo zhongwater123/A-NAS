@@ -464,7 +464,7 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 	paused := stopWatching()
 	cancel()
 	next := <-ahead
-	defer input.file.Close()
+	defer func() { _ = input.file.Close() }()
 	carryOn := func(err error) (bool, error) {
 		s.nextDetection = next
 		return true, err

@@ -124,7 +124,7 @@ func (s *Service) processVideo(ctx context.Context, actor accounts.User, video p
 		}
 		return err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	duration := video.duration
 	if video.probe == "pending" {
 		info, err := s.processor.Probe(ctx, content.Reader)
@@ -217,7 +217,7 @@ func writeAtomically(target string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() { _ = os.Remove(temporary.Name()) }()
 	if _, err := temporary.Write(data); err != nil {
 		_ = temporary.Close()
 		return err

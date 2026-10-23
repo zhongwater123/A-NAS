@@ -101,7 +101,7 @@ func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Reques
 		h.writeMusicError(w, r, err)
 		return
 	}
-	defer stream.Reader.Close()
+	defer func() { _ = stream.Reader.Close() }()
 	if contentType := stream.Track.ContentType(); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
@@ -161,7 +161,7 @@ func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "not_found", "music resource was not found")
 		return
 	}
-	defer content.Close()
+	defer func() { _ = content.Close() }()
 	info, err := content.Stat()
 	if err != nil {
 		h.internalError(w, r, err)

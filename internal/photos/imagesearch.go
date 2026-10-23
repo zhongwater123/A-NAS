@@ -184,7 +184,7 @@ func (s *Service) embedSearchImage(ctx context.Context, thumbnail []byte) ([]flo
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	vector, err := s.embedder.EmbedImage(ctx, file)
 	if errors.Is(err, ErrAIRejected) {
 		return nil, ErrUnsupportedType
@@ -205,7 +205,7 @@ func (s *Service) searchObjects(ctx context.Context, info EmbedderInfo, input []
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	model, boxes, err := detector.DetectObjects(ctx, file)
 	// A Worker that took the request keeps the detector loaded; the AI
 	// runner releases it on its next round, since this request kept the gate

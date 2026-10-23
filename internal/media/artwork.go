@@ -173,7 +173,7 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 	if err != nil {
 		return Image{}, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	scaled, err := scaleArtwork(content.Reader, size)
 	if err != nil {
 		return Image{}, err

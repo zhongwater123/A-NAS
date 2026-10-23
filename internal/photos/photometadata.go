@@ -52,7 +52,7 @@ func (s *Service) Metadata(ctx context.Context, p Principal, assetID string) (Me
 	if err != nil {
 		return Metadata{}, err
 	}
-	defer original.Close()
+	defer func() { _ = original.Close() }()
 	return decodeMetadata(original), nil
 }
 

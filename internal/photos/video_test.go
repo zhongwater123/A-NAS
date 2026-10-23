@@ -81,7 +81,7 @@ func videoService(t *testing.T, probe mediaworker.Probe) (*photos.Service, *vide
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s, decoder, root
 }
 
@@ -91,7 +91,7 @@ func catalog(t *testing.T, root string) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -125,19 +125,19 @@ func TestAVideoIsAPhotoAssetThatPlaysAndHasAPoster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Thumbnail() error = %v", err)
 	}
-	thumbnail.Reader.Close()
+	_ = thumbnail.Reader.Close()
 	poster, err := s.Preview(ctx, alice, asset.ID)
 	if err != nil || poster.MediaType != "image/jpeg" {
 		t.Fatalf("Preview() = %+v, %v; want the poster frame", poster, err)
 	}
-	poster.Reader.Close()
+	_ = poster.Reader.Close()
 
 	// The browser reads the original as MP4, or a converted stream.
 	original, err := s.OpenVideo(ctx, alice, asset.ID)
 	if err != nil || original.MediaType != "video/mp4" || original.SizeBytes != 600 {
 		t.Fatalf("OpenVideo() = %+v, %v", original, err)
 	}
-	original.Reader.Close()
+	_ = original.Reader.Close()
 	for caps, want := range map[photos.BrowserCaps]string{{HEVC: true}: photos.PlayDirect, {}: photos.PlayTranscode} {
 		playback, err := s.VideoPlayback(ctx, alice, asset.ID, caps)
 		if err != nil || playback.Mode != want || playback.Duration != 42.5 {
@@ -355,7 +355,7 @@ func TestOnlyReadableVideosAreImported(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 		private, _ := libraries(t, s, alice)
 		if _, err := s.Import(context.Background(), alice, photos.ImportRequest{LibraryID: private.ID, Name: "small.mp4", Content: bytes.NewReader(mp4Bytes(6))}); err != nil {
 			t.Fatalf("a video under its own limit but over the photo limit: %v", err)
