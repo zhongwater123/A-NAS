@@ -84,7 +84,7 @@ func ParseCalibration(data []byte) (Calibration, error) {
 
 func parseWordKey(key string) ([]int, error) {
 	var classes []int
-	for _, part := range strings.Split(key, ",") {
+	for part := range strings.SplitSeq(key, ",") {
 		class, err := strconv.Atoi(part)
 		if err != nil || class <= 0 || class >= Classes {
 			return nil, fmt.Errorf("word %q names a class out of range", key)

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -83,12 +84,7 @@ func Units(keys []string) []string {
 }
 
 func contains(items []string, item string) bool {
-	for _, candidate := range items {
-		if candidate == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, item)
 }
 
 // Limits on what one read may ask for and return.

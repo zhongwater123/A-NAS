@@ -237,7 +237,7 @@ func readBtrfsErrors(root fs.FS, devices []string) *uint64 {
 			if err != nil {
 				return nil
 			}
-			for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(string(contents)), "\n") {
 				fields := strings.Fields(line)
 				if len(fields) != 2 {
 					return nil
@@ -518,12 +518,7 @@ func deviceInUse(device blockDevice) bool {
 	case kind == "crypt", kind == "lvm", kind == "md", kind == "dm", kind == "mpath", strings.HasPrefix(kind, "raid"):
 		return true
 	}
-	for _, child := range device.Children {
-		if deviceInUse(child) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(device.Children, deviceInUse)
 }
 
 // collectSignatures lists the formats blkid found on the disk and its

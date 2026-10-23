@@ -91,7 +91,7 @@ func ifdEntry(data []byte, offset uint32, order binary.ByteOrder, tag uint16) []
 	if start+count*12 > uint64(len(data)) {
 		return nil
 	}
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		entry := data[start+i*12 : start+(i+1)*12]
 		if order.Uint16(entry) == tag {
 			return entry

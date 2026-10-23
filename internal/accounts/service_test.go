@@ -143,7 +143,7 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 	if credentials.password != "a newly reset password" {
 		t.Fatalf("provisioned password = %q", credentials.password)
 	}
-	if _, err := service.ResolveSession(ctx, oldSession.Token); err != accounts.ErrSessionNotFound {
+	if _, err := service.ResolveSession(ctx, oldSession.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
 		t.Fatalf("old session error = %v, want ErrSessionNotFound", err)
 	}
 	if _, err := service.Authenticate(ctx, "alice", "a newly reset password"); err != nil {
@@ -152,7 +152,7 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 	if err := service.DisableUser(ctx, admin, member.ID); err != nil {
 		t.Fatalf("DisableUser() error = %v", err)
 	}
-	if _, err := service.Authenticate(ctx, "alice", "a newly reset password"); err != accounts.ErrInvalidCredentials {
+	if _, err := service.Authenticate(ctx, "alice", "a newly reset password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
 		t.Fatalf("disabled authentication error = %v", err)
 	}
 }

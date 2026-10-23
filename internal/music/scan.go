@@ -168,7 +168,7 @@ const batchSize = 25
 var ignoredFolders = map[string]bool{"@eadir": true, "#recycle": true, "$recycle.bin": true, "system volume information": true, "lost+found": true}
 
 func ignored(relative string) bool {
-	for _, part := range strings.Split(relative, "/") {
+	for part := range strings.SplitSeq(relative, "/") {
 		if strings.HasPrefix(part, ".") || ignoredFolders[strings.ToLower(part)] {
 			return true
 		}

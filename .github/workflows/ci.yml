@@ -29,6 +29,9 @@ jobs:
         with:
           go-version-file: .go-version
           cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/golangci-lint/go.sum
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6

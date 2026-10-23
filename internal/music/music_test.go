@@ -188,9 +188,9 @@ func text(value string) []byte { return append([]byte{3}, value...) } // UTF-8
 func flacFile(t *testing.T, samples uint64, picture []byte, tags ...[2]string) []byte {
 	t.Helper()
 	info := &meta.StreamInfo{BlockSizeMin: 4096, BlockSizeMax: 4096, SampleRate: 44100, NChannels: 2, BitsPerSample: 16, NSamples: samples}
-	blocks := []*meta.Block{{Header: meta.Header{Type: meta.TypeVorbisComment, Length: 1}, Body: &meta.VorbisComment{Vendor: "test", Tags: tags}}}
+	blocks := []*meta.Block{{Type: meta.TypeVorbisComment, Length: 1, Body: &meta.VorbisComment{Vendor: "test", Tags: tags}}}
 	if picture != nil {
-		blocks = append(blocks, &meta.Block{Header: meta.Header{Type: meta.TypePicture, Length: 1}, Body: &meta.Picture{Type: 3, MIME: "image/png", Width: 64, Height: 48, Data: picture}})
+		blocks = append(blocks, &meta.Block{Type: meta.TypePicture, Length: 1, Body: &meta.Picture{Type: 3, MIME: "image/png", Width: 64, Height: 48, Data: picture}})
 	}
 	var encoded bytes.Buffer
 	encoder, err := flac.NewEncoder(&encoded, info, blocks...)

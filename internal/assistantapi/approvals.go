@@ -563,7 +563,7 @@ func (h *handler) answerQuestion(m *member, requestID string, answers map[string
 	if answers != nil {
 		result["answers"] = answers
 	}
-	var err error = errApprovalGone
+	var err = errApprovalGone
 	if owner != nil && !owner.isClosed() {
 		err = owner.send(rpcResult(json.RawMessage(strconv.Quote(owner.serverRequestOf(requestID))), result))
 	}
@@ -608,7 +608,7 @@ func (h *handler) respond(ctx context.Context, m *member, c *card, choice string
 		}
 	}
 	m.mu.Unlock()
-	var lastErr error = errApprovalGone
+	var lastErr = errApprovalGone
 	for _, u := range candidates {
 		if u.isClosed() {
 			continue

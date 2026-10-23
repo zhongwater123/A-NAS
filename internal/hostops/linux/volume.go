@@ -253,7 +253,7 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 		return fmt.Errorf("read the data-volume mount unit: %w", err)
 	}
 	uuid := ""
-	for _, line := range strings.Split(string(contents), "\n") {
+	for line := range strings.SplitSeq(string(contents), "\n") {
 		if value, found := strings.CutPrefix(strings.TrimSpace(line), "What=UUID="); found {
 			uuid = strings.TrimSpace(value)
 		}

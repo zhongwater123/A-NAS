@@ -115,7 +115,7 @@ func readTaskCPUModel(root fs.FS) string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		key, value, ok := strings.Cut(line, ":")
 		if ok && (strings.TrimSpace(key) == "model name" || strings.TrimSpace(key) == "Hardware") {
 			return strings.TrimSpace(value)
@@ -130,7 +130,7 @@ func readTaskNetworks(root fs.FS) taskmanager.NetworkGroup {
 		result.Status = taskmanager.Unavailable
 		return result
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		name, values, ok := strings.Cut(line, ":")
 		name = strings.TrimSpace(name)
 		if !ok || name == "" || name == "lo" || strings.ContainsAny(name, "/|") {
@@ -223,7 +223,7 @@ func (r *Reader) readTaskDisks(ctx context.Context) (taskmanager.DiskGroup, map[
 			continue
 		}
 		// Kernel block statistics always use 512-byte sectors, including 4K disks.
-		counters[d.ID] = taskDiskCounters{taskUintPointer(read * 512), taskUintPointer(write * 512)}
+		counters[d.ID] = taskDiskCounters{new(read * 512), new(write * 512)}
 	}
 	sort.Slice(result.Items, func(i, j int) bool { return result.Items[i].ID < result.Items[j].ID })
 	return result, counters
@@ -253,7 +253,7 @@ func readTaskAccelerators(root fs.FS, class, prefix string) taskmanager.Accelera
 		item := taskmanager.Accelerator{ID: class + ":" + entry.Name(), Name: label + " " + suffix, Status: taskmanager.Unsupported, UsageStatus: taskmanager.Unsupported, MemoryUsedStatus: taskmanager.Unsupported, MemoryTotalStatus: taskmanager.Unsupported}
 		slot, pciID := "", ""
 		if data, err := readTaskFile(root, path+"uevent"); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
+			for line := range strings.SplitSeq(string(data), "\n") {
 				key, value, ok := strings.Cut(line, "=")
 				if ok && key == "DRIVER" {
 					item.Driver = value
@@ -277,7 +277,7 @@ func readTaskAccelerators(root fs.FS, class, prefix string) taskmanager.Accelera
 			item.UsageStatus = usageStatus
 			if usage != nil {
 				if *usage <= 100 {
-					item.UsagePercent = taskFloat(float64(*usage))
+					item.UsagePercent = new(float64(*usage))
 				} else {
 					item.UsageStatus = taskmanager.Unavailable
 				}

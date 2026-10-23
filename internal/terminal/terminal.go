@@ -127,11 +127,11 @@ func (h *Handler) serveSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUpgradeRequired, "upgrade_required", "terminal sessions require WebSocket")
 		return
 	}
-	switch h.acquire() {
-	case errShuttingDown:
+	switch err := h.acquire(); {
+	case errors.Is(err, errShuttingDown):
 		writeError(w, http.StatusServiceUnavailable, "terminal_unavailable", "server is shutting down")
 		return
-	case errBusy:
+	case errors.Is(err, errBusy):
 		writeError(w, http.StatusTooManyRequests, "terminal_busy", "too many terminal sessions")
 		return
 	}

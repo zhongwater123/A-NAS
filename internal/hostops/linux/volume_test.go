@@ -536,7 +536,7 @@ func (h *diskHost) unitUUID(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, line := range strings.Split(string(contents), "\n") {
+	for line := range strings.SplitSeq(string(contents), "\n") {
 		if value, found := strings.CutPrefix(line, "What=UUID="); found {
 			return value
 		}

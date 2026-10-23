@@ -51,10 +51,8 @@ func (s uploadStore) NewUpload(ctx context.Context, info tusd.FileInfo) (tusd.Up
 	}
 	lastModified, _ := strconv.ParseInt(meta["lastModified"], 10, 64)
 	t, err := s.service.BeginUpload(ctx, user, transfers.UploadRequest{
-		UploadRequest: files.UploadRequest{
-			SpaceID: meta["spaceId"], ParentID: meta["parentId"], Directories: directories,
-			Name: meta["filename"], Size: info.Size, Conflict: conflict,
-		},
+		SpaceID: meta["spaceId"], ParentID: meta["parentId"], Directories: directories,
+		Name: meta["filename"], Size: info.Size, Conflict: conflict,
 		Batch: meta["batch"], RelativePath: strings.Join(directories, "/"), LastModified: lastModified,
 	})
 	if err != nil {

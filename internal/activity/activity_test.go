@@ -88,7 +88,7 @@ func TestMergedPagesFollowTimeAcrossSourcesWithoutGapsOrRepeats(t *testing.T) {
 	want := []string{"audit:a4", "audit:f3", "audit:a2", "audit:f1", "audit:f2", "audit:a1", "audit:a3"}
 	var got []string
 	query := activity.Query{Limit: 3}
-	for page := 0; page < 5; page++ {
+	for range 5 {
 		fromAccounts, err := accounts.List(ctx, query)
 		if err != nil {
 			t.Fatal(err)

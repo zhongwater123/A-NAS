@@ -237,7 +237,7 @@ func (r *RootFileSystem) MkdirAll(_ context.Context, name string) error {
 		return nil
 	}
 	walked := ""
-	for _, component := range strings.Split(relative, "/") {
+	for component := range strings.SplitSeq(relative, "/") {
 		walked = path.Join(walked, component)
 		if err := unix.Mkdirat(current, component, 0o770); err != nil && !errors.Is(err, unix.EEXIST) {
 			return &fs.PathError{Op: "mkdir", Path: walked, Err: err}
@@ -403,7 +403,7 @@ func (r *RootFileSystem) CreateTemp(_ context.Context, directory, prefix string)
 		return nil, "", err
 	}
 	defer unix.Close(dir)
-	for attempt := 0; attempt < 16; attempt++ {
+	for range 16 {
 		suffix := make([]byte, 8)
 		if _, err := io.ReadFull(rand.Reader, suffix); err != nil {
 			return nil, "", err

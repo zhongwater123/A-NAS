@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -116,9 +117,7 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 	}
 	e.spaceRootsMu.RLock()
 	spaces := make(map[string]string, len(e.spaceRoots))
-	for spaceID, root := range e.spaceRoots {
-		spaces[spaceID] = root
-	}
+	maps.Copy(spaces, e.spaceRoots)
 	e.spaceRootsMu.RUnlock()
 	spaceIDs := make([]string, 0, len(spaces))
 	for spaceID := range spaces {
@@ -322,7 +321,7 @@ func rootOwned(info os.FileInfo) bool {
 // entries, ignoring comments such as "#effective:".
 func sameACL(getfacl, spec string) bool {
 	var current []string
-	for _, line := range strings.Split(getfacl, "\n") {
+	for line := range strings.SplitSeq(getfacl, "\n") {
 		line, _, _ = strings.Cut(line, "#")
 		if line = strings.TrimSpace(line); line != "" {
 			current = append(current, line)

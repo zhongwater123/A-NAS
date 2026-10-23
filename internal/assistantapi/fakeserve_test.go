@@ -184,11 +184,9 @@ func (f *fakeServe) learning(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		if r.URL.Path == "/api/learning/node" {
 			id := r.URL.Query().Get("id")
-			for _, skill := range append(f.skillNames(), f.system...) {
-				if skill == id {
-					_, _ = fmt.Fprintf(w, `{"ok":true,"kind":"skill","id":%q,"content":"---\nname: %s\n---\n# 出游计划"}`, id, id)
-					return
-				}
+			if slices.Contains(append(f.skillNames(), f.system...), id) {
+				_, _ = fmt.Fprintf(w, `{"ok":true,"kind":"skill","id":%q,"content":"---\nname: %s\n---\n# 出游计划"}`, id, id)
+				return
 			}
 			http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)
 			return

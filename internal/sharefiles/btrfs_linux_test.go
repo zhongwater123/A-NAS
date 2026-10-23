@@ -70,7 +70,7 @@ func TestBtrfsCaptureAtomicAndPublishedCopyIndependent(t *testing.T) {
 			}
 		}
 	}()
-	for n := 0; n < 40; n++ {
+	for n := range 40 {
 		dst, e := os.CreateTemp(root, "clone-")
 		if e != nil {
 			t.Fatal(e)

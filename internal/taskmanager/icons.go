@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"image"
 	_ "image/jpeg"
 	"image/png"
@@ -115,11 +116,11 @@ func staticSVG(data []byte) bool {
 		return false
 	}
 	tags := map[string]bool{}
-	for _, name := range strings.Fields("svg g path rect circle ellipse line polyline polygon defs linearGradient radialGradient stop clipPath mask title desc use symbol") {
+	for name := range strings.FieldsSeq("svg g path rect circle ellipse line polyline polygon defs linearGradient radialGradient stop clipPath mask title desc use symbol") {
 		tags[name] = true
 	}
 	attrs := map[string]bool{}
-	for _, name := range strings.Fields("xmlns version id class width height viewBox preserveAspectRatio x y x1 x2 y1 y2 cx cy r rx ry d points fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-miterlimit stroke-dasharray stroke-dashoffset stroke-opacity opacity transform gradientUnits gradientTransform spreadMethod offset stop-color stop-opacity clip-path clip-rule mask maskUnits maskContentUnits filter href style role aria-label aria-labelledby focusable") {
+	for name := range strings.FieldsSeq("xmlns version id class width height viewBox preserveAspectRatio x y x1 x2 y1 y2 cx cy r rx ry d points fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-miterlimit stroke-dasharray stroke-dashoffset stroke-opacity opacity transform gradientUnits gradientTransform spreadMethod offset stop-color stop-opacity clip-path clip-rule mask maskUnits maskContentUnits filter href style role aria-label aria-labelledby focusable") {
 		attrs[name] = true
 	}
 	decoder := xml.NewDecoder(bytes.NewReader(data))
@@ -127,7 +128,7 @@ func staticSVG(data []byte) bool {
 	closed := false
 	for {
 		token, err := decoder.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return closed && depth == 0 && elements > 0
 		}
 		if err != nil {

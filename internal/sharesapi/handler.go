@@ -65,8 +65,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// This reserved collection otherwise intersects /{shareID}/messages in
 	// ServeMux's pattern ordering (the resource IDs never equal "jobs").
-	if strings.HasPrefix(r.URL.Path, PathPrefix+"/jobs/") {
-		id := strings.TrimPrefix(r.URL.Path, PathPrefix+"/jobs/")
+	if id, ok := strings.CutPrefix(r.URL.Path, PathPrefix+"/jobs/"); ok {
 		if r.Method == "GET" && id != "" && !strings.Contains(id, "/") {
 			r.SetPathValue("jobID", id)
 			h.job(w, r)

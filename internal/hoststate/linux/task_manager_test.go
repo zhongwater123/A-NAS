@@ -316,7 +316,7 @@ func TestTaskProcessAndServiceLimits(t *testing.T) {
 	}
 	root["sys/fs/cgroup/cgroup.controllers"] = &fstest.MapFile{}
 	var services strings.Builder
-	for i := 0; i < taskServiceLimit+1; i++ {
+	for i := range taskServiceLimit + 1 {
 		fmt.Fprintf(&services, "Id=worker%d.service\nActiveState=active\nSubState=running\n\n", i)
 	}
 	r.dependencies.readTaskServices = func(context.Context) ([]byte, error) { return []byte(services.String()), nil }
@@ -399,7 +399,7 @@ func TestTaskAcceleratorMetricAvailability(t *testing.T) {
 		name  string
 		usage *string
 		want  taskmanager.Status
-	}{{"missing", nil, taskmanager.Unsupported}, {"malformed", taskString("bad"), taskmanager.Unavailable}, {"out of range", taskString("101"), taskmanager.Unavailable}, {"valid", taskString("42"), taskmanager.Available}} {
+	}{{"missing", nil, taskmanager.Unsupported}, {"malformed", new("bad"), taskmanager.Unavailable}, {"out of range", new("101"), taskmanager.Unavailable}, {"valid", new("42"), taskmanager.Available}} {
 		t.Run(tt.name, func(t *testing.T) {
 			base := "sys/class/drm/card0/device/"
 			root := fstest.MapFS{base + "uevent": &fstest.MapFile{Data: []byte("DRIVER=amdgpu\n")}, base + "mem_info_vram_used": &fstest.MapFile{Data: []byte("100")}, base + "mem_info_vram_total": &fstest.MapFile{Data: []byte("200")}}
@@ -417,7 +417,6 @@ func TestTaskAcceleratorMetricAvailability(t *testing.T) {
 		})
 	}
 }
-func taskString(s string) *string { return &s }
 
 type taskMetricReadErrorFS struct {
 	fs.FS

@@ -170,8 +170,7 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 	for name, option := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    "+option+"\n"), testPolicy, testIdentity, nil)
-			var policyError *appstore.PolicyError
-			if !errors.As(err, &policyError) {
+			if _, ok := errors.AsType[*appstore.PolicyError](err); !ok {
 				t.Fatalf("Render() error = %v, want policy error", err)
 			}
 		})
@@ -243,16 +242,14 @@ services:
 volumes:
   a-nas-shared: {}
 `), testPolicy, testIdentity, nil)
-	var policyError *appstore.PolicyError
-	if !errors.As(err, &policyError) {
+	if _, ok := errors.AsType[*appstore.PolicyError](err); !ok {
 		t.Fatalf("Render() error = %v, want policy error", err)
 	}
 }
 
 func TestRenderRequiresAnAppIdentity(t *testing.T) {
 	_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, appstore.Identity{}, nil)
-	var policyError *appstore.PolicyError
-	if !errors.As(err, &policyError) {
+	if _, ok := errors.AsType[*appstore.PolicyError](err); !ok {
 		t.Fatalf("Render() without identity error = %v, want policy error", err)
 	}
 }

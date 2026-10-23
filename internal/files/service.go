@@ -15,7 +15,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -1948,21 +1947,4 @@ func safeSegment(value string) string {
 	return builder.String()
 }
 
-func inodeOf(info os.FileInfo) (uint64, error) {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, errors.New("filesystem does not expose a stable inode")
-	}
-	return stat.Ino, nil
-}
-
 func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
-
-func sortedKeys(values map[uint64]struct{}) []uint64 {
-	keys := make([]uint64, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-	return keys
-}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,9 +127,7 @@ func serve(handler http.Handler, method, path, body string, headers http.Header)
 func serveHost(handler http.Handler, method, path, host, body string, headers http.Header) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Host = host
-	for key, values := range headers {
-		request.Header[key] = values
-	}
+	maps.Copy(request.Header, headers)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder

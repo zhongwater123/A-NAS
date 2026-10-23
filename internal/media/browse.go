@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,10 +52,7 @@ func pageBounds(offset, limit, total int) (int, int) {
 	if offset > total {
 		offset = total
 	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
+	end := min(offset+limit, total)
 	return offset, end
 }
 
@@ -121,7 +119,7 @@ func (s *Service) Titles(ctx context.Context, actor accounts.User, query TitleQu
 	}
 	newSorter().sort(items, query.Sort)
 	start, end := pageBounds(query.Offset, query.Limit, len(items))
-	result := TitleResults{TitlePage: TitlePage{Items: append([]Title{}, items[start:end]...), Total: len(items)}, Genres: []string{}}
+	result := TitleResults{Items: append([]Title{}, items[start:end]...), Total: len(items), Genres: []string{}}
 	for genre := range genres {
 		result.Genres = append(result.Genres, genre)
 	}
@@ -135,12 +133,7 @@ func (s *Service) Titles(ctx context.Context, actor accounts.User, query TitleQu
 }
 
 func containsString(values []string, value string) bool {
-	for _, candidate := range values {
-		if candidate == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, value)
 }
 
 // continueWatching lists videos in progress and the next episode of shows

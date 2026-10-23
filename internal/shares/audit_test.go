@@ -37,7 +37,7 @@ func TestMaintenanceCancelsDisabledRecipientWithoutRevokingOtherRecipients(t *te
 	s, _ := setup(t, b)
 	var disabled atomic.Bool
 	s.mu.Lock()
-	s.options.Active = func(ctx context.Context, id string) (bool, error) { return !(id == bob.ID && disabled.Load()), nil }
+	s.options.Active = func(ctx context.Context, id string) (bool, error) { return id != bob.ID || !disabled.Load(), nil }
 	s.mu.Unlock()
 	v := publish(t, s)
 	job, err := s.Save(context.Background(), bob, v.ID, SaveRequest{RequestID: "disable", EntryIDs: []string{v.Entries[0].ID}, Target: Target{RootID: "home"}})
