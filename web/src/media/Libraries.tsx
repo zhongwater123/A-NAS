@@ -305,10 +305,16 @@ export function LibraryDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const parent = trail.at(-1)?.id ?? "";
+  // Each folder browsed shows nothing until its own folders arrive.
+  const browsed = step === 2 && spaceId ? JSON.stringify([spaceId, parent]) : "";
+  const [browsedBefore, setBrowsedBefore] = useState(browsed);
+  if (browsedBefore !== browsed) {
+    setBrowsedBefore(browsed);
+    if (browsed) setEntries(undefined);
+  }
   useEffect(() => {
     if (step !== 2 || !spaceId) return;
     let live = true;
-    setEntries(undefined);
     listEntries(spaceId, parent).then(
       (items) => {
         if (live) setEntries(items.filter((item) => item.kind === "directory" && !item.name.startsWith(".")));

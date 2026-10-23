@@ -40,6 +40,14 @@ export function FoldersPage({
   const [roots, setRoots] = useState<FolderRoot[]>();
   const [listing, setListing] = useState<FolderListing>();
   const [missing, setMissing] = useState(false);
+  // Each load of a folder starts without the last failure; the root list
+  // shows no folder.
+  const [loadedFor, setLoadedFor] = useState({ place, refreshKey });
+  if (loadedFor.place !== place || loadedFor.refreshKey !== refreshKey) {
+    setLoadedFor({ place, refreshKey });
+    if (place) setMissing(false);
+    else setListing(undefined);
+  }
   useEffect(() => {
     if (place) return;
     listFolderRoots().then(setRoots, (caught) => {
@@ -48,12 +56,8 @@ export function FoldersPage({
     });
   }, [place, refreshKey, onError]);
   useEffect(() => {
-    if (!place) {
-      setListing(undefined);
-      return;
-    }
+    if (!place) return;
     let live = true;
-    setMissing(false);
     getFolder(place.entryId, place.path).then(
       (value) => {
         if (live) setListing(value);

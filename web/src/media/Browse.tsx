@@ -149,10 +149,14 @@ export function CategoryPage({
   const [genres, setGenres] = useState<string[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const generation = useRef(0);
-  useEffect(() => {
+  // Another library or category starts without the last one's filters.
+  const filtersFor = JSON.stringify([fixedLibrary?.id, category]);
+  const [filtersBefore, setFiltersBefore] = useState(filtersFor);
+  if (filtersBefore !== filtersFor) {
+    setFiltersBefore(filtersFor);
     setLibrary(fixedLibrary?.id ?? "");
     setGenre("");
-  }, [fixedLibrary?.id, category]);
+  }
   useEffect(() => {
     const current = ++generation.current;
     listTitles({ category, sort, library, genre, q: search, limit: pageSize }).then(

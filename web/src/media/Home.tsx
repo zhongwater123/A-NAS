@@ -77,9 +77,7 @@ function Hero({ items, continuing }: { items: Title[]; continuing: Set<string> }
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const count = items.length;
-  useEffect(() => {
-    if (index >= count) setIndex(0);
-  }, [count, index]);
+  if (index >= count && index > 0) setIndex(0);
   useEffect(() => {
     if (paused || count < 2) return;
     const timer = window.setTimeout(() => setIndex((current) => (current + 1) % count), heroInterval);

@@ -66,7 +66,13 @@ export function Artwork({
   const choose = (candidate?: ArtworkKind) => (candidate && title.artwork[candidate] ? candidate : undefined);
   const chosen = choose(kind) ?? choose(fallback);
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [title.id, chosen, title.artwork.version]);
+  // Another picture gets another try.
+  const picture = JSON.stringify([title.id, chosen, title.artwork.version]);
+  const [tried, setTried] = useState(picture);
+  if (tried !== picture) {
+    setTried(picture);
+    setFailed(false);
+  }
   const tint = hue(heading(title));
   const style = { "--mc-hue": tint } as CSSProperties;
   if (!chosen || failed) {

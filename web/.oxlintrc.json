@@ -50,8 +50,6 @@
         "src/appcenter/InstallSheet.tsx",
         "src/assistant/useAssistantThread.ts",
         "src/docker/DockerPanel.tsx",
-        "src/media/MediaCenter.tsx",
-        "src/media/Player.tsx",
         "src/useHostState.ts"
       ],
       "rules": { "react-hooks-js/exhaustive-deps": "off" }
@@ -68,8 +66,6 @@
         "src/backup/RestoreDialog.tsx",
         "src/feedback/FeedbackChannel.tsx",
         "src/feedback/FeedbackEditor.tsx",
-        "src/media/Player.tsx",
-        "src/media/uploads.ts",
         "src/music/MusicPanel.tsx",
         "src/music/player.ts",
         "src/settings/AvatarDialog.tsx",
@@ -94,15 +90,6 @@
         "src/docker/DockerPanel.tsx",
         "src/feedback/FeedbackChannel.tsx",
         "src/files/FileViewer.tsx",
-        "src/media/Browse.tsx",
-        "src/media/Cards.tsx",
-        "src/media/Dropdown.tsx",
-        "src/media/Folders.tsx",
-        "src/media/Home.tsx",
-        "src/media/Libraries.tsx",
-        "src/media/Player.tsx",
-        "src/media/PlayerPanel.tsx",
-        "src/media/Upload.tsx",
         "src/music/NowPlaying.tsx",
         "src/music/SourcesDialog.tsx",
         "src/settings/ImageSources.tsx",
@@ -116,12 +103,8 @@
       "rules": { "react-hooks-js/set-state-in-effect": "off" }
     },
     {
-      "files": ["src/App.tsx", "src/media/Player.tsx", "src/settings/StorageSection.tsx"],
+      "files": ["src/App.tsx", "src/settings/StorageSection.tsx"],
       "rules": { "react-hooks-js/purity": "off" }
-    },
-    {
-      "files": ["src/media/Player.tsx"],
-      "rules": { "react-hooks-js/immutability": "off" }
     }
   ]
 }

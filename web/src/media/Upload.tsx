@@ -214,10 +214,16 @@ export function UploadDialog({
 
   // Libraries are polled, so the listing follows the space, not the object.
   const spaceId = library?.spaceId ?? "";
+  // Each folder browsed shows nothing until its own folders arrive.
+  const browsed = browsing && spaceId && parentId ? JSON.stringify([spaceId, parentId]) : "";
+  const [browsedBefore, setBrowsedBefore] = useState(browsed);
+  if (browsedBefore !== browsed) {
+    setBrowsedBefore(browsed);
+    if (browsed) setFolders(undefined);
+  }
   useEffect(() => {
     if (!browsing || !spaceId || !parentId) return;
     let live = true;
-    setFolders(undefined);
     listEntries(spaceId, parentId).then(
       (items) => {
         if (live) setFolders(items.filter((item) => item.kind === "directory" && !item.name.startsWith(".")));
