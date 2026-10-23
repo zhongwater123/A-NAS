@@ -3,6 +3,7 @@ package aiworker_test
 import (
 	"context"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,13 +36,18 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = worker.Process.Kill() })
+	// bind() creates the socket file before listen(), and a connection in
+	// between is refused, so wait until one is accepted. The Worker drops
+	// this empty connection with a warning and serves the next.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := os.Stat(socket); err == nil {
+		conn, err := net.Dial("unix", socket)
+		if err == nil {
+			_ = conn.Close()
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the Python Worker did not start listening")
+			t.Fatalf("the Python Worker did not start listening: %v", err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
