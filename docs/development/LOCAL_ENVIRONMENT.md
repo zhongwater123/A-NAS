@@ -264,7 +264,7 @@ make check
 
 日常迭代先运行受影响的现有目标，例如 `go test ./internal/storage`、`make web-test` 或 `make ops-check`；RC 提交只运行一次完整 `make check VERSION=<RC>`。完整检查会把提交、产品版本和两个二进制哈希写入可丢弃的 `build/.validated-build`，`deploy-dev.ps1` 只有在四者全部一致时才复用结果，否则自动重跑完整门禁。这样不会用“跳过测试”换速度，也不会为同一制品重复执行全量测试。
 
-完整检查中的 `make vuln-check` 用 `go.mod` 的 `tool` 指令固定的 govulncheck 扫描代码可达的已知漏洞，需要能访问 `vuln.go.dev`。它报告可达漏洞时检查失败：升级对应模块，或一起修改 `.go-version` 与 `go.mod` 的 `toolchain` 行来升级 Go。
+完整检查中的 `make vuln-check` 用 `go.mod` 的 `tool` 指令固定的 govulncheck 扫描代码可达的已知漏洞，需要能访问 `vuln.go.dev`。它报告可达漏洞时检查失败：升级对应模块，或一起修改 `.go-version` 与 `go.mod` 的 `toolchain` 行来升级 Go。CI 每周一还在 `main` 上单独运行一次（`.github/workflows/vuln.yml`，也可手动触发），这样没有人推送时，新公布的漏洞也会报出。
 
 只开发界面时：
 
