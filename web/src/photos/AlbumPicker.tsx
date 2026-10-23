@@ -1,5 +1,5 @@
 import { FolderPlus, Images, X } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useEffectEvent, useState } from "react";
 
 import { assetsLabel, type Caller, canEditAlbum, libraryName, ownLibrary, sharedLibrary } from "./model";
 import { listAlbums, thumbnailURL, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
@@ -22,11 +22,13 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
   const [albums, setAlbums] = useState<Map<string, PhotoAlbum[]>>();
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  // The albums are those of the libraries the picker opened with.
+  const loadAlbums = useEffectEvent(() =>
+    Promise.all(libraries.map(async (library) => [library.id, await listAlbums(library.id).catch(() => [])] as const)),
+  );
   useEffect(() => {
     let live = true;
-    void Promise.all(
-      libraries.map(async (library) => [library.id, await listAlbums(library.id).catch(() => [])] as const),
-    ).then((lists) => {
+    void loadAlbums().then((lists) => {
       if (live) setAlbums(new Map(lists));
     });
     return () => {

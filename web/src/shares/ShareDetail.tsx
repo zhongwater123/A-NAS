@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeft,
@@ -78,8 +78,9 @@ export function ShareDetail({
   // Where each save of this window went; the job itself does not say.
   const [places, setPlaces] = useState<Record<string, string>>({});
   const [reload, setReload] = useState(0);
-  const activeRef = useRef(shares.active);
-  activeRef.current = shares.active;
+  const isActive = useEffectEvent(() => shares.active);
+  const direct = useEffectEvent(onDirection);
+  const refreshShares = shares.refresh;
   const viewed = useRef(false);
   const directed = useRef(false);
   const chatToggle = useRef<HTMLButtonElement>(null);
@@ -98,11 +99,11 @@ export function ShareDetail({
         );
         if (!directed.current) {
           directed.current = true;
-          onDirection(value.sender.id === shares.userId ? "sent" : "received");
+          direct(value.sender.id === shares.userId ? "sent" : "received");
         }
         let warning = "";
         if (value.sender.id !== shares.userId) {
-          const shouldView = activeRef.current && document.visibilityState !== "hidden" && !viewed.current;
+          const shouldView = isActive() && document.visibilityState !== "hidden" && !viewed.current;
           // Neither an unavailable job list nor a failed view receipt blocks the other.
           const [savedJobs, receipt] = await Promise.allSettled([
             listJobs(id),
@@ -114,7 +115,7 @@ export function ShareDetail({
           if (receipt.status === "fulfilled" && receipt.value) {
             viewed.current = true;
             setShare(receipt.value);
-            shares.refresh();
+            refreshShares();
           } else if (receipt.status === "rejected")
             warning = [warning, errorText(receipt.reason)].filter(Boolean).join("；");
         }
@@ -131,22 +132,24 @@ export function ShareDetail({
       stopped = true;
       clearInterval(timer);
     };
-  }, [id, reload, shares.userId]);
-  useEffect(() => {
+  }, [id, reload, shares.userId, refreshShares]);
+  // Each request to open the share with a recipient opens that conversation.
+  const [askedBefore, setAskedBefore] = useState({ preferredRecipient, focus: shares.focus });
+  if (askedBefore.preferredRecipient !== preferredRecipient || askedBefore.focus !== shares.focus) {
+    setAskedBefore({ preferredRecipient, focus: shares.focus });
     if (preferredRecipient) {
       setRecipient(preferredRecipient);
       setChatOpen(true);
     }
-  }, [preferredRecipient, shares.focus]);
+  }
   const thread = useThread(id, recipient);
   const phase = share ? phaseOf(share) : undefined;
   const available = phase === "active";
-  useEffect(() => {
-    if (!available) {
-      setPreview(undefined);
-      setSaving(undefined);
-    }
-  }, [available]);
+  // A share that is no longer available closes its viewer and save dialog.
+  if (!available && (preview !== undefined || saving !== undefined)) {
+    setPreview(undefined);
+    setSaving(undefined);
+  }
   const sender = share?.sender.id === shares.userId;
   const revoke = async () => {
     setRevoking(true);

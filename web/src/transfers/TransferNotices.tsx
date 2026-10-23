@@ -13,7 +13,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { formatRate } from "../bytes";
 import {
@@ -132,17 +132,21 @@ const holdIcons: Record<Hold, typeof WifiOff> = {
 export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: () => void }) {
   const snapshot = useTransfers();
   const [finished, setFinished] = useState<Array<{ batch: string; done: number; failed: number; place: string }>>([]);
-  const announced = useRef(new Set<string>());
   const [dismissed, setDismissed] = useState<Hold[]>([]);
 
-  useEffect(() => {
+  // Each batch that ends is announced once.
+  const [announced, setAnnounced] = useState<ReadonlySet<string>>(() => new Set());
+  const [checked, setChecked] = useState<{ batches: unknown; uploads: unknown }>();
+  if (checked?.batches !== snapshot.batches || checked.uploads !== snapshot.uploads) {
+    setChecked({ batches: snapshot.batches, uploads: snapshot.uploads });
+    const ended = new Set<string>();
     const fresh: typeof finished = [];
     for (const batch of snapshot.batches) {
       const uploads = snapshot.uploads.filter((upload) => upload.batch === batch.id);
-      if (!uploads.length || announced.current.has(batch.id)) continue;
+      if (!uploads.length || announced.has(batch.id)) continue;
       if (uploads.some((upload) => ["queued", "running", "paused", "waiting", "conflict"].includes(upload.phase)))
         continue;
-      announced.current.add(batch.id);
+      ended.add(batch.id);
       const done = uploads.filter((upload) => upload.phase === "completed").length;
       const failed = uploads.filter((upload) => upload.phase === "failed").length;
       if (done + failed)
@@ -153,13 +157,16 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
           place: batch.target.label ?? locationParts(batch.target).join(" › "),
         });
     }
+    if (ended.size) setAnnounced(new Set([...announced, ...ended]));
     if (fresh.length) setFinished((current) => [...current, ...fresh]);
-  }, [snapshot.batches, snapshot.uploads]);
+  }
 
   // A hold that cleared may be raised again later.
-  useEffect(() => {
+  const [holdsBefore, setHoldsBefore] = useState(snapshot.holds);
+  if (holdsBefore !== snapshot.holds) {
+    setHoldsBefore(snapshot.holds);
     setDismissed((current) => current.filter((item) => snapshot.holds.includes(item)));
-  }, [snapshot.holds]);
+  }
 
   useEffect(() => {
     if (!finished.length) return;

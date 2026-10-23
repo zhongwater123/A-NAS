@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { failureText } from "../transfers/model";
 import { type LocalUpload, transferStore, useTransfers } from "../transfers/store";
@@ -172,8 +172,8 @@ export function useUploads({
   const snapshot = useTransfers();
   const [staged, setStaged] = useState<Staged[]>([]);
   const next = useRef(0);
-  const callbacks = useRef({ onUploaded, onSettled });
-  callbacks.current = { onUploaded, onSettled };
+  const uploaded = useEffectEvent(onUploaded);
+  const settle = useEffectEvent(onSettled);
 
   const items = useMemo(() => {
     const queued = new Map(snapshot.uploads.map((upload) => [upload.key, upload]));
@@ -195,12 +195,12 @@ export function useUploads({
       if (!item.to || active(item) || announced.current.has(item.id)) continue;
       announced.current.add(item.id);
       settled.current.push(item);
-      if (item.state === "done") callbacks.current.onUploaded(item);
+      if (item.state === "done") uploaded(item);
     }
     if (!running && settled.current.length) {
       const batch = settled.current;
       settled.current = [];
-      callbacks.current.onSettled(batch);
+      settle(batch);
     }
   }, [items, running]);
 
@@ -225,7 +225,9 @@ export function useUploads({
   );
 
   const latest = useRef(staged);
-  latest.current = staged;
+  useLayoutEffect(() => {
+    latest.current = staged;
+  });
   const start = useCallback((to: Destination) => {
     const ready = latest.current.filter((entry) => !entry.key && entry.role !== "other");
     if (!ready.length) return;

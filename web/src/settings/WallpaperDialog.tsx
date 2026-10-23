@@ -1,5 +1,5 @@
 import { ArrowLeft, Wallpaper as WallpaperIcon, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { uploadWallpaper, type Wallpaper, type WallpaperStyle } from "../api";
 import { wallpaperBackdrop } from "../wallpaper";
@@ -36,8 +36,11 @@ export function WallpaperDialog({
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Opening another image and closing let the last one go.
   const pickedRef = useRef<Picked>(undefined);
-  pickedRef.current = picked;
+  useLayoutEffect(() => {
+    pickedRef.current = picked;
+  });
   useEffect(() => () => pickedRef.current?.revoke?.(), []);
 
   const close = useCallback(() => {

@@ -48,9 +48,14 @@ export function VersionsDialog({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "danger"; text: string }>();
 
+  const listing = JSON.stringify([entry.id, reload]);
+  const [listingBefore, setListingBefore] = useState(listing);
+  if (listingBefore !== listing) {
+    setListingBefore(listing);
+    setError("");
+  }
   useEffect(() => {
     let live = true;
-    setError("");
     listVersions(entry.id)
       .then((found) => {
         if (live) setMatch(found);

@@ -289,7 +289,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
         refresh();
       },
     }),
-    [navigate, playTitle, toast, refresh, onError],
+    [navigate, playTitle, toast, refresh, onError, follow],
   );
 
   const openLibraryDialog = async (library?: MediaLibrary) => {

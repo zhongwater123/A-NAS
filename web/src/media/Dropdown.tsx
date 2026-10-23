@@ -36,7 +36,7 @@ interface Place {
 // and unfolds from the anchor's edge. Arrow keys move through it, Escape
 // closes it, and so does a press or a scroll elsewhere.
 export function ChoiceList({
-  anchor,
+  anchor: anchorRef,
   open,
   choices,
   value,
@@ -58,11 +58,11 @@ export function ChoiceList({
   const [place, setPlace] = useState<Place>();
   const list = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (!open || !anchor.current) return;
-    const root = anchor.current.closest(".mc-player, .mc-app");
+    if (!open || !anchorRef.current) return;
+    const root = anchorRef.current.closest(".mc-player, .mc-app");
     if (!root) return;
     const frame = root.getBoundingClientRect();
-    const box = anchor.current.getBoundingClientRect();
+    const box = anchorRef.current.getBoundingClientRect();
     const below = frame.bottom - box.bottom - 14;
     const above = box.top - frame.top - 14;
     const wanted = Math.min(choices.length * 36 + 12, 340);
@@ -75,7 +75,7 @@ export function ChoiceList({
       top: (up ? box.top - 6 : box.bottom + 6) - frame.top,
       maxHeight: Math.max(120, Math.min(340, up ? above : below)),
     });
-  }, [open, anchor, choices.length, align]);
+  }, [open, anchorRef, choices.length, align]);
   // A list wider than its anchor stays inside the frame.
   useLayoutEffect(() => {
     const element = list.current;
@@ -99,7 +99,7 @@ export function ChoiceList({
     list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
     const close = () => dismiss.current(false);
     const outside = (target: EventTarget | null) =>
-      !list.current?.contains(target as Node) && !anchor.current?.contains(target as Node);
+      !list.current?.contains(target as Node) && !anchorRef.current?.contains(target as Node);
     const press = (event: PointerEvent) => {
       if (outside(event.target)) close();
     };
@@ -115,7 +115,7 @@ export function ChoiceList({
       window.removeEventListener("scroll", scroll, true);
       window.removeEventListener("resize", resize);
     };
-  }, [open, place, anchor]);
+  }, [open, place, anchorRef]);
   // Keys stay in the list, so the player does not also take them.
   const keys = (event: KeyboardEvent) => {
     if (event.key !== "Tab") event.stopPropagation();

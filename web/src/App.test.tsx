@@ -31,7 +31,7 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 // The cropper needs layout jsdom lacks; this one reports a fixed square.
 vi.mock("react-easy-crop", async () => {
-  const { useEffect } = await import("react");
+  const { useEffect, useEffectEvent } = await import("react");
   return {
     default: function MockCropper({
       image,
@@ -40,8 +40,9 @@ vi.mock("react-easy-crop", async () => {
       image: string;
       onCropComplete: (area: unknown, pixels: unknown) => void;
     }) {
+      const complete = useEffectEvent(onCropComplete);
       useEffect(() => {
-        onCropComplete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 });
+        complete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 });
       }, [image]);
       return <div data-testid="cropper" data-image={image} />;
     },
@@ -49,14 +50,15 @@ vi.mock("react-easy-crop", async () => {
 });
 
 vi.mock("./XtermSession", async () => {
-  const { useEffect } = await import("react");
+  const { useEffect, useEffectEvent } = await import("react");
   return {
     default: function MockXtermSession({ onStatus }: { onStatus: (status: SessionStatus) => void }) {
-      useEffect(() => {
+      const mounted = useEffectEvent(() => {
         xterm.mounts += 1;
         xterm.onStatus = onStatus;
         onStatus({ state: "connected" });
-      }, []);
+      });
+      useEffect(() => mounted(), []);
       return <div data-testid="xterm-session" />;
     },
   };

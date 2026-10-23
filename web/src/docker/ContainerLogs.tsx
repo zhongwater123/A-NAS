@@ -11,7 +11,7 @@ const tailOptions = [200, 500];
 export function ContainerLogs({ item }: { item: ContainerSummary }) {
   const [lines, setLines] = useState<ContainerLogLine[]>();
   const [failure, setFailure] = useState<string>();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [tail, setTail] = useState(tailOptions[0]);
   // A stopped container writes nothing new, so following starts off for it.
   const [follow, setFollow] = useState(item.state === "running");
@@ -22,26 +22,39 @@ export function ContainerLogs({ item }: { item: ContainerSummary }) {
   const pinned = useRef(true);
   const active = useRef<AbortController | undefined>(undefined);
 
-  const load = useCallback(async () => {
+  const fetchLogs = useCallback(() => {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    setLoading(true);
-    try {
-      setLines(await readContainerLogs(item.id, tail, controller.signal));
-      setFailure(undefined);
-      setUpdatedAt(Date.now());
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setFailure("无法读取日志");
-    } finally {
-      if (active.current === controller) setLoading(false);
-    }
+    return readContainerLogs(item.id, tail, controller.signal)
+      .then((read) => {
+        setLines(read);
+        setFailure(undefined);
+        setUpdatedAt(Date.now());
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setFailure("无法读取日志");
+      })
+      .finally(() => {
+        if (active.current === controller) setLoading(false);
+      });
   }, [item.id, tail]);
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetchLogs();
+  }, [fetchLogs]);
 
+  // Another container or tail length loads at once.
+  const logsFor = JSON.stringify([item.id, tail]);
+  const [logsBefore, setLogsBefore] = useState(logsFor);
+  if (logsBefore !== logsFor) {
+    setLogsBefore(logsFor);
+    setLoading(true);
+  }
   useEffect(() => {
-    void load();
+    void fetchLogs();
     return () => active.current?.abort();
-  }, [load]);
+  }, [fetchLogs]);
   useEffect(() => {
     if (!follow) return;
     const timer = window.setInterval(() => {

@@ -58,6 +58,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useReducer,
   useRef,
@@ -770,7 +771,7 @@ function Desktop({
   };
   const assistantFocusHandled = useCallback(() => setAssistantFocus(undefined), []);
   const showInDocker = (appID: string) => {
-    setDockerFocus({ project: appProject(appID), at: Date.now() });
+    setDockerFocus((current) => ({ project: appProject(appID), at: (current?.at ?? 0) + 1 }));
     openWindow("docker");
   };
   const showPhoto = (assetId: string) => {
@@ -1341,76 +1342,103 @@ function FilePanel({
   const [dropTarget, setDropTarget] = useState("");
   const transfers = useTransfers();
 
-  const refresh = useCallback(async (selected: string, parent: string) => {
-    if (!selected) {
-      setEntries([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      setEntries(await listEntries(selected, parent));
-      setError("");
-    } catch (caught) {
-      setError(messageOf(caught));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  const refreshVolume = useCallback(async () => {
-    try {
-      const volumes = await listVolumes();
-      setVolume(volumes.find((item) => item.id === "volume:data") ?? volumes[0]);
-    } catch {
-      setVolume(undefined);
-    }
-  }, []);
-  const loadSpaces = useCallback(async () => {
-    try {
-      const items = await listSpaces();
-      setSpaces(items);
-      setSpaceID((current) => (items.some((space) => space.id === current) ? current : (items[0]?.id ?? "")));
-    } catch (caught) {
-      setError(messageOf(caught));
-    }
-  }, []);
+  const list = useCallback(
+    (selected: string, parent: string) =>
+      listEntries(selected, parent)
+        .then((items) => {
+          setEntries(items);
+          setError("");
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        })
+        .finally(() => setLoading(false)),
+    [],
+  );
+  const refresh = useCallback(
+    async (selected: string, parent: string) => {
+      if (!selected) {
+        setEntries([]);
+        return;
+      }
+      setLoading(true);
+      return list(selected, parent);
+    },
+    [list],
+  );
+  const refreshVolume = useCallback(
+    () =>
+      listVolumes()
+        .then((volumes) => setVolume(volumes.find((item) => item.id === "volume:data") ?? volumes[0]))
+        .catch(() => setVolume(undefined)),
+    [],
+  );
+  const loadSpaces = useCallback(
+    () =>
+      listSpaces()
+        .then((items) => {
+          setSpaces(items);
+          setSpaceID((current) => (items.some((space) => space.id === current) ? current : (items[0]?.id ?? "")));
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        }),
+    [],
+  );
   useEffect(() => {
     void loadSpaces();
     void refreshVolume();
   }, [loadSpaces, refreshVolume]);
+  // Each folder opened lists at once.
+  const [listedFor, setListedFor] = useState<{ spaceID: string; parentID: string }>();
+  if (listedFor?.spaceID !== spaceID || listedFor.parentID !== parentID) {
+    setListedFor({ spaceID, parentID });
+    if (spaceID) setLoading(true);
+  }
   useEffect(() => {
-    if (spaceID) void refresh(spaceID, parentID);
-  }, [spaceID, parentID, refresh]);
+    if (spaceID) void list(spaceID, parentID);
+  }, [spaceID, parentID, list]);
+  // A transfer's location opens here.
+  const [navigatedTo, setNavigatedTo] = useState<TransferLocation>();
+  if (navigatedTo !== navigation) {
+    setNavigatedTo(navigation);
+    if (navigation) {
+      setSpaceID(navigation.spaceId);
+      setTrail(navigation.folders.map((folder) => ({ id: folder.id, name: folder.name })));
+      setQuery("");
+      setSelectedItemID("");
+      setSelectedItemIDs([]);
+      setContextMenu(undefined);
+    }
+  }
+  const navigated = useEffectEvent(onNavigated);
   useEffect(() => {
-    if (!navigation) return;
-    setSpaceID(navigation.spaceId);
-    setTrail(navigation.folders.map((folder) => ({ id: folder.id, name: folder.name })));
-    setQuery("");
-    setSelectedItemID("");
-    setSelectedItemIDs([]);
-    setContextMenu(undefined);
-    onNavigated();
-  }, [navigation, onNavigated]);
+    if (navigation) navigated();
+  }, [navigation]);
   // Files uploaded into this space show up without a manual refresh.
-  const location = useRef({ spaceID, parentID });
-  location.current = { spaceID, parentID };
+  const uploadedHere = useEffectEvent((spaceId: string) => spaceId === spaceID);
+  const refreshHere = useEffectEvent(() => {
+    void refresh(spaceID, parentID);
+    void refreshVolume();
+  });
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stop = transferStore.onUploaded((target) => {
-      if (target.spaceId !== location.current.spaceID) return;
+      if (!uploadedHere(target.spaceId)) return;
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        void refresh(location.current.spaceID, location.current.parentID);
-        void refreshVolume();
-      }, 400);
+      timer = setTimeout(() => refreshHere(), 400);
     });
     return () => {
       stop();
       clearTimeout(timer);
     };
-  }, [refresh, refreshVolume]);
-  useEffect(() => {
+  }, []);
+  // Another item gets another try at its preview.
+  const [previewedID, setPreviewedID] = useState(selectedItemID);
+  if (previewedID !== selectedItemID) {
+    setPreviewedID(selectedItemID);
     setFailedPreviewID("");
-  }, [selectedItemID]);
+  }
   useEffect(() => {
     if (!pendingDelete && !renaming && !viewMenuOpen && !contextMenu && !uploadMenuOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1581,17 +1609,44 @@ function FilePanel({
     : 0;
   const uploadAttention = uploadsHere.some((upload) => upload.phase === "conflict" || upload.phase === "waiting");
 
+  // A text file selected alone previews its text; a large one says why not.
+  const previewText =
+    Boolean(selectedItem?.entry) && isTextPreviewable(selectedItem?.name ?? "") && selectedItems.length === 1;
+  const previewTooLarge = previewText && (selectedItem?.sizeBytes ?? 0) > 1024 * 1024;
+  const [previewFor, setPreviewFor] = useState<{
+    id?: string;
+    entry?: FileEntry;
+    name?: string;
+    sizeBytes?: number;
+    count: number;
+  }>();
+  if (
+    !previewFor ||
+    previewFor.id !== selectedItem?.id ||
+    previewFor.entry !== selectedItem?.entry ||
+    previewFor.name !== selectedItem?.name ||
+    previewFor.sizeBytes !== selectedItem?.sizeBytes ||
+    previewFor.count !== selectedItems.length
+  ) {
+    setPreviewFor({
+      id: selectedItem?.id,
+      entry: selectedItem?.entry,
+      name: selectedItem?.name,
+      sizeBytes: selectedItem?.sizeBytes,
+      count: selectedItems.length,
+    });
+    setTextPreview(
+      !previewText || !selectedItem
+        ? undefined
+        : previewTooLarge
+          ? { id: selectedItem.id, error: "文本超过 1 MiB，请下载后查看完整内容。" }
+          : { id: selectedItem.id },
+    );
+  }
   useEffect(() => {
-    if (!selectedItem?.entry || !isTextPreviewable(selectedItem.name) || selectedItems.length !== 1) {
-      setTextPreview(undefined);
-      return;
-    }
-    if (selectedItem.sizeBytes > 1024 * 1024) {
-      setTextPreview({ id: selectedItem.id, error: "文本超过 1 MiB，请下载后查看完整内容。" });
-      return;
-    }
+    if (!selectedItem?.entry || !isTextPreviewable(selectedItem.name) || selectedItems.length !== 1) return;
+    if (selectedItem.sizeBytes > 1024 * 1024) return;
     let cancelled = false;
-    setTextPreview({ id: selectedItem.id });
     void readFileTextPreview(selectedItem.entry.id)
       .then((content) => {
         if (!cancelled) setTextPreview({ id: selectedItem.id, content });

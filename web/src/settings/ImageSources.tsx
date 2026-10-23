@@ -183,11 +183,19 @@ function FileSource({ onPick }: { onPick: (entry: FileEntry) => void }) {
       .catch((caught) => setError(messageOf(caught)));
   }, []);
   const folder = trail.at(-1)?.id ?? "";
+  // Each folder shows nothing until its own entries arrive.
+  const browsed = JSON.stringify([spaceID, folder]);
+  const [browsedBefore, setBrowsedBefore] = useState(browsed);
+  if (browsedBefore !== browsed) {
+    setBrowsedBefore(browsed);
+    if (spaceID) {
+      setEntries(undefined);
+      setError("");
+    }
+  }
   useEffect(() => {
     if (!spaceID) return;
     let current = true;
-    setEntries(undefined);
-    setError("");
     void listEntries(spaceID, folder)
       .then((items) => {
         if (current) setEntries(items);
@@ -320,12 +328,19 @@ function PhotoSource({ onPick }: { onPick: (asset: PhotoAsset) => void }) {
         setError(messageOf(caught));
       });
   }, []);
+  // Each library shows nothing until its own photos arrive.
+  const [libraryBefore, setLibraryBefore] = useState(libraryID);
+  if (libraryBefore !== libraryID) {
+    setLibraryBefore(libraryID);
+    if (libraryID) {
+      setAssets(undefined);
+      setNext(undefined);
+      setError("");
+    }
+  }
   useEffect(() => {
     if (!libraryID) return;
     let current = true;
-    setAssets(undefined);
-    setNext(undefined);
-    setError("");
     void listTimeline(libraryID, "", 120)
       .then((page) => {
         if (current) {

@@ -31,7 +31,6 @@ export function TerminalSection({
 
   useEffect(() => {
     const controller = new AbortController();
-    setAvailability("checking");
     readTerminalEnabled(controller.signal)
       .then((enabled) => setAvailability(enabled ? "enabled" : "disabled"))
       .catch((error: unknown) => {
@@ -52,6 +51,10 @@ export function TerminalSection({
     setSession((value) => value + 1);
   };
   const resize = useCallback((cols: number, rows: number) => setSize({ cols, rows }), []);
+  const checkAgain = () => {
+    setAvailability("checking");
+    setAttempt((value) => value + 1);
+  };
   // Latin names get spaces around them in Chinese text.
   const device = hostname ? ` ${hostname} ` : "这台设备";
 
@@ -68,7 +71,7 @@ export function TerminalSection({
         {availability === "unreachable" && (
           <Banner tone="error">
             无法读取终端状态，请确认 A-NAS 产品服务正在运行。
-            <button className="set-btn tm-banner-action" onClick={() => setAttempt((value) => value + 1)}>
+            <button className="set-btn tm-banner-action" onClick={checkAgain}>
               重试
             </button>
           </Banner>
@@ -82,7 +85,7 @@ export function TerminalSection({
               <code>{"echo ANAS_TERMINAL=enabled >> /etc/a-nas/anas-api.env\nsystemctl restart anas-api"}</code>
             </pre>
             <p className="tm-notice-foot">开启后，系统升级会保留这个设置。</p>
-            <button className="set-btn" onClick={() => setAttempt((value) => value + 1)}>
+            <button className="set-btn" onClick={checkAgain}>
               重新检查
             </button>
           </div>

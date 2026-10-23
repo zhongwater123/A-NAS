@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 
 import { SessionStatus, exitCodeFromReason, resizeMessage, terminalSessionURL } from "./terminal";
 
@@ -26,10 +26,8 @@ export default function XtermSession({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const focusRef = useRef<() => void>(undefined);
-  const onStatusRef = useRef(onStatus);
-  onStatusRef.current = onStatus;
-  const onSizeRef = useRef(onSize);
-  onSizeRef.current = onSize;
+  const reportStatus = useEffectEvent(onStatus);
+  const reportSize = useEffectEvent((cols: number, rows: number) => onSize?.(cols, rows));
 
   useEffect(() => {
     const host = hostRef.current;
@@ -66,25 +64,25 @@ export default function XtermSession({
       term.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0)))),
       term.onResize(({ cols, rows }) => {
         send(resizeMessage(cols, rows));
-        onSizeRef.current?.(cols, rows);
+        reportSize(cols, rows);
       }),
     ];
     socket.onopen = () => {
       refit();
       send(resizeMessage(term.cols, term.rows));
       term.focus();
-      onStatusRef.current({ state: "connected" });
+      reportStatus({ state: "connected" });
     };
     socket.onmessage = (event: MessageEvent) => {
       if (event.data instanceof ArrayBuffer) term.write(new Uint8Array(event.data));
     };
-    socket.onclose = (event) => onStatusRef.current({ state: "ended", exitCode: exitCodeFromReason(event.reason) });
+    socket.onclose = (event) => reportStatus({ state: "ended", exitCode: exitCodeFromReason(event.reason) });
 
     const observer = new ResizeObserver(refit);
     observer.observe(host);
     refit();
-    onSizeRef.current?.(term.cols, term.rows);
-    onStatusRef.current({ state: "connecting" });
+    reportSize(term.cols, term.rows);
+    reportStatus({ state: "connecting" });
 
     return () => {
       focusRef.current = undefined;

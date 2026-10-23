@@ -7,6 +7,7 @@ import {
   ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -98,9 +99,11 @@ export function FeedbackEditor({
   const textID = useId();
   // Captures finish after a render, so additions read the latest draft.
   const latest = useRef(draft);
-  latest.current = draft;
   const attachedCount = useRef(attached.length);
-  attachedCount.current = attached.length;
+  useLayoutEffect(() => {
+    latest.current = draft;
+    attachedCount.current = attached.length;
+  });
 
   // Focus without scrolling: a window wider than the screen makes the
   // desktop scrollable, and the panel slides in from past its edge. Only the

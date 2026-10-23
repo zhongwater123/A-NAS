@@ -29,6 +29,7 @@ import {
   RefObject,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -229,17 +230,13 @@ export function Player({
   const duration = playback?.duration || detail?.duration || 0;
   const absolute = useCallback(() => (converted ? offset : 0) + (video.current?.currentTime ?? 0), [converted, offset]);
 
-  // Load the video and decide how to play it.
-  useEffect(() => {
-    let live = true;
-    window.clearTimeout(restart.current);
-    pendingSeek.current = undefined;
+  // Another video starts without the last one's state.
+  const [requestBefore, setRequestBefore] = useState(request);
+  if (requestBefore !== request) {
+    setRequestBefore(request);
     setJump(undefined);
     setFrozen(false);
     setRanges([]);
-    fellBack.current = false;
-    started.current = false;
-    lastSaved.current = 0;
     setFailure("");
     setDetail(undefined);
     setPlayback(undefined);
@@ -247,27 +244,7 @@ export function Player({
     setUpNext(undefined);
     setHalted(false);
     setCues([]);
-    Promise.all([getVideo(request.videoId), getPlayback(request.videoId, { caps })]).then(
-      ([value, decision]) => {
-        if (!live) return;
-        const saved = value.progress;
-        const start = !request.restart && saved && !saved.watched && saved.position > resumeFloor ? saved.position : 0;
-        setDetail(value);
-        setResumed(start > 0 ? start : undefined);
-        const preferred =
-          value.subtitles.find((track) => track.default) ??
-          value.subtitles.find((track) => track.external && track.language?.startsWith("zh"));
-        setSubtitle(preferred?.id ?? "off");
-        begin(decision, start, true);
-      },
-      (caught) => {
-        if (live) setFailure(messageOf(caught));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [request, caps]);
+  }
 
   // A converted stream plays through a feed that buffers it ahead, where
   // the browser allows; otherwise the element fetches it itself.
@@ -331,6 +308,38 @@ export function Player({
     setTime(start);
   };
 
+  // Load the video and decide how to play it.
+  const decided = useEffectEvent((value: VideoDetail, decision: Playback) => {
+    const saved = value.progress;
+    const start = !request.restart && saved && !saved.watched && saved.position > resumeFloor ? saved.position : 0;
+    setDetail(value);
+    setResumed(start > 0 ? start : undefined);
+    const preferred =
+      value.subtitles.find((track) => track.default) ??
+      value.subtitles.find((track) => track.external && track.language?.startsWith("zh"));
+    setSubtitle(preferred?.id ?? "off");
+    begin(decision, start, true);
+  });
+  useEffect(() => {
+    let live = true;
+    window.clearTimeout(restart.current);
+    pendingSeek.current = undefined;
+    fellBack.current = false;
+    started.current = false;
+    lastSaved.current = 0;
+    Promise.all([getVideo(request.videoId), getPlayback(request.videoId, { caps })]).then(
+      ([value, decision]) => {
+        if (live) decided(value, decision);
+      },
+      (caught) => {
+        if (live) setFailure(messageOf(caught));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [request, caps]);
+
   const save = useCallback(
     (force = false) => {
       if (!detail || !playback || !started.current) return;
@@ -345,13 +354,12 @@ export function Player({
   );
 
   // Save when the player closes or moves on to another episode.
-  const saveRef = useRef(save);
-  saveRef.current = save;
-  useEffect(() => () => saveRef.current(true), []);
+  const saveOnClose = useEffectEvent(() => save(true));
+  useEffect(() => () => saveOnClose(), []);
   // The control that moved on, a panel's episode or the countdown's button,
   // goes away with the video, so the player keeps the keyboard itself.
   const go = (videoId: string) => {
-    saveRef.current(true);
+    save(true);
     setCountdown(undefined);
     container.current?.focus({ preventScroll: true });
     onNavigate(videoId);
@@ -501,9 +509,10 @@ export function Player({
   // A key leaves a short notice of what it did; the volume and the skips
   // are otherwise invisible while the controls are hidden.
   const noticeTimer = useRef(0);
+  const noticeCount = useRef(0);
   const announce = (icon: ReactNode, text: string) => {
     window.clearTimeout(noticeTimer.current);
-    setNotice({ id: Date.now(), icon, text });
+    setNotice({ id: ++noticeCount.current, icon, text });
     noticeTimer.current = window.setTimeout(() => setNotice(undefined), 900);
   };
   useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
@@ -610,9 +619,14 @@ export function Player({
   // Subtitles load into a hidden track; the overlay shows the cues for the
   // absolute position, so they stay in time after a converted restart.
   const trackElement = useRef<HTMLTrackElement>(null);
+  const cuesFor = JSON.stringify([subtitle, source]);
+  const [cuesBefore, setCuesBefore] = useState(cuesFor);
+  if (cuesBefore !== cuesFor) {
+    setCuesBefore(cuesFor);
+    setCues([]);
+  }
   useEffect(() => {
     const element = trackElement.current;
-    setCues([]);
     if (!element?.track || subtitle === "off") return;
     element.track.mode = "hidden";
     const loaded = () => {

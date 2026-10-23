@@ -14,7 +14,7 @@ import {
   Waypoints,
   X,
 } from "lucide-react";
-import { ReactNode, useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
 import { AppJob, AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
 import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
@@ -45,25 +45,31 @@ export function InstallSheet({ app, busyApp, onChanged, onClose }: SheetProps & 
   // The job this sheet started; until the list catches up, an earlier failed job is not ours.
   const [started, setStarted] = useState<AppJob>();
   const [plan, setPlan] = useState<InstallPlan>();
-  const [planning, setPlanning] = useState(false);
+  // A sheet that opens before the install plans at once.
+  const [planning, setPlanning] = useState(app.state !== "installing");
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string>();
 
-  const loadPlan = useCallback(async () => {
+  const fetchPlan = useCallback(
+    () =>
+      readPlan(app.id)
+        .then(setPlan)
+        .catch((error: unknown) => {
+          setFailure(describeError(error));
+        })
+        .finally(() => setPlanning(false)),
+    [app.id],
+  );
+  const loadPlan = useCallback(() => {
     setPlanning(true);
     setPlan(undefined);
-    try {
-      setPlan(await readPlan(app.id));
-    } catch (error) {
-      setFailure(describeError(error));
-    } finally {
-      setPlanning(false);
-    }
-  }, [app.id]);
+    return fetchPlan();
+  }, [fetchPlan]);
   // Plan once per opening; a retry reloads explicitly.
-  useEffect(() => {
-    if (!submitted) void loadPlan();
-  }, []);
+  const planOnOpen = useEffectEvent(() => {
+    if (!submitted) void fetchPlan();
+  });
+  useEffect(() => planOnOpen(), []);
 
   const confirm = async () => {
     if (!plan) return;

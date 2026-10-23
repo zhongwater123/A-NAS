@@ -277,10 +277,16 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
   const [error, setError] = useState("");
   const [opening, setOpening] = useState("");
   const search = query.trim();
-  useEffect(() => {
-    let live = true;
+  // Each search shows nothing until its own results arrive.
+  const searched = JSON.stringify([category, scope, search]);
+  const [searchedBefore, setSearchedBefore] = useState(searched);
+  if (searchedBefore !== searched) {
+    setSearchedBefore(searched);
     setItems(undefined);
     setError("");
+  }
+  useEffect(() => {
+    let live = true;
     // Typing waits for a pause before it asks again.
     const timer = window.setTimeout(
       () => {

@@ -21,7 +21,14 @@ export function SharesPanel() {
   const [next, setNext] = useState<number>();
   const [pageCount, setPageCount] = useState(1);
   const [error, setError] = useState("");
+  // Each change of direction, revision or pages loads the list again.
   const [loading, setLoading] = useState(true);
+  const listing = `${direction}/${revision}/${pageCount}`;
+  const [listingBefore, setListingBefore] = useState(listing);
+  if (listingBefore !== listing) {
+    setListingBefore(listing);
+    setLoading(true);
+  }
   const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -37,14 +44,18 @@ export function SharesPanel() {
     return () => observer.disconnect();
   }, []);
   const layout = layoutFor(width);
-  useEffect(() => {
-    if (!focus) return;
-    setSelected(focus.id || undefined);
-    if (!focus.id) {
-      setDirection("received");
-      setPageCount(1);
+  // A share another window asks for opens; a request for none lists the received ones.
+  const [focusSeen, setFocusSeen] = useState<typeof focus>();
+  if (focus !== focusSeen) {
+    setFocusSeen(focus);
+    if (focus) {
+      setSelected(focus.id || undefined);
+      if (!focus.id) {
+        setDirection("received");
+        setPageCount(1);
+      }
     }
-  }, [focus]);
+  }
   useEffect(() => {
     let stopped = false,
       busy = false;
@@ -74,7 +85,6 @@ export function SharesPanel() {
         if (!stopped) setLoading(false);
       }
     };
-    setLoading(true);
     void load();
     const timer = setInterval(() => void load(), 5000);
     return () => {

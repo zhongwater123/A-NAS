@@ -34,7 +34,12 @@ export function Avatar({
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [occurrenceId]);
+  // Another face gets another try.
+  const [tried, setTried] = useState(occurrenceId);
+  if (tried !== occurrenceId) {
+    setTried(occurrenceId);
+    setFailed(false);
+  }
   return (
     <span className={`ph-avatar ${className}`} style={{ width: size, height: size }}>
       {occurrenceId && !failed ? (
@@ -330,7 +335,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
     return () => {
       live = false;
     };
-  }, [editing]);
+  }, [editing, people, viewing]);
   const face = faces.find((item) => item.occurrenceId === editing);
   const suggestions = useMemo(
     () =>
@@ -346,7 +351,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                 person.id !== face.personId,
             )
             .slice(0, 6),
-    [people, face, name],
+    [people, face, name, asset.libraryId],
   );
   const start = (item: PhotoAssetPerson) => {
     setEditing(item.occurrenceId);

@@ -1,5 +1,14 @@
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, X } from "lucide-react";
-import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { dayLabel, momentOf, reducedMotion } from "./model";
@@ -80,7 +89,9 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
   // Everything the timers act on is read through refs, so that renders of
   // the view below never restart them.
   const latest = useRef({ assets, all, current, more, onReveal, onExit });
-  latest.current = { assets, all, current, more, onReveal, onExit };
+  useLayoutEffect(() => {
+    latest.current = { assets, all, current, more, onReveal, onExit };
+  });
   const prepared = useRef<Prepared>(new Map());
   const move = useRef(0);
 
@@ -112,44 +123,59 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
 
   // The next photo starts decoding as soon as one is shown; ones far behind
   // are let go.
-  useEffect(() => {
+  const currentId = current?.id;
+  const prepareNext = useEffectEvent(() => {
     if (!current) return;
-    latest.current.onReveal(current.id);
+    onReveal(current.id);
     const next = assets[position + 1];
     if (next) void prepare(prepared.current, next);
     const keep = new Set(assets.slice(Math.max(0, position - 1), position + 3).map((asset) => asset.id));
     for (const id of prepared.current.keys()) if (!keep.has(id)) prepared.current.delete(id);
-  }, [current?.id]);
+  });
+  useEffect(() => prepareNext(), [currentId]);
 
   useEffect(() => {
     if (!leaving) return;
     const timer = window.setTimeout(() => setLeaving(undefined), fade ? fadeTime : 0);
     return () => window.clearTimeout(timer);
-  }, [leaving]);
+  }, [leaving, fade]);
 
   // Each photo stays slideDelay after its fade; pausing stops the clock and
   // playing again gives the photo its full time.
   useEffect(() => {
-    if (paused || ended || awaitingMore || !current) return;
+    if (paused || ended || awaitingMore || !currentId) return;
     const timer = window.setTimeout(() => void go(1), slideDelay + (fade ? fadeTime : 0));
     return () => window.clearTimeout(timer);
-  }, [current?.id, paused, ended, awaitingMore, go]);
+  }, [currentId, paused, ended, awaitingMore, go, fade]);
 
   // At the end of what is loaded, the view below loads the photos after it,
-  // and past any videos after those.
-  useEffect(() => {
-    if (!awaitingMore) return;
-    if (assets.length > position + 1) {
+  // and past any videos after those. Once it has loaded more, the slideshow
+  // goes on at once; when it has no more, the slideshow ends.
+  const loadedNow = `${assets.length}/${all.length}/${more}`;
+  const [loadedSeen, setLoadedSeen] = useState(loadedNow);
+  const [goOn, setGoOn] = useState(0);
+  if (loadedSeen !== loadedNow) {
+    setLoadedSeen(loadedNow);
+    if (awaitingMore && assets.length > position + 1) {
       setAwaitingMore(false);
-      void go(1);
-      return;
-    }
-    if (!more) {
+      setGoOn((value) => value + 1);
+    } else if (awaitingMore && !more) {
       setAwaitingMore(false);
       setEnded(true);
-      return;
     }
-    if (all.length) latest.current.onReveal(all[all.length - 1].id);
+  }
+  const wentOn = useRef(0);
+  useEffect(() => {
+    if (goOn === wentOn.current) return;
+    wentOn.current = goOn;
+    void go(1);
+  }, [goOn, go]);
+  const revealLast = useEffectEvent(() => {
+    if (all.length) onReveal(all[all.length - 1].id);
+  });
+  useEffect(() => {
+    if (!awaitingMore) return;
+    revealLast();
     const timer = window.setTimeout(() => {
       setAwaitingMore(false);
       setEnded(true);
@@ -158,9 +184,10 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
   }, [awaitingMore, assets.length, all.length, more]);
 
   // A view of videos alone has nothing to show.
-  useEffect(() => {
+  const exitIfEmpty = useEffectEvent(() => {
     if (!current) onExit(startId);
-  }, []);
+  });
+  useEffect(() => exitIfEmpty(), []);
 
   // The controls show while the pointer moves, and stay while paused.
   const idle = useRef(0);
@@ -170,9 +197,9 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
     idle.current = window.setTimeout(() => setControls(false), controlsDelay);
   }, []);
   useEffect(() => {
-    wake();
+    idle.current = window.setTimeout(() => setControls(false), controlsDelay);
     return () => window.clearTimeout(idle.current);
-  }, [wake]);
+  }, []);
 
   const exit = useCallback(() => {
     const shown = latest.current.current;

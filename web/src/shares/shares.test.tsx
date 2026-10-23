@@ -379,10 +379,10 @@ it("suppresses only the active visible thread and not a minimized thread", async
     ),
   );
   function Thread() {
-    const context = useShares();
+    const { thread } = useShares();
     useEffect(() => {
-      context.thread({ id: "s1", recipientId: "bob" });
-    }, []);
+      thread({ id: "s1", recipientId: "bob" });
+    }, [thread]);
     return null;
   }
   const { rerender } = render(

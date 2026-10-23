@@ -276,22 +276,21 @@ function useRenderedEntries(entries: DockEntry[]): RenderedEntry[] {
     entries.map((entry) => ({ ...entry, leaving: false })),
   );
   const signature = entries.map((entry) => `${entry.id}:${entry.minimized}:${entry.title}`).join("|");
-  const latest = useRef(entries);
-  latest.current = entries;
-
-  useLayoutEffect(() => {
-    const current = new Map(latest.current.map((entry) => [entry.id, entry]));
+  const [merged, setMerged] = useState(signature);
+  if (merged !== signature) {
+    setMerged(signature);
+    const current = new Map(entries.map((entry) => [entry.id, entry]));
     setRendered((previous) => {
       const next: RenderedEntry[] = previous.map((item) => {
         const entry = current.get(item.id);
         return entry ? { ...entry, leaving: false } : { ...item, leaving: true };
       });
-      latest.current.forEach((entry) => {
+      entries.forEach((entry) => {
         if (!previous.some((item) => item.id === entry.id)) next.push({ ...entry, leaving: false });
       });
       return next;
     });
-  }, [signature]);
+  }
 
   const leavingIDs = rendered
     .filter((item) => item.leaving)

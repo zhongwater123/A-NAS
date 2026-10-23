@@ -1,5 +1,5 @@
 import { RotateCcw } from "lucide-react";
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { DayHeader, gridInset, type GridProps, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, type MonthState, type PendingPhoto, timelineEntries } from "./layout";
@@ -43,14 +43,35 @@ export function Timeline(props: Props) {
   const loading = useRef(new Set<string>());
   const generation = useRef(0);
   const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
+  useLayoutEffect(() => {
+    loadedRef.current = loaded;
+  });
   // The unloaded months last seen in view.
   const inView = useRef<string[]>([]);
+
+  const ensure = useCallback(
+    (month: string) => {
+      if (loading.current.has(month) || loadedRef.current.get(month)?.assets) return;
+      loading.current.add(month);
+      const current = generation.current;
+      loadMonth(libraryId, month)
+        .then(
+          (assets) => {
+            if (current === generation.current) setLoaded((value) => new Map(value).set(month, { assets }));
+          },
+          () => {
+            if (current === generation.current) setLoaded((value) => new Map(value).set(month, { failed: true }));
+          },
+        )
+        .finally(() => loading.current.delete(month));
+    },
+    [libraryId],
+  );
 
   // A new library starts over; a refresh reloads the months already shown
   // and swaps them in at once, so nothing flickers.
   const libraryRef = useRef(libraryId);
-  useEffect(() => {
+  const reload = useEffectEvent(() => {
     const fresh = libraryRef.current !== libraryId;
     libraryRef.current = libraryId;
     const current = ++generation.current;
@@ -76,35 +97,15 @@ export function Timeline(props: Props) {
         onReloaded();
         // Months in view that were loading when the refresh began load again.
         for (const month of inView.current)
-          if (!keep.includes(month) && nextMonths.some((item) => item.month === month)) ensureRef.current(month);
+          if (!keep.includes(month) && nextMonths.some((item) => item.month === month)) ensure(month);
       } catch (caught) {
         if (current !== generation.current) return;
         setMonths((value) => value ?? []);
         onError(messageOf(caught));
       }
     })();
-  }, [libraryId, refreshKey]);
-
-  const ensure = useCallback(
-    (month: string) => {
-      if (loading.current.has(month) || loadedRef.current.get(month)?.assets) return;
-      loading.current.add(month);
-      const current = generation.current;
-      loadMonth(libraryId, month)
-        .then(
-          (assets) => {
-            if (current === generation.current) setLoaded((value) => new Map(value).set(month, { assets }));
-          },
-          () => {
-            if (current === generation.current) setLoaded((value) => new Map(value).set(month, { failed: true }));
-          },
-        )
-        .finally(() => loading.current.delete(month));
-    },
-    [libraryId],
-  );
-  const ensureRef = useRef(ensure);
-  ensureRef.current = ensure;
+  });
+  useEffect(() => reload(), [libraryId, refreshKey]);
 
   const visible = useMemo(() => {
     if (!hidden.size) return loaded;
@@ -132,14 +133,16 @@ export function Timeline(props: Props) {
         ),
     ),
   );
-  useEffect(() => onAssets(ordered), [ordered]);
+  const reportAssets = useEffectEvent(onAssets);
+  useEffect(() => reportAssets(ordered), [ordered]);
   const total = months?.reduce((sum, month) => sum + (visible.get(month.month)?.assets?.length ?? month.photos), 0);
   const videos = months?.reduce(
     (sum, month) =>
       sum + (visible.get(month.month)?.assets?.filter((asset) => asset.video).length ?? month.videos ?? 0),
     0,
   );
-  useEffect(() => onCount(total, videos), [total, videos]);
+  const reportCount = useEffectEvent(onCount);
+  useEffect(() => reportCount(total, videos), [total, videos]);
 
   const renderTile = useTileRenderer(props);
   const renderEntry = (entry: Entry): ReactNode => {

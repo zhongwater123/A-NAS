@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { artistLine, shuffled, unknownAlbum } from "./library";
 import { coverURL, streamURL, type Track } from "./musicApi";
@@ -119,11 +128,16 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const time = useMemo(() => new TimeStore(), []);
+  // The audio element is made on first use and lives as long as the music window.
   const audioRef = useRef<HTMLAudioElement>(null);
-  if (!audioRef.current) audioRef.current = new Audio();
-  const audio = audioRef.current;
+  const media = useCallback(() => (audioRef.current ??= new Audio()), []);
+  // The controls below read the latest queue and library without changing identity.
   const stateRef = useRef(state);
-  stateRef.current = state;
+  const tracksRef = useRef(tracks);
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    tracksRef.current = tracks;
+  });
   const loaded = useRef<{ generation: number; id: string }>(undefined);
   const wantPlay = useRef(false);
   const resumeAt = useRef(saved?.position ?? 0);
@@ -132,10 +146,8 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
   const offset = useRef(0);
   const listened = useRef({ seconds: 0, last: 0, counted: false });
   const errors = useRef(0);
-  const callbacks = useRef({ onPlayed, onError });
-  callbacks.current = { onPlayed, onError };
-  const tracksRef = useRef(tracks);
-  tracksRef.current = tracks;
+  const reportPlayed = useEffectEvent(onPlayed);
+  const reportError = useEffectEvent(onError);
 
   const currentId = state.index >= 0 ? state.queue[state.index] : undefined;
   const current = currentId ? tracks.get(currentId) : undefined;
@@ -160,7 +172,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
 
   const start = useCallback(() => {
     wantPlay.current = true;
-    const result = audio.play();
+    const result = media().play();
     if (result)
       result.catch((error: unknown) => {
         // A newer load interrupts an earlier play; that is not a failure.
@@ -168,7 +180,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
         wantPlay.current = false;
         setPlaying(false);
       });
-  }, [audio]);
+  }, [media]);
 
   // Load the current track whenever it changes, or when go() chose it again
   // (a new generation), so choosing the playing track restarts it.
@@ -181,6 +193,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     const duration = (track?.durationMs ?? 0) / 1000;
     // A track that had played to its end starts again from the beginning.
     const resume = duration && resumeAt.current > duration - 2 ? 0 : resumeAt.current;
+    const audio = media();
     audio.preload = "metadata";
     if (track?.transcode) {
       offset.current = resume;
@@ -193,14 +206,15 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     listened.current = { seconds: 0, last: resume, counted: false };
     time.set({ position: resume, duration, buffered: 0 });
     if (wantPlay.current) start();
-  }, [audio, currentId, generation, ready, start, time]);
+  }, [media, currentId, generation, ready, start, time]);
 
   useEffect(() => {
+    const audio = media();
     audio.volume = state.volume;
     audio.muted = state.muted;
-  }, [audio, state.volume, state.muted]);
+  }, [media, state.volume, state.muted]);
 
-  const positionNow = useCallback(() => offset.current + (audio.currentTime || 0), [audio]);
+  const positionNow = useCallback(() => offset.current + (media().currentTime || 0), [media]);
   const decoding = useCallback(
     () => Boolean(loaded.current && tracksRef.current.get(loaded.current.id)?.transcode),
     [],
@@ -212,6 +226,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     (seconds: number) => {
       const target = Math.max(0, seconds);
       const id = loaded.current?.id;
+      const audio = media();
       if (id && decoding()) {
         const playing = !audio.paused;
         offset.current = target;
@@ -222,7 +237,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       listened.current.last = target;
       time.set({ position: target });
     },
-    [audio, decoding, start, time],
+    [media, decoding, start, time],
   );
 
   // release lets go of a decoded stream, which holds a media worker process
@@ -230,11 +245,12 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
   const release = useCallback(
     (at: number) => {
       offset.current = at;
+      const audio = media();
       audio.removeAttribute("src");
       audio.load();
       time.set({ position: at, buffered: at });
     },
-    [audio, time],
+    [media, time],
   );
 
   const save = useCallback(() => {
@@ -280,10 +296,11 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       moveTo(0);
       return;
     }
-    go(value.index > 0 ? value.index - 1 : value.queue.length - 1, wantPlay.current || !audio.paused);
-  }, [audio, go, moveTo, positionNow]);
+    go(value.index > 0 ? value.index - 1 : value.queue.length - 1, wantPlay.current || !media().paused);
+  }, [media, go, moveTo, positionNow]);
 
   useEffect(() => {
+    const audio = media();
     const onTime = () => {
       const position = positionNow();
       time.set({ position });
@@ -293,7 +310,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       heard.last = position;
       if (!heard.counted && heard.seconds >= countAfterSeconds && loaded.current) {
         heard.counted = true;
-        callbacks.current.onPlayed(loaded.current.id);
+        reportPlayed(loaded.current.id);
       }
     };
     // A decoded stream reports only what is left of it; the library knows the
@@ -326,7 +343,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       const heard = listened.current;
       if (!heard.counted && loaded.current) {
         heard.counted = true;
-        callbacks.current.onPlayed(loaded.current.id);
+        reportPlayed(loaded.current.id);
       }
       if (stateRef.current.repeat === "one") {
         moveTo(0);
@@ -340,7 +357,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       const id = loaded.current?.id;
       const track = id ? tracksRef.current.get(id) : undefined;
       if (!track || !audio.getAttribute("src")) return;
-      callbacks.current.onError(track);
+      reportError(track);
       errors.current += 1;
       // Skip an unplayable file, but stop rather than spin through a queue
       // that cannot play at all.
@@ -368,7 +385,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
     return () => {
       for (const [name, handler] of events) audio.removeEventListener(name, handler);
     };
-  }, [audio, decoding, moveTo, next, positionNow, save, start, time]);
+  }, [media, decoding, moveTo, next, positionNow, save, start, time]);
 
   // Closing the window stops the music.
   useEffect(
@@ -378,15 +395,17 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       // where it was.
       resumeAt.current = positionNow() || resumeAt.current;
       loaded.current = undefined;
+      const audio = media();
       audio.pause();
       audio.removeAttribute("src");
       audio.load();
     },
-    [audio, positionNow, save],
+    [media, positionNow, save],
   );
 
   const toggle = useCallback(() => {
     if (!stateRef.current.queue.length) return;
+    const audio = media();
     if (audio.paused) {
       if (!audio.getAttribute("src")) {
         const id = loaded.current?.id;
@@ -403,16 +422,17 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       wantPlay.current = false;
       audio.pause();
     }
-  }, [audio, decoding, go, start]);
+  }, [media, decoding, go, start]);
 
   // A decoded track paused for a while gives its worker process back.
   useEffect(() => {
     if (playing || !current?.transcode) return;
     const timer = window.setTimeout(() => {
+      const audio = media();
       if (audio.paused && audio.getAttribute("src") && decoding()) release(positionNow());
     }, 30_000);
     return () => window.clearTimeout(timer);
-  }, [audio, current, decoding, playing, positionNow, release]);
+  }, [media, current, decoding, playing, positionNow, release]);
 
   const seek = useCallback(
     (seconds: number) => {
@@ -479,6 +499,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
           ? value.original.filter((_, position) => position !== originalIndex)
           : value.original;
       if (index === value.index) {
+        const audio = media();
         if (!queue.length) {
           wantPlay.current = false;
           audio.pause();
@@ -493,7 +514,7 @@ export function usePlayer({ storageKey, tracks, ready, onPlayed, onError }: Opti
       }
       setState({ ...value, queue, original, index: index < value.index ? value.index - 1 : value.index });
     },
-    [audio, go],
+    [media, go],
   );
 
   const move = useCallback(

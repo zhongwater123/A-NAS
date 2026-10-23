@@ -1,5 +1,16 @@
 import { Check } from "lucide-react";
-import { MouseEvent, PointerEvent, ReactNode, RefObject, useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  MouseEvent,
+  PointerEvent,
+  ReactNode,
+  RefObject,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 
 import type { Box, Entry } from "./layout";
 import { getPhoto, type PhotoAsset } from "./photosApi";
@@ -37,7 +48,9 @@ export const scrubberInset = 46;
 export function useTileRenderer(grid: GridProps, badge?: (asset: PhotoAsset) => ReactNode) {
   const selecting = grid.selected.size > 0;
   const gridRef = useRef(grid);
-  gridRef.current = grid;
+  useLayoutEffect(() => {
+    gridRef.current = grid;
+  });
   const onToggle = useCallback(
     (asset: PhotoAsset, event: MouseEvent) => gridRef.current.onToggle(asset, event.shiftKey),
     [],
@@ -117,8 +130,7 @@ export function usePendingThumbnails(
         .join(","),
     [assets],
   );
-  const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
+  const reportReady = useEffectEvent(onReady);
   useEffect(() => {
     if (!pending) return;
     let attempts = 0;
@@ -130,7 +142,7 @@ export function usePendingThumbnails(
             .filter((asset): asset is PhotoAsset => asset !== undefined && asset.thumbnail !== "pending")
             .map((asset) => [asset.id, asset]),
         );
-        if (ready.size) onReadyRef.current(ready);
+        if (ready.size) reportReady(ready);
       });
     }, thumbnailCheckInterval);
     return () => window.clearInterval(timer);

@@ -1,5 +1,5 @@
 import { FolderPlus, Images } from "lucide-react";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useEffectEvent, useState } from "react";
 
 import { messageOf } from "./model";
 import { listAlbums, thumbnailURL, type PhotoAlbum } from "./photosApi";
@@ -17,6 +17,7 @@ interface AlbumsProps {
 // AlbumsView shows a library's albums as covers.
 export function AlbumsView({ libraryId, readOnly, refreshKey, topInset, onOpen, onCreate, onError }: AlbumsProps) {
   const [albums, setAlbums] = useState<PhotoAlbum[]>();
+  const reportError = useEffectEvent(onError);
   useEffect(() => {
     let live = true;
     listAlbums(libraryId).then(
@@ -26,7 +27,7 @@ export function AlbumsView({ libraryId, readOnly, refreshKey, topInset, onOpen, 
       (caught) => {
         if (live) {
           setAlbums([]);
-          onError(messageOf(caught));
+          reportError(messageOf(caught));
         }
       },
     );

@@ -35,9 +35,10 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
   const installed = apps.filter(listedAsInstalled);
 
   useEffect(() => void preloadMarkdown(), []);
+  const currentId = current?.id;
   useLayoutEffect(() => {
-    if (main.current) main.current.scrollTop = current ? 0 : listScroll.current;
-  }, [current?.id]);
+    if (main.current) main.current.scrollTop = currentId ? 0 : listScroll.current;
+  }, [currentId]);
   useEffect(() => {
     if (modal || !opener.current) return;
     if (opener.current.isConnected) opener.current.focus();
@@ -289,17 +290,19 @@ function useAppList() {
   const [error, setError] = useState<string>();
   const active = useRef<AbortController | undefined>(undefined);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(() => {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    try {
-      setList(await readApps(controller.signal));
-      setError(undefined);
-    } catch (failure) {
-      if (failure instanceof DOMException && failure.name === "AbortError") return;
-      setError(failure instanceof AppsAPIError ? failure.code : "request_failed");
-    }
+    return readApps(controller.signal)
+      .then((read) => {
+        setList(read);
+        setError(undefined);
+      })
+      .catch((failure: unknown) => {
+        if (failure instanceof DOMException && failure.name === "AbortError") return;
+        setError(failure instanceof AppsAPIError ? failure.code : "request_failed");
+      });
   }, []);
 
   // Poll quickly while an install or uninstall runs so progress stays live.

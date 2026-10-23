@@ -1,5 +1,5 @@
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import {
   HostState,
@@ -158,6 +158,8 @@ export function useStoragePlan(): StoragePlanFlow {
 
 export interface VolumesView {
   items?: Volume[];
+  // When items were read, in milliseconds since the epoch.
+  readAt: number;
   error: string;
   refresh: () => Promise<void>;
 }
@@ -167,15 +169,21 @@ export interface VolumesView {
 // every half minute while a stopped conversion waits for the Host Agent.
 export function useVolumes(planState?: string): VolumesView {
   const [items, setItems] = useState<Volume[]>();
+  const [readAt, setReadAt] = useState(0);
   const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    try {
-      setItems(await listVolumes());
-      setError("");
-    } catch (caught) {
-      setError(messageOf(caught));
-    }
-  }, []);
+  const refresh = useCallback(
+    () =>
+      listVolumes()
+        .then((volumes) => {
+          setItems(volumes);
+          setReadAt(Date.now());
+          setError("");
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        }),
+    [],
+  );
   useEffect(() => {
     void refresh();
   }, [refresh, planState]);
@@ -185,7 +193,7 @@ export function useVolumes(planState?: string): VolumesView {
     const timer = window.setInterval(() => void refresh(), conversion === "running" ? 5000 : 30_000);
     return () => window.clearInterval(timer);
   }, [conversion, refresh]);
-  return { items, error, refresh };
+  return { items, readAt, error, refresh };
 }
 
 // useUnfinishedPlan finds a plan that ran on the device while this page was
@@ -307,7 +315,13 @@ export function StorageSection({
       ) : (
         volume && (
           <>
-            <VolumeCard volume={volume} disks={disks} isAdmin={isAdmin} onRefresh={volumes.refresh} />
+            <VolumeCard
+              volume={volume}
+              readAt={volumes.readAt}
+              disks={disks}
+              isAdmin={isAdmin}
+              onRefresh={volumes.refresh}
+            />
             {isAdmin && usable.length > 0 && (
               <SpareDisks count={usable.length} volume={volume} canAdd={canAdd} onOpen={() => setWizardOpen(true)} />
             )}
@@ -390,11 +404,13 @@ function SpareDisks({
 
 function VolumeCard({
   volume,
+  readAt,
   disks,
   isAdmin,
   onRefresh,
 }: {
   volume: Volume;
+  readAt: number;
   disks: Disk[];
   isAdmin: boolean;
   onRefresh: () => Promise<void>;
@@ -457,7 +473,13 @@ function VolumeCard({
         </p>
       )}
       {volume.conversion && (
-        <ConversionProgress volume={volume} conversion={volume.conversion} isAdmin={isAdmin} onRefresh={onRefresh} />
+        <ConversionProgress
+          volume={volume}
+          conversion={volume.conversion}
+          readAt={readAt}
+          isAdmin={isAdmin}
+          onRefresh={onRefresh}
+        />
       )}
       {members.length > 0 && (
         <ul className="vol-members" aria-label="组成数据卷的硬盘">
@@ -482,22 +504,25 @@ function VolumeCard({
 function ConversionProgress({
   volume,
   conversion,
+  readAt,
   isAdmin,
   onRefresh,
 }: {
   volume: Volume;
   conversion: VolumeConversion;
+  readAt: number;
   isAdmin: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  // The speed is measured from the first progress this page saw.
-  const first = useRef<ProgressSample | undefined>(undefined);
-  if (conversion.state !== "running" || !first.current || conversion.convertedBytes < first.current.bytes) {
-    first.current = { at: Date.now(), bytes: conversion.convertedBytes };
-  }
-  const left = remainingSeconds(first.current, Date.now(), conversion);
+  // The speed is measured from the first progress this page saw, by when
+  // each progress was read.
+  const [first, setFirst] = useState<ProgressSample>();
+  const restart = conversion.state !== "running" || !first || conversion.convertedBytes < first.bytes;
+  const sample = restart ? { at: readAt, bytes: conversion.convertedBytes } : first;
+  if (restart && (first?.at !== sample.at || first?.bytes !== sample.bytes)) setFirst(sample);
+  const left = remainingSeconds(sample, readAt, conversion);
   const target = layouts[volume.layout].name;
   const running = conversion.state === "running";
   const percent = conversionPercent(conversion);
@@ -614,6 +639,37 @@ function DiskRow({ disk }: { disk: Disk }) {
 
 type WizardMode = "create" | "add";
 
+// minutesUntil is the whole minutes left before a time, none once it passed.
+export const minutesUntil = (until: number, now: number) => Math.max(0, Math.ceil((until - now) / 60_000));
+
+// useMinutesLeft counts the minutes left before a time and changes on its own
+// as each one passes, so a plan's expiry shows without anything else
+// rendering the page.
+export function useMinutesLeft(until: number | undefined): number {
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      let timer = 0;
+      const next = () => {
+        if (until === undefined) return;
+        const left = until - Date.now();
+        if (!(left > 0)) return;
+        // The count drops when the time left reaches the next whole minute.
+        timer = window.setTimeout(
+          () => {
+            changed();
+            next();
+          },
+          (left % 60_000 || 60_000) + 1,
+        );
+      };
+      next();
+      return () => window.clearTimeout(timer);
+    },
+    [until],
+  );
+  return useSyncExternalStore(subscribe, () => (until === undefined ? 0 : minutesUntil(until, Date.now())));
+}
+
 interface LayoutOption {
   layout: VolumeLayout;
   before?: number;
@@ -664,7 +720,8 @@ function VolumeWizard({
         : ["选择硬盘", "核对计划", "执行"];
 
   const pending = plan?.state === "planned" || plan?.state === "confirmed";
-  const expired = Boolean(plan && pending && Date.parse(plan.expiresAt) <= Date.now());
+  const minutesLeft = useMinutesLeft(plan && pending ? Date.parse(plan.expiresAt) : undefined);
+  const expired = Boolean(plan && pending && minutesLeft === 0);
   const running = busy === "execute" || plan?.state === "running";
   const state = !plan ? stage : running ? "running" : expired ? "expired" : plan.state;
   const review = steps.indexOf("核对计划");
@@ -678,7 +735,6 @@ function VolumeWizard({
           : state === "succeeded"
             ? steps.length
             : review;
-  const minutesLeft = plan ? Math.max(0, Math.ceil((Date.parse(plan.expiresAt) - Date.now()) / 60_000)) : 0;
   const title = mode === "add" ? "设置硬盘用途" : "初始化数据卷";
   const toggle = (id: string) =>
     setSelected((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));

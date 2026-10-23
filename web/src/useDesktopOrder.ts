@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 export const desktopOrderStorageKey = "a-nas.desktop-order.v1";
 
@@ -9,9 +9,11 @@ export function useDesktopOrder(defaultIDs: string[]) {
   const signature = defaultIDs.join("\n");
   const [order, setOrder] = useState(() => mergeOrder(readStoredOrder(), defaultIDs));
 
-  useEffect(() => {
-    setOrder((current) => mergeOrder(current, signature.split("\n")));
-  }, [signature]);
+  const [merged, setMerged] = useState(signature);
+  if (merged !== signature) {
+    setMerged(signature);
+    setOrder((current) => mergeOrder(current, defaultIDs));
+  }
 
   const save = useCallback((next: string[]) => {
     try {

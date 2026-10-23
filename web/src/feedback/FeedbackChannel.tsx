@@ -10,7 +10,16 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { PointerEvent as ReactPointerEvent, RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  PointerEvent as ReactPointerEvent,
+  RefObject,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import { APIError } from "../api";
 import { nameOf, person, usePeople } from "../people";
@@ -60,17 +69,21 @@ export function FeedbackChannel() {
   const button = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const list = await listFeedback();
-      setItems(list);
-      setLoadError("");
-      return list;
-    } catch (error) {
-      setLoadError(describeFeedbackError(error));
-      return undefined;
-    }
-  }, []);
+  const refresh = useCallback(
+    () =>
+      listFeedback().then(
+        (list) => {
+          setItems(list);
+          setLoadError("");
+          return list;
+        },
+        (error: unknown) => {
+          setLoadError(describeFeedbackError(error));
+          return undefined;
+        },
+      ),
+    [],
+  );
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), open ? OPEN_REFRESH : CLOSED_REFRESH);
@@ -81,9 +94,8 @@ export function FeedbackChannel() {
     wasOpen.current = open;
   }, [open]);
   // A draft outlives closing the panel, but not leaving the desktop.
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  useEffect(() => () => releaseDraft(draftRef.current), []);
+  const releaseOnLeave = useEffectEvent(() => releaseDraft(draft));
+  useEffect(() => () => releaseOnLeave(), []);
 
   const close = () => {
     setOpen(false);
@@ -376,9 +388,8 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
   const [threadOpen, setThreadOpen] = useState(false);
   const [focusComposer, setFocusComposer] = useState(false);
   const [commentDraft, setCommentDraft] = useState<Draft>(emptyDraft);
-  const commentDraftRef = useRef(commentDraft);
-  commentDraftRef.current = commentDraft;
-  useEffect(() => () => releaseDraft(commentDraftRef.current), []);
+  const releaseOnLeave = useEffectEvent(() => releaseDraft(commentDraft));
+  useEffect(() => () => releaseOnLeave(), []);
   const threadID = useId();
   const commentCount = item.comments.length;
 
