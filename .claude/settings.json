@@ -12,11 +12,23 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt.sh\"",
+            "if": "Edit(**/*.go)",
+            "command": "input=$(cat); cwd=$(printf '%s\\n' \"$input\" | sed -n 's/.*\"cwd\" *: *\"\\([^\"]*\\)\".*/\\1/p' | sed 's/\\\\\\\\/\\\\/g'); [ -n \"$cwd\" ] && root=$(git -C \"$cwd\" rev-parse --show-toplevel 2>/dev/null) && [ -f \"$root/.claude/hooks/gofmt.sh\" ] || exit 0; printf '%s' \"$input\" | bash \"$root/.claude/hooks/gofmt.sh\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Write(**/*.go)",
+            "command": "input=$(cat); cwd=$(printf '%s\\n' \"$input\" | sed -n 's/.*\"cwd\" *: *\"\\([^\"]*\\)\".*/\\1/p' | sed 's/\\\\\\\\/\\\\/g'); [ -n \"$cwd\" ] && root=$(git -C \"$cwd\" rev-parse --show-toplevel 2>/dev/null) && [ -f \"$root/.claude/hooks/gofmt.sh\" ] || exit 0; printf '%s' \"$input\" | bash \"$root/.claude/hooks/gofmt.sh\"",
             "timeout": 60
           }
         ]

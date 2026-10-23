@@ -5,6 +5,9 @@
 # It touches only files in the checkout Claude works in: the nearest directory
 # with a go.mod above the hook input's cwd. CLAUDE_PROJECT_DIR does not name
 # that checkout in a worktree session, where it stays at the main checkout.
+# For the same reason the hook command in settings.json runs this script from
+# the Git checkout around that cwd, never the main checkout's copy, which may
+# be older or missing; it does nothing when the checkout has no copy.
 #
 # The Windows development machines have Go and jq only inside WSL
 # (docs/development/LOCAL_ENVIRONMENT.md), so there this script runs itself
