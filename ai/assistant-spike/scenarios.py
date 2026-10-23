@@ -52,7 +52,7 @@ HOME = Path(f"/srv/a-nas/data/assistant/{USER}/files")
 CHANNEL = "api_server" if Path("/etc/systemd/system/anas-assistant@.service.d/channel.conf").exists() else "serve"
 # The real model's gateway or the fake model, whichever this container runs.
 MODEL_LOG = Path("/var/log/gateway.jsonl" if Path("/etc/anas-spike/model.key").exists() else "/var/log/fake-model.jsonl")
-APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in open("/etc/hermes/config.yaml")
+APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in Path("/etc/hermes/config.yaml").read_text().splitlines()
                              if line.startswith("  timeout:")), "300"))
 
 
@@ -279,7 +279,7 @@ async def api_turn(session, turn):
 
 
 async def api_conversation(lines):
-    status, created = hermes("POST", "/api/sessions", {})
+    _, created = hermes("POST", "/api/sessions", {})
     session = created["session"]["id"]
     for answers, said in lines:
         yield session, Turn(session, said, answers), lambda turn: api_turn(session, turn)

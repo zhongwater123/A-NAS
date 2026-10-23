@@ -65,7 +65,7 @@ def with_distractors(photos, homes, distractors, kind):
             item = next(pool, None)
             if item is None:
                 return photos
-            key, path, group = item
+            key, path, _ = item
             photos.append(Photo(key + "@" + home, path, [Face(f"stranger:{key}", group=f"stranger-{kind}")], home))
     return photos
 

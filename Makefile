@@ -6,6 +6,7 @@ SHELLCHECK_VERSION = 0.11.0
 # Every tracked shell script; in a copy without .git, every *.sh file.
 SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
 NPM ?= npm
+RUFF ?= ruff
 BUILD_DIR ?= build
 VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
@@ -16,7 +17,7 @@ GOLANGCI_LINT ?= $(GO) tool -modfile=tools/golangci-lint/go.mod golangci-lint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-test root-integration-test system-test build build-binaries check check-steps clean
+.PHONY: all web-install web-typecheck web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test build build-binaries check check-steps clean
 
 all: check
 
@@ -165,6 +166,13 @@ test:
 race-test: web-build
 	$(GO) test -race -p $(RACE_PARALLEL) ./...
 
+# Ruff as ai/requirements-dev.lock pins it: another version may judge differently.
+ai-lint:
+	@want="$$(sed -n 's/^ruff==\([0-9.]*\).*/\1/p' ai/requirements-dev.lock)"; \
+	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
+	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.lock pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
+	cd ai && $(RUFF) check .
+
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
 ai-test:
@@ -196,7 +204,7 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-test build-binaries
+check-steps: web-typecheck web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)

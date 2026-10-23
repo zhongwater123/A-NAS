@@ -57,10 +57,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      # NumPy, pinned by the runtime's lock, lets the clustering tests run;
-      # the real-model tests still need model files and stay skipped.
-      - name: Install the AI test dependencies
-        run: grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
+      # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock, lets the
+      # clustering tests run; the real-model tests need model files and stay skipped.
+      - name: Install the AI tools and test dependencies
+        run: |
+          python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r ai/requirements-dev.lock
+          grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
 
       - name: Run checks
         run: make check
