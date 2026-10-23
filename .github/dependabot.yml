@@ -46,6 +46,19 @@ updates:
         exclude-patterns: ["@xterm/addon-fit", "dom-accessibility-api"]
         update-types: [minor, patch]
 
+  # The contract's generators (Makefile, api). openapi-typescript uses
+  # TypeScript 5's compiler API, which TypeScript 7 does not have.
+  - package-ecosystem: npm
+    directory: /tools/openapi
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+    groups:
+      openapi:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

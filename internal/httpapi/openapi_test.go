@@ -15,9 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
@@ -28,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
@@ -37,18 +36,7 @@ import (
 
 func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	ctx := context.Background()
-	loader := openapi3.NewLoader()
-	document, err := loader.LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatalf("load OpenAPI document: %v", err)
-	}
-	if err := document.Validate(ctx); err != nil {
-		t.Fatalf("validate OpenAPI document: %v", err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatalf("create OpenAPI router: %v", err)
-	}
+	router := openapitest.Router(t)
 
 	photoHandler, photoLibraryID, photoAssetID := photoAPI(t)
 	movies := newMediaFixture(t)

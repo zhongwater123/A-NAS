@@ -16,16 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
 
 // silentMP3 is an ID3v2.3 title followed by silent MPEG-1 Layer III frames.
@@ -128,14 +127,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Music: library, Logger: logger,
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := openapitest.Router(t)
 	client := &contractClient{t: t, handler: handler, router: router}
 
 	unauthenticated := httptest.NewRecorder()
