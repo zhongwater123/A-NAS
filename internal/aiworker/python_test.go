@@ -3,6 +3,7 @@ package aiworker_test
 import (
 	"context"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,28 +27,40 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket := filepath.Join(dir, "ai.sock")
-	worker := exec.Command(python, "-m", "anas_ai.worker", "--fake", "--fake-detector", "--fake-faces", "--fake-animals",
-		"--socket", socket, "--idle-seconds", "60")
+	// The Worker gets the socket already listening, as systemd's anas-ai.socket
+	// passes it in production, so connections queue until it accepts them.
+	// LISTEN_PID must be the Worker's own, which only the shell it execs from knows.
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	inherited, err := listener.File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-m", "anas_ai.worker",
+		"--fake", "--fake-detector", "--fake-faces", "--fake-animals", "--idle-seconds", "60")
 	worker.Dir = filepath.Join("..", "..", "ai")
-	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
+	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "LISTEN_FDS=1")
+	worker.ExtraFiles = []*os.File{inherited}
 	worker.Stderr = os.Stderr
-	if err := worker.Start(); err != nil {
+	err = worker.Start()
+	// Only the Worker holds the socket now: if it dies, connections are
+	// refused at once instead of waiting in the queue.
+	_ = inherited.Close()
+	_ = listener.Close()
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = worker.Process.Kill() })
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(socket); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the Python Worker did not start listening")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	exited := make(chan error, 1)
+	go func() { exited <- worker.Wait() }()
 
 	client := aiworker.Client{SocketPath: socket}
-	info, err := client.Info(context.Background())
+	starting, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	info, err := client.Info(starting)
 	if err != nil || info.Model != "fake-sha256-768" || info.Dimensions != 768 || info.Detector != "fake-detector-sha256" ||
 		info.Faces != "fake-faces-sha256" || info.Animals != "fake-animals-sha256" {
 		t.Fatalf("Info() = %+v, %v", info, err)
@@ -145,7 +158,12 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 	if err := client.Release(context.Background(), true); err != nil {
 		t.Fatalf("Release(all) error = %v", err)
 	}
-	if err := worker.Wait(); err != nil {
-		t.Fatalf("the Worker did not exit cleanly after releasing everything: %v", err)
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("the Worker did not exit cleanly after releasing everything: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the Worker was still running 10 s after releasing everything")
 	}
 }
