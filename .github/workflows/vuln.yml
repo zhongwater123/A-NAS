@@ -7,7 +7,9 @@ on:
   schedule:
     - cron: "17 2 * * 1" # Mondays 02:17 UTC
   workflow_dispatch:
-  # A change to this file is tried on its pull request.
+  # A change to this file is tried on its pull request. Other pull requests
+  # never run it, so it must not be a required check (#218): they would wait
+  # for it forever.
   pull_request:
     paths: [.github/workflows/vuln.yml]
 
