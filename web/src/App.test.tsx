@@ -346,7 +346,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(dialog).getByRole("button", { name: "取消置顶" }));
     expect(item("b").querySelector('[aria-label="已置顶"]')).toBeNull();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-  }, 15000);
+  });
 
   it("sends a LAN browser to the device's own screen to set it up", async () => {
     const fetchMock = installAPI({ setupRequired: true, setupAllowed: false });
@@ -430,7 +430,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   // jsdom resolves the computed styles this test checks slowly.
-  it("enables file management and lists only the signed-in user's spaces", { timeout: 15_000 }, async () => {
+  it("enables file management and lists only the signed-in user's spaces", async () => {
     const fetchMock = installAPI({
       spaces: [
         {
@@ -518,7 +518,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   // Switching spaces and pasting re-renders the whole file manager several times.
-  it("moves a cut file into the space it is pasted in", { timeout: 15_000 }, async () => {
+  it("moves a cut file into the space it is pasted in", async () => {
     const fetchMock = installAPI({
       spaces: [
         {
@@ -738,9 +738,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   // Opening the transfer center loads its window code on first use.
-  it("uploads picked and dropped files through the transfer center without blocking the folder", {
-    timeout: 15_000,
-  }, async () => {
+  it("uploads picked and dropped files through the transfer center without blocking the folder", async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],
       entries: [
@@ -2417,7 +2415,7 @@ describe("Settings", () => {
     expect((within(settings).getByLabelText(/输入确认短语/) as HTMLInputElement).value).toBe("ERASE");
     expect(within(settings).getByRole("button", { name: "确认计划" }).hasAttribute("disabled")).toBe(true);
     expect(within(settings).queryByRole("button", { name: "生成格式化计划" })).toBeNull();
-  }, 15000);
+  });
 
   it("says why the system is rated as it is and leads to storage", async () => {
     installAPI({
@@ -2576,7 +2574,7 @@ describe("Settings", () => {
     expect(await within(wizard).findByText("硬盘已加入数据卷")).toBeTruthy();
     await user.click(within(wizard).getByRole("button", { name: "完成" }));
     expect(within(settings).queryByRole("region", { name: "设置硬盘用途" })).toBeNull();
-  }, 15000);
+  });
 
   it("leaves the wizard by cancelling a plan that has not run", async () => {
     const fetchMock = installAPI({
@@ -2621,7 +2619,7 @@ describe("Settings", () => {
     await user.click(within(settings).getByRole("button", { name: "生成格式化计划" }));
     await user.click(await within(settings).findByRole("button", { name: "取消计划并关闭" }));
     expect(await within(settings).findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
-  }, 15000);
+  });
 
   it("follows a plan that runs on the device when the page comes back", async () => {
     const plan = {
@@ -2655,9 +2653,9 @@ describe("Settings", () => {
     const wizard = await within(settings).findByRole("region", { name: "初始化数据卷" });
     expect(within(wizard).getByText("正在格式化，固态硬盘可能要几分钟…")).toBeTruthy();
     expect(within(wizard).getByText(/关闭这个窗口或页面不会打断它/)).toBeTruthy();
-    expect(await within(wizard).findByText("数据卷已创建", undefined, { timeout: 5000 })).toBeTruthy();
+    expect(await within(wizard).findByText("数据卷已创建")).toBeTruthy();
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/operations/plan%3Arun")).toBe(true);
-  }, 15000);
+  });
 
   it("offers to retry a plan that stopped on the device", async () => {
     const plan = {
@@ -2700,7 +2698,7 @@ describe("Settings", () => {
       ),
     ).toBe(true);
     expect(await within(wizard).findByText("数据卷已创建")).toBeTruthy();
-  }, 15000);
+  });
 
   it("shows why a retried plan stopped again", async () => {
     const plan = {
@@ -2740,7 +2738,7 @@ describe("Settings", () => {
     expect(await within(wizard).findByText(/disk identity changed after planning/)).toBeTruthy();
     expect(within(wizard).queryByText(/the Host Agent stopped during the erase step/)).toBeNull();
     expect(within(wizard).queryByRole("alert")).toBeNull();
-  }, 15000);
+  });
 
   it("shows how far a conversion has come and continues a stopped one", async () => {
     const disks = [
@@ -2817,7 +2815,7 @@ describe("Settings", () => {
       diskIds: ["disk:fake-data-01", "disk:fake-data-02"],
       layout: "span",
     });
-  }, 15000);
+  });
 
   it("resets a member password from a form inside the window", async () => {
     const prompt = vi.spyOn(window, "prompt");

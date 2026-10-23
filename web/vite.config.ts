@@ -34,5 +34,10 @@ export default defineConfig({
     pool: "threads",
     fileParallelism: false,
     maxWorkers: 1,
+    // Development machines share their cores with other sessions' builds and
+    // tests; the 5 s default failed tests that only waited for the CPU. A test
+    // that never finishes still fails, 20 s later.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });
