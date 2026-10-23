@@ -13,8 +13,8 @@ const sweep = 210;
 const startAngle = -sweep / 2;
 
 // extra shows beside the clock while it has something to say, such as
-// transfers in progress; onOpenTransfers makes the network rates open the
-// transfer center, and onOpenTaskManager makes the gauges open the task manager.
+// transfers in progress; the network rates open the transfer center and the
+// gauges open the task manager.
 export function StatusBar({
   host,
   extra,
@@ -23,64 +23,51 @@ export function StatusBar({
 }: {
   host: HostStateView;
   extra?: ReactNode;
-  onOpenTransfers?: () => void;
-  onOpenTaskManager?: () => void;
+  onOpenTransfers: () => void;
+  onOpenTaskManager: () => void;
 }) {
   const { metrics, disconnected: metricsDisconnected } = useHostMetrics();
   const disconnected = host.disconnected || metricsDisconnected;
   const connection = disconnected ? "offline" : host.snapshot ? "online" : "pending";
   const connectionLabel = { offline: "连接中断", online: "设备在线", pending: "正在连接" }[connection];
   const memory = metrics?.memory;
-  const gauges = (
-    <>
-      <Gauge
-        label="CPU"
-        name="CPU 占用"
-        percent={metrics?.cpu.usagePercent}
-        detail={metrics ? `${metrics.cpu.logicalCores} 核` : "—"}
-      />
-      <Gauge
-        label="内存"
-        name="内存占用"
-        percent={memory ? (memory.usedBytes / memory.totalBytes) * 100 : undefined}
-        detail={memory ? `${formatGiB(memory.usedBytes)} / ${formatGiB(memory.totalBytes)} GiB` : "—"}
-      />
-    </>
-  );
 
   return (
     <header className={`status-bar ${metricsDisconnected ? "stale" : ""}`} aria-label="设备状态">
-      {onOpenTaskManager ? (
+      {/* The button lies under the gauges instead of around them: a button's
+          content is not exposed to screen readers, and the meters' readings must be. */}
+      <div className="status-gauges">
         <button
           type="button"
-          className="status-gauges"
+          className="status-gauges-open"
           aria-label="CPU 与内存占用，打开任务管理器"
           title="打开任务管理器"
           onClick={onOpenTaskManager}
-        >
-          {gauges}
-        </button>
-      ) : (
-        <div className="status-gauges">{gauges}</div>
-      )}
+        />
+        <Gauge
+          label="CPU"
+          name="CPU 占用"
+          percent={metrics?.cpu.usagePercent}
+          detail={metrics ? `${metrics.cpu.logicalCores} 核` : "—"}
+        />
+        <Gauge
+          label="内存"
+          name="内存占用"
+          percent={memory ? (memory.usedBytes / memory.totalBytes) * 100 : undefined}
+          detail={memory ? `${formatGiB(memory.usedBytes)} / ${formatGiB(memory.totalBytes)} GiB` : "—"}
+        />
+      </div>
       <span className="status-divider" aria-hidden="true" />
-      {onOpenTransfers ? (
-        <button
-          type="button"
-          className="net-rates"
-          aria-label="网络速率，打开传输中心"
-          title="打开传输中心"
-          onClick={onOpenTransfers}
-        >
-          <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
-          <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
-        </button>
-      ) : (
-        <div className="net-rates" role="group" aria-label="网络速率">
-          <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
-          <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
-        </div>
-      )}
+      <button
+        type="button"
+        className="net-rates"
+        aria-label="网络速率，打开传输中心"
+        title="打开传输中心"
+        onClick={onOpenTransfers}
+      >
+        <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
+        <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
+      </button>
       <span className="status-divider" aria-hidden="true" />
       {extra && <div className="status-extra">{extra}</div>}
       <div className="status-clock">
@@ -186,12 +173,12 @@ function NetworkRate({
   const [value, unit] = bytesPerSecond === undefined ? ["—", ""] : formatRate(bytesPerSecond);
   const Icon = direction === "down" ? ArrowDown : ArrowUp;
   return (
-    <div className={`net-row ${direction}`}>
+    <span className={`net-row ${direction}`}>
       <Icon aria-hidden="true" />
       <span className="sr-only">{label}</span>
       <span className="net-value">{value}</span>
       <span className="net-unit">{unit}</span>
-    </div>
+    </span>
   );
 }
 

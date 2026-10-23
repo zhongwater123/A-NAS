@@ -151,6 +151,9 @@ export function SettingsPanel({
   const [terminalOpened, setTerminalOpened] = useState(current === "terminal");
   const [terminalStatus, setTerminalStatus] = useState<SessionStatus>();
   if (current === "terminal" && !terminalOpened) setTerminalOpened(true);
+  // Other windows can switch the section too (the status bar opens the task
+  // manager), so a password form left half filled ends with any switch away.
+  if (current !== "account" && editingPassword) setEditingPassword(false);
   const navigate = (next: SettingsSection) => {
     setEditingPassword(false);
     onSectionChange(next);

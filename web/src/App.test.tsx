@@ -1126,8 +1126,10 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     const statusBar = await screen.findByRole("banner", { name: "设备状态" });
     const gauges = within(statusBar).getByRole("button", { name: "CPU 与内存占用，打开任务管理器" });
-    expect(within(gauges).getByRole("meter", { name: "CPU 占用" })).toBeTruthy();
-    expect(within(gauges).getByRole("meter", { name: "内存占用" })).toBeTruthy();
+    // Screen readers do not read a button's content, so the meters must stay outside it.
+    for (const name of ["CPU 占用", "内存占用"]) {
+      expect(gauges.contains(within(statusBar).getByRole("meter", { name }))).toBe(false);
+    }
     await user.click(gauges);
     const settings = await screen.findByRole("dialog", { name: "设置" });
     const section = (name: string) => within(settings).getByRole("button", { name });
@@ -1139,6 +1141,47 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(gauges);
     expect(section("任务管理器").getAttribute("aria-current")).toBe("page");
     expect(within(settings).getByTestId("task-manager")).toBeTruthy();
+  });
+
+  it("restores minimized settings on the task manager when the gauges are activated from the keyboard", async () => {
+    stubFetch(healthyState);
+    const user = userEvent.setup();
+    render(<App />);
+    const statusBar = await screen.findByRole("banner", { name: "设备状态" });
+    const gauges = within(statusBar).getByRole("button", { name: "CPU 与内存占用，打开任务管理器" });
+
+    for (const key of ["{Enter}", " "]) {
+      gauges.focus();
+      await user.keyboard(key);
+      expect(screen.queryByRole("button", { name: "恢复设置" })).toBeNull();
+      const settings = await screen.findByRole("dialog", { name: "设置" });
+      expect(within(settings).getByRole("button", { name: "任务管理器" }).getAttribute("aria-current")).toBe("page");
+      await user.click(within(settings).getByRole("button", { name: "概览" }));
+      await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
+      expect(screen.getByRole("button", { name: "恢复设置" })).toBeTruthy();
+    }
+  });
+
+  it("closes a half-filled password form when the gauges switch settings to the task manager", async () => {
+    installAPI({ users: [session.user] });
+    const user = userEvent.setup();
+    render(<App />);
+    const openAccount = async () => {
+      await user.click(await screen.findByRole("button", { name: "账号（owner）" }));
+      await user.click(screen.getByRole("menuitem", { name: /^我的账号/ }));
+      return screen.getByRole("dialog", { name: "设置" });
+    };
+    let settings = await openAccount();
+    await user.click(within(settings).getByRole("button", { name: "修改密码…" }));
+    await user.type(within(settings).getByLabelText("当前密码"), "correct horse battery staple");
+
+    const statusBar = screen.getByRole("banner", { name: "设备状态" });
+    await user.click(within(statusBar).getByRole("button", { name: "CPU 与内存占用，打开任务管理器" }));
+    expect(within(settings).getByTestId("task-manager")).toBeTruthy();
+
+    settings = await openAccount();
+    expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
+    expect(within(settings).getByRole("button", { name: "修改密码…" })).toBeTruthy();
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {
