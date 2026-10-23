@@ -48,7 +48,12 @@ var (
 	// and nobody comes back to fix it (#191). Only the current-state page
 	// and the acceptance runbook record it; other documents give the
 	// implementation stage, or date what they observed.
-	statusPhrases       = []string{"未合并", "待合并", "尚未部署"}
+	statusPhrases = []string{"未合并", "待合并", "尚未部署"}
+	// History also says 未部署 ("Docker 从未部署", an old status quoted), so
+	// it counts only where a document labels its current state: on a 状态
+	// line, or in parentheses such as an index entry's (……，未部署).
+	labelPhrases        = []string{"未部署"}
+	labelLine           = regexp.MustCompile(`^\**(?:状态|Status)\**[：:]`)
 	statusPhraseKeepers = map[string]bool{currentDocument: true, "docs/runbooks/accept-features-on-experimental-nas.md": true}
 	// A line that uses a phrase in its ordinary sense, such as merging two
 	// people in the photo library, carries this comment.
@@ -180,14 +185,48 @@ func findStatusPhrases(relativePath, content string) []string {
 		}
 		// A link to a heading in CURRENT.md may carry a phrase in its anchor.
 		text := linkDestination.ReplaceAllString(line, "]")
-		for _, phrase := range statusPhrases {
-			if strings.Contains(text, phrase) {
-				problems = append(problems, fmt.Sprintf("%s:%d says %s: merge and deploy status belongs in %s", relativePath, number+1, phrase, currentDocument))
-				break
-			}
+		if phrase := statusPhrase(text); phrase != "" {
+			problems = append(problems, fmt.Sprintf("%s:%d says %s: merge and deploy status belongs in %s", relativePath, number+1, phrase, currentDocument))
 		}
 	}
 	return problems
+}
+
+// statusPhrase returns the first merge or deploy status that line states, or
+// "" when it states none.
+func statusPhrase(line string) string {
+	for _, phrase := range statusPhrases {
+		if strings.Contains(line, phrase) {
+			return phrase
+		}
+	}
+	for _, phrase := range labelPhrases {
+		if labelsWith(line, phrase) {
+			return phrase
+		}
+	}
+	return ""
+}
+
+// labelsWith reports whether line uses phrase as a status label: anywhere on
+// a 状态 line, or inside parentheses elsewhere.
+func labelsWith(line, phrase string) bool {
+	if labelLine.MatchString(strings.TrimSpace(line)) {
+		return strings.Contains(line, phrase)
+	}
+	for offset := 0; ; {
+		index := strings.Index(line[offset:], phrase)
+		if index < 0 {
+			return false
+		}
+		before := line[:offset+index]
+		opened := max(strings.LastIndex(before, "（"), strings.LastIndex(before, "("))
+		closed := max(strings.LastIndex(before, "）"), strings.LastIndex(before, ")"))
+		if opened > closed {
+			return true
+		}
+		offset += index + len(phrase)
+	}
 }
 
 // validateADRIndex checks that every ADR is listed once in the index and that

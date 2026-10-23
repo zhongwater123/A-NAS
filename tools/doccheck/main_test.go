@@ -81,11 +81,18 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 		"docs/specs/photo-people.md": "# 人物\n\n" +
 			"相册列出待合并的人物建议。<!-- doccheck: not a status -->\n" +
 			"部署进度见[当前状态](../status/CURRENT.md#已合并尚未部署)。\n",
+		"docs/investigations/2026-10-21-snapshots.md": "# 快照\n\n状态：fixed（修复未部署）\n\n## 时间线\n\n" +
+			"- Docker 与容器代理从未部署。\n" +
+			"- 项目状态一直标记“Experimental NAS 未部署”（见旧版 README）。\n",
+		"docs/architecture/photo-library.md": "13. 人物与宠物（已合并，未部署）。\n" +
+			"14. 视频（[进度](../status/CURRENT.md)）当时未部署。\n",
 	})
 
 	assertProblems(t, validateDocumentationProblems(root), []string{
 		"docs/specs/music.md:3 says 未合并",
 		"docs/adr/0023-share-copies.md:3 says 待合并",
+		"docs/investigations/2026-10-21-snapshots.md:3 says 未部署",
+		"docs/architecture/photo-library.md:1 says 未部署",
 	})
 }
 
