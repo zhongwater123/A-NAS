@@ -110,7 +110,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，由 `internal/httpapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
 | `internal/systemlog` / `internal/systemlog/journal` | A-NAS 服务日志：服务白名单、查询与 JSON 日志行解析、开发用 Fake，以及 Host Agent 中以固定参数运行 `journalctl` 的读取器（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)） | 已实现，Host Agent `/v1/system-logs` 与产品 API `/api/v1/system-logs` 仅管理员可用；系统测试覆盖真实单元 |
 | `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现；OpenAPI 契约测试只核对手写清单中的部分路由，且放过规格未声明的状态码（[#192](https://github.com/zhongwater123/A-NAS/issues/192)） |
-| `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
+| `api/` | 客户端产品接口契约：根文件 `openapi.yaml` 按领域引用 `paths/` 与 `components/` 中的文件；`make api` 打包为 `openapi.bundle.yaml`（Go 契约测试加载它），并生成 Web 客户端的类型与外壳响应的校验 | OpenAPI 3.1，见[接口契约](../development/LOCAL_ENVIRONMENT.md#接口契约) |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
 | `docs/specs` | 可验收的产品行为 | 见[规格索引](../specs/README.md) |
 | `docs/investigations` | 复杂缺陷的证据和根因 | 见[调查索引](../investigations/README.md) |

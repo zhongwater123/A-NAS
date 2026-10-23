@@ -1,0 +1,115 @@
+/api/v1/spaces:
+  get:
+    operationId: listSpaces
+    responses:
+      "200": { description: Visible spaces only, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/Space" } } } } } } }
+/api/v1/spaces/{spaceId}/entries:
+  get:
+    operationId: listEntries
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { name: parentId, in: query, schema: { type: string } }]
+    responses:
+      "200": { description: Directory entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } } } } }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/spaces/{spaceId}/directories:
+  post:
+    operationId: createDirectory
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileDestination" } } } }
+    responses:
+      "201": { description: Directory created, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/spaces/{spaceId}/uploads:
+  post:
+    operationId: uploadFile
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { parentId: { type: string }, file: { type: string, format: binary } } } } } }
+    responses:
+      "201": { description: File uploaded, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/files/{fileId}/content:
+  get:
+    operationId: downloadFile
+    parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }, { name: Range, in: header, schema: { type: string } }, { name: disposition, in: query, description: Use inline for browser-previewable raster images and PDF documents; other files remain attachments., schema: { type: string, enum: [inline] } }]
+    responses:
+      "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+      "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+/api/v1/files/{fileId}/preview:
+  get:
+    operationId: renderFilePreview
+    summary: Render a video frame or a HEIC/HEIF image after checking source-file access
+    description: Returns JPEG for videos and PNG for HEIC/HEIF. Each request reopens the source as the signed-in user, including cache hits. Browser caching is disabled. Originals are unchanged.
+    parameters:
+      - { $ref: "../components/files.yaml#/parameters/FileID" }
+      - { name: size, in: query, schema: { type: string, enum: [thumbnail, preview], default: thumbnail } }
+    responses:
+      "200":
+        description: A bounded image; thumbnail is 320 pixels and preview is 1600 pixels (HEIF longest edge, video width).
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+      "206":
+        description: Partial rendered image
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/files/{fileId}:
+  patch:
+    operationId: moveFile
+    parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileTransfer" } } } }
+    responses:
+      "200": { description: File moved, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+  delete:
+    operationId: trashFile
+    parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: Trash item, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/TrashItem" } } } }
+/api/v1/files/{fileId}/versions:
+  get:
+    operationId: listFileVersions
+    summary: List the versions of a file or folder that the snapshots of its space hold at its path
+    description: >-
+      Versions are newest first. Snapshots holding a file of the same size and modification time are merged into
+      one version; the version equal to the file as it is now is marked current.
+    parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }]
+    responses:
+      "200": { description: The path and its versions, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/SnapshotMatch" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/files/{fileId}/copies:
+  post:
+    operationId: copyFile
+    parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileTransfer" } } } }
+    responses:
+      "201": { description: File copied, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+/api/v1/trash:
+  get:
+    operationId: listTrash
+    responses:
+      "200": { description: Visible recycle-bin items, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/TrashItem" } } } } } } }
+/api/v1/trash/{trashId}/restore:
+  post:
+    operationId: restoreTrash
+    summary: Restore an item; without a parentId it goes back to its original folder, or to the space root when that folder is gone. What happens to a taken name is the request's conflict; nothing is overwritten.
+    parameters: [{ $ref: "../components/files.yaml#/parameters/TrashID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/TrashRestore" } } } }
+    responses:
+      "200": { description: Restored entry, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/RestoredEntry" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/trash/{trashId}:
+  delete:
+    operationId: purgeTrash
+    parameters: [{ $ref: "../components/files.yaml#/parameters/TrashID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Item permanently removed }

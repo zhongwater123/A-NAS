@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Approval } from "./assistantApi";
 import type { SessionMessage } from "./hermes/types/hermes";
+import { stubAPI } from "../test/api";
 
 // The window against a stand-in for the member's Hermes: the gateway's events
 // are pushed by the test, REST answers come from a stubbed fetch.
@@ -51,8 +52,7 @@ const history: SessionMessage[] = [
 ];
 
 async function open(approvals: Approval[] = [], stored = history, reply = "相册已经打开。") {
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/assistant/sessions"))

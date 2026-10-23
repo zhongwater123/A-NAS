@@ -1,0 +1,58 @@
+/api/v1/terminal:
+  get:
+    operationId: getTerminalStatus
+    summary: Report whether interactive terminal sessions are enabled
+    responses:
+      "200":
+        description: Terminal availability configured by ANAS_TERMINAL.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/terminal.yaml#/schemas/TerminalStatusResponse"
+      "401":
+        $ref: "../components/common.yaml#/responses/ProductError"
+      "403":
+        $ref: "../components/common.yaml#/responses/ProductError"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/terminal/session:
+  get:
+    operationId: openTerminalSession
+    summary: Upgrade to a WebSocket bridged to a login shell on a new PTY
+    description: >-
+      Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this
+      device by localhost or IP address and whose browser Origin is the same origin are accepted. Binary
+      frames carry raw terminal input and output. The only client text frame is
+      `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell
+      exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
+    responses:
+      "101":
+        description: Switched to the WebSocket terminal protocol.
+      "401":
+        $ref: "../components/common.yaml#/responses/ProductError"
+      "403":
+        description: The terminal is disabled or the request did not come through this device's Web entry.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "426":
+        description: The request is not a WebSocket upgrade.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+      "429":
+        description: The concurrent session limit has been reached.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+      "503":
+        description: The Product Service is shutting down.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"

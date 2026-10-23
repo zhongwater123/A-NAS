@@ -48,6 +48,7 @@ vi.mock("../api", async (original) => ({
 import { APIError } from "../api";
 import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
 import type { Transfer } from "./transfersApi";
+import { json, stubAPI } from "../test/api";
 
 const target: UploadTarget = {
   spaceId: "space:shared",
@@ -68,8 +69,7 @@ beforeEach(() => {
   server = [];
   calls = [];
   api.sessionEnded.mockReset();
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       calls.push({ path, method: init?.method ?? "GET" });
@@ -77,7 +77,7 @@ beforeEach(() => {
         path === "/api/v1/transfers"
           ? { items: server }
           : { id: path.split("/")[4], state: path.endsWith("/cancel") ? "canceled" : "paused" };
-      return { ok: true, status: 200, json: async () => body } as Response;
+      return json(body);
     }),
   );
   store = new TransferStore();
@@ -293,7 +293,7 @@ describe("the upload queue", () => {
       direction: "download",
       kind: "file",
       name: "film.mkv",
-      location: target,
+      location: { spaceId: target.spaceId, spaceKind: target.spaceKind, folders: target.folders },
       totalBytes: 100_000_000,
       transferredBytes: sent,
       bytesPerSecond: 0,

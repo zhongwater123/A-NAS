@@ -1,0 +1,48 @@
+parameters:
+  TransferID: { name: transferId, in: path, required: true, schema: { type: string } }
+  TusResumable: { name: Tus-Resumable, in: header, required: true, schema: { type: string, enum: ["1.0.0"] } }
+schemas:
+  Transfer:
+    type: object
+    additionalProperties: false
+    required: [id, direction, kind, name, location, totalBytes, transferredBytes, bytesPerSecond, state, createdAt, updatedAt]
+    properties:
+      id: { type: string }
+      direction: { type: string, enum: [upload, download] }
+      kind: { type: string, enum: [file, archive], description: "archive downloads files and folders as one ZIP." }
+      name: { type: string, description: "The upload's requested name, or the download's file name." }
+      location: { $ref: "#/schemas/TransferLocation" }
+      totalBytes: { type: integer, minimum: 0, description: "For an archive, the size of the files in it." }
+      transferredBytes: { type: integer, minimum: 0 }
+      bytesPerSecond: { type: integer, minimum: 0, description: Current speed of a running transfer. }
+      state: { type: string, enum: [pending, running, paused, interrupted, completed, failed, canceled], description: "pending: a download no browser fetched yet. interrupted: the connection dropped; both directions resume where they stopped." }
+      error: { $ref: "#/schemas/TransferFailure" }
+      batch: { type: string, description: Groups the uploads one action started. }
+      relativePath: { type: string, description: Folders a folder upload created below its target. }
+      lastModified: { type: integer, description: "The uploaded file's modification time in milliseconds, as its browser saw it." }
+      entryId: { type: string, description: The saved file of a completed upload. }
+      savedName: { type: string, description: The name an upload was saved under when the requested one was taken. }
+      replaced: { type: boolean, description: The upload sent the file it replaced to the trash. }
+      skipped: { type: integer, minimum: 0, description: "Files an archive could not read; they are listed in a text file inside it." }
+      contentUrl: { type: string, description: Where a download's browser fetches it. }
+      createdAt: { type: string, format: date-time }
+      updatedAt: { type: string, format: date-time }
+      finishedAt: { type: string, format: date-time }
+  TransferLocation:
+    type: object
+    additionalProperties: false
+    required: [spaceId, spaceKind, folders]
+    properties:
+      spaceId: { type: string }
+      spaceKind: { type: string, enum: [private, shared] }
+      folders:
+        type: array
+        description: Folders from the space root down to the transfer's folder.
+        items: { type: object, additionalProperties: false, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+  TransferFailure:
+    type: object
+    additionalProperties: false
+    required: [code, message]
+    properties:
+      code: { type: string, description: "For example forbidden, not_found, folder_blocked, volume_unavailable, insufficient_storage, service_restarted, expired, not_started or internal_error." }
+      message: { type: string }

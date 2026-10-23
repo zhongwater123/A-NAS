@@ -25,6 +25,9 @@ Caddyfile text eol=lf
 
 # Copied from Hermes by ai/assistant-spike/vendor-hermes-ui.py; GitHub folds it in diffs.
 web/src/assistant/hermes/** linguist-generated=true
+# Written by `make api`.
+api/openapi.bundle.yaml linguist-generated=true
+web/src/*.generated.ts linguist-generated=true
 
 *.png binary
 *.jpg binary

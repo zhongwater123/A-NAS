@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
@@ -31,14 +30,7 @@ func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
 	if _, err := service.CreateMember(ctx, admin, "member", "member password for testing"); err != nil {
 		t.Fatal(err)
 	}
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := openapitest.Router(t)
 	client := &contractClient{t: t, router: router, handler: httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: iconContractReader{fake.NewHealthy()}, DataSource: httpapi.DataSourceSimulated, Accounts: service,
 	})}
@@ -61,10 +53,7 @@ func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
 // The contract must distinguish unknown metrics from zero and reject accidental
 // host metadata exposure, even when a valid response contains no such fields.
 func TestTaskManagerSchemaPreservesUnknownsAndRejectsHostMetadata(t *testing.T) {
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	document := openapitest.Document(t)
 	tests := []struct {
 		name     string
 		endpoint string

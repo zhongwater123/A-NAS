@@ -7,6 +7,7 @@ import { forgetPeople, rememberPerson } from "../people";
 import { FeedbackChannel } from "./FeedbackChannel";
 import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
 import { describeTime } from "./time";
+import { stubAPI } from "../test/api";
 
 const capture = vi.hoisted(() => ({ result: undefined as Blob | undefined }));
 vi.mock("./capture", async (original) => ({
@@ -78,7 +79,7 @@ function serve(items: FeedbackItem[], ...handlers: Handler[]) {
     if (url === "/api/v1/feedback" && (init.method ?? "GET") === "GET") return json({ items });
     return json({ error: { code: "not_found", message: "not found" } }, 404);
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 
@@ -89,7 +90,14 @@ beforeEach(() => {
   setSession({
     csrfToken: "csrf-test",
     expiresAt: "2026-10-12T20:00:00Z",
-    user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-01T00:00:00Z" },
+    user: {
+      id: "user:owner",
+      username: "owner",
+      role: "admin",
+      status: "active",
+      createdAt: "2026-10-01T00:00:00Z",
+      mustChangePassword: false,
+    },
   });
   let next = 0;
   vi.stubGlobal(

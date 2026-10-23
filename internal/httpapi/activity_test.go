@@ -17,13 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
-
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -103,33 +101,33 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Photos: photoAPI(photoService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := openapitest.Router(t)
 	return &activityFixture{t: t, handler: handler, accounts: accountService, files: fileService, photos: photoService,
 		client: &contractClient{t: t, handler: handler, router: router}}
 }
 
-// signIn signs in from a LAN browser and returns a client acting as that user.
+// signIn signs in from a LAN browser, or sets the device up from its own
+// screen, checks the exchange against the contract and returns a client
+// acting as that user.
 func (f *activityFixture) signIn(path, username, password, address string, want int) *contractClient {
 	f.t.Helper()
-	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
-	request.Header.Set("Content-Type", "application/json")
-	if path == "/api/v1/setup/admin" {
-		fromLocalConsole(request)
-	} else {
-		request.Header.Set("X-Forwarded-For", address)
+	newRequest := func() *http.Request {
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080"+path, strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
+		request.Header.Set("Content-Type", "application/json")
+		if path == "/api/v1/setup/admin" {
+			fromLocalConsole(request)
+		} else {
+			request.Header.Set("X-Forwarded-For", address)
+		}
+		return request
 	}
+	request := newRequest()
 	recorder := httptest.NewRecorder()
 	f.handler.ServeHTTP(recorder, request)
 	if recorder.Code != want {
 		f.t.Fatalf("sign in %s status = %d, want %d; body=%s", username, recorder.Code, want, recorder.Body.String())
 	}
+	validateExchange(f.t, f.client.router, newRequest(), recorder)
 	if want >= 300 {
 		return nil
 	}

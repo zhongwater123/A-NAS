@@ -5,30 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import type { AppJob, CatalogApp, InstallPlan } from "../appsApi";
 import { AppCenterPanel } from "./AppCenterPanel";
-
-function app(id: string, overrides: Partial<CatalogApp> = {}): CatalogApp {
-  return {
-    id,
-    title: id[0].toUpperCase() + id.slice(1),
-    tagline: "",
-    description: "",
-    notes: "",
-    category: "notes",
-    version: "1.0",
-    author: "",
-    developer: "",
-    website: "",
-    repo: "",
-    docs: "",
-    updated: "",
-    scheme: "http",
-    path: "/",
-    state: "available",
-    running: 0,
-    total: 0,
-    ...overrides,
-  };
-}
+import { stubAPI } from "../test/api";
+import { app } from "../test/fixtures";
 
 function job(overrides: Partial<AppJob> = {}): AppJob {
   return {
@@ -91,12 +69,11 @@ function serve(
   plan: InstallPlan = memosPlan,
 ) {
   const posts: string[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "POST") {
-        expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("csrf-test");
+        expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-test");
         posts.push(url);
         return onPost(url);
       }
@@ -118,7 +95,14 @@ beforeEach(() => {
   setSession({
     csrfToken: "csrf-test",
     expiresAt: "2026-10-12T22:00:00Z",
-    user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-12T00:00:00Z" },
+    user: {
+      id: "user:owner",
+      username: "owner",
+      role: "admin",
+      status: "active",
+      createdAt: "2026-10-12T00:00:00Z",
+      mustChangePassword: false,
+    },
   });
 });
 

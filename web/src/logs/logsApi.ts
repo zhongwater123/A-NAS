@@ -1,35 +1,15 @@
-import { request } from "../api";
+import { call, client } from "../api";
+import type { ActivityCategory, SystemLogEntry, SystemLogService } from "../api.generated";
 
-export type ActivityCategory = "session" | "account" | "file" | "storage" | "photo";
-
-// nickname is the account's current nickname, shown instead of username.
-export interface ActivityAccount {
-  id: string;
-  username: string;
-  nickname?: string;
-}
-
-export interface ActivityEvent {
-  id: string;
-  occurredAt: string;
-  category: ActivityCategory | "other";
-  action: string;
-  actor?: ActivityAccount;
-  system?: boolean;
-  subject?: ActivityAccount;
-  resourceType: string;
-  resourceId?: string;
-  detail?: string;
-  space?: { id: string; kind: "private" | "shared"; owner?: ActivityAccount };
-  redacted?: boolean;
-}
-
-export interface ActivityPage {
-  items: ActivityEvent[];
-  next?: string;
-  scope: "all" | "self";
-  unavailable?: ActivityCategory[];
-}
+export type {
+  ActivityAccount,
+  ActivityCategory,
+  ActivityEvent,
+  ActivityPage,
+  SystemLogEntry,
+  SystemLogPage,
+  SystemLogService,
+} from "../api.generated";
 
 // The time ranges both logs offer; "all" sends no lower bound.
 export type TimeRange = "1h" | "24h" | "7d" | "30d" | "all";
@@ -56,34 +36,24 @@ export interface ActivityFilters {
   q: string;
 }
 
-export function listActivity(
-  filters: ActivityFilters,
-  before?: string,
-  limit = 50,
-  signal?: AbortSignal,
-): Promise<ActivityPage> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (filters.category) params.set("category", filters.category);
-  if (filters.actor) params.set("actor", filters.actor);
-  const since = sinceOf(filters.range);
-  if (since) params.set("since", since);
-  if (filters.q.trim()) params.set("q", filters.q.trim());
-  if (before) params.set("before", before);
-  return request<ActivityPage>(`/api/v1/activity?${params}`, { signal });
-}
+export const listActivity = (filters: ActivityFilters, before?: string, limit = 50, signal?: AbortSignal) =>
+  call(
+    client.GET("/api/v1/activity", {
+      params: {
+        query: {
+          limit,
+          category: filters.category,
+          actor: filters.actor || undefined,
+          since: sinceOf(filters.range),
+          q: filters.q.trim() || undefined,
+          before,
+        },
+      },
+      signal,
+    }),
+  );
 
-export type SystemLogService =
-  | "api"
-  | "host-agent"
-  | "photos"
-  | "shares"
-  | "containers"
-  | "ai"
-  | "media"
-  | "kiosk"
-  | "samba"
-  | "caddy";
-export type LogLevel = "error" | "warning" | "info" | "debug";
+export type LogLevel = SystemLogEntry["level"];
 
 export const systemLogServices: Array<{ id: SystemLogService; label: string; unit: string }> = [
   { id: "api", label: "产品服务", unit: "anas-api" },
@@ -98,26 +68,6 @@ export const systemLogServices: Array<{ id: SystemLogService; label: string; uni
   { id: "caddy", label: "局域网入口 Caddy", unit: "caddy" },
 ];
 
-export interface SystemLogEntry {
-  cursor: string;
-  time: string;
-  service: SystemLogService;
-  unit?: string;
-  level: LogLevel;
-  message: string;
-  fields?: Record<string, string>;
-  pid?: number;
-  truncated?: boolean;
-}
-
-export interface SystemLogPage {
-  items: SystemLogEntry[];
-  next?: string;
-  scannedThrough?: string;
-  overflow?: boolean;
-  dataSource: "simulated" | "live";
-}
-
 // "warning" includes errors: the level is the least severe one to show.
 export interface SystemLogFilters {
   service?: SystemLogService;
@@ -126,19 +76,25 @@ export interface SystemLogFilters {
   q: string;
 }
 
-export function listSystemLogs(
+export const listSystemLogs = (
   filters: SystemLogFilters,
   cursor: { before?: string; after?: string } = {},
   limit = 200,
   signal?: AbortSignal,
-): Promise<SystemLogPage> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (filters.service) params.set("service", filters.service);
-  if (filters.level) params.set("level", filters.level);
-  const since = sinceOf(filters.range);
-  if (since) params.set("since", since);
-  if (filters.q.trim()) params.set("q", filters.q.trim());
-  if (cursor.before) params.set("before", cursor.before);
-  if (cursor.after) params.set("after", cursor.after);
-  return request<SystemLogPage>(`/api/v1/system-logs?${params}`, { signal });
-}
+) =>
+  call(
+    client.GET("/api/v1/system-logs", {
+      params: {
+        query: {
+          limit,
+          service: filters.service,
+          level: filters.level,
+          since: sinceOf(filters.range),
+          q: filters.q.trim() || undefined,
+          before: cursor.before || undefined,
+          after: cursor.after || undefined,
+        },
+      },
+      signal,
+    }),
+  );
