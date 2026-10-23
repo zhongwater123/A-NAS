@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
@@ -32,6 +33,9 @@ type testEnv struct {
 	bob      accounts.User
 	shared   accounts.Space
 	private  map[string]accounts.Space
+	// clock ticks a second per read until a test sets it; background scans
+	// read it too.
+	clock *clocktest.Clock
 }
 
 type acceptingCredentials struct{}
@@ -102,16 +106,16 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 		t.Fatalf("open media store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	clock := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	clock := clocktest.Ticking(time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), time.Second)
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
+		Now: clock.Now, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	t.Cleanup(service.Close)
-	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}}
+	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}, clock: clock}
 	for _, user := range []accounts.User{admin, alice, bob} {
 		spaces, err := accountService.ListSpaces(ctx, user)
 		if err != nil {
@@ -1133,12 +1137,13 @@ func TestRefreshLeavesAScanInProgressAlone(t *testing.T) {
 	held := &heldTree{Files: env.media.files, reached: make(chan struct{}, 10), release: make(chan struct{})}
 	env.media.files = held
 	later := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
-	env.media.now = func() time.Time { return later }
+	env.clock.Set(later)
 
 	env.media.RefreshStale(env.ctx, env.admin)
 	<-held.reached
 	for range 5 {
 		later = later.Add(3 * time.Minute)
+		env.clock.Set(later)
 		env.media.RefreshStale(env.ctx, env.admin)
 	}
 	close(held.release)

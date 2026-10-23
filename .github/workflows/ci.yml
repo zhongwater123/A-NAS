@@ -9,10 +9,12 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request replaces its running checks; every commit on
-# main keeps its own run.
+# A new push to a pull request replaces its running checks. Each commit on
+# main has a group of its own, so its run neither waits nor is cancelled
+# (a group keeps one pending run): a merge that breaks main shows on its commit.
+# The price: merges in quick succession each run every job, system test too.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

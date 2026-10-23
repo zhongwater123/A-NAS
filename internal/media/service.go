@@ -53,9 +53,11 @@ type Options struct {
 	// StreamWait is how long a converted stream waits for a free slot
 	// before the device reports itself busy; it defaults to 4 seconds.
 	StreamWait time.Duration
-	Now        func() time.Time
-	Random     io.Reader
-	Logger     *slog.Logger
+	// Now defaults to time.Now. Background scans call it while requests do,
+	// so it must be safe for concurrent use.
+	Now    func() time.Time
+	Random io.Reader
+	Logger *slog.Logger
 }
 
 type Service struct {

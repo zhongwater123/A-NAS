@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
@@ -88,7 +89,7 @@ func heicBytes(seed byte) []byte {
 	return append(heic, box("mdat", []byte{seed})...)
 }
 
-func awayService(t *testing.T) (*photos.Service, *awayDecoder, *clock, string) {
+func awayService(t *testing.T) (*photos.Service, *awayDecoder, *clocktest.Clock, string) {
 	t.Helper()
 	decoder, c := &awayDecoder{}, newClock()
 	root := filepath.Join(t.TempDir(), "photos")

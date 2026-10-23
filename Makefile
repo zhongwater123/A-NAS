@@ -50,11 +50,14 @@ fmt-check:
 docs-check:
 	$(GO) run ./tools/doccheck
 
+# Shell scripts, units and installer conventions, and Dependabot's groups
+# (tools/depcheck keeps 0.x web packages out of them).
 ops-check:
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS)
 	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
+	$(GO) run ./tools/depcheck
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service

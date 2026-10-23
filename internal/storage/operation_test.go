@@ -5,11 +5,14 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -155,12 +158,10 @@ func TestAPlanThatStoppedIsRetriedFromTheHostAgent(t *testing.T) {
 // Once a later plan has run, a stopped plan is history: it is neither shown
 // nor retried.
 func TestAStoppedPlanIsSupersededByAPlanThatRan(t *testing.T) {
-	clock := time.Date(2026, time.October, 21, 9, 0, 0, 0, time.UTC)
 	host := newHostOperations()
-	ids := 0
 	service, err := storage.OpenService(fake.NewWithSpareDisk(), host, storage.Options{
-		Now:          func() time.Time { clock = clock.Add(time.Second); return clock },
-		NewID:        func() string { ids++; return "plan-" + string(rune('0'+ids)) },
+		Now:          clocktest.Ticking(time.Date(2026, time.October, 21, 9, 0, 0, 0, time.UTC), time.Second).Now,
+		NewID:        planIDs(),
 		PollInterval: time.Millisecond,
 	})
 	if err != nil {
@@ -269,6 +270,12 @@ func followingService(t *testing.T, reader hoststate.Reader, host storage.Volume
 	}
 	t.Cleanup(service.Close)
 	return service
+}
+
+// planIDs numbers plans plan-1, plan-2 and so on, from any goroutine.
+func planIDs() func() string {
+	var last atomic.Int64
+	return func() string { return "plan-" + strconv.FormatInt(last.Add(1), 10) }
 }
 
 func openStore(t *testing.T, path string) *storage.Store {

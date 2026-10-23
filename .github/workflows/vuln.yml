@@ -1,0 +1,37 @@
+name: Vulnerability check
+
+# `make check` scans every pull request and merge; this run reports advisories
+# published since, while nobody pushes. GitHub runs the schedule on main only
+# and reports a failed run to whoever last changed the cron line.
+on:
+  schedule:
+    - cron: "17 2 * * 1" # Mondays 02:17 UTC
+  workflow_dispatch:
+  # A change to this file is tried on its pull request. Other pull requests
+  # never run it, so it must not be a required check (#218): they would wait
+  # for it forever.
+  pull_request:
+    paths: [.github/workflows/vuln.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: Known vulnerabilities the code can reach
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # The Go release matters as much as the modules: the standard library
+      # has advisories of its own.
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Run govulncheck
+        run: make vuln-check
