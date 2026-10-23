@@ -13,16 +13,18 @@ const sweep = 210;
 const startAngle = -sweep / 2;
 
 // extra shows beside the clock while it has something to say, such as
-// transfers in progress; onOpenTransfers makes the network rates open the
-// transfer center.
+// transfers in progress; the network rates open the transfer center and the
+// gauges open the task manager.
 export function StatusBar({
   host,
   extra,
   onOpenTransfers,
+  onOpenTaskManager,
 }: {
   host: HostStateView;
   extra?: ReactNode;
-  onOpenTransfers?: () => void;
+  onOpenTransfers: () => void;
+  onOpenTaskManager: () => void;
 }) {
   const { metrics, disconnected: metricsDisconnected } = useHostMetrics();
   const disconnected = host.disconnected || metricsDisconnected;
@@ -32,7 +34,16 @@ export function StatusBar({
 
   return (
     <header className={`status-bar ${metricsDisconnected ? "stale" : ""}`} aria-label="设备状态">
+      {/* The button lies under the gauges instead of around them: a button's
+          content is not exposed to screen readers, and the meters' readings must be. */}
       <div className="status-gauges">
+        <button
+          type="button"
+          className="status-gauges-open"
+          aria-label="CPU 与内存占用，打开任务管理器"
+          title="打开任务管理器"
+          onClick={onOpenTaskManager}
+        />
         <Gauge
           label="CPU"
           name="CPU 占用"
@@ -47,23 +58,16 @@ export function StatusBar({
         />
       </div>
       <span className="status-divider" aria-hidden="true" />
-      {onOpenTransfers ? (
-        <button
-          type="button"
-          className="net-rates"
-          aria-label="网络速率，打开传输中心"
-          title="打开传输中心"
-          onClick={onOpenTransfers}
-        >
-          <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
-          <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
-        </button>
-      ) : (
-        <div className="net-rates" role="group" aria-label="网络速率">
-          <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
-          <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
-        </div>
-      )}
+      <button
+        type="button"
+        className="net-rates"
+        aria-label="网络速率，打开传输中心"
+        title="打开传输中心"
+        onClick={onOpenTransfers}
+      >
+        <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
+        <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
+      </button>
       <span className="status-divider" aria-hidden="true" />
       {extra && <div className="status-extra">{extra}</div>}
       <div className="status-clock">
@@ -169,12 +173,12 @@ function NetworkRate({
   const [value, unit] = bytesPerSecond === undefined ? ["—", ""] : formatRate(bytesPerSecond);
   const Icon = direction === "down" ? ArrowDown : ArrowUp;
   return (
-    <div className={`net-row ${direction}`}>
+    <span className={`net-row ${direction}`}>
       <Icon aria-hidden="true" />
       <span className="sr-only">{label}</span>
       <span className="net-value">{value}</span>
       <span className="net-unit">{unit}</span>
-    </div>
+    </span>
   );
 }
 

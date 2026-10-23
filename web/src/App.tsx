@@ -981,6 +981,7 @@ function Desktop({
           host={host}
           extra={<TransferIndicator onOpen={() => openWindow("transfers")} />}
           onOpenTransfers={() => openWindow("transfers")}
+          onOpenTaskManager={() => openSettings("task-manager")}
         />
 
         <NotificationCenter />

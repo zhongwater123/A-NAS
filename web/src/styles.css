@@ -1017,8 +1017,35 @@ button {
   backdrop-filter: blur(24px) saturate(150%);
 }
 .status-gauges {
+  position: relative;
   display: flex;
   gap: 2px;
+}
+/* Clicks pass through the gauges to the button beneath them. */
+.status-gauges .gauge {
+  position: relative;
+  pointer-events: none;
+}
+/* The gauges sit at the bar's rounded left end: the button keeps 4px inside
+   its padding there and follows its curve, and its focus ring is drawn inside. */
+.status-gauges-open {
+  position: absolute;
+  inset: -4px -8px -4px -4px;
+  border: 0;
+  border-radius: 20px 14px 14px 20px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.status-gauges-open:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.status-gauges-open:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+.status-gauges-open:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
 }
 .status-extra {
   display: flex;
@@ -1033,8 +1060,9 @@ button {
   margin: 8px 0;
   background: linear-gradient(transparent, rgba(255, 255, 255, 0.3), transparent);
 }
-.status-bar.stale .status-gauges,
-.status-bar.stale .net-rates {
+/* Only the readings fade, so the buttons' focus rings keep their contrast. */
+.status-bar.stale .gauge,
+.status-bar.stale .net-row {
   opacity: 0.5;
 }
 
@@ -5636,6 +5664,10 @@ button.health-go svg {
     gap: 8px;
     padding: 6px 12px 6px 6px;
     justify-content: space-between;
+  }
+  /* Still 4px inside the bar's smaller padding. */
+  .status-gauges-open {
+    inset: -2px -6px -2px -2px;
   }
   .status-meta .source-badge {
     display: none;
