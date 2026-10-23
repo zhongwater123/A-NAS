@@ -83,7 +83,7 @@ export function FileContextMenu({
             </button>
           )}
           <i />
-          <button role="menuitem" disabled={!can.share} onClick={choose(commands.share)}>
+          <button role="menuitem" disabled={!can.mutate} onClick={choose(commands.share)}>
             <Share2 />
             <span>分享给成员</span>
           </button>

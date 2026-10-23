@@ -180,7 +180,6 @@ describe("file manager", () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
-  // jsdom resolves the computed styles this test checks slowly.
   it("enables file management and lists only the signed-in user's spaces", async () => {
     const fetchMock = installAPI({
       spaces: [
@@ -268,7 +267,6 @@ describe("file manager", () => {
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
-  // Switching spaces and pasting re-renders the whole file manager several times.
   it("moves a cut file into the space it is pasted in", async () => {
     const fetchMock = installAPI({
       spaces: [
@@ -488,7 +486,6 @@ describe("file manager", () => {
     expect(within(dialog).queryByRole("dialog", { name: /^预览/ })).toBeNull();
   });
 
-  // Opening the transfer center loads its window code on first use.
   it("uploads picked and dropped files through the transfer center without blocking the folder", async () => {
     const fetchMock = installAPI({
       spaces: [{ id: "space:shared", kind: "shared", name: "Shared", createdAt: "2026-10-07T10:00:00Z" }],

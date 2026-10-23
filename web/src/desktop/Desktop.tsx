@@ -128,7 +128,7 @@ export function Desktop({
     showInDocker,
     showPhoto,
     focus,
-    focusHandled: (id) => setFocus((current) => ({ ...current, [id]: undefined })),
+    focusHandled: (id) => setFocus((current) => (current[id] ? { ...current, [id]: undefined } : current)),
     settingsSection,
     setSettingsSection,
     storagePlan,

@@ -125,7 +125,6 @@ export function selectionCommands({
     entries,
     folders,
     mutate,
-    share: mutate,
     rename: mutate && entries.length === 1,
     // Snapshot versions are for the user's own spaces; viewing a member's is for browsing files.
     versions: entries.length === 1 && items.length === 1 && item?.entry?.kind === "file" && !viewing,

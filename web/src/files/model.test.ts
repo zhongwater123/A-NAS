@@ -45,7 +45,6 @@ describe("file manager selection", () => {
   it("offers every command for one file of one's own", () => {
     expect(selectionCommands(state([report]))).toMatchObject({
       mutate: true,
-      share: true,
       rename: true,
       versions: true,
       download: true,
@@ -62,14 +61,13 @@ describe("file manager selection", () => {
 
   it("acts on files only, not on the app resources beside them", () => {
     const withResource = selectionCommands(state([report, personalFileResources[0]]));
-    expect(withResource).toMatchObject({ mutate: false, share: false, download: false });
+    expect(withResource).toMatchObject({ mutate: false, download: false });
     expect(withResource.entries).toEqual([report.entry]);
   });
 
   it("only downloads while viewing another member's space, and waits while an operation runs", () => {
     expect(selectionCommands(state([report], { viewing: true }))).toMatchObject({
       mutate: false,
-      share: false,
       rename: false,
       versions: false,
       download: true,

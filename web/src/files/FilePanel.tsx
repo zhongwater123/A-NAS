@@ -211,6 +211,7 @@ export function FilePanel({
     if (canMove(delta))
       saveOrder(reorderFiles(browserItems, order, selectedItemID, reorderPeers[selectedPosition + delta].id));
   };
+  const changeSort = (sort: FileSort) => saveOrder(sortedBy(order, sort, orderedItems));
   const togglePinned = () => {
     if (can.pin) saveOrder(withPins(order, can.folders));
   };
@@ -539,7 +540,7 @@ export function FilePanel({
           sortBy={order.sortBy}
           disabled={loading || !spaceID}
           can={can}
-          onSort={(sort: FileSort) => saveOrder(sortedBy(order, sort, orderedItems))}
+          onSort={changeSort}
           onPin={togglePinned}
           canMove={canMove}
           onMove={moveSelection}
@@ -593,7 +594,7 @@ export function FilePanel({
           query={query}
           viewing={Boolean(viewing)}
           dragProps={dragProps}
-          onSort={(sort) => saveOrder(sortedBy(order, sort, orderedItems))}
+          onSort={changeSort}
           onSelect={selectItem}
           onBoxSelect={selectBox}
           onOpen={openItem}

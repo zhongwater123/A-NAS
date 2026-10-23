@@ -185,7 +185,7 @@ export function FileCommandBar({
         className="file-command-button"
         aria-label="分享"
         title="分享给成员"
-        disabled={!can.share}
+        disabled={!can.mutate}
         onClick={commands.share}
       >
         <Share2 />

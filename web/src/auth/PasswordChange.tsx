@@ -1,7 +1,8 @@
 import { FormEvent, useId, useState } from "react";
 
 import { changePassword } from "../api";
-import { accountErrorText, passwordProblem, passwordRuleText } from "../accountRules";
+import { passwordProblem, passwordRuleText } from "../accountRules";
+import { messageOf } from "../settings/parts";
 
 // PasswordChange blocks the desktop after an administrator reset the
 // password, so only the member knows the password in use.
@@ -28,7 +29,7 @@ export function PasswordChange({ onChanged, onLogout }: { onChanged: () => void;
       await changePassword(String(data.get("currentPassword")), next);
       onChanged();
     } catch (caught) {
-      setError(accountErrorText(caught) ?? (caught instanceof Error ? caught.message : "请求失败"));
+      setError(messageOf(caught));
     } finally {
       setSubmitting(false);
     }

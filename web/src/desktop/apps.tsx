@@ -33,20 +33,6 @@ const TransferCenter = lazy(() =>
   import("../transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })),
 );
 
-export type WindowID =
-  | "shares"
-  | "files"
-  | "trash"
-  | "settings"
-  | "store"
-  | "media"
-  | "transfers"
-  | "backup"
-  | "docker"
-  | "photos"
-  | "music"
-  | "assistant";
-
 // Where another window asked an app to go. The app clears it once shown, so
 // asking for the same place again shows it again.
 export interface WindowFocus {
@@ -115,7 +101,7 @@ const loading = (
 
 // The desktop's built-in apps. Their order is the initial order of the desktop
 // icons and of the windows on the page.
-export const apps: Record<WindowID, AppDefinition> = {
+const definitions = {
   shares: {
     title: "分享",
     icon: Share2,
@@ -278,7 +264,11 @@ export const apps: Record<WindowID, AppDefinition> = {
       </Suspense>
     ),
   },
-};
+} satisfies Record<string, AppDefinition>;
+
+// Each built-in app's window, named by its key above.
+export type WindowID = keyof typeof definitions;
+export const apps: Record<WindowID, AppDefinition> = definitions;
 
 export const windowIDs = Object.keys(apps) as WindowID[];
 
