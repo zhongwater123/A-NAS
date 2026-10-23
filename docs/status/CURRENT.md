@@ -13,7 +13,7 @@
 - 主干 `8f5b6b0b4586`（PR #206 的合并提交，2026-10-21 安装；2026-10-22 只读核对 `/opt/a-nas/current`），包含此前合并的全部 PR。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
-- 已合并、尚未部署：[#212](https://github.com/zhongwater123/A-NAS/pull/212)（Host Agent 健壮性，#166）、[#213](https://github.com/zhongwater123/A-NAS/pull/213)（应用安装回滚，#169）、[#214](https://github.com/zhongwater123/A-NAS/pull/214)（媒体 Worker 共享准入，#168）、[#215](https://github.com/zhongwater123/A-NAS/pull/215)（按范围对账，#167）。这次部署要在一次维护中完成：
+- 已合并、尚未部署：[#225](https://github.com/zhongwater123/A-NAS/pull/225)（Go 1.27.3 与解码器 panic 防护）、[#212](https://github.com/zhongwater123/A-NAS/pull/212)（Host Agent 健壮性，#166）、[#213](https://github.com/zhongwater123/A-NAS/pull/213)（应用安装回滚，#169）、[#214](https://github.com/zhongwater123/A-NAS/pull/214)（媒体 Worker 共享准入，#168）、[#215](https://github.com/zhongwater123/A-NAS/pull/215)（按范围对账，#167）。这次部署要在一次维护中完成：
   - 运行安装器，它会写入媒体 Worker 槽位的 tmpfiles 条目与 `system-anasmedia.slice`；
   - 产品服务、Host Agent、相册服务与分享服务同版本；
   - 容器代理连同单元一起更新，再 `daemon-reload`。
@@ -39,7 +39,7 @@
 ## 下一步
 
 1. 完成 v1.0.1 闭环：重建 Samba 凭据后，按[实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)完成个人空间与 Shared 的 Web/SMB 双向读写、大文件哈希、删除与恢复、快照、正常重启、SMART、容量、服务与审计证据，全部通过后才打标签。
-2. 在一次维护中部署 #212–#215（要求见上）。
+2. 在一次维护中部署 #212–#215 与 #225（要求见上）。
 3. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对：文件管理与登录、备份与存储、桌面与本机屏幕、相册、影视与音乐、传输中心、应用中心、成员分享、AI 助手。每完成一节，就从手册中删去这一节。
 4. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改；#92 之后新装的应用密码按台随机生成。
 5. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。

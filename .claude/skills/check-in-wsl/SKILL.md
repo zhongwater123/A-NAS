@@ -38,4 +38,4 @@ EOF
 
 - 在最终报告或 PR 中写明 `PASS` 或失败的目标，并给出日志路径，例如 `~/anas-check/<检出名>.log`。
 - 失败时先读日志尾部，修复当前变更引起的问题后重跑同一命令。与当前变更无关的失败如实报告，不要绕过。
-- 本机同时有其他重负载时，`web-test` 里个别测试可能 5 秒超时或 `findBy…` 找不到元素。先在副本的 `web/` 中运行 `npx vitest run <失败的文件>` 单独重跑；通过的话，在报告中写明是负载导致的超时，再运行 `web-test` 之后的目标：`make web-build fmt-check docs-check ops-check vet test ai-test build-binaries`。
+- 本机同时有其他重负载时，`web-test` 里个别测试可能 5 秒超时或 `findBy…` 找不到元素。先在副本的 `web/` 中运行 `npx vitest run <失败的文件>` 单独重跑；通过的话，在报告中写明是负载导致的超时，再运行 `web-test` 之后的目标：`make web-build fmt-check docs-check ops-check vet vuln-check test ai-test build-binaries`。
