@@ -1,7 +1,10 @@
 GO ?= go
 SYSTEM_TEST_IMAGE ?= anas-systemd:trixie
-# The AI assistant's part of the system test and the scripts it runs from the spike.
-ASSISTANT_SYSTEM_TEST = $(addprefix ai/assistant-spike/,system-test.sh assistant-install.sh assistant-layout.sh seed.sh layout-acl.sh)
+# ShellCheck releases judge differently (0.11 made SC2002 optional), so ops-check
+# runs only this one; CI installs it from the release by hash.
+SHELLCHECK_VERSION = 0.11.0
+# Every tracked shell script; in a copy without .git, every *.sh file.
+SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
 NPM ?= npm
 BUILD_DIR ?= build
 VERSION ?= dev
@@ -43,8 +46,10 @@ docs-check:
 	$(GO) run ./tools/doccheck
 
 ops-check:
-	shellcheck scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/smoke-photo-service.sh scripts/system-test.sh scripts/build-system-test-image.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST) .claude/hooks/gofmt.sh
-	bash -n scripts/remote-activate-release.sh scripts/run-kiosk.sh scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh scripts/install-screensavers.sh scripts/remote-stage-screensavers.sh scripts/build-ai-runtime.sh $(ASSISTANT_SYSTEM_TEST) .claude/hooks/gofmt.sh
+	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
+	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
+	shellcheck $(SHELL_SCRIPTS)
+	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service

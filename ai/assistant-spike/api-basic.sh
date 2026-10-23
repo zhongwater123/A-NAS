@@ -9,7 +9,7 @@ start=$(date +%s.%N)
 api -o /dev/null -w 'first /health: HTTP %{http_code}\n' http://a/health
 python3 -c "import sys,time; print('cold start through socket activation: %.1f s' % (time.time() - float(sys.argv[1])))" "$start"
 systemctl is-active "anas-assistant@$user.service" | sed 's/^/assistant unit: /'
-api http://a/v1/toolsets > /tmp/toolsets-$user.json
+api http://a/v1/toolsets > "/tmp/toolsets-$user.json"
 python3 - "$user" <<'PY'
 import json, sys
 data = json.load(open(f"/tmp/toolsets-{sys.argv[1]}.json"))
