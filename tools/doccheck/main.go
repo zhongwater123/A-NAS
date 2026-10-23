@@ -179,7 +179,7 @@ func validateADRIndex(root string) []string {
 		return nil
 	}
 	markers := map[string]string{}
-	for _, line := range strings.Split(string(index), "\n") {
+	for line := range strings.SplitSeq(string(index), "\n") {
 		if match := adrIndexLink.FindStringSubmatch(line); match != nil {
 			markers[match[1]] = match[2]
 		}
