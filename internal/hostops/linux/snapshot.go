@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
@@ -45,22 +47,33 @@ func (e *Executor) Objects(ctx context.Context, snapshotID string, visit func(fi
 	return files.WalkSnapshot(ctx, root, visit)
 }
 
+// Open opens one object of a snapshot. The kernel resolves the key beneath
+// the snapshot root and refuses ".." out of it and any symbolic link on the
+// way, as Objects skips them; O_NONBLOCK keeps a FIFO from blocking the open.
 func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
 	root := e.snapshotRoot(snapshotID)
-	path := filepath.Join(root, filepath.FromSlash(key))
-	if !withinDirectory(root, path) {
+	relative := filepath.FromSlash(key)
+	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
 		return nil, files.SnapshotObject{}, files.ErrNotFound
 	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+	defer unix.Close(rootFD)
+	fd, err := unix.Openat2(rootFD, relative, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	})
+	if err != nil {
 		return nil, files.SnapshotObject{}, files.ErrNotFound
+	}
+	reader := os.NewFile(uintptr(fd), filepath.Join(root, relative))
+	info, err := reader.Stat()
+	if err != nil {
+		_ = reader.Close()
+		return nil, files.SnapshotObject{}, err
 	}
 	if !info.Mode().IsRegular() {
+		_ = reader.Close()
 		return nil, files.SnapshotObject{}, files.ErrUnsupportedType
-	}
-	reader, err := os.Open(path)
-	if err != nil {
-		return nil, files.SnapshotObject{}, err
 	}
 	return reader, files.SnapshotObject{Key: key, Name: info.Name(), Kind: files.EntryKindFile, SizeBytes: info.Size()}, nil
 }
