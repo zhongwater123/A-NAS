@@ -7,7 +7,7 @@
 
 用户在 Experimental NAS（产品 `9cda8a366ded`，试用包同版本，云端 `deepseek-flash`）上与 VNAS 进行一段高频的长对话，其中有大量操作桌面的步骤：
 
-- 对话进行中 VNAS 窗口变成桌面的窗口兜底页“这个页面暂时无法显示”（[`App.tsx`](../../web/src/App.tsx) `PanelErrorBoundary`），只能“重新载入界面”，即重载整个 WebOS；重新打开 VNAS 进入同一个对话，再次出现同样的页面。
+- 对话进行中 VNAS 窗口变成桌面的窗口兜底页“这个页面暂时无法显示”（[`AppWindow.tsx`](../../web/src/desktop/AppWindow.tsx) `PanelErrorBoundary`），只能“重新载入界面”，即重载整个 WebOS；重新打开 VNAS 进入同一个对话，再次出现同样的页面。
 - 助手接连请求确认（命令、提问、桌面上的一步），成员点了允许之后，这些卡片仍留在输入框上方，一张张堆起来，遮住对话。
 
 ## 最小复现

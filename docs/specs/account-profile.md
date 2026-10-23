@@ -67,7 +67,7 @@
 ## 验收证据
 
 - Go 测试：[账号资料测试](../../internal/accounts/profile_test.go) 覆盖昵称整理、长度与不可见字符、与他人账号名或昵称冲突、表情连接符、清空、日志记录、头像版本与移除、禁用账号；[头像压缩测试](../../internal/avatar/avatar_test.go) 覆盖居中裁剪、尺寸与体积、透明铺白、小图不放大、拒绝非图片和超大尺寸；[资料接口测试](../../internal/httpapi/profile_test.go) 按 OpenAPI 契约覆盖昵称与头像接口、CSRF、缓存头与 304、日志按昵称搜索。
-- React 行为测试：[桌面测试](../../web/src/App.test.tsx) 覆盖设置昵称及前后端校验、本机图片裁剪上传与移除、从 NAS 文件夹选择（排除只读查看的空间）、用户列表与账号通知中的“昵称（账号名）”；[问题反馈测试](../../web/src/feedback/FeedbackChannel.test.tsx) 覆盖作者昵称与头像；[日志描述测试](../../web/src/logs/describe.test.ts) 覆盖昵称与改名记录；[账号规则测试](../../web/src/accountRules.test.ts) 覆盖昵称规则。
+- React 行为测试：[设置测试](../../web/src/SettingsPanel.test.tsx) 覆盖设置昵称及前后端校验、本机图片裁剪上传与移除、从 NAS 文件夹选择（排除只读查看的空间）、用户列表与账号通知中的“昵称（账号名）”；[问题反馈测试](../../web/src/feedback/FeedbackChannel.test.tsx) 覆盖作者昵称与头像；[日志描述测试](../../web/src/logs/describe.test.ts) 覆盖昵称与改名记录；[账号规则测试](../../web/src/accountRules.test.ts) 覆盖昵称规则。
 - 浏览器检查：Fake 模式本地预览中以 1440×900 检查“我的账号”、三种来源的选择、裁剪、保存后的快捷栏与账号菜单、用户列表、日志与问题反馈。
 - 本地门禁：`make check`。
 
