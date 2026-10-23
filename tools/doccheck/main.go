@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -28,9 +31,9 @@ var (
 		"CONTEXT.md",
 		"PROJECT_CONTEXT.md",
 		"docs/README.md",
-		"docs/status/CURRENT.md",
+		currentDocument,
 		"docs/architecture/OVERVIEW.md",
-		"docs/adr/README.md",
+		adrIndex,
 		"docs/specs/README.md",
 		"docs/specs/_TEMPLATE.md",
 		"docs/investigations/README.md",
@@ -47,10 +50,19 @@ var (
 	// implementation stage, or date what they observed.
 	statusPhrases       = []string{"未合并", "待合并", "尚未部署"}
 	statusPhraseKeepers = map[string]bool{currentDocument: true, "docs/runbooks/accept-features-on-experimental-nas.md": true}
-	adrFileName         = regexp.MustCompile(`^\d{4}-.+\.md$`)
-	adrStatusLine       = regexp.MustCompile(`(?m)^(?:状态[：:]|Status:)\s*([A-Za-z]+)`)
-	adrIndexLink        = regexp.MustCompile(`\]\((\d{4}-[^)]+\.md)\)(.*)$`)
-	comparableADRStatus = map[string]bool{"proposed": true, "accepted": true, "superseded": true}
+	// A line that uses a phrase in its ordinary sense, such as merging two
+	// people in the photo library, carries this comment.
+	statusPhraseAllowed = "<!-- doccheck: not a status -->"
+	linkDestination     = regexp.MustCompile(`\]\([^)]*\)`)
+
+	// The index lists each ADR as "- [NNNN：title](file)", followed by a
+	// parenthesised marker that starts with proposed or superseded when the
+	// ADR is not accepted.
+	adrFileName    = regexp.MustCompile(`^\d{4}-.+\.md$`)
+	adrIndexEntry  = regexp.MustCompile(`^\s*[-*]\s+\[\d{4}[^\]]*\]\(([^)]+)\)(.*)$`)
+	adrIndexMarker = regexp.MustCompile(`^\s*[（(]\s*([A-Za-z]+)`)
+	adrStatusLine  = regexp.MustCompile(`(?m)^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
+	adrStatuses    = map[string]bool{"proposed": true, "accepted": true, "superseded": true}
 )
 
 func main() {
@@ -110,11 +122,12 @@ func validateDocumentation(root string) ([]string, int) {
 	}
 
 	files := 0
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	adrDocuments := map[string]string{}
+	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		relativePath, _ := filepath.Rel(root, path)
+		relativePath, _ := filepath.Rel(root, filePath)
 		relativePath = filepath.ToSlash(relativePath)
 		if entry.IsDir() {
 			name := entry.Name()
@@ -124,24 +137,27 @@ func validateDocumentation(root string) ([]string, int) {
 			}
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(path), ".md") {
+		if !strings.EqualFold(filepath.Ext(filePath), ".md") {
 			return nil
 		}
 
 		files++
-		data, readErr := os.ReadFile(path) //nolint:gosec // G122: a developer tool reading the checkout's own documents.
+		data, readErr := os.ReadFile(filePath) //nolint:gosec // G122: a developer tool reading the checkout's own documents.
 		if readErr != nil {
 			return readErr
 		}
 		if !statusPhraseKeepers[relativePath] {
 			problems = append(problems, findStatusPhrases(relativePath, string(data))...)
 		}
+		if path.Dir(relativePath) == adrDirectory {
+			adrDocuments[relativePath] = string(data)
+		}
 		for _, match := range markdownLink.FindAllStringSubmatch(string(data), -1) {
 			target := normalizeLinkTarget(match[1])
 			if target == "" || isExternalLink(target) {
 				continue
 			}
-			resolved := filepath.Clean(filepath.Join(filepath.Dir(path), filepath.FromSlash(target)))
+			resolved := filepath.Clean(filepath.Join(filepath.Dir(filePath), filepath.FromSlash(target)))
 			if _, statErr := os.Stat(resolved); statErr != nil {
 				problems = append(problems, fmt.Sprintf("%s links to missing %s", relativePath, target))
 			}
@@ -152,15 +168,20 @@ func validateDocumentation(root string) ([]string, int) {
 		problems = append(problems, err.Error())
 	}
 
-	problems = append(problems, validateADRIndex(root)...)
+	problems = append(problems, validateADRIndex(adrDocuments)...)
 	return problems, files
 }
 
 func findStatusPhrases(relativePath, content string) []string {
 	var problems []string
 	for number, line := range strings.Split(content, "\n") {
+		if strings.Contains(line, statusPhraseAllowed) {
+			continue
+		}
+		// A link to a heading in CURRENT.md may carry a phrase in its anchor.
+		text := linkDestination.ReplaceAllString(line, "]")
 		for _, phrase := range statusPhrases {
-			if strings.Contains(line, phrase) {
+			if strings.Contains(text, phrase) {
 				problems = append(problems, fmt.Sprintf("%s:%d says %s: merge and deploy status belongs in %s", relativePath, number+1, phrase, currentDocument))
 				break
 			}
@@ -169,48 +190,52 @@ func findStatusPhrases(relativePath, content string) []string {
 	return problems
 }
 
-// validateADRIndex checks that every ADR is listed in the index and that the
-// index marks proposed and superseded ADRs as their own 状态 line says.
-// Accepted ADRs carry no marker. ADRs without a proposed, accepted or
-// superseded status word are only checked for an index entry.
-func validateADRIndex(root string) []string {
-	index, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(adrIndex)))
-	if err != nil {
+// validateADRIndex checks that every ADR is listed once in the index and that
+// the index marks proposed and superseded ADRs as their own 状态 line says.
+// documents maps the slash-separated paths of the Markdown files in
+// docs/adr to their contents.
+func validateADRIndex(documents map[string]string) []string {
+	index, found := documents[adrIndex]
+	if !found {
 		return nil
 	}
-	markers := map[string]string{}
-	for line := range strings.SplitSeq(string(index), "\n") {
-		if match := adrIndexLink.FindStringSubmatch(line); match != nil {
-			markers[match[1]] = match[2]
-		}
-	}
-
-	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(adrDirectory)))
-	if err != nil {
-		return []string{err.Error()}
-	}
 	var problems []string
-	for _, entry := range entries {
-		if entry.IsDir() || !adrFileName.MatchString(entry.Name()) {
+	markers := map[string]string{}
+	for line := range strings.SplitSeq(index, "\n") {
+		match := adrIndexEntry.FindStringSubmatch(line)
+		if match == nil {
 			continue
 		}
-		name := adrDirectory + "/" + entry.Name()
-		marker, listed := markers[entry.Name()]
+		name := path.Clean(normalizeLinkTarget(match[1]))
+		if strings.Contains(name, "/") || !adrFileName.MatchString(name) {
+			continue
+		}
+		if _, seen := markers[name]; seen {
+			problems = append(problems, fmt.Sprintf("%s lists %s more than once", adrIndex, name))
+			continue
+		}
+		markers[name] = match[2]
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(documents)) {
+		if !adrFileName.MatchString(path.Base(name)) {
+			continue
+		}
+		marker, listed := markers[path.Base(name)]
 		if !listed {
 			problems = append(problems, fmt.Sprintf("%s is not listed in %s", name, adrIndex))
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
-		if err != nil {
-			problems = append(problems, err.Error())
-			continue
-		}
-		match := adrStatusLine.FindSubmatch(data)
+		match := adrStatusLine.FindStringSubmatch(documents[name])
 		if match == nil {
 			continue
 		}
-		status := strings.ToLower(string(match[1]))
-		if !comparableADRStatus[status] {
+		status := strings.ToLower(match[1])
+		if status == "" {
+			problems = append(problems, fmt.Sprintf("%s: start the 状态 line with proposed, accepted or superseded so the index can be checked", name))
+			continue
+		}
+		if !adrStatuses[status] {
 			continue
 		}
 		if indexed := indexedADRStatus(marker); indexed != status {
@@ -220,16 +245,16 @@ func validateADRIndex(root string) []string {
 	return problems
 }
 
+// indexedADRStatus reads the status from the marker after an index link: only
+// a leading proposed or superseded counts, so the marker may still mention
+// other ADRs in prose.
 func indexedADRStatus(marker string) string {
-	marker = strings.ToLower(marker)
-	switch {
-	case strings.Contains(marker, "superseded"):
-		return "superseded"
-	case strings.Contains(marker, "proposed"):
-		return "proposed"
-	default:
-		return "accepted"
+	if match := adrIndexMarker.FindStringSubmatch(marker); match != nil {
+		if word := strings.ToLower(match[1]); word == "proposed" || word == "superseded" {
+			return word
+		}
 	}
+	return "accepted"
 }
 
 func normalizeLinkTarget(raw string) string {
