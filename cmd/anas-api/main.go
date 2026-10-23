@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/aiworker"
 	"github.com/zhongwater123/A-NAS/internal/appid"
@@ -139,6 +141,11 @@ func run(logger *slog.Logger) error {
 	live, stateDirectory, volumeRoot := config.Live(), config.StateDir, config.DataMount
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Background work ends after the server stopped and before the stores it
+	// writes to close: the deferred closes run once run returns.
+	background, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	var tasks errgroup.Group
 	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
 		return err
 	}
@@ -289,6 +296,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeShares()
+	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
@@ -303,7 +311,7 @@ func run(logger *slog.Logger) error {
 		FilePreviews: previewService,
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
-		Assistant:    assistantAPI(config.Assistant, logger, broker, accountService),
+		Assistant:    assistant,
 		SystemLogs:   systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
@@ -319,62 +327,72 @@ func run(logger *slog.Logger) error {
 	server := &http.Server{
 		Addr: config.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
+		// Panics in handlers and TLS or protocol errors are logged as JSON
+		// like everything else.
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	go syncIdentities(ctx, accountService, logger)
-	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
-	// The Host Agent takes scheduled snapshots, so they need no session.
-	schedules := make(chan struct{})
-	go func() {
-		defer close(schedules)
-		fileService.RunSnapshotSchedules(ctx, accountService, logger)
-	}()
-	// Runs before the deferred fileStore.Close: a snapshot that stopping
-	// interrupts is deleted again before the catalog closes.
-	defer func() {
-		stop()
-		<-schedules
-	}()
-	go mediaService.Run(ctx)
-	go transferService.Run(ctx)
+	tasks.Go(func() error { syncIdentities(background, accountService, logger); return nil })
+	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
+	// The Host Agent takes scheduled snapshots, so they need no session. A
+	// snapshot that stopping interrupts is deleted again before the catalog
+	// closes.
+	tasks.Go(func() error { fileService.RunSnapshotSchedules(background, accountService, logger); return nil })
+	tasks.Go(func() error { mediaService.Run(background); return nil })
+	// Its last flush of transfer progress lands before transfers.db closes.
+	tasks.Go(func() error { transferService.Run(background); return nil })
 	if photoService != nil {
-		background := make(chan struct{})
-		go func() {
-			defer close(background)
-			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
-		}()
-		// Runs before the deferred photoService.Close.
-		defer func() {
-			stop()
-			<-background
-		}()
+		tasks.Go(func() error {
+			photoservice.RunBackground(background, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
+			return nil
+		})
 	}
-	listenError := make(chan error, 1)
-	go func() {
+	// The assistant's kept instances record task notices in control.db.
+	tasks.Go(func() error {
+		<-background.Done()
+		assistant.Wait()
+		return nil
+	})
+	listener, err := net.Listen("tcp", config.HTTPAddr)
+	if err == nil {
 		logger.Info("A-NAS API listening", "address", config.HTTPAddr, "version", version, "data_source", dataSource, "terminal", config.TerminalEnabled, "containers", containerManager != nil)
-		listenError <- server.ListenAndServe()
-	}()
+		err = serve(ctx, server, listener, terminals, logger)
+	}
+	stopBackground()
+	_ = tasks.Wait()
+	return err
+}
+
+// shutdownGrace is how long stopping waits for open requests; the unit's
+// TimeoutStopSec leaves room for the background work after it.
+var shutdownGrace = 15 * time.Second
+
+// serve runs server on listener until the process is told to stop or the
+// server fails. Stopping ends the terminal sessions, which hijacked their
+// connections, and waits shutdownGrace for the other requests; connections
+// still open then, such as long media, music or download streams, are closed,
+// which is not a failure.
+func serve(ctx context.Context, server *http.Server, listener net.Listener, terminals *terminal.Handler, logger *slog.Logger) error {
+	listenError := make(chan error, 1)
+	go func() { listenError <- server.Serve(listener) }()
 	select {
 	case err := <-listenError:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
 		return err
 	case <-ctx.Done():
-		logger.Info("A-NAS API shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return err
-		}
-		if err := terminals.Shutdown(shutdownCtx); err != nil {
-			return err
-		}
-		err := <-listenError
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
+	}
+	logger.Info("A-NAS API shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	if err := terminals.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("terminal sessions did not end in time", "error", err)
+	}
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("requests still open when stopping were cut off", "error", err)
+		_ = server.Close()
+	}
+	if err := <-listenError; !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	return nil
 }
 
 // closeAtExit closes what run opened, once the server has stopped. The
@@ -510,9 +528,10 @@ func configuredContainers(config Config) (containers.Manager, appstore.Store, co
 // through the File Broker, the session gate (decision 10), which also
 // executes the assistant's changes; development dials the sockets directly
 // with their tokens and may name the spike's change broker. The account store
-// keeps the notices of the members' scheduled tasks.
-func assistantAPI(config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) http.Handler {
-	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Logger: logger}
+// keeps the notices of the members' scheduled tasks. Its background work ends
+// with background.
+func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) *assistantapi.Handler {
+	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Logger: logger, Context: background}
 	switch {
 	case config.SocketDir == "":
 	case broker != nil:

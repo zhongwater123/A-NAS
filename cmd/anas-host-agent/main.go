@@ -157,6 +157,7 @@ func run(logger *slog.Logger) error {
 			SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 	sessions := accounts.NewSessionDirectory(filepath.Join(config.StateDir, "control.db"))
 	defer func() { _ = sessions.Close() }()

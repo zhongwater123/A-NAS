@@ -148,7 +148,7 @@ func parseHermesTime(value *string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (h *handler) listTasks(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) listTasks(w http.ResponseWriter, r *http.Request, account string) {
 	var jobs []hermesJob
 	if !h.taskCall(w, r, account, http.MethodGet, "/api/cron/jobs", &jobs) {
 		return
@@ -171,7 +171,7 @@ type taskRun struct {
 	MessageCount int      `json:"messageCount"`
 }
 
-func (h *handler) taskRuns(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) taskRuns(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := taskID(w, r)
 	if !ok {
 		return
@@ -200,7 +200,7 @@ func (h *handler) taskRuns(w http.ResponseWriter, r *http.Request, account strin
 }
 
 // changeTask pauses or resumes a task.
-func (h *handler) changeTask(action string) func(http.ResponseWriter, *http.Request, string) {
+func (h *Handler) changeTask(action string) func(http.ResponseWriter, *http.Request, string) {
 	return func(w http.ResponseWriter, r *http.Request, account string) {
 		id, ok := taskID(w, r)
 		if !ok {
@@ -217,7 +217,7 @@ func (h *handler) changeTask(action string) func(http.ResponseWriter, *http.Requ
 // deleteTask deletes a task with its runs: the window shows a run only under
 // its task. Hermes finds a job's runs through the job, so they go first; a run
 // that is still being written stays.
-func (h *handler) deleteTask(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) deleteTask(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := taskID(w, r)
 	if !ok {
 		return
@@ -258,7 +258,7 @@ func (h *handler) deleteTask(w http.ResponseWriter, r *http.Request, account str
 // one-off again. Hermes answers when the run ends, so a run that takes longer
 // than runStartWait is answered as started (202) and goes on; its end shows
 // in the task and as a notice.
-func (h *handler) runTask(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) runTask(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := taskID(w, r)
 	if !ok {
 		return
@@ -302,7 +302,7 @@ func (h *handler) runTask(w http.ResponseWriter, r *http.Request, account string
 
 // taskCall is call with a task's errors: a missing task, or one already
 // running.
-func (h *handler) taskCall(w http.ResponseWriter, r *http.Request, account, method, path string, into any) bool {
+func (h *Handler) taskCall(w http.ResponseWriter, r *http.Request, account, method, path string, into any) bool {
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 	status, data, err := h.rest(ctx, account, method, path, nil)
@@ -325,7 +325,7 @@ func (h *handler) taskCall(w http.ResponseWriter, r *http.Request, account, meth
 	return true
 }
 
-func (h *handler) relayTaskError(w http.ResponseWriter, status int, detail []byte) {
+func (h *Handler) relayTaskError(w http.ResponseWriter, status int, detail []byte) {
 	switch status {
 	case http.StatusNotFound:
 		httpjson.WriteError(w, http.StatusNotFound, "task_not_found", "no such task")

@@ -60,6 +60,11 @@ type Options struct {
 	// member is not told of them.
 	Notices TaskNotices
 	Logger  *slog.Logger
+	// Context ends what the API runs in the background: the instances kept
+	// for signed-in members, the watch over their scheduled tasks, and the
+	// gateway connections. Wait returns once the first two stopped. Without
+	// it they last as long as the process.
+	Context context.Context
 }
 
 type userKey struct{}
@@ -69,20 +74,23 @@ func WithUser(ctx context.Context, user accounts.User) context.Context {
 	return context.WithValue(ctx, userKey{}, user)
 }
 
-type handler struct {
-	options   Options
-	logger    *slog.Logger
-	mux       *http.ServeMux
-	ctx       context.Context
-	membersMu sync.Mutex
-	members   map[string]*member
+// Handler is the assistant API.
+type Handler struct {
+	options Options
+	logger  *slog.Logger
+	mux     *http.ServeMux
+	ctx     context.Context
+	// background runs the kept instances and the watch over their tasks.
+	background sync.WaitGroup
+	membersMu  sync.Mutex
+	members    map[string]*member
 	// keeps holds the instances kept running for signed-in members, by account.
 	keepsMu sync.Mutex
 	keeps   map[string]*keep
 }
 
 // New returns the assistant API.
-func New(options Options) http.Handler {
+func New(options Options) *Handler {
 	logger := options.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -90,7 +98,11 @@ func New(options Options) http.Handler {
 	if options.Changes == nil {
 		options.Changes = noChanges{}
 	}
-	h := &handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: context.Background(), members: map[string]*member{}, keeps: map[string]*keep{}}
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h := &Handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: ctx, members: map[string]*member{}, keeps: map[string]*keep{}}
 	routes := map[string]func(http.ResponseWriter, *http.Request, string){
 		"GET /status":                  h.status,
 		"GET /ws":                      h.gateway,
@@ -123,7 +135,11 @@ func New(options Options) http.Handler {
 	return h
 }
 
-func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// Wait returns once the background work stopped after Options.Context
+// ended. Call it only when no more requests can arrive.
+func (h *Handler) Wait() { h.background.Wait() }
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if h.options.Connector == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "assistant_unavailable", "the assistant is not enabled on this device")
@@ -132,7 +148,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 
-func (h *handler) withAccount(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+func (h *Handler) withAccount(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(userKey{}).(accounts.User)
 		if !ok || user.ID == "" {
@@ -147,7 +163,7 @@ func (h *handler) withAccount(next func(http.ResponseWriter, *http.Request, stri
 	}
 }
 
-func (h *handler) status(w http.ResponseWriter, _ *http.Request, account string) {
+func (h *Handler) status(w http.ResponseWriter, _ *http.Request, account string) {
 	available := true
 	if h.options.SocketDir != "" {
 		_, err := os.Stat(filepath.Join(h.options.SocketDir, account+".sock"))
@@ -202,7 +218,7 @@ func (s hermesSession) view() session {
 	return view
 }
 
-func (h *handler) listSessions(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request, account string) {
 	var page struct {
 		Sessions []hermesSession `json:"sessions"`
 	}
@@ -223,7 +239,7 @@ func (h *handler) listSessions(w http.ResponseWriter, r *http.Request, account s
 	httpjson.Write(w, http.StatusOK, map[string]any{"sessions": sessions})
 }
 
-func (h *handler) renameSession(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) renameSession(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := sessionID(w, r)
 	if !ok {
 		return
@@ -249,7 +265,7 @@ func (h *handler) renameSession(w http.ResponseWriter, r *http.Request, account 
 	httpjson.Write(w, http.StatusOK, map[string]any{"id": id, "title": updated.Title})
 }
 
-func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := sessionID(w, r)
 	if !ok {
 		return
@@ -261,7 +277,7 @@ func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request, account 
 
 // messages returns the transcript in Hermes's own message form, which the
 // desktop turns into chat messages with Hermes Desktop's transcript model.
-func (h *handler) messages(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) messages(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := sessionID(w, r)
 	if !ok {
 		return
@@ -278,11 +294,11 @@ func (h *handler) messages(w http.ResponseWriter, r *http.Request, account strin
 	httpjson.Write(w, http.StatusOK, map[string]any{"messages": page.Messages})
 }
 
-func (h *handler) listApprovals(w http.ResponseWriter, _ *http.Request, account string) {
+func (h *Handler) listApprovals(w http.ResponseWriter, _ *http.Request, account string) {
 	httpjson.Write(w, http.StatusOK, map[string]any{"approvals": h.member(account).list()})
 }
 
-func (h *handler) decideApproval(confirm bool) func(http.ResponseWriter, *http.Request, string) {
+func (h *Handler) decideApproval(confirm bool) func(http.ResponseWriter, *http.Request, string) {
 	return func(w http.ResponseWriter, r *http.Request, account string) {
 		id := r.PathValue("id")
 		if !requestIDPattern.MatchString(id) {
@@ -304,7 +320,7 @@ func (h *handler) decideApproval(confirm bool) func(http.ResponseWriter, *http.R
 }
 
 // answerApproval answers a question card; no answers skips the questions.
-func (h *handler) answerApproval(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) answerApproval(w http.ResponseWriter, r *http.Request, account string) {
 	id := r.PathValue("id")
 	if !requestIDPattern.MatchString(id) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_approval", "invalid approval id")
@@ -324,7 +340,7 @@ func (h *handler) answerApproval(w http.ResponseWriter, r *http.Request, account
 }
 
 // decided answers a decision on a card.
-func (h *handler) decided(w http.ResponseWriter, account string, c card, err error) {
+func (h *Handler) decided(w http.ResponseWriter, account string, c card, err error) {
 	switch {
 	case errors.Is(err, ErrChangeNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "approval_not_found", "no such approval")
@@ -347,7 +363,7 @@ func (h *handler) decided(w http.ResponseWriter, account string, c card, err err
 
 // call makes a JSON request to the account's instance and decodes the reply
 // into into (when not nil). On failure it has already answered the client.
-func (h *handler) call(w http.ResponseWriter, r *http.Request, account, method, path string, body []byte, into any) bool {
+func (h *Handler) call(w http.ResponseWriter, r *http.Request, account, method, path string, body []byte, into any) bool {
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 	status, data, err := h.rest(ctx, account, method, path, body)
@@ -370,7 +386,7 @@ func (h *handler) call(w http.ResponseWriter, r *http.Request, account, method, 
 	return true
 }
 
-func (h *handler) unavailable(w http.ResponseWriter, account string, err error) {
+func (h *Handler) unavailable(w http.ResponseWriter, account string, err error) {
 	if errors.Is(err, ErrSessionRejected) {
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 		return
@@ -382,7 +398,7 @@ func (h *handler) unavailable(w http.ResponseWriter, account string, err error) 
 }
 
 // relayError turns an instance error into ours; a missing session stays 404.
-func (h *handler) relayError(w http.ResponseWriter, status int, detail []byte) {
+func (h *Handler) relayError(w http.ResponseWriter, status int, detail []byte) {
 	var failure struct {
 		Detail string `json:"detail"`
 	}

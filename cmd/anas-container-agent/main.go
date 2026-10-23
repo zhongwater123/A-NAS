@@ -92,6 +92,7 @@ func run(logger *slog.Logger) error {
 		// Stop and restart wait up to ten seconds for the container to exit.
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  30 * time.Second,
+		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

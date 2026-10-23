@@ -51,7 +51,7 @@ type learned struct {
 }
 
 // learning reads the member's learning graph.
-func (h *handler) learning(ctx context.Context, account string) (learned, error) {
+func (h *Handler) learning(ctx context.Context, account string) (learned, error) {
 	status, data, err := h.rest(ctx, account, http.MethodGet, "/api/learning/graph", nil)
 	if err != nil {
 		return learned{}, err
@@ -115,7 +115,7 @@ func (l learned) has(id string) bool {
 	return false
 }
 
-func (h *handler) getMemory(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) getMemory(w http.ResponseWriter, r *http.Request, account string) {
 	result, err := h.learning(r.Context(), account)
 	if err != nil {
 		h.unavailable(w, account, err)
@@ -125,7 +125,7 @@ func (h *handler) getMemory(w http.ResponseWriter, r *http.Request, account stri
 }
 
 // memoryID reads the path's id and checks that it is in the member's graph now.
-func (h *handler) memoryID(w http.ResponseWriter, r *http.Request, account string) (string, bool) {
+func (h *Handler) memoryID(w http.ResponseWriter, r *http.Request, account string) (string, bool) {
 	id := r.PathValue("id")
 	if !memoryIDPattern.MatchString(id) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_memory", "invalid memory id")
@@ -143,7 +143,7 @@ func (h *handler) memoryID(w http.ResponseWriter, r *http.Request, account strin
 	return id, true
 }
 
-func (h *handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := h.memoryID(w, r, account)
 	if !ok {
 		return
@@ -158,7 +158,7 @@ func (h *handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account 
 	httpjson.Write(w, http.StatusOK, map[string]string{"id": id, "kind": detail.Kind, "content": detail.Content})
 }
 
-func (h *handler) deleteMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) deleteMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := h.memoryID(w, r, account)
 	if !ok {
 		return
@@ -177,7 +177,7 @@ var errMemoryChanged = errors.New("the learning graph changed")
 
 // forget deletes one node. Hermes removes a memory inside the memory tool's own
 // lock, finding it again by its text, and moves a skill into its archive.
-func (h *handler) forget(ctx context.Context, account, id string) error {
+func (h *Handler) forget(ctx context.Context, account, id string) error {
 	payload, _ := json.Marshal(map[string]string{"id": id})
 	status, data, err := h.rest(ctx, account, http.MethodDelete, "/api/learning/node", payload)
 	if err != nil {
@@ -195,7 +195,7 @@ func (h *handler) forget(ctx context.Context, account, id string) error {
 // clearMemory forgets everything in the graph and, when asked, deletes every
 // conversation too: only then is it gone for good, since a conversation keeps
 // the memory it started with and the assistant can search earlier ones.
-func (h *handler) clearMemory(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) clearMemory(w http.ResponseWriter, r *http.Request, account string) {
 	var body struct {
 		Conversations bool `json:"conversations"`
 	}
@@ -240,7 +240,7 @@ func (h *handler) clearMemory(w http.ResponseWriter, r *http.Request, account st
 
 // deleteConversations deletes every stored conversation; one with a turn
 // running is left and counted as busy.
-func (h *handler) deleteConversations(ctx context.Context, account string) (int, int, error) {
+func (h *Handler) deleteConversations(ctx context.Context, account string) (int, int, error) {
 	var ids []string
 	for offset := 0; ; offset += sessionLimit {
 		query := url.Values{"limit": {fmt.Sprint(sessionLimit)}, "offset": {fmt.Sprint(offset)}, "archived": {"include"}}
