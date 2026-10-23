@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import { device as taskManagerDevice, tasks as taskManagerTasks } from "./taskmanager/testData";
 import type { SessionStatus } from "./terminal";
 import { transferStore } from "./transfers/store";
 
@@ -63,12 +64,6 @@ vi.mock("./XtermSession", async () => {
     },
   };
 });
-
-// The task manager has its own tests with full device samples; here only the
-// way into it matters.
-vi.mock("./taskmanager/TaskManagerSection", () => ({
-  TaskManagerSection: () => <div data-testid="task-manager" />,
-}));
 
 const session = {
   csrfToken: "csrf-test",
@@ -1117,7 +1112,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByRole("dialog", { name: "传输中心" })).toBeTruthy();
   });
 
-  it("opens the task manager from the utilisation gauges, also when settings shows another section", async () => {
+  it("opens the task manager from the utilisation gauges and brings settings in front on another section", async () => {
     stubFetch(healthyState);
     const user = userEvent.setup();
     render(<App />);
@@ -1132,13 +1127,20 @@ describe("A-NAS v1.0.1 desktop", () => {
     const settings = await screen.findByRole("dialog", { name: "设置" });
     const section = (name: string) => within(settings).getByRole("button", { name });
     expect(section("任务管理器").getAttribute("aria-current")).toBe("page");
-    expect(within(settings).getByTestId("task-manager")).toBeTruthy();
+    expect(await within(settings).findByRole("img", { name: /CPU 使用率，最近/ })).toBeTruthy();
 
     await user.click(section("概览"));
-    expect(within(settings).queryByTestId("task-manager")).toBeNull();
+    expect(within(settings).queryByRole("heading", { name: "任务管理器" })).toBeNull();
+    await user.click(
+      within(screen.getByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开回收站" }),
+    );
+    const dock = screen.getByRole("navigation", { name: "已打开窗口" });
+    expect(within(dock).getByRole("button", { name: "最小化回收站" }).getAttribute("aria-current")).toBe("true");
+
     await user.click(gauges);
+    expect(within(dock).getByRole("button", { name: "最小化设置" }).getAttribute("aria-current")).toBe("true");
     expect(section("任务管理器").getAttribute("aria-current")).toBe("page");
-    expect(within(settings).getByTestId("task-manager")).toBeTruthy();
+    expect(await within(settings).findByRole("img", { name: /CPU 使用率，最近/ })).toBeTruthy();
   });
 
   it("restores minimized settings on the task manager when the gauges are activated from the keyboard", async () => {
@@ -1175,7 +1177,7 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     const statusBar = screen.getByRole("banner", { name: "设备状态" });
     await user.click(within(statusBar).getByRole("button", { name: "CPU 与内存占用，打开任务管理器" }));
-    expect(within(settings).getByTestId("task-manager")).toBeTruthy();
+    expect(within(settings).getByRole("heading", { name: "任务管理器" })).toBeTruthy();
 
     settings = await openAccount();
     expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
@@ -1913,6 +1915,8 @@ function installAPI(
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
     if (path === "/api/v1/host-state") return ok(options.hostState ?? healthyState);
     if (path === "/api/v1/metrics") return ok(metricsState);
+    if (path === "/api/v1/task-manager/device") return ok(taskManagerDevice);
+    if (path === "/api/v1/task-manager/tasks") return ok(taskManagerTasks);
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
@@ -2055,6 +2059,10 @@ function routeFetch(routes: {
           return routes.metrics ? routes.metrics() : okResponse(metricsState);
         case "/api/v1/terminal":
           return okResponse({ enabled: routes.terminalEnabled ?? true });
+        case "/api/v1/task-manager/device":
+          return okResponse(taskManagerDevice);
+        case "/api/v1/task-manager/tasks":
+          return okResponse(taskManagerTasks);
         default:
           return okResponse({ items: [] });
       }
@@ -2914,6 +2922,10 @@ describe("Settings", () => {
     await user.click(within(settings).getByRole("button", { name: "修改我的密码" }));
     expect(within(settings).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
     expect(within(settings).getByRole("form", { name: "修改密码" })).toBeTruthy();
+    // The request opens the form once; coming back to My account later does not.
+    await user.click(within(settings).getByRole("button", { name: "概览" }));
+    await user.click(within(settings).getByRole("button", { name: "我的账号" }));
+    expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
     prompt.mockRestore();
   });
 
