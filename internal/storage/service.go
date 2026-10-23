@@ -325,15 +325,20 @@ func OpenService(reader hoststate.Reader, executor VolumeExecutor, options Optio
 		return nil, err
 	}
 	// The Host Agent went on with a plan that ran when the service stopped.
+	// The running plans are listed first: a follower writes s.plans as soon
+	// as it starts, so the map is not ranged over once one runs.
+	var running []string
 	for _, plan := range service.plans {
-		if plan.State != PlanStateRunning {
-			continue
+		if plan.State == PlanStateRunning {
+			running = append(running, plan.ID)
 		}
+	}
+	for _, planID := range running {
 		if executor == nil {
-			_, _ = service.needsAttention(plan.ID, errors.New("volume executor is unavailable"))
+			_, _ = service.needsAttention(planID, errors.New("volume executor is unavailable"))
 			continue
 		}
-		service.follow(plan.ID)
+		service.follow(planID)
 	}
 	return service, nil
 }

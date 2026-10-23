@@ -119,7 +119,7 @@ func TestSessionSurvivesServerTimeouts(t *testing.T) {
 		WriteTimeout: 200 * time.Millisecond,
 	}
 	go func() { _ = server.Serve(listener) }()
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	conn, _, err := websocket.Dial(context.Background(), "ws://"+listener.Addr().String()+terminal.SessionPath, nil)
 	if err != nil {

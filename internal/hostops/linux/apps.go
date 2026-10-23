@@ -170,7 +170,7 @@ func (e *Executor) makeFolder(ctx context.Context, path string, mode uint32, own
 	if err != nil {
 		return err
 	}
-	defer folder.Close()
+	defer func() { _ = folder.Close() }()
 	if owner == "" {
 		return nil
 	}

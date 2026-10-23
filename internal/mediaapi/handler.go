@@ -320,7 +320,7 @@ func (h *handler) original(w http.ResponseWriter, r *http.Request, user accounts
 		h.fail(w, r, err)
 		return
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": content.Name}))
 	http.ServeContent(w, r, content.Name, content.ModifiedAt, content.Reader)
@@ -582,7 +582,7 @@ func (h *handler) artwork(w http.ResponseWriter, r *http.Request, user accounts.
 		h.fail(w, r, err)
 		return
 	}
-	defer image.File.Close()
+	defer func() { _ = image.File.Close() }()
 	// The URL carries the artwork version, so the browser may keep it.
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Header().Set("Content-Type", "image/jpeg")

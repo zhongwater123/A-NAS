@@ -90,7 +90,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	if err != nil {
 		return Image{}, err
 	}
-	content.Reader.Close()
+	_ = content.Reader.Close()
 	if hit, ok := s.lookup(key); ok {
 		return hit, nil
 	}
@@ -108,7 +108,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	if err != nil {
 		return Image{}, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if hit, ok := s.lookup(key); ok {
 		return hit, nil
 	}
@@ -172,7 +172,7 @@ func (s *Service) open(ctx context.Context, actor accounts.User, id string, size
 		}
 	}
 	if err != nil {
-		content.Reader.Close()
+		_ = content.Reader.Close()
 		return files.Content{}, "", "", err
 	}
 	return content, key, format, nil

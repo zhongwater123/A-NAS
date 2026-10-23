@@ -44,7 +44,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer manager.Close()
+	defer func() { _ = manager.Close() }()
 
 	apps, err := configuredAppStore()
 	if err != nil {

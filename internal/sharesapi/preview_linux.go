@@ -18,7 +18,7 @@ func anonymousInput(reader io.Reader) (*os.File, error) {
 		return nil, err
 	}
 	file := os.NewFile(uintptr(fd), "share-preview")
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	n, err := io.Copy(file, reader)
 	if err != nil {
 		return nil, err

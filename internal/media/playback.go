@@ -387,7 +387,7 @@ func (s *Service) externalSubtitle(ctx context.Context, actor accounts.User, vid
 	if err != nil {
 		return nil, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if content.SizeBytes > maxSubtitle {
 		return nil, ErrInvalid
 	}
@@ -420,7 +420,7 @@ func (s *Service) embeddedSubtitle(ctx context.Context, actor accounts.User, vid
 	if err != nil {
 		return nil, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	// Extracting a track reads the whole file.
 	jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()

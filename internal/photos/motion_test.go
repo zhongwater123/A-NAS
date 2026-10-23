@@ -46,7 +46,7 @@ func motionService(t *testing.T, probe mediaworker.Probe) (*photos.Service, stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s, root
 }
 func TestLivePhotoLifecycleAndAIQueue(t *testing.T) {
@@ -78,7 +78,7 @@ func TestLivePhotoLifecycleAndAIQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var videoJobs int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM jobs j JOIN objects o ON o.id=j.object_id WHERE o.media_type LIKE 'video/%'`).Scan(&videoJobs); err != nil || videoJobs != 0 {
 		t.Fatalf("video reached AI: %d %v", videoJobs, err)
@@ -94,7 +94,7 @@ func TestLivePhotoLifecycleAndAIQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := io.ReadAll(content.Reader)
-	content.Reader.Close()
+	_ = content.Reader.Close()
 	if !bytes.Equal(got, clip) {
 		t.Fatal("copy lost original movie")
 	}
@@ -172,7 +172,7 @@ func TestAndroidMotionPhotoFormats(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ := io.ReadAll(original.Reader)
-			original.Reader.Close()
+			_ = original.Reader.Close()
 			if !bytes.Equal(data, got) {
 				t.Fatal("Android original changed")
 			}
@@ -181,7 +181,7 @@ func TestAndroidMotionPhotoFormats(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ = io.ReadAll(movie.Reader)
-			movie.Reader.Close()
+			_ = movie.Reader.Close()
 			if !bytes.Equal(clip, got) {
 				t.Fatal("wrong video extraction")
 			}

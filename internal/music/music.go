@@ -293,7 +293,7 @@ func (s *Service) Decode(ctx context.Context, actor accounts.User, id string, st
 	}
 	// The worker receives its own descriptor; this one closes once the
 	// request is sent.
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	stream, err := s.worker.Audio(ctx, content.Reader, playbackRequest(value.SampleRate, value.BitDepth, start))
 	return stream, decoderError(err)
 }
@@ -343,7 +343,7 @@ func (s *Service) Lyrics(ctx context.Context, actor accounts.User, id string) (s
 	if value.LyricsFile != "" {
 		content, err := s.files.OpenContent(ctx, actor, value.LyricsFile)
 		if err == nil {
-			defer content.Reader.Close()
+			defer func() { _ = content.Reader.Close() }()
 			raw, err := io.ReadAll(io.LimitReader(content.Reader, maxLyricsBytes))
 			if err != nil {
 				return "", err
@@ -361,7 +361,7 @@ func (s *Service) Lyrics(ctx context.Context, actor accounts.User, id string) (s
 	if err != nil {
 		return "", err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	lyrics := readLyrics(content.Reader)
 	if lyrics == "" {
 		return "", ErrNotFound

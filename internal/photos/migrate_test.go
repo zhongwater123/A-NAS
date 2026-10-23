@@ -34,7 +34,7 @@ func TestMigrationFromFirstSchemaQueuesThumbnails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	var version, jobs int
 	if err := service.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
 		t.Fatalf("user_version = %d, %v; want %d", version, err, len(migrations))
@@ -75,7 +75,7 @@ func TestMigrationQueuesVectorsForExistingThumbnails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	var derivation string
 	if err := service.db.QueryRowContext(ctx, "SELECT derivation FROM jobs WHERE object_id = ?", zeroObjectID).Scan(&derivation); err != nil || derivation != embeddingDerivation {
 		t.Fatalf("queued job = %q, %v; want %s", derivation, err, embeddingDerivation)
@@ -107,7 +107,7 @@ func TestMigrationQueuesDetectionsAndFaceScansForExistingThumbnails(t *testing.T
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	var queued string
 	err = service.db.QueryRowContext(ctx,
 		"SELECT group_concat(derivation, ' ') FROM (SELECT derivation FROM jobs WHERE object_id = ? ORDER BY derivation)",

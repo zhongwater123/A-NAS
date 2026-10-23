@@ -54,7 +54,7 @@ func TestRealVideoCodecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	private, _ := libraries(t, service, alice)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -95,7 +95,7 @@ func TestRealVideoCodecs(t *testing.T) {
 					t.Fatalf("thumbnail or poster: %v", err)
 				}
 				config, _, err := image.DecodeConfig(content.Reader)
-				content.Reader.Close()
+				_ = content.Reader.Close()
 				if err != nil || (config.Width > config.Height) != (wantWidth > wantHeight) {
 					t.Fatalf("thumbnail or poster %dx%d, %v; want it upright", config.Width, config.Height, err)
 				}

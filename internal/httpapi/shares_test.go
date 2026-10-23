@@ -17,7 +17,7 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	users := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	owner, err := users.SetupAdministrator(context.Background(), "owner", "correct horse battery staple")
 	if err != nil {

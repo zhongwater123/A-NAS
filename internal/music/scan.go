@@ -396,7 +396,7 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 	if err != nil {
 		return row{}, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	format := formatOf(entry.Name)
 	var tags metadata
 	if tagFormats[format] {

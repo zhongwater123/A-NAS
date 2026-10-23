@@ -49,7 +49,7 @@ func TestImportPersistsOriginalAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	stored, err := io.ReadAll(content.Reader)
 	if err != nil || !bytes.Equal(stored, original) || content.MediaType != "image/jpeg" || content.Name != "IMG_0001.JPG" {
 		t.Fatalf("Open() content mismatch: err=%v name=%q type=%q", err, content.Name, content.MediaType)

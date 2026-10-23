@@ -40,7 +40,7 @@ func (s *Service) View(ctx context.Context, p Principal, assetID string) (Conten
 	if err != nil {
 		return Content{}, err
 	}
-	defer original.Close()
+	defer func() { _ = original.Close() }()
 	data, _, _, err := s.renderPhoto(ctx, original, record.orientation, viewEdge, viewQuality)
 	if err != nil {
 		return Content{}, err

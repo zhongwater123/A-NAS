@@ -146,10 +146,10 @@ func (s *Store) Recover() error {
 func (s *Store) resume(ctx context.Context, job *appstore.Job, output io.Writer) error {
 	down := takeDown(job.AppID)
 	if job.Action == appstore.JobUninstall {
-		fmt.Fprintln(output, "容器代理重启时卸载没有完成，继续卸载")
+		_, _ = fmt.Fprintln(output, "容器代理重启时卸载没有完成，继续卸载")
 		return s.runner.Run(ctx, down, output)
 	}
-	fmt.Fprintln(output, "容器代理重启时安装没有完成，正在删除它创建的容器")
+	_, _ = fmt.Fprintln(output, "容器代理重启时安装没有完成，正在删除它创建的容器")
 	if err := s.runner.Run(ctx, down, output); err != nil {
 		return fmt.Errorf("%w; the install could not be rolled back: %v", errInterrupted, err)
 	}

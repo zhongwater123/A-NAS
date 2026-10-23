@@ -70,13 +70,13 @@ func (s *Service) Preview(ctx context.Context, p Principal, id string) (Content,
 		return Content{}, err
 	}
 	if record.Video != nil {
-		defer original.Reader.Close()
+		defer func() { _ = original.Reader.Close() }()
 		return s.poster(ctx, record, original.Reader)
 	}
 	if record.MediaType != "image/heic" {
 		return original, nil
 	}
-	defer original.Reader.Close()
+	defer func() { _ = original.Reader.Close() }()
 	data, _, _, err := s.renderPhoto(ctx, original.Reader, 1, 1600, 92)
 	if err != nil {
 		return Content{}, err

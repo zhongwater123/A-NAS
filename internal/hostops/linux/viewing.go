@@ -217,7 +217,7 @@ func applyViewerTree(root string, uid uint32, grant bool) error {
 // and closes fd.
 func applyViewerDirectory(fd int, uid uint32, grant bool) error {
 	directory := os.NewFile(uintptr(fd), "")
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	if err := updateViewerACL(fd, uid, grant, true); err != nil {
 		return err
 	}

@@ -38,7 +38,7 @@ func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	h := photosapi.New(service, nil)
 	c := client{t: t, handler: h, as: alice}
 	private, _ := librariesOf(c)
@@ -49,10 +49,10 @@ func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
 	binary.BigEndian.PutUint32(movie, 24)
 	copy(movie[4:], "ftypqt  ")
 	part, _ := writer.CreateFormFile("file", "live.png")
-	part.Write(photo)
+	_, _ = part.Write(photo)
 	part, _ = writer.CreateFormFile("motion", "live.MOV")
-	part.Write(movie)
-	writer.Close()
+	_, _ = part.Write(movie)
+	_ = writer.Close()
 	result := c.do(http.MethodPost, "/api/v1/photos/libraries/"+private.ID+"/live-photos", body.Bytes(), writer.FormDataContentType())
 	if result.Code != 201 {
 		t.Fatalf("upload: %d %s", result.Code, result.Body.String())
@@ -100,7 +100,7 @@ func TestLiveVideoAloneNeedsItsAppleIdentifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	c := client{t: t, handler: photosapi.New(service, nil), as: alice}
 	private, _ := librariesOf(c)
 	send := func(name string) *httptest.ResponseRecorder {
@@ -111,9 +111,9 @@ func TestLiveVideoAloneNeedsItsAppleIdentifier(t *testing.T) {
 			movie := make([]byte, 64)
 			binary.BigEndian.PutUint32(movie, 24)
 			copy(movie[4:], "ftypqt  ")
-			part.Write(movie)
+			_, _ = part.Write(movie)
 		}
-		writer.Close()
+		_ = writer.Close()
 		return c.do(http.MethodPost, "/api/v1/photos/libraries/"+private.ID+"/live-videos", body.Bytes(), writer.FormDataContentType())
 	}
 	// The stand-in decoder reports no Apple identifier: nothing to match.

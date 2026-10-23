@@ -51,7 +51,7 @@ func TestHEIFUsesPrimaryPropertiesAndDisplayRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	file, _ := os.Open(path)
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	w, h, err := heifDimensions(file)
 	if err != nil || w != 3000 || h != 4000 {
 		t.Fatalf("dimensions %dx%d %v", w, h, err)

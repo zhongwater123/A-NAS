@@ -119,7 +119,7 @@ func (s *Service) openAIInput(ctx context.Context, job claimedJob) (file *os.Fil
 	if err != nil {
 		return nil, "", err
 	}
-	defer original.Close()
+	defer func() { _ = original.Close() }()
 	content, _, _, err := s.renderPhoto(mediaworker.WithPriority(ctx, mediaworker.Background), original, job.orientation, aiInputEdge, aiInputQuality)
 	if err != nil {
 		return nil, decodeFailure(err), nil

@@ -290,7 +290,7 @@ func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []by
 	if err != nil {
 		return nil, 0, 0, jobErrorIO
 	}
-	defer original.Close()
+	defer func() { _ = original.Close() }()
 	ctx = mediaworker.WithPriority(ctx, mediaworker.Background)
 	if job.video {
 		thumbnail, width, height, err = s.renderVideoFrame(ctx, original, job.duration, thumbnailEdge, thumbnailQuality)

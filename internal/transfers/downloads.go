@@ -122,7 +122,7 @@ func (s *Service) serveFile(ctx context.Context, w *countingWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if info, err := content.Reader.Stat(); err == nil {
 		s.mu.Lock()
 		live.transfer.TotalBytes = info.Size()

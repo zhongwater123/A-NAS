@@ -147,7 +147,7 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenContent() error = %v", err)
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	gotContents, err := io.ReadAll(content.Reader)
 	if err != nil {
 		t.Fatalf("read restored content: %v", err)
@@ -452,7 +452,7 @@ func TestCutAndCopyBetweenSpaces(t *testing.T) {
 		if err != nil {
 			t.Fatalf("OpenContent(%s) error = %v", id, err)
 		}
-		defer content.Reader.Close()
+		defer func() { _ = content.Reader.Close() }()
 		data, _ := io.ReadAll(content.Reader)
 		return string(data)
 	}

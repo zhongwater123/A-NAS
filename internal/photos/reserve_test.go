@@ -16,7 +16,7 @@ func TestImportIntoAFullVolumeLeavesNothingBehind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	alice := Principal{UserID: "user:alice", Username: "alice"}
 	libraries, err := service.Libraries(ctx, alice)
 	if err != nil {

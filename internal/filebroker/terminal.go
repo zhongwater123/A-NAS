@@ -102,7 +102,7 @@ func (s *Server) startShell(identity accounts.Identity, cols, rows uint16) (*exe
 	if err != nil {
 		return nil, nil, err
 	}
-	defer slave.Close()
+	defer func() { _ = slave.Close() }()
 	if !s.config.skipCredentials {
 		// Like login(1): the user owns their terminal, the tty group may write.
 		if err := slave.Chown(identity.UID, ttyGroup()); err != nil {
@@ -142,7 +142,7 @@ func (s *Server) startShell(identity accounts.Identity, cols, rows uint16) (*exe
 			_ = master.Close()
 			return nil, nil, err
 		}
-		defer wait.Close()
+		defer func() { _ = wait.Close() }()
 		cmd = gateShell(s.executable, cmd, wait)
 	}
 	if err := cmd.Start(); err != nil {

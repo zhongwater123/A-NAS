@@ -227,7 +227,7 @@ VALUES(?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	defer insert.Close()
+	defer func() { _ = insert.Close() }()
 	// Only folders are parents, so only their entry IDs are remembered.
 	folderIDs := map[string]string{"": ""}
 	for _, object := range objects {
@@ -924,7 +924,7 @@ func copyRegularFile(source, destination string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err

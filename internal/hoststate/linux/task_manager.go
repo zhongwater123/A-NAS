@@ -51,7 +51,7 @@ func readTaskFile(root fs.FS, name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, taskReadLimit+1))
 	if err != nil {
 		return nil, err
@@ -66,7 +66,7 @@ func taskDirectories(root fs.FS, name string, limit int) ([]fs.DirEntry, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	dir, ok := file.(fs.ReadDirFile)
 	if !ok {
 		return nil, false, errors.New("directory cannot be enumerated")

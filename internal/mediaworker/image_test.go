@@ -67,7 +67,7 @@ func TestRealHEIF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	if err := os.Chmod(target, 0); err != nil {
 		t.Fatal(err)
 	}

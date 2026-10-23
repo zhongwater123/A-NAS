@@ -90,7 +90,7 @@ func TestRootPermissionMatrix(t *testing.T) {
 		if err != nil {
 			return outcome{err.Error(), false}
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		contents, err := io.ReadAll(file)
 		return outcome{string(contents), err == nil}
 	}

@@ -124,7 +124,7 @@ func (s *Service) processVideo(ctx context.Context, actor accounts.User, video p
 		}
 		return err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	duration := video.duration
 	if video.probe == "pending" {
 		info, err := s.processor.Probe(ctx, content.Reader)
@@ -212,13 +212,20 @@ func (s *Service) dropFrames(ids []string) {
 	}
 }
 
+// writeAtomically puts data at target through a synced temporary file. A
+// cached file that exists is served as it is, so a crash must never leave an
+// empty one behind under its final name.
 func writeAtomically(target string, data []byte) error {
 	temporary, err := os.CreateTemp(filepath.Dir(target), ".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() { _ = os.Remove(temporary.Name()) }()
 	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
 		return err
 	}

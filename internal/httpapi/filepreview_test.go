@@ -35,7 +35,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	owner, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
@@ -48,7 +48,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileStore.Close()
+	defer func() { _ = fileStore.Close() }()
 	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	spaces, err := accountService.ListSpaces(ctx, owner)
 	if err != nil {

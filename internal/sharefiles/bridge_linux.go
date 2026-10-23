@@ -93,7 +93,7 @@ func readWire(conn *net.UnixConn, value any) (*os.File, error) {
 		fds, e := syscall.ParseUnixRights(&control)
 		if e != nil {
 			if file != nil {
-				file.Close()
+				_ = file.Close()
 			}
 			return nil, e
 		}
@@ -108,7 +108,7 @@ func readWire(conn *net.UnixConn, value any) (*os.File, error) {
 	}
 	fail := func(err error) (*os.File, error) {
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		return nil, err
 	}
@@ -220,14 +220,14 @@ func Serve(parent context.Context, socket string, local *Local) (func(), error) 
 		err = os.Chmod(socket, 0660)
 	}
 	if err != nil {
-		listener.Close()
+		_ = listener.Close()
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
 	var wg sync.WaitGroup
 	accepted := make(chan struct{})
 	slots := make(chan struct{}, 32)
-	stop := context.AfterFunc(ctx, func() { listener.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	go func() {
 		defer close(accepted)
 		for {
@@ -256,7 +256,7 @@ func Serve(parent context.Context, socket string, local *Local) (func(), error) 
 		once.Do(func() {
 			cancel()
 			stop()
-			listener.Close()
+			_ = listener.Close()
 			<-accepted
 			_, _ = local.Reset(context.Background())
 			wg.Wait()
@@ -268,7 +268,7 @@ func serveConnection(ctx context.Context, conn *net.UnixConn, local *Local) {
 	var req wireRequest
 	inbound, err := readWire(conn, &req)
 	if inbound != nil {
-		inbound.Close()
+		_ = inbound.Close()
 		err = shares.ErrInvalid
 	}
 	if err != nil {
@@ -334,7 +334,7 @@ func serveConnection(ctx context.Context, conn *net.UnixConn, local *Local) {
 		}
 	}
 	if descriptor != nil {
-		defer descriptor.Close()
+		defer func() { _ = descriptor.Close() }()
 	}
 	resp.Code = wireError(err)
 	_ = writeWire(conn, resp, descriptor)
@@ -346,7 +346,7 @@ func NewRemote(ctx context.Context, socket string) (*Remote, error) {
 	r := &Remote{socket: socket}
 	resp, f, err := r.call(ctx, wireRequest{Op: "reset"}, nil)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if err != nil {
 		return nil, err
@@ -386,7 +386,7 @@ func (r *Remote) call(ctx context.Context, req wireRequest, body io.Reader) (wir
 		err = responseError(resp.Code)
 	}
 	if err != nil && f != nil {
-		f.Close()
+		_ = f.Close()
 		f = nil
 	}
 	return resp, f, err
@@ -394,7 +394,7 @@ func (r *Remote) call(ctx context.Context, req wireRequest, body io.Reader) (wir
 func (r *Remote) Select(ctx context.Context, _ shares.User, ids []string) ([]files.ShareSource, error) {
 	resp, f, e := r.call(ctx, wireRequest{Op: "select", IDs: ids}, nil)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	return resp.Items, e
 }
@@ -408,7 +408,7 @@ func (r *Remote) Open(ctx context.Context, _ shares.User, id string) (*os.File, 
 func (r *Remote) simple(ctx context.Context, req wireRequest, body io.Reader) (string, error) {
 	resp, f, e := r.call(ctx, req, body)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	return resp.ID, e
 }
@@ -423,7 +423,7 @@ func (r *Remote) reliableWithin(ctx context.Context, req wireRequest, attemptLim
 	resp, f, err := r.call(attempt, req, nil)
 	stopAttempt()
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if err == nil || resp.Code != "" {
 		return resp.ID, err
@@ -433,7 +433,7 @@ func (r *Remote) reliableWithin(ctx context.Context, req wireRequest, attemptLim
 	for range 3 {
 		result, f, e := r.call(retry, wireRequest{Op: "status", ID: req.ID, Name: req.Op}, nil)
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 		}
 		if e == nil {
 			return result.ID, nil
@@ -447,7 +447,7 @@ func (r *Remote) reliableWithin(ctx context.Context, req wireRequest, attemptLim
 		if result.Code == "not_found" {
 			result, f, e = r.call(retry, req, nil)
 			if f != nil {
-				f.Close()
+				_ = f.Close()
 			}
 			if e == nil || result.Code != "" {
 				return result.ID, e
@@ -467,7 +467,7 @@ func (r *Remote) Stage(ctx context.Context, _ shares.User, t shares.Target, e sh
 	req := wireRequest{Op: "stage", ID: id, Target: t, ShareID: t.ShareID, Entry: e}
 	resp, f, err := r.call(ctx, req, reader)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if err == nil {
 		return resp.ID, nil
@@ -477,7 +477,7 @@ func (r *Remote) Stage(ctx context.Context, _ shares.User, t shares.Target, e sh
 	if resp.Code == "" {
 		result, f, e := r.call(cleanup, wireRequest{Op: "status", ID: id, Name: "stage"}, nil)
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 		}
 		if e == nil {
 			return result.ID, nil

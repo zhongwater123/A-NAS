@@ -37,7 +37,7 @@ func TestBtrfsCaptureAtomicAndPublishedCopyIndependent(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer fd.Close()
+	defer func() { _ = fd.Close() }()
 	flags, e := unix.FcntlInt(fd.Fd(), unix.F_GETFL, 0)
 	if e != nil || flags&unix.O_ACCMODE != unix.O_RDONLY {
 		t.Fatalf("source descriptor not read-only: %d %v", flags, e)
@@ -52,7 +52,7 @@ func TestBtrfsCaptureAtomicAndPublishedCopyIndependent(t *testing.T) {
 	wg.Add(1)
 	writeErr := make(chan error, 1)
 	var once sync.Once
-	finish := func() { once.Do(func() { close(stop); wg.Wait(); writer.Close() }) }
+	finish := func() { once.Do(func() { close(stop); wg.Wait(); _ = writer.Close() }) }
 	t.Cleanup(finish)
 	go func() {
 		defer wg.Done()
@@ -82,8 +82,8 @@ func TestBtrfsCaptureAtomicAndPublishedCopyIndependent(t *testing.T) {
 			t.Fatal(e)
 		}
 		data, e := io.ReadAll(dst)
-		dst.Close()
-		os.Remove(dst.Name())
+		_ = dst.Close()
+		_ = os.Remove(dst.Name())
 		if e != nil || (!bytes.Equal(data, a) && !bytes.Equal(data, b)) {
 			t.Fatalf("mixed clone at %d: length %d, error %v", n, len(data), e)
 		}
@@ -101,7 +101,7 @@ func TestBtrfsCaptureAtomicAndPublishedCopyIndependent(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	v, e := store.Create(f.ac, user(f.alice), shares.CreateRequest{RequestID: "capture", SourceIDs: []string{entry.ID}, RecipientIDs: []string{f.bob.ID}})
 	if e != nil {
 		t.Fatal(e)

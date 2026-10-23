@@ -9,17 +9,35 @@ linters:
   default: none
   enable:
     - bodyclose
+    - errcheck
     - errorlint
     - gosec
     - ineffassign
     - modernize
     - staticcheck
     - unused
-  # errcheck, the rest of golangci-lint's standard set, is not enabled: its
-  # 382 findings at the time it was tried were mostly deferred Close calls and
-  # best-effort writes, which need a review of their own.
 
   settings:
+    errcheck:
+      exclude-functions:
+        # A query's failure shows in rows.Err after the loop; Close only
+        # releases the connection.
+        - (*database/sql.Rows).Close
+        # Deferred so that a failed transaction is undone: after Commit it
+        # returns sql.ErrTxDone, and on a failure the caller gets that failure.
+        - (*database/sql.Tx).Rollback
+        # Streams that are only read: a failed read has already been returned.
+        - (io.ReadCloser).Close
+        # A socket's Close says nothing about the exchange; its reads and
+        # writes do. *net.conn is behind *net.UnixConn and *net.TCPConn.
+        - (net.Conn).Close
+        - (*net.conn).Close
+        # coder/websocket's way to drop a connection, after Close or on failure.
+        - (*github.com/coder/websocket.Conn).CloseNow
+        # Raw descriptors are directories, O_PATH handles, and descriptors
+        # received or not yet wrapped; files are written through *os.File.
+        - golang.org/x/sys/unix.Close
+        - syscall.Close
     errorlint:
       # Code classifies a failure with a sentinel and keeps the cause as text,
       # fmt.Errorf("%w: %v", ErrUnavailable, err), so that a caller's errors.Is
@@ -29,7 +47,7 @@ linters:
     gosec:
       excludes:
         - G101 # Hard-coded credentials: matches names such as NotificationCredentialReset.
-        - G104 # Unhandled errors: errcheck's subject, see above.
+        - G104 # Unhandled errors: errcheck's subject, with the exclusions above.
         - G115 # Integer conversions: sizes, counts and IDs are checked where they come in.
         - G118 # Not a security rule: some work outlives its request on purpose (volume conversion).
         - G124 # Cookies without Secure: the LAN entry is plain HTTP (ADR 0012); HttpOnly and SameSite=Strict are set.

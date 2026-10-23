@@ -148,7 +148,7 @@ func (r *RootFileSystem) Scan(ctx context.Context, name string, skip ScanSkip) (
 // directory the caller cannot read is listed without its contents.
 func scanDirectory(ctx context.Context, fd int, prefix string, skip ScanSkip, entries *[]ScanEntry) error {
 	directory := os.NewFile(uintptr(fd), prefix)
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	var names []string
 	var err error
 	if skip.Strict && skip.Limit > 0 {
@@ -463,7 +463,7 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 			return err
 		}
 		source := os.NewFile(uintptr(sourceFD), sourceName)
-		defer source.Close()
+		defer func() { _ = source.Close() }()
 		targetFD, err := unix.Openat(targetDir, targetName, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if err != nil {
 			return err
@@ -495,7 +495,7 @@ func copyFileAt(ctx context.Context, sourceDir int, sourceName string, targetDir
 		return err
 	}
 	input := os.NewFile(uintptr(inputFD), sourceName)
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	outputFD, err := unix.Openat(targetDir, targetName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o660)
 	if err != nil {
 		return err

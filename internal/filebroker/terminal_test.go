@@ -31,7 +31,7 @@ func TestTerminalShellRunsThroughTheBrokerForAdministratorsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartShell() error = %v", err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	output := bufio.NewReader(shell)
 	waitForLine(t, output, "ready")
 	if err := shell.Resize(120, 40); err != nil {
@@ -78,7 +78,7 @@ func TestTerminalEndsWhenTheSessionStopsBeingValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	waitForLine(t, bufio.NewReader(shell), "ready")
 	broker.revoke("admin-token")
 	select {
@@ -96,7 +96,7 @@ func TestTerminalOutlivesAPassingSessionDirectoryError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	output := bufio.NewReader(shell)
 	waitForLine(t, output, "ready")
 	broker.setUnreadable(errors.New("database is locked"))
@@ -117,7 +117,7 @@ func TestTerminalEndsWhenTheSessionDirectoryStaysUnreadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	waitForLine(t, bufio.NewReader(shell), "ready")
 	broker.setUnreadable(errors.New("database is locked"))
 	select {
@@ -146,7 +146,7 @@ func TestTerminalShellStartsOnlyOnceInItsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	waitForLine(t, bufio.NewReader(shell), "in-scope")
 	if placed := placer.calls(); len(placed) != 1 || !strings.HasPrefix(placed[0], "terminal:owner:") {
 		t.Fatalf("placed = %v, want the owner's terminal once", placed)
@@ -162,7 +162,7 @@ func TestTerminalStartsWhenItsScopeCannotBeMade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	waitForLine(t, bufio.NewReader(shell), "ready")
 }
 

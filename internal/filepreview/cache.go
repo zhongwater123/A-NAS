@@ -87,7 +87,7 @@ func (c *diskCache) get(key string) []byte {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() != entry.size {
 		return nil
@@ -122,7 +122,7 @@ func (c *diskCache) put(key string, data []byte) {
 	if err != nil {
 		return
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	_, err = f.Write(data)
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {

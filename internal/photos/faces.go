@@ -430,7 +430,7 @@ func (s *Service) avatarTile(derivation, objectID string, ordinal int) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	sheet, err := imaging.Decode(file)
 	if err != nil {
 		return nil, err

@@ -33,7 +33,7 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	if file == nil {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: "no file descriptor"}, nil)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if request.Ack {
 		if err := writeFrame(conn, Response{Accepted: true}, nil); err != nil {
 			return err
@@ -53,6 +53,7 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	if program == "" {
 		return writeFrame(conn, Response{Code: CodeUnavailable, Message: "decoder is unavailable"}, nil)
 	}
+	stdin := file
 	if request.Op == OpImage {
 		// libheif opens a filename instead of consuming an existing descriptor.
 		// Reopening the caller's /proc/self/fd/0 would fail under DynamicUser.
@@ -61,11 +62,11 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 		if err != nil {
 			return writeFrame(conn, Response{Code: CodeUnreadable, Message: "image input is unreadable or too large"}, nil)
 		}
-		defer input.Close()
-		file = input
+		defer func() { _ = input.Close() }()
+		stdin = input
 	}
 	command := exec.CommandContext(ctx, program, args...)
-	command.Stdin = file
+	command.Stdin = stdin
 	command.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8"}
 	var stderr limitedBuffer
 	stderr.limit = 8 << 10

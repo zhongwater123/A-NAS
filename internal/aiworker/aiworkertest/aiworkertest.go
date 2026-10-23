@@ -62,7 +62,7 @@ func serveOne(conn *net.UnixConn, handle Handler) {
 	if messages, err := unix.ParseSocketControlMessage(control[:controlLength]); err == nil && len(messages) == 1 {
 		if fds, err := unix.ParseUnixRights(&messages[0]); err == nil && len(fds) == 1 {
 			file = os.NewFile(uintptr(fds[0]), "image")
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 		}
 	}
 	length := binary.BigEndian.Uint32(buffer)

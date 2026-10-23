@@ -519,7 +519,7 @@ func (s *Server) spawn(key workerKey, credential *syscall.Credential, env []stri
 	}
 	parent := os.NewFile(uintptr(pair[0]), "file-broker")
 	child := os.NewFile(uintptr(pair[1]), "file-worker")
-	defer child.Close()
+	defer func() { _ = child.Close() }()
 	cmd := s.config.Command(s.config.VolumeRoot)
 	cmd.ExtraFiles = []*os.File{child}
 	cmd.Env = append([]string{}, env...)

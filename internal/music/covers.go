@@ -130,8 +130,14 @@ func writeJPEG(target string, picture image.Image) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() { _ = os.Remove(temporary.Name()) }()
 	if _, err := temporary.Write(encoded.Bytes()); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	// Put never renders a cover again once its file exists, so the file is
+	// synced before it takes its name: a crash must not leave it empty.
+	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
 		return err
 	}

@@ -31,7 +31,7 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 		}
 		if part.FormName() == "directoryId" {
 			value, err := io.ReadAll(io.LimitReader(part, 4097))
-			part.Close()
+			_ = part.Close()
 			if err != nil || len(value) > 4096 {
 				WriteError(w, 400, "invalid_multipart", "目录无效")
 				return
@@ -40,7 +40,7 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if part.FormName() != "file" {
-			part.Close()
+			_ = part.Close()
 			WriteError(w, 400, "invalid_multipart", "请先提交照片，再提交同名 MOV")
 			return
 		}
@@ -48,7 +48,7 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 		motionName := strings.TrimSuffix(name, filepath.Ext(name)) + ".MOV"
 		principal, _ := principalFrom(r)
 		asset, err := h.service.Import(r.Context(), principal, photos.ImportRequest{LibraryID: r.PathValue("libraryID"), DirectoryID: directoryID, Name: name, Content: part, MotionName: motionName, MotionContent: &pairedPartReader{reader: reader, name: motionName}})
-		part.Close()
+		_ = part.Close()
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -200,13 +200,13 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request) {
 		h.serve(w, r, photo, "attachment")
 		return
 	}
-	defer photo.Reader.Close()
+	defer func() { _ = photo.Reader.Close() }()
 	motion, err := h.service.OpenMotion(r.Context(), principal, id)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	defer motion.Reader.Close()
+	defer func() { _ = motion.Reader.Close() }()
 	base := strings.TrimSuffix(photo.Name, filepath.Ext(photo.Name))
 	if base == "" {
 		base = "photo"

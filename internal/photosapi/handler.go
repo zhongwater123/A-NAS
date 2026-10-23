@@ -645,7 +645,7 @@ func (h *handler) thumbnail(w http.ResponseWriter, r *http.Request) {
 // serve streams content. Responses may be cached privately but must be
 // revalidated, so that access ending also ends what the browser shows.
 func (h *handler) serve(w http.ResponseWriter, r *http.Request, content photos.Content, disposition string) {
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	w.Header().Set("Cache-Control", "private, no-cache")
 	w.Header().Set("Content-Type", content.MediaType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")

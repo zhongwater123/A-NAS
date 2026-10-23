@@ -498,7 +498,7 @@ func (h *productHandler) handleDownload(w http.ResponseWriter, r *http.Request, 
 		h.writeFileError(w, r, err)
 		return
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	disposition := "attachment"
 	if r.URL.Query().Get("disposition") == "inline" && browserPreviewableContent(content.Name) {
 		disposition = "inline"

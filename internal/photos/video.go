@@ -100,7 +100,7 @@ func (s *Service) readVideo(ctx context.Context, staged *stagedObject) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	probe, err := s.media.Probe(mediaworker.WithTimeout(ctx, videoProbeTimeout), file)
 	if errors.Is(err, mediaworker.ErrUnreadable) {
 		return ErrUnsupportedType

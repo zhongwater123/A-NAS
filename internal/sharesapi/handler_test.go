@@ -32,7 +32,7 @@ func fixture(t *testing.T) (*shares.Store, http.Handler, *atomic.Int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store, New(store, nil, func(context.Context) ([]accounts.Profile, error) {
 		return []accounts.Profile{{ID: "a", Username: "Alice"}, {ID: "b", Username: "Bob"}, {ID: "c", Username: "Carol"}}, nil
 	}), clock

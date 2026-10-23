@@ -40,7 +40,7 @@ func runSession(ctx context.Context, conn *websocket.Conn, spawner Spawner, logg
 		logger.ErrorContext(ctx, "terminal shell failed to start", "error", err)
 		return websocket.StatusInternalError, "shell unavailable"
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 
 	// Canceling a context passed to coder/websocket drops the connection
 	// without a close frame, so I/O outlives ctx until the caller closes conn.

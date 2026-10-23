@@ -40,7 +40,7 @@ func TestAssistantConnectionsGoOnlyToTheSessionsOwnMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConnectAssistant() error = %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	// The broker logged in with her instance's secret; the Product Service gets
 	// only the access token.
 	if conn.Username != "alice" || conn.Token != "alice-access-1" {
@@ -57,7 +57,7 @@ func TestAssistantConnectionIsCutWhenTheSessionEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	roundTrip(t, conn, "before")
 	h.revoke("member-token")
 	// The Product Service's copy stops working too, even if it never closes it.
@@ -82,7 +82,7 @@ func TestAssistantConnectionOutlivesAPassingSessionDirectoryError(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	roundTrip(t, conn, "before")
 	h.setUnreadable(errors.New("database is locked"))
 	time.Sleep(120 * time.Millisecond)
@@ -98,7 +98,7 @@ func TestStoppingTheBrokerCutsAssistantConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	roundTrip(t, conn, "before")
 	h.server.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -182,7 +182,7 @@ func TestAssistantLoginIsKeptUntilTheInstanceRefusesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if conn.Token != "alice-access-2" || h.logins.Load() != 2 {
 		t.Fatalf("fresh token = %q after %d logins", conn.Token, h.logins.Load())
 	}
@@ -201,7 +201,7 @@ func TestAssistantWithAWrongSecretIsUnavailable(t *testing.T) {
 func roundTrip(t *testing.T, conn net.Conn, line string) string {
 	t.Helper()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	defer conn.SetDeadline(time.Time{})
+	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	if _, err := io.WriteString(conn, line+"\n"); err != nil {
 		t.Fatal(err)
 	}

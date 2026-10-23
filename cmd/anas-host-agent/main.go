@@ -99,7 +99,7 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
 	sessions := accounts.NewSessionDirectory(filepath.Join(environment("ANAS_STATE_DIR", "/var/lib/a-nas"), "control.db"))
-	defer sessions.Close()
+	defer func() { _ = sessions.Close() }()
 	// The AI assistant is not shipped yet (ADR 0024): off unless its sockets
 	// are named. With it come the session gate and the executor of its changes,
 	// which keeps the copies the members' cards show beside the assistant

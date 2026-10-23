@@ -43,7 +43,7 @@ func TestVideosUploadAndPlayThroughTheAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	h := photosapi.New(service, nil)
 	c := client{t: t, handler: h, as: alice}
 	private, _ := librariesOf(c)
