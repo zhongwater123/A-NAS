@@ -5,8 +5,10 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,12 +157,10 @@ func TestAPlanThatStoppedIsRetriedFromTheHostAgent(t *testing.T) {
 // Once a later plan has run, a stopped plan is history: it is neither shown
 // nor retried.
 func TestAStoppedPlanIsSupersededByAPlanThatRan(t *testing.T) {
-	clock := time.Date(2026, time.October, 21, 9, 0, 0, 0, time.UTC)
 	host := newHostOperations()
-	ids := 0
 	service, err := storage.OpenService(fake.NewWithSpareDisk(), host, storage.Options{
-		Now:          func() time.Time { clock = clock.Add(time.Second); return clock },
-		NewID:        func() string { ids++; return "plan-" + string(rune('0'+ids)) },
+		Now:          tickingClock(time.Date(2026, time.October, 21, 9, 0, 0, 0, time.UTC)),
+		NewID:        planIDs(),
 		PollInterval: time.Millisecond,
 	})
 	if err != nil {
@@ -269,6 +269,24 @@ func followingService(t *testing.T, reader hoststate.Reader, host storage.Volume
 	}
 	t.Cleanup(service.Close)
 	return service
+}
+
+// tickingClock moves a second each time it is read. The goroutine that
+// follows a running plan reads it while the test plans the next one.
+func tickingClock(start time.Time) func() time.Time {
+	var mu sync.Mutex
+	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		start = start.Add(time.Second)
+		return start
+	}
+}
+
+// planIDs numbers plans plan-1, plan-2 and so on, from any goroutine.
+func planIDs() func() string {
+	var last atomic.Int64
+	return func() string { return "plan-" + strconv.FormatInt(last.Add(1), 10) }
 }
 
 func openStore(t *testing.T, path string) *storage.Store {

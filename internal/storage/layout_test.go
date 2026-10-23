@@ -79,11 +79,9 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)
 	executor := &recordingExecutor{}
-	clock := time.Date(2026, time.October, 20, 9, 0, 0, 0, time.UTC)
-	ids := 0
 	service := storage.NewService(reader, executor, storage.Options{
-		Now:   func() time.Time { clock = clock.Add(time.Second); return clock },
-		NewID: func() string { ids++; return "plan-" + string(rune('0'+ids)) },
+		Now:   tickingClock(time.Date(2026, time.October, 20, 9, 0, 0, 0, time.UTC)),
+		NewID: planIDs(),
 	})
 	createSingleVolume(t, service)
 	mountVolume(reader, []string{"disk:fake-data-01"}, 120_000_000_000,
@@ -201,8 +199,7 @@ func TestAnOfflineMemberOfTheVolumeIsNeverErased(t *testing.T) {
 func TestAPlanThatHasNotRunCanBeCancelled(t *testing.T) {
 	ctx := context.Background()
 	executor := &recordingExecutor{}
-	ids := 0
-	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: func() string { ids++; return "plan-" + string(rune('0'+ids)) }})
+	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: planIDs()})
 	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)

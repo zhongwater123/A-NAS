@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +31,32 @@ type testEnv struct {
 	bob      accounts.User
 	shared   accounts.Space
 	private  map[string]accounts.Space
+	clock    *testClock
+}
+
+// testClock moves a second each time it is read, so that changes made one
+// after another have different times, until a test sets it. Background scans
+// read it while the test does, so like time.Now it is safe for concurrent use.
+type testClock struct {
+	mu      sync.Mutex
+	now     time.Time
+	stopped bool
+}
+
+func (c *testClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.stopped {
+		c.now = c.now.Add(time.Second)
+	}
+	return c.now
+}
+
+// Set stops the clock at now.
+func (c *testClock) Set(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now, c.stopped = now, true
 }
 
 type acceptingCredentials struct{}
@@ -100,16 +127,16 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 		t.Fatalf("open media store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	clock := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	clock := &testClock{now: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
+		Now: clock.Now, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	t.Cleanup(service.Close)
-	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}}
+	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}, clock: clock}
 	for _, user := range []accounts.User{admin, alice, bob} {
 		spaces, err := accountService.ListSpaces(ctx, user)
 		if err != nil {
@@ -965,12 +992,13 @@ func TestRefreshLeavesAScanInProgressAlone(t *testing.T) {
 	held := &heldTree{Files: env.media.files, reached: make(chan struct{}, 10), release: make(chan struct{})}
 	env.media.files = held
 	later := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
-	env.media.now = func() time.Time { return later }
+	env.clock.Set(later)
 
 	env.media.RefreshStale(env.ctx, env.admin)
 	<-held.reached
 	for range 5 {
 		later = later.Add(3 * time.Minute)
+		env.clock.Set(later)
 		env.media.RefreshStale(env.ctx, env.admin)
 	}
 	close(held.release)
