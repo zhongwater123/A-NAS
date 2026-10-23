@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import type { PhotoAsset } from "./photosApi";
 
@@ -16,10 +16,13 @@ export function useSelection(order: PhotoAsset[]) {
   const anchor = useRef<string>(undefined);
   // What was selected when a marquee or swipe began, which it adds to.
   const base = useRef<ReadonlySet<string>>(undefined);
+  // The callbacks read the latest order and selection without changing identity.
   const orderRef = useRef(order);
-  orderRef.current = order;
   const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  useLayoutEffect(() => {
+    orderRef.current = order;
+    selectedRef.current = selected;
+  });
 
   const toggle = useCallback((asset: PhotoAsset, range: boolean) => {
     const from = anchor.current;

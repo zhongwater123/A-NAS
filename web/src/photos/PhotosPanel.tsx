@@ -36,6 +36,7 @@ import {
   ReactNode,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -280,26 +281,29 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   const narrow = width < narrowWidth;
   const sidebarOpen = narrow ? drawer : docked;
 
-  const loadLibraries = useCallback(async () => {
-    try {
-      const items = await listPhotoLibraries();
-      setLibraries(items);
-      setFailure("");
-      setPlaceState((current) => {
-        const library = current && placeLibrary(current);
-        if (current && (!library || items.some((item) => item.id === library))) return current;
-        const home =
-          items.find((item) => item.kind === "private" && item.ownerUserId === userId && !item.viewing) ?? items[0];
-        return home ? { kind: "timeline", libraryId: home.id } : undefined;
-      });
-    } catch (caught) {
-      setFailure(
-        isUnavailable(caught)
-          ? "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册。恢复后点击重试。"
-          : messageOf(caught),
-      );
-    }
-  }, [userId]);
+  const loadLibraries = useCallback(
+    () =>
+      listPhotoLibraries()
+        .then((items) => {
+          setLibraries(items);
+          setFailure("");
+          setPlaceState((current) => {
+            const library = current && placeLibrary(current);
+            if (current && (!library || items.some((item) => item.id === library))) return current;
+            const home =
+              items.find((item) => item.kind === "private" && item.ownerUserId === userId && !item.viewing) ?? items[0];
+            return home ? { kind: "timeline", libraryId: home.id } : undefined;
+          });
+        })
+        .catch((caught: unknown) => {
+          setFailure(
+            isUnavailable(caught)
+              ? "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册。恢复后点击重试。"
+              : messageOf(caught),
+          );
+        }),
+    [userId],
+  );
   useEffect(() => {
     void loadLibraries();
   }, [loadLibraries]);
@@ -326,6 +330,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
 
   // The window's width decides whether the sidebar docks; the toolbar's
   // height is where the photos start.
+  const librariesLoaded = libraries !== undefined;
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
@@ -339,15 +344,18 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     observer.observe(element);
     if (toolbar.current) observer.observe(toolbar.current);
     return () => observer.disconnect();
-  }, [libraries !== undefined]);
+  }, [librariesLoaded]);
 
   // Each view reports its own photos when it mounts, so going to the place
   // already shown changes nothing.
   const placeRef = useRef(place);
-  placeRef.current = place;
+  useLayoutEffect(() => {
+    placeRef.current = place;
+  });
   // How AI 聚合 looked when it opened a group; kept while that group is open
   // so that going back returns to the same spot.
-  const aiHomeReturn = useRef<AIHomeSnapshot | undefined>(undefined);
+  const [aiHomeReturn, setAIHomeReturn] = useState<AIHomeSnapshot>();
+  const clearSelection = selection.clear;
   const setPlace = useCallback(
     (next: Place) => {
       setDrawer(false);
@@ -361,9 +369,9 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
           !next.query
         )
       )
-        aiHomeReturn.current = undefined;
+        setAIHomeReturn(undefined);
       setPlaceState(next);
-      selection.clear();
+      clearSelection();
       setHidden(new Set());
       setCount(undefined);
       setClosest(undefined);
@@ -372,18 +380,18 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       setImageResult(next.kind === "image" && isEncoded(next.query) ? {} : undefined);
       setQuery(next.kind === "search" ? next.query : "");
     },
-    [selection.clear],
+    [clearSelection],
   );
 
   const libraryId = place ? placeLibrary(place) : "";
   // AI search keeps the sidebar on the library it came from.
-  const lastLibrary = useRef("");
-  if (libraryId) lastLibrary.current = libraryId;
+  const [lastLibrary, setLastLibrary] = useState("");
+  if (libraryId && libraryId !== lastLibrary) setLastLibrary(libraryId);
   const sideLibrary =
     libraryOf(caller, libraryId) ??
     (place && "viewing" in place && place.viewing
       ? libraryOf(caller, place.viewing)
-      : libraryOf(caller, lastLibrary.current)) ??
+      : libraryOf(caller, libraryId || lastLibrary)) ??
     mine;
   const viewingLibrary = sideLibrary?.viewing ? sideLibrary : undefined;
   const readOnlyPlace = Boolean(viewingLibrary);
@@ -439,9 +447,10 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     [uploads.items, place],
   );
   // Previews of finished uploads stay until the timeline shows the photos.
+  const { items: uploadItems, prune: pruneUploads } = uploads;
   useEffect(() => {
-    if (place?.kind !== "timeline" && uploads.items.some((item) => item.state === "done")) uploads.prune();
-  }, [uploads.items, place]);
+    if (place?.kind !== "timeline" && uploadItems.some((item) => item.state === "done")) pruneUploads();
+  }, [uploadItems, place, pruneUploads]);
   const pickFiles = () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -880,6 +889,9 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     },
     error: reportError,
   };
+  // Runs once per focus; the callbacks it uses do not decide what to show.
+  const focusFailed = useEffectEvent(reportError);
+  const focusHandled = useEffectEvent(() => onFocusHandled?.());
   useEffect(() => {
     if (!focus) return;
     let current = true;
@@ -891,13 +903,12 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
         }
       })
       .catch((reason) => {
-        if (current) reportError(reason);
+        if (current) focusFailed(reason);
       })
-      .finally(() => onFocusHandled?.());
+      .finally(() => focusHandled());
     return () => {
       current = false;
     };
-    // Runs once per focus; the callbacks it uses do not decide what to show.
   }, [focus]);
   const focusedActions: ViewerActions = {
     ...viewerActions,
@@ -1013,14 +1024,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   };
   const pickSearchImage = () => pickImage((file) => void searchByImage(file));
   // A search box takes an image dropped onto it or pasted into it.
-  const imageDrop = (name: string): ImageDropProps => ({
-    onDragOver: (event) => {
-      if (!carriesFiles(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.dataTransfer.dropEffect = "copy";
-      setImageOver(name);
-    },
+  const imageDrop: Omit<ImageDropProps, "onDragOver"> = {
     onDragLeave: (event) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setImageOver("");
     },
@@ -1039,7 +1043,15 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       event.preventDefault();
       void searchByImage(file, true);
     },
-  });
+  };
+  // imageDragOver marks the search box a file is over by its name.
+  const imageDragOver = (name: string) => (event: DragEvent) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setImageOver(name);
+  };
 
   if (!libraries || !place) {
     return (
@@ -1159,7 +1171,8 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
           className={`ph-search wide${imageOver === "results" ? " image-drop" : ""}`}
           role="search"
           onSubmit={submitSearch}
-          {...imageDrop("results")}
+          {...imageDrop}
+          onDragOver={imageDragOver("results")}
         >
           <Search />
           <input
@@ -1192,7 +1205,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
           query={place.query}
           result={imageResult}
           over={imageOver === "source"}
-          drop={imageDrop("source")}
+          drop={{ ...imageDrop, onDragOver: imageDragOver("source") }}
           onReplace={pickSearchImage}
         />
         {ai && ai.pending > 0 && imageResult && !imageResult.error && (
@@ -1392,25 +1405,30 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
             <AIHome
               viewing={place.viewing}
               userName={userName}
-              snapshot={aiHomeReturn.current}
+              snapshot={aiHomeReturn}
               refreshKey={refreshKey}
               topInset={topInset}
               ai={ai}
               recent={recent}
               onSearch={startSearch}
               onForget={() => setRecent([])}
-              image={{ pick: pickSearchImage, over: imageOver === "hero", dragging, drop: imageDrop("hero") }}
+              image={{
+                pick: pickSearchImage,
+                over: imageOver === "hero",
+                dragging,
+                drop: { ...imageDrop, onDragOver: imageDragOver("hero") },
+              }}
               onOpenCluster={(label, snapshot) => {
                 setPlace({ kind: "cluster", viewing: place.viewing, label });
-                aiHomeReturn.current = snapshot;
+                setAIHomeReturn(snapshot);
               }}
               onOpenTag={(tag, snapshot) => {
                 setPlace({ kind: "tag", viewing: place.viewing, tag });
-                aiHomeReturn.current = snapshot;
+                setAIHomeReturn(snapshot);
               }}
               onOpenPerson={(person, snapshot) => {
                 setPlace({ kind: "person", viewing: place.viewing, person });
-                aiHomeReturn.current = snapshot;
+                setAIHomeReturn(snapshot);
               }}
               onPeopleSettings={() => setPeopleSettings(true)}
               onError={reportError}
@@ -1756,7 +1774,8 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
                   className={`ph-search${imageOver === "toolbar" ? " image-drop" : ""}`}
                   role="search"
                   onSubmit={submitSearch}
-                  {...imageDrop("toolbar")}
+                  {...imageDrop}
+                  onDragOver={imageDragOver("toolbar")}
                 >
                   <Search />
                   <input

@@ -70,10 +70,16 @@ export function Sidebar({
   onDropOnAlbum,
   onDropOnLibrary,
 }: Props) {
-  const [albums, setAlbums] = useState<PhotoAlbum[]>([]);
   const libraryId = library?.id ?? "";
-  useEffect(() => {
+  // Another library, or a refresh, starts with no albums until they are listed.
+  const [albums, setAlbums] = useState<PhotoAlbum[]>([]);
+  const albumsFor = `${libraryId}/${albumsKey}`;
+  const [albumsBefore, setAlbumsBefore] = useState(albumsFor);
+  if (albumsBefore !== albumsFor) {
+    setAlbumsBefore(albumsFor);
     setAlbums([]);
+  }
+  useEffect(() => {
     if (!libraryId) return;
     let live = true;
     listAlbums(libraryId).then(

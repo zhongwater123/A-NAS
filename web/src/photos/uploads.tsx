@@ -9,7 +9,7 @@ import {
   ScanSearch,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { groupPhotoUploads } from "./uploadGroups";
 import { transferStore } from "../transfers/store";
@@ -204,18 +204,14 @@ export function useUploads(onSettled: (summary: UploadSummary) => void) {
     (key: string) => update(key, { state: "waiting", error: undefined, progress: 0 }),
     [update],
   );
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
-  useEffect(
-    () => () => {
-      for (const item of itemsRef.current) {
-        if (item.url) URL.revokeObjectURL(item.url);
-        // The queue lives in the photo window: photos not started stay unsent.
-        if (item.state === "waiting") tracked.current.get(item.key)?.cancel("相册窗口已关闭，未上传");
-      }
-    },
-    [],
-  );
+  const release = useEffectEvent(() => {
+    for (const item of items) {
+      if (item.url) URL.revokeObjectURL(item.url);
+      // The queue lives in the photo window: photos not started stay unsent.
+      if (item.state === "waiting") tracked.current.get(item.key)?.cancel("相册窗口已关闭，未上传");
+    }
+  });
+  useEffect(() => () => release(), []);
   return { items, add, prune, clear, retry };
 }
 

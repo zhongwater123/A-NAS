@@ -1,5 +1,5 @@
 import { ChevronsDown } from "lucide-react";
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { gridInset, type GridProps, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, flatEntries, type Split } from "./layout";
@@ -33,32 +33,32 @@ export function AssetGrid(props: Props) {
   const [next, setNext] = useState<string>();
   const generation = useRef(0);
   const busy = useRef(false);
-  const loadRef = useRef(load);
-  loadRef.current = load;
 
   const fetchPage = useCallback(
-    async (cursor: string, current: number) => {
+    (cursor: string, current: number) => {
       busy.current = true;
-      try {
-        const page = await loadRef.current(cursor);
-        if (current !== generation.current) return;
-        setAssets((value) => (cursor && value ? [...value, ...page.items] : page.items));
-        setNext(page.next);
-        onPage?.(page, !cursor);
-      } catch (caught) {
-        if (current !== generation.current) return;
-        setAssets((value) => value ?? []);
-        setNext(undefined);
-        onError(messageOf(caught));
-      } finally {
-        if (current === generation.current) busy.current = false;
-      }
+      return load(cursor)
+        .then((page) => {
+          if (current !== generation.current) return;
+          setAssets((value) => (cursor && value ? [...value, ...page.items] : page.items));
+          setNext(page.next);
+          onPage?.(page, !cursor);
+        })
+        .catch((caught: unknown) => {
+          if (current !== generation.current) return;
+          setAssets((value) => value ?? []);
+          setNext(undefined);
+          onError(messageOf(caught));
+        })
+        .finally(() => {
+          if (current === generation.current) busy.current = false;
+        });
     },
-    [onPage, onError],
+    [load, onPage, onError],
   );
 
   const keyRef = useRef(listKey);
-  useEffect(() => {
+  const startOver = useEffectEvent(() => {
     const fresh = keyRef.current !== listKey;
     keyRef.current = listKey;
     const current = ++generation.current;
@@ -67,23 +67,35 @@ export function AssetGrid(props: Props) {
       setNext(undefined);
     }
     void fetchPage("", current);
-  }, [listKey, refreshKey]);
+  });
+  useEffect(() => startOver(), [listKey, refreshKey]);
 
   const shown = useMemo(() => assets?.filter((asset) => !hidden.has(asset.id)), [assets, hidden]);
   usePendingThumbnails(shown, (ready) => setAssets((value) => value?.map((asset) => ready.get(asset.id) ?? asset)));
   const { split } = props;
+  const splitAt = split?.at;
+  const splitTitle = split?.title ?? "";
+  const splitText = split?.text ?? "";
   // Hidden photos leave the first group smaller.
   const shownSplit = useMemo(
     () =>
-      split && assets && { ...split, at: assets.slice(0, split.at).filter((asset) => !hidden.has(asset.id)).length },
-    [split?.at, split?.title, split?.text, assets, hidden],
+      splitAt !== undefined && assets
+        ? {
+            title: splitTitle,
+            text: splitText,
+            at: assets.slice(0, splitAt).filter((asset) => !hidden.has(asset.id)).length,
+          }
+        : undefined,
+    [splitAt, splitTitle, splitText, assets, hidden],
   );
   const entries = useMemo(
     () => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end, shownSplit),
     [shown, width, rowHeight, next, props.end, shownSplit],
   );
-  useEffect(() => onAssets(shown ?? []), [shown]);
-  useEffect(() => onCount?.(shown && !next ? shown.length : undefined), [shown, next]);
+  const reportAssets = useEffectEvent(onAssets);
+  const reportCount = useEffectEvent((photos: number | undefined) => onCount?.(photos));
+  useEffect(() => reportAssets(shown ?? []), [shown]);
+  useEffect(() => reportCount(shown && !next ? shown.length : undefined), [shown, next]);
 
   const renderTile = useTileRenderer(props, props.badge);
   const renderEntry = (entry: Entry): ReactNode =>

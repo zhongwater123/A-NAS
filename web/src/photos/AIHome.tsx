@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Hash, History, Search, ShieldCheck, X } from "lucide-react";
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
 import { categoryNames, messageOf } from "./model";
@@ -93,11 +93,12 @@ export function AIHome({
   const settled = ai?.clusters === "ready" && ai.pending === 0;
   const wasSettled = useRef<boolean | undefined>(undefined);
   const [reload, setReload] = useState(0);
-  useEffect(() => {
+  const settle = useEffectEvent((settled: boolean, clusters: AIHomeSnapshot["clusters"]) => {
     const was = wasSettled.current;
     if (ai) wasSettled.current = settled;
     if (settled && (was === false || (clusters && !clusters.ready))) setReload((value) => value + 1);
-  }, [settled, clusters]);
+  });
+  useEffect(() => settle(settled, clusters), [settled, clusters]);
   const groups = useMemo(() => {
     const byCategory = new Map<string, PhotoLabelCount[]>();
     for (const label of clusters?.items ?? [])
@@ -133,9 +134,10 @@ export function AIHome({
   }, [shown]);
   // Coming back from a group: the remembered page is already drawn, so its
   // scroll position is restored before the first paint.
-  useLayoutEffect(() => {
+  const restoreScroll = useEffectEvent(() => {
     if (back && scroller.current) scroller.current.scrollTop = back.scrollTop;
-  }, []);
+  });
+  useLayoutEffect(() => restoreScroll(), []);
   const remember = (): AIHomeSnapshot => ({
     viewing,
     scrollTop: scroller.current?.scrollTop ?? 0,
@@ -148,6 +150,7 @@ export function AIHome({
     allTags,
     perRow,
   });
+  const reportError = useEffectEvent(onError);
   useEffect(() => {
     let live = true;
     listPhotoLabels(viewing).then(
@@ -157,7 +160,7 @@ export function AIHome({
       (caught) => {
         if (live) {
           setClusters({ items: [], ready: false });
-          onError(messageOf(caught));
+          reportError(messageOf(caught));
         }
       },
     );
@@ -172,7 +175,7 @@ export function AIHome({
         if (live) setTags(value);
       },
       (caught) => {
-        if (live) onError(messageOf(caught));
+        if (live) reportError(messageOf(caught));
       },
     );
     return () => {
@@ -190,7 +193,7 @@ export function AIHome({
       (caught) => {
         if (live) {
           setPeople([]);
-          onError(messageOf(caught));
+          reportError(messageOf(caught));
         }
       },
     );

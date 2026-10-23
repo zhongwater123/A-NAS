@@ -12,7 +12,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { TransformComponent, TransformWrapper, type ReactZoomPanPinchContentRef } from "react-zoom-pan-pinch";
 
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
@@ -113,23 +113,33 @@ export function Viewer({
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
-  useEffect(() => {
+  // Another photo starts without the last one's details, zoom or Live Photo.
+  const assetId = asset?.id;
+  const [shownId, setShownId] = useState(assetId);
+  if (shownId !== assetId) {
+    setShownId(assetId);
     setDetails(undefined);
     setLivePlaying(false);
     setLiveError(false);
     setOriginalReady(false);
     setZoomed(false);
-    if (!asset) return;
-    // The neighbours' originals load ahead.
+  }
+  // The neighbours' originals load ahead.
+  const preloadNeighbours = useEffectEvent(() => {
     for (const neighbour of [assets[index + 1], assets[index - 1]])
       if (neighbour) new Image().src = displayURL(neighbour);
-  }, [asset?.id]);
+  });
+  useEffect(() => {
+    if (assetId) preloadNeighbours();
+  }, [assetId]);
   // Details carry tags and albums; lists leave them out. A photo that became
   // a Live Photo meanwhile is asked for again.
+  const motionKind = asset?.motion?.kind;
+  const liveVideoMissing = asset?.liveVideoMissing;
   useEffect(() => {
-    if (!asset) return;
+    if (!assetId) return;
     let live = true;
-    getPhoto(asset.id).then(
+    getPhoto(assetId).then(
       (value) => {
         if (live) setDetails(value);
       },
@@ -138,10 +148,10 @@ export function Viewer({
     return () => {
       live = false;
     };
-  }, [asset?.id, asset?.motion?.kind, asset?.liveVideoMissing]);
+  }, [assetId, motionKind, liveVideoMissing]);
 
   // Opening grows the photo from its tile.
-  useLayoutEffect(() => {
+  const growFromTile = useEffectEvent(() => {
     root.current?.focus();
     if (!origin || !asset || !motion || !stage.current || typeof HTMLElement.prototype.animate !== "function") {
       setEntering(false);
@@ -149,7 +159,8 @@ export function Viewer({
     }
     const target = containRect(stage.current.getBoundingClientRect(), asset.width / asset.height || 1);
     void fly(root.current!, previewURL(asset), origin, target, false).then(() => setEntering(false));
-  }, []);
+  });
+  useLayoutEffect(() => growFromTile(), []);
 
   const close = useCallback(async () => {
     setLivePlaying(false);
@@ -187,9 +198,9 @@ export function Viewer({
     idleTimer.current = window.setTimeout(() => setIdle(true), idleDelay);
   }, []);
   useEffect(() => {
-    wake();
+    idleTimer.current = window.setTimeout(() => setIdle(true), idleDelay);
     return () => window.clearTimeout(idleTimer.current);
-  }, [wake]);
+  }, []);
 
   // The filmstrip keeps the current photo in its middle.
   const strip = useRef<HTMLDivElement>(null);

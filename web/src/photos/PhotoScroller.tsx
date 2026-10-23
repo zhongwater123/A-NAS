@@ -6,6 +6,7 @@ import {
   RefObject,
   useCallback,
   useEffect,
+  useEffectEvent,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -130,7 +131,8 @@ export function PhotoScroller({
     return { byKey, byAsset, starts: starts(entries, topInset) };
   }, [entries, topInset]);
 
-  useLayoutEffect(() => {
+  // When the entries change, the photo that was showing stays in place.
+  const keepPlace = useEffectEvent((entries: Entry[]) => {
     const before = previous.current;
     previous.current = entries;
     const element = scrollRef.current;
@@ -162,7 +164,8 @@ export function PhotoScroller({
     if (target === undefined) return;
     element.scrollTop = Math.max(0, index.starts[target] + anchor.fraction * entries[target].size - anchor.viewportY);
     // Read by the measure above; scroll then follows.
-  }, [entries]);
+  });
+  useLayoutEffect(() => keepPlace(entries), [entries]);
 
   const items = virtualizer.getVirtualItems();
   // The range changes when other entries come into view, or when entries
@@ -174,10 +177,11 @@ export function PhotoScroller({
         .map((entry) => entry.key)
         .join(",")}`
     : "";
-  useEffect(() => {
+  const reportRange = useEffectEvent(() => {
     if (onRange && inView.length) onRange(inView);
-    // The range key changes whenever the entries in view do.
-  }, [rangeKey]);
+  });
+  // The range key changes whenever the entries in view do.
+  useEffect(() => reportRange(), [rangeKey]);
 
   // Geometry in content coordinates, without the DOM, so hit tests also
   // find tiles that are not rendered.
@@ -508,7 +512,7 @@ function Scrubber({ entries, starts: positions, total, offset, viewport, topInse
   const range = Math.max(1, total - viewport);
   const thumb = Math.min(height, Math.max(32, (viewport / Math.max(total, 1)) * height));
   const travel = Math.max(1, height - thumb);
-  const toY = (value: number) => Math.min(1, Math.max(0, value / range)) * travel;
+  const toY = useCallback((value: number) => Math.min(1, Math.max(0, value / range)) * travel, [range, travel]);
   const toOffset = (thumbTop: number) => Math.min(1, Math.max(0, thumbTop / travel)) * range;
   // The bubble shows briefly while the photos scroll.
   const last = useRef(offset);
@@ -528,7 +532,7 @@ function Scrubber({ entries, starts: positions, total, offset, viewport, topInse
       marks.push({ year, y });
     }
     return marks;
-  }, [months, range, travel, thumb]);
+  }, [months, toY, thumb]);
   if (months.length < 1 || total <= viewport + 1) return null;
   const monthAt = (value: number) => {
     let found = months[0];

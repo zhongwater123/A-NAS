@@ -17,7 +17,9 @@ import {
   RefObject,
   useCallback,
   useEffect,
+  useEffectEvent,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -83,7 +85,10 @@ function bufferedAt(element: HTMLVideoElement, at: number) {
 // player restarts it where a skip lands and adds that offset to the
 // stream's own clock. A failure to play the original or a remux falls back
 // to a full conversion before it is reported.
-export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer({ asset, stage, onDownload }, ref) {
+export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer(
+  { asset, stage: stageRef, onDownload },
+  ref,
+) {
   const caps = useMemo(() => browserCapabilities(), []);
   const duration = asset.video?.duration ?? 0;
   const video = useRef<HTMLVideoElement>(null);
@@ -162,22 +167,31 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     attach(videoStreamURL(asset.id, start, caps, forced.current), mime, Math.max(1, duration - start), how);
   };
 
+  // The memoized controls below call the latest begin.
+  const beginLatest = useRef(begin);
+  useLayoutEffect(() => {
+    beginLatest.current = begin;
+  });
+
   const fail = (message: string) => {
     setWaiting(false);
     setFailure(message);
     setPaused(true);
   };
 
+  const decided = useEffectEvent((decision: VideoPlayback) => {
+    setPlayback(decision);
+    begin(decision, decision.mode, 0, true);
+  });
+  const undecided = useEffectEvent((caught: unknown) => fail(messageOf(caught)));
   useEffect(() => {
     let live = true;
     getVideoPlayback(asset.id, caps).then(
       (decision) => {
-        if (!live) return;
-        setPlayback(decision);
-        begin(decision, decision.mode, 0, true);
+        if (live) decided(decision);
       },
       (caught) => {
-        if (live) fail(messageOf(caught));
+        if (live) undecided(caught);
       },
     );
     return () => {
@@ -185,7 +199,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
       window.clearTimeout(restart.current);
       feed.current?.close();
     };
-  }, [asset.id]);
+  }, [asset.id, caps]);
 
   // The element's own failure: what the browser could not play is tried
   // once more as a full conversion.
@@ -201,7 +215,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
 
   const absolute = useCallback(() => (converted ? offset : 0) + (video.current?.currentTime ?? 0), [converted, offset]);
 
-  const play = () => {
+  const play = useCallback(() => {
     const element = video.current;
     if (!element) return;
     wantPlay.current = true;
@@ -212,7 +226,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
         setPaused(true);
         setWaiting(false);
       });
-  };
+  }, []);
 
   // seek moves to an absolute position; a converted stream restarts there
   // unless it already holds it.
@@ -234,7 +248,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
       }
       window.clearTimeout(restart.current);
       const resume = !element.paused || wantPlay.current;
-      restart.current = window.setTimeout(() => begin(playback, mode, target, resume), settleSkips);
+      restart.current = window.setTimeout(() => beginLatest.current(playback, mode, target, resume), settleSkips);
     },
     [playback, mode, converted, offset, duration],
   );
@@ -244,7 +258,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     if (!element || failure) return;
     if (ended) {
       if (converted) {
-        if (playback && mode) begin(playback, mode, 0, true);
+        if (playback && mode) beginLatest.current(playback, mode, 0, true);
       } else {
         element.currentTime = 0;
         play();
@@ -256,13 +270,13 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
       wantPlay.current = false;
       element.pause();
     }
-  }, [failure, ended, paused, converted, playback, mode]);
+  }, [failure, ended, paused, converted, playback, mode, play]);
 
   const toggleMute = useCallback(() => setMuted((value) => !value), []);
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
-    else void stage.current?.requestFullscreen?.().catch(() => undefined);
-  }, [stage]);
+    else void stageRef.current?.requestFullscreen?.().catch(() => undefined);
+  }, [stageRef]);
   useImperativeHandle(ref, () => ({ toggle, mute: toggleMute, fullscreen: toggleFullscreen }), [
     toggle,
     toggleMute,
@@ -270,15 +284,16 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
   ]);
 
   useEffect(() => {
+    const element = stageRef.current;
     const changed = () =>
-      setFullscreen(Boolean(document.fullscreenElement) && document.fullscreenElement === stage.current);
+      setFullscreen(Boolean(document.fullscreenElement) && document.fullscreenElement === stageRef.current);
     document.addEventListener("fullscreenchange", changed);
     return () => {
       document.removeEventListener("fullscreenchange", changed);
-      if (document.fullscreenElement && document.fullscreenElement === stage.current)
+      if (document.fullscreenElement && document.fullscreenElement === element)
         void document.exitFullscreen?.().catch(() => undefined);
     };
-  }, [stage]);
+  }, [stageRef]);
 
   useEffect(() => {
     const element = video.current;
