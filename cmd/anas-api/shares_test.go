@@ -93,7 +93,8 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			input := &openapi3filter.ResponseValidationInput{RequestValidationInput: &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}, Status: response.Code, Header: response.Header()}
+			input := &openapi3filter.ResponseValidationInput{RequestValidationInput: &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}, Status: response.Code, Header: response.Header(),
+				Options: &openapi3filter.Options{IncludeResponseStatus: true}}
 			input.SetBodyBytes(response.Body.Bytes())
 			if err := openapi3filter.ValidateResponse(ctx, input); err != nil {
 				t.Fatalf("%s %s contract: %v", method, url, err)

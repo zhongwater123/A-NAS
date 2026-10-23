@@ -28,7 +28,7 @@ func TestSystemLogsAreForAdministratorsAndFollowTheContract(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		SystemLogs: systemlog.NewFake(nil), Logger: logger,
 	})
@@ -88,7 +88,7 @@ func TestSystemLogsAreForAdministratorsAndFollowTheContract(t *testing.T) {
 		t.Fatalf("ssh logs status = %d, want 400", recorder.Code)
 	}
 
-	withoutLogs := httpapi.NewProduct(httpapi.ProductDependencies{Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceLive, Accounts: accountService, Logger: logger})
+	withoutLogs := checkedProduct(t, httpapi.ProductDependencies{Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceLive, Accounts: accountService, Logger: logger})
 	asAdmin.handler = withoutLogs
 	asAdmin.do(http.MethodGet, "/api/v1/system-logs", "", nil, http.StatusServiceUnavailable)
 }

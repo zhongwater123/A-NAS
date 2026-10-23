@@ -29,7 +29,7 @@ func TestTaskManagerIsReadOnlyAndAvailableToEverySignedInAccount(t *testing.T) {
 	if _, err := service.CreateMember(ctx, admin, "member", "member password for testing"); err != nil {
 		t.Fatal(err)
 	}
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service})
+	handler := checkedProduct(t, httpapi.ProductDependencies{Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service})
 	paths := []string{"/api/v1/task-manager/device", "/api/v1/task-manager/tasks"}
 	for _, path := range paths {
 		r := httptest.NewRecorder()
@@ -71,8 +71,10 @@ func TestTaskManagerIsReadOnlyAndAvailableToEverySignedInAccount(t *testing.T) {
 					t.Fatalf("tasks: %+v, %v", tasks, err)
 				}
 			}
+			// A write needs the CSRF token before the route says it only reads.
 			post := httptest.NewRequest(http.MethodPost, path, nil)
 			post.AddCookie(&http.Cookie{Name: "anas_session", Value: session.Token})
+			post.Header.Set("X-CSRF-Token", session.CSRFToken)
 			r = httptest.NewRecorder()
 			handler.ServeHTTP(r, post)
 			if r.Code != http.StatusMethodNotAllowed {

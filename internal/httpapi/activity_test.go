@@ -99,7 +99,7 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = settings.Close() })
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Photos: photoAPI(photoService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

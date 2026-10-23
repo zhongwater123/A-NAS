@@ -60,7 +60,7 @@ func newTransferFixture(t *testing.T) *transferFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Transfers: api, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

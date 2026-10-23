@@ -31,7 +31,7 @@ func TestPhotoAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 		t.Fatalf("open photos: %v", err)
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
 		Photos:   photosapi.New(photoService, nil),
@@ -156,7 +156,7 @@ func TestLibraryViewingThroughTheProductAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
 		Photos:   photosapi.New(photoService, nil),

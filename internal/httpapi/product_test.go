@@ -39,9 +39,10 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	terminalCalls := 0
 	terminalHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		terminalCalls++
-		w.WriteHeader(http.StatusNoContent)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"enabled":true}`))
 	})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		ProductVersion: "v1.0.1-rc.1", Accounts: accountService, Files: fileService, Storage: storageService,
 		Terminal: terminalHandler, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -101,7 +102,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	adminTerminalRequest.AddCookie(responseCookies[0])
 	adminTerminal := httptest.NewRecorder()
 	handler.ServeHTTP(adminTerminal, adminTerminalRequest)
-	if got, want := adminTerminal.Code, http.StatusNoContent; got != want || terminalCalls != 1 {
+	if got, want := adminTerminal.Code, http.StatusOK; got != want || terminalCalls != 1 {
 		t.Fatalf("administrator terminal status/calls = %d/%d, want %d/1", got, terminalCalls, want)
 	}
 
@@ -332,7 +333,7 @@ func TestProductAPIReportsCredentialProvisioningFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, failingCredentials{}, accounts.Options{}),
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -356,7 +357,7 @@ func TestProductAPIKeepsLocalConsoleSessionsUntilSignOut(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Date(2026, 10, 8, 18, 15, 0, 0, time.UTC)
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{Now: func() time.Time { return now }}),
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -442,7 +443,7 @@ func TestProductAPIAcceptsSessionsOnlyFromTheClientThatSignedIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),

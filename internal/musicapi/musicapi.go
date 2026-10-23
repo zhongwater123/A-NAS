@@ -1,8 +1,12 @@
-package httpapi
+// Package musicapi serves the music library (/api/v1/music) to every
+// signed-in member. Reads of files go through files.Service, so the File
+// Broker reads them as the member (ADR 0018).
+package musicapi
 
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -10,47 +14,54 @@ import (
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/music"
 )
 
-// musicRoutes serve the music library to every signed-in member. Reads of
-// files go through files.Service, so the File Broker reads them as the
-// member (ADR 0018).
-func (h *productHandler) musicRoutes() {
-	h.mux.HandleFunc("GET /api/v1/music/library", h.withMusic(h.handleMusicStatus))
-	h.mux.HandleFunc("POST /api/v1/music/library/scan", h.withMusicMutation(h.handleMusicScan))
-	h.mux.HandleFunc("GET /api/v1/music/tracks", h.withMusic(h.handleMusicTracks))
-	h.mux.HandleFunc("GET /api/v1/music/tracks/{trackID}/stream", h.withMusic(h.handleMusicStream))
-	h.mux.HandleFunc("GET /api/v1/music/tracks/{trackID}/lyrics", h.withMusic(h.handleMusicLyrics))
-	h.mux.HandleFunc("GET /api/v1/music/covers/{coverID}", h.withMusic(h.handleMusicCover))
-	h.mux.HandleFunc("GET /api/v1/music/sources", h.withMusic(h.handleMusicSources))
-	h.mux.HandleFunc("PUT /api/v1/music/sources", h.withMusicMutation(h.handleSetMusicSources))
-	h.mux.HandleFunc("GET /api/v1/music/favorites", h.withMusic(h.handleMusicFavorites))
-	h.mux.HandleFunc("PUT /api/v1/music/favorites/{trackID}", h.withMusicMutation(h.handleMusicFavorite(true)))
-	h.mux.HandleFunc("DELETE /api/v1/music/favorites/{trackID}", h.withMusicMutation(h.handleMusicFavorite(false)))
-	h.mux.HandleFunc("GET /api/v1/music/recent", h.withMusic(h.handleMusicRecent))
-	h.mux.HandleFunc("DELETE /api/v1/music/recent", h.withMusicMutation(h.handleClearMusicRecent))
-	h.mux.HandleFunc("POST /api/v1/music/plays", h.withMusicMutation(h.handleMusicPlay))
-	h.mux.HandleFunc("GET /api/v1/music/playlists", h.withMusic(h.handleMusicPlaylists))
-	h.mux.HandleFunc("POST /api/v1/music/playlists", h.withMusicMutation(h.handleCreateMusicPlaylist))
-	h.mux.HandleFunc("PATCH /api/v1/music/playlists/{playlistID}", h.withMusicMutation(h.handleUpdateMusicPlaylist))
-	h.mux.HandleFunc("DELETE /api/v1/music/playlists/{playlistID}", h.withMusicMutation(h.handleDeleteMusicPlaylist))
-	h.mux.HandleFunc("POST /api/v1/music/playlists/{playlistID}/tracks", h.withMusicMutation(h.handleAddToMusicPlaylist))
+// API serves the library; a nil library answers music_unavailable.
+type API struct {
+	music  *music.Service
+	logger *slog.Logger
 }
 
-type musicHandler func(http.ResponseWriter, *http.Request, accounts.Session)
-
-func (h *productHandler) withMusic(next musicHandler) http.HandlerFunc {
-	return h.withSession(h.requireMusic(next))
+func New(service *music.Service, logger *slog.Logger) *API {
+	return &API{music: service, logger: logger}
 }
 
-func (h *productHandler) withMusicMutation(next musicHandler) http.HandlerFunc {
-	return h.withMutation(h.requireMusic(next))
+func (h *API) Routes() []apiroute.Route {
+	read := func(method, pattern string, handler apiroute.Handler) apiroute.Route {
+		return apiroute.Route{Method: method, Pattern: pattern, Posture: apiroute.Session, Handler: h.requireMusic(handler)}
+	}
+	change := func(method, pattern string, handler apiroute.Handler) apiroute.Route {
+		return apiroute.Route{Method: method, Pattern: pattern, Posture: apiroute.Mutation, Handler: h.requireMusic(handler)}
+	}
+	return []apiroute.Route{
+		read(http.MethodGet, "/api/v1/music/library", h.handleMusicStatus),
+		change(http.MethodPost, "/api/v1/music/library/scan", h.handleMusicScan),
+		read(http.MethodGet, "/api/v1/music/tracks", h.handleMusicTracks),
+		read(http.MethodGet, "/api/v1/music/tracks/{trackID}/stream", h.handleMusicStream),
+		read(http.MethodGet, "/api/v1/music/tracks/{trackID}/lyrics", h.handleMusicLyrics),
+		read(http.MethodGet, "/api/v1/music/covers/{coverID}", h.handleMusicCover),
+		read(http.MethodGet, "/api/v1/music/sources", h.handleMusicSources),
+		change(http.MethodPut, "/api/v1/music/sources", h.handleSetMusicSources),
+		read(http.MethodGet, "/api/v1/music/favorites", h.handleMusicFavorites),
+		change(http.MethodPut, "/api/v1/music/favorites/{trackID}", h.handleMusicFavorite(true)),
+		change(http.MethodDelete, "/api/v1/music/favorites/{trackID}", h.handleMusicFavorite(false)),
+		read(http.MethodGet, "/api/v1/music/recent", h.handleMusicRecent),
+		change(http.MethodDelete, "/api/v1/music/recent", h.handleClearMusicRecent),
+		change(http.MethodPost, "/api/v1/music/plays", h.handleMusicPlay),
+		read(http.MethodGet, "/api/v1/music/playlists", h.handleMusicPlaylists),
+		change(http.MethodPost, "/api/v1/music/playlists", h.handleCreateMusicPlaylist),
+		change(http.MethodPatch, "/api/v1/music/playlists/{playlistID}", h.handleUpdateMusicPlaylist),
+		change(http.MethodDelete, "/api/v1/music/playlists/{playlistID}", h.handleDeleteMusicPlaylist),
+		change(http.MethodPost, "/api/v1/music/playlists/{playlistID}/tracks", h.handleAddToMusicPlaylist),
+	}
 }
 
-func (h *productHandler) requireMusic(next musicHandler) musicHandler {
+func (h *API) requireMusic(next apiroute.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		if h.music == nil {
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "music_unavailable", "music library is unavailable")
@@ -60,37 +71,37 @@ func (h *productHandler) requireMusic(next musicHandler) musicHandler {
 	}
 }
 
-func (h *productHandler) handleMusicStatus(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicStatus(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	status, err := h.music.Status(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, status)
 }
 
-func (h *productHandler) handleMusicScan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicScan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	status, err := h.music.StartScan(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusAccepted, status)
 }
 
-func (h *productHandler) handleMusicTracks(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicTracks(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	library, err := h.music.Tracks(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, library)
 }
 
-func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicStream(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	track, err := h.music.Track(r.Context(), session.User, r.PathValue("trackID"))
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	if track.Transcode {
@@ -99,7 +110,7 @@ func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Reques
 	}
 	stream, err := h.music.OpenTrack(r.Context(), session.User, track.ID)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	defer func() { _ = stream.Reader.Close() }()
@@ -112,7 +123,7 @@ func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Reques
 
 // streamDecodedTrack sends the FLAC the media worker decodes from ?start=
 // seconds. It cannot seek, so players request a new start instead of a Range.
-func (h *productHandler) streamDecodedTrack(w http.ResponseWriter, r *http.Request, session accounts.Session, track music.Track) {
+func (h *API) streamDecodedTrack(w http.ResponseWriter, r *http.Request, session accounts.Session, track music.Track) {
 	start := 0.0
 	if value := r.URL.Query().Get("start"); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
@@ -124,7 +135,7 @@ func (h *productHandler) streamDecodedTrack(w http.ResponseWriter, r *http.Reque
 	}
 	body, err := h.music.Decode(r.Context(), session.User, track.ID, start)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	defer body.Close()
@@ -134,16 +145,16 @@ func (h *productHandler) streamDecodedTrack(w http.ResponseWriter, r *http.Reque
 	_, _ = io.Copy(w, body)
 }
 
-func (h *productHandler) handleMusicLyrics(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicLyrics(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	lyrics, err := h.music.Lyrics(r.Context(), session.User, r.PathValue("trackID"))
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]string{"text": lyrics})
 }
 
-func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicCover(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	size := r.URL.Query().Get("size")
 	if size == "" {
 		size = music.CoverSmall
@@ -154,7 +165,7 @@ func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request
 	}
 	file, err := h.music.CoverPath(r.Context(), session.User, r.PathValue("coverID"), size)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	content, err := os.Open(file)
@@ -165,7 +176,7 @@ func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request
 	defer func() { _ = content.Close() }()
 	info, err := content.Stat()
 	if err != nil {
-		h.internalError(w, r, err)
+		httpjson.WriteInternal(w, r, h.logger, err)
 		return
 	}
 	// A cover ID names the picture's content, so a rendition never changes.
@@ -174,16 +185,16 @@ func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request
 	http.ServeContent(w, r, "", info.ModTime(), content)
 }
 
-func (h *productHandler) handleMusicSources(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicSources(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	sources, err := h.music.Sources(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, sources)
 }
 
-func (h *productHandler) handleSetMusicSources(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleSetMusicSources(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		Custom bool                `json:"custom"`
 		Items  []music.SourceInput `json:"items"`
@@ -193,49 +204,49 @@ func (h *productHandler) handleSetMusicSources(w http.ResponseWriter, r *http.Re
 	}
 	sources, err := h.music.SetSources(r.Context(), session.User, request.Items, !request.Custom)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, sources)
 }
 
-func (h *productHandler) handleMusicFavorites(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicFavorites(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	items, err := h.music.Favorites(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *productHandler) handleMusicFavorite(favorite bool) musicHandler {
+func (h *API) handleMusicFavorite(favorite bool) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		if err := h.music.SetFavorite(r.Context(), session.User, r.PathValue("trackID"), favorite); err != nil {
-			h.writeMusicError(w, r, err)
+			h.writeError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func (h *productHandler) handleMusicRecent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicRecent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	items, err := h.music.Recent(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *productHandler) handleClearMusicRecent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleClearMusicRecent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if err := h.music.ClearRecent(r.Context(), session.User); err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *productHandler) handleMusicPlay(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicPlay(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		TrackID string `json:"trackId"`
 	}
@@ -247,22 +258,22 @@ func (h *productHandler) handleMusicPlay(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if err := h.music.RecordPlay(r.Context(), session.User, request.TrackID); err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *productHandler) handleMusicPlaylists(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleMusicPlaylists(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	items, err := h.music.Playlists(r.Context(), session.User)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *productHandler) handleCreateMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleCreateMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		Name     string   `json:"name"`
 		TrackIDs []string `json:"trackIds"`
@@ -272,34 +283,34 @@ func (h *productHandler) handleCreateMusicPlaylist(w http.ResponseWriter, r *htt
 	}
 	playlist, err := h.music.CreatePlaylist(r.Context(), session.User, request.Name, request.TrackIDs)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusCreated, playlist)
 }
 
-func (h *productHandler) handleUpdateMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleUpdateMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var change music.PlaylistChange
 	if !httpjson.Read(w, r, httpjson.Limit, &change) {
 		return
 	}
 	playlist, err := h.music.UpdatePlaylist(r.Context(), session.User, r.PathValue("playlistID"), change)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, playlist)
 }
 
-func (h *productHandler) handleDeleteMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleDeleteMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if err := h.music.DeletePlaylist(r.Context(), session.User, r.PathValue("playlistID")); err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *productHandler) handleAddToMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+func (h *API) handleAddToMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		TrackIDs []string `json:"trackIds"`
 	}
@@ -308,13 +319,13 @@ func (h *productHandler) handleAddToMusicPlaylist(w http.ResponseWriter, r *http
 	}
 	playlist, err := h.music.AddToPlaylist(r.Context(), session.User, r.PathValue("playlistID"), request.TrackIDs)
 	if err != nil {
-		h.writeMusicError(w, r, err)
+		h.writeError(w, r, err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, playlist)
 }
 
-func (h *productHandler) writeMusicError(w http.ResponseWriter, r *http.Request, err error) {
+func (h *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, music.ErrNotFound), errors.Is(err, files.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "music resource was not found")
@@ -327,6 +338,6 @@ func (h *productHandler) writeMusicError(w http.ResponseWriter, r *http.Request,
 	case errors.Is(err, accounts.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "music library access is forbidden")
 	default:
-		h.writeFileError(w, r, err)
+		filesapi.WriteError(w, r, h.logger, err)
 	}
 }

@@ -1,4 +1,7 @@
-// Package httpapi exposes read-only A-NAS product endpoints over HTTP.
+// Package httpapi composes the product API: the route table and the guard
+// that enforces each route's posture (routes.go), signing in, accounts,
+// storage, the terminal and the host state (this file). Each domain's own
+// routes live in its internal/<domain>api package.
 package httpapi
 
 import (
@@ -62,7 +65,7 @@ type systemHealth struct {
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics", "/api/v1/task-manager/device", "/api/v1/task-manager/tasks":
+	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -73,10 +76,6 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.Path == "/api/v1/task-manager/device" || r.URL.Path == "/api/v1/task-manager/tasks" {
-		h.handleTaskManager(w, r)
-		return
-	}
 	if r.URL.Path == "/healthz" {
 		httpjson.Write(w, http.StatusOK, map[string]string{"status": "ok"})
 		return

@@ -152,7 +152,7 @@ func mediaAPIFor(service *media.Service, user accounts.User) http.Handler {
 
 func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	fixture := newMediaFixture(t)
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: fixture.accounts, Files: fixture.files,
 		Media: mediaapi.New(fixture.media, nil), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -220,7 +220,7 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 // about Web file changes, signed in as the administrator.
 func signedInMediaHandler(t *testing.T, fixture *mediaFixture) (http.Handler, *http.Cookie, string, func() string) {
 	t.Helper()
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: fixture.accounts, Files: fixture.files,
 		Media: mediaapi.New(fixture.media, nil), FilesChanged: fixture.media.SpaceChanged, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

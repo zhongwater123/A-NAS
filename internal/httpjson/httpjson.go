@@ -43,6 +43,13 @@ func WriteError(w http.ResponseWriter, status int, code, message string) {
 	Write(w, status, Error{Error: ErrorDetail{Code: code, Message: message}})
 }
 
+// WriteInternal logs err with the request's path and answers 500
+// internal_error, which tells the client nothing more.
+func WriteInternal(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
+	logger.ErrorContext(r.Context(), "product request failed", "path", r.URL.Path, "error", err)
+	WriteError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
+}
+
 // Why a request body was refused.
 var (
 	ErrContentType = errors.New("Content-Type must be application/json")

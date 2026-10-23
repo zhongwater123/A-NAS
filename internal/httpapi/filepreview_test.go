@@ -64,7 +64,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), Accounts: accountService, Files: fileService,
 		FilePreviews: filepreview.New(fileService, previewWorker{}), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
