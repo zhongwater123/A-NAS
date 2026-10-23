@@ -1,6 +1,6 @@
 # 本地开发环境
 
-更新时间：2026-10-08
+更新时间：2026-10-23
 
 项目有两台 Windows 开发机。[检出换行](#windows-检出换行)、[Root 集成测试](#root-集成测试)、[系统测试](#系统测试)和[实验 NAS 接入](#实验-nas-接入)适用于两台；两台的差异分列在各自的小节。
 
@@ -69,9 +69,9 @@ wsl -d Ubuntu-24.04 -u root
 | WSL 用户 | 日常用户，属于 `docker` 组，没有免密 `sudo`；没有 `anas-dev` |
 | WSL 工作区入口 | 直接使用 `/mnt/d/A-NAS` 或对应工作树 |
 | Git | Git for Windows；仓库内已设置 `core.autocrlf=false`、`core.eol=lf` |
-| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0 与 jq，均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；WSL 中没有 gcc |
+| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0 与 jq，均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译 |
 | Docker | WSL 内 Docker Engine 29.1.3，cgroup v2；Docker Hub 不可达，`deb.debian.org` 与 `proxy.golang.org` 可达 |
-| 本地镜像 | `anas-acl-matrix:bookworm`：Debian 12，加装 gcc、acl、btrfs-progs、samba、samba-vfs-modules 与 smbclient，用于 cgo 测试与 root 集成测试；`anas-systemd:trixie`：由 `scripts/build-system-test-image.sh` 以前者为构建器生成，用于系统测试 |
+| 本地镜像 | `anas-acl-matrix:bookworm`：Debian 12，加装 gcc、acl、btrfs-progs、samba、samba-vfs-modules 与 smbclient，用于 root 集成测试，也可在 Debian 12 中复现 cgo 测试；`anas-systemd:trixie`：由 `scripts/build-system-test-image.sh` 以前者为构建器生成，用于系统测试 |
 
 ### 运行检查
 
@@ -83,7 +83,7 @@ cd /mnt/d/A-NAS
 make docs-check ops-check web-test web-build
 ```
 
-WSL 没有 gcc，依赖 cgo（SQLite）的 Go 命令在 `anas-acl-matrix:bookworm` 中以当前用户运行；以 root 运行会改变依赖权限检查的文件代理与文件测试。模块缓存先在 WSL 中用 `go mod download` 填好：
+完整门禁按 [check-in-wsl](../../.claude/skills/check-in-wsl/SKILL.md) 在 WSL 的 ext4 副本中运行，依赖 cgo（SQLite）的 Go 测试与构建直接用 WSL 的 gcc。要在 Debian 12 中复现 cgo 测试时，在 `anas-acl-matrix:bookworm` 中以当前用户运行；以 root 运行会改变依赖权限检查的文件代理与文件测试。模块缓存先在 WSL 中用 `go mod download` 填好：
 
 ```bash
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
@@ -95,13 +95,10 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
 
 把最后的 `go test ./...` 换成 `go vet ./...` 或 `go build -o build/ ./cmd/anas-api ./cmd/anas-host-agent` 即得到对应检查。root 集成测试使用同一镜像，去掉 `-u`，加上 `--privileged -e ANAS_ROOT_INTEGRATION=1`，运行 `go test -tags rootintegration -count=1 ./internal/hostops/linux`。
 
-`make system-test` 在本机会因 `build-binaries` 需要 gcc 而失败，按以下顺序运行系统测试：
+系统测试按 [system-test](../../.claude/skills/system-test/SKILL.md) 在同一个 ext4 副本中运行；构建系统测试镜像时以 `anas-acl-matrix:bookworm` 为构建器：
 
 ```bash
-scripts/build-system-test-image.sh anas-systemd:trixie anas-acl-matrix:bookworm   # 只需一次
-make web-build                                                                     # WSL 中
-# 用上面的容器执行 go build -o build/ ./cmd/anas-api ./cmd/anas-host-agent
-bash scripts/system-test.sh
+scripts/build-system-test-image.sh anas-systemd:trixie anas-acl-matrix:bookworm
 ```
 
 注意事项：
