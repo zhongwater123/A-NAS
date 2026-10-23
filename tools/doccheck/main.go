@@ -53,8 +53,10 @@ var (
 	// it counts only where a document labels its current state: on a 状态
 	// line, or in parentheses such as an index entry's (……，未部署).
 	labelPhrases        = []string{"未部署"}
-	labelLine           = regexp.MustCompile(`^\**(?:状态|Status)\**[：:]`)
 	statusPhraseKeepers = map[string]bool{currentDocument: true, "docs/runbooks/accept-features-on-experimental-nas.md": true}
+	// A document's 状态 line; the group is the English status word it starts
+	// with, if any.
+	statusLine = regexp.MustCompile(`^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
 	// A line that uses a phrase in its ordinary sense, such as merging two
 	// people in the photo library, carries this comment.
 	statusPhraseAllowed = "<!-- doccheck: not a status -->"
@@ -66,7 +68,6 @@ var (
 	adrFileName    = regexp.MustCompile(`^\d{4}-.+\.md$`)
 	adrIndexEntry  = regexp.MustCompile(`^\s*[-*]\s+\[\d{4}[^\]]*\]\(([^)]+)\)(.*)$`)
 	adrIndexMarker = regexp.MustCompile(`^\s*[（(]\s*([A-Za-z]+)`)
-	adrStatusLine  = regexp.MustCompile(`^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
 	adrStatuses    = map[string]bool{"proposed": true, "accepted": true, "superseded": true}
 )
 
@@ -211,22 +212,21 @@ func statusPhrase(line string) string {
 // labelsWith reports whether line uses phrase as a status label: anywhere on
 // a 状态 line, or inside parentheses elsewhere.
 func labelsWith(line, phrase string) bool {
-	if labelLine.MatchString(strings.TrimSpace(line)) {
+	if statusLine.MatchString(strings.TrimSpace(line)) {
 		return strings.Contains(line, phrase)
 	}
-	for offset := 0; ; {
-		index := strings.Index(line[offset:], phrase)
-		if index < 0 {
-			return false
-		}
-		before := line[:offset+index]
-		opened := max(strings.LastIndex(before, "（"), strings.LastIndex(before, "("))
-		closed := max(strings.LastIndex(before, "）"), strings.LastIndex(before, ")"))
-		if opened > closed {
+	depth := 0
+	for index, r := range line {
+		switch {
+		case r == '（' || r == '(':
+			depth++
+		case r == '）' || r == ')':
+			depth = max(depth-1, 0)
+		case depth > 0 && strings.HasPrefix(line[index:], phrase):
 			return true
 		}
-		offset += index + len(phrase)
 	}
+	return false
 }
 
 // validateADRIndex checks that every ADR is listed once in the index and that
@@ -265,7 +265,11 @@ func validateADRIndex(documents map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("%s is not listed in %s", name, adrIndex))
 			continue
 		}
-		match := adrStatusLine.FindStringSubmatch(adrHeaderLine(documents[name]))
+		match, misplaced := adrStatus(documents[name])
+		if misplaced {
+			problems = append(problems, fmt.Sprintf("%s: move the 状态 line directly under the title so the index can be checked", name))
+			continue
+		}
 		if match == nil {
 			continue
 		}
@@ -284,21 +288,30 @@ func validateADRIndex(documents map[string]string) []string {
 	return problems
 }
 
-// adrHeaderLine returns the first line under an ADR's title, where its 状态
-// line goes; a 状态： further down belongs to the body.
-func adrHeaderLine(content string) string {
-	titled := false
+// adrStatus matches the 状态 line against the first line under an ADR's
+// title, where it goes. misplaced reports a 状态 line further down but before
+// the first section, which would otherwise escape the index check; one inside
+// a section belongs to the body.
+func adrStatus(content string) (match []string, misplaced bool) {
+	titled, header := false, true
 	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "":
 		case !titled && strings.HasPrefix(line, "# "):
 			titled = true
-		default:
-			return line
+		case strings.HasPrefix(line, "## "):
+			return nil, false
+		case header:
+			if match = statusLine.FindStringSubmatch(line); match != nil {
+				return match, false
+			}
+			header = false
+		case statusLine.MatchString(line):
+			return nil, true
 		}
 	}
-	return ""
+	return nil, false
 }
 
 // indexedADRStatus reads the status from the marker after an index link: only

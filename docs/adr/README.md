@@ -34,6 +34,6 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 
 ## 格式
 
-文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。状态行紧接标题、写在正文之前，以 proposed、accepted 或 superseded 开头；`make docs-check` 只读这一行，与索引的标记核对。
+文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。状态行紧接标题、写在正文之前，以 proposed、accepted 或 superseded 开头；`make docs-check` 读这一行与索引的标记核对，状态行写在第一个小节之前的其他位置时报错。
 
 决定被替代时保留原文件，在顶部标记 `superseded` 并链接新 ADR。
