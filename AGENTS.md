@@ -23,6 +23,15 @@
 - Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
 - 其他变更运行能证明结果的最小相关检查。
 
+## Claude Code
+
+- 本文件是唯一的项目指令文件，Claude Code 直接读取。不要新建 `CLAUDE.md` 或 `CLAUDE.local.md`：任一级目录中出现它们，Claude Code 就不再读本文件；确需时在其中写一行 `@AGENTS.md`。
+- `.claude/settings.json` 是共享设置：禁止读取密钥文件，并在编辑后对 Go 文件运行 gofmt。个人覆盖写进被 Git 忽略的 `.claude/settings.local.json`。
+- 可复用流程写成技能，其他工具也可以照着做：
+  - [check-in-wsl](.claude/skills/check-in-wsl/SKILL.md)：在 Windows 开发机上运行门禁；
+  - [system-test](.claude/skills/system-test/SKILL.md)：systemd 系统测试；
+  - [fake-preview](.claude/skills/fake-preview/SKILL.md)：在独立的 `*.localhost` 主机名上启动 Fake 预览栈。
+
 ## 完工
 
 1. 留下已运行检查或其他可复现的验证证据。

@@ -176,7 +176,7 @@ cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
 /opt/a-nas/current/install-screensavers.sh <池 ID>
 ```
 
-之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
+Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
 
 ## 依据
 
