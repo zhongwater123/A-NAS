@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
@@ -108,7 +109,8 @@ func (s *Service) returnDetection(ctx context.Context, input *detectionInput) er
 // an undecodable original.
 func (s *Service) openAIInput(ctx context.Context, job claimedJob) (file *os.File, class string, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo AI input", recovered)
 			file, class, err = nil, jobErrorUndecodable, nil
 		}
 	}()

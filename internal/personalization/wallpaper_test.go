@@ -85,6 +85,7 @@ func TestWallpapersAreUprightAtMost4KAndOpaque(t *testing.T) {
 }
 
 func TestOnlyReasonableWallpapersAreAccepted(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
 	// A PNG header that claims 20000x20000 pixels is refused before decoding.
 	huge := encodePNG(t, image.NewGray(image.Rect(0, 0, 1, 1)))
 	binary.BigEndian.PutUint32(huge[16:20], 20000)
@@ -105,6 +106,9 @@ func TestOnlyReasonableWallpapersAreAccepted(t *testing.T) {
 			t.Errorf("%s: NormalizeWallpaper() error = %v, want %v", name, err, test.want)
 		}
 	}
+	// The decoder's panic is logged; pictures refused before or by the
+	// decoder are not.
+	imagetest.RequirePanicLogged(t, panics(), "wallpaper")
 }
 
 func TestTheWallpaperIsKeptUntilTheDefaultIsRestored(t *testing.T) {

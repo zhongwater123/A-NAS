@@ -17,6 +17,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // maxArtworkPixels refuses images that would take too much memory to decode.
@@ -192,7 +193,8 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 // size. An image the decoder panics on is not artwork, like one it rejects.
 func scaleArtwork(r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("media artwork", recovered)
 			encoded, err = nil, ErrNotFound
 		}
 	}()

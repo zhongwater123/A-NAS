@@ -606,6 +606,7 @@ func TestStreamsSubtitlesAndArtworkGoThroughTheProcessor(t *testing.T) {
 }
 
 func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
 	env := newTestEnv(t, nil)
 	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
 	env.write(t, env.shared, "电影/Heat (1995)-poster.jpg", string(imagetest.PanickingPicture()))
@@ -617,6 +618,7 @@ func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
 	if _, err := env.media.Artwork(env.ctx, env.bob, movies.Items[0].ID, "poster"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
 	}
+	imagetest.RequirePanicLogged(t, panics(), "media artwork", "Heat", "电影")
 }
 
 func TestWebChangesRescanTheLibrariesOfTheirSpace(t *testing.T) {

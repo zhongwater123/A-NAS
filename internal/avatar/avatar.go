@@ -14,6 +14,8 @@ import (
 
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Size is the edge of a stored avatar in pixels: twice the largest place a
@@ -42,7 +44,8 @@ var (
 // panics on is unsupported, like one it rejects.
 func Normalize(picture []byte) (normalized []byte, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("avatar", recovered)
 			normalized, err = nil, ErrUnsupported
 		}
 	}()

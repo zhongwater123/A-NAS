@@ -71,6 +71,8 @@ func main() {
 		}
 		return
 	}
+	// Code without a logger of its own, such as decode guards, logs here too.
+	slog.SetDefault(logger)
 	if len(os.Args) == 2 && os.Args[1] == "share-service" {
 		if err := runShareService(logger); err != nil {
 			logger.Error("A-NAS share service stopped", "error", err)

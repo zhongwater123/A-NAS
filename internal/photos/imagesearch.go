@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/disintegration/imaging"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Image search finds the photos like an image that is not in the library,
@@ -152,7 +154,8 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 // as an undecodable image, as for thumbnails.
 func renderSearchImage(data []byte) (thumbnail, detectorInput []byte, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo search image", recovered)
 			thumbnail, detectorInput, err = nil, nil, ErrUnsupportedType
 		}
 	}()

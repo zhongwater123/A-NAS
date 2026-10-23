@@ -295,6 +295,7 @@ func TestScanIndexesTagsCoversLyricsAndDurations(t *testing.T) {
 }
 
 func TestCoversThatPanicTheDecoderLeaveTheScanRunning(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
 	panicking := imagetest.PanickingPicture()
 	f := newFixture(t)
 	write(t, filepath.Join(f.shared, "Embedded", "song.mp3"), mp3File(10,
@@ -315,6 +316,12 @@ func TestCoversThatPanicTheDecoderLeaveTheScanRunning(t *testing.T) {
 			t.Errorf("track %q = %+v (indexed %v), want it indexed without a cover", title, track, ok)
 		}
 	}
+	// Both covers are logged as decoder panics, without the files' names.
+	logged := panics()
+	if len(logged) != 2 {
+		t.Fatalf("logged %d recovered panics, want 2: %+v", len(logged), logged)
+	}
+	imagetest.RequirePanicLogged(t, logged, "music cover", "song.mp3", "cover.jpg", "Embedded", "Folder")
 }
 
 func TestMembersOnlySeeTheirOwnSpaceAndTheSharedSpace(t *testing.T) {
