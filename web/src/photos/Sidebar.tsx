@@ -71,12 +71,12 @@ export function Sidebar({
   onDropOnLibrary,
 }: Props) {
   const libraryId = library?.id ?? "";
-  // Another library, or a refresh, starts with no albums until they are listed.
+  // Another library starts with no albums until they are listed; a refresh
+  // keeps the library's albums until the new list arrives.
   const [albums, setAlbums] = useState<PhotoAlbum[]>([]);
-  const albumsFor = `${libraryId}/${albumsKey}`;
-  const [albumsBefore, setAlbumsBefore] = useState(albumsFor);
-  if (albumsBefore !== albumsFor) {
-    setAlbumsBefore(albumsFor);
+  const [albumsOf, setAlbumsOf] = useState(libraryId);
+  if (albumsOf !== libraryId) {
+    setAlbumsOf(libraryId);
     setAlbums([]);
   }
   useEffect(() => {

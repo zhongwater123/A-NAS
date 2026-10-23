@@ -758,6 +758,40 @@ describe("PhotosPanel selection", () => {
   });
 });
 
+describe("PhotosPanel sidebar albums", () => {
+  it("keeps the sidebar's albums on screen while it lists them again", async () => {
+    let hold = false;
+    let deliver: (response: Response) => void = () => undefined;
+    serve(
+      (url, init) => {
+        if (url === "/api/v1/photos/libraries/library%3Amine/albums") {
+          if (!hold) return json({ items: [trip] });
+          return new Promise<Response>((resolve) => {
+            deliver = resolve;
+          });
+        }
+        if (url.startsWith("/api/v1/photos/albums/") && init?.method === "POST") return json(asset("photo:a"));
+        return undefined;
+      },
+      timeline(privateLibrary.id, () => [asset("photo:a")]),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    const nav = await screen.findByRole("navigation", { name: "相册导航" });
+    expect(await within(nav).findByRole("button", { name: /旅行/ })).toBeTruthy();
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:a.jpg" }));
+    await user.click(screen.getByRole("button", { name: "加入相册" }));
+    const picker = await screen.findByRole("dialog", { name: "加入相册" });
+    // Adding to the album lists the albums again; that list does not answer yet.
+    hold = true;
+    await user.click(within(picker).getByRole("button", { name: /旅行/ }));
+    expect(await screen.findByText("已加入相册“旅行”")).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: /旅行/ })).toBeTruthy();
+    deliver(json({ items: [{ ...trip, name: "旅行（更新）" }] }));
+    expect(await within(nav).findByRole("button", { name: /旅行（更新）/ })).toBeTruthy();
+  });
+});
+
 describe("PhotosPanel albums, trash and AI 聚合", () => {
   it("lists albums, opens one, renames it and takes a photo out of it", async () => {
     let removed = false;
