@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Message is the message of the records Log writes.
@@ -21,21 +23,87 @@ const Message = "decoder panicked; the input is treated as undecodable"
 const (
 	// maxFrames keeps the stack to where the panic started.
 	maxFrames = 8
-	// maxValue bounds the panic's message, since decoders may quote input.
-	maxValue = 256
+	// quiet is how long a panic already logged is counted instead.
+	quiet = 10 * time.Minute
 )
+
+// now is time.Now; tests move it.
+var now = time.Now
+
+// logged remembers when each panic was last logged, by decoder, type and
+// stack. The keys are paths through the code, never input, so they are few.
+var logged struct {
+	sync.Mutex
+	// to is the default logger the records went to: a new one, as in a
+	// test, starts afresh.
+	to   *slog.Logger
+	keys map[string]*occurrence
+}
+
+type occurrence struct {
+	at time.Time
+	// repeats counts the panics since then that were not logged.
+	repeats int
+}
 
 // Log records value, a panic recovered while decoding what, at error level on
 // the default logger, with up to eight stack frames from where the panic
 // started. Call it from the deferred function that called recover.
 //
-// Administrators read the system log and must not learn members' file names
-// (docs/specs/logs.md), so what names the decoder, such as "media artwork",
-// never the file, and frames are functions and line numbers without source
-// paths. Decoders get bytes or open files rather than names, so the panic's
-// message carries no name either.
+// Administrators read the system log and must learn neither members' file
+// names nor what their files hold (docs/specs/logs.md). So what names the
+// decoder, such as "media artwork", never the file; frames are functions and
+// line numbers without source paths; and of the value only its type is
+// logged, with the message of a runtime error, which states lengths and types
+// but never quotes input. A decoder's own panic message may quote the bytes
+// it was reading.
+//
+// A panic of the same type along the same stack, as a repeated request
+// raises, is logged once every ten minutes, with the number of repeats since
+// the last record, so that requesting one broken file over and over does not
+// flood the log.
 func Log(what string, value any) {
-	slog.Error(Message, "decoder", what, "panic", truncate(fmt.Sprint(value)), "stack", stack())
+	frames := stack()
+	kind := fmt.Sprintf("%T", value)
+	message := ""
+	if err, ok := value.(runtime.Error); ok {
+		message = err.Error()
+	}
+	// Not the message: its lengths come from the input.
+	repeats, ok := due(what + "\x00" + kind + "\x00" + strings.Join(frames, "\n"))
+	if !ok {
+		return
+	}
+	attrs := []any{"decoder", what, "panic_type", kind}
+	if message != "" {
+		attrs = append(attrs, "panic", message)
+	}
+	attrs = append(attrs, "stack", frames)
+	if repeats > 0 {
+		attrs = append(attrs, "repeats", repeats)
+	}
+	slog.Error(Message, attrs...)
+}
+
+// due reports whether the panic of key is to be logged now, and how many of
+// its repeats went unlogged before.
+func due(key string) (repeats int, ok bool) {
+	logged.Lock()
+	defer logged.Unlock()
+	if to := slog.Default(); logged.to != to {
+		logged.to, logged.keys = to, map[string]*occurrence{}
+	}
+	at := now()
+	last := logged.keys[key]
+	if last != nil && at.Sub(last.at) < quiet {
+		last.repeats++
+		return 0, false
+	}
+	if last != nil {
+		repeats = last.repeats
+	}
+	logged.keys[key] = &occurrence{at: at}
+	return repeats, true
 }
 
 // stack returns the frames below the panic as function:line. Log runs in the
@@ -60,11 +128,4 @@ func stack() []string {
 		}
 	}
 	return lines
-}
-
-func truncate(value string) string {
-	if len(value) <= maxValue {
-		return value
-	}
-	return strings.ToValidUTF8(value[:maxValue], "") + "…"
 }

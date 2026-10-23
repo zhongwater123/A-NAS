@@ -31,7 +31,8 @@ func TestLogRecordsThePanicAndWhereItStarted(t *testing.T) {
 		t.Fatalf("logged %d panics, want 1", len(logged))
 	}
 	got := logged[0]
-	if got.Level != slog.LevelError || got.Decoder != "test decoder" || !strings.Contains(got.Value, "index out of range [3] with length 3") {
+	if got.Level != slog.LevelError || got.Decoder != "test decoder" || got.Type != "runtime.boundsError" ||
+		!strings.Contains(got.Value, "index out of range [3] with length 3") {
 		t.Fatalf("logged %+v", got)
 	}
 	// The stack starts at the function that panicked, not in the runtime
@@ -46,22 +47,55 @@ func TestLogRecordsThePanicAndWhereItStarted(t *testing.T) {
 	}
 }
 
-func TestLogShortensTheStackAndThePanic(t *testing.T) {
+func TestLogKeepsTheInputADecoderQuotesOutOfTheLog(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	guarded(func() { panic("bad frame in 体检报告 by alice") })
+	guarded(func() { panic(fmtError("tag 体检报告")) })
+
+	logged := panics()
+	if len(logged) != 2 || logged[0].Type != "string" || logged[1].Type != "decodepanic_test.fmtError" {
+		t.Fatalf("logged %+v, want a string and a fmtError panic", logged)
+	}
+	for _, got := range logged {
+		for _, field := range got.Fields {
+			if strings.Contains(field, "体检报告") {
+				t.Fatalf("logged field %q quotes the input", field)
+			}
+		}
+	}
+}
+
+type fmtError string
+
+func (e fmtError) Error() string { return string(e) }
+
+func TestLogShortensTheStack(t *testing.T) {
 	panics := imagetest.LoggedPanics(t)
 	var deep func(int)
 	deep = func(depth int) {
 		if depth == 0 {
-			panic(strings.Repeat("界", 200))
+			panic("deep")
 		}
 		deep(depth - 1)
 	}
 	guarded(func() { deep(20) })
 
-	logged := panics()
-	if len(logged) != 1 || len(logged[0].Stack) != 8 {
+	if logged := panics(); len(logged) != 1 || len(logged[0].Stack) != 8 {
 		t.Fatalf("logged %+v, want one panic with 8 frames", logged)
 	}
-	if value := logged[0].Value; len(value) > 256+len("…") || !strings.HasSuffix(value, "界…") {
-		t.Fatalf("panic = %q (%d bytes), want it cut to 256 bytes at a character", value, len(value))
+}
+
+func TestLogCountsRepeatsOfAPanicInsteadOfLoggingThem(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	// The same path with another length is a repeat too; another path is
+	// not.
+	for _, at := range []int{1, 1, 1, 5} {
+		guarded(func() { readPastTheEnd(nil, at) })
+	}
+	guarded(func() { panic("elsewhere") })
+
+	logged := panics()
+	if len(logged) != 2 || logged[0].Type != "runtime.boundsError" || logged[1].Type != "string" {
+		t.Fatalf("logged %+v, want the first bounds error and the other panic", logged)
 	}
 }
