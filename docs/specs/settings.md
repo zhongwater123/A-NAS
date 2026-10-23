@@ -102,7 +102,7 @@
 
 ## 验收证据
 
-- React 行为测试：[桌面测试](../../web/src/App.test.tsx) 覆盖单一入口、头像跳转、成员自助改密、从“我的账号”打开登录记录、角色可见分区、终端分区跨分区与最小化保留 Shell、概览加载/失联/重试、存储状态与“已用空间未知”、初始化向导与计划跨分区和关窗保留、菜单与对话框中的重置密码、只读查看和禁用确认，以及添加成员时的账号名与密码规则检查；规则本身见 [`accountRules.test.ts`](../../web/src/accountRules.test.ts)。
+- React 行为测试：[设置测试](../../web/src/SettingsPanel.test.tsx) 与[桌面测试](../../web/src/App.test.tsx) 覆盖单一入口、头像跳转、成员自助改密、从“我的账号”打开登录记录、角色可见分区、终端分区跨分区与最小化保留 Shell、概览加载/失联/重试、存储状态与“已用空间未知”、初始化向导与计划跨分区和关窗保留、菜单与对话框中的重置密码、只读查看和禁用确认，以及添加成员时的账号名与密码规则检查；规则本身见 [`accountRules.test.ts`](../../web/src/accountRules.test.ts)。
 - 本地门禁：`make check`。
 
 ## 关联
@@ -111,4 +111,4 @@
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
 - 代码：[设置窗口](../../web/src/SettingsPanel.tsx)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[日志分区](../../web/src/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[个性化分区](../../web/src/settings/PersonalizationSection.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)
-- 测试：[桌面测试](../../web/src/App.test.tsx)
+- 测试：[设置测试](../../web/src/SettingsPanel.test.tsx)、[桌面测试](../../web/src/App.test.tsx)

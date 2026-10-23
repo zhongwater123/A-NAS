@@ -179,4 +179,4 @@
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[传输中心](transfer-center.md)。
 - 现有代码：[文件代理](../../internal/filebroker/server.go)、[文件操作](../../internal/files/service.go)、[桌面](../../web/src/desktop/Desktop.tsx)与[通知](../../web/src/desktop/NotificationCenter.tsx)、[文件预览](../../web/src/files/FileViewer.tsx)。
 - 界面：[分享窗口](../../web/src/shares/SharesPanel.tsx)、[详情](../../web/src/shares/ShareDetail.tsx)、[私聊](../../web/src/shares/Conversation.tsx)、[提醒与未读](../../web/src/shares/SharesProvider.tsx)；[界面测试](../../web/src/shares/shares.test.tsx)；已读游标见[讨论](../../internal/shares/discussions.go)与[测试](../../internal/shares/lifecycle_test.go)。
-- 现有测试参考：[文件操作测试](../../internal/files/service_test.go)、[桌面工作流测试](../../web/src/App.test.tsx)。
+- 现有测试参考：[文件操作测试](../../internal/files/service_test.go)、[文件管理测试](../../web/src/files/FilePanel.test.tsx)。

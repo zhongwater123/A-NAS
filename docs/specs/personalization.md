@@ -141,7 +141,7 @@
 ## 验收证据
 
 - 屏保后黑屏、没有视频时黑屏、登录页黑屏、“从不”、读取失败按默认值、第一次输入只唤醒：[`LocalConsoleScreenSaver.test.tsx`](../../web/src/LocalConsoleScreenSaver.test.tsx)。
-- 设置分区的息屏与壁纸样式修改、失败恢复、上传与恢复默认：[`PersonalizationSection.test.tsx`](../../web/src/settings/PersonalizationSection.test.tsx)；成员侧栏没有“个性化”：[`App.test.tsx`](../../web/src/App.test.tsx)。
+- 设置分区的息屏与壁纸样式修改、失败恢复、上传与恢复默认：[`PersonalizationSection.test.tsx`](../../web/src/settings/PersonalizationSection.test.tsx)；成员侧栏没有“个性化”：[`SettingsPanel.test.tsx`](../../web/src/SettingsPanel.test.tsx)。
 - 五种样式对应的显示方式：[`wallpaper.test.ts`](../../web/src/wallpaper.test.ts)。
 - 存储默认值、只接受四个时长与五种样式、图片转正缩小与透明填色、恢复默认、重新打开后保留：[`personalization_test.go`](../../internal/personalization/personalization_test.go)、[`wallpaper_test.go`](../../internal/personalization/wallpaper_test.go)。
 - 未登录读取息屏、管理员修改、成员 `403`、无效值 `422`、图片的 `413`/`415`、缓存头与 OpenAPI 契约：[`local_display_test.go`](../../internal/httpapi/local_display_test.go)、[`wallpaper_test.go`](../../internal/httpapi/wallpaper_test.go)。

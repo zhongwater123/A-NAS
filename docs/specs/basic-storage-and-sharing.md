@@ -98,7 +98,8 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [`web/src/files/FilePanel.tsx`](../../web/src/files/FilePanel.tsx)：文件管理窗口
 - [`web/src/files/model.ts`](../../web/src/files/model.ts) 与 [`model.test.ts`](../../web/src/files/model.test.ts)：所选项目可用的命令、粘贴位置、排序与置顶
 - [`web/src/useFileOrder.ts`](../../web/src/useFileOrder.ts) 与 [`useFileOrder.test.ts`](../../web/src/useFileOrder.test.ts)：置顶、手动排列、偏好隔离与存储降级
-- [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：文件管理交互、会话过期回到登录页、本机屏幕申请持久会话
+- [`web/src/files/FilePanel.test.tsx`](../../web/src/files/FilePanel.test.tsx)：文件管理交互
+- [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：会话过期回到登录页、本机屏幕申请持久会话
 - [`internal/filepreview`](../../internal/filepreview)：普通文件派生预览、权限与缓存回归测试
 - [视频与 HEIC 预览调查](../investigations/2026-10-14-file-media-previews.md)
 - [`web/src/files/FileViewer.tsx`](../../web/src/files/FileViewer.tsx)：文件管理的图片与 PDF 预览
