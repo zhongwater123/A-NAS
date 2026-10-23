@@ -72,7 +72,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useEffectEvent,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -128,6 +130,12 @@ const CONTROL_CAPABILITIES = [
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
+
+// Opening a run reads its task's notices.
+function readRun(id: string) {
+  const task = taskOfRun(id);
+  if (task) readTaskNotices(task);
+}
 
 /** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
 export interface AssistantFocus {
@@ -214,8 +222,7 @@ export function AssistantPanel({
   // The product service tells every window of the member how each card stands;
   // a card from a conversation this window has not listed yet, or Hermes saying
   // the conversations changed, brings the list up to date.
-  const known = useRef(new Set<string>());
-  known.current = new Set(sessions.map((session) => session.id));
+  const known = useEffectEvent((id: string) => sessions.some((session) => session.id === id));
   useEffect(
     () =>
       gateway.client.onEvent((event) => {
@@ -223,7 +230,7 @@ export function AssistantPanel({
         if (type === "anas.approval" && event.payload) {
           const approval = event.payload as unknown as Approval;
           keep(approval);
-          if (approval.storedSessionId && !known.current.has(approval.storedSessionId)) void refreshSessions();
+          if (approval.storedSessionId && !known(approval.storedSessionId)) void refreshSessions();
         }
         const session = typeof event.session_id === "string" ? event.session_id : "";
         if (type === "review.summary" && session) {
@@ -261,44 +268,42 @@ export function AssistantPanel({
   const asking = useRef<(allowed: boolean) => void>(undefined);
   // One card at a time: a write that arrives while another card is open waits its turn.
   const cards = useRef(Promise.resolve());
-  const controller = useMemo(
-    () =>
-      new WebosController({
-        exclude: (element) => Boolean(element.closest(".app-window-assistant, .vt-toasts, .vnas-control-ring")),
-        confirm: (danger) => {
-          const shown = cards.current.then(
-            () =>
-              new Promise<boolean>((resolve) => {
-                let timer = 0;
-                const answer = (allowed: boolean) => {
-                  window.clearTimeout(timer);
-                  asking.current = undefined;
-                  setControlAsk(undefined);
-                  resolve(allowed);
-                };
-                asking.current = answer;
-                timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
-                setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
-              }),
-          );
-          cards.current = shown.then(() => undefined);
-          return shown;
-        },
-      }),
-    [],
-  );
-  useEffect(() => controller.install(), [controller]);
+  const controller = useRef<WebosController>(undefined);
+  useEffect(() => {
+    const installed = new WebosController({
+      exclude: (element) => Boolean(element.closest(".app-window-assistant, .vt-toasts, .vnas-control-ring")),
+      confirm: (danger) => {
+        const shown = cards.current.then(
+          () =>
+            new Promise<boolean>((resolve) => {
+              let timer = 0;
+              const answer = (allowed: boolean) => {
+                window.clearTimeout(timer);
+                asking.current = undefined;
+                setControlAsk(undefined);
+                resolve(allowed);
+              };
+              asking.current = answer;
+              timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
+              setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
+            }),
+        );
+        cards.current = shown.then(() => undefined);
+        return shown;
+      },
+    });
+    controller.current = installed;
+    return installed.install();
+  }, []);
   // The window that sends a prompt is the conversation's browser for its turn:
   // it registers again before every prompt, so the steps and their cards stay
   // on the device the member is using; a window that only shows the
   // conversation never registers (#160). These are the live sessions this
   // connection registered for.
   const controlled = useRef(new Set<string>());
-  const generation = useRef(gateway.generation);
-  if (generation.current !== gateway.generation) {
-    generation.current = gateway.generation;
+  useLayoutEffect(() => {
     controlled.current.clear();
-  }
+  }, [gateway.generation]);
   const beforePrompt = useCallback(
     (liveId: string) =>
       gateway.client
@@ -335,8 +340,8 @@ export function AssistantPanel({
           action?: string;
           arguments?: Record<string, unknown>;
         };
-        if (!command.command_id || !command.action) return;
-        void controller
+        if (!command.command_id || !command.action || !controller.current) return;
+        void controller.current
           .run(command.action, command.arguments ?? {})
           .then(
             (result) => ({ ok: true, result }),
@@ -354,7 +359,7 @@ export function AssistantPanel({
           )
           .catch(() => undefined);
       }),
-    [gateway.client, controller],
+    [gateway.client],
   );
 
   const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
@@ -362,28 +367,46 @@ export function AssistantPanel({
 
   // Results of scheduled tasks the member has not read; opening a run reads its task's.
   const unread = useTaskNotices().length;
-  const openRun = useCallback((id: string, title: string) => {
-    const task = taskOfRun(id);
-    if (task) readTaskNotices(task);
+  const showRun = useCallback((id: string, title: string) => {
     setRun({ id, title });
     setActiveId(id);
     setView("chat");
   }, []);
+  const openRun = useCallback(
+    (id: string, title: string) => {
+      readRun(id);
+      showRun(id, title);
+    },
+    [showRun],
+  );
   // A task asked for from the tasks page goes to a new conversation, once the
   // thread has left the one that was open.
   const [plan, setPlan] = useState<string>();
-  useEffect(() => {
-    if (plan === undefined || activeId) return;
+  const [planned, setPlanned] = useState<{ text: string }>();
+  if (plan !== undefined && !activeId) {
     setPlan(undefined);
-    void send(plan);
-  }, [plan, activeId, send]);
+    setPlanned({ text: plan });
+  }
+  const sendPlan = useEffectEvent((text: string) => void send(text));
+  const sentPlan = useRef<{ text: string }>(undefined);
+  useEffect(() => {
+    if (!planned || sentPlan.current === planned) return;
+    sentPlan.current = planned;
+    sendPlan(planned.text);
+  }, [planned]);
   // A toast on the desktop opens a run, or the tasks.
+  const [focusBefore, setFocusBefore] = useState<typeof focus>();
+  if (focusBefore !== focus) {
+    setFocusBefore(focus);
+    if (focus?.sessionId) showRun(focus.sessionId, focus.title ?? "定时任务");
+    else if (focus) setView("tasks");
+  }
+  const focusHandled = useEffectEvent(() => onFocusHandled?.());
   useEffect(() => {
     if (!focus) return;
-    if (focus.sessionId) openRun(focus.sessionId, focus.title ?? "定时任务");
-    else setView("tasks");
-    onFocusHandled?.();
-  }, [focus, openRun, onFocusHandled]);
+    if (focus.sessionId) readRun(focus.sessionId);
+    focusHandled();
+  }, [focus]);
 
   // assistant-ui re-reads its store whenever the adapter changes, so it only
   // changes with the messages or the running state.

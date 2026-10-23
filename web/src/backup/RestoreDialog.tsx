@@ -1,5 +1,5 @@
 import { ArchiveRestore, ChevronRight, CornerLeftUp, Folder, FolderOpen, MapPin, Trash2 } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APIError, listEntries, type FileEntry, type Space } from "../api";
 
@@ -61,9 +61,6 @@ export function RestoreDialog({
   const [taken, setTaken] = useState<Set<string>>();
   // The name the dialog put in place of a taken one, while it is unchanged.
   const [suggested, setSuggested] = useState("");
-  // The listing below reads the name as it is when the listing returns.
-  const latest = useRef({ name, suggested });
-  latest.current = { name, suggested };
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -104,24 +101,36 @@ export function RestoreDialog({
   // When the target already holds the name, the dialog suggests a new one
   // instead of letting the restore fail; back where the name is free, it
   // returns to the original.
+  const [listedFor, setListedFor] = useState({ target, spaceId: space.id, initialName, kind: entry.kind });
+  if (
+    listedFor.target !== target ||
+    listedFor.spaceId !== space.id ||
+    listedFor.initialName !== initialName ||
+    listedFor.kind !== entry.kind
+  ) {
+    setListedFor({ target, spaceId: space.id, initialName, kind: entry.kind });
+    if (target) setTaken(undefined);
+  }
+  // The name is read as it is when the listing returns.
+  const suggestFor = useEffectEvent((names: Set<string>) => {
+    if (name === initialName && names.has(nameKey(initialName))) {
+      const next = restoredName(initialName, entry.kind);
+      setName(next);
+      setSuggested(next);
+    } else if (suggested && name === suggested && !names.has(nameKey(initialName))) {
+      setName(initialName);
+      setSuggested("");
+    }
+  });
   useEffect(() => {
     if (!target) return;
     let live = true;
-    setTaken(undefined);
     listEntries(space.id, target.at(-1)?.id ?? "")
       .then((items) => {
         if (!live) return;
         const names = new Set(items.map((item) => nameKey(item.name)));
         setTaken(names);
-        const { name: current, suggested: offered } = latest.current;
-        if (current === initialName && names.has(nameKey(initialName))) {
-          const next = restoredName(initialName, entry.kind);
-          setName(next);
-          setSuggested(next);
-        } else if (offered && current === offered && !names.has(nameKey(initialName))) {
-          setName(initialName);
-          setSuggested("");
-        }
+        suggestFor(names);
       })
       .catch(() => {
         if (live) setTaken(new Set());
@@ -353,10 +362,16 @@ function FolderPicker({ space, start, onPick }: { space: Space; start: Crumb[]; 
   const [error, setError] = useState("");
   const parentId = trail.at(-1)?.id ?? "";
 
-  useEffect(() => {
-    let live = true;
+  // Each folder shows nothing until its own folders arrive.
+  const browsed = JSON.stringify([space.id, parentId]);
+  const [browsedBefore, setBrowsedBefore] = useState(browsed);
+  if (browsedBefore !== browsed) {
+    setBrowsedBefore(browsed);
     setFolders(undefined);
     setError("");
+  }
+  useEffect(() => {
+    let live = true;
     listEntries(space.id, parentId)
       .then((items) => {
         if (live) setFolders(items.filter((item) => item.kind === "directory"));

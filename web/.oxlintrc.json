@@ -39,64 +39,12 @@
     "vitest/no-conditional-expect": "off"
   },
   "ignorePatterns": ["src/assistant/hermes/**"],
-  // These files predate the hooks rules. They load data from effects and keep the latest values in refs,
-  // which the rules reject; changing that rewrites each component's data flow and needs a review of its
-  // own. Every other file must pass. Take a file off a list once it passes that rule.
+  // The storage wizard reads the clock while it renders a plan's expiry and the minutes left. Without
+  // that they would change only with the next render, or count down on their own, which the user would
+  // see; until that is decided, purity is off for that file. Every other file must pass every rule.
   "overrides": [
     {
-      "files": [
-        "src/App.test.tsx",
-        "src/appcenter/AppCenterPanel.tsx",
-        "src/appcenter/InstallSheet.tsx",
-        "src/assistant/useAssistantThread.ts",
-        "src/docker/DockerPanel.tsx",
-        "src/useHostState.ts"
-      ],
-      "rules": { "react-hooks-js/exhaustive-deps": "off" }
-    },
-    {
-      "files": [
-        "src/App.tsx",
-        "src/DesktopGrid.tsx",
-        "src/Dock.tsx",
-        "src/SystemRail.tsx",
-        "src/XtermSession.tsx",
-        "src/assistant/AssistantPanel.tsx",
-        "src/assistant/useAssistantThread.ts",
-        "src/backup/RestoreDialog.tsx",
-        "src/feedback/FeedbackChannel.tsx",
-        "src/feedback/FeedbackEditor.tsx",
-        "src/music/MusicPanel.tsx",
-        "src/music/player.ts"
-      ],
-      "rules": { "react-hooks-js/refs": "off" }
-    },
-    {
-      "files": [
-        "src/App.tsx",
-        "src/appcenter/AppCenterPanel.tsx",
-        "src/appcenter/InstallSheet.tsx",
-        "src/appcenter/model.ts",
-        "src/assistant/AssistantPanel.tsx",
-        "src/backup/FindPage.tsx",
-        "src/backup/RestoreDialog.tsx",
-        "src/backup/SnapshotsPage.tsx",
-        "src/backup/VersionsDialog.tsx",
-        "src/docker/ContainerLogs.tsx",
-        "src/docker/DockerPanel.tsx",
-        "src/feedback/FeedbackChannel.tsx",
-        "src/files/FileViewer.tsx",
-        "src/music/NowPlaying.tsx",
-        "src/music/SourcesDialog.tsx",
-        "src/transfers/TransferNotices.tsx",
-        "src/trash/TrashPanel.tsx",
-        "src/useDesktopOrder.ts",
-        "src/useHostState.ts"
-      ],
-      "rules": { "react-hooks-js/set-state-in-effect": "off" }
-    },
-    {
-      "files": ["src/App.tsx", "src/settings/StorageSection.tsx"],
+      "files": ["src/settings/StorageSection.tsx"],
       "rules": { "react-hooks-js/purity": "off" }
     }
   ]

@@ -82,18 +82,21 @@ export function SnapshotsPage() {
   }, []);
 
   // Keep the selection while snapshots refresh; follow a requested focus.
-  useEffect(() => {
-    if (!snapshots) return;
-    if (focus && snapshots.some((snapshot) => snapshot.id === focus)) {
+  const focused = Boolean(focus && snapshots?.some((snapshot) => snapshot.id === focus));
+  const [selectedFor, setSelectedFor] = useState<{ snapshots: Snapshot[]; focus: typeof focus }>();
+  if (snapshots && (selectedFor?.snapshots !== snapshots || selectedFor.focus !== focus)) {
+    setSelectedFor({ snapshots, focus });
+    if (focused) {
       setSelectedId(focus);
       setShowDetail(true);
-      consumeFocus();
-      return;
-    }
-    setSelectedId((current) =>
-      current && snapshots.some((snapshot) => snapshot.id === current) ? current : snapshots[0]?.id,
-    );
-  }, [snapshots, focus, consumeFocus]);
+    } else
+      setSelectedId((current) =>
+        current && snapshots.some((snapshot) => snapshot.id === current) ? current : snapshots[0]?.id,
+      );
+  }
+  useEffect(() => {
+    if (focused) consumeFocus();
+  }, [focused, consumeFocus]);
 
   const groups = useMemo(() => {
     const result: { day: string; items: { snapshot: Snapshot; before?: Snapshot }[] }[] = [];
@@ -255,12 +258,17 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
   const [onlyChanged, setOnlyChanged] = useState(false);
   const parentId = trail.at(-1)?.id ?? "";
 
-  useEffect(() => setEntries(undefined), [snapshot.id, parentId]);
-  // A restore changes what differs from the space, so the level reloads.
-  useEffect(() => {
-    let live = true;
+  // Another level starts empty; a restore changes what differs from the
+  // space, so the level reloads.
+  const [listedFor, setListedFor] = useState({ snapshotId: snapshot.id, parentId, restored });
+  if (listedFor.snapshotId !== snapshot.id || listedFor.parentId !== parentId || listedFor.restored !== restored) {
+    if (listedFor.snapshotId !== snapshot.id || listedFor.parentId !== parentId) setEntries(undefined);
+    setListedFor({ snapshotId: snapshot.id, parentId, restored });
     setError("");
     setSelected(undefined);
+  }
+  useEffect(() => {
+    let live = true;
     listSnapshotEntries(snapshot.id, parentId)
       .then((items) => {
         if (live) setEntries(items);

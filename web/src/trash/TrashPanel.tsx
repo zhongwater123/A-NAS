@@ -62,7 +62,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   const [items, setItems] = useState<TrashItem[]>();
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<TrashSort>("deleted");
   const [query, setQuery] = useState("");
   const [spaceFilter, setSpaceFilter] = useState("");
@@ -83,23 +83,28 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   // The same after the dialog for taken names closes with the focus in it.
   const refocusAfterConflicts = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const fetchTrash = useCallback(
+    () =>
+      Promise.all([listTrash(), listSpaces()])
+        .then(([next, visible]) => {
+          setItems(next);
+          setSpaces(visible);
+          setError("");
+          setSelected((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
+        })
+        .catch((caught: unknown) => {
+          setError(messageOf(caught));
+        })
+        .finally(() => setLoading(false)),
+    [],
+  );
+  const refresh = useCallback(() => {
     setLoading(true);
-    try {
-      const [next, visible] = await Promise.all([listTrash(), listSpaces()]);
-      setItems(next);
-      setSpaces(visible);
-      setError("");
-      setSelected((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
-    } catch (caught) {
-      setError(messageOf(caught));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    return fetchTrash();
+  }, [fetchTrash]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void fetchTrash();
+  }, [fetchTrash]);
 
   useEffect(() => {
     if (conflicts || !refocusAfterConflicts.current) return;

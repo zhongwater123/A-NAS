@@ -1,5 +1,14 @@
 import { ArrowLeft, CircleAlert } from "lucide-react";
-import { KeyboardEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { APIError } from "../api";
 import { formatBytes } from "../bytes";
@@ -267,8 +276,11 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
   });
 
   const favoriteSet = useMemo(() => new Set(favorites.map((item) => item.trackId)), [favorites]);
+  // Quick toggles see each other's changes before the next render.
   const favoritesRef = useRef(favoriteSet);
-  favoritesRef.current = favoriteSet;
+  useLayoutEffect(() => {
+    favoritesRef.current = favoriteSet;
+  });
   const toggleFavorite = useCallback(
     (trackId: string) => {
       const on = !favoritesRef.current.has(trackId);

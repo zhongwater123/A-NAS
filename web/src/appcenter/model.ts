@@ -185,9 +185,13 @@ export function useElapsed(startedAt: string | undefined, running: boolean): str
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
+    const tick = () => setNow(Date.now());
+    const first = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 1_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
   }, [running]);
   const started = startedAt ? Date.parse(startedAt) : NaN;
   if (!running || Number.isNaN(started)) return undefined;

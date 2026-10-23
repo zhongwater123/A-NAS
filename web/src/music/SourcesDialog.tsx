@@ -165,10 +165,14 @@ function FolderPicker({ onPick, onCancel }: { onPick: (item: Chosen) => void; on
     );
   }, []);
   const parent = trail.at(-1);
+  const [browsedBefore, setBrowsedBefore] = useState({ space, parent });
+  if (browsedBefore.space !== space || browsedBefore.parent !== parent) {
+    setBrowsedBefore({ space, parent });
+    if (space) setEntries(undefined);
+  }
   useEffect(() => {
     if (!space) return;
     let live = true;
-    setEntries(undefined);
     listEntries(space.id, parent?.id ?? "").then(
       (items) => {
         if (live) setEntries(items.filter((item) => item.kind === "directory"));

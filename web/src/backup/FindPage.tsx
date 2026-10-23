@@ -62,16 +62,19 @@ export function FindPage() {
   const noSnapshots = targets.every((space) => data[space.id]?.snapshots?.length === 0);
   const where = targets.length === 1 ? spaceLabel(targets[0]) : "所有空间";
 
-  useEffect(() => {
-    const text = query.trim();
+  const [searchedBefore, setSearchedBefore] = useState<{ query: string; targets: Space[]; restored: unknown }>();
+  if (searchedBefore?.query !== query || searchedBefore.targets !== targets || searchedBefore.restored !== restored) {
+    setSearchedBefore({ query, targets, restored });
     setError("");
-    if (!text || !targets.length) {
+    if (!query.trim() || !targets.length) {
       setResult(undefined);
       setLoading(false);
-      return;
-    }
+    } else setLoading(true);
+  }
+  useEffect(() => {
+    const text = query.trim();
+    if (!text || !targets.length) return;
     const controller = new AbortController();
-    setLoading(true);
     // A restore can bring a path back into a space; restored reruns the search.
     const timer = window.setTimeout(() => {
       gather(targets, (space) => searchSnapshots(space.id, text, controller.signal))
@@ -286,9 +289,13 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
   const [error, setError] = useState("");
 
   // A restore brings items back into the space, so the list reloads.
+  const [listedBefore, setListedBefore] = useState({ spaces, restored });
+  if (listedBefore.spaces !== spaces || listedBefore.restored !== restored) {
+    setListedBefore({ spaces, restored });
+    setError("");
+  }
   useEffect(() => {
     const controller = new AbortController();
-    setError("");
     gather(spaces, (space) => listRemovedEntries(space.id, controller.signal))
       .then((found) => {
         // Each space lists its newest losses first; together they keep that order.

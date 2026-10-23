@@ -25,21 +25,23 @@ export function useHostState(enabled = true): HostStateView {
     activeController.current = controller;
     if (snapshotRef.current) setRefreshing(true);
     else setLoading(true);
-    try {
-      const state = await readHostState(controller.signal);
-      snapshotRef.current = state;
-      setSnapshot(state);
-      setDisconnected(false);
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        setDisconnected(true);
-      }
-    } finally {
-      if (activeController.current === controller) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
+    return readHostState(controller.signal)
+      .then((state) => {
+        snapshotRef.current = state;
+        setSnapshot(state);
+        setDisconnected(false);
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setDisconnected(true);
+        }
+      })
+      .finally(() => {
+        if (activeController.current === controller) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      });
   }, [enabled]);
 
   useEffect(() => {
@@ -57,7 +59,7 @@ export function useHostState(enabled = true): HostStateView {
       document.removeEventListener("visibilitychange", resume);
       activeController.current?.abort();
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return { snapshot, loading, refreshing, disconnected, refresh };
 }

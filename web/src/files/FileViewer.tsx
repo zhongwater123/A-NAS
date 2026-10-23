@@ -39,11 +39,15 @@ export function FileViewer({
     layer.current?.focus({ preventScroll: true });
     return () => returnTo?.focus({ preventScroll: true });
   }, []);
-  useEffect(() => {
+  // Another file starts afresh.
+  const shown = JSON.stringify([entry.id, pdf]);
+  const [shownBefore, setShownBefore] = useState(shown);
+  if (shownBefore !== shown) {
+    setShownBefore(shown);
     setState(pdf ? "ready" : "loading");
     setSize(undefined);
     setZoomed(false);
-  }, [entry.id, pdf]);
+  }
 
   const step = (delta: number) => onIndex((index + delta + entries.length) % entries.length);
   const keyDown = (event: KeyboardEvent) => {

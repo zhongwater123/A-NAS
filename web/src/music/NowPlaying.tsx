@@ -18,21 +18,24 @@ import { coverURL, getLyrics } from "./musicApi";
 import { usePlaybackTime } from "./player";
 
 type LyricsState = { trackId: string; lyrics?: Lyrics; missing?: boolean; failed?: boolean };
+// A song without lyrics has none to load.
+const lyricsOf = (track: { id: string; lyrics?: unknown } | undefined): LyricsState | undefined =>
+  track && (track.lyrics ? { trackId: track.id } : { trackId: track.id, missing: true });
 
 // NowPlaying is the immersive view of the playing song: large art on a
 // blurred backdrop and lyrics that follow the music.
 export function NowPlaying({ onClose }: { onClose: () => void }) {
   const music = useMusic();
   const track = music.player.current;
-  const [state, setState] = useState<LyricsState>();
+  const [state, setState] = useState(() => lyricsOf(track));
+  const [trackBefore, setTrackBefore] = useState(track);
+  if (trackBefore !== track) {
+    setTrackBefore(track);
+    if (track) setState(lyricsOf(track));
+  }
   useEffect(() => {
-    if (!track) return;
-    if (!track.lyrics) {
-      setState({ trackId: track.id, missing: true });
-      return;
-    }
+    if (!track?.lyrics) return;
     let live = true;
-    setState({ trackId: track.id });
     getLyrics(track.id).then(
       (text) => {
         if (live) setState({ trackId: track.id, lyrics: parseLyrics(text) });

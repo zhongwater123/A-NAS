@@ -67,9 +67,13 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
   const orderRef = useRef(order);
   const drag = useRef<DragState | null>(null);
   const suppressClick = useRef(false);
-  const [draggingID, setDraggingID] = useState<string>();
+  // The icon being dragged and the size of its preview.
+  const [dragging, setDragging] = useState<{ id: string; width: number; height: number }>();
+  const draggingID = dragging?.id;
   const [announcement, setAnnouncement] = useState("");
-  orderRef.current = order;
+  useLayoutEffect(() => {
+    orderRef.current = order;
+  });
 
   const placePreview = useCallback(() => {
     const state = drag.current;
@@ -108,7 +112,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
     const state = drag.current;
     drag.current = null;
     if (!state?.started) return;
-    setDraggingID(undefined);
+    setDragging(undefined);
     if (cancelled) {
       setOrder(state.originalOrder);
       return;
@@ -155,7 +159,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
         state.grabY = state.startY - box.top;
         state.width = box.width;
         state.height = box.height;
-        setDraggingID(state.id);
+        setDragging({ id: state.id, width: box.width, height: box.height });
       }
       moveEvent.preventDefault();
       const target = nearestIndex(
@@ -204,7 +208,6 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
   };
 
   const draggingApp = draggingID ? appsByID.get(draggingID) : undefined;
-  const draggingState = drag.current;
 
   return (
     <>
@@ -255,12 +258,12 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
         </p>
       </section>
       {draggingApp &&
-        draggingState?.started &&
+        dragging &&
         createPortal(
           <div
             ref={previewRef}
             className="desktop-drag-preview"
-            style={{ width: draggingState.width, height: draggingState.height }}
+            style={{ width: dragging.width, height: dragging.height }}
             aria-hidden="true"
           >
             <div className={`desktop-shortcut ${draggingApp.active ? "running" : ""}`}>

@@ -11,7 +11,17 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { readApps } from "../appsApi";
 import {
@@ -84,16 +94,25 @@ export function DockerPanel({
   // The control that opened the confirmation; the inert page drops its focus, so it is restored by hand.
   const opener = useRef<HTMLElement | null>(null);
 
+  // Each request to show an app's containers opens its project.
+  const focusAt = focus?.at;
+  const [focusBefore, setFocusBefore] = useState<typeof focusAt>();
+  if (focusBefore !== focusAt) {
+    setFocusBefore(focusAt);
+    if (focus) {
+      setView({ kind: "project", key: focus.project });
+      setSelected(undefined);
+      setQuery("");
+    }
+  }
+  const focusHandled = useEffectEvent(() => onFocusHandled?.());
   useEffect(() => {
-    if (!focus) return;
-    setView({ kind: "project", key: focus.project });
-    setSelected(undefined);
-    setQuery("");
-    onFocusHandled?.();
-  }, [focus?.at]);
+    if (focusAt !== undefined) focusHandled();
+  }, [focusAt]);
+  const selectedId = selected?.id;
   useLayoutEffect(() => {
-    if (main.current) main.current.scrollTop = selected ? 0 : listScroll.current;
-  }, [selected?.id]);
+    if (main.current) main.current.scrollTop = selectedId ? 0 : listScroll.current;
+  }, [selectedId]);
   useEffect(() => {
     if (confirm || !opener.current) return;
     if (opener.current.isConnected) opener.current.focus();
@@ -125,7 +144,7 @@ export function DockerPanel({
     },
   };
 
-  const containers = snapshot?.containers ?? [];
+  const containers = useMemo(() => snapshot?.containers ?? [], [snapshot?.containers]);
   const groups = useMemo(() => groupContainers(containers, apps), [containers, apps]);
 
   if (!snapshot && !error) {
@@ -527,27 +546,34 @@ function actionFailure(error: unknown, action: ContainerAction): string {
 function useContainerSnapshot() {
   const [snapshot, setSnapshot] = useState<ContainerSnapshot>();
   const [error, setError] = useState<string>();
-  const [refreshing, setRefreshing] = useState(false);
+  // The first read starts with the panel.
+  const [refreshing, setRefreshing] = useState(true);
   const active = useRef<AbortController | undefined>(undefined);
 
-  const refresh = useCallback(async () => {
+  const read = useCallback(() => {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    setRefreshing(true);
-    try {
-      setSnapshot(await readContainers(controller.signal));
-      setError(undefined);
-    } catch (failure) {
-      if (failure instanceof DOMException && failure.name === "AbortError") return;
-      setError(failure instanceof ContainerAPIError ? failure.code : "request_failed");
-    } finally {
-      if (active.current === controller) setRefreshing(false);
-    }
+    return readContainers(controller.signal)
+      .then((read) => {
+        setSnapshot(read);
+        setError(undefined);
+      })
+      .catch((failure: unknown) => {
+        if (failure instanceof DOMException && failure.name === "AbortError") return;
+        setError(failure instanceof ContainerAPIError ? failure.code : "request_failed");
+      })
+      .finally(() => {
+        if (active.current === controller) setRefreshing(false);
+      });
   }, []);
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    return read();
+  }, [read]);
 
   useEffect(() => {
-    void refresh();
+    void read();
     const interval = window.setInterval(() => {
       if (!document.hidden) void refresh();
     }, containerPollInterval);
@@ -560,7 +586,7 @@ function useContainerSnapshot() {
       document.removeEventListener("visibilitychange", resume);
       active.current?.abort();
     };
-  }, [refresh]);
+  }, [read, refresh]);
 
   return { snapshot, error, refreshing, refresh };
 }

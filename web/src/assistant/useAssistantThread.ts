@@ -5,7 +5,7 @@
 // REST and is folded by Desktop's transcript model (toChatMessages). Leaving a
 // conversation does not stop its turn: Hermes keeps it running and the product
 // service keeps the instance up until it ends.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { failureText, sessionMessages } from "./assistantApi";
 import { toChatMessages } from "./hermes/lib/chat-messages/hydration";
@@ -140,8 +140,13 @@ export function useAssistantThread(
   const created = useRef<string | undefined>(undefined);
   const resumed = useRef<{ stored?: string; generation: number }>({ generation: -1 });
   const replyId = useRef<string | undefined>(undefined);
+  // The latest callbacks and connection, for events and sends.
   const notify = useRef(callbacks);
-  notify.current = callbacks;
+  const connected = useRef(ready);
+  useLayoutEffect(() => {
+    notify.current = callbacks;
+    connected.current = ready;
+  });
 
   const adopt = (id: string | undefined) => {
     live.current = id;
@@ -166,11 +171,14 @@ export function useAssistantThread(
   }, []);
 
   // A conversation opened from the list: its history now, its live session when connected.
+  // generation only records which connection the new conversation began on;
+  // a reconnection resumes it below, without reloading.
+  const connection = useEffectEvent(() => generation);
   useEffect(() => {
     shown.current = storedId;
     if (storedId && storedId === created.current) {
       created.current = undefined;
-      resumed.current = { stored: storedId, generation };
+      resumed.current = { stored: storedId, generation: connection() };
       setLoadedFor(storedId);
       return;
     }
@@ -188,8 +196,6 @@ export function useAssistantThread(
     return () => {
       current = false;
     };
-    // generation only records which connection the new conversation began on;
-    // a reconnection resumes it below, without reloading.
   }, [storedId, reload]);
 
   // Resume the conversation on screen on each (re)connection, which also brings
@@ -273,9 +279,6 @@ export function useAssistantThread(
       }),
     [client, finishTurn, updateReply],
   );
-
-  const connected = useRef(ready);
-  connected.current = ready;
 
   const send = useCallback(
     async (input: string) => {

@@ -1,5 +1,5 @@
 import { Clock3, Grid2X2, Home, LogOut, Monitor, Search, Settings, Share2, UserRound } from "lucide-react";
-import { KeyboardEvent, ReactNode, RefObject, useEffect, useId, useRef, useState } from "react";
+import { KeyboardEvent, ReactNode, RefObject, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { Session, User } from "./api";
 import type { DesktopApp } from "./DesktopGrid";
@@ -228,17 +228,16 @@ function DismissableLayer({
   children: ReactNode;
 }) {
   const layer = useRef<HTMLElement>(null);
-  const dismiss = useRef(onDismiss);
-  dismiss.current = onDismiss;
+  const dismiss = useEffectEvent(onDismiss);
 
   useEffect(() => {
     const inside = (target: EventTarget | null) =>
       target instanceof Node && Boolean(layer.current?.contains(target) || trigger.current?.contains(target));
     const pointer = (event: PointerEvent) => {
-      if (!inside(event.target)) dismiss.current(false);
+      if (!inside(event.target)) dismiss(false);
     };
     const key = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") dismiss.current(true);
+      if (event.key === "Escape") dismiss(true);
     };
     window.addEventListener("pointerdown", pointer);
     window.addEventListener("keydown", key);
@@ -258,7 +257,7 @@ function DismissableLayer({
       onBlur={(event) => {
         const next = event.relatedTarget;
         if (next instanceof Node && !layer.current?.contains(next) && !trigger.current?.contains(next))
-          dismiss.current(false);
+          onDismiss(false);
       }}
     >
       {children}
