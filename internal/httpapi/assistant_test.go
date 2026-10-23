@@ -134,7 +134,7 @@ func TestSigningInKeepsTheMembersAssistantRunningUntilSigningOut(t *testing.T) {
 	assistant := assistantapi.New(assistantapi.Options{
 		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
 	})
 	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
@@ -205,7 +205,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	assistant := assistantapi.New(assistantapi.Options{
 		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
 	})
 	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
@@ -277,7 +277,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 		t.Fatalf("confirm without CSRF token = %d", recorder.Code)
 	}
 
-	unconfigured := httpapi.NewProduct(httpapi.ProductDependencies{
+	unconfigured := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		Assistant: assistantapi.New(assistantapi.Options{}), Logger: logger,
 	})

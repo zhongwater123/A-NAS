@@ -6,7 +6,8 @@ info:
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
     the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
-    container agent, and each member's AI assistant (proposed in ADR 0024).
+    container agent, and each member's AI assistant (proposed in ADR 0024). A JSON request body larger than the
+    operation accepts (1 MiB unless it says otherwise) answers 413 request_too_large.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -88,6 +89,7 @@ paths:
         "403": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
+        "503": { description: "credential_provision_failed: the Host Agent could not enable the account for SMB", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/session:
     post:
       security: []
@@ -197,6 +199,7 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ViewingRequest" } } } }
       responses:
         "201": { description: Read-only access granted, content: { application/json: { schema: { $ref: "#/components/schemas/ViewingGrant" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
         "403": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
@@ -230,6 +233,7 @@ paths:
       responses:
         "204": { description: User disabled }
         "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
         "503": { $ref: "#/components/responses/ProductError" }
   /api/v1/users/{userId}/credential:
     patch:
@@ -476,6 +480,8 @@ paths:
       parameters: [{ $ref: "#/components/parameters/SpaceID" }, { name: parentId, in: query, schema: { type: string } }]
       responses:
         "200": { description: Directory entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/FileEntry" } } } } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
         "423": { $ref: "#/components/responses/ProductError" }
   /api/v1/spaces/{spaceId}/directories:
     post:
@@ -484,7 +490,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileDestination" } } } }
       responses:
         "201": { description: Directory created, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
         "507": { $ref: "#/components/responses/ProductError" }
   /api/v1/spaces/{spaceId}/uploads:
     post:
@@ -493,14 +504,23 @@ paths:
       requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { parentId: { type: string }, file: { type: string, format: binary } } } } } }
       responses:
         "201": { description: File uploaded, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "400": { description: "invalid_multipart, invalid_parent or file_required", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
         "507": { $ref: "#/components/responses/ProductError" }
   /api/v1/files/{fileId}/content:
     get:
       operationId: downloadFile
       parameters: [{ $ref: "#/components/parameters/FileID" }, { name: Range, in: header, schema: { type: string } }, { name: disposition, in: query, description: Use inline for browser-previewable raster images and PDF documents; other files remain attachments., schema: { type: string, enum: [inline] } }]
       responses:
-        "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
-        "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        "200": { description: "File content, typed by the file name's extension", content: { "*/*": { schema: { type: string, format: binary } } } }
+        "206": { description: Partial file content, content: { "*/*": { schema: { type: string, format: binary } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
   /api/v1/files/{fileId}/preview:
     get:
       operationId: renderFilePreview
@@ -535,11 +555,21 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileTransfer" } } } }
       responses:
         "200": { description: File moved, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+        "507": { $ref: "#/components/responses/ProductError" }
     delete:
       operationId: trashFile
       parameters: [{ $ref: "#/components/parameters/FileID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200": { description: Trash item, content: { application/json: { schema: { $ref: "#/components/schemas/TrashItem" } } } }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
   /api/v1/files/{fileId}/versions:
     get:
       operationId: listFileVersions
@@ -559,6 +589,13 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FileTransfer" } } } }
       responses:
         "201": { description: File copied, content: { application/json: { schema: { $ref: "#/components/schemas/FileEntry" } } } }
+        "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "409": { $ref: "#/components/responses/ProductError" }
+        "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+        "507": { $ref: "#/components/responses/ProductError" }
   /api/v1/trash:
     get:
       operationId: listTrash
@@ -573,14 +610,21 @@ paths:
       responses:
         "200": { description: Restored entry, content: { application/json: { schema: { $ref: "#/components/schemas/RestoredEntry" } } } }
         "400": { $ref: "#/components/responses/ProductError" }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
         "409": { $ref: "#/components/responses/ProductError" }
         "422": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
+        "507": { $ref: "#/components/responses/ProductError" }
   /api/v1/trash/{trashId}:
     delete:
       operationId: purgeTrash
       parameters: [{ $ref: "#/components/parameters/TrashID" }, { $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "204": { description: Item permanently removed }
+        "403": { $ref: "#/components/responses/ProductError" }
+        "404": { $ref: "#/components/responses/ProductError" }
+        "423": { $ref: "#/components/responses/ProductError" }
   /api/v1/spaces/{spaceId}/snapshots:
     get:
       operationId: listSnapshots
@@ -2006,6 +2050,7 @@ paths:
       summary: The start page; stale libraries are scanned in the background
       responses:
         "200": { description: Rows of the start page, content: { application/json: { schema: { $ref: "#/components/schemas/MediaHome" } } } }
+        "503": { description: "media_unavailable: the media center is not running", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /api/v1/media/titles:
     get:
       operationId: listMediaTitles
@@ -2265,6 +2310,7 @@ paths:
       summary: "Every feedback item, newest first; all signed-in accounts read the same list"
       responses:
         "200": { description: Feedback items, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/FeedbackItem" } } } } } } }
+        "503": { description: "feedback_unavailable: the feedback list is not running", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
     post:
       operationId: createFeedback
       summary: File a problem or suggestion with text, images or both

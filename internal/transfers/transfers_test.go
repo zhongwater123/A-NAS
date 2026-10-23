@@ -74,7 +74,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
 	f.root = filepath.Join(volume, "spaces", "shared")
-	f.files = files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	f.files = files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	f.path = filepath.Join(t.TempDir(), "transfers.db")
 	f.open(t)
 	return f

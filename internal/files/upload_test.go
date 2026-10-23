@@ -65,9 +65,10 @@ func newUploadFixtureOn(t *testing.T, fileSystem func(volume string) files.FileS
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: func() time.Time { return fixture.now },
 	}
 	if fileSystem != nil {
-		options.FileSystem = fileSystem(volume)
+		fixture.service = files.NewService(catalog, volume, accountService, fileSystem(volume), options)
+	} else {
+		fixture.service = files.NewLocalService(catalog, volume, accountService, options)
 	}
-	fixture.service = files.NewService(catalog, volume, accountService, options)
 	return fixture
 }
 

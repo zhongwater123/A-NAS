@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // ShortcutsPrefix serves the desktop shortcuts of installed apps to every
@@ -41,6 +42,7 @@ type shortcutsResponse struct {
 }
 
 func (h *shortcutsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !allow(w, r, http.MethodGet) {
 		return
 	}
@@ -50,12 +52,12 @@ func (h *shortcutsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, ShortcutsPrefix+"/"), "/icon")
 	if !ok || !appstore.ValidID(id) || h.store == nil {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	icon, contentType, err := h.store.Icon(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	// Catalog icons are fixed for a release; SVGs must not run scripts.
@@ -71,12 +73,12 @@ func (h *shortcutsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *shortcutsHandler) list(w http.ResponseWriter, r *http.Request) {
 	response := shortcutsResponse{Items: []ShortcutDocument{}}
 	if h.store == nil {
-		writeJSON(w, http.StatusOK, response)
+		httpjson.Write(w, http.StatusOK, response)
 		return
 	}
 	apps, err := h.store.Apps(r.Context())
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "apps_unavailable", "the container engine could not list apps")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "apps_unavailable", "the container engine could not list apps")
 		return
 	}
 	for _, app := range apps {
@@ -87,5 +89,5 @@ func (h *shortcutsHandler) list(w http.ResponseWriter, r *http.Request) {
 			ID: app.ID, Title: app.Title, WebPort: app.WebPort, Scheme: app.Scheme, Path: app.Path, Running: app.Running, Total: app.Total,
 		})
 	}
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }

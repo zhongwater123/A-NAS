@@ -77,7 +77,7 @@
 
    ```bash
    cd "$HOME/apps/a-nas/releases/<GIT_SHORT_SHA>"
-   ANAS_HTTP_ADDR=127.0.0.1:8080 ./anas-api >anas-api-smoke.log 2>&1 &
+   ANAS_HOSTSTATE_MODE=fake ANAS_HTTP_ADDR=127.0.0.1:8080 ./anas-api >anas-api-smoke.log 2>&1 &
    pid=$!
 
    # 使用远端已有的 HTTP 客户端或 Bash /dev/tcp 依次请求：

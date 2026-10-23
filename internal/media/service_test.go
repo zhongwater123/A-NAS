@@ -100,7 +100,7 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
-	fileService := files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "media.db"))
 	if err != nil {
 		t.Fatalf("open media store: %v", err)

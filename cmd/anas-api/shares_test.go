@@ -57,9 +57,9 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	}
 	defer func() { _ = catalog.Close() }()
 	volume := filepath.Join(root, "volume")
-	fs := files.NewService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	fs := files.NewLocalService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	api, closeShares, err := configuredShares(ctx, false, volume, users, fs, nil, logger)
+	api, closeShares, err := configuredShares(ctx, Config{Mode: ModeFake, DataMount: volume}, users, fs, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,8 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			input := &openapi3filter.ResponseValidationInput{RequestValidationInput: &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}, Status: response.Code, Header: response.Header()}
+			input := &openapi3filter.ResponseValidationInput{RequestValidationInput: &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}, Status: response.Code, Header: response.Header(),
+				Options: &openapi3filter.Options{IncludeResponseStatus: true}}
 			input.SetBodyBytes(response.Body.Bytes())
 			if err := openapi3filter.ValidateResponse(ctx, input); err != nil {
 				t.Fatalf("%s %s contract: %v", method, url, err)

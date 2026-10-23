@@ -94,7 +94,7 @@ func storageAdmin(t *testing.T, executor storage.VolumeExecutor) *contractClient
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	storageService := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{})
 	t.Cleanup(storageService.Close)
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewWithSpareDisk(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		Storage: storageService,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),

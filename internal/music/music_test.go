@@ -72,7 +72,7 @@ func newFixtureWith(t *testing.T, worker mediaworker.Worker) *fixture {
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
 	volume := filepath.Join(dir, "volume")
-	fileService := files.NewService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	musicStore, err := music.OpenSQLite(filepath.Join(dir, "music.db"))
 	if err != nil {
 		t.Fatalf("open music: %v", err)

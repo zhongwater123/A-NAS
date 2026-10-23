@@ -248,9 +248,8 @@ func TestFileServiceWorksThroughTheBroker(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
-	service := files.NewService(catalog, harness.volume, accountService, files.Options{
-		DisableCapacityReserve: true, AllowUnverifiedVolume: true, FileSystem: harness.client,
-	})
+	service := files.NewService(catalog, harness.volume, accountService, harness.client, files.Options{
+		DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	userCtx := accounts.WithSessionToken(ctx, "alice-token")
 	// The Host Agent creates spaces; workers never create them.
 	if err := os.MkdirAll(filepath.Join(harness.volume, "spaces", "private", "alice"), 0o770); err != nil {

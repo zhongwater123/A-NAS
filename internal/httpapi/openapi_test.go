@@ -18,6 +18,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
@@ -274,10 +275,12 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 			if err := openapi3filter.ValidateRequest(ctx, requestInput); err != nil {
 				t.Fatalf("validate request: %v", err)
 			}
+			// A status the specification does not declare fails too.
 			responseInput := &openapi3filter.ResponseValidationInput{
 				RequestValidationInput: requestInput,
 				Status:                 recorder.Code,
 				Header:                 recorder.Header(),
+				Options:                &openapi3filter.Options{IncludeResponseStatus: true},
 			}
 			responseInput.SetBodyBytes(recorder.Body.Bytes())
 			if err := openapi3filter.ValidateResponse(ctx, responseInput); err != nil {
@@ -343,7 +346,7 @@ func transfersAPI(t *testing.T) transferContract {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	entry, err := fileService.Upload(ctx, admin, contract.space, "", "clip.bin", strings.NewReader("0123456789"))
 	if err != nil {
 		t.Fatal(err)

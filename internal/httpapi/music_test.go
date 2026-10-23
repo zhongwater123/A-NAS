@@ -20,6 +20,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
@@ -82,6 +83,9 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 	if recorder.Code != want {
 		c.t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, want, recorder.Body.String())
 	}
+	if guardAnswer(recorder) {
+		return recorder
+	}
 	request := newRequest()
 	route, params, err := c.router.FindRoute(request)
 	if err != nil {
@@ -93,7 +97,8 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 	if err := openapi3filter.ValidateRequest(context.Background(), input); err != nil {
 		c.t.Fatalf("validate %s %s request: %v", method, path, err)
 	}
-	response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header()}
+	response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header(),
+		Options: &openapi3filter.Options{IncludeResponseStatus: true}}
 	response.SetBodyBytes(recorder.Body.Bytes())
 	if err := openapi3filter.ValidateResponse(context.Background(), response); err != nil {
 		c.t.Fatalf("validate %s %s response: %v", method, path, err)
@@ -115,7 +120,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
 	volume := filepath.Join(dir, "volume")
-	fileService := files.NewService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	musicStore, err := music.OpenSQLite(filepath.Join(dir, "music.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +129,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{Worker: decodingWorker{}})
 	t.Cleanup(library.Close)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Music: library, Logger: logger,
 	})

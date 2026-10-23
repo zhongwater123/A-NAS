@@ -31,8 +31,8 @@ func TestResetMemberMustChangePasswordAndAdministratorCanViewReadOnly(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -158,7 +158,7 @@ func TestAccountErrorsNameTheRuleThatFailed(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Accounts: accountService, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
@@ -203,7 +203,7 @@ func TestOnlyTheLocalConsoleCanSetUpTheDevice(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Accounts: accountService, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	lan := func(r *http.Request) { // as Caddy forwards a LAN browser (ADR 0012)
@@ -246,7 +246,7 @@ func TestMembersKeepSeeingWhoResetTheirPassword(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Accounts: accountService, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	admin, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")

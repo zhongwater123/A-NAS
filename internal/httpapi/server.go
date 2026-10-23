@@ -1,14 +1,17 @@
-// Package httpapi exposes read-only A-NAS product endpoints over HTTP.
+// Package httpapi composes the product API: the route table and the guard
+// that enforces each route's posture (routes.go), signing in, accounts,
+// storage, the terminal and the host state (this file). Each domain's own
+// routes live in its internal/<domain>api package.
 package httpapi
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 type handler struct {
@@ -62,23 +65,19 @@ type systemHealth struct {
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics", "/api/v1/task-manager/device", "/api/v1/task-manager/tasks":
+	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 
-	if r.URL.Path == "/api/v1/task-manager/device" || r.URL.Path == "/api/v1/task-manager/tasks" {
-		h.handleTaskManager(w, r)
-		return
-	}
 	if r.URL.Path == "/healthz" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		httpjson.Write(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	if r.URL.Path == "/api/v1/system" {
@@ -88,7 +87,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		assessed := h.assess(state)
-		writeJSON(w, http.StatusOK, systemResponse{
+		httpjson.Write(w, http.StatusOK, systemResponse{
 			ID:       state.System.ID.String(),
 			Hostname: state.System.Hostname,
 			OperatingSystem: operatingSystemResponse{
@@ -115,7 +114,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			items[i] = mapDisk(disk)
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-		writeJSON(w, http.StatusOK, disksResponse{
+		httpjson.Write(w, http.StatusOK, disksResponse{
 			ObservedAt: state.ObservedAt.UTC().Format(time.RFC3339),
 			Items:      items,
 		})
@@ -125,12 +124,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metrics, err := h.reader.ReadMetrics(r.Context())
 		if err != nil {
 			h.logger.ErrorContext(r.Context(), "host metrics read failed", "path", r.URL.Path, "error", err)
-			writeError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
 			return
 		}
 		// Utilisation changes every poll; intermediaries must not reuse it.
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, metricsResponse{
+		httpjson.Write(w, http.StatusOK, metricsResponse{
 			DataSource: h.dataSource,
 			ObservedAt: metrics.ObservedAt.UTC().Format(time.RFC3339),
 			CPU:        cpuMetricsResponse{UsagePercent: metrics.CPU.UsagePercent, LogicalCores: metrics.CPU.LogicalCores},
@@ -148,7 +147,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeStateUnavailable(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, hostStateResponse{
+		httpjson.Write(w, http.StatusOK, hostStateResponse{
 			DataSource:     h.dataSource,
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
@@ -161,7 +160,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) writeStateUnavailable(w http.ResponseWriter, r *http.Request, err error) {
 	h.logger.ErrorContext(r.Context(), "host state read failed", "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
+	httpjson.WriteError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
 }
 
 type operatingSystemResponse struct {
@@ -304,26 +303,5 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 		Role: disk.Role, Health: disk.Health, SMARTStatus: disk.SMARTStatus,
 		Eligible:          len(reasons) == 0 && disk.Role == hoststate.DiskRoleUnassigned,
 		IneligibleReasons: reasons, TemperatureCelsius: disk.TemperatureCelsius,
-	}
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type errorResponse struct {
-	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
 	}
 }

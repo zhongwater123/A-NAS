@@ -22,7 +22,7 @@ func (h *harness) request(method, path, body string) (int, string) {
 	}
 	defer response.Body.Close()
 	data, _ := io.ReadAll(response.Body)
-	return response.StatusCode, string(data)
+	return response.StatusCode, strings.TrimSuffix(string(data), "\n")
 }
 
 func TestTheMemoryPageReadsAndForgetsWhatTheAssistantLearned(t *testing.T) {

@@ -81,7 +81,7 @@ ops-check:
 	grep -Fq '/etc/chromium/policies/managed/a-nas.json' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'a-nas-chromium-policy.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq "'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current'" scripts/install-v1.0.1-system-services.sh
-	grep -Fq '"/var/lib/a-nas/screensavers/current"' cmd/anas-api/main.go
+	grep -Fq '"/var/lib/a-nas/screensavers/current"' cmd/anas-api/config.go
 	grep -Fq 'install-screensavers.sh.incoming' scripts/deploy-dev.ps1
 	grep -Fq 'install-screensavers.sh.incoming' scripts/remote-activate-release.sh
 	grep -Fq '"$$source_release/install-screensavers.sh" "$$temporary/install-screensavers.sh"' scripts/install-v1.0.1-system-services.sh
@@ -107,7 +107,7 @@ ops-check:
 	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
-	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/main.go
+	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-ai.service
@@ -132,7 +132,7 @@ ops-check:
 	grep -Fq 'anas-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq '/etc/systemd/system/anas.slice' scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
-	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/main.go
+	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/config.go
 	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-media.socket
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-media.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-media.socket
@@ -149,7 +149,7 @@ ops-check:
 	grep -Fqx 'Slice=system-anasmedia.slice' deploy/systemd/system/anas-media@.service
 	grep -Fqx 'MemoryMax=3G' deploy/systemd/system/system-anasmedia.slice
 	grep -Fqx 'MaxConnections=16' deploy/systemd/system/anas-media.socket
-	grep -Fq '"/run/a-nas-media/slots"' cmd/anas-api/main.go
+	grep -Fq '"/run/a-nas-media/slots"' cmd/anas-api/config.go
 	grep -Fqx 'const Slots = 8' internal/mediaworker/admission.go
 	grep -Fq 'for slot in 0 1 2 3 4 5 6 7; do' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'ffmpeg ffprobe heif-thumbnailer; do' scripts/install-v1.0.1-system-services.sh

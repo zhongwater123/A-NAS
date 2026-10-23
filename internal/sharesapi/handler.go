@@ -5,11 +5,7 @@ package sharesapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
-	"github.com/zhongwater123/A-NAS/internal/shares"
 	"io"
 	"log/slog"
 	"mime"
@@ -18,6 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 const PathPrefix = "/api/v1/shares"
@@ -56,11 +57,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if _, ok := UserFrom(r.Context()); !ok {
-		WriteError(w, 401, "authentication_required", "authentication is required")
+		httpjson.WriteError(w, 401, "authentication_required", "authentication is required")
 		return
 	}
 	if h.store == nil {
-		WriteError(w, 503, "shares_unavailable", "member shares are not available")
+		httpjson.WriteError(w, 503, "shares_unavailable", "member shares are not available")
 		return
 	}
 	// This reserved collection otherwise intersects /{shareID}/messages in
@@ -71,7 +72,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.job(w, r)
 			return
 		}
-		WriteError(w, 404, "not_found", "resource not found")
+		httpjson.WriteError(w, 404, "not_found", "resource not found")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -96,47 +97,34 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/{shareID}/revoke", h.revoke)
 	h.mux.HandleFunc("GET "+p+"/{shareID}/entries/{entryID}/content", h.content)
 	h.mux.HandleFunc("GET "+p+"/{shareID}/entries/{entryID}/preview", h.preview)
-	h.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { WriteError(w, 404, "not_found", "resource not found") })
-}
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-func WriteError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	h.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		httpjson.WriteError(w, 404, "not_found", "resource not found")
+	})
 }
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, shares.ErrNotFound):
-		WriteError(w, 404, "share_not_found", "share not found")
+		httpjson.WriteError(w, 404, "share_not_found", "share not found")
 	case errors.Is(err, shares.ErrUnauthorized):
-		WriteError(w, 401, "authentication_required", "session or account unavailable")
+		httpjson.WriteError(w, 401, "authentication_required", "session or account unavailable")
 	case errors.Is(err, shares.ErrRecipientInactive):
-		WriteError(w, 409, "share_recipient_unavailable", "the recipient account is unavailable")
+		httpjson.WriteError(w, 409, "share_recipient_unavailable", "the recipient account is unavailable")
 	case errors.Is(err, shares.ErrInactive):
-		WriteError(w, 410, "share_inactive", "share has expired or was withdrawn")
+		httpjson.WriteError(w, 410, "share_inactive", "share has expired or was withdrawn")
 	case errors.Is(err, shares.ErrInvalid):
-		WriteError(w, 400, "invalid_share_request", "invalid share request")
+		httpjson.WriteError(w, 400, "invalid_share_request", "invalid share request")
 	case errors.Is(err, shares.ErrConflict):
-		WriteError(w, 409, "share_request_conflict", "request key was used for different content")
+		httpjson.WriteError(w, 409, "share_request_conflict", "request key was used for different content")
 	case errors.Is(err, shares.ErrBusy):
-		WriteError(w, 429, "share_busy", "too many active share operations; retry later")
+		httpjson.WriteError(w, 429, "share_busy", "too many active share operations; retry later")
 	default:
 		h.logger.WarnContext(r.Context(), "share operation failed", "error", err)
-		WriteError(w, 503, "shares_unavailable", "share storage or file operation unavailable")
+		httpjson.WriteError(w, 503, "shares_unavailable", "share storage or file operation unavailable")
 	}
 }
 func decode(w http.ResponseWriter, r *http.Request, value any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		WriteError(w, 400, "invalid_share_request", "invalid request body")
-		return false
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		WriteError(w, 400, "invalid_share_request", "request must contain one JSON value")
+	if err := httpjson.Decode(w, r, 256<<10, value); err != nil {
+		httpjson.WriteDecodeError(w, err, "invalid_share_request", "invalid request body")
 		return false
 	}
 	return true
@@ -173,7 +161,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 202, v)
+	httpjson.Write(w, 202, v)
 }
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	direction := r.URL.Query().Get("direction")
@@ -206,7 +194,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		end = len(items)
 	}
 	response["items"] = items[int(offset):end]
-	writeJSON(w, 200, response)
+	httpjson.Write(w, 200, response)
 }
 func (h *handler) listMembers(w http.ResponseWriter, r *http.Request) {
 	if h.members == nil {
@@ -224,7 +212,7 @@ func (h *handler) listMembers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, p)
 		}
 	}
-	writeJSON(w, 200, map[string]any{"items": out})
+	httpjson.Write(w, 200, map[string]any{"items": out})
 }
 func (h *handler) get(w http.ResponseWriter, r *http.Request)  { h.detail(w, r, false) }
 func (h *handler) view(w http.ResponseWriter, r *http.Request) { h.detail(w, r, true) }
@@ -234,7 +222,7 @@ func (h *handler) detail(w http.ResponseWriter, r *http.Request, viewed bool) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, v)
+	httpjson.Write(w, 200, v)
 }
 func (h *handler) messages(w http.ResponseWriter, r *http.Request) {
 	after, limit, err := paging(r)
@@ -247,7 +235,7 @@ func (h *handler) messages(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	httpjson.Write(w, 200, map[string]any{"items": items})
 }
 func (h *handler) message(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -263,7 +251,7 @@ func (h *handler) message(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 201, v)
+	httpjson.Write(w, 201, v)
 }
 func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -289,7 +277,7 @@ func (h *handler) save(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 202, v)
+	httpjson.Write(w, 202, v)
 }
 func (h *handler) job(w http.ResponseWriter, r *http.Request) {
 	v, err := h.store.Job(r.Context(), actor(r), r.PathValue("jobID"))
@@ -297,7 +285,7 @@ func (h *handler) job(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, v)
+	httpjson.Write(w, 200, v)
 }
 func (h *handler) jobs(w http.ResponseWriter, r *http.Request) {
 	items, err := h.store.Jobs(r.Context(), actor(r), r.PathValue("shareID"))
@@ -305,7 +293,7 @@ func (h *handler) jobs(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	httpjson.Write(w, 200, map[string]any{"items": items})
 }
 func (h *handler) notifications(w http.ResponseWriter, r *http.Request) {
 	after, limit, err := paging(r)
@@ -318,7 +306,7 @@ func (h *handler) notifications(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	httpjson.Write(w, 200, map[string]any{"items": items})
 }
 func (h *handler) revoke(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.Revoke(r.Context(), actor(r), r.PathValue("shareID")); err != nil {
