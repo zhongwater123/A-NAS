@@ -97,7 +97,8 @@ function serve(libraries: MediaLibrary[], ...routes: Route[]) {
       const response = route(url, init);
       if (response) return response;
     }
-    if (url === "/api/v1/media/libraries" && !init?.method) return json({ items: libraries, processing: true });
+    if (url === "/api/v1/media/libraries" && (init?.method ?? "GET") === "GET")
+      return json({ items: libraries, processing: true });
     if (url === "/api/v1/media/home")
       return json(
         libraries.length
@@ -404,7 +405,7 @@ describe("MediaCenter", () => {
       progress: { position: 0, duration: 2700, watched: true, playedAt: "2026-10-10T07:00:00Z" },
     };
     const fetchMock = serve([library], (url, init) =>
-      url.startsWith("/api/v1/media/history?") && !init?.method
+      url.startsWith("/api/v1/media/history?") && (init?.method ?? "GET") === "GET"
         ? json({ items: [resuming, episode], total: 2 })
         : undefined,
     );
@@ -491,7 +492,7 @@ describe("MediaCenter", () => {
       },
       // The server keeps reporting the scan while it runs.
       (url, init) =>
-        scanned && url === "/api/v1/media/libraries" && !init?.method
+        scanned && url === "/api/v1/media/libraries" && (init?.method ?? "GET") === "GET"
           ? json({ items: [scanning], processing: true })
           : undefined,
     );
@@ -509,7 +510,7 @@ describe("MediaCenter", () => {
 
   it("creates a collection and adds a title to it from a card", async () => {
     const fetchMock = serve([library], (url, init) =>
-      url === "/api/v1/media/collections" && !init?.method
+      url === "/api/v1/media/collections" && (init?.method ?? "GET") === "GET"
         ? json({
             items: [
               { id: "collection:weekend", name: "周末片单", automatic: false, count: 0, updatedAt: "", covers: [] },
