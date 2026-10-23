@@ -112,6 +112,29 @@ describe("MusicPanel", () => {
     expect(within(console).getByRole("button", { name: "播放队列" }).textContent).toBe("3");
   });
 
+  it("says the lyrics are loading until they arrive", async () => {
+    const answer = serve([track("file:l1", { title: "有歌词的歌", lyrics: true, durationMs: 200_000 })]);
+    let deliver: (response: Response) => void = () => undefined;
+    const lyrics = new Promise<Response>((resolve) => {
+      deliver = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith("/lyrics") ? lyrics : answer(input, init),
+      ),
+    );
+    render(<MusicPanel userId="user:u1" />);
+    await screen.findByText("有歌词的歌");
+    fireEvent.doubleClick(rowOf("有歌词的歌"));
+    fireEvent.click(await screen.findByRole("button", { name: "歌词" }));
+    const stage = await screen.findByRole("region", { name: "正在播放" });
+    expect(within(stage).getByText("正在载入歌词…")).toBeTruthy();
+    expect(within(stage).queryByText("暂无歌词")).toBeNull();
+    deliver(json({ text: "[00:01.00]第一句" }));
+    expect(await within(stage).findByText("第一句")).toBeTruthy();
+  });
+
   it("restarts a decoded track's stream from where the listener seeks", async () => {
     serve([...library, track("file:ape", { title: "无损的歌", format: "ape", transcode: true, durationMs: 300_000 })]);
     // A playing element: seeking keeps it playing from the new start.

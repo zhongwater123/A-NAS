@@ -18,9 +18,9 @@ import { coverURL, getLyrics } from "./musicApi";
 import { usePlaybackTime } from "./player";
 
 type LyricsState = { trackId: string; lyrics?: Lyrics; missing?: boolean; failed?: boolean };
-// A song without lyrics has none to load.
+// A song without lyrics has none to load; one with lyrics has nothing until they arrive.
 const lyricsOf = (track: { id: string; lyrics?: unknown } | undefined): LyricsState | undefined =>
-  track && (track.lyrics ? { trackId: track.id } : { trackId: track.id, missing: true });
+  track && !track.lyrics ? { trackId: track.id, missing: true } : undefined;
 
 // NowPlaying is the immersive view of the playing song: large art on a
 // blurred backdrop and lyrics that follow the music.
