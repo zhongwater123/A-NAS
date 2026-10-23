@@ -216,10 +216,14 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(matches_filter(where(source="nas"), pl))
         self.assertTrue(matches_filter({"should": [{"key": "source", "match": {"value": "nas"}},
                                                    {"key": "level", "range": {"gt": 2, "lte": 3}}]}, pl))
-        self.assertFalse(matches_filter({"must_not": [{"key": "msg", "match": {"text": "memory"}}]}, pl))
-        self.assertTrue(matches_filter({"must": [{"key": "level", "match": {"except": [1, 2]}}]}, pl))
-        self.assertTrue(matches_filter({"must": [{"is_null": {"key": "owner"}}]}, pl))
         self.assertTrue(matches_filter({"must": [{"must": [{"key": "level", "range": {"gte": 3}}]}]}, pl))
+        # 支持子集以外的写法一律拒绝，而不是当成满足（#152 S3）
+        from finetune.store import UnsupportedFilter
+        for bad in ({"must_not": [{"key": "msg", "match": {"text": "memory"}}]},
+                    {"must": [{"key": "level", "match": {"except": [1, 2]}}]},
+                    {"must": [{"is_null": {"key": "owner"}}]}):
+            with self.assertRaises(UnsupportedFilter):
+                matches_filter(bad, pl)
 
     def test_build_store_env_and_fallback(self):
         saved = {k: os.environ.pop(k, None) for k in ENV_KEYS}
@@ -262,7 +266,11 @@ class TextIndexTest(unittest.TestCase):
         self.assertEqual(set(hits[0].as_dict()), {"key", "score", "text", "payload"})
         only_reg = self.idx.search("校验不一致", k=5, where=where(source="regression"))
         self.assertEqual([h.key for h in only_reg], ["FB-3"])
-        sim = self.idx.similar(texts[0], k=2)
+        with self.assertRaises(StoreError):                     # 检索集合（document 前缀）不能做 similar
+            self.idx.similar(texts[0], k=2)
+        sts = TextIndex(MemoryStore("sts"), self.emb, task="sts")
+        sts.add(texts)
+        sim = sts.similar(texts[0], k=2)
         self.assertNotIn(texts[0], [h.text for h in sim])        # 自己被去掉
         self.assertEqual(len(sim), 2)
 
@@ -285,9 +293,11 @@ class TextIndexTest(unittest.TestCase):
         TextIndex(store, HashEmbedder(128), recreate=True)
         self.assertEqual(store.dim, 128)
 
-    def test_hash_embedder_name_carries_dim(self):
-        # CachedEmbedder 用 name 当缓存键：不带维度时 128 维和 512 维的向量会串
-        self.assertNotEqual(HashEmbedder(128).name, HashEmbedder(512).name)
+    def test_hash_embedder_dims_do_not_share_cache_keys(self):
+        # CachedEmbedder 的键来自向量空间身份（含维度），128 维和 512 维的向量不会串（#152 R1）
+        from finetune.embedders import CachedEmbedder
+        self.assertNotEqual(CachedEmbedder(HashEmbedder(128), None)._key("sts", "t"),
+                            CachedEmbedder(HashEmbedder(512), None)._key("sts", "t"))
 
 
 class VectorsCliTest(unittest.TestCase):

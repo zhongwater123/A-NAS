@@ -11,4 +11,4 @@
 - [Hermes Agent 作为 AI 助手运行时的可行性](hermes-agent-runtime.md)（开发机 spike 与 DeepSeek 真实模型测试完成；实验 NAS 实测待做）
 - [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
 - [EmbeddingGemma 2 文本向量：任务前缀、社区微调与我们的微调流程](embeddinggemma-2-text-finetuning.md)（脚本与离线测试完成；基座基线已在 CPU 开发机上跑：短文本分类 Hit@1 0.72、仓库文档检索段落级 Hit@5 0.86 / 文件级 Hit@1 0.83，实验 NAS 真实反馈与日志的阈值观察；MediaPipe 对照、微调与权重转 LiteRT 未做）
-- [Qdrant 作为文本向量库：接入方式、边界与离线验证](qdrant-vector-store.md)（客户端、进程内退路与离线测试完成；真 Qdrant 与真模型未在开发机上跑）
+- [Qdrant 作为文本向量库：接入方式、边界与离线验证](qdrant-vector-store.md)（客户端、进程内退路与离线测试完成；按 #152 审查修正四个已复现问题，过滤语义已与真实 Qdrant 1.19.2 对照）

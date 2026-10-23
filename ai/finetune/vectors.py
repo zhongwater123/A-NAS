@@ -84,9 +84,9 @@ def open_index(args, recreate: bool = False) -> TextIndex:
     emb = build_embedder({"dim": args.dim, "url": args.embed_url}, cache_dir=HERE / "cache", logger=log)
     store = build_store({"url": args.qdrant}, collection=args.collection, data_dir=Path(args.data_dir), logger=log)
     try:
-        return TextIndex(store, emb, recreate=recreate)
+        return TextIndex(store, emb, task=args.task, scope=args.scope, recreate=recreate)
     except StoreError as e:
-        raise SystemExit(f"{e}\n提示：维度不一致时加 --recreate 重建集合（会清空）。")
+        raise SystemExit(f"{e}\n提示：维度、模型、前缀、任务或作用域设置变了，要加 --recreate 重建集合（会清空）。")
 
 
 def cmd_info(args):
@@ -107,7 +107,7 @@ def cmd_add(args):
         raise SystemExit(f"有记录缺少 key 字段 {args.key_field!r}")
     fields = [f for f in (args.payload_fields or "").split(",") if f]
     payloads = [{f: r[f] for f in fields if f in r} for r in rows] if fields else None
-    idx.add(texts, keys=keys, payloads=payloads, kind=args.kind)
+    idx.add(texts, keys=keys, payloads=payloads)
     print(f"已写入 {len(texts)} 条到集合 {idx.store.collection}（共 {len(idx)} 条，"
           f"{'语义' if idx.semantic else '哈希'}向量 {idx.embedder.dim} 维）")
 
@@ -138,8 +138,7 @@ def cmd_similar(args):
 def cmd_export(args):
     idx = open_index(args)
     n = 0
-    for key, payload in idx.store.scroll(parse_where(args.where)):
-        text = payload.pop("text", "")
+    for key, text, payload in idx.items(parse_where(args.where)):
         print(json.dumps({"key": key, "text": text, **payload}, ensure_ascii=False))
         n += 1
     print(f"导出 {n} 条", file=sys.stderr)
@@ -161,6 +160,9 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--embed-url", default=None, help="向量服务地址，默认取 ANAS_EMBED_URL；都没有则用哈希向量")
     ap.add_argument("--dim", type=int, default=int(os.environ.get("ANAS_EMBED_DIM", "256")), help="向量维度，默认 256")
     ap.add_argument("--data-dir", default=str(HERE / "data" / "vectors"), help="进程内向量库的落盘目录")
+    ap.add_argument("--task", choices=["retrieval", "sts"], default="retrieval",
+                    help="retrieval：入库 document、查询 query 前缀；sts：两边都用 sts（去重 / similar 用）")
+    ap.add_argument("--scope", default=None, help="作用域（比如成员名）；给了就只在这个作用域里读写删")
     ap.add_argument("-q", "--quiet", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -171,7 +173,6 @@ def main(argv: list[str]) -> None:
     p.add_argument("--text-field", default="text")
     p.add_argument("--key-field", default=None, help="当 key 的字段；不给则用文本本身")
     p.add_argument("--payload-fields", default=None, help="逗号分隔，要一起存进 payload 的字段")
-    p.add_argument("--kind", default=None, help="任务前缀，默认 document；做去重库用 sts")
     p.add_argument("--recreate", action="store_true", help="先删掉集合再写（换维度时用）")
     p.set_defaults(fn=cmd_add)
 

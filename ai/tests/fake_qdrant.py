@@ -15,6 +15,11 @@
 id 只接受无符号整数或 UUID 字符串，否则 400（和真 Qdrant 一致，这是最容易踩的坑）。
 
 手工联调 finetune.vectors 时可以单独起：cd ai && python -m tests.fake_qdrant 6333
+
+过滤条件用本文件自己的求值器（_FakeFilter），**不**导入 gemma_embed.store 的过滤器：两边各写一份，
+契约测试才能发现语义分歧（A-NAS #152 S3：之前共用一个函数，两个实现一起错也照样通过）。
+求值器只认 must / should / must_not、match value / any、range；别的写法回 400，就像服务端不认识。
+集合 metadata（PUT 时的 "metadata"）原样存、在 GET 的 config.metadata 里返回，和真 Qdrant 一致。
 """
 
 from __future__ import annotations
@@ -28,7 +33,66 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
 from finetune.embedders import cosine, normalize
-from finetune.store import matches_filter
+
+
+class _Unsupported(Exception):
+    pass
+
+
+class _FakeFilter:
+    """按 Qdrant 文档的语义单独实现：字段缺失不满足 match/range；数组任一元素满足即可；布尔与整数不相等。"""
+
+    @classmethod
+    def ok(cls, flt, payload) -> bool:
+        if flt is None:
+            return True
+        if not isinstance(flt, dict) or set(flt) - {"must", "should", "must_not"}:
+            raise _Unsupported(f"unknown filter clause {flt!r}")
+        def lst(x):
+            return x if isinstance(x, list) else [x]
+        must = [cls._cond(c, payload) for c in lst(flt.get("must", []))]
+        should = [cls._cond(c, payload) for c in lst(flt.get("should", []))]
+        must_not = [cls._cond(c, payload) for c in lst(flt.get("must_not", []))]
+        if not all(must):
+            return False
+        if "should" in flt and lst(flt["should"]) and not any(should):
+            return False
+        return not any(must_not)
+
+    @classmethod
+    def _cond(cls, c, payload) -> bool:
+        if isinstance(c, dict) and ({"must", "should", "must_not"} & set(c)):
+            return cls.ok(c, payload)
+        if not isinstance(c, dict) or "key" not in c or not ({"match", "range"} & set(c)) or set(c) - {"key", "match", "range"}:
+            raise _Unsupported(f"unknown condition {c!r}")
+        raw = payload.get(c["key"])
+        if raw is None:
+            return False
+        items = raw if isinstance(raw, list) else [raw]
+        if "match" in c:
+            m = c["match"]
+            if "value" in m:
+                wanted = [m["value"]]
+            elif "any" in m:
+                wanted = list(m["any"])
+            else:
+                raise _Unsupported(f"unknown match {m!r}")
+            same = lambda a, b: (type(a) is type(b) and a == b) if isinstance(a, bool) or isinstance(b, bool) else a == b  # noqa: E731
+            return any(same(x, w) for x in items for w in wanted)
+        rng = c["range"]
+        for x in items:
+            if isinstance(x, bool) or not isinstance(x, (int, float)):
+                continue
+            if ("gt" in rng and not x > rng["gt"]) or ("gte" in rng and not x >= rng["gte"]) \
+                    or ("lt" in rng and not x < rng["lt"]) or ("lte" in rng and not x <= rng["lte"]):
+                continue
+            return True
+        return False
+
+
+def matches_filter(flt, payload) -> bool:      # 名字保留，供本文件内部用
+    return _FakeFilter.ok(flt, payload)
+
 
 
 def _valid_id(pid) -> bool:
@@ -52,6 +116,12 @@ class FakeQdrant:
         self.requests: list[tuple[str, str]] = []     # (method, path) 方便测试断言走了哪些接口
 
     def handle(self, method: str, path: str, body: dict | None) -> tuple[int, dict]:
+        try:
+            return self._handle(method, path, body)
+        except _Unsupported as e:
+            return 400, self._err(f"Format error in JSON body: {e}")
+
+    def _handle(self, method: str, path: str, body: dict | None) -> tuple[int, dict]:
         self.requests.append((method, path))
         if path == "/":
             return 200, {"title": "qdrant - vector search engine", "version": "fake-1.10"}
@@ -77,7 +147,7 @@ class FakeQdrant:
                 return self._delete(col, body or {})
             if action == "count":
                 flt = (body or {}).get("filter")
-                n = sum(1 for pid, (_, pl) in col["points"].items() if matches_filter(flt, {**pl, "_id": pid}))
+                n = sum(1 for pid, (_, pl) in col["points"].items() if matches_filter(flt, pl))
                 return 200, self._ok({"count": n})
             if action == "scroll":
                 return self._scroll(col, body or {})
@@ -99,7 +169,8 @@ class FakeQdrant:
                 return 404, self._err(f"Collection `{name}` doesn't exist!")
             return 200, self._ok({
                 "status": "green", "points_count": len(col["points"]),
-                "config": {"params": {"vectors": {"size": col["dim"], "distance": "Cosine"}}},
+                "config": {"params": {"vectors": {"size": col["dim"], "distance": "Cosine"}},
+                           "metadata": col.get("metadata") or {}},
             })
         if method == "PUT":
             if name in self.collections:
@@ -108,7 +179,7 @@ class FakeQdrant:
             size = vectors.get("size")
             if not isinstance(size, int) or size <= 0:
                 return 400, self._err("vectors.size must be a positive integer")
-            self.collections[name] = {"dim": size, "points": {}}
+            self.collections[name] = {"dim": size, "points": {}, "metadata": (body or {}).get("metadata") or {}}
             return 200, self._ok(True)
         if method == "DELETE":
             existed = self.collections.pop(name, None) is not None
@@ -151,7 +222,7 @@ class FakeQdrant:
         thr = body.get("score_threshold")
         hits = []
         for pid, (v, pl) in col["points"].items():
-            if not matches_filter(flt, {**pl, "_id": pid}):
+            if not matches_filter(flt, pl):
                 continue
             s = cosine(q, v)
             if thr is not None and s < thr:
@@ -166,7 +237,7 @@ class FakeQdrant:
                 col["points"].pop(pid, None)
         elif "filter" in body:
             flt = body["filter"]
-            col["points"] = {pid: v for pid, v in col["points"].items() if not matches_filter(flt, {**v[1], "_id": pid})}
+            col["points"] = {pid: v for pid, v in col["points"].items() if not matches_filter(flt, v[1])}
         else:
             return 400, self._err("points or filter required")
         return 200, self._ok({"operation_id": len(self.requests), "status": "completed"})
@@ -174,7 +245,7 @@ class FakeQdrant:
     def _scroll(self, col, body):
         flt = body.get("filter")
         limit = int(body.get("limit", 10))
-        ids = sorted((str(pid) for pid, (_, pl) in col["points"].items() if matches_filter(flt, {**pl, "_id": pid})))
+        ids = sorted((str(pid) for pid, (_, pl) in col["points"].items() if matches_filter(flt, pl)))
         offset = body.get("offset")
         start = ids.index(str(offset)) if offset is not None and str(offset) in ids else 0
         page = ids[start:start + limit]

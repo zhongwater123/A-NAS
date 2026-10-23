@@ -15,8 +15,11 @@
 存在 payload 的 ``_key`` 字段里，查询结果再还回来。整数 key 原样使用。
 
 过滤条件用 Qdrant 的 filter 语法（``{"must": [{"key": "source", "match": {"value": "n8n"}}]}``），
-``MemoryStore`` 实现了其中最常用的子集（must / should / must_not + match value / any / range）。
-``where(**kv)`` 是构造等值过滤的快捷方式。
+只接受一个白名单子集（must / should / must_not + match value / any + range），两个实现都先校验，
+认不出的写法直接报 ``UnsupportedFilter``，不会当成满足。``where(**kv)`` 是构造等值过滤的快捷方式。
+
+集合可以带一份元数据（``ensure_collection(..., meta=...)``）：MemoryStore 存在日志头里，Qdrant 存在集合
+metadata 里。``TextIndex`` 用它记录向量空间身份、任务前缀和作用域设置，重新打开时不一致就拒绝。
 """
 
 from __future__ import annotations
@@ -85,7 +88,8 @@ class VectorStore(Protocol):
     name: str
     collection: str
 
-    def ensure_collection(self, dim: int, recreate: bool = False) -> None: ...
+    def ensure_collection(self, dim: int, recreate: bool = False, meta: Optional[dict] = None) -> None: ...
+    def meta(self) -> Optional[dict]: ...
     def drop_collection(self) -> None: ...
     def upsert(self, keys: list[str | int], vectors: list[Vector],
                payloads: Optional[list[Payload]] = None) -> None: ...
@@ -99,63 +103,149 @@ class VectorStore(Protocol):
     def info(self) -> dict: ...
 
 
-# ---------- 过滤器（MemoryStore 和测试里的假 Qdrant 共用） ----------
+# ---------- 过滤器 ----------
+#
+# 支持的子集是白名单，两个实现都先过 validate_filter：认不出的写法一律报 UnsupportedFilter，
+# 绝不当成"满足"处理——否则 search 会多读、delete_where 会多删（A-NAS #152 S3 复现过：未实现的 nested 条件
+# 被当成 True，条件删除把全部点删光）。QdrantStore 发请求前也走同一个校验，保证两个后端接受的语法一样。
+#
+#   Filter    = {"must" | "should" | "must_not": Condition 或 [Condition, ...]}（至少一个键，不能有别的键）
+#   Condition = Filter（嵌套的布尔组合）
+#             | {"key": 字段, "match": {"value": 字符串/整数/布尔}}
+#             | {"key": 字段, "match": {"any": [字符串/整数, ...]}}（非空，类型一致）
+#             | {"key": 字段, "range": {"gt"/"gte"/"lt"/"lte": 数字, ...}}（至少一个界）
+#
+# 语义按 Qdrant 文档：字段缺失时 match / range 不满足；字段是数组时任一元素满足即满足；布尔和整数不互相等于；
+# should 至少满足一个；must_not 全部不满足。真实 Qdrant 的独立对照见 tests/test_store.py 的 RealQdrantFilterParity。
 
-def _match_one(cond: dict, payload: Payload) -> bool:
-    key = cond.get("key")
-    val = payload.get(key) if key is not None else None
-    if "match" in cond:
+_FILTER_KEYS = ("must", "should", "must_not")
+_RANGE_KEYS = ("gt", "gte", "lt", "lte")
+
+
+class UnsupportedFilter(StoreError):
+    """过滤条件超出支持的子集。宁可拒绝，也不放宽。"""
+
+
+def _is_scalar_match(v: Any) -> bool:
+    return isinstance(v, (str, bool)) or (isinstance(v, int) and not isinstance(v, bool))
+
+
+def _validate_condition(cond: Any, path: str) -> None:
+    if not isinstance(cond, dict) or not cond:
+        raise UnsupportedFilter(f"{path}：条件必须是非空对象，收到 {cond!r}")
+    if any(k in cond for k in _FILTER_KEYS):
+        validate_filter(cond, path)
+        return
+    extra = set(cond) - {"key", "match", "range"}
+    if extra or "key" not in cond or not isinstance(cond["key"], str) or not cond["key"]:
+        raise UnsupportedFilter(f"{path}：不支持的条件 {sorted(cond)}（支持 must/should/must_not、key+match、key+range）")
+    has_match, has_range = "match" in cond, "range" in cond
+    if has_match == has_range:
+        raise UnsupportedFilter(f"{path}：一个条件里 match 和 range 只能有一个")
+    if has_match:
         m = cond["match"]
-        if "value" in m:
-            return val == m["value"] or (isinstance(val, list) and m["value"] in val)
-        if "any" in m:
-            opts = m["any"]
-            if isinstance(val, list):
-                return any(x in opts for x in val)
-            return val in opts
-        if "except" in m:
-            return val not in m["except"]
-        if "text" in m:
-            return isinstance(val, str) and m["text"] in val
-    if "range" in cond:
+        if not isinstance(m, dict) or len(m) != 1:
+            raise UnsupportedFilter(f"{path}.match：只支持 value 或 any 其中一个，收到 {m!r}")
+        (op, v), = m.items()
+        if op == "value":
+            if not _is_scalar_match(v):
+                raise UnsupportedFilter(f"{path}.match.value 只支持字符串、整数、布尔，收到 {v!r}")
+        elif op == "any":
+            if not isinstance(v, list) or not v or not all(_is_scalar_match(x) and not isinstance(x, bool) for x in v) \
+                    or len({type(x) for x in v}) != 1:
+                raise UnsupportedFilter(f"{path}.match.any 要非空、同类型的字符串或整数列表，收到 {v!r}")
+        else:
+            raise UnsupportedFilter(f"{path}.match：不支持 {op!r}（只支持 value、any）")
+    else:
         r = cond["range"]
-        if not isinstance(val, (int, float)) or isinstance(val, bool):
-            return False
-        return all([
-            r.get("gt") is None or val > r["gt"],
-            r.get("gte") is None or val >= r["gte"],
-            r.get("lt") is None or val < r["lt"],
-            r.get("lte") is None or val <= r["lte"],
-        ])
-    if "is_null" in cond:
-        return payload.get(cond["is_null"].get("key")) is None
-    if "has_id" in cond:
-        return payload.get("_id") in cond["has_id"]
-    if any(k in cond for k in ("must", "should", "must_not")):      # 嵌套
-        return matches_filter(cond, payload)
+        if not isinstance(r, dict) or not r or set(r) - set(_RANGE_KEYS):
+            raise UnsupportedFilter(f"{path}.range：只支持 gt/gte/lt/lte，收到 {r!r}")
+        for k, v in r.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise UnsupportedFilter(f"{path}.range.{k} 必须是数字，收到 {v!r}")
+
+
+def validate_filter(flt: Any, path: str = "filter") -> None:
+    """不在支持子集里就抛 UnsupportedFilter。None 表示不过滤，合法。"""
+    if flt is None:
+        return
+    if not isinstance(flt, dict) or not flt:
+        raise UnsupportedFilter(f"{path}：过滤条件必须是非空对象，收到 {flt!r}")
+    extra = set(flt) - set(_FILTER_KEYS)
+    if extra:
+        raise UnsupportedFilter(f"{path}：不支持的键 {sorted(extra)}（只支持 must/should/must_not）")
+    for k in _FILTER_KEYS:
+        if k not in flt:
+            continue
+        conds = flt[k] if isinstance(flt[k], list) else [flt[k]]
+        if isinstance(flt[k], list) and not flt[k]:
+            raise UnsupportedFilter(f"{path}.{k}：不能是空列表")
+        for i, c in enumerate(conds):
+            _validate_condition(c, f"{path}.{k}[{i}]")
+
+
+def _eq(a: Any, b: Any) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    return a == b
+
+
+def _values(payload: Payload, key: str) -> Optional[list]:
+    if key not in payload or payload[key] is None:
+        return None
+    v = payload[key]
+    return v if isinstance(v, list) else [v]
+
+
+def _cond_true(cond: dict, payload: Payload) -> bool:
+    if any(k in cond for k in _FILTER_KEYS):
+        return _filter_true(cond, payload)
+    vals = _values(payload, cond["key"])
+    if vals is None:
+        return False
+    if "match" in cond:
+        (op, target), = cond["match"].items()
+        if op == "value":
+            return any(_eq(x, target) for x in vals)
+        return any(_eq(x, t) for x in vals for t in target)
+    r = cond["range"]
+    for x in vals:
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            continue
+        if all([r.get("gt") is None or x > r["gt"], r.get("gte") is None or x >= r["gte"],
+                r.get("lt") is None or x < r["lt"], r.get("lte") is None or x <= r["lte"]]):
+            return True
+    return False
+
+
+def _as_list(v: Any) -> list:
+    return v if isinstance(v, list) else [v]
+
+
+def _filter_true(flt: dict, payload: Payload) -> bool:
+    if "must" in flt and not all(_cond_true(c, payload) for c in _as_list(flt["must"])):
+        return False
+    if "should" in flt and not any(_cond_true(c, payload) for c in _as_list(flt["should"])):
+        return False
+    if "must_not" in flt and any(_cond_true(c, payload) for c in _as_list(flt["must_not"])):
+        return False
     return True
 
 
 def matches_filter(flt: Optional[dict], payload: Payload) -> bool:
-    """Qdrant filter 子集：must（全部满足）、should（至少一个）、must_not（全部不满足）。"""
-    if not flt:
-        return True
-    must = flt.get("must") or []
-    should = flt.get("should") or []
-    must_not = flt.get("must_not") or []
-    if isinstance(must, dict):
-        must = [must]
-    if isinstance(should, dict):
-        should = [should]
-    if isinstance(must_not, dict):
-        must_not = [must_not]
-    if not all(_match_one(c, payload) for c in must):
-        return False
-    if should and not any(_match_one(c, payload) for c in should):
-        return False
-    if any(_match_one(c, payload) for c in must_not):
-        return False
-    return True
+    """先校验再求值；不支持的写法抛 UnsupportedFilter。"""
+    validate_filter(flt)
+    return True if flt is None else _filter_true(flt, payload)
+
+
+def and_filters(*filters: Optional[dict]) -> Optional[dict]:
+    """把几个过滤条件用 must 串起来（只会收窄，不会放宽）；全是 None 时返回 None。"""
+    parts = [f for f in filters if f]
+    if not parts:
+        return None
+    for f in parts:
+        validate_filter(f)
+    return parts[0] if len(parts) == 1 else {"must": parts}
 
 
 def _split_key(pid: PointId, payload: Payload) -> tuple[str | int, Payload]:
@@ -165,6 +255,35 @@ def _split_key(pid: PointId, payload: Payload) -> tuple[str | int, Payload]:
 
 
 # ---------- 进程内实现 ----------
+
+def _check_delete_filter(flt: Optional[dict]) -> None:
+    """条件删除必须带非空、受支持的过滤；删全部请显式用 drop_collection。"""
+    if not flt:
+        raise StoreError("delete_where 需要非空的过滤条件；要清空整个集合请用 drop_collection")
+    validate_filter(flt)
+
+
+def check_meta(collection: str, stored: Optional[dict], wanted: Optional[dict], has_points: bool) -> None:
+    """集合已存在时，调用方声明的元数据（向量空间身份等）必须与集合里记录的完全一致。
+
+    - 调用方不声明（wanted=None）：不校验，兼容只用存储层的调用；TextIndex 总会声明。
+    - 集合没记录（旧数据）但有点：拒绝，没法确认这些向量来自哪个空间，只能重建。
+    - 都有但不同：拒绝，并指出哪些字段不同。
+    """
+    if wanted is None:
+        return
+    if stored is None:
+        if has_points:
+            raise StoreError(f"集合 {collection} 没有记录向量空间身份，无法确认已有向量与当前 embedder 兼容；"
+                             f"用 recreate=True 重建（会清空）")
+        return
+    if stored != wanted:
+        diff = sorted(k for k in set(stored) | set(wanted) if stored.get(k) != wanted.get(k))
+        raise StoreError(f"集合 {collection} 的元数据与调用方不一致（{', '.join(diff)}）："
+                         f"集合 {json.dumps({k: stored.get(k) for k in diff}, ensure_ascii=False)}，"
+                         f"调用方 {json.dumps({k: wanted.get(k) for k in diff}, ensure_ascii=False)}；"
+                         f"换了模型、前缀、任务或作用域设置就要 recreate=True 重建")
+
 
 class MemoryStore:
     """字典 + 暴力余弦。几百到几千条够用；可选 path 落成 JSON，进程重启后还在。"""
@@ -176,9 +295,11 @@ class MemoryStore:
         self.path = Path(path) if path else None
         self.dim: Optional[int] = None
         self._points: dict[PointId, tuple[Vector, Payload]] = {}
+        self._meta: Optional[dict] = None               # 集合元数据（向量空间身份、任务、作用域），见 TextIndex
         if self.path and self.path.exists():
             data = json.loads(self.path.read_text(encoding="utf-8"))
             self.dim = data.get("dim")
+            self._meta = data.get("meta")
             for pid, vec, pl in data.get("points", []):
                 self._points[pid] = (vec, pl)
 
@@ -188,26 +309,30 @@ class MemoryStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps({
-            "collection": self.collection, "dim": self.dim,
+            "collection": self.collection, "dim": self.dim, "meta": self._meta,
             "points": [[pid, vec, pl] for pid, (vec, pl) in self._points.items()],
         }, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
 
-    def ensure_collection(self, dim: int, recreate: bool = False) -> None:
-        if recreate:
-            self._points.clear()
-            self.dim = dim
+    def ensure_collection(self, dim: int, recreate: bool = False, meta: Optional[dict] = None) -> None:
+        if recreate or self.dim is None:
+            if recreate:
+                self._points.clear()
+            self.dim, self._meta = dim, meta
             self._save()
-        elif self.dim is None:
-            self.dim = dim
-            self._save()
-        elif self.dim != dim:
+            return
+        if self.dim != dim:
             raise StoreError(f"集合 {self.collection} 已是 {self.dim} 维，调用方要 {dim} 维；"
                              f"换维度要 recreate=True（会清空）")
+        check_meta(self.collection, self._meta, meta, has_points=bool(self._points))
+
+    def meta(self) -> Optional[dict]:
+        return self._meta
 
     def drop_collection(self) -> None:
         self._points.clear()
         self.dim = None
+        self._meta = None
         if self.path and self.path.exists():
             self.path.unlink()
 
@@ -226,10 +351,11 @@ class MemoryStore:
         self._save()
 
     def search(self, vector, k=5, filter=None, min_score=None) -> list[ScoredPoint]:
+        validate_filter(filter)
         q = normalize(vector)
         hits = []
         for pid, (v, pl) in self._points.items():
-            if not matches_filter(filter, {**pl, "_id": pid}):
+            if filter is not None and not _filter_true(filter, pl):
                 continue
             s = cosine(q, v)
             if min_score is not None and s < min_score:
@@ -245,8 +371,8 @@ class MemoryStore:
         self._save()
 
     def delete_where(self, filter) -> None:
-        self._points = {pid: (v, pl) for pid, (v, pl) in self._points.items()
-                        if not matches_filter(filter, {**pl, "_id": pid})}
+        _check_delete_filter(filter)
+        self._points = {pid: (v, pl) for pid, (v, pl) in self._points.items() if not _filter_true(filter, pl)}
         self._save()
 
     def get(self, keys) -> dict:
@@ -258,18 +384,20 @@ class MemoryStore:
         return out
 
     def count(self, filter=None) -> int:
-        if not filter:
+        validate_filter(filter)
+        if filter is None:
             return len(self._points)
-        return sum(1 for pid, (_, pl) in self._points.items() if matches_filter(filter, {**pl, "_id": pid}))
+        return sum(1 for _, pl in self._points.values() if _filter_true(filter, pl))
 
     def scroll(self, filter=None, limit=100):
+        validate_filter(filter)
         for pid, (_, pl) in list(self._points.items()):
-            if matches_filter(filter, {**pl, "_id": pid}):
+            if filter is None or _filter_true(filter, pl):
                 yield _split_key(pid, pl)
 
     def info(self) -> dict:
         return {"store": self.name, "collection": self.collection, "dim": self.dim,
-                "points": len(self._points), "path": str(self.path) if self.path else None}
+                "points": len(self._points), "path": str(self.path) if self.path else None, "meta": self._meta}
 
 
 # ---------- Qdrant ----------
@@ -346,16 +474,32 @@ class QdrantStore:
                 return int(v["size"])
         return None
 
-    def ensure_collection(self, dim: int, recreate: bool = False) -> None:
-        cur = self.current_dim()
+    META_KEY = "anas_index"          # 集合级 metadata 里放向量空间身份等（Qdrant ≥ 1.16 支持集合 metadata）
+
+    def meta(self) -> Optional[dict]:
+        info = self.collection_info()
+        if not info:
+            return None
+        return ((info.get("config") or {}).get("metadata") or {}).get(self.META_KEY)
+
+    def ensure_collection(self, dim: int, recreate: bool = False, meta: Optional[dict] = None) -> None:
+        info = self.collection_info()
+        cur = self.current_dim() if info else None
         if cur is not None and not recreate:
             if cur != dim:
                 raise StoreError(f"Qdrant 集合 {self.collection} 已是 {cur} 维，调用方要 {dim} 维；"
                                  f"换维度要 recreate=True（会清空）")
+            stored = ((info.get("config") or {}).get("metadata") or {}).get(self.META_KEY)
+            check_meta(self.collection, stored, meta, has_points=bool(info.get("points_count")))
             return
         if cur is not None:
             self.drop_collection()
-        self._req("PUT", self._col(), {"vectors": {"size": dim, "distance": "Cosine"}})
+        body: dict = {"vectors": {"size": dim, "distance": "Cosine"}}
+        if meta is not None:
+            body["metadata"] = {self.META_KEY: meta}
+        self._req("PUT", self._col(), body)
+
+
 
     def drop_collection(self) -> None:
         self._req("DELETE", self._col(), ok404=True)
@@ -375,6 +519,7 @@ class QdrantStore:
             self._req("PUT", self._col("/points?wait=true"), {"points": points[i:i + 256]})
 
     def search(self, vector, k=5, filter=None, min_score=None) -> list[ScoredPoint]:
+        validate_filter(filter)          # 与 MemoryStore 同一白名单：真实 Qdrant 认得的写法也不放行，两端语义才一致
         body: dict = {"query": normalize(vector), "limit": k, "with_payload": True}
         if filter:
             body["filter"] = filter
@@ -393,6 +538,7 @@ class QdrantStore:
             self._req("POST", self._col("/points/delete?wait=true"), {"points": [point_id(k) for k in keys]})
 
     def delete_where(self, filter) -> None:
+        _check_delete_filter(filter)
         self._req("POST", self._col("/points/delete?wait=true"), {"filter": filter})
 
     def get(self, keys) -> dict:
@@ -407,6 +553,7 @@ class QdrantStore:
         return out
 
     def count(self, filter=None) -> int:
+        validate_filter(filter)
         body: dict = {"exact": True}
         if filter:
             body["filter"] = filter
@@ -415,6 +562,7 @@ class QdrantStore:
 
     def scroll(self, filter=None, limit=100):
         """遍历集合里的点（不带向量），给导出 / 迁移用。"""
+        validate_filter(filter)
         offset = None
         while True:
             body: dict = {"limit": limit, "with_payload": True, "with_vector": False}
@@ -438,6 +586,7 @@ class QdrantStore:
             "dim": self.current_dim() if col else None,
             "points": (col or {}).get("points_count"),
             "status": (col or {}).get("status"),
+            "meta": (((col or {}).get("config") or {}).get("metadata") or {}).get(self.META_KEY),
         }
 
 

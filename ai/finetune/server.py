@@ -29,9 +29,26 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from finetune.embedders import HashEmbedder  # noqa: E402
+
+
+def weights_fingerprint(model_id: str) -> str:
+    """服务实际加载的权重的指纹。本地目录：所有文件的相对路径和大小，加上小配置文件的内容，一起做 sha256
+    （不读几 GB 的权重本体，换文件或改配置都会变）；Hugging Face 模型名：就用名字。"""
+    import hashlib
+    root = Path(model_id)
+    if not root.is_dir():
+        return "hf:" + model_id
+    h = hashlib.sha256()
+    for f in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = f.relative_to(root).as_posix()
+        h.update(f"{rel}\0{f.stat().st_size}\0".encode("utf-8"))
+        if f.suffix in (".json", ".txt", ".model") and f.stat().st_size < 4 << 20:
+            h.update(f.read_bytes())
+    return "dir:" + h.hexdigest()[:32]
 
 
 class GemmaBackend:
@@ -58,6 +75,14 @@ class GemmaBackend:
         self.dtype = dtype
         self.name = model_id
         self.dims = self.model.get_sentence_embedding_dimension() or 768
+        # /health 报告实际权重与运行参数：精度和截断长度都会改变向量，是向量空间身份的一部分（#152 R1）
+        self.weights = weights_fingerprint(model_id)
+        try:
+            import sentence_transformers  # type: ignore
+            self.runtime = (f"sentence-transformers {sentence_transformers.__version__} torch {torch.__version__} "
+                            f"{dtype} max_seq_length={self.model.max_seq_length}")
+        except Exception:
+            self.runtime = f"sentence-transformers {dtype}"
         self.model.encode(["预热"], normalize_embeddings=True)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -70,6 +95,8 @@ class FakeBackend:
         self.h = HashEmbedder(dims)
         self.name = "fake-hash"
         self.dims = dims
+        self.weights = f"fake-hash@{dims}"
+        self.runtime = "fake"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self.h.embed(texts)
@@ -87,7 +114,8 @@ def make_handler(backend, fake: bool, lock: threading.Lock):
 
         def do_GET(self):  # noqa: N802
             if self.path.rstrip("/") in ("/health", ""):
-                self._json(200, {"ok": True, "model": backend.name, "dims": backend.dims, "fake": fake})
+                self._json(200, {"ok": True, "model": backend.name, "dims": backend.dims, "fake": fake,
+                                 "weights": getattr(backend, "weights", None), "runtime": getattr(backend, "runtime", None)})
             else:
                 self._json(404, {"error": "not found"})
 
