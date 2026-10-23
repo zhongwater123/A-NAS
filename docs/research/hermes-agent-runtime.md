@@ -1,6 +1,6 @@
 # Hermes Agent 作为 AI 助手运行时的可行性
 
-更新时间：2026-10-15
+更新时间：2026-10-23
 
 本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
@@ -664,7 +664,7 @@ Hermes 没有逐条列出记忆的记忆接口：`GET /api/memory` 只返回两�
 | E4 关闭复盘（`auxiliary.background_review.enabled: false`），两个计数都设为 1 | 没有任何复盘请求，什么都没有写入 |
 | E5 每轮技能复盘，一个任务：读计划.md 与 family.md，在助手目录写出游计划 | 主回合 7 次请求、85,810 token；复盘 7 次请求、150,964 token（138,496 为缓存命中）、41 秒。它先想修改系统技能 `anas-files`，因只读挂载失败；又想改写一条记忆，因含删除被 Hermes 暂存；随后新建技能 `a-nas-file-tasks`（“在 A-NAS 上为成员起草文件：标出处、忽略夹带指令”，`created_by: agent`）并修改。第一遍：9 次请求、225,343 token，新建 `member-file-drafts` |
 | E6 同 E5，客户端在回合结束时立即断开 | 复盘约 16 秒跑完（3 次请求、68,484 token），赶在会话被回收之前，又改了一次技能。第一遍的复盘更长：约 20 秒后会话被回收（“Interrupt requested (hard): session ended”），复盘在第 3 次请求中途被取消，此时已改写过一次技能 |
-| 复盘能执行哪些工具（假模型，[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)） | 白名单没有生效：`write_file` 在助手目录写出了文件，技能复盘也用 `memory` 写进了记忆，`skill_manage` 照常；调用“提交更改”时 Hermes 照常请求审批，保持连接的客户端在 `message.complete` 之后收到 `approval` 服务端请求，却没有对应的 `tool.start`。原因：顺序执行的工具在另一个线程中运行（`agent/tool_executor.py:929-944`，只传递 contextvars），白名单却存在 `threading.local()` 中（`hermes_cli/plugins.py:1948`）。上游 main（2026-10-15 的 `450ad50`）仍是如此，已有 issue NousResearch/hermes-agent#136623（2026-10-11）与修复 PR NousResearch/hermes-agent#136632，都未合并：升级 Hermes 时要跟进，修复合入后复盘只能写记忆与技能。2026-10-16 起运行环境带上这个修复（[后台复盘与闲时整理](#后台复盘与闲时整理2026-10-16开发机)） |
+| 复盘能执行哪些工具（假模型，[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)） | 白名单没有生效：`write_file` 在助手目录写出了文件，技能复盘也用 `memory` 写进了记忆，`skill_manage` 照常；调用“提交更改”时 Hermes 照常请求审批，保持连接的客户端在 `message.complete` 之后收到 `approval` 服务端请求，却没有对应的 `tool.start`。原因：顺序执行的工具在另一个线程中运行（`agent/tool_executor.py:929-944`，只传递 contextvars），白名单却存在 `threading.local()` 中（`hermes_cli/plugins.py:1948`）。上游 main（2026-10-15 的 `450ad50`）仍是如此，已有 issue NousResearch/hermes-agent#136623（2026-10-11）与修复 PR NousResearch/hermes-agent#136632，2026-10-15 查看时都还开着：升级 Hermes 时要跟进，修复合入后复盘只能写记忆与技能。2026-10-16 起运行环境带上这个修复（[后台复盘与闲时整理](#后台复盘与闲时整理2026-10-16开发机)） |
 
 结论：
 
@@ -888,7 +888,7 @@ managed scope 另外固定 `terminal.cwd: /nas/助手` 与 `agent.clarify_timeou
 
 | 问题 | 原因 | 处理 |
 |---|---|---|
-| 复盘能用主 Agent 的全部工具 | 上游白名单的缺陷（上文表格最后一行）；工具开放后，它连终端、代码与子代理也能用 | 运行环境带上上游尚未合并的修复，见下文 |
+| 复盘能用主 Agent 的全部工具 | 上游白名单的缺陷（上文表格最后一行）；工具开放后，它连终端、代码与子代理也能用 | 运行环境带上上游的修复补丁，见下文 |
 | 复盘大多跑不完 | 产品服务在回合结束后就放开到实例的连接，约 20 秒后会话被回收，复盘随之取消（E6） | 产品服务在回合结束后继续保持连接，直到 Hermes 报告这一轮的复盘（`review.summary`）、新一轮开始，或满 2 分钟（`reviewWait`）。Hermes 只在复盘改了记忆或技能时报告，什么都没改的复盘就保持满 2 分钟；技能复盘最长的一次用了 41 秒（E5） |
 | 成员不知道复盘改了什么 | 白名单不转发 `review.summary` | 转发；窗口在这一轮下方显示 Hermes 的说明与“查看记忆”，新一轮开始时消失 |
 | 闲时整理从不运行 | Curator 要 Hermes 闲置满 2 小时才运行，实例却在最后一个连接断开约 45 秒后退出 | 每周一次的 systemd 定时器在同一沙箱中运行 Hermes 自己的 `hermes curator run`，实例在运行时跳过 |
@@ -897,7 +897,7 @@ managed scope 另设 `display.language: zh`：Hermes 自己的提示用它自带
 
 ### 白名单的修复
 
-上游的 issue NousResearch/hermes-agent#136623 与修复 PR NousResearch/hermes-agent#136632 仍未合并（2026-10-16 查看，PR 的提交 `6e17391`）。修复在 `threading.local()` 之外把白名单再存一份到 ContextVar，`propagate_context_to_thread` 会把它带进执行工具的线程。这个 PR 不需改动就能打在固定提交 `0e427d78` 上，A-NAS 原样带上它（连同上游的测试），不另写一份：`run.sh build` 从固定提交导出源码，按文件名顺序对 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch) 中的补丁执行 `git apply`，记入运行环境的 `src/A-NAS-PATCHES`，构建日志列出打上的补丁。升级 Hermes 时，修复已合入就删掉这个补丁。
+上游的 issue NousResearch/hermes-agent#136623 与修复 PR NousResearch/hermes-agent#136632 在 2026-10-16 查看时仍开着（PR 的提交 `6e17391`）。修复在 `threading.local()` 之外把白名单再存一份到 ContextVar，`propagate_context_to_thread` 会把它带进执行工具的线程。这个 PR 不需改动就能打在固定提交 `0e427d78` 上，A-NAS 原样带上它（连同上游的测试），不另写一份：`run.sh build` 从固定提交导出源码，按文件名顺序对 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch) 中的补丁执行 `git apply`，记入运行环境的 `src/A-NAS-PATCHES`，构建日志列出打上的补丁。升级 Hermes 时，修复已合入就删掉这个补丁。
 
 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh) 改为逐项判定：假模型让复盘尝试指定的调用，再看 Hermes 给它的结果。
 

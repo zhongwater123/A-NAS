@@ -1,7 +1,7 @@
 # 成员分享技术设计
 
-状态：implemented（开发分支；尚未部署）
-更新时间：2026-10-20
+状态：implemented
+更新时间：2026-10-23
 
 产品行为以[成员分享规格](../specs/member-sharing.md)为准；权限边界见 [ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)。
 

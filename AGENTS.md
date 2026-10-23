@@ -13,7 +13,7 @@
 - 新功能或行为变化：读或创建 `docs/specs/` 中的规格。
 - 难复现、跨边界或可能复发的缺陷：先查 `docs/investigations/`，再更新或创建调查记录。
 - 安装、部署、恢复、磁盘或其他高风险操作：使用 `docs/runbooks/` 中的手册。
-- 产品目标、历史研究或完整决策盘点：按需读 `PROJECT_CONTEXT.md`。
+- 产品定位：读 `README.md`；早期产品背景、历史研究或 2026-10-06 的决策盘点：按需读 `PROJECT_CONTEXT.md`。
 - 本机工具或 WSL 问题：读 `docs/development/LOCAL_ENVIRONMENT.md`。
 
 ## 验证

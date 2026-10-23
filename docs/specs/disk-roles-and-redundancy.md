@@ -1,7 +1,7 @@
 # 硬盘用途与数据卷冗余
 
-状态：M1 implemented（尚未部署）；M2、M3 draft
-更新时间：2026-10-21
+状态：M1 implemented；M2、M3 draft
+更新时间：2026-10-23
 
 ## 目标
 

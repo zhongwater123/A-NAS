@@ -12,7 +12,7 @@
 - [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
-- [启用相册本地 AI](enable-photo-ai.md)（draft；首次部署待执行）
+- [启用相册本地 AI](enable-photo-ai.md)（verified；2026-10-10 部署 `6833c7637f73`）
 - [启用相册物体检测](enable-photo-objects.md)（verified；2026-10-13 部署 `bb1ec71bff65`）
 - [启用局域网 Web 访问](enable-lan-web-access.md)（verified）
 - [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
