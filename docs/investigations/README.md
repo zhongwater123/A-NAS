@@ -33,7 +33,7 @@
 - [2026-10-15：剧集改名与旧扫描交错导致身份丢失](2026-10-15-media-rename-scan-race.md)（fixed locally）
 - [2026-10-15：Host Agent 每次请求都读 SMART，读盘超时被杀](2026-10-15-host-agent-smart-on-every-request.md)（fixed locally；Experimental NAS verification pending）
 
-- [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed；2026-10-21 部署，待实机验收）
+- [2026-10-15：分享接入后的会话目录权限与服务恢复](2026-10-15-member-sharing-service-startup.md)（fixed；2026-10-21 部署的 `8f5b6b0b4586` 包含修复，待实机验收）
 
 - [2026-10-16：局域网 HTTP 点击发送分享无反应](2026-10-16-member-sharing-http-send.md)（fixed locally；待部署验收）
 
