@@ -29,7 +29,7 @@ const (
 func (e *Executor) prepareState(directory, legacy string, paths []string) map[string]error {
 	failures := make(map[string]error)
 	if err := ensureStateDirectory(directory, e.stateOwner); err != nil {
-		err = fmt.Errorf("Host Agent state directory: %w", err)
+		err = fmt.Errorf("the Host Agent's state directory: %w", err)
 		for _, path := range paths {
 			failures[path] = err
 		}
@@ -96,10 +96,11 @@ func (e *Executor) moveStateFile(legacy, path string) (bool, error) {
 	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return false, fmt.Errorf("move %s: %w", filepath.Base(legacy), err)
 	}
+	// The copy is in use either way; an original left behind is dropped on
+	// the next start.
 	if err := os.Remove(legacy); err != nil {
-		return true, fmt.Errorf("remove %s after moving it: %w", legacy, err)
-	}
-	if err := syncDirectory(filepath.Dir(legacy)); err != nil {
+		e.logger.Warn("remove a moved Host Agent record", "file", legacy, "error", err)
+	} else if err := syncDirectory(filepath.Dir(legacy)); err != nil {
 		e.logger.Warn("flush the removal of a moved Host Agent record", "file", legacy, "error", err)
 	}
 	return true, nil

@@ -167,6 +167,14 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.viewingError = executor.loadViewingRegistry()
 	executor.appsError = executor.loadAppsRegistry()
 	executor.operationsError = executor.loadOperations()
+	for path, err := range map[string]error{
+		executor.registryPath: executor.registryError, executor.identityPath: executor.identityError,
+		executor.viewingPath: executor.viewingError, executor.appsPath: executor.appsError, executor.operationsPath: executor.operationsError,
+	} {
+		if err != nil {
+			executor.logger.Error("a Host Agent record cannot be used; the operations that need it fail", "file", path, "error", err)
+		}
+	}
 	return executor
 }
 
