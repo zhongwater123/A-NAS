@@ -5,6 +5,9 @@
       "Read(//**/.env)",
       "Read(//**/.env.local)",
       "Read(//**/.env.*.local)",
+      "Read(//**/.env.development)",
+      "Read(//**/.env.production)",
+      "Read(//**/.env.staging)",
       "Read(.env.*)",
       "Read(!.env.example)",
       "Read(//**/*.key)",
@@ -14,6 +17,10 @@
       "Read(~/.ssh/**)",
       "Read(~/.config/gh/**)",
       "Read(~/AppData/Roaming/GitHub CLI/**)",
+      "Read(~/.netrc)",
+      "Read(~/_netrc)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.claude/.credentials.json)",
       "Read(//etc/anas-spike/**)"
     ]
   },
