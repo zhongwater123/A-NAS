@@ -1868,9 +1868,19 @@ small.tone-uncertain {
   box-shadow: 0 16px 48px rgba(18, 28, 42, 0.2);
   animation: sh-pop 0.16s var(--sh-ease);
 }
-.sh-input-chat .sh-emoji {
+.sh-input-wrap {
+  position: relative;
+}
+.sh-input-wrap-chat .sh-emoji {
   left: auto;
   right: 0;
+}
+/* The send dialog's picker opens below the note in the dialog's flow, so it
+   covers neither the note nor the recipients above it. */
+.sh-input-wrap-note .sh-emoji {
+  position: static;
+  margin-top: 8px;
+  box-shadow: 0 8px 24px rgba(18, 28, 42, 0.12);
 }
 .sh-emoji-head {
   display: flex;
@@ -1961,10 +1971,12 @@ small.tone-uncertain {
   font-size: 11.5px;
   font-weight: 600;
 }
+/* Every category gets the same height, so switching never moves the panel. */
 .sh-emoji-grid {
-  max-height: 178px;
+  height: 178px;
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
+  align-content: start;
   gap: 2px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1990,6 +2002,7 @@ small.tone-uncertain {
   font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 }
 .sh-emoji-empty {
+  grid-column: 1 / -1;
   margin: 0;
   padding: 18px 0;
   color: var(--sh-faint);

@@ -45,6 +45,7 @@ export function EmojiInput({
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const cursor = useRef<number | undefined>(undefined);
   const id = useId();
   useLayoutEffect(() => {
@@ -71,6 +72,11 @@ export function EmojiInput({
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [open]);
+  useEffect(() => {
+    // A note's picker opens below the field inside the scrolling dialog body,
+    // so bring all of it into view.
+    if (open && variant === "note") panel.current?.scrollIntoView?.({ block: "nearest" });
+  }, [open, variant]);
   const close = () => {
     setOpen(false);
     trigger.current?.focus();
@@ -99,7 +105,7 @@ export function EmojiInput({
   return (
     <div
       ref={root}
-      className={`sh-input sh-input-${variant}${disabled ? " disabled" : ""}`}
+      className={`sh-input-wrap sh-input-wrap-${variant}`}
       onKeyDown={(event) => {
         if (open && event.key === "Escape") {
           event.preventDefault();
@@ -108,55 +114,57 @@ export function EmojiInput({
         }
       }}
     >
-      {variant === "note" && (
-        <span className="sh-input-label" aria-hidden="true">
-          {label}
-          <small>可选</small>
-        </span>
-      )}
-      <textarea
-        ref={input}
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        maxLength={8000}
-        rows={variant === "chat" ? 1 : 3}
-        placeholder={placeholder}
-        onKeyDown={(event) => {
-          if (
-            !onEnter ||
-            event.key !== "Enter" ||
-            event.shiftKey ||
-            event.nativeEvent.isComposing ||
-            event.keyCode === 229
-          )
-            return;
-          event.preventDefault();
-          onEnter();
-        }}
-      />
-      <div className="sh-input-tools">
-        <button
-          ref={trigger}
-          type="button"
-          className="sh-emoji-trigger"
-          aria-label="选择表情"
-          title="表情"
-          aria-controls={id}
-          aria-expanded={open}
+      <div className={`sh-input sh-input-${variant}${disabled ? " disabled" : ""}`}>
+        {variant === "note" && (
+          <span className="sh-input-label" aria-hidden="true">
+            {label}
+            <small>可选</small>
+          </span>
+        )}
+        <textarea
+          ref={input}
+          aria-label={label}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
-          onClick={() => {
-            setOpen(!open);
-            setQuery("");
+          maxLength={8000}
+          rows={variant === "chat" ? 1 : 3}
+          placeholder={placeholder}
+          onKeyDown={(event) => {
+            if (
+              !onEnter ||
+              event.key !== "Enter" ||
+              event.shiftKey ||
+              event.nativeEvent.isComposing ||
+              event.keyCode === 229
+            )
+              return;
+            event.preventDefault();
+            onEnter();
           }}
-        >
-          <Smile />
-        </button>
-        {trailing}
+        />
+        <div className="sh-input-tools">
+          <button
+            ref={trigger}
+            type="button"
+            className="sh-emoji-trigger"
+            aria-label="选择表情"
+            title="表情"
+            aria-controls={id}
+            aria-expanded={open}
+            disabled={disabled}
+            onClick={() => {
+              setOpen(!open);
+              setQuery("");
+            }}
+          >
+            <Smile />
+          </button>
+          {trailing}
+        </div>
       </div>
       {open && (
-        <div id={id} className="sh-emoji" role="dialog" aria-label="表情">
+        <div ref={panel} id={id} className="sh-emoji" role="dialog" aria-label="表情">
           <div className="sh-emoji-head">
             <label className="sh-emoji-search">
               <Search />
@@ -214,10 +222,10 @@ export function EmojiInput({
                 {emoji}
               </button>
             ))}
+            {!filtered.length && (
+              <p className="sh-emoji-empty">{query ? "没有找到表情，试试其他关键词" : "使用过的表情会出现在这里"}</p>
+            )}
           </div>
-          {!filtered.length && (
-            <p className="sh-emoji-empty">{query ? "没有找到表情，试试其他关键词" : "使用过的表情会出现在这里"}</p>
-          )}
         </div>
       )}
     </div>
