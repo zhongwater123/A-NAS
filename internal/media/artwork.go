@@ -20,7 +20,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
-// maxArtworkPixels refuses images that would take too much memory to decode.
+// maxArtworkPixels bounds the memory artwork takes to decode twice: a larger
+// picture is not decoded, and the decodes in flight together hold at most
+// this many pixels (Service.decoding). However many requests arrive, that is
+// about 100 MB of JPEG or 425 MB of 16-bit PNG, and about 1 GB at the worst
+// for a crafted progressive JPEG; see
+// docs/architecture/media-center.md#海报与剧照.
 const maxArtworkPixels = 50_000_000
 
 type artworkSize struct {
@@ -175,7 +180,7 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 		return Image{}, err
 	}
 	defer func() { _ = content.Reader.Close() }()
-	scaled, err := scaleArtwork(content.Reader, size)
+	scaled, err := s.scaleArtwork(ctx, content.Reader, size)
 	if err != nil {
 		return Image{}, err
 	}
@@ -190,8 +195,9 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 }
 
 // scaleArtwork decodes a sidecar image and encodes it as a JPEG that fits
-// size. An image the decoder panics on is not artwork, like one it rejects.
-func scaleArtwork(r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
+// size, once its pixels are free in the decode budget; waiting ends with the
+// request. An image the decoder panics on is not artwork, like one it rejects.
+func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			decodepanic.Log("media artwork", recovered)
@@ -199,9 +205,18 @@ func scaleArtwork(r io.ReadSeeker, size artworkSize) (encoded []byte, err error)
 		}
 	}()
 	config, _, err := image.DecodeConfig(r)
-	if err != nil || config.Width*config.Height > maxArtworkPixels {
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
 		return nil, ErrNotFound
 	}
+	pixels := int64(config.Width) * int64(config.Height)
+	if pixels > maxArtworkPixels {
+		return nil, ErrNotFound
+	}
+	if err := s.decoding.Acquire(ctx, pixels); err != nil {
+		return nil, err
+	}
+	// Released before the panic above is recovered, too.
+	defer s.decoding.Release(pixels)
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
