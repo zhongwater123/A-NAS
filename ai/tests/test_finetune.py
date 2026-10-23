@@ -9,6 +9,7 @@ import os
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 
 from anas_ai import providers
 from finetune import build_triplets, server, similarity
@@ -205,6 +206,101 @@ class FinetuneScriptsTest(unittest.TestCase):
             r2 = finetune_eval.evaluate(trip, ProviderEmbedder(TextFakeProvider(64)))
             self.assertEqual(r2["anchors"], r["anchors"])
 
+
+class EvalDocsTest(unittest.TestCase):
+    def test_chunking_and_evaluation(self):
+        from finetune import eval_docs
+        nl = chr(10)
+        with tempfile.TemporaryDirectory() as d:
+            docs = os.path.join(d, "docs")
+            os.makedirs(os.path.join(docs, "specs"))
+            body = nl.join(["# 相册", "", "开头一段。", "", "## 回收站", "",
+                            "照片删除后进入回收站，三十天内可以恢复，恢复后回到原相册。",
+                            "```", "# 代码块里的井号不是标题", "```", "", "## 搜索", "",
+                            "用中文描述搜索照片，结果按相似度排序。", ""])
+            with open(os.path.join(docs, "specs", "a.md"), "w", encoding="utf-8") as f:
+                f.write(body)
+            with open(os.path.join(docs, "README.md"), "w", encoding="utf-8") as f:
+                f.write(nl.join(["# 索引", "", "被跳过的文件。", ""]))
+            chunks = eval_docs.chunk_markdown(Path(docs), min_chars=5)
+            ids = [c.id for c in chunks]
+            self.assertIn("specs/a.md#回收站", ids)
+            self.assertIn("specs/a.md#搜索", ids)
+            self.assertTrue(all(c.path == "specs/a.md" for c in chunks))
+            self.assertNotIn("specs/a.md#代码块里的井号不是标题", ids)
+            queries = [{"q": "删掉的照片多久内还能恢复", "target": "specs/a.md#回收站"},
+                       {"q": "怎么用一句话找照片", "target": ["specs/a.md#搜索"]}]
+            r = eval_docs.evaluate(chunks, queries, HashEmbedder(256), "retrieval")
+            for k in ("hit@1", "hit@5", "hit@10", "mrr@10", "file_hit@1", "file_hit@5"):
+                self.assertIn(k, r)
+            self.assertEqual(r["file_hit@1"], 1.0)   # 只有一篇文档
+            self.assertGreaterEqual(r["hit@5"], r["hit@1"])
+
+    def test_truncated_wrapper(self):
+        from finetune.eval_docs import Truncated
+        t = Truncated(HashEmbedder(64), 16)
+        v = t.embed(["hello world"])[0]
+        self.assertEqual(len(v), 16)
+        self.assertAlmostEqual(cosine(v, v), 1.0, places=6)
+        self.assertEqual(t.name, "hash-ngram->16")
+
+    def test_long_path_reader(self):
+        from finetune.eval_docs import _read_text
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.md"
+            p.write_text("内容", encoding="utf-8")
+            self.assertEqual(_read_text(p), "内容")
+
+class EvalDedupTest(unittest.TestCase):
+    def test_strip_template_and_load_texts(self):
+        from finetune import eval_dedup
+        t = eval_dedup.strip_template("【A 测试｜文件】上传失败 版本：0.3.1 复现：2026-10-13 点上传")
+        self.assertNotIn("【", t)
+        self.assertNotIn("0.3.1", t)
+        self.assertNotIn("2026-10-13", t)
+        self.assertIn("上传失败", t)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("已登录" + chr(10) + json.dumps({"items": [{"text": " a  b "}, {"text": ""}, {"text": "c"}]}, ensure_ascii=False))
+            self.assertEqual(eval_dedup.load_texts(path, "items.text"), ["a b", "c"])
+
+    def test_doc_query_pairs(self):
+        from finetune import build_triplets
+        nl = chr(10)
+        with tempfile.TemporaryDirectory() as d:
+            docs = os.path.join(d, "docs")
+            os.makedirs(docs)
+            with open(os.path.join(docs, "a.md"), "w", encoding="utf-8") as f:
+                f.write(nl.join(["# 标题", "", "## 回收站", "", "照片删除后进入回收站，三十天内可以恢复。", ""]))
+            q = os.path.join(d, "q.json")
+            with open(q, "w", encoding="utf-8") as f:
+                json.dump([{"q": "删掉的照片多久能恢复", "target": "a.md#回收站"},
+                           {"q": "不存在的", "target": "a.md#没有这节"}], f, ensure_ascii=False)
+            pairs = build_triplets.doc_query_pairs(q, docs)
+            self.assertEqual(len(pairs), 1)
+            self.assertEqual(pairs[0]["a"], "删掉的照片多久能恢复")
+            self.assertIn("三十天", pairs[0]["b"])
+
+class PromptSelectionTest(unittest.TestCase):
+    ROWS = [{"anchor": "问题", "positive": "段落", "negative": "别的段落", "source": "docq:0"},
+            {"anchor": "句子甲", "positive": "句子乙", "negative": "句子丙", "source": "label:x"}]
+
+    def test_eval_prompt_kinds_by_source(self):
+        akind, ckind = finetune_eval.prompt_kinds(self.ROWS)
+        self.assertEqual(akind, {"问题": "query", "句子甲": "sts"})
+        self.assertEqual(ckind, {"段落": "document", "别的段落": "document", "句子乙": "sts", "句子丙": "sts"})
+        r = finetune_eval.evaluate(self.ROWS, HashEmbedder(128))
+        self.assertEqual(r["anchors"], 2)
+
+    def test_train_with_prompts_prepends_by_source(self):
+        from finetune import train
+        rows = train.with_prompts(self.ROWS)
+        self.assertTrue(rows[0]["anchor"].startswith(train.QUERY_PROMPT))
+        self.assertTrue(rows[0]["positive"].startswith(train.DOC_PROMPT))
+        self.assertTrue(rows[1]["anchor"].startswith(train.STS_PROMPT))
+        self.assertTrue(rows[1]["negative"].startswith(train.STS_PROMPT))
+        self.assertEqual(set(rows[0]), {"anchor", "positive", "negative"})
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,11 +24,32 @@ from finetune.embedders import HashEmbedder, HttpEmbedder, ProviderEmbedder, cos
 MANIFEST = os.path.join(AI_DIR, "..", "deploy", "models", "embeddinggemma-2-740m.json")
 
 
+def prompt_kinds(triplets: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+    """每条 anchor 和语料文本该用的前缀：来源为 docq:（问答对）的用 query / document，其余 STS。"""
+    akind: dict[str, str] = {}
+    ckind: dict[str, str] = {}
+    for t in triplets:
+        asym = str(t.get("source", "")).startswith("docq:")
+        akind.setdefault(t["anchor"], "query" if asym else "sts")
+        for key in ("positive", "negative"):
+            ckind.setdefault(t[key], "document" if asym else "sts")
+    return akind, ckind
+
+
+def _embed_by_kind(texts: list[str], kinds: dict[str, str], embedder) -> dict[str, list[float]]:
+    out: dict[str, list[float]] = {}
+    for kind in sorted({kinds[t] for t in texts}):
+        group = [t for t in texts if kinds[t] == kind]
+        out.update(zip(group, embedder.embed(group, kind)))
+    return out
+
+
 def evaluate(triplets: list[dict], embedder) -> dict:
+    akind, ckind = prompt_kinds(triplets)
     corpus = sorted({t["positive"] for t in triplets} | {t["negative"] for t in triplets})
-    cvecs = dict(zip(corpus, embedder.embed(corpus, "sts")))
+    cvecs = _embed_by_kind(corpus, ckind, embedder)
     anchors = sorted({t["anchor"] for t in triplets})
-    avecs = dict(zip(anchors, embedder.embed(anchors, "sts")))
+    avecs = _embed_by_kind(anchors, akind, embedder)
     positives: dict[str, set[str]] = {}
     for t in triplets:
         positives.setdefault(t["anchor"], set()).add(t["positive"])

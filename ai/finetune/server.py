@@ -37,20 +37,25 @@ from finetune.embedders import HashEmbedder  # noqa: E402
 class GemmaBackend:
     """sentence-transformers 封装；只在真的要用时才 import，保持脚本在无依赖机器上可读可测。"""
 
-    def __init__(self, model_id: str, device: str | None):
+    def __init__(self, model_id: str, device: str | None, dtype: str = "auto", max_seq_length: int = 0):
         from sentence_transformers import SentenceTransformer  # type: ignore
+        import torch  # type: ignore
         kwargs: dict = {
             # 只要文本编码器：不加载视觉/音频，参数从 740M 降到 270M
             "config_kwargs": {"vision_config": None, "audio_config": None},
         }
-        try:
-            import torch  # type: ignore
-            kwargs["model_kwargs"] = {"torch_dtype": torch.bfloat16}
-        except Exception:
-            pass
         if device:
             kwargs["device"] = device
+        # 精度：GPU 用 bf16；CPU 用 fp32——没有 AVX-512/AMX 的 CPU 上 bf16 靠软件模拟，
+        # 实测比 fp32 慢 6 倍（文档段落 30.7 s 对 5.4 s）。官方只禁 fp16。
+        on_cpu = (device or "").startswith("cpu") or (not device and not torch.cuda.is_available())
+        if dtype == "auto":
+            dtype = "fp32" if on_cpu else "bf16"
+        kwargs["model_kwargs"] = {"torch_dtype": torch.float32 if dtype == "fp32" else torch.bfloat16}
         self.model = SentenceTransformer(model_id, **kwargs)
+        if max_seq_length:
+            self.model.max_seq_length = max_seq_length   # 超长段落截断，CPU 上控制单段耗时
+        self.dtype = dtype
         self.name = model_id
         self.dims = self.model.get_sentence_embedding_dimension() or 768
         self.model.encode(["预热"], normalize_embeddings=True)
@@ -131,17 +136,20 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--model", default="google/embeddinggemma-2", help="HF 模型 id 或本地微调目录")
     ap.add_argument("--device", default=None, help="cuda / cpu，默认自动")
     ap.add_argument("--fake", action="store_true", help="不加载模型，用哈希向量联调")
+    ap.add_argument("--dtype", choices=("auto", "fp32", "bf16"), default="auto", help="auto：CPU 用 fp32，GPU 用 bf16")
+    ap.add_argument("--max-seq-length", type=int, default=0, help="超过此 token 数的输入截断，0=模型默认（8192）")
     args = ap.parse_args(argv)
 
     if args.fake:
         backend = FakeBackend()
     else:
         try:
-            backend = GemmaBackend(args.model, args.device)
+            backend = GemmaBackend(args.model, args.device, args.dtype, args.max_seq_length)
         except ImportError:
             sys.exit("缺少 sentence-transformers：pip install -r finetune/requirements.txt，或加 --fake 只联调接口。")
     srv = serve(args.host, args.port, backend, args.fake)
-    print(f"向量服务就绪 http://{args.host}:{args.port}  模型 {backend.name}  {backend.dims} 维  fake={args.fake}", flush=True)
+    print(f"向量服务就绪 http://{args.host}:{args.port}  模型 {backend.name}  {backend.dims} 维  fake={args.fake}"
+          f"  dtype={getattr(backend, 'dtype', '-')}  max_seq_length={args.max_seq_length or '默认'}", flush=True)
     print("调用方这样接：ANAS_EMBED_URL=http://%s:%d" % (args.host, args.port), flush=True)
     try:
         srv.serve_forever()

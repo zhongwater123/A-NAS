@@ -6,6 +6,8 @@ finetune.train 直接读，finetune.eval 直接评。
 输入（可同时给多份）：
   --labeled  JSONL，每行 {"text": "...", "label": "..."}：同一 label 下任意两句互为正例，其他 label 的句子做负例。
   --pairs    JSONL，每行 {"a": "...", "b": "..."}：人工标注的"说的是同一件事"的对，负例从所有文本里随机抽。
+  --doc-queries + --docs  eval_docs 用的问题文件和文档目录：每个问题和它的答案段落成一对（问题 → 段落），
+             负例从其他段落里挖。注意这是不对称的问答对，训练时也该用 query / document 前缀。
 难负例（默认开启）：用当前模型对每个 anchor 取 Top-K，把"分高但不是正例"的那条当负例。
   LawVault 的经验是难负例对 Top-1 提升最大。--embed-url 指向 finetune.server；不给则用哈希向量挖，弱一些但流程一样。
 
@@ -49,7 +51,7 @@ def labeled_triplets(rows: list[dict], rng: random.Random) -> list[dict]:
     return out
 
 
-def pair_triplets(pairs: list[dict], pool: list[str], rng: random.Random) -> list[dict]:
+def pair_triplets(pairs: list[dict], pool: list[str], rng: random.Random, source: str = "pair") -> list[dict]:
     out = []
     for i, pr in enumerate(pairs):
         a, b = pr.get("a"), pr.get("b")
@@ -59,8 +61,22 @@ def pair_triplets(pairs: list[dict], pool: list[str], rng: random.Random) -> lis
         if not cands:
             continue
         for x, y in ((a, b), (b, a)):
-            out.append({"anchor": x, "positive": y, "negative": rng.choice(cands), "source": f"pair:{i}"})
+            out.append({"anchor": x, "positive": y, "negative": rng.choice(cands), "source": f"{source}:{i}"})
     return out
+
+
+def doc_query_pairs(queries_path: str, docs_dir: str) -> list[dict]:
+    """eval_docs 的问题 → 答案段落正文，成 {"a": 问题, "b": 段落} 对（每个问题只取第一个 target）。"""
+    from finetune.eval_docs import chunk_markdown
+    chunks = {c.id.split("~")[0]: c.text for c in chunk_markdown(Path(docs_dir))}
+    pairs = []
+    for q in json.loads(Path(queries_path).read_text(encoding="utf-8-sig")):
+        targets = q["target"] if isinstance(q["target"], list) else [q["target"]]
+        for t in targets:
+            if t in chunks:
+                pairs.append({"a": q["q"], "b": chunks[t]})
+                break
+    return pairs
 
 
 def mine_hard_negatives(triplets: list[dict], embedder, k: int = 5) -> int:
@@ -92,6 +108,8 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--labeled", nargs="*", default=[])
     ap.add_argument("--pairs", nargs="*", default=[])
+    ap.add_argument("--doc-queries", help="eval_docs 的问题文件（JSON），与 --docs 一起用")
+    ap.add_argument("--docs", help="文档目录，给 --doc-queries 找答案段落")
     ap.add_argument("--embed-url", help="挖难负例用的向量服务；不给则用哈希向量")
     ap.add_argument("--no-hard", action="store_true", help="不挖难负例，负例随机")
     ap.add_argument("--seed", type=int, default=7)
@@ -100,8 +118,10 @@ def main(argv: list[str]) -> None:
     rng = random.Random(args.seed)
     labeled = [r for p in args.labeled for r in read_jsonl(p)]
     pairs = [r for p in args.pairs for r in read_jsonl(p)]
-    pool = sorted({r["text"] for r in labeled if r.get("text")} | {pr[k] for pr in pairs for k in ("a", "b") if pr.get(k)})
-    triplets = labeled_triplets(labeled, rng) + pair_triplets(pairs, pool, rng)
+    doc_pairs = doc_query_pairs(args.doc_queries, args.docs) if args.doc_queries else []
+    pool = sorted({r["text"] for r in labeled if r.get("text")} | {pr[k] for pr in pairs + doc_pairs for k in ("a", "b") if pr.get(k)})
+    # docq: 是不对称的问答对，train / eval 对它用 query / document 前缀，其余用 STS 前缀
+    triplets = labeled_triplets(labeled, rng) + pair_triplets(pairs, pool, rng) + pair_triplets(doc_pairs, pool, rng, "docq")
     if not triplets:
         sys.exit("没有产出任何三元组：--labeled 需要同一 label 至少 2 条且存在其他 label；--pairs 需要 a/b 字段。")
     changed = 0
@@ -112,7 +132,7 @@ def main(argv: list[str]) -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(json.dumps(t, ensure_ascii=False) + "\n" for t in triplets), encoding="utf-8")
-    print(f"写出 {len(triplets)} 条三元组到 {out}；难负例替换 {changed} 条；标签文本 {len(labeled)} 条，标注对 {len(pairs)} 对")
+    print(f"写出 {len(triplets)} 条三元组到 {out}；难负例替换 {changed} 条；标签文本 {len(labeled)} 条，标注对 {len(pairs)} 对，文档问答对 {len(doc_pairs)} 对")
     if len(triplets) < 200:
         print("提示：官方和社区经验是几百到几千条才有稳定收益。")
 
