@@ -164,17 +164,17 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer accountStore.Close()
+	defer closeAtExit(logger, "control.db", accountStore)
 	fileStore, err := files.OpenSQLite(filepath.Join(stateDirectory, "files.db"))
 	if err != nil {
 		return err
 	}
-	defer fileStore.Close()
+	defer closeAtExit(logger, "files.db", fileStore)
 	storageStore, err := storage.OpenSQLite(filepath.Join(stateDirectory, "storage.db"))
 	if err != nil {
 		return err
 	}
-	defer storageStore.Close()
+	defer closeAtExit(logger, "storage.db", storageStore)
 	accountService := accounts.NewService(accountStore, operations, accounts.Options{})
 	storageService, err := storage.OpenService(reader, operations, storage.Options{Store: storageStore})
 	if err != nil {
@@ -222,7 +222,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer musicStore.Close()
+	defer closeAtExit(logger, "music.db", musicStore)
 	// Runs before the deferred musicStore.Close, after the server stopped.
 	musicService := music.New(musicStore, filepath.Join(stateDirectory, "music-covers"), fileService, accountService, music.Options{Logger: logger, Worker: mediaWorker})
 	defer musicService.Close()
@@ -239,14 +239,14 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		defer photoService.Close()
+		defer closeAtExit(logger, "photo library", photoService)
 		photoAPI = photosapi.New(photoService, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
 		return err
 	}
-	defer mediaStore.Close()
+	defer closeAtExit(logger, "media.db", mediaStore)
 	var processor media.Processor
 	if mediaWorker != nil {
 		processor = media.WorkerProcessor{Worker: mediaWorker}
@@ -268,19 +268,19 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer feedbackStore.Close()
+	defer closeAtExit(logger, "feedback.db", feedbackStore)
 	personalizationStore, err := personalization.Open(filepath.Join(stateDirectory, "personalization.db"))
 	if err != nil {
 		return err
 	}
-	defer personalizationStore.Close()
+	defer closeAtExit(logger, "personalization.db", personalizationStore)
 	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
 		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
 	})
 	if err != nil {
 		return err
 	}
-	defer transferService.Close()
+	defer closeAtExit(logger, "transfers.db", transferService)
 	transferAPI, err := transfersapi.New(transferService, logger)
 	if err != nil {
 		return err
@@ -398,6 +398,14 @@ func run(logger *slog.Logger) error {
 			return nil
 		}
 		return err
+	}
+}
+
+// closeAtExit closes what run opened, once the server has stopped. The
+// process is on its way out, so a failure can only be logged.
+func closeAtExit(logger *slog.Logger, name string, closer io.Closer) {
+	if err := closer.Close(); err != nil {
+		logger.Error("A-NAS API could not close a store", "store", name, "error", err)
 	}
 }
 

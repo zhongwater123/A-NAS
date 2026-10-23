@@ -28,7 +28,7 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	users := accounts.NewService(db, &developmentOperations{}, accounts.Options{})
 	owner, err := users.SetupAdministrator(ctx, "owner", "owner strong password")
 	if err != nil {
@@ -55,7 +55,7 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer catalog.Close()
+	defer func() { _ = catalog.Close() }()
 	volume := filepath.Join(root, "volume")
 	fs := files.NewService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
