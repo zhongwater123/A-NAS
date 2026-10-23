@@ -51,7 +51,7 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	vector, err := client.EmbedImage(context.Background(), file)
 	if err != nil || len(vector) != 2 || vector[0] != 7 || vector[1] != 0.5 {
 		t.Fatalf("EmbedImage() = %v, %v; want the Worker to read the 7 bytes behind the descriptor", vector, err)
@@ -133,7 +133,7 @@ func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	model, boxes, err := client.DetectObjects(context.Background(), file)
 	want := aiworkertest.HashBoxes(content)
 	if err != nil || model != "detector-1" || len(boxes) != len(want) {
@@ -221,7 +221,7 @@ func TestAnimalsCrossTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	boxes := [][4]float32{{0.25, 0.5, 0.75, 1}, {0, 0, 0.5, 0.5}}
 	model, vectors, err := client.EmbedAnimals(context.Background(), file, boxes)
 	if err != nil || model != "animals-1" || len(vectors) != len(boxes) {
@@ -266,7 +266,7 @@ func TestCancellingADetectionHangsUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
 	_, _, err = (aiworker.Client{SocketPath: socket}).DetectObjects(ctx, file)

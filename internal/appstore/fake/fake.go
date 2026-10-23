@@ -127,7 +127,7 @@ func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error
 			return ctx.Err()
 		case <-time.After(r.step):
 		}
-		fmt.Fprintln(output, line)
+		_, _ = fmt.Fprintln(output, line)
 	}
 
 	r.docker.mu.Lock()

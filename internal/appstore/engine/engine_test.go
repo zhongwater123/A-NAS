@@ -112,7 +112,7 @@ func (f *fakeRunner) Run(ctx context.Context, args []string, output io.Writer) e
 		<-f.gate
 	}
 	for i := range 45 {
-		fmt.Fprintf(output, "step %d\n", i)
+		_, _ = fmt.Fprintf(output, "step %d\n", i)
 	}
 	if f.after != nil {
 		f.after(args)
