@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
 
 func TestNormalizeInstalledIcon(t *testing.T) {
@@ -38,6 +40,11 @@ func TestNormalizeInstalledIcon(t *testing.T) {
 	}
 	if validIcon(strings.Repeat("0", 64), source) {
 		t.Fatal("incorrect hash accepted")
+	}
+}
+func TestIconTheDecoderPanicsOnIsDropped(t *testing.T) {
+	if id, source := NormalizeIcon(imagetest.PanickingPicture()); id != "" || source != "" {
+		t.Fatalf("NormalizeIcon() = %q, %q, want no icon", id, source)
 	}
 }
 func TestStaticSVGAndUnsafeArtwork(t *testing.T) {

@@ -38,8 +38,14 @@ var (
 // Normalize decodes picture, turns it upright, crops the centre square,
 // scales it to at most Size pixels and flattens transparency onto white. The
 // result is a JPEG of a few dozen kilobytes, whatever was uploaded, so
-// showing avatars never loads a user's original photo.
-func Normalize(picture []byte) ([]byte, error) {
+// showing avatars never loads a user's original photo. A picture the decoder
+// panics on is unsupported, like one it rejects.
+func Normalize(picture []byte) (normalized []byte, err error) {
+	defer func() {
+		if recover() != nil {
+			normalized, err = nil, ErrUnsupported
+		}
+	}()
 	if len(picture) > MaxUploadBytes {
 		return nil, ErrTooLarge
 	}

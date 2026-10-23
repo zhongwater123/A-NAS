@@ -174,26 +174,11 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 		return Image{}, err
 	}
 	defer content.Reader.Close()
-	config, _, err := image.DecodeConfig(content.Reader)
-	if err != nil || config.Width*config.Height > maxArtworkPixels {
-		return Image{}, ErrNotFound
-	}
-	if _, err := content.Reader.Seek(0, io.SeekStart); err != nil {
-		return Image{}, err
-	}
-	decoded, err := imaging.Decode(content.Reader, imaging.AutoOrientation(true))
+	scaled, err := scaleArtwork(content.Reader, size)
 	if err != nil {
-		return Image{}, ErrNotFound
-	}
-	scaled := decoded
-	if decoded.Bounds().Dx() > size.width || decoded.Bounds().Dy() > size.height {
-		scaled = imaging.Fit(decoded, size.width, size.height, imaging.Lanczos)
-	}
-	var buffer bytes.Buffer
-	if err := imaging.Encode(&buffer, scaled, imaging.JPEG, imaging.JPEGQuality(85)); err != nil {
 		return Image{}, err
 	}
-	if err := writeAtomically(target, buffer.Bytes()); err != nil {
+	if err := writeAtomically(target, scaled); err != nil {
 		return Image{}, err
 	}
 	file, err := os.Open(target)
@@ -201,4 +186,34 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 		return Image{}, err
 	}
 	return Image{File: file, Modified: entry.ModifiedAt}, nil
+}
+
+// scaleArtwork decodes a sidecar image and encodes it as a JPEG that fits
+// size. An image the decoder panics on is not artwork, like one it rejects.
+func scaleArtwork(r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
+	defer func() {
+		if recover() != nil {
+			encoded, err = nil, ErrNotFound
+		}
+	}()
+	config, _, err := image.DecodeConfig(r)
+	if err != nil || config.Width*config.Height > maxArtworkPixels {
+		return nil, ErrNotFound
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	decoded, err := imaging.Decode(r, imaging.AutoOrientation(true))
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	scaled := decoded
+	if decoded.Bounds().Dx() > size.width || decoded.Bounds().Dy() > size.height {
+		scaled = imaging.Fit(decoded, size.width, size.height, imaging.Lanczos)
+	}
+	var buffer bytes.Buffer
+	if err := imaging.Encode(&buffer, scaled, imaging.JPEG, imaging.JPEGQuality(85)); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
