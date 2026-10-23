@@ -21,17 +21,10 @@ export class AppsAPIError extends Error {
   }
 }
 
-export async function readApps(signal?: AbortSignal): Promise<AppList> {
-  const value = await request(client.GET("/api/v1/apps", { signal }));
-  if (!isRecord(value) || !Array.isArray(value.apps)) throw new AppsAPIError("malformed_response");
-  return value;
-}
+export const readApps = (signal?: AbortSignal) => request(client.GET("/api/v1/apps", { signal }));
 
-export async function readPlan(appId: string, signal?: AbortSignal): Promise<InstallPlan> {
-  const value = await request(client.GET("/api/v1/apps/{appId}/plan", { params: { path: { appId } }, signal }));
-  if (!isRecord(value) || typeof value.digest !== "string") throw new AppsAPIError("malformed_response");
-  return value;
-}
+export const readPlan = (appId: string, signal?: AbortSignal) =>
+  request(client.GET("/api/v1/apps/{appId}/plan", { params: { path: { appId } }, signal }));
 
 export const installApp = (appId: string, digest: string) =>
   request(client.POST("/api/v1/apps/{appId}/install", { params: { path: { appId } }, body: { digest } }));
@@ -44,19 +37,16 @@ export function iconURL(id: string): string {
 }
 
 // readShortcuts lists the installed apps every signed-in user opens from the desktop.
-export async function readShortcuts(signal?: AbortSignal) {
-  const value = await request(client.GET("/api/v1/app-shortcuts", { signal }));
-  if (!isRecord(value) || !Array.isArray(value.items)) throw new AppsAPIError("malformed_response");
-  return value.items;
-}
+export const readShortcuts = async (signal?: AbortSignal) =>
+  (await request(client.GET("/api/v1/app-shortcuts", { signal }))).items;
 
 export function shortcutIconURL(id: string): string {
   return `/api/v1/app-shortcuts/${id}/icon`;
 }
 
 // request unwraps an App Center call: a failed one throws an AppsAPIError
-// with the server's code, network_error when the request went nowhere and
-// malformed_response when the body was not JSON.
+// with the server's code (malformed_response for a body that breaks the
+// contract) or network_error when the request went nowhere.
 async function request<Data>(pending: Promise<{ data?: Data; error?: unknown; response: Response }>): Promise<Data> {
   try {
     return await call(pending);
@@ -65,8 +55,4 @@ async function request<Data>(pending: Promise<{ data?: Data; error?: unknown; re
     if (error instanceof APIError) throw new AppsAPIError(error.code, error.message);
     throw new AppsAPIError(error instanceof TypeError ? "network_error" : "malformed_response");
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

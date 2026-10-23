@@ -37,8 +37,10 @@ $(OPENAPI_DEPS_STAMP): tools/openapi/package.json tools/openapi/package-lock.jso
 
 # Bundles the contract (api/openapi.yaml and the per-domain files it refers
 # to) into api/openapi.bundle.yaml, which the Go contract tests load, and
-# generates the Web client's types from the bundle into web/src/api.generated.ts.
-# Run it after changing the contract and commit what it writes.
+# generates from the bundle the Web client's types (web/src/api.generated.ts)
+# and the validators of the responses its desktop shell depends on
+# (web/src/api.validators.generated.ts). Run it after changing the contract
+# and commit what it writes.
 api: api-install
 	@mkdir -p $(API_OUT)/api $(API_OUT)/web/src
 	@bundle=$(API_OUT)/api/openapi.bundle.yaml; \
@@ -46,12 +48,13 @@ api: api-install
 	$(REDOCLY) bundle api/openapi.yaml; } > "$$bundle.tmp" && mv "$$bundle.tmp" "$$bundle" || { rm -f "$$bundle.tmp"; exit 1; }
 	@$(OPENAPI_TS) $(API_OUT)/api/openapi.bundle.yaml --root-types --root-types-no-schema-prefix \
 		--output $(API_OUT)/web/src/api.generated.ts > /dev/null
+	@node tools/openapi/validators.mjs $(API_OUT)/api/openapi.bundle.yaml $(API_OUT)/web/src/api.validators.generated.ts
 
 # Fails when a generated contract file differs from what `make api` writes.
 api-check: api-install
 	@out="$$(mktemp -d)"; trap 'rm -rf "$$out"' EXIT; \
 	$(MAKE) --no-print-directory api API_OUT="$$out" || exit 1; \
-	for file in api/openapi.bundle.yaml web/src/api.generated.ts; do \
+	for file in api/openapi.bundle.yaml web/src/api.generated.ts web/src/api.validators.generated.ts; do \
 		if ! cmp -s "$$file" "$$out/$$file"; then \
 			diff -u "$$file" "$$out/$$file" | head -n 40; \
 			echo "$$file is out of date: run make api and commit the result" >&2; exit 1; \

@@ -2,7 +2,6 @@ import createClient from "openapi-fetch";
 
 import type {
   FileEntry,
-  Health,
   HealthFinding,
   HostStateResponse,
   LocalDisplay,
@@ -16,6 +15,7 @@ import type {
   VolumeLayout,
   WallpaperStyle,
 } from "./api.generated";
+import { responseValidators } from "./api.validators.generated";
 
 export type {
   DataSource,
@@ -106,115 +106,23 @@ export class HostStateError extends Error {
   }
 }
 
+// readHostState and readHostMetrics fail with a HostStateError, which the
+// status bar shows as the host state being unavailable.
 export async function readHostState(signal?: AbortSignal): Promise<HostState> {
-  const result = await client.GET("/api/v1/host-state", { signal }).catch((error: unknown) => {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
-    throw new HostStateError();
-  });
-  if (!result.response.ok) {
-    throw new HostStateError(result.response.status);
-  }
-  const value: unknown = result.data;
-  if (!isHostState(value)) {
-    throw new HostStateError();
-  }
-  // A Product Service from before the assessment sends no findings.
-  (value.system as { healthFindings?: HealthFinding[] }).healthFindings ??= [];
-  return value;
-}
-
-function isHostState(value: unknown): value is HostState {
-  if (!isRecord(value) || !["simulated", "live"].includes(String(value.dataSource))) return false;
-  if (typeof value.productVersion !== "string" || typeof value.observedAt !== "string") return false;
-  if (!isRecord(value.system) || !Array.isArray(value.disks)) return false;
-  const system = value.system;
-  if (
-    typeof system.id !== "string" ||
-    typeof system.hostname !== "string" ||
-    typeof system.architecture !== "string" ||
-    typeof system.uptimeSeconds !== "number" ||
-    !isHealth(system.health) ||
-    !(
-      system.healthFindings === undefined ||
-      (Array.isArray(system.healthFindings) && system.healthFindings.every(isHealthFinding))
-    ) ||
-    !isRecord(system.operatingSystem) ||
-    typeof system.operatingSystem.name !== "string" ||
-    typeof system.operatingSystem.version !== "string"
-  ) {
-    return false;
-  }
-  return value.disks.every(
-    (disk) =>
-      isRecord(disk) &&
-      typeof disk.id === "string" &&
-      typeof disk.model === "string" &&
-      ["nvme", "sata", "usb", "unknown"].includes(String(disk.transport)) &&
-      typeof disk.capacityBytes === "number" &&
-      typeof disk.rotational === "boolean" &&
-      typeof disk.removable === "boolean" &&
-      typeof disk.inUse === "boolean" &&
-      Array.isArray(disk.filesystems) &&
-      ["system", "data", "unassigned"].includes(String(disk.role)) &&
-      isHealth(disk.health) &&
-      isHealth(disk.smartStatus) &&
-      typeof disk.eligibleForDataVolume === "boolean" &&
-      Array.isArray(disk.ineligibleReasons) &&
-      (disk.temperatureCelsius === undefined || typeof disk.temperatureCelsius === "number"),
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isHealthFinding(value: unknown): value is HealthFinding {
-  return (
-    isRecord(value) &&
-    typeof value.code === "string" &&
-    ["warning", "critical"].includes(String(value.severity)) &&
-    (value.diskId === undefined || typeof value.diskId === "string") &&
-    (value.value === undefined || typeof value.value === "number")
-  );
-}
-
-function isHealth(value: unknown): value is Health {
-  return ["healthy", "warning", "critical", "unknown"].includes(String(value));
+  return hostState(client.GET("/api/v1/host-state", { signal }));
 }
 
 export async function readHostMetrics(signal?: AbortSignal): Promise<HostMetrics> {
-  const { data, response } = await client.GET("/api/v1/metrics", { signal });
+  return hostState(client.GET("/api/v1/metrics", { signal }));
+}
+
+async function hostState<Data>(pending: Promise<{ data?: Data; response: Response }>): Promise<Data> {
+  const { data, response } = await pending.catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new HostStateError();
+  });
   if (!response.ok) throw new HostStateError(response.status);
-  const value: unknown = data;
-  if (!isHostMetrics(value)) throw new HostStateError();
-  return value;
-}
-
-function isHostMetrics(value: unknown): value is HostMetrics {
-  if (
-    !isRecord(value) ||
-    !["simulated", "live"].includes(String(value.dataSource)) ||
-    typeof value.observedAt !== "string"
-  )
-    return false;
-  const { cpu, memory, network } = value;
-  return (
-    isRecord(cpu) &&
-    isNumberIn(cpu.usagePercent, 0, 100) &&
-    isNumberIn(cpu.logicalCores, 1, Infinity) &&
-    isRecord(memory) &&
-    isNumberIn(memory.totalBytes, 1, Infinity) &&
-    isNumberIn(memory.usedBytes, 0, Number(memory.totalBytes)) &&
-    isRecord(network) &&
-    isNumberIn(network.receiveBytesPerSecond, 0, Infinity) &&
-    isNumberIn(network.transmitBytesPerSecond, 0, Infinity)
-  );
-}
-
-function isNumberIn(value: unknown, min: number, max: number): value is number {
-  return typeof value === "number" && value >= min && value <= max;
+  return data as Data;
 }
 
 export class APIError extends Error {
@@ -262,6 +170,21 @@ client.use({
     for (const [name, value] of Object.entries(csrfHeader(request.method))) request.headers.set(name, value);
     return request;
   },
+  // The responses the desktop shell depends on are checked against the
+  // contract before anyone reads them, so that a server answering null for a
+  // list (10-07) fails the call instead of blanking the desktop. The list is
+  // in tools/openapi/validators.mjs.
+  async onResponse({ request, response, schemaPath }) {
+    const validate = responseValidators[`${request.method} ${schemaPath} ${response.status}`];
+    if (!validate) return undefined;
+    const body: unknown = await response
+      .clone()
+      .json()
+      .catch(() => undefined);
+    if (validate(body)) return undefined;
+    console.warn(`${request.method} ${schemaPath}: the response breaks the contract`, validate.errors);
+    throw new APIError(response.status, "malformed_response", "服务返回的内容不完整，请稍后重试");
+  },
 });
 
 // call waits for a client call and returns its data; a failure throws an
@@ -270,6 +193,10 @@ export async function call<Data>(pending: Promise<{ data?: Data; error?: unknown
   const { data, error, response } = await pending;
   if (!response.ok) throw failure(response.status, error);
   return data as Data;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function failure(status: number, body: unknown): APIError {

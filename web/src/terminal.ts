@@ -7,8 +7,7 @@ export type SessionStatus = { state: "connecting" } | { state: "connected" } | {
 
 export async function readTerminalEnabled(signal?: AbortSignal): Promise<boolean> {
   const { data, response } = await client.GET("/api/v1/terminal", { signal });
-  if (!response.ok) throw new Error(`terminal status request failed with status ${response.status}`);
-  if (typeof data?.enabled !== "boolean") throw new Error("terminal status response is malformed");
+  if (!response.ok || !data) throw new Error(`terminal status request failed with status ${response.status}`);
   return data.enabled;
 }
 

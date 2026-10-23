@@ -18,11 +18,7 @@ export class ContainerAPIError extends Error {
   }
 }
 
-export async function readContainers(signal?: AbortSignal): Promise<ContainerSnapshot> {
-  const value = await request(client.GET("/api/v1/containers", { signal }));
-  if (!isSnapshot(value)) throw new ContainerAPIError("malformed_response");
-  return value;
-}
+export const readContainers = (signal?: AbortSignal) => request(client.GET("/api/v1/containers", { signal }));
 
 export async function applyContainerAction(containerId: string, action: ContainerAction): Promise<void> {
   await request(
@@ -46,8 +42,8 @@ export async function readContainerLogs(
 }
 
 // request unwraps a container call: a failed one throws a ContainerAPIError
-// with the server's code, network_error when the request went nowhere and
-// malformed_response when the body was not JSON.
+// with the server's code (malformed_response for a body that breaks the
+// contract) or network_error when the request went nowhere.
 async function request<Data>(pending: Promise<{ data?: Data; error?: unknown; response: Response }>): Promise<Data> {
   try {
     return await call(pending);
@@ -56,20 +52,6 @@ async function request<Data>(pending: Promise<{ data?: Data; error?: unknown; re
     if (error instanceof APIError) throw new ContainerAPIError(error.code, error.status);
     throw new ContainerAPIError(error instanceof TypeError ? "network_error" : "malformed_response");
   }
-}
-
-function isSnapshot(value: unknown): value is ContainerSnapshot {
-  if (!isRecord(value) || !["simulated", "live"].includes(String(value.dataSource)) || !isRecord(value.engine))
-    return false;
-  if (!Array.isArray(value.containers) || !Array.isArray(value.images)) return false;
-  return value.containers.every(
-    (item) =>
-      isRecord(item) &&
-      typeof item.id === "string" &&
-      typeof item.name === "string" &&
-      typeof item.state === "string" &&
-      Array.isArray(item.ports),
-  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
