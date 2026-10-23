@@ -82,7 +82,14 @@ describe("Settings → 个性化", () => {
     setSession({
       csrfToken: "csrf-token",
       expiresAt: "2026-10-21T00:00:00Z",
-      user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
+      user: {
+        id: "user:owner",
+        username: "owner",
+        role: "admin",
+        status: "active",
+        createdAt: "2026-10-07T10:00:00Z",
+        mustChangePassword: false,
+      },
     }),
   );
   afterEach(() => {

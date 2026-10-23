@@ -90,7 +90,14 @@ beforeEach(() => {
   setSession({
     csrfToken: "csrf-test",
     expiresAt: "2026-10-12T20:00:00Z",
-    user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-01T00:00:00Z" },
+    user: {
+      id: "user:owner",
+      username: "owner",
+      role: "admin",
+      status: "active",
+      createdAt: "2026-10-01T00:00:00Z",
+      mustChangePassword: false,
+    },
   });
   let next = 0;
   vi.stubGlobal(

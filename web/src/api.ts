@@ -1,62 +1,54 @@
 import createClient from "openapi-fetch";
 
-import type { paths } from "./api.generated";
+import type {
+  FileEntry,
+  Health,
+  HealthFinding,
+  HostStateResponse,
+  LocalDisplay,
+  MetricsResponse,
+  Notification,
+  paths,
+  Session,
+  StoragePlan,
+  TrashRestore,
+  ViewingGrant,
+  VolumeLayout,
+  WallpaperStyle,
+} from "./api.generated";
 
-export type Health = "healthy" | "warning" | "critical" | "unknown";
-export type DiskRole = "system" | "data" | "unassigned";
-export type Transport = "nvme" | "sata" | "usb" | "unknown";
-export type DataSource = "simulated" | "live";
-export type HealthFindingCode =
-  | "disk_failing"
-  | "disk_warning"
-  | "disk_health_unknown"
-  | "disk_hot"
-  | "volume_offline"
-  | "volume_read_only"
-  | "volume_full"
-  | "volume_nearly_full"
-  | "volume_errors"
-  | "volume_reconcile_failed";
-// HealthFinding is one reason the system is not plainly healthy; value is the
-// temperature, percentage used or error count its code describes.
-export interface HealthFinding {
-  code: HealthFindingCode;
-  severity: "warning" | "critical";
-  diskId?: string;
-  value?: number;
-}
-
-export interface HostState {
-  dataSource: DataSource;
-  productVersion: string;
-  observedAt: string;
-  system: {
-    id: string;
-    hostname: string;
-    operatingSystem: { name: string; version: string };
-    architecture: string;
-    uptimeSeconds: number;
-    health: Health;
-    // healthFindings say why, most severe first; empty when healthy.
-    healthFindings: HealthFinding[];
-  };
-  disks: Array<{
-    id: string;
-    model: string;
-    transport: Transport;
-    capacityBytes: number;
-    rotational: boolean;
-    removable: boolean;
-    inUse: boolean;
-    filesystems: string[];
-    role: DiskRole;
-    health: Health;
-    smartStatus: Health;
-    eligibleForDataVolume: boolean;
-    ineligibleReasons: string[];
-    temperatureCelsius?: number;
-  }>;
-}
+export type {
+  DataSource,
+  DiskRole,
+  FileEntry,
+  Health,
+  HealthFinding,
+  LocalDisplay,
+  Notification,
+  PlannedDisk,
+  Profile,
+  RestoredEntry,
+  Session,
+  Space,
+  StoragePlan,
+  Transport,
+  TrashItem,
+  User,
+  ViewingGrant,
+  Volume,
+  VolumeConversion,
+  VolumeLayout,
+  Wallpaper,
+  WallpaperStyle,
+} from "./api.generated";
+export type HealthFindingCode = HealthFinding["code"];
+export type HostState = HostStateResponse;
+export type HostMetrics = MetricsResponse;
+// A run of one of the member's VNAS scheduled tasks that finished; at most one waits per task.
+export type AssistantTaskNotice = NonNullable<Notification["task"]>;
+export type ViewingScope = ViewingGrant["scope"];
+// The step a running storage plan is at on the device, or the one it stopped in.
+export type StorageStep = NonNullable<StoragePlan["step"]>;
 
 let sessionEndedListener: (() => void) | undefined;
 
@@ -115,23 +107,16 @@ export class HostStateError extends Error {
 }
 
 export async function readHostState(signal?: AbortSignal): Promise<HostState> {
-  let response: Response;
-  try {
-    response = await apiFetch("/api/v1/host-state", {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal,
-    });
-  } catch (error) {
+  const result = await client.GET("/api/v1/host-state", { signal }).catch((error: unknown) => {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw error;
     }
     throw new HostStateError();
+  });
+  if (!result.response.ok) {
+    throw new HostStateError(result.response.status);
   }
-  if (!response.ok) {
-    throw new HostStateError(response.status);
-  }
-  const value: unknown = await response.json();
+  const value: unknown = result.data;
   if (!isHostState(value)) {
     throw new HostStateError();
   }
@@ -199,23 +184,10 @@ function isHealth(value: unknown): value is Health {
   return ["healthy", "warning", "critical", "unknown"].includes(String(value));
 }
 
-export interface HostMetrics {
-  dataSource: DataSource;
-  observedAt: string;
-  cpu: { usagePercent: number; logicalCores: number };
-  memory: { totalBytes: number; usedBytes: number };
-  network: { receiveBytesPerSecond: number; transmitBytesPerSecond: number };
-}
-
 export async function readHostMetrics(signal?: AbortSignal): Promise<HostMetrics> {
-  const response = await apiFetch("/api/v1/metrics", {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    credentials: "same-origin",
-    signal,
-  });
+  const { data, response } = await client.GET("/api/v1/metrics", { signal });
   if (!response.ok) throw new HostStateError(response.status);
-  const value: unknown = await response.json();
+  const value: unknown = data;
   if (!isHostMetrics(value)) throw new HostStateError();
   return value;
 }
@@ -243,143 +215,6 @@ function isHostMetrics(value: unknown): value is HostMetrics {
 
 function isNumberIn(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && value >= min && value <= max;
-}
-
-// nickname, when set, is what pages show instead of username; avatarVersion
-// names the current avatar (see avatarURL).
-export interface User {
-  id: string;
-  username: string;
-  role: "admin" | "member";
-  status: "pending" | "active" | "disabled" | "error";
-  createdAt: string;
-  mustChangePassword?: boolean;
-  nickname?: string;
-  avatarVersion?: string;
-}
-// Profile is how an account appears to everyone signed in.
-export interface Profile {
-  id: string;
-  username: string;
-  nickname?: string;
-  avatarVersion?: string;
-}
-// credentialReset is the latest time an administrator chose the user's
-// password; the user keeps seeing it.
-export interface Session {
-  csrfToken: string;
-  expiresAt: string;
-  user: User;
-  credentialReset?: { actorUsername: string; at: string };
-}
-export interface Space {
-  writable?: boolean;
-  id: string;
-  kind: "private" | "shared";
-  name: string;
-  ownerUserId?: string;
-  createdAt: string;
-  viewing?: { grantId: string; expiresAt: string };
-}
-export interface Notification {
-  id: string;
-  kind: "admin_viewing" | "admin_library_viewing" | "credential_reset" | "assistant_task";
-  actorUsername: string;
-  reason?: string;
-  expiresAt?: string;
-  task?: AssistantTaskNotice;
-  createdAt: string;
-}
-/** A run of one of the member's VNAS scheduled tasks that finished; at most one waits per task. */
-export interface AssistantTaskNotice {
-  taskId: string;
-  name: string;
-  status: string;
-  ranAt: string;
-  sessionId?: string;
-  summary?: string;
-}
-export type ViewingScope = "space" | "library";
-export interface ViewingGrant {
-  id: string;
-  scope: ViewingScope;
-  spaceId: string;
-  ownerUserId: string;
-  reason: string;
-  grantedAt: string;
-  expiresAt: string;
-}
-export interface FileEntry {
-  id: string;
-  spaceId: string;
-  parentId?: string;
-  name: string;
-  kind: "file" | "directory";
-  sizeBytes: number;
-  modifiedAt: string;
-}
-// TrashItem mirrors internal/files.TrashItem: originalPath is the folder a
-// restore without a parentId puts the item back in, relative to the space
-// root; when originalGone is set that folder is gone and the item goes to
-// the root instead.
-export interface TrashItem {
-  id: string;
-  entryId: string;
-  spaceId: string;
-  name: string;
-  kind: "file" | "directory";
-  sizeBytes: number;
-  originalPath: string;
-  originalGone: boolean;
-  deletedBy: string;
-  deletedAt: string;
-  purgeAt: string;
-}
-// VolumeLayout is how the data volume keeps files on its disks (ADR 0025).
-export type VolumeLayout = "single" | "mirror" | "span" | "stripe";
-// VolumeConversion is set while Btrfs converts the volume to its layout
-// after disks were added; waiting means it stopped and continues later.
-export interface VolumeConversion {
-  state: "running" | "waiting";
-  convertedBytes: number;
-  totalBytes: number;
-}
-export interface Volume {
-  id: string;
-  diskIds: string[];
-  filesystemUuid?: string;
-  layout: VolumeLayout;
-  capacityBytes?: number;
-  availableBytes?: number;
-  state: "creating" | "available" | "unavailable" | "read_only";
-  conversion?: VolumeConversion;
-}
-export interface PlannedDisk {
-  id: string;
-  model: string;
-  capacityBytes: number;
-  fingerprint: string;
-  signatures: Array<{ type: string; label?: string }>;
-}
-// StorageStep is the step a running plan is at on the device, or the one it
-// stopped in.
-export type StorageStep = "erase" | "format" | "mount" | "prepare" | "add_devices";
-// A plan creates the data volume on its disks, or adds them to it; the
-// capacities estimate the space for files before and after.
-export interface StoragePlan {
-  id: string;
-  kind: "create_volume" | "add_disks";
-  layout: VolumeLayout;
-  disks: PlannedDisk[];
-  capacityBeforeBytes?: number;
-  capacityAfterBytes: number;
-  confirmationPhrase: string;
-  actions: Array<{ kind: string; description: string }>;
-  state: string;
-  step?: StorageStep;
-  expiresAt: string;
-  failure?: string;
-  volume?: Volume;
 }
 
 export class APIError extends Error {
@@ -510,100 +345,95 @@ export async function uploadForm<T>(
   });
 }
 
-const json = (value: unknown): RequestInit => ({
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(value),
-});
+// rawBody sends a Blob or a FormData as it is. The contract types binary
+// content as a string, which a Blob is not, so the typed body is set aside.
+export function rawBody(content: Blob | FormData) {
+  return { body: content as never, bodySerializer: () => content };
+}
 
-// setupAllowed is false where this connection may not set the device up:
-// only its own screen or an SSH tunnel may.
-export const getSetupStatus = () => request<{ setupRequired: boolean; setupAllowed?: boolean }>("/api/v1/setup/status");
+const id = (value: string) => encodeURIComponent(value);
+
+export const getSetupStatus = () => call(client.GET("/api/v1/setup/status"));
 // localConsole asks for a session that lasts until sign-out; the server grants it only to the device's own screen.
-const credentials = (username: string, password: string, localConsole: boolean) =>
-  json({ username, password, ...(localConsole ? { localConsole } : {}) });
+const credentials = (username: string, password: string, localConsole: boolean) => ({
+  username,
+  password,
+  ...(localConsole ? { localConsole } : {}),
+});
 export async function setupAdministrator(username: string, password: string, localConsole = false) {
-  const value = await request<Session>("/api/v1/setup/admin", credentials(username, password, localConsole));
+  const value = await call(client.POST("/api/v1/setup/admin", { body: credentials(username, password, localConsole) }));
   setSession(value);
   return value;
 }
 export async function login(username: string, password: string, localConsole = false) {
-  const value = await request<Session>("/api/v1/session", credentials(username, password, localConsole));
+  const value = await call(client.POST("/api/v1/session", { body: credentials(username, password, localConsole) }));
   setSession(value);
   return value;
 }
 export async function currentSession() {
-  const value = await request<Session>("/api/v1/session");
+  const value = await call(client.GET("/api/v1/session"));
   setSession(value);
   return value;
 }
 export const changePassword = (currentPassword: string, newPassword: string) =>
-  request<void>("/api/v1/session/password", json({ currentPassword, newPassword }), true);
+  call(client.POST("/api/v1/session/password", { body: { currentPassword, newPassword } }));
 export const updateNickname = (nickname: string) =>
-  request<User>("/api/v1/session/profile", { ...json({ nickname }), method: "PATCH" }, true);
+  call(client.PATCH("/api/v1/session/profile", { body: { nickname } }));
 // uploadAvatar sends the cropped picture; the server makes the stored avatar from it.
 export const uploadAvatar = (picture: Blob) =>
-  request<User>(
-    "/api/v1/session/avatar",
-    { method: "PUT", headers: { "Content-Type": picture.type || "image/jpeg" }, body: picture },
-    true,
+  call(
+    client.PUT("/api/v1/session/avatar", {
+      ...rawBody(picture),
+      headers: { "Content-Type": picture.type || "image/jpeg" },
+    }),
   );
-export const removeAvatar = () => request<User>("/api/v1/session/avatar", { method: "DELETE" }, true);
-// LocalDisplay is how the screen attached to the NAS behaves; sleepAfterMinutes 0 keeps it on.
-export interface LocalDisplay {
-  sleepAfterMinutes: number;
-}
+export const removeAvatar = () => call(client.DELETE("/api/v1/session/avatar"));
 // readLocalDisplay needs no session: the sign-in page on the local console reads it too.
-export const readLocalDisplay = () => request<LocalDisplay>("/api/v1/local-display");
-export const updateLocalDisplay = (sleepAfterMinutes: number) =>
-  request<LocalDisplay>("/api/v1/local-display", { ...json({ sleepAfterMinutes }), method: "PUT" }, true);
-// Wallpaper is the desktop every account sees; without image it is the built-in one.
-export type WallpaperStyle = "fill" | "fit" | "stretch" | "center" | "tile";
-export interface Wallpaper {
-  style: WallpaperStyle;
-  image?: { version: string; width: number; height: number };
-}
-export const readWallpaper = () => request<Wallpaper>("/api/v1/wallpaper");
+export const readLocalDisplay = () => call(client.GET("/api/v1/local-display"));
+export const updateLocalDisplay = (sleepAfterMinutes: LocalDisplay["sleepAfterMinutes"]) =>
+  call(client.PUT("/api/v1/local-display", { body: { sleepAfterMinutes } }));
+export const readWallpaper = () => call(client.GET("/api/v1/wallpaper"));
 export const updateWallpaperStyle = (style: WallpaperStyle) =>
-  request<Wallpaper>("/api/v1/wallpaper", { ...json({ style }), method: "PATCH" }, true);
+  call(client.PATCH("/api/v1/wallpaper", { body: { style } }));
 export const uploadWallpaper = (picture: Blob) =>
-  request<Wallpaper>(
-    "/api/v1/wallpaper/image",
-    { method: "PUT", headers: { "Content-Type": picture.type || "image/jpeg" }, body: picture },
-    true,
+  call(
+    client.PUT("/api/v1/wallpaper/image", {
+      ...rawBody(picture),
+      headers: { "Content-Type": picture.type || "image/jpeg" },
+    }),
   );
-export const resetWallpaper = () => request<Wallpaper>("/api/v1/wallpaper/image", { method: "DELETE" }, true);
+export const resetWallpaper = () => call(client.DELETE("/api/v1/wallpaper/image"));
 // A version names one picture for good, so the browser keeps it cached.
-export const wallpaperImageURL = (version: string) => `/api/v1/wallpaper/image?v=${encodeURIComponent(version)}`;
-export const listProfiles = async () => (await request<{ items: Profile[] }>("/api/v1/profiles")).items;
+export const wallpaperImageURL = (version: string) => `/api/v1/wallpaper/image?v=${id(version)}`;
+export const listProfiles = async () => (await call(client.GET("/api/v1/profiles"))).items;
 // A version names one picture for good, so the browser keeps it cached.
-export const avatarURL = (userId: string, version: string) =>
-  `/api/v1/users/${encodeURIComponent(userId)}/avatar?v=${encodeURIComponent(version)}`;
-export const listNotifications = async () => (await request<{ items: Notification[] }>("/api/v1/notifications")).items;
-export const acknowledgeNotification = (id: string) =>
-  request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/acknowledge`, json({}), true);
+export const avatarURL = (userId: string, version: string) => `/api/v1/users/${id(userId)}/avatar?v=${id(version)}`;
+export const listNotifications = async () => (await call(client.GET("/api/v1/notifications"))).items;
+export const acknowledgeNotification = (notificationId: string) =>
+  call(client.POST("/api/v1/notifications/{notificationId}/acknowledge", { params: { path: { notificationId } } }));
 export const startViewing = (userId: string, password: string, reason: string, scope: ViewingScope = "space") =>
-  request<ViewingGrant>(`/api/v1/users/${encodeURIComponent(userId)}/viewing`, json({ password, reason, scope }), true);
+  call(
+    client.POST("/api/v1/users/{userId}/viewing", { params: { path: { userId } }, body: { password, reason, scope } }),
+  );
 export const endViewing = (grantId: string) =>
-  request<void>(`/api/v1/viewing/${encodeURIComponent(grantId)}`, { method: "DELETE" }, true);
+  call(client.DELETE("/api/v1/viewing/{grantId}", { params: { path: { grantId } } }));
 export async function logout() {
-  await request<void>("/api/v1/session", { method: "DELETE" }, true);
+  await call(client.DELETE("/api/v1/session"));
   setSession();
 }
-export const listSpaces = async () => (await request<{ items: Space[] }>("/api/v1/spaces")).items;
+export const listSpaces = async () => (await call(client.GET("/api/v1/spaces"))).items;
 export const listEntries = async (spaceId: string, parentId = "") =>
-  (
-    await request<{ items: FileEntry[] }>(
-      `/api/v1/spaces/${encodeURIComponent(spaceId)}/entries?parentId=${encodeURIComponent(parentId)}`,
-    )
-  ).items;
+  (await call(client.GET("/api/v1/spaces/{spaceId}/entries", { params: { path: { spaceId }, query: { parentId } } })))
+    .items;
 export const createDirectory = (spaceId: string, parentId: string, name: string) =>
-  request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/directories`, json({ parentId, name }), true);
+  call(
+    client.POST("/api/v1/spaces/{spaceId}/directories", { params: { path: { spaceId } }, body: { parentId, name } }),
+  );
 export function uploadFile(spaceId: string, parentId: string, file: File) {
   const body = new FormData();
   body.set("parentId", parentId);
   body.set("file", file);
-  return request<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/uploads`, { method: "POST", body }, true);
+  return call(client.POST("/api/v1/spaces/{spaceId}/uploads", { params: { path: { spaceId } }, ...rawBody(body) }));
 }
 // sendFile uploads like uploadFile and reports progress as a fraction; parentId must precede the file in the form.
 export function sendFile(
@@ -616,66 +446,70 @@ export function sendFile(
   const body = new FormData();
   body.set("parentId", parentId);
   body.set("file", file);
-  return uploadForm<FileEntry>(`/api/v1/spaces/${encodeURIComponent(spaceId)}/uploads`, body, onProgress, signal);
+  return uploadForm<FileEntry>(`/api/v1/spaces/${id(spaceId)}/uploads`, body, onProgress, signal);
 }
 // Without spaceId the target folder is in the entry's own space.
 export const moveFile = (fileId: string, parentId: string, name: string, spaceId?: string) =>
-  request<FileEntry>(
-    `/api/v1/files/${encodeURIComponent(fileId)}`,
-    { ...json({ spaceId, parentId, name }), method: "PATCH" },
-    true,
-  );
+  call(client.PATCH("/api/v1/files/{fileId}", { params: { path: { fileId } }, body: { spaceId, parentId, name } }));
 export const copyFile = (fileId: string, parentId: string, name: string, spaceId?: string) =>
-  request<FileEntry>(`/api/v1/files/${encodeURIComponent(fileId)}/copies`, json({ spaceId, parentId, name }), true);
+  call(
+    client.POST("/api/v1/files/{fileId}/copies", { params: { path: { fileId } }, body: { spaceId, parentId, name } }),
+  );
 export const deleteFile = (fileId: string) =>
-  request<TrashItem>(`/api/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
-export const fileDownloadURL = (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/content`;
+  call(client.DELETE("/api/v1/files/{fileId}", { params: { path: { fileId } } }));
+export const fileDownloadURL = (fileId: string) => `/api/v1/files/${id(fileId)}/content`;
 export const fileRenderedPreviewURL = (fileId: string, size: "thumbnail" | "preview") =>
-  `/api/v1/files/${encodeURIComponent(fileId)}/preview?size=${size}`;
+  `/api/v1/files/${id(fileId)}/preview?size=${size}`;
 export const filePreviewURL = (fileId: string) => `${fileDownloadURL(fileId)}?disposition=inline`;
 export async function readFileTextPreview(fileId: string) {
-  const response = await fetch(fileDownloadURL(fileId));
+  const { data, response } = await client.GET("/api/v1/files/{fileId}/content", {
+    params: { path: { fileId } },
+    parseAs: "text",
+  });
   if (!response.ok) throw new APIError(response.status, "preview_failed", "无法读取文件预览");
-  return response.text();
+  return data ?? "";
 }
-export const listTrash = async () => (await request<{ items: TrashItem[] }>("/api/v1/trash")).items;
+export const listTrash = async () => (await call(client.GET("/api/v1/trash"))).items;
 // RestoreConflict is what a restore does when its name is taken: ask answers
 // name_conflict, rename keeps both under "name (恢复)", replace (files only)
 // sends the file of that name to the recycle bin.
-export type RestoreConflict = "ask" | "rename" | "replace";
-export interface RestoredEntry extends FileEntry {
-  replaced?: boolean;
-}
-export const restoreTrash = (id: string, name: string, conflict: RestoreConflict = "ask") =>
-  request<RestoredEntry>(
-    `/api/v1/trash/${encodeURIComponent(id)}/restore`,
-    json({ parentId: "", name, conflict }),
-    true,
+export type RestoreConflict = TrashRestore["conflict"];
+export const restoreTrash = (trashId: string, name: string, conflict: RestoreConflict = "ask") =>
+  call(
+    client.POST("/api/v1/trash/{trashId}/restore", {
+      params: { path: { trashId } },
+      body: { parentId: "", name, conflict },
+    }),
   );
-export const purgeTrash = (id: string) =>
-  request<void>(`/api/v1/trash/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
-export const listUsers = async () => (await request<{ items: User[] }>("/api/v1/users")).items;
+export const purgeTrash = (trashId: string) =>
+  call(client.DELETE("/api/v1/trash/{trashId}", { params: { path: { trashId } } }));
+export const listUsers = async () => (await call(client.GET("/api/v1/users"))).items;
 export const createMember = (username: string, password: string) =>
-  request<User>("/api/v1/users", json({ username, password }), true);
-export const resetMember = (id: string, password: string) =>
-  request<void>(`/api/v1/users/${encodeURIComponent(id)}/credential`, { ...json({ password }), method: "PATCH" }, true);
-export const disableMember = (id: string) =>
-  request<void>(`/api/v1/users/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
-export const listVolumes = async () => (await request<{ items: Volume[] }>("/api/v1/volumes")).items;
+  call(client.POST("/api/v1/users", { body: { username, password } }));
+export const resetMember = (userId: string, password: string) =>
+  call(client.PATCH("/api/v1/users/{userId}/credential", { params: { path: { userId } }, body: { password } }));
+export const disableMember = (userId: string) =>
+  call(client.DELETE("/api/v1/users/{userId}", { params: { path: { userId } } }));
+export const listVolumes = async () => (await call(client.GET("/api/v1/volumes"))).items;
 export const createStoragePlan = (diskIds: string[], layout?: VolumeLayout) =>
-  request<StoragePlan>("/api/v1/storage/plans", json({ diskIds, layout }), true);
+  call(client.POST("/api/v1/storage/plans", { body: { diskIds, layout } }));
 export const continueVolumeConversion = (volumeId: string) =>
-  request<void>(`/api/v1/volumes/${encodeURIComponent(volumeId)}/conversion`, json({}), true);
-export const confirmStoragePlan = (id: string, confirmationPhrase: string) =>
-  request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/confirm`, json({ confirmationPhrase }), true);
+  call(client.POST("/api/v1/volumes/{volumeId}/conversion", { params: { path: { volumeId } } }));
+export const confirmStoragePlan = (planId: string, confirmationPhrase: string) =>
+  call(
+    client.POST("/api/v1/storage/plans/{planId}/confirm", {
+      params: { path: { planId } },
+      body: { confirmationPhrase },
+    }),
+  );
 // executeStoragePlan starts a confirmed plan, or retries one that needs
 // attention; the device runs it on whether or not this page stays open.
-export const executeStoragePlan = (id: string) =>
-  request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/execute`, json({}), true);
-export const getStoragePlan = (id: string) => request<StoragePlan>(`/api/v1/operations/${encodeURIComponent(id)}`);
+export const executeStoragePlan = (planId: string) =>
+  call(client.POST("/api/v1/storage/plans/{planId}/execute", { params: { path: { planId } } }));
+export const getStoragePlan = (operationId: string) =>
+  call(client.GET("/api/v1/operations/{operationId}", { params: { path: { operationId } } }));
 // listUnfinishedStoragePlans finds a plan running on the device, or one that
 // stopped, after the page was closed or reloaded.
-export const listUnfinishedStoragePlans = async () =>
-  (await request<{ items: StoragePlan[] }>("/api/v1/storage/plans")).items;
-export const cancelStoragePlan = (id: string) =>
-  request<StoragePlan>(`/api/v1/storage/plans/${encodeURIComponent(id)}/cancel`, json({}), true);
+export const listUnfinishedStoragePlans = async () => (await call(client.GET("/api/v1/storage/plans"))).items;
+export const cancelStoragePlan = (planId: string) =>
+  call(client.POST("/api/v1/storage/plans/{planId}/cancel", { params: { path: { planId } } }));

@@ -11,11 +11,25 @@ import { json, stubAPI } from "../test/api";
 const admin: Session = {
   csrfToken: "csrf",
   expiresAt: "2026-10-12T22:00:00Z",
-  user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-01T00:00:00Z" },
+  user: {
+    id: "user:owner",
+    username: "owner",
+    role: "admin",
+    status: "active",
+    createdAt: "2026-10-01T00:00:00Z",
+    mustChangePassword: false,
+  },
 };
 const member: Session = {
   ...admin,
-  user: { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: "2026-10-01T00:00:00Z" },
+  user: {
+    id: "user:alice",
+    username: "alice",
+    role: "member",
+    status: "active",
+    createdAt: "2026-10-01T00:00:00Z",
+    mustChangePassword: false,
+  },
 };
 const alice = { id: "user:alice", username: "alice" };
 const owner = { id: "user:owner", username: "owner" };

@@ -76,7 +76,14 @@ const tasks = {
 const session: Session = {
   csrfToken: "test",
   expiresAt: "2026-10-20T00:00:00Z",
-  user: { id: "user:alice", username: "alice", role: "member", status: "active", createdAt: device.observedAt },
+  user: {
+    id: "user:alice",
+    username: "alice",
+    role: "member",
+    status: "active",
+    createdAt: device.observedAt,
+    mustChangePassword: false,
+  },
 };
 function Panel() {
   const [section, setSection] = useState<SettingsSection>("overview");

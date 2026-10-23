@@ -84,7 +84,14 @@ beforeEach(() => {
   setSession({
     csrfToken: "csrf-test",
     expiresAt: "2026-10-13T22:00:00Z",
-    user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-13T00:00:00Z" },
+    user: {
+      id: "user:owner",
+      username: "owner",
+      role: "admin",
+      status: "active",
+      createdAt: "2026-10-13T00:00:00Z",
+      mustChangePassword: false,
+    },
   });
 });
 afterEach(() => vi.unstubAllGlobals());

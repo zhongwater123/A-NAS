@@ -142,7 +142,14 @@ class FakeUpload {
 const alice = {
   csrfToken: "csrf-photo",
   expiresAt: "",
-  user: { id: "user:alice", username: "alice", role: "member" as const, status: "active" as const, createdAt: "" },
+  user: {
+    id: "user:alice",
+    username: "alice",
+    role: "member" as const,
+    status: "active" as const,
+    createdAt: "",
+    mustChangePassword: false,
+  },
 };
 const sizes = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
 
