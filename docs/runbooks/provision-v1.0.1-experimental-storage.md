@@ -108,7 +108,7 @@ rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）�
 
    完成标准：第一条命令输出 `0`，之后 `id a-nas` 不再含 `a-nas-members`。输出不为 `0` 时停止，先找出仍引用该组的目录。
 
-完成标准：`/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json` 列出全部账号，二者均为 `root:root 0600`。
+完成标准：`/var/lib/a-nas-host/identity-registry.json` 与数据卷 `.a-nas-identities.json` 列出全部账号，二者均为 `root:root 0600`。
 
 ## 生成和执行计划
 
@@ -165,6 +165,15 @@ if [[ -f "$stage/anas-ai-system.service" ]]; then
     rm -f /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
   systemctl stop anas-ai.service
 fi
+# Releases before issue #176 read the Host Agent's records from /var/lib/a-nas.
+if ! grep -Fqx 'StateDirectory=a-nas-host' "$stage/anas-host-agent-system.service"; then
+  systemctl stop anas-host-agent.service
+  for record in space-registry identity-registry viewing-grants app-identities volume-operations; do
+    if [[ -f "/var/lib/a-nas-host/$record.json" ]]; then
+      mv -f -- "/var/lib/a-nas-host/$record.json" "/var/lib/a-nas/$record.json"
+    fi
+  done
+fi
 ln -sfn -- "/opt/a-nas/releases/$previous" /opt/a-nas/current
 runuser -u anas-dev -- ln -sfn "$stage" /home/anas-dev/apps/a-nas/current.next
 runuser -u anas-dev -- mv -Tf /home/anas-dev/apps/a-nas/current.next /home/anas-dev/apps/a-nas/current
@@ -173,6 +182,8 @@ systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
 ```
 
 AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。旧版本也拒绝打开比它新的相册 Catalog：回滚跨过 Catalog 迁移时，先按该版本的手册把 Catalog 退回，例如物体检测的 migration 7。
+
+Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷操作）在 `/var/lib/a-nas-host`，只有 root 能打开（[issue #176](https://github.com/zhongwater123/A-NAS/issues/176)）。新版本启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来：先写入并刷盘新副本，再删除原件；不移动符号链接、硬链接或不归 root 所有的文件，对应的记录报错停用，需管理员核对后删除。旧版本只在 `/var/lib/a-nas` 读这些记录，所以回滚到它之前时，上面的脚本先停止 Host Agent，再把记录移回去。漏掉这一步时，旧二进制以空记录启动：不修复任何空间的目录与 ACL，快照与管理员查看找不到空间，应用身份从空表分配、与已有账号冲突而报错，新版本发出的查看授权到期也不撤销（再次升级后由新版本撤销）；它写下的新记录留在 `/var/lib/a-nas`。再次升级时，新版本只用 `/var/lib/a-nas-host` 中已有的记录，删除与之相同的旧副本，并在日志中报告内容不同的旧记录（`differs from the one in use`），由管理员核对。按脚本移回的记录会在再次升级时重新移入。
 
 `/etc/a-nas/*.env` 由安装器按固定内容生成，旧版本忽略新增的变量，不需要恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。另外：
 

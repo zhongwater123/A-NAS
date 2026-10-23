@@ -182,6 +182,9 @@ systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-media.conf
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /var/lib/a-nas/screensavers
+# The Host Agent's records (its StateDirectory); it moves those of older
+# releases out of /var/lib/a-nas when it starts (issue #176).
+install -d -o root -g root -m 0700 /var/lib/a-nas-host
 install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
 install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba

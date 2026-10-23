@@ -145,7 +145,7 @@ func TestRootAdministrativeViewing(t *testing.T) {
 	if again, err := restarted.ExpireViewing(ctx); err != nil || len(again) != 0 {
 		t.Errorf("second ExpireViewing() = %v, %v", again, err)
 	}
-	if _, err := os.Stat("/var/lib/a-nas/viewing-grants.json"); err != nil {
+	if _, err := os.Stat("/var/lib/a-nas-host/viewing-grants.json"); err != nil {
 		t.Fatal(err)
 	}
 }

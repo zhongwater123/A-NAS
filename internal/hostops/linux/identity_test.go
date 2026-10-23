@@ -38,7 +38,7 @@ func TestSetCredentialCreatesIdentityInTheReservedRange(t *testing.T) {
 			t.Errorf("missing command %q; got:\n%s", want, strings.Join(host.commands, "\n"))
 		}
 	}
-	registry, err := os.ReadFile(filepath.Join(systemRoot, "var", "lib", "a-nas", "identity-registry.json"))
+	registry, err := os.ReadFile(filepath.Join(systemRoot, "var", "lib", "a-nas-host", "identity-registry.json"))
 	if err != nil {
 		t.Fatalf("read identity registry: %v", err)
 	}
