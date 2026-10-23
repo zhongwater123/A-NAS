@@ -302,5 +302,62 @@ class PromptSelectionTest(unittest.TestCase):
         self.assertTrue(rows[1]["negative"].startswith(train.STS_PROMPT))
         self.assertEqual(set(rows[0]), {"anchor", "positive", "negative"})
 
+class CacheKeyIdentityTest(unittest.TestCase):
+    """缓存键与向量空间身份（A-NAS #152 R1）：名字和维度相同不等于同一个向量空间。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.servers = []
+        for dims in (32, 32):
+            srv = server.serve("127.0.0.1", 0, server.FakeBackend(dims), fake=True)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            cls.servers.append(srv)
+        cls.urls = [f"http://127.0.0.1:{s.server_address[1]}" for s in cls.servers]
+
+    @classmethod
+    def tearDownClass(cls):
+        for s in cls.servers:
+            s.shutdown()
+            s.server_close()
+
+    def test_server_reports_weights_and_runtime(self):
+        ident = HttpEmbedder(self.urls[0], "m", dim=None).server_identity()
+        self.assertEqual((ident["weights"], ident["runtime"]), ("fake-hash@32", "fake"))
+
+    def test_same_name_and_dim_but_different_url_or_prefix_get_different_keys(self):
+        from finetune.embedders import space_fingerprint, space_of
+        base = HttpEmbedder(self.urls[0], "m", dim=None)
+        other_url = HttpEmbedder(self.urls[1], "m", dim=None)
+        no_prefix = HttpEmbedder(self.urls[0], "m", dim=None, add_prefix=False)
+        self.assertEqual({base.name, other_url.name, no_prefix.name}, {base.name})
+        self.assertEqual(len({space_fingerprint(space_of(e)) for e in (base, other_url, no_prefix)}), 3)
+        self.assertEqual(len({CachedEmbedder(e, None)._key("query", "同一段文本") for e in (base, other_url, no_prefix)}), 3)
+
+    def test_different_server_weights_get_different_keys(self):
+        a = HttpEmbedder(self.urls[0], "m", dim=None)
+        b = HttpEmbedder(self.urls[0], "m", dim=None)
+        b._server = {**a.server_identity(), "weights": "dir:finetuned"}  # 服务端换了权重，名字没变
+        self.assertNotEqual(CachedEmbedder(a, None)._key("sts", "t"), CachedEmbedder(b, None)._key("sts", "t"))
+
+    def test_hash_embedder_params_change_key(self):
+        self.assertNotEqual(CachedEmbedder(HashEmbedder(64), None)._key("sts", "t"),
+                            CachedEmbedder(HashEmbedder(64, ngrams=(2,)), None)._key("sts", "t"))
+
+    def test_provider_prefix_switch_changes_key(self):
+        a = ProviderEmbedder(TextFakeProvider(16))
+        b = ProviderEmbedder(TextFakeProvider(16), add_prefix=False)
+        self.assertNotEqual(CachedEmbedder(a, None)._key("sts", "t"), CachedEmbedder(b, None)._key("sts", "t"))
+
+    def test_weights_fingerprint_tracks_files_and_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "config.json").write_text('{"a": 1}', encoding="utf-8")
+            (root / "model.safetensors").write_bytes(b"x" * 10)
+            first = server.weights_fingerprint(d)
+            (root / "config.json").write_text('{"a": 2}', encoding="utf-8")
+            self.assertNotEqual(server.weights_fingerprint(d), first)
+        self.assertEqual(server.weights_fingerprint("google/embeddinggemma-2"), "hf:google/embeddinggemma-2")
+
+
 if __name__ == "__main__":
     unittest.main()

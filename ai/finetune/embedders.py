@@ -225,6 +225,7 @@ class ProviderEmbedder:
         return [truncate([float(x) for x in self.provider.embed_text(prefix + t)], self.dim) for t in texts]
 
     def space(self) -> dict:
+        # provider.model 已含权重哈希、MediaPipe 版本、视觉 token 与归一化（anas_ai.providers）
         return {"impl": "provider", "provider": type(self.provider).__name__, "model": getattr(self.provider, "model", None),
                 "dim": self.dim, "add_prefix": self.add_prefix, "prompts": PROMPTS_VERSION if self.add_prefix else None,
                 "normalize": "truncate+l2"}
@@ -256,7 +257,7 @@ class CachedEmbedder:
         return space_of(self.inner)
 
     def _key(self, kind: str, text: str) -> str:
-        # 键用完整的向量空间身份（含服务地址、前缀开关、服务端权重指纹），不只是名字和维度（A-NAS #152 R1）
+        # 键用完整的向量空间身份（含服务地址、前缀开关、服务端权重指纹与运行参数），不只是名字和维度（A-NAS #152 R1）
         if self._fp is None:
             self._fp = space_fingerprint(self.space())
         return hashlib.sha256(f"{self._fp}\x00{kind}\x00{text}".encode("utf-8")).hexdigest()
