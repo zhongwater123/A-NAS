@@ -21,7 +21,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0015：Docker 与 Caddy 跟随上游官方软件源，最低能力由代码检查](0015-take-docker-and-caddy-from-their-upstream-repositories.md)
 - [0016：相册 AI 随系统内置安装，设备不联网获取模型](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - [0017：影视中心经文件代理读取媒体，FFmpeg 在隔离 Worker 中运行](0017-run-the-media-center-through-the-file-broker.md)（proposed）
-- [0018：音乐原地索引普通文件，经文件代理以成员身份读取](0018-index-music-in-place-through-the-file-broker.md)
+- [0018：音乐原地索引普通文件，经文件代理以成员身份读取](0018-index-music-in-place-through-the-file-broker.md)（proposed）
 - [0019：上传经 tus 分片到达，写入文件代理以用户身份创建的临时文件](0019-resume-uploads-over-tus-with-broker-held-files.md)（proposed）
 - [0020：系统日志经 Host Agent 的白名单 journal 查询读取](0020-read-service-logs-through-the-host-agent.md)（proposed）
 - [0022：应用容器只以应用身份接触共享空间](0022-reach-shared-folders-only-as-the-app-identity.md)（修订 0008 的应用容器实现，取代 0010 的运行身份段落）
