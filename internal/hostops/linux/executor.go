@@ -307,7 +307,7 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {
 		return err
 	}
-	defer os.Remove(candidatePath)
+	defer func() { _ = os.Remove(candidatePath) }()
 	if output, err := e.runner.Run(ctx, "testparm", []string{"--suppress-prompt", candidatePath}, ""); err != nil {
 		return fmt.Errorf("validate Samba configuration: %w: %s", err, strings.TrimSpace(string(output)))
 	}

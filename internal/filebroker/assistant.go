@@ -147,7 +147,7 @@ func readAssistantToken(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	lines := bufio.NewScanner(file)
 	for lines.Scan() {
 		if value, ok := strings.CutPrefix(lines.Text(), "HERMES_DASHBOARD_SESSION_TOKEN="); ok && strings.TrimSpace(value) != "" {

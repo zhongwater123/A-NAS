@@ -56,7 +56,7 @@ func (s *Server) VerifyIdentitySwitch() error {
 		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
-		<-done
+		<-done //nolint:errcheck // Waits for the killed probe to be reaped; its error is the kill.
 		return errors.New("identity probe did not finish")
 	}
 	want := fmt.Sprintf("%d %d %d", probeID, probeID, probeID)

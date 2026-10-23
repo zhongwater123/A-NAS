@@ -98,12 +98,12 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, dir: contentDir, options: options, records: map[string]*record{}, running: map[string]running{}, streams: map[string]*contentReader{}, stop: make(chan struct{})}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS share_documents(id TEXT PRIMARY KEY, document BLOB NOT NULL)`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	rows, err := db.Query(`SELECT document FROM share_documents`)
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	for rows.Next() {
@@ -127,7 +127,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 	}
 	rows.Close()
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	for _, r := range s.records {
@@ -151,7 +151,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 		}
 		if changed {
 			if err = s.persist(r); err != nil {
-				db.Close()
+				_ = db.Close()
 				return nil, err
 			}
 		}
@@ -159,13 +159,13 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 	// Only generated object directories are managed; unknown files are untouched.
 	children, err := os.ReadDir(s.dir)
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	for _, child := range children {
 		if validID(child.Name()) && s.records[child.Name()] == nil {
 			if err = os.RemoveAll(filepath.Join(s.dir, child.Name())); err != nil {
-				db.Close()
+				_ = db.Close()
 				return nil, err
 			}
 		}

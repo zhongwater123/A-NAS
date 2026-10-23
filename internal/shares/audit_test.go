@@ -17,7 +17,9 @@ func TestRevokeFencesEvenWhenMetadataCannotBeWritten(t *testing.T) {
 	s.mu.Lock()
 	s.options.Backend = backend
 	s.mu.Unlock()
-	s.db.Close()
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Revoke(context.Background(), sender, v.ID); err == nil {
 		t.Fatal("persistence failure ignored")
 	}

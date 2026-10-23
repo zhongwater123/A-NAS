@@ -349,7 +349,7 @@ func readTaskIconFile(root fs.FS, name string, limit int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err = file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > int64(limit) {
 		return nil, errTaskObservationLimit

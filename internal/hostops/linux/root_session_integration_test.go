@@ -39,7 +39,7 @@ func holdControlDatabase(path string) error {
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	service := accounts.NewService(store, acceptAll{}, accounts.Options{})
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil && !errors.Is(err, accounts.ErrSetupComplete) {
 		return err

@@ -16,7 +16,9 @@ func TestUnpersistedMessageCannotAppearOrNotify(t *testing.T) {
 	v := publish(t, s)
 	ctx := context.Background()
 	before, _ := s.Notifications(ctx, sender, 0, 100)
-	s.db.Close()
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SendMessage(ctx, bob, v.ID, bob.ID, "unpersisted", "must remain invisible"); err == nil {
 		t.Fatal("message write succeeded after storage failure")
 	}
@@ -150,7 +152,9 @@ func TestRestartRemovesOnlyOrphanOwnedDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := publish(t, s)
-	s.Close()
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
 	orphan := newID()
 	if err = os.Mkdir(filepath.Join(content, orphan), 0700); err != nil {
 		t.Fatal(err)
@@ -163,7 +167,7 @@ func TestRestartRemovesOnlyOrphanOwnedDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if _, err = os.Stat(filepath.Join(content, orphan)); !os.IsNotExist(err) {
 		t.Fatalf("orphan retained: %v", err)
 	}

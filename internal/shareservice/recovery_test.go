@@ -31,7 +31,7 @@ func TestSupervisorRehandshakesWhenBridgeGenerationChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	var epoch, resets, checks atomic.Int64
 	epoch.Store(1)
 	go func() {

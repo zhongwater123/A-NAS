@@ -120,7 +120,7 @@ func TestTaskIconRootRejectsSymlinkEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	if _, err := readTaskIconFile(root.FS(), "escape.svg", taskIconFileLimit); err == nil {
 		t.Fatal("followed symlink outside trusted root")
 	}

@@ -53,7 +53,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	workerCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	if guarded, ok := reader.(interface{ Done() <-chan struct{} }); ok {

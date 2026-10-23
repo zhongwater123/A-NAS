@@ -20,8 +20,8 @@ func TestProxyForwardsOriginalAuthenticatedTokenOnly(t *testing.T) {
 	}
 	received := make(chan http.Header, 1)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received <- r.Header.Clone(); w.WriteHeader(204) })}
-	go server.Serve(listener)
-	defer server.Close()
+	go func() { _ = server.Serve(listener) }()
+	defer func() { _ = server.Close() }()
 	proxy := NewProxy(socket, nil)
 	req := httptest.NewRequest("GET", PathPrefix, nil)
 	req.Header.Set("Cookie", "session=untrusted")

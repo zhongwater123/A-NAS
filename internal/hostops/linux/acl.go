@@ -199,7 +199,7 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, res
 	if err != nil {
 		return false, existed, err
 	}
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	info, err := directory.Stat()
 	if err != nil {
 		return false, existed, err
@@ -254,7 +254,7 @@ func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) 
 	if err != nil {
 		return nil, false, err
 	}
-	defer mount.Close()
+	defer func() { _ = mount.Close() }()
 	parentFD, err := unix.Openat2(int(mount.Fd()), filepath.Dir(relative), &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,

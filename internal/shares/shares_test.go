@@ -62,7 +62,7 @@ func setup(t *testing.T, b *testBackend) (*Store, *testClock) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s, clock
 }
 

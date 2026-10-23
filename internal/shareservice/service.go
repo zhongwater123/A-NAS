@@ -101,7 +101,7 @@ func listen(socket string) (net.Listener, error) {
 		return nil, err
 	}
 	if err = os.Chmod(socket, 0660); err != nil {
-		listener.Close()
+		_ = listener.Close()
 		return nil, err
 	}
 	return listener, nil
@@ -123,8 +123,7 @@ func Run(parent context.Context, config Config) error {
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
-	defer os.Remove(config.SocketPath)
+	defer func() { _ = os.Remove(config.SocketPath); _ = listener.Close() }()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var current atomic.Pointer[http.Handler]

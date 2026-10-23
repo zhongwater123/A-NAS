@@ -26,7 +26,7 @@ func TestRevokeRequiresRemotePublicationFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	v := publish(t, s)
 	if err = s.Revoke(context.Background(), sender, v.ID); err == nil {
 		t.Fatal("revoke acknowledged without remote publication fence")
@@ -88,12 +88,14 @@ func TestPersistenceHistoryAndInterruptedJobRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.mu.Unlock()
-	s.Close()
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
 	s, err = Open(db, content, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	messages, err := s.Messages(context.Background(), sender, v.ID, bob.ID, 0, 100)
 	if err != nil || len(messages) != 2 || messages[1].Text != msg.Text {
 		t.Fatalf("persisted messages %+v %v", messages, err)

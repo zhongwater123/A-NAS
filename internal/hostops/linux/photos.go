@@ -92,7 +92,7 @@ func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceU
 	if err != nil {
 		return false, err
 	}
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	info, err := directory.Stat()
 	if err != nil {
 		return false, err

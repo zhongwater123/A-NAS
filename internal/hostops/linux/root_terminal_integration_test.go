@@ -49,7 +49,7 @@ func TestRootTerminalRunsAsTheAdministrator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartShell() error = %v", err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	script := "echo uid=$(id -u) groups=$(id -Gn) home=$(pwd); cat " + filepath.Join(alicePrivate, "secret.txt") + "; ls -l $(tty); exit\n"
 	if _, err := shell.Write([]byte(script)); err != nil {
 		t.Fatal(err)

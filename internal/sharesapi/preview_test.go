@@ -40,7 +40,7 @@ func previewFixture(t *testing.T, worker mediaworker.Worker) (*shares.Store, htt
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	v := published(t, s)
 	return s, NewWithPreview(s, nil, nil, worker), v
 }

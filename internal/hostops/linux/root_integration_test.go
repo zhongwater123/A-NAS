@@ -24,21 +24,21 @@ func TestMain(m *testing.M) {
 	// as that user with an empty environment, so check for it first.
 	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
 		if err := filebroker.RunWorker(os.Args[2]); err != nil {
-			os.Stderr.WriteString(err.Error() + "\n")
+			_, _ = os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
 	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
 		if err := filebroker.RunProbe(); err != nil {
-			os.Stderr.WriteString(err.Error() + "\n")
+			_, _ = os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
 	if os.Geteuid() != 0 || os.Getenv("ANAS_ROOT_INTEGRATION") != "1" {
 		// Refuse to touch a developer machine by accident.
-		os.Stderr.WriteString("root integration tests require root and ANAS_ROOT_INTEGRATION=1 in a disposable container\n")
+		_, _ = os.Stderr.WriteString("root integration tests require root and ANAS_ROOT_INTEGRATION=1 in a disposable container\n")
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
