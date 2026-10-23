@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/appid"
+	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
 )
 
 // TestRootAppIdentityAndFolders creates an app identity and its folders on
@@ -98,6 +100,42 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	expect("released app keeps its own data", true, asContainer("app-memos", "", appData, "cat /mnt/db"))
 	if again, err := executor.AppIdentity(ctx, "memos"); err != nil || again != identity {
 		t.Fatalf("identity after release = %+v, %v; want the same UID", again, err)
+	}
+}
+
+// The container agent reads app identities from the host's account database,
+// where the Host Agent creates them, and accepts only accounts of that shape
+// (issue #176).
+func TestRootContainerAgentReadsAppIdentitiesFromTheHost(t *testing.T) {
+	resetAgentState(t)
+	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline")})
+	identities := appstoreagent.SystemIdentities{}
+	if identity, ok, err := identities.App("agentcheck"); ok || err != nil {
+		t.Fatalf("App() before the account exists = %+v, %v, %v", identity, ok, err)
+	}
+	if unused, err := identities.Unused(30940); !unused || err != nil {
+		t.Fatalf("Unused(30940) before the account exists = %v, %v", unused, err)
+	}
+	if err := executor.ensureAccount(context.Background(), "app-agentcheck", 30940); err != nil {
+		t.Fatal(err)
+	}
+	identity, ok, err := identities.App("agentcheck")
+	if want := (appid.Identity{Username: "app-agentcheck", UID: 30940, GID: 30940}); !ok || err != nil || identity != want {
+		t.Fatalf("App() = %+v, %v, %v; want %+v", identity, ok, err, want)
+	}
+	if unused, err := identities.Unused(30940); unused || err != nil {
+		t.Fatalf("Unused(30940) with the account = %v, %v", unused, err)
+	}
+
+	// Accounts the Host Agent would not create.
+	run(t, "groupadd", "--gid", "30941", "agentcheck-group")
+	run(t, "useradd", "--uid", "30941", "--gid", "30941", "--no-create-home", "--shell", "/usr/sbin/nologin", "app-othergroup")
+	run(t, "useradd", "--uid", "20941", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "app-memberrange")
+	run(t, "useradd", "--uid", "30940", "--non-unique", "--gid", "30940", "--no-create-home", "--shell", "/usr/sbin/nologin", "app-shareduid")
+	for _, id := range []string{"othergroup", "memberrange", "shareduid"} {
+		if identity, ok, err := identities.App(id); !ok || err == nil {
+			t.Errorf("App(%s) = %+v, %v, %v; want it refused", id, identity, ok, err)
+		}
 	}
 }
 

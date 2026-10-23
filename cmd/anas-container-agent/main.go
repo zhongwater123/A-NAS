@@ -68,7 +68,7 @@ func run(logger *slog.Logger) error {
 	}()
 
 	server := &http.Server{
-		Handler:           route(agent.NewHandler(manager, logger), appstoreagent.NewHandler(apps, logger)),
+		Handler:           route(agent.NewHandler(manager, logger), appstoreagent.NewHandler(apps, appstoreagent.SystemIdentities{}, logger)),
 		ReadHeaderTimeout: 2 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		// Stop and restart wait up to ten seconds for the container to exit.
