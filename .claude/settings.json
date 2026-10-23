@@ -3,9 +3,17 @@
   "permissions": {
     "deny": [
       "Read(//**/.env)",
-      "Read(//**/.env.*)",
+      "Read(//**/.env.local)",
+      "Read(//**/.env.*.local)",
+      "Read(.env.*)",
+      "Read(!.env.example)",
       "Read(//**/*.key)",
       "Read(//**/*.pem)",
+      "Read(//**/.git-credentials)",
+      "Read(~/.config/git/credentials)",
+      "Read(~/.ssh/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/AppData/Roaming/GitHub CLI/**)",
       "Read(//etc/anas-spike/**)"
     ]
   },
