@@ -1,12 +1,15 @@
 name: Vulnerability check
 
 # `make check` scans every pull request and merge; this run reports advisories
-# published since, while nobody pushes. GitHub runs it on main only and sends
-# the failure to whoever last changed the cron line.
+# published since, while nobody pushes. GitHub runs the schedule on main only
+# and reports a failed run to whoever last changed the cron line.
 on:
   schedule:
     - cron: "17 2 * * 1" # Mondays 02:17 UTC
   workflow_dispatch:
+  # A change to this file is tried on its pull request.
+  pull_request:
+    paths: [.github/workflows/vuln.yml]
 
 permissions:
   contents: read
