@@ -272,7 +272,7 @@ func (s *Service) CollectionDetail(ctx context.Context, actor accounts.User, id 
 		if err != nil {
 			return CollectionDetail{}, ErrNotFound
 		}
-		detail := CollectionDetail{Collection: Collection{ID: id, Name: string(decoded), Automatic: true}, Items: []Title{}}
+		detail := CollectionDetail{ID: id, Name: string(decoded), Automatic: true, Items: []Title{}}
 		for _, video := range c.order {
 			if video.Kind == TypeMovie && video.Collection == string(decoded) {
 				detail.Items = append(detail.Items, c.videoTitle(video))

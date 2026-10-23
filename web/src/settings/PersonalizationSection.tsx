@@ -1,7 +1,14 @@
 import { Clapperboard, ImagePlus, Monitor, Moon, RotateCcw, Scaling } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperStyle, type Wallpaper, type WallpaperStyle } from "../api";
+import {
+  readLocalDisplay,
+  resetWallpaper,
+  updateLocalDisplay,
+  updateWallpaperStyle,
+  type Wallpaper,
+  type WallpaperStyle,
+} from "../api";
 import { localConsoleScreenSaverIdleMs } from "../LocalConsoleScreenSaver";
 import { publishWallpaper, useWallpaper, wallpaperPicture } from "../wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
@@ -38,7 +45,11 @@ export function PersonalizationSection() {
   return (
     <>
       <PageHeader title="个性化" subtitle="全家共用的桌面壁纸与本机屏幕" />
-      {error && <Banner tone="error" onClose={() => setError("")}>{error}</Banner>}
+      {error && (
+        <Banner tone="error" onClose={() => setError("")}>
+          {error}
+        </Banner>
+      )}
       <WallpaperGroup onError={setError} />
       <LocalScreenGroup onError={setError} />
     </>
@@ -52,10 +63,16 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
   // A change shows at once; a failed one puts the previous wallpaper back.
   const run = async (action: () => Promise<Wallpaper>, previous?: Wallpaper) => {
-    setBusy(true); onError("");
-    try { publishWallpaper(await action()); }
-    catch (caught) { if (previous) publishWallpaper(previous); onError(messageOf(caught)); }
-    finally { setBusy(false); }
+    setBusy(true);
+    onError("");
+    try {
+      publishWallpaper(await action());
+    } catch (caught) {
+      if (previous) publishWallpaper(previous);
+      onError(messageOf(caught));
+    } finally {
+      setBusy(false);
+    }
   };
   const chooseStyle = (style: WallpaperStyle) => {
     if (!wallpaper || style === wallpaper.style) return;
@@ -66,7 +83,10 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
   const style = wallpaper?.style ?? "fill";
   return (
     <>
-      <Group title="桌面壁纸" footnote="壁纸对所有账号的桌面生效，包括本机屏幕。图片上传前会缩小到长边不超过 3840 像素，不带拍摄位置等信息。">
+      <Group
+        title="桌面壁纸"
+        footnote="壁纸对所有账号的桌面生效，包括本机屏幕。图片上传前会缩小到长边不超过 3840 像素，不带拍摄位置等信息。"
+      >
         <div className="pz-wallpaper">
           <DesktopPreview picture={wallpaper && wallpaperPicture(wallpaper)} style={style} label="当前桌面壁纸的预览" />
           <div className="pz-wallpaper-side">
@@ -78,14 +98,33 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
               <div className="pz-confirm" role="group" aria-label="确认恢复默认壁纸">
                 <p>所有桌面会换回默认壁纸，样式改回“填充”。</p>
                 <div>
-                  <button className="set-btn" onClick={() => setConfirmingReset(false)} disabled={busy}>取消</button>
-                  <button className="set-btn danger" onClick={() => { setConfirmingReset(false); void run(resetWallpaper); }} disabled={busy}>恢复默认</button>
+                  <button className="set-btn" onClick={() => setConfirmingReset(false)} disabled={busy}>
+                    取消
+                  </button>
+                  <button
+                    className="set-btn danger"
+                    onClick={() => {
+                      setConfirmingReset(false);
+                      void run(resetWallpaper);
+                    }}
+                    disabled={busy}
+                  >
+                    恢复默认
+                  </button>
                 </div>
               </div>
             ) : (
               <div className="pz-wallpaper-actions">
-                <button className="set-btn primary" onClick={() => setChoosing(true)} disabled={busy || !wallpaper}><ImagePlus />更换图片…</button>
-                {custom && <button className="set-btn" onClick={() => setConfirmingReset(true)} disabled={busy}><RotateCcw />恢复默认</button>}
+                <button className="set-btn primary" onClick={() => setChoosing(true)} disabled={busy || !wallpaper}>
+                  <ImagePlus />
+                  更换图片…
+                </button>
+                {custom && (
+                  <button className="set-btn" onClick={() => setConfirmingReset(true)} disabled={busy}>
+                    <RotateCcw />
+                    恢复默认
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -98,15 +137,30 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
           </div>
           <div className="pz-segmented" role="radiogroup" aria-label="壁纸样式" aria-busy={busy || undefined}>
             {styleChoices.map((choice) => (
-              <button key={choice.style} type="button" role="radio" aria-checked={wallpaper?.style === choice.style}
-                disabled={busy || !wallpaper} onClick={() => chooseStyle(choice.style)}>
+              <button
+                key={choice.style}
+                type="button"
+                role="radio"
+                aria-checked={wallpaper?.style === choice.style}
+                disabled={busy || !wallpaper}
+                onClick={() => chooseStyle(choice.style)}
+              >
                 {choice.label}
               </button>
             ))}
           </div>
         </div>
       </Group>
-      {choosing && <WallpaperDialog style={style} onClose={() => setChoosing(false)} onSaved={(next) => { publishWallpaper(next); setChoosing(false); }} />}
+      {choosing && (
+        <WallpaperDialog
+          style={style}
+          onClose={() => setChoosing(false)}
+          onSaved={(next) => {
+            publishWallpaper(next);
+            setChoosing(false);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -117,20 +171,36 @@ function LocalScreenGroup({ onError }: { onError: (message: string) => void }) {
   useEffect(() => {
     let active = true;
     readLocalDisplay()
-      .then((display) => { if (active) setSleepAfter(display.sleepAfterMinutes); })
-      .catch((caught: unknown) => { if (active) onError(messageOf(caught)); });
-    return () => { active = false; };
+      .then((display) => {
+        if (active) setSleepAfter(display.sleepAfterMinutes);
+      })
+      .catch((caught: unknown) => {
+        if (active) onError(messageOf(caught));
+      });
+    return () => {
+      active = false;
+    };
   }, [onError]);
   const choose = async (minutes: number) => {
     if (sleepAfter === undefined || minutes === sleepAfter) return;
     const previous = sleepAfter;
-    setSleepAfter(minutes); setSaving(true); onError("");
-    try { setSleepAfter((await updateLocalDisplay(minutes)).sleepAfterMinutes); }
-    catch (caught) { setSleepAfter(previous); onError(messageOf(caught)); }
-    finally { setSaving(false); }
+    setSleepAfter(minutes);
+    setSaving(true);
+    onError("");
+    try {
+      setSleepAfter((await updateLocalDisplay(minutes)).sleepAfterMinutes);
+    } catch (caught) {
+      setSleepAfter(previous);
+      onError(messageOf(caught));
+    } finally {
+      setSaving(false);
+    }
   };
   return (
-    <Group title="本机屏幕" footnote="本机屏幕是直接接在这台 NAS 上的显示器，用手机或电脑浏览器访问时不会息屏。黑屏时视频停止播放，显示器背光仍按它自己的亮度点亮。">
+    <Group
+      title="本机屏幕"
+      footnote="本机屏幕是直接接在这台 NAS 上的显示器，用手机或电脑浏览器访问时不会息屏。黑屏时视频停止播放，显示器背光仍按它自己的亮度点亮。"
+    >
       <div className="set-row pz-row">
         <IconTile tone="sleep" icon={Moon} />
         <div className="set-row-text">
@@ -139,8 +209,14 @@ function LocalScreenGroup({ onError }: { onError: (message: string) => void }) {
         </div>
         <div className="pz-segmented" role="radiogroup" aria-label="息屏时间" aria-busy={saving || undefined}>
           {sleepChoices.map(({ minutes, label }) => (
-            <button key={minutes} type="button" role="radio" aria-checked={sleepAfter === minutes}
-              disabled={saving || sleepAfter === undefined} onClick={() => void choose(minutes)}>
+            <button
+              key={minutes}
+              type="button"
+              role="radio"
+              aria-checked={sleepAfter === minutes}
+              disabled={saving || sleepAfter === undefined}
+              onClick={() => void choose(minutes)}
+            >
               {label}
             </button>
           ))}
@@ -159,9 +235,20 @@ function SleepTimeline({ sleepAfter }: { sleepAfter: number }) {
   return (
     <figure className={`pz-timeline ${sleeps ? "" : "never"}`}>
       <div className="pz-track" aria-hidden="true">
-        <span className="pz-stage desktop"><Monitor />桌面</span>
-        <span className="pz-stage saver"><Clapperboard />屏保</span>
-        {sleeps && <span className="pz-stage asleep"><Moon />黑屏</span>}
+        <span className="pz-stage desktop">
+          <Monitor />
+          桌面
+        </span>
+        <span className="pz-stage saver">
+          <Clapperboard />
+          屏保
+        </span>
+        {sleeps && (
+          <span className="pz-stage asleep">
+            <Moon />
+            黑屏
+          </span>
+        )}
       </div>
       <div className="pz-ticks" aria-hidden="true">
         <span>最后一次操作</span>

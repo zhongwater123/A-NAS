@@ -19,7 +19,7 @@ export function useHostState(enabled = true): HostStateView {
   const activeController = useRef<AbortController | undefined>(undefined);
 
   const refresh = useCallback(async () => {
-	if (!enabled) return;
+    if (!enabled) return;
     activeController.current?.abort();
     const controller = new AbortController();
     activeController.current = controller;
@@ -43,7 +43,7 @@ export function useHostState(enabled = true): HostStateView {
   }, [enabled]);
 
   useEffect(() => {
-	if (!enabled) return;
+    if (!enabled) return;
     void refresh();
     const interval = window.setInterval(() => {
       if (!document.hidden) void refresh();

@@ -17,7 +17,7 @@ libc = ctypes.CDLL(None, use_errno=True)
 if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
     sys.exit(f"prctl(PR_SET_DUMPABLE) failed: {os.strerror(ctypes.get_errno())}")
 
-from hermes_cli.main import main  # noqa: E402  only once the token is out of reach
+from hermes_cli.main import main  # only once the token is out of reach
 
 sys.argv = ["hermes", "serve", *sys.argv[1:]]
 sys.exit(main())

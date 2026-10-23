@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession, type Wallpaper } from "../api";
 import { PersonalizationSection } from "./PersonalizationSection";
 
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const refused = () => json({ error: { code: "forbidden", message: "administrator permission is required" } }, 403);
 
 function installAPI(options: { sleepAfterMinutes?: number; wallpaper?: Wallpaper; refuse?: boolean } = {}) {
@@ -48,21 +49,46 @@ const sent = (fetchMock: ReturnType<typeof installAPI>, path: string, method: st
 // jsdom neither decodes images nor draws on a canvas.
 function stubPictures() {
   class DecodedImage {
-    naturalWidth = 5000; naturalHeight = 2500; decoding = ""; onload?: () => void; onerror?: () => void; private source = "";
-    get src() { return this.source; }
-    set src(value: string) { this.source = value; queueMicrotask(() => this.onload?.()); }
+    naturalWidth = 5000;
+    naturalHeight = 2500;
+    decoding = "";
+    onload?: () => void;
+    onerror?: () => void;
+    private source = "";
+    get src() {
+      return this.source;
+    }
+    set src(value: string) {
+      this.source = value;
+      queueMicrotask(() => this.onload?.());
+    }
   }
   vi.stubGlobal("Image", DecodedImage);
-  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:wallpaper-source"), revokeObjectURL: vi.fn() }));
+  vi.stubGlobal(
+    "URL",
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:wallpaper-source"), revokeObjectURL: vi.fn() }),
+  );
   const drawImage = vi.fn();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ fillRect: vi.fn(), drawImage } as never);
-  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["jpeg"], { type: "image/jpeg" })));
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) =>
+    callback(new Blob(["jpeg"], { type: "image/jpeg" })),
+  );
   return drawImage;
 }
 
 describe("Settings → 个性化", () => {
-  beforeEach(() => setSession({ csrfToken: "csrf-token", expiresAt: "2026-10-21T00:00:00Z", user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" } }));
-  afterEach(() => { setSession(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  beforeEach(() =>
+    setSession({
+      csrfToken: "csrf-token",
+      expiresAt: "2026-10-21T00:00:00Z",
+      user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
+    }),
+  );
+  afterEach(() => {
+    setSession();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it("chooses when the local screen goes black", async () => {
     const fetchMock = installAPI();
@@ -107,7 +133,11 @@ describe("Settings → 个性化", () => {
     expect(await screen.findByText("默认壁纸")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "恢复默认" })).toBeNull();
     const styles = screen.getByRole("radiogroup", { name: "壁纸样式" });
-    expect(within(styles).getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["填充", "适应", "拉伸", "居中", "平铺"]);
+    expect(
+      within(styles)
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["填充", "适应", "拉伸", "居中", "平铺"]);
 
     await user.click(within(styles).getByRole("radio", { name: "平铺" }));
     expect(await within(styles).findByRole("radio", { name: "平铺", checked: true })).toBeTruthy();
@@ -124,7 +154,10 @@ describe("Settings → 个性化", () => {
     render(<PersonalizationSection />);
     await user.click(await screen.findByRole("button", { name: "更换图片…" }));
     const dialog = screen.getByRole("dialog", { name: "更换壁纸" });
-    await user.upload(within(dialog).getByLabelText("从本机选择图片"), new File(["png"], "beach.png", { type: "image/png" }));
+    await user.upload(
+      within(dialog).getByLabelText("从本机选择图片"),
+      new File(["png"], "beach.png", { type: "image/png" }),
+    );
 
     expect(await within(dialog).findByRole("img", { name: "新壁纸在桌面上的预览" })).toBeTruthy();
     expect(within(dialog).getByText(/5000 × 2500 像素，保存时缩小到 3840 × 1920/)).toBeTruthy();
@@ -137,11 +170,15 @@ describe("Settings → 个性化", () => {
     const [[, init]] = sent(fetchMock, "/api/v1/wallpaper/image", "PUT");
     expect(new Headers(init?.headers).get("Content-Type")).toBe("image/jpeg");
     expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe("csrf-token");
-    expect(screen.getByRole("img", { name: "当前桌面壁纸的预览" }).style.backgroundImage).toContain("/api/v1/wallpaper/image?v=0123456789abcdef");
+    expect(screen.getByRole("img", { name: "当前桌面壁纸的预览" }).style.backgroundImage).toContain(
+      "/api/v1/wallpaper/image?v=0123456789abcdef",
+    );
   });
 
   it("asks before going back to the default wallpaper", async () => {
-    const fetchMock = installAPI({ wallpaper: { style: "center", image: { version: "0123456789abcdef", width: 800, height: 600 } } });
+    const fetchMock = installAPI({
+      wallpaper: { style: "center", image: { version: "0123456789abcdef", width: 800, height: 600 } },
+    });
     const user = userEvent.setup();
     render(<PersonalizationSection />);
     await user.click(await screen.findByRole("button", { name: "恢复默认" }));
@@ -150,6 +187,8 @@ describe("Settings → 个性化", () => {
     await user.click(within(confirm).getByRole("button", { name: "恢复默认" }));
     expect(await screen.findByText("默认壁纸")).toBeTruthy();
     expect(sent(fetchMock, "/api/v1/wallpaper/image", "DELETE")).toHaveLength(1);
-    expect(within(screen.getByRole("radiogroup", { name: "壁纸样式" })).getByRole("radio", { name: "填充", checked: true })).toBeTruthy();
+    expect(
+      within(screen.getByRole("radiogroup", { name: "壁纸样式" })).getByRole("radio", { name: "填充", checked: true }),
+    ).toBeTruthy();
   });
 });

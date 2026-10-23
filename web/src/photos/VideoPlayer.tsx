@@ -1,13 +1,46 @@
-import { Download, Maximize, Minimize, Pause, Play, RotateCcw, TriangleAlert, Volume1, Volume2, VolumeX } from "lucide-react";
-import { forwardRef, KeyboardEvent, PointerEvent as ReactPointerEvent, RefObject, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  Download,
+  Maximize,
+  Minimize,
+  Pause,
+  Play,
+  RotateCcw,
+  TriangleAlert,
+  Volume1,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import {
+  forwardRef,
+  KeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  RefObject,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { browserCapabilities } from "../media/mediaApi";
 import { canFeed, StreamFeed } from "../media/streamFeed";
 import { clock, messageOf } from "./model";
-import { displayURL, getVideoPlayback, videoOriginalURL, videoStreamURL, type PhotoAsset, type VideoPlayback } from "./photosApi";
+import {
+  displayURL,
+  getVideoPlayback,
+  videoOriginalURL,
+  videoStreamURL,
+  type PhotoAsset,
+  type VideoPlayback,
+} from "./photosApi";
 
 // What the viewer's keys do to the video it shows.
-export interface VideoControls { toggle: () => void; mute: () => void; fullscreen: () => void }
+export interface VideoControls {
+  toggle: () => void;
+  mute: () => void;
+  fullscreen: () => void;
+}
 
 interface Props {
   asset: PhotoAsset;
@@ -27,7 +60,12 @@ const settleSkips = 350;
 const volumeKey = "a-nas.photos.volume";
 
 function storedVolume() {
-  try { const value = Number(window.localStorage.getItem(volumeKey) ?? "1"); return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1; } catch { return 1; }
+  try {
+    const value = Number(window.localStorage.getItem(volumeKey) ?? "1");
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+  } catch {
+    return 1;
+  }
 }
 
 // bufferedAt tells whether the element holds enough at a position to play
@@ -76,11 +114,16 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
   const attach = (url: string, mime: string, remaining: number, kind: "remux" | "transcode") => {
     feed.current?.close();
     feed.current = undefined;
-    if (!canFeed(mime)) { setSource(url); return; }
+    if (!canFeed(mime)) {
+      setSource(url);
+      return;
+    }
     const next: StreamFeed = new StreamFeed(url, mime, () => video.current, {
       ...reach[kind],
       duration: remaining,
-      onError: (message) => { if (feed.current === next) fail(message); },
+      onError: (message) => {
+        if (feed.current === next) fail(message);
+      },
       onFallback: () => {
         if (feed.current !== next) return;
         next.close();
@@ -112,7 +155,10 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     pendingStart.current = 0;
     setOffset(start);
     // A conversion asked for after another way failed is always H.264.
-    const mime = forced.current || !decision.mime ? `video/mp4; codecs="avc1.640033${decision.mime && !decision.mime.includes("mp4a") ? "" : ",mp4a.40.2"}"` : decision.mime;
+    const mime =
+      forced.current || !decision.mime
+        ? `video/mp4; codecs="avc1.640033${decision.mime && !decision.mime.includes("mp4a") ? "" : ",mp4a.40.2"}"`
+        : decision.mime;
     attach(videoStreamURL(asset.id, start, caps, forced.current), mime, Math.max(1, duration - start), how);
   };
 
@@ -124,19 +170,31 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
 
   useEffect(() => {
     let live = true;
-    getVideoPlayback(asset.id, caps).then((decision) => {
-      if (!live) return;
-      setPlayback(decision);
-      begin(decision, decision.mode, 0, true);
-    }, (caught) => { if (live) fail(messageOf(caught)); });
-    return () => { live = false; window.clearTimeout(restart.current); feed.current?.close(); };
+    getVideoPlayback(asset.id, caps).then(
+      (decision) => {
+        if (!live) return;
+        setPlayback(decision);
+        begin(decision, decision.mode, 0, true);
+      },
+      (caught) => {
+        if (live) fail(messageOf(caught));
+      },
+    );
+    return () => {
+      live = false;
+      window.clearTimeout(restart.current);
+      feed.current?.close();
+    };
   }, [asset.id]);
 
   // The element's own failure: what the browser could not play is tried
   // once more as a full conversion.
   const failed = () => {
     if (!playback || failure) return;
-    if (forced.current) { fail("浏览器无法播放这段视频"); return; }
+    if (forced.current) {
+      fail("浏览器无法播放这段视频");
+      return;
+    }
     forced.current = true;
     begin(playback, "transcode", absolute(), wantPlay.current || !paused);
   };
@@ -147,41 +205,57 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     const element = video.current;
     if (!element) return;
     wantPlay.current = true;
-    Promise.resolve().then(() => element.play()).catch(() => { wantPlay.current = false; setPaused(true); setWaiting(false); });
+    Promise.resolve()
+      .then(() => element.play())
+      .catch(() => {
+        wantPlay.current = false;
+        setPaused(true);
+        setWaiting(false);
+      });
   };
 
   // seek moves to an absolute position; a converted stream restarts there
   // unless it already holds it.
-  const seek = useCallback((target: number) => {
-    const element = video.current;
-    if (!element || !playback || !mode) return;
-    target = Math.max(0, Math.min(duration - 0.2, target));
-    setTime(target);
-    setEnded(false);
-    if (!converted) {
-      element.currentTime = target;
-      return;
-    }
-    const local = target - offset;
-    if (local >= 0 && bufferedAt(element, local)) {
-      element.currentTime = local;
-      return;
-    }
-    window.clearTimeout(restart.current);
-    const resume = !element.paused || wantPlay.current;
-    restart.current = window.setTimeout(() => begin(playback, mode, target, resume), settleSkips);
-  }, [playback, mode, converted, offset, duration]);
+  const seek = useCallback(
+    (target: number) => {
+      const element = video.current;
+      if (!element || !playback || !mode) return;
+      target = Math.max(0, Math.min(duration - 0.2, target));
+      setTime(target);
+      setEnded(false);
+      if (!converted) {
+        element.currentTime = target;
+        return;
+      }
+      const local = target - offset;
+      if (local >= 0 && bufferedAt(element, local)) {
+        element.currentTime = local;
+        return;
+      }
+      window.clearTimeout(restart.current);
+      const resume = !element.paused || wantPlay.current;
+      restart.current = window.setTimeout(() => begin(playback, mode, target, resume), settleSkips);
+    },
+    [playback, mode, converted, offset, duration],
+  );
 
   const toggle = useCallback(() => {
     const element = video.current;
     if (!element || failure) return;
     if (ended) {
-      if (converted) { if (playback && mode) begin(playback, mode, 0, true); }
-      else { element.currentTime = 0; play(); }
+      if (converted) {
+        if (playback && mode) begin(playback, mode, 0, true);
+      } else {
+        element.currentTime = 0;
+        play();
+      }
       return;
     }
     if (paused) play();
-    else { wantPlay.current = false; element.pause(); }
+    else {
+      wantPlay.current = false;
+      element.pause();
+    }
   }, [failure, ended, paused, converted, playback, mode]);
 
   const toggleMute = useCallback(() => setMuted((value) => !value), []);
@@ -189,14 +263,20 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
     else void stage.current?.requestFullscreen?.().catch(() => undefined);
   }, [stage]);
-  useImperativeHandle(ref, () => ({ toggle, mute: toggleMute, fullscreen: toggleFullscreen }), [toggle, toggleMute, toggleFullscreen]);
+  useImperativeHandle(ref, () => ({ toggle, mute: toggleMute, fullscreen: toggleFullscreen }), [
+    toggle,
+    toggleMute,
+    toggleFullscreen,
+  ]);
 
   useEffect(() => {
-    const changed = () => setFullscreen(Boolean(document.fullscreenElement) && document.fullscreenElement === stage.current);
+    const changed = () =>
+      setFullscreen(Boolean(document.fullscreenElement) && document.fullscreenElement === stage.current);
     document.addEventListener("fullscreenchange", changed);
     return () => {
       document.removeEventListener("fullscreenchange", changed);
-      if (document.fullscreenElement && document.fullscreenElement === stage.current) void document.exitFullscreen?.().catch(() => undefined);
+      if (document.fullscreenElement && document.fullscreenElement === stage.current)
+        void document.exitFullscreen?.().catch(() => undefined);
     };
   }, [stage]);
 
@@ -205,7 +285,11 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     if (!element) return;
     element.volume = volume;
     element.muted = muted;
-    try { window.localStorage.setItem(volumeKey, String(volume)); } catch { /* private windows keep it for the session */ }
+    try {
+      window.localStorage.setItem(volumeKey, String(volume));
+    } catch {
+      /* private windows keep it for the session */
+    }
   }, [volume, muted, source]);
 
   const readRanges = () => {
@@ -213,7 +297,8 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     if (!element) return;
     const base = converted ? offset : 0;
     const next: [number, number][] = [];
-    for (let index = 0; index < element.buffered.length; index++) next.push([base + element.buffered.start(index), base + element.buffered.end(index)]);
+    for (let index = 0; index < element.buffered.length; index++)
+      next.push([base + element.buffered.start(index), base + element.buffered.end(index)]);
     setRanges(next);
   };
 
@@ -267,39 +352,79 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
         onClick={toggle}
         onDoubleClick={toggleFullscreen}
         onLoadedMetadata={(event) => {
-          if (pendingStart.current > 0) { event.currentTarget.currentTime = pendingStart.current; pendingStart.current = 0; }
+          if (pendingStart.current > 0) {
+            event.currentTarget.currentTime = pendingStart.current;
+            pendingStart.current = 0;
+          }
           if (wantPlay.current) play();
           else setWaiting(false);
         }}
-        onTimeUpdate={(event) => { if (scrub === undefined) setTime((converted ? offset : 0) + event.currentTarget.currentTime); }}
+        onTimeUpdate={(event) => {
+          if (scrub === undefined) setTime((converted ? offset : 0) + event.currentTarget.currentTime);
+        }}
         onProgress={readRanges}
         onWaiting={() => setWaiting(true)}
-        onPlaying={() => { setWaiting(false); setStarted(true); setEnded(false); }}
+        onPlaying={() => {
+          setWaiting(false);
+          setStarted(true);
+          setEnded(false);
+        }}
         onCanPlay={() => setWaiting(false)}
         onPlay={() => setPaused(false)}
         onPause={() => setPaused(true)}
-        onEnded={() => { setEnded(true); setPaused(true); setTime(duration); wantPlay.current = false; }}
-        onError={() => { if (source) failed(); }}
+        onEnded={() => {
+          setEnded(true);
+          setPaused(true);
+          setTime(duration);
+          wantPlay.current = false;
+        }}
+        onError={() => {
+          if (source) failed();
+        }}
       />
       {resting && (
         <button type="button" className="ph-video-play" aria-label={ended ? "重新播放" : "播放视频"} onClick={toggle}>
           {ended ? <RotateCcw /> : <Play />}
         </button>
       )}
-      {waiting && !failure && (started || source) && <div className="ph-video-wait" role="status" aria-label="正在载入视频"><span className="ph-spinner" /></div>}
+      {waiting && !failure && (started || source) && (
+        <div className="ph-video-wait" role="status" aria-label="正在载入视频">
+          <span className="ph-spinner" />
+        </div>
+      )}
       {failure && (
         <div className="ph-video-failure" role="status">
           <TriangleAlert />
           <strong>视频暂时无法播放</strong>
           <small>{failure}</small>
-          <button type="button" onClick={onDownload}><Download />下载原件</button>
+          <button type="button" onClick={onDownload}>
+            <Download />
+            下载原件
+          </button>
         </div>
       )}
       {/* A focused button takes the space bar as a click; anywhere else in
           the controls it plays and pauses, as in the viewer. */}
-      <div className="ph-video-controls" role="toolbar" aria-label="视频控制" onKeyDown={(event) => { if (event.key === " " && (event.target as HTMLElement).closest("button")) event.stopPropagation(); }}>
-        <button type="button" aria-label={paused ? "播放" : "暂停"} title={paused ? "播放 (空格)" : "暂停 (空格)"} disabled={Boolean(failure)} onClick={toggle}>{paused ? <Play /> : <Pause />}</button>
-        <span className="ph-video-time"><strong>{clock(shown)}</strong> / {clock(duration)}</span>
+      <div
+        className="ph-video-controls"
+        role="toolbar"
+        aria-label="视频控制"
+        onKeyDown={(event) => {
+          if (event.key === " " && (event.target as HTMLElement).closest("button")) event.stopPropagation();
+        }}
+      >
+        <button
+          type="button"
+          aria-label={paused ? "播放" : "暂停"}
+          title={paused ? "播放 (空格)" : "暂停 (空格)"}
+          disabled={Boolean(failure)}
+          onClick={toggle}
+        >
+          {paused ? <Play /> : <Pause />}
+        </button>
+        <span className="ph-video-time">
+          <strong>{clock(shown)}</strong> / {clock(duration)}
+        </span>
         <div
           ref={track}
           className={`ph-video-scrub${scrub !== undefined ? " dragging" : ""}`}
@@ -317,22 +442,74 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
           onKeyDown={scrubKey}
         >
           <span className="ph-video-rail">
-            {ranges.map(([start, end]) => <span key={start} className="ph-video-buffered" style={{ left: `${(start / duration) * 100}%`, width: `${(Math.max(0, end - start) / duration) * 100}%` }} />)}
+            {ranges.map(([start, end]) => (
+              <span
+                key={start}
+                className="ph-video-buffered"
+                style={{
+                  left: `${(start / duration) * 100}%`,
+                  width: `${(Math.max(0, end - start) / duration) * 100}%`,
+                }}
+              />
+            ))}
             <span className="ph-video-played" style={{ width: `${fraction * 100}%` }} />
           </span>
           <span className="ph-video-knob" style={{ left: `${fraction * 100}%` }} />
-          {hover && <span className="ph-video-tip" style={{ left: hover.x }}>{clock(hover.time)}</span>}
+          {hover && (
+            <span className="ph-video-tip" style={{ left: hover.x }}>
+              {clock(hover.time)}
+            </span>
+          )}
         </div>
-        {converted && <span className="ph-video-mode" title={mode === "remux" ? "浏览器不能直接打开这种格式，NAS 正在转换封装" : "浏览器无法解码这段视频，NAS 正在实时转码"}>{mode === "remux" ? "转换播放" : "转码播放"}</span>}
+        {converted && (
+          <span
+            className="ph-video-mode"
+            title={
+              mode === "remux"
+                ? "浏览器不能直接打开这种格式，NAS 正在转换封装"
+                : "浏览器无法解码这段视频，NAS 正在实时转码"
+            }
+          >
+            {mode === "remux" ? "转换播放" : "转码播放"}
+          </span>
+        )}
         <span className="ph-video-volume">
-          <button type="button" aria-label={quiet ? "打开声音" : "静音"} title={quiet ? "打开声音 (M)" : "静音 (M)"} onClick={() => { if (volume === 0) setVolume(1); setMuted(quiet ? false : true); }}>
+          <button
+            type="button"
+            aria-label={quiet ? "打开声音" : "静音"}
+            title={quiet ? "打开声音 (M)" : "静音 (M)"}
+            onClick={() => {
+              if (volume === 0) setVolume(1);
+              setMuted(quiet ? false : true);
+            }}
+          >
             {quiet ? <VolumeX /> : volume < 0.5 ? <Volume1 /> : <Volume2 />}
           </button>
-          <input type="range" aria-label="音量" min={0} max={1} step={0.05} value={quiet ? 0 : volume}
-            onChange={(event) => { const value = Number(event.target.value); setVolume(value); setMuted(value === 0); }}
-            onKeyDown={(event) => { if (event.key.startsWith("Arrow")) event.stopPropagation(); }} />
+          <input
+            type="range"
+            aria-label="音量"
+            min={0}
+            max={1}
+            step={0.05}
+            value={quiet ? 0 : volume}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              setVolume(value);
+              setMuted(value === 0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key.startsWith("Arrow")) event.stopPropagation();
+            }}
+          />
         </span>
-        <button type="button" aria-label={fullscreen ? "退出全屏" : "全屏"} title={fullscreen ? "退出全屏 (F)" : "全屏 (F)"} onClick={toggleFullscreen}>{fullscreen ? <Minimize /> : <Maximize />}</button>
+        <button
+          type="button"
+          aria-label={fullscreen ? "退出全屏" : "全屏"}
+          title={fullscreen ? "退出全屏 (F)" : "全屏 (F)"}
+          onClick={toggleFullscreen}
+        >
+          {fullscreen ? <Minimize /> : <Maximize />}
+        </button>
       </div>
     </div>
   );

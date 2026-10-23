@@ -137,7 +137,7 @@ func configuredAppStore() (*engine.Store, error) {
 			return nil, errors.New("app data roots and state directory must be absolute paths")
 		}
 	}
-	engineClient, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	engineClient, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, err
 	}

@@ -61,7 +61,7 @@ function refOf(snapshot: string, name: string): string {
 }
 
 async function look(control: WebosController, full = false) {
-  return (await control.run("browser_snapshot", { full }) as { snapshot: string }).snapshot;
+  return ((await control.run("browser_snapshot", { full })) as { snapshot: string }).snapshot;
 }
 
 // The writes the page sent, as the product API saw them.
@@ -77,10 +77,13 @@ function writes(id: string, method: string, path: string) {
 beforeEach(() => {
   desktop();
   sent = [];
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    sent.push(`${init?.method ?? "GET"} ${String(input)}`);
-    return new Response(null, { status: 204 });
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(`${init?.method ?? "GET"} ${String(input)}`);
+      return new Response(null, { status: 204 });
+    }),
+  );
 });
 afterEach(() => {
   uninstall();
@@ -165,7 +168,9 @@ describe("WebosController", () => {
   it("asks about a write of a route it does not know", async () => {
     const { control, asked } = controller(false);
     writes("open", "POST", "/api/v1/something-new");
-    await expect(control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") })).rejects.toThrow(ControlError);
+    await expect(control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") })).rejects.toThrow(
+      ControlError,
+    );
     expect(asked[0].why).toBe("这一步会改动 NAS 上的内容");
     expect(sent).toEqual([]);
   });
@@ -222,7 +227,9 @@ describe("WebosController", () => {
     const { control, asked } = controller(false);
     const stopped = vi.fn();
     document.getElementById("stop")!.addEventListener("click", stopped);
-    await expect(control.run("browser_click", { ref: refOf(await look(control), "停止") })).rejects.toThrow("成员没有允许");
+    await expect(control.run("browser_click", { ref: refOf(await look(control), "停止") })).rejects.toThrow(
+      "成员没有允许",
+    );
     expect(asked).toEqual([{ what: "点击“停止”", where: "Docker", why: "“Docker”里的操作都要你先允许" }]);
     expect(stopped).not.toHaveBeenCalled();
   });
@@ -240,7 +247,9 @@ describe("WebosController", () => {
   it("asks for anything in 设置's 终端, but not for the settings navigation", async () => {
     const { control, asked } = controller(false);
     const snapshot = await look(control);
-    await expect(control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") })).rejects.toThrow("成员没有允许");
+    await expect(control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") })).rejects.toThrow(
+      "成员没有允许",
+    );
     expect(asked[0]).toEqual({ what: "点击“以 root 打开”", where: "设置 · 终端", why: "“终端”里的操作都要你先允许" });
     await control.run("browser_click", { ref: refOf(snapshot, "日志") });
     expect(asked).toHaveLength(1);
@@ -270,9 +279,21 @@ describe("the picture of the page", () => {
   // The renderer draws the page into a canvas; here a canvas that records what is written on it.
   function canvasOf(width: number, height: number) {
     const written: string[] = [];
-    const context = { font: "", textBaseline: "", strokeStyle: "", fillStyle: "", lineWidth: 1, strokeRect: vi.fn(), fillRect: vi.fn(),
-      measureText: () => ({ width: 18 }), fillText: (text: string) => written.push(text) };
-    return { canvas: { width, height, getContext: () => context, toDataURL: () => "data:image/png;base64,iVBORw0KGgo=" }, written };
+    const context = {
+      font: "",
+      textBaseline: "",
+      strokeStyle: "",
+      fillStyle: "",
+      lineWidth: 1,
+      strokeRect: vi.fn(),
+      fillRect: vi.fn(),
+      measureText: () => ({ width: 18 }),
+      fillText: (text: string) => written.push(text),
+    };
+    return {
+      canvas: { width, height, getContext: () => context, toDataURL: () => "data:image/png;base64,iVBORw0KGgo=" },
+      written,
+    };
   }
 
   afterEach(() => vi.restoreAllMocks());
@@ -281,9 +302,12 @@ describe("the picture of the page", () => {
     const { control } = controller();
     const { canvas } = canvasOf(1024, 768);
     vi.mocked(domToCanvas).mockResolvedValue(canvas as unknown as HTMLCanvasElement);
-    const shot = await control.run("browser_screenshot", { annotate: false }) as Screenshot;
+    const shot = (await control.run("browser_screenshot", { annotate: false })) as Screenshot;
     expect(shot).toEqual({ mime_type: "image/png", data: "iVBORw0KGgo=", width: 1024, height: 768 });
-    const [root, options] = vi.mocked(domToCanvas).mock.calls[0] as unknown as [Element, { width?: number; height?: number; filter?(node: Node): boolean }];
+    const [root, options] = vi.mocked(domToCanvas).mock.calls[0] as unknown as [
+      Element,
+      { width?: number; height?: number; filter?(node: Node): boolean },
+    ];
     expect(root).toBe(document.body);
     expect([options?.width, options?.height]).toEqual([window.innerWidth, window.innerHeight]);
     expect(options?.filter?.(document.querySelector(".app-window-assistant")!)).toBe(false);
@@ -295,7 +319,7 @@ describe("the picture of the page", () => {
     const { canvas, written } = canvasOf(1024, 768);
     vi.mocked(domToCanvas).mockResolvedValue(canvas as unknown as HTMLCanvasElement);
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 40, 80, 24));
-    const shot = await control.run("browser_screenshot", { annotate: true }) as Screenshot;
+    const shot = (await control.run("browser_screenshot", { annotate: true })) as Screenshot;
     const folder = shot.annotations?.find((label) => label.name === "新建文件夹");
     expect(folder?.ref).toMatch(/^e\d+$/);
     expect(written).toContain(folder?.ref);
@@ -315,7 +339,7 @@ describe("the picture of the page", () => {
     const vnas = document.querySelector(".app-window-assistant")!;
     document.elementsFromPoint = vi.fn(() => [vnas, photos, document.body]);
     try {
-      const shot = await control.run("browser_screenshot", { annotate: true }) as Screenshot;
+      const shot = (await control.run("browser_screenshot", { annotate: true })) as Screenshot;
       expect(shot.annotations?.map((label) => label.name).sort()).toEqual(["照片查看器", "移到回收站"]);
     } finally {
       delete (document as Partial<Document>).elementsFromPoint;

@@ -26,7 +26,7 @@ func NewWarning() *Reader {
 	state := baseState()
 	state.System.Health = hoststate.HealthWarning
 	state.Disks[1].Health = hoststate.HealthWarning
-	state.Disks[1].TemperatureCelsius = intPointer(55)
+	state.Disks[1].TemperatureCelsius = new(55)
 	return newReader(state)
 }
 
@@ -43,7 +43,7 @@ func NewWithSpareDisk() *Reader {
 		Role:               hoststate.DiskRoleUnassigned,
 		Health:             hoststate.HealthHealthy,
 		SMARTStatus:        hoststate.HealthHealthy,
-		TemperatureCelsius: intPointer(32),
+		TemperatureCelsius: new(32),
 		Filesystems:        []string{"linux_raid_member"},
 		Signatures:         []hoststate.Signature{{Type: "linux_raid_member", Label: "OrangePi3B:0", UUID: "2a5a4bd2-c45f-586f-20c3-f2657f46b405"}},
 	})
@@ -112,7 +112,7 @@ func baseState() hoststate.State {
 				Role:               hoststate.DiskRoleSystem,
 				Health:             hoststate.HealthHealthy,
 				SMARTStatus:        hoststate.HealthHealthy,
-				TemperatureCelsius: intPointer(36),
+				TemperatureCelsius: new(36),
 				InUse:              true,
 				Filesystems:        []string{"ext4"},
 			},
@@ -125,7 +125,7 @@ func baseState() hoststate.State {
 				Role:               hoststate.DiskRoleUnassigned,
 				Health:             hoststate.HealthHealthy,
 				SMARTStatus:        hoststate.HealthHealthy,
-				TemperatureCelsius: intPointer(31),
+				TemperatureCelsius: new(31),
 			},
 		},
 	}
@@ -137,7 +137,7 @@ func cloneState(state hoststate.State) hoststate.State {
 	for i, disk := range state.Disks {
 		cloned.Disks[i] = disk
 		if disk.TemperatureCelsius != nil {
-			cloned.Disks[i].TemperatureCelsius = intPointer(*disk.TemperatureCelsius)
+			cloned.Disks[i].TemperatureCelsius = new(*disk.TemperatureCelsius)
 		}
 		if disk.FilesystemCapacityBytes != nil {
 			value := *disk.FilesystemCapacityBytes
@@ -170,10 +170,6 @@ func mustResourceID(value string) hoststate.ResourceID {
 		panic(err)
 	}
 	return id
-}
-
-func intPointer(value int) *int {
-	return &value
 }
 
 var _ hoststate.Observer = (*Reader)(nil)

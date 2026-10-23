@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -64,9 +65,7 @@ func contractChecked(t *testing.T, next http.Handler) http.Handler {
 				}
 			}
 		}
-		for key, values := range recorder.Header() {
-			w.Header()[key] = values
-		}
+		maps.Copy(w.Header(), recorder.Header())
 		w.WriteHeader(recorder.Code)
 		_, _ = w.Write(recorder.Body.Bytes())
 	})

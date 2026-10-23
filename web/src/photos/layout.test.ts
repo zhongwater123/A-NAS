@@ -5,13 +5,24 @@ import { dayLabel } from "./model";
 import type { PhotoAsset } from "./photosApi";
 
 const photo = (id: string, takenAt: string, width = 4000, height = 3000): PhotoAsset => ({
-  id, libraryId: "library:mine", name: `${id}.jpg`, mediaType: "image/jpeg", sizeBytes: 1, uploadedBy: "user:alice",
-  importedAt: "2026-10-08T09:00:00Z", takenAt, width, height, thumbnail: "ready",
+  id,
+  libraryId: "library:mine",
+  name: `${id}.jpg`,
+  mediaType: "image/jpeg",
+  sizeBytes: 1,
+  uploadedBy: "user:alice",
+  importedAt: "2026-10-08T09:00:00Z",
+  takenAt,
+  width,
+  height,
+  thumbnail: "ready",
 });
 
 describe("justify", () => {
   it("fills each row to the width and keeps every photo's shape", () => {
-    const photos = Array.from({ length: 9 }, (_, index) => photo(`p${index}`, "2026-05-01T08:00:00Z", index % 3 ? 4000 : 3000, index % 3 ? 3000 : 4000));
+    const photos = Array.from({ length: 9 }, (_, index) =>
+      photo(`p${index}`, "2026-05-01T08:00:00Z", index % 3 ? 4000 : 3000, index % 3 ? 3000 : 4000),
+    );
     const rows = justify(photos, assetAspect, 900, 180);
     expect(rows.flatMap((row) => row.boxes).map((box) => box.item.id)).toEqual(photos.map((item) => item.id));
     for (const row of rows.slice(0, -1)) {
@@ -31,9 +42,23 @@ describe("justify", () => {
 
 describe("timelineEntries", () => {
   it("heads months and days, and holds unloaded months open by their size", () => {
-    const may = [photo("a", "2026-05-02T08:00:00Z"), photo("b", "2026-05-02T07:00:00Z"), photo("c", "2026-05-01T08:00:00Z")];
+    const may = [
+      photo("a", "2026-05-02T08:00:00Z"),
+      photo("b", "2026-05-02T07:00:00Z"),
+      photo("c", "2026-05-01T08:00:00Z"),
+    ];
     const now = new Date("2026-10-10T08:00:00Z");
-    const entries = timelineEntries([{ month: "2026-05", photos: 3 }, { month: "2025-12", photos: 40 }], new Map([["2026-05", { assets: may }]]), [], 900, 180, now);
+    const entries = timelineEntries(
+      [
+        { month: "2026-05", photos: 3 },
+        { month: "2025-12", photos: 40 },
+      ],
+      new Map([["2026-05", { assets: may }]]),
+      [],
+      900,
+      180,
+      now,
+    );
     expect(entries.map((entry) => entry.kind)).toEqual(["month", "day", "row", "day", "row", "month", "placeholder"]);
     expect(entries[0].label).toBe("2026年5月");
     expect(entries[1].kind === "day" && entries[1].ids).toEqual(["a", "b"]);
@@ -46,8 +71,13 @@ describe("timelineEntries", () => {
   });
 
   it("puts uploads first and leaves out months that emptied", () => {
-    const entries = timelineEntries([{ month: "2026-05", photos: 1 }], new Map([["2026-05", { assets: [] }]]),
-      [{ key: "upload-1", name: "new.jpg", url: "blob:1", aspect: 1.5, progress: 0.5, state: "uploading" }], 900, 180);
+    const entries = timelineEntries(
+      [{ month: "2026-05", photos: 1 }],
+      new Map([["2026-05", { assets: [] }]]),
+      [{ key: "upload-1", name: "new.jpg", url: "blob:1", aspect: 1.5, progress: 0.5, state: "uploading" }],
+      900,
+      180,
+    );
     expect(entries.map((entry) => entry.kind)).toEqual(["heading", "pending"]);
     expect(entries[0].kind === "heading" && entries[0].detail).toBe("正在上传 1 张");
   });
@@ -66,12 +96,16 @@ describe("flatEntries", () => {
     const split = { at: 2, title: "相关度较低", text: "差距较大" };
     const entries = flatEntries(photos, 2000, 180, true, "", split);
     expect(entries.map((entry) => entry.kind)).toEqual(["row", "divider", "row", "more"]);
-    const ids = (entry: (typeof entries)[number]) => entry.kind === "row" ? entry.boxes.map((box) => box.item.id) : [];
+    const ids = (entry: (typeof entries)[number]) =>
+      entry.kind === "row" ? entry.boxes.map((box) => box.item.id) : [];
     expect(ids(entries[0])).toEqual(["a", "b"]);
     expect(ids(entries[2])).toEqual(["c", "d", "e"]);
     // Rows after the divider float its title while they scroll by.
     expect([entries[0].label, entries[2].label]).toEqual(["", "相关度较低"]);
     // A split at or past the loaded photos waits for them.
-    expect(flatEntries(photos, 2000, 180, true, "", { ...split, at: 5 }).map((entry) => entry.kind)).toEqual(["row", "more"]);
+    expect(flatEntries(photos, 2000, 180, true, "", { ...split, at: 5 }).map((entry) => entry.kind)).toEqual([
+      "row",
+      "more",
+    ]);
   });
 });

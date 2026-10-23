@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -106,10 +107,8 @@ func clean(raw string) (string, error) {
 	if !strings.HasPrefix(raw, "/") {
 		return "", fmt.Errorf("%s：需要绝对路径", raw)
 	}
-	for _, part := range strings.Split(raw, "/") {
-		if part == ".." {
-			return "", fmt.Errorf("%s：路径中不能有 ..", raw)
-		}
+	if slices.Contains(strings.Split(raw, "/"), "..") {
+		return "", fmt.Errorf("%s：路径中不能有 ..", raw) //nolint:staticcheck // ST1005: ".." is the path component, not punctuation.
 	}
 	return path.Clean(raw), nil
 }
@@ -124,7 +123,7 @@ func volumePath(account, sandboxPath string, target bool) (string, error) {
 		}
 		inside := strings.TrimPrefix(sandboxPath, a.sandbox+"/")
 		if target {
-			for _, part := range strings.Split(inside, "/") {
+			for part := range strings.SplitSeq(inside, "/") {
 				if strings.HasPrefix(part, ".a-nas-") {
 					return "", fmt.Errorf("%s：不能更改系统文件夹", sandboxPath)
 				}
@@ -146,8 +145,8 @@ func sourcePath(account, sandboxPath string) (string, error) {
 		{"/nas/共享空间", "spaces/shared", false},
 		{"/nas/助手", "assistant/" + account + "/files", false},
 	} {
-		if strings.HasPrefix(sandboxPath, a.sandbox+"/") {
-			return a.volume + "/" + strings.TrimPrefix(sandboxPath, a.sandbox+"/"), nil
+		if inside, ok := strings.CutPrefix(sandboxPath, a.sandbox+"/"); ok {
+			return a.volume + "/" + inside, nil
 		}
 	}
 	return "", fmt.Errorf("%s：只能复制个人空间、共享空间或 /nas/助手 中的文件", sandboxPath)
@@ -158,8 +157,8 @@ func sourcePath(account, sandboxPath string) (string, error) {
 // recycle bin imports files found there under their own name and folder.
 func trashFor(account, sandboxPath string) string {
 	var bin, inside string
-	if strings.HasPrefix(sandboxPath, "/nas/共享空间/") {
-		bin, inside = "spaces/shared/.a-nas-trash/"+account, strings.TrimPrefix(sandboxPath, "/nas/共享空间/")
+	if shared, ok := strings.CutPrefix(sandboxPath, "/nas/共享空间/"); ok {
+		bin, inside = "spaces/shared/.a-nas-trash/"+account, shared
 	} else {
 		bin, inside = "spaces/private/"+account+"/.a-nas-trash/"+account, strings.TrimPrefix(sandboxPath, "/nas/个人空间/")
 	}

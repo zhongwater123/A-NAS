@@ -34,7 +34,7 @@ describe("boot splash", () => {
     expect(container.querySelector(".boot-splash canvas")).not.toBeNull();
     expect(sessionStorage.getItem(bootIdentStorageKey)).toBe("1");
 
-    act(() => ident.hooks!.onFade(.4));
+    act(() => ident.hooks!.onFade(0.4));
     expect(container.querySelector<HTMLElement>(".boot-splash")!.style.opacity).toBe("0.4");
 
     act(() => ident.hooks!.onDone());

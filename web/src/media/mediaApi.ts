@@ -6,7 +6,12 @@ export type Category = "all" | "movie" | "show" | "other";
 export type SortOrder = "added" | "name" | "year" | "rating";
 export type Quality = "original" | "1080p" | "720p" | "480p";
 
-export interface LibraryFolder { entryId: string; name: string; path: string; missing?: boolean }
+export interface LibraryFolder {
+  entryId: string;
+  name: string;
+  path: string;
+  missing?: boolean;
+}
 export interface MediaLibrary {
   id: string;
   name: string;
@@ -22,10 +27,25 @@ export interface MediaLibrary {
   canManage: boolean;
   covers: string[];
 }
-export interface LibraryInput { name: string; kind?: LibraryKind; spaceId?: string; folderIds?: string[] }
+export interface LibraryInput {
+  name: string;
+  kind?: LibraryKind;
+  spaceId?: string;
+  folderIds?: string[];
+}
 
-export interface Artwork { poster: boolean; backdrop: boolean; thumb: boolean; version?: string }
-export interface Progress { position: number; duration: number; watched: boolean; playedAt?: string }
+export interface Artwork {
+  poster: boolean;
+  backdrop: boolean;
+  thumb: boolean;
+  version?: string;
+}
+export interface Progress {
+  position: number;
+  duration: number;
+  watched: boolean;
+  playedAt?: string;
+}
 export interface Title {
   id: string;
   type: TitleType;
@@ -50,8 +70,13 @@ export interface Title {
   season?: number;
   episode?: number;
 }
-export interface TitlePage { items: Title[]; total: number }
-export interface TitleResults extends TitlePage { genres: string[] }
+export interface TitlePage {
+  items: Title[];
+  total: number;
+}
+export interface TitleResults extends TitlePage {
+  genres: string[];
+}
 export interface Home {
   featured: Title[];
   continue: Title[];
@@ -63,17 +88,59 @@ export interface Home {
   libraries: number;
   scanning: boolean;
 }
-export interface CollectionRef { id: string; name: string }
-export interface Episode { id: string; season: number; episode: number; title: string; plot?: string; duration?: number; addedAt: string; artwork: Artwork; progress?: Progress; file?: string }
+export interface CollectionRef {
+  id: string;
+  name: string;
+}
+export interface Episode {
+  id: string;
+  season: number;
+  episode: number;
+  title: string;
+  plot?: string;
+  duration?: number;
+  addedAt: string;
+  artwork: Artwork;
+  progress?: Progress;
+  file?: string;
+}
 // folder names the folder the show has to itself; namedByNfo tells that tvshow.nfo, not file names, gives the title.
-export interface ShowDetail extends Title { plot?: string; next?: Episode; seasonList: { number: number; episodes: Episode[] }[]; collections: CollectionRef[]; folder?: string; namedByNfo?: boolean }
-export interface AudioTrack { index: number; label: string; language?: string; codec: string; channels?: number; default?: boolean }
-export interface SubtitleTrack { id: string; label: string; language?: string; external: boolean; default?: boolean }
+export interface ShowDetail extends Title {
+  plot?: string;
+  next?: Episode;
+  seasonList: { number: number; episodes: Episode[] }[];
+  collections: CollectionRef[];
+  folder?: string;
+  namedByNfo?: boolean;
+}
+export interface AudioTrack {
+  index: number;
+  label: string;
+  language?: string;
+  codec: string;
+  channels?: number;
+  default?: boolean;
+}
+export interface SubtitleTrack {
+  id: string;
+  label: string;
+  language?: string;
+  external: boolean;
+  default?: boolean;
+}
 export interface VideoDetail extends Title {
   plot?: string;
   episodeTitle?: string;
   file: { name: string; folder: string; sizeBytes: number; modifiedAt: string };
-  media?: { container: string; videoCodec?: string; audioCodec?: string; width?: number; height?: number; frameRate?: number; bitrate?: number };
+  media?: {
+    container: string;
+    videoCodec?: string;
+    audioCodec?: string;
+    width?: number;
+    height?: number;
+    frameRate?: number;
+    bitrate?: number;
+  };
   probeState: "pending" | "ready" | "failed";
   audio: AudioTrack[];
   subtitles: SubtitleTrack[];
@@ -85,40 +152,100 @@ export interface VideoDetail extends Title {
   namedByNfo?: boolean;
 }
 // mime names a converted stream's codecs, so the player can buffer it itself.
-export interface Playback { mode: "direct" | "remux" | "transcode"; url: string; duration?: number; reason?: string; audio: number; quality: Quality; qualities: Quality[]; mime?: string }
-export interface Collection { id: string; name: string; automatic: boolean; count: number; updatedAt: string; covers: string[] }
-export interface CollectionDetail extends Collection { items: Title[] }
-export interface FolderRoot { libraryId: string; libraryName: string; entryId: string; name: string; path: string; videos: number; cover?: string; missing?: boolean }
-export interface Folder { name: string; path: string; videos: number; cover?: string }
-export interface FolderListing { root: FolderRoot; path: string; folders: Folder[]; videos: Title[] }
+export interface Playback {
+  mode: "direct" | "remux" | "transcode";
+  url: string;
+  duration?: number;
+  reason?: string;
+  audio: number;
+  quality: Quality;
+  qualities: Quality[];
+  mime?: string;
+}
+export interface Collection {
+  id: string;
+  name: string;
+  automatic: boolean;
+  count: number;
+  updatedAt: string;
+  covers: string[];
+}
+export interface CollectionDetail extends Collection {
+  items: Title[];
+}
+export interface FolderRoot {
+  libraryId: string;
+  libraryName: string;
+  entryId: string;
+  name: string;
+  path: string;
+  videos: number;
+  cover?: string;
+  missing?: boolean;
+}
+export interface Folder {
+  name: string;
+  path: string;
+  videos: number;
+  cover?: string;
+}
+export interface FolderListing {
+  root: FolderRoot;
+  path: string;
+  folders: Folder[];
+  videos: Title[];
+}
 
 const base = "/api/v1/media";
 const id = encodeURIComponent;
-const body = (method: string, value: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+const body = (method: string, value: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(value),
+});
 
 export const listLibraries = () => request<{ items: MediaLibrary[]; processing: boolean }>(`${base}/libraries`);
-export const createLibrary = (input: LibraryInput) => request<MediaLibrary>(`${base}/libraries`, body("POST", input), true);
-export const updateLibrary = (libraryId: string, input: LibraryInput) => request<MediaLibrary>(`${base}/libraries/${id(libraryId)}`, body("PATCH", input), true);
-export const deleteLibrary = (libraryId: string) => request<void>(`${base}/libraries/${id(libraryId)}`, { method: "DELETE" }, true);
+export const createLibrary = (input: LibraryInput) =>
+  request<MediaLibrary>(`${base}/libraries`, body("POST", input), true);
+export const updateLibrary = (libraryId: string, input: LibraryInput) =>
+  request<MediaLibrary>(`${base}/libraries/${id(libraryId)}`, body("PATCH", input), true);
+export const deleteLibrary = (libraryId: string) =>
+  request<void>(`${base}/libraries/${id(libraryId)}`, { method: "DELETE" }, true);
 // scanLibrary starts a scan and returns the library as it reads while scanning.
-export const scanLibrary = (libraryId: string) => request<MediaLibrary>(`${base}/libraries/${id(libraryId)}/scan`, { method: "POST" }, true);
+export const scanLibrary = (libraryId: string) =>
+  request<MediaLibrary>(`${base}/libraries/${id(libraryId)}/scan`, { method: "POST" }, true);
 
 export const getHome = () => request<Home>(`${base}/home`);
-export interface TitleQuery { category?: Category; library?: string; genre?: string; sort?: SortOrder; q?: string; offset?: number; limit?: number }
+export interface TitleQuery {
+  category?: Category;
+  library?: string;
+  genre?: string;
+  sort?: SortOrder;
+  q?: string;
+  offset?: number;
+  limit?: number;
+}
 export function listTitles(query: TitleQuery) {
   const parameters = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") parameters.set(key, String(value));
+  for (const [key, value] of Object.entries(query))
+    if (value !== undefined && value !== "") parameters.set(key, String(value));
   return request<TitleResults>(`${base}/titles?${parameters}`);
 }
 export const getShow = (showId: string) => request<ShowDetail>(`${base}/shows/${id(showId)}`);
 export const getVideo = (videoId: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`);
 // renameVideoFile renames the 片源, the video's file, with the subtitles, NFO
 // and artwork named after it.
-export const renameVideoFile = (videoId: string, fileName: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`, body("PATCH", { fileName }), true);
+export const renameVideoFile = (videoId: string, fileName: string) =>
+  request<VideoDetail>(`${base}/videos/${id(videoId)}`, body("PATCH", { fileName }), true);
 // renameShow renames a show's own folder and the episode files carrying its title.
-export const renameShow = (showId: string, name: string) => request<ShowDetail>(`${base}/shows/${id(showId)}`, body("PATCH", { name }), true);
+export const renameShow = (showId: string, name: string) =>
+  request<ShowDetail>(`${base}/shows/${id(showId)}`, body("PATCH", { name }), true);
 export function getPlayback(videoId: string, options: { caps: string; audio?: number; quality?: Quality }) {
-  const parameters = new URLSearchParams({ caps: options.caps, audio: String(options.audio ?? -1), quality: options.quality ?? "original" });
+  const parameters = new URLSearchParams({
+    caps: options.caps,
+    audio: String(options.audio ?? -1),
+    quality: options.quality ?? "original",
+  });
   return request<Playback>(`${base}/videos/${id(videoId)}/playback?${parameters}`);
 }
 // streamURL asks for a converted stream directly, for when the original
@@ -128,27 +255,43 @@ export function streamURL(videoId: string, mode: "remux" | "transcode", audio: n
 }
 // Progress is saved while the page may be closing, so it keeps the request alive.
 export const saveProgress = (videoId: string, position: number, duration: number) =>
-  request<Progress>(`${base}/videos/${id(videoId)}/progress`, { ...body("PUT", { position: Math.max(0, position), duration: Math.max(0, duration) }), keepalive: true }, true);
-export const setWatched = (titleId: string, watched: boolean) => request<void>(`${base}/titles/${id(titleId)}/watched`, body("PUT", { watched }), true);
-export const setFavorite = (titleId: string, favorite: boolean) => request<void>(`${base}/favorites/${id(titleId)}`, { method: favorite ? "PUT" : "DELETE" }, true);
+  request<Progress>(
+    `${base}/videos/${id(videoId)}/progress`,
+    { ...body("PUT", { position: Math.max(0, position), duration: Math.max(0, duration) }), keepalive: true },
+    true,
+  );
+export const setWatched = (titleId: string, watched: boolean) =>
+  request<void>(`${base}/titles/${id(titleId)}/watched`, body("PUT", { watched }), true);
+export const setFavorite = (titleId: string, favorite: boolean) =>
+  request<void>(`${base}/favorites/${id(titleId)}`, { method: favorite ? "PUT" : "DELETE" }, true);
 export const listFavorites = () => request<TitlePage>(`${base}/favorites`);
-export const listHistory = (offset = 0, limit = 200) => request<TitlePage>(`${base}/history?offset=${offset}&limit=${limit}`);
-export const removeHistory = (videoId: string) => request<void>(`${base}/history/${id(videoId)}`, { method: "DELETE" }, true);
+export const listHistory = (offset = 0, limit = 200) =>
+  request<TitlePage>(`${base}/history?offset=${offset}&limit=${limit}`);
+export const removeHistory = (videoId: string) =>
+  request<void>(`${base}/history/${id(videoId)}`, { method: "DELETE" }, true);
 export const clearHistory = () => request<void>(`${base}/history`, { method: "DELETE" }, true);
 export const listCollections = async () => (await request<{ items: Collection[] }>(`${base}/collections`)).items;
-export const createCollection = (name: string, items: string[] = []) => request<Collection>(`${base}/collections`, body("POST", { name, items }), true);
-export const getCollection = (collectionId: string) => request<CollectionDetail>(`${base}/collections/${id(collectionId)}`);
-export const renameCollection = (collectionId: string, name: string) => request<void>(`${base}/collections/${id(collectionId)}`, body("PATCH", { name }), true);
-export const deleteCollection = (collectionId: string) => request<void>(`${base}/collections/${id(collectionId)}`, { method: "DELETE" }, true);
-export const addToCollection = (collectionId: string, items: string[]) => request<void>(`${base}/collections/${id(collectionId)}/items`, body("POST", { items }), true);
+export const createCollection = (name: string, items: string[] = []) =>
+  request<Collection>(`${base}/collections`, body("POST", { name, items }), true);
+export const getCollection = (collectionId: string) =>
+  request<CollectionDetail>(`${base}/collections/${id(collectionId)}`);
+export const renameCollection = (collectionId: string, name: string) =>
+  request<void>(`${base}/collections/${id(collectionId)}`, body("PATCH", { name }), true);
+export const deleteCollection = (collectionId: string) =>
+  request<void>(`${base}/collections/${id(collectionId)}`, { method: "DELETE" }, true);
+export const addToCollection = (collectionId: string, items: string[]) =>
+  request<void>(`${base}/collections/${id(collectionId)}/items`, body("POST", { items }), true);
 export const removeFromCollection = (collectionId: string, titleId: string) =>
   request<void>(`${base}/collections/${id(collectionId)}/items/${id(titleId)}`, { method: "DELETE" }, true);
 export const listFolderRoots = async () => (await request<{ items: FolderRoot[] }>(`${base}/folders`)).items;
-export const getFolder = (entryId: string, path = "") => request<FolderListing>(`${base}/folders/${id(entryId)}?path=${id(path)}`);
+export const getFolder = (entryId: string, path = "") =>
+  request<FolderListing>(`${base}/folders/${id(entryId)}?path=${id(path)}`);
 
 export type ArtworkKind = "poster" | "backdrop" | "thumb";
-export const artworkURL = (titleId: string, kind: ArtworkKind, version = "") => `${base}/artwork/${id(titleId)}/${kind}${version ? `?v=${id(version)}` : ""}`;
-export const subtitleURL = (videoId: string, trackId: string) => `${base}/videos/${id(videoId)}/subtitles/${id(trackId)}`;
+export const artworkURL = (titleId: string, kind: ArtworkKind, version = "") =>
+  `${base}/artwork/${id(titleId)}/${kind}${version ? `?v=${id(version)}` : ""}`;
+export const subtitleURL = (videoId: string, trackId: string) =>
+  `${base}/videos/${id(videoId)}/subtitles/${id(trackId)}`;
 
 // browserCapabilities lists what this browser decodes beyond what every
 // browser plays, so the server can play more files without converting them.
@@ -156,10 +299,18 @@ export function browserCapabilities(): string {
   if (typeof document === "undefined") return "";
   const video = document.createElement("video");
   const can = (type: string) => {
-    try { return video.canPlayType(type) !== ""; } catch { return false; }
+    try {
+      return video.canPlayType(type) !== "";
+    } catch {
+      return false;
+    }
   };
   const source = (type: string) => {
-    try { return typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(type); } catch { return false; }
+    try {
+      return typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(type);
+    } catch {
+      return false;
+    }
   };
   const caps: string[] = [];
   if (can('video/mp4; codecs="hvc1.1.6.L93.B0"') || source('video/mp4; codecs="hvc1.1.6.L93.B0"')) caps.push("hevc");

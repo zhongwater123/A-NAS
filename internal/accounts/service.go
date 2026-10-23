@@ -1129,7 +1129,7 @@ func verifyPassword(password, encoded string) bool {
 	var memory uint64
 	var iterations uint64
 	var parallelism uint64
-	for _, value := range strings.Split(parts[3], ",") {
+	for value := range strings.SplitSeq(parts[3], ",") {
 		key, raw, found := strings.Cut(value, "=")
 		if !found {
 			return false

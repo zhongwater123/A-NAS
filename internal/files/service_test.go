@@ -212,7 +212,7 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 		t.Fatalf("snapshot-restored content = %q, err = %v", snapshotBytes, err)
 	}
 
-	if _, err := service.List(ctx, bob, privateSpace.ID, ""); err != files.ErrForbidden {
+	if _, err := service.List(ctx, bob, privateSpace.ID, ""); !errors.Is(err, files.ErrForbidden) {
 		t.Fatalf("Bob List(Alice private) error = %v, want ErrForbidden", err)
 	}
 }

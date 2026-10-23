@@ -11,8 +11,23 @@ import { FoldersPage, type FolderPlace } from "./Folders";
 import { HomePage } from "./Home";
 import { LibrariesPage, LibraryDialog } from "./Libraries";
 import {
-  clearHistory, createCollection, deleteCollection, deleteLibrary, getHome, getShow, listLibraries, removeFromCollection, removeHistory, renameCollection, scanLibrary,
-  setFavorite, setWatched, type Category, type Home, type MediaLibrary, type Title,
+  clearHistory,
+  createCollection,
+  deleteCollection,
+  deleteLibrary,
+  getHome,
+  getShow,
+  listLibraries,
+  removeFromCollection,
+  removeHistory,
+  renameCollection,
+  scanLibrary,
+  setFavorite,
+  setWatched,
+  type Category,
+  type Home,
+  type MediaLibrary,
+  type Title,
 } from "./mediaApi";
 import { Player, type PlayRequest } from "./Player";
 import { type Section, Sidebar } from "./Sidebar";
@@ -43,10 +58,19 @@ const followWindow = 30_000;
 
 function sectionOf(place: Place): Section | undefined {
   switch (place.kind) {
-    case "home": case "history": case "favorites": case "folders": case "collections": case "libraries": return place.kind;
-    case "collection": return "collections";
-    case "library": return "libraries";
-    case "category": return `category:${place.category}`;
+    case "home":
+    case "history":
+    case "favorites":
+    case "folders":
+    case "collections":
+    case "libraries":
+      return place.kind;
+    case "collection":
+      return "collections";
+    case "library":
+      return "libraries";
+    case "category":
+      return `category:${place.category}`;
   }
   return undefined;
 }
@@ -102,7 +126,12 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       setLibraries(result.items);
       setProcessing(result.processing);
       setFailure("");
-      const next = result.items.map((library) => `${library.id}:${library.counts.movies}:${library.counts.shows}:${library.counts.episodes}:${library.counts.others}:${library.scan.state}`).join("|");
+      const next = result.items
+        .map(
+          (library) =>
+            `${library.id}:${library.counts.movies}:${library.counts.shows}:${library.counts.episodes}:${library.counts.others}:${library.scan.state}`,
+        )
+        .join("|");
       if (signature.current && next !== signature.current) refresh();
       signature.current = next;
       return result.items.some((library) => library.scan.state !== "idle");
@@ -126,7 +155,11 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
     };
     state.tick = () => void tick();
     void tick();
-    return () => { live = false; window.clearTimeout(state.timer); state.tick = undefined; };
+    return () => {
+      live = false;
+      window.clearTimeout(state.timer);
+      state.tick = undefined;
+    };
   }, [loadLibraries]);
   // follow refreshes the libraries now and keeps polling quickly for a while.
   const follow = useCallback(() => {
@@ -137,7 +170,9 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
   // the dialog is not there to show it.
   const [uploading, setUploading] = useState<{ scope: Category; preferred?: string }>();
   const uploadShown = useRef(false);
-  useEffect(() => { uploadShown.current = Boolean(uploading); }, [uploading]);
+  useEffect(() => {
+    uploadShown.current = Boolean(uploading);
+  }, [uploading]);
   const lastUpload = useRef<{ scope: Category; preferred?: string }>({ scope: "all" });
   const uploads = useUploads({
     onUploaded: follow,
@@ -146,7 +181,12 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
       if (uploadShown.current) return;
       const done = settled.filter((item) => item.state === "done").length;
       const failed = settled.filter((item) => item.state === "failed").length;
-      if (failed) toast({ text: `${failed} 个文件上传失败`, tone: "error", action: { label: "查看", run: () => setUploading(lastUpload.current) } });
+      if (failed)
+        toast({
+          text: `${failed} 个文件上传失败`,
+          tone: "error",
+          action: { label: "查看", run: () => setUploading(lastUpload.current) },
+        });
       else if (done) toast({ text: `已上传 ${done} 个文件，新视频稍后出现在影视中心` });
     },
   });
@@ -162,60 +202,102 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
   };
   const [dropping, setDropping] = useState(false);
 
-  const rescan = useCallback((targets: MediaLibrary[], message: string) => {
-    Promise.all(targets.map((library) => scanLibrary(library.id))).then((scanned) => {
-      setLibraries((current) => current?.map((library) => scanned.find((item) => item?.id === library.id) ?? library));
-      toast({ text: message });
-      follow();
-    }, (caught) => onError(messageOf(caught)));
-  }, [follow, toast, onError]);
+  const rescan = useCallback(
+    (targets: MediaLibrary[], message: string) => {
+      Promise.all(targets.map((library) => scanLibrary(library.id))).then(
+        (scanned) => {
+          setLibraries((current) =>
+            current?.map((library) => scanned.find((item) => item?.id === library.id) ?? library),
+          );
+          toast({ text: message });
+          follow();
+        },
+        (caught) => onError(messageOf(caught)),
+      );
+    },
+    [follow, toast, onError],
+  );
 
   useEffect(() => {
     if (place.kind !== "home") return;
     let live = true;
-    getHome().then((value) => { if (live) setHome(value); }, (caught) => { if (live) onError(messageOf(caught)); });
-    return () => { live = false; };
+    getHome().then(
+      (value) => {
+        if (live) setHome(value);
+      },
+      (caught) => {
+        if (live) onError(messageOf(caught));
+      },
+    );
+    return () => {
+      live = false;
+    };
   }, [place.kind, refreshKey, onError]);
 
-  const closePlayer = () => { setPlay(undefined); refresh(); };
+  const closePlayer = () => {
+    setPlay(undefined);
+    refresh();
+  };
 
-  const playTitle = useCallback(async (title: Title, restart = false) => {
-    if (title.type === "show") {
-      try {
-        const show = await getShow(title.id);
-        if (show.next) setPlay({ videoId: show.next.id, restart });
-      } catch (caught) { onError(messageOf(caught)); }
-      return;
-    }
-    setPlay({ videoId: title.id, restart });
-  }, [onError]);
+  const playTitle = useCallback(
+    async (title: Title, restart = false) => {
+      if (title.type === "show") {
+        try {
+          const show = await getShow(title.id);
+          if (show.next) setPlay({ videoId: show.next.id, restart });
+        } catch (caught) {
+          onError(messageOf(caught));
+        }
+        return;
+      }
+      setPlay({ videoId: title.id, restart });
+    },
+    [onError],
+  );
 
-  const actions: MediaActions = useMemo(() => ({
-    open: (title) => {
-      if (title.type === "show") navigate({ kind: "show", id: title.id });
-      else if (title.type === "episode" && title.showId) navigate({ kind: "show", id: title.showId });
-      else navigate({ kind: "video", id: title.id });
-    },
-    play: (title, restart) => void playTitle(title, restart),
-    toggleFavorite: (title) => {
-      setFavorite(title.id, !title.favorite).then(() => {
-        toast({ text: title.favorite ? "已取消收藏" : "已加入我的收藏" });
+  const actions: MediaActions = useMemo(
+    () => ({
+      open: (title) => {
+        if (title.type === "show") navigate({ kind: "show", id: title.id });
+        else if (title.type === "episode" && title.showId) navigate({ kind: "show", id: title.showId });
+        else navigate({ kind: "video", id: title.id });
+      },
+      play: (title, restart) => void playTitle(title, restart),
+      toggleFavorite: (title) => {
+        setFavorite(title.id, !title.favorite).then(
+          () => {
+            toast({ text: title.favorite ? "已取消收藏" : "已加入我的收藏" });
+            refresh();
+          },
+          (caught) => onError(messageOf(caught)),
+        );
+      },
+      setWatched: (title, watched) => {
+        setWatched(title.id, watched).then(
+          () => {
+            toast({ text: watched ? "已标记为已看" : "已标记为未看" });
+            refresh();
+          },
+          (caught) => onError(messageOf(caught)),
+        );
+      },
+      addToCollection: (title) => setPicker(title),
+      rename: (title) => setRenaming(title),
+      renamed: (message) => {
+        toast({ text: message });
+        follow();
         refresh();
-      }, (caught) => onError(messageOf(caught)));
-    },
-    setWatched: (title, watched) => {
-      setWatched(title.id, watched).then(() => {
-        toast({ text: watched ? "已标记为已看" : "已标记为未看" });
-        refresh();
-      }, (caught) => onError(messageOf(caught)));
-    },
-    addToCollection: (title) => setPicker(title),
-    rename: (title) => setRenaming(title),
-    renamed: (message) => { toast({ text: message }); follow(); refresh(); },
-  }), [navigate, playTitle, toast, refresh, onError]);
+      },
+    }),
+    [navigate, playTitle, toast, refresh, onError],
+  );
 
   const openLibraryDialog = async (library?: MediaLibrary) => {
-    try { setEditing({ library, spaces: await listSpaces() }); } catch (caught) { onError(messageOf(caught)); }
+    try {
+      setEditing({ library, spaces: await listSpaces() });
+    } catch (caught) {
+      onError(messageOf(caught));
+    }
   };
   const canCreate = true;
 
@@ -228,19 +310,34 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
   const submitSearch = (value: string) => {
     setQuery(value);
     const trimmed = value.trim();
-    if (!trimmed) { if (place.kind === "search") back(); return; }
+    if (!trimmed) {
+      if (place.kind === "search") back();
+      return;
+    }
     if (place.kind === "search") setStack((current) => [...current.slice(0, -1), { kind: "search", query: trimmed }]);
     else navigate({ kind: "search", query: trimmed });
   };
 
   const removeLibrary = async (library: MediaLibrary) => {
     const ok = await dialogs.confirm({
-      title: `删除媒体库“${library.name}”？`, danger: true, confirm: "删除媒体库",
-      message: <>只会删除影视中心里的目录、播放进度和收藏。<strong>文件夹中的视频文件不会被删除</strong>，以后可以重新添加。</>,
+      title: `删除媒体库“${library.name}”？`,
+      danger: true,
+      confirm: "删除媒体库",
+      message: (
+        <>
+          只会删除影视中心里的目录、播放进度和收藏。<strong>文件夹中的视频文件不会被删除</strong>，以后可以重新添加。
+        </>
+      ),
     });
     if (!ok) return;
-    try { await deleteLibrary(library.id); toast({ text: `已删除媒体库“${library.name}”` }); follow(); refresh(); }
-    catch (caught) { onError(messageOf(caught)); }
+    try {
+      await deleteLibrary(library.id);
+      toast({ text: `已删除媒体库“${library.name}”` });
+      follow();
+      refresh();
+    } catch (caught) {
+      onError(messageOf(caught));
+    }
   };
 
   const libraryOf = (id: string) => libraries?.find((library) => library.id === id);
@@ -250,73 +347,197 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
   // category page offers the libraries whose titles it lists.
   const uploadScope: Category = place.kind === "category" ? place.category : "all";
   const uploadPreferred = place.kind === "library" ? place.id : undefined;
-  const dropLabel = place.kind === "library" ? `“${libraryOf(place.id)?.name ?? "媒体库"}”` : place.kind === "category" ? { all: "影视中心", movie: "“电影”", show: "“电视剧”", other: "“其他”" }[place.category] : "媒体库";
+  const dropLabel =
+    place.kind === "library"
+      ? `“${libraryOf(place.id)?.name ?? "媒体库"}”`
+      : place.kind === "category"
+        ? { all: "影视中心", movie: "“电影”", show: "“电视剧”", other: "“其他”" }[place.category]
+        : "媒体库";
 
   let page;
   switch (place.kind) {
     case "home":
-      page = !home ? <Loading /> : (
-        <HomePage home={home} canCreate={canCreate} onLibraries={() => navigate({ kind: "libraries" }, false)} onCreateLibrary={() => void openLibraryDialog()}
+      page = !home ? (
+        <Loading />
+      ) : (
+        <HomePage
+          home={home}
+          canCreate={canCreate}
+          onLibraries={() => navigate({ kind: "libraries" }, false)}
+          onCreateLibrary={() => void openLibraryDialog()}
           onUpload={uploadTargets(libraries ?? [], "all").length ? () => openUpload("all") : undefined}
           onCategory={(category) => {
             if (category === "favorites") navigate({ kind: "favorites" }, false);
             else if (category === "history") navigate({ kind: "history" }, false);
             else navigate({ kind: "category", category }, false);
-          }} />
+          }}
+        />
       );
       break;
     case "history":
-      page = <HistoryPage refreshKey={refreshKey} onError={onError}
-        onRemove={(title) => { removeHistory(title.id).then(refresh, (caught) => onError(messageOf(caught))); }}
-        onClear={async () => {
-          if (await dialogs.confirm({ title: "清空播放记录？", message: "只清除列表，播放进度与已看标记会保留。", confirm: "清空", danger: true })) {
-            clearHistory().then(() => { toast({ text: "已清空播放记录" }); refresh(); }, (caught) => onError(messageOf(caught)));
-          }
-        }} />;
+      page = (
+        <HistoryPage
+          refreshKey={refreshKey}
+          onError={onError}
+          onRemove={(title) => {
+            removeHistory(title.id).then(refresh, (caught) => onError(messageOf(caught)));
+          }}
+          onClear={async () => {
+            if (
+              await dialogs.confirm({
+                title: "清空播放记录？",
+                message: "只清除列表，播放进度与已看标记会保留。",
+                confirm: "清空",
+                danger: true,
+              })
+            ) {
+              clearHistory().then(
+                () => {
+                  toast({ text: "已清空播放记录" });
+                  refresh();
+                },
+                (caught) => onError(messageOf(caught)),
+              );
+            }
+          }}
+        />
+      );
       break;
     case "favorites":
       page = <FavoritesPage refreshKey={refreshKey} onError={onError} />;
       break;
     case "folders":
-      page = <FoldersPage place={place.folder} refreshKey={refreshKey} onError={onError} onPlace={(folder) => setStack((current) => [...current.slice(0, -1), { kind: "folders", folder }])} />;
+      page = (
+        <FoldersPage
+          place={place.folder}
+          refreshKey={refreshKey}
+          onError={onError}
+          onPlace={(folder) => setStack((current) => [...current.slice(0, -1), { kind: "folders", folder }])}
+        />
+      );
       break;
     case "collections":
-      page = <CollectionsPage refreshKey={refreshKey} onError={onError} onOpen={(collection) => navigate({ kind: "collection", id: collection.id })}
-        onCreate={async () => {
-          const name = await dialogs.prompt({ title: "新建合集", label: "合集名称", confirm: "新建" });
-          if (!name) return;
-          createCollection(name).then((collection) => { toast({ text: `已新建合集“${collection.name}”` }); refresh(); }, (caught) => onError(messageOf(caught)));
-        }} />;
+      page = (
+        <CollectionsPage
+          refreshKey={refreshKey}
+          onError={onError}
+          onOpen={(collection) => navigate({ kind: "collection", id: collection.id })}
+          onCreate={async () => {
+            const name = await dialogs.prompt({ title: "新建合集", label: "合集名称", confirm: "新建" });
+            if (!name) return;
+            createCollection(name).then(
+              (collection) => {
+                toast({ text: `已新建合集“${collection.name}”` });
+                refresh();
+              },
+              (caught) => onError(messageOf(caught)),
+            );
+          }}
+        />
+      );
       break;
     case "collection":
-      page = <CollectionPage id={place.id} refreshKey={refreshKey} onError={onError} onBack={back}
-        onRename={async (collection) => {
-          const name = await dialogs.prompt({ title: "重命名合集", label: "合集名称", value: collection.name, confirm: "保存" });
-          if (name && name !== collection.name) renameCollection(collection.id, name).then(refresh, (caught) => onError(messageOf(caught)));
-        }}
-        onDelete={async (collection) => {
-          if (await dialogs.confirm({ title: `删除合集“${collection.name}”？`, message: "合集里的影片不会被删除。", confirm: "删除合集", danger: true })) {
-            deleteCollection(collection.id).then(() => { toast({ text: "已删除合集" }); back(); refresh(); }, (caught) => onError(messageOf(caught)));
-          }
-        }}
-        onRemove={(collection, title) => { removeFromCollection(collection.id, title.id).then(() => { toast({ text: `已从“${collection.name}”移除` }); refresh(); }, (caught) => onError(messageOf(caught))); }} />;
+      page = (
+        <CollectionPage
+          id={place.id}
+          refreshKey={refreshKey}
+          onError={onError}
+          onBack={back}
+          onRename={async (collection) => {
+            const name = await dialogs.prompt({
+              title: "重命名合集",
+              label: "合集名称",
+              value: collection.name,
+              confirm: "保存",
+            });
+            if (name && name !== collection.name)
+              renameCollection(collection.id, name).then(refresh, (caught) => onError(messageOf(caught)));
+          }}
+          onDelete={async (collection) => {
+            if (
+              await dialogs.confirm({
+                title: `删除合集“${collection.name}”？`,
+                message: "合集里的影片不会被删除。",
+                confirm: "删除合集",
+                danger: true,
+              })
+            ) {
+              deleteCollection(collection.id).then(
+                () => {
+                  toast({ text: "已删除合集" });
+                  back();
+                  refresh();
+                },
+                (caught) => onError(messageOf(caught)),
+              );
+            }
+          }}
+          onRemove={(collection, title) => {
+            removeFromCollection(collection.id, title.id).then(
+              () => {
+                toast({ text: `已从“${collection.name}”移除` });
+                refresh();
+              },
+              (caught) => onError(messageOf(caught)),
+            );
+          }}
+        />
+      );
       break;
     case "libraries":
-      page = <LibrariesPage libraries={libraries} processing={processing} canCreate={canCreate}
-        onOpen={(library) => navigate({ kind: "library", id: library.id })}
-        onCreate={() => void openLibraryDialog()} onEdit={(library) => void openLibraryDialog(library)} onDelete={(library) => void removeLibrary(library)}
-        onScan={(library) => rescan([library], `正在重新扫描“${library.name}”`)} onUpload={(library) => openUpload("all", library?.id)} />;
+      page = (
+        <LibrariesPage
+          libraries={libraries}
+          processing={processing}
+          canCreate={canCreate}
+          onOpen={(library) => navigate({ kind: "library", id: library.id })}
+          onCreate={() => void openLibraryDialog()}
+          onEdit={(library) => void openLibraryDialog(library)}
+          onDelete={(library) => void removeLibrary(library)}
+          onScan={(library) => rescan([library], `正在重新扫描“${library.name}”`)}
+          onUpload={(library) => openUpload("all", library?.id)}
+        />
+      );
       break;
     case "library": {
       const library = libraryOf(place.id);
-      page = library ? <CategoryPage category="all" library={library} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} onUpload={() => openUpload("all", library.id)} /> : <Loading />;
+      page = library ? (
+        <CategoryPage
+          category="all"
+          library={library}
+          libraries={libraries ?? []}
+          refreshKey={refreshKey}
+          onError={onError}
+          onUpload={() => openUpload("all", library.id)}
+        />
+      ) : (
+        <Loading />
+      );
       break;
     }
     case "category":
-      page = <CategoryPage key={place.category} category={place.category} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} onUpload={() => openUpload(place.category)} />;
+      page = (
+        <CategoryPage
+          key={place.category}
+          category={place.category}
+          libraries={libraries ?? []}
+          refreshKey={refreshKey}
+          onError={onError}
+          onUpload={() => openUpload(place.category)}
+        />
+      );
       break;
     case "search":
-      page = <CategoryPage key="search" category="all" search={place.query} libraries={libraries ?? []} refreshKey={refreshKey} onError={onError} />;
+      page = (
+        <CategoryPage
+          key="search"
+          category="all"
+          search={place.query}
+          libraries={libraries ?? []}
+          refreshKey={refreshKey}
+          onError={onError}
+        />
+      );
       break;
     case "video":
       page = <VideoPage id={place.id} refreshKey={refreshKey} onBack={back} onError={onError} />;
@@ -328,10 +549,22 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
 
   return (
     <ActionsContext.Provider value={actions}>
-      <div ref={root} className={`mc-app ${narrow ? "narrow" : ""} ${sidebarOpen ? "with-sidebar" : ""}`} data-user={userId}
-        onDragOver={(event) => { if (hasFiles(event)) { event.preventDefault(); if (play) event.dataTransfer.dropEffect = "none"; } }}
-        onDrop={(event) => { if (hasFiles(event)) event.preventDefault(); }}
-        onMouseDown={(event) => { if (event.button === 3 || event.button === 4) event.preventDefault(); }}
+      <div
+        ref={root}
+        className={`mc-app ${narrow ? "narrow" : ""} ${sidebarOpen ? "with-sidebar" : ""}`}
+        data-user={userId}
+        onDragOver={(event) => {
+          if (hasFiles(event)) {
+            event.preventDefault();
+            if (play) event.dataTransfer.dropEffect = "none";
+          }
+        }}
+        onDrop={(event) => {
+          if (hasFiles(event)) event.preventDefault();
+        }}
+        onMouseDown={(event) => {
+          if (event.button === 3 || event.button === 4) event.preventDefault();
+        }}
         onMouseUp={(event) => {
           // The mouse's back button steps back inside the media center
           // instead of taking the browser away from the NAS desktop.
@@ -340,59 +573,162 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
           if (event.button === 4) return;
           if (play) closePlayer();
           else back();
-        }}>
+        }}
+      >
         {(sidebarOpen || narrow) && (
           <div className={`mc-side ${narrow ? "drawer" : ""} ${sidebarOpen ? "open" : ""}`}>
             <Sidebar active={sectionOf(place)} libraries={libraries} processing={processing} onSelect={select} />
           </div>
         )}
         {narrow && drawer && <div className="mc-scrim" onPointerDown={() => setDrawer(false)} />}
-        <main className={`mc-main ${detail ? "detail" : ""}`}
-          onDragEnter={(event) => { if (hasFiles(event) && !uploading) { event.preventDefault(); setDropping(true); } }}>
+        <main
+          className={`mc-main ${detail ? "detail" : ""}`}
+          onDragEnter={(event) => {
+            if (hasFiles(event) && !uploading) {
+              event.preventDefault();
+              setDropping(true);
+            }
+          }}
+        >
           <div className="mc-topbar">
-            <button type="button" className="mc-icon-button" aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"} onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}><PanelLeft /></button>
-            {stack.length > 1 && <button type="button" className="mc-icon-button" aria-label="返回" onClick={back}><ArrowLeft /></button>}
+            <button
+              type="button"
+              className="mc-icon-button"
+              aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+              onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}
+            >
+              <PanelLeft />
+            </button>
+            {stack.length > 1 && (
+              <button type="button" className="mc-icon-button" aria-label="返回" onClick={back}>
+                <ArrowLeft />
+              </button>
+            )}
             <label className="mc-search">
               <Search />
-              <input value={query} placeholder="搜索电影、电视剧、视频" aria-label="搜索影视"
-                onChange={(event) => submitSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") submitSearch(""); }} />
-              {query && <button type="button" aria-label="清除搜索" onClick={() => submitSearch("")}><X /></button>}
+              <input
+                value={query}
+                placeholder="搜索电影、电视剧、视频"
+                aria-label="搜索影视"
+                onChange={(event) => submitSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") submitSearch("");
+                }}
+              />
+              {query && (
+                <button type="button" aria-label="清除搜索" onClick={() => submitSearch("")}>
+                  <X />
+                </button>
+              )}
             </label>
             <span className="mc-topbar-gap" />
             {!uploading && <UploadPill uploads={uploads} onOpen={() => setUploading(lastUpload.current)} />}
             {place.kind === "libraries" && libraries?.some((library) => library.canManage) && (
-              <button type="button" className="mc-icon-button" aria-label="全部重新扫描" title="全部重新扫描"
-                onClick={() => rescan(libraries.filter((library) => library.canManage), "已开始重新扫描全部媒体库")}>
+              <button
+                type="button"
+                className="mc-icon-button"
+                aria-label="全部重新扫描"
+                title="全部重新扫描"
+                onClick={() =>
+                  rescan(
+                    libraries.filter((library) => library.canManage),
+                    "已开始重新扫描全部媒体库",
+                  )
+                }
+              >
                 <RefreshCw />
               </button>
             )}
           </div>
           <div ref={content} className="mc-content">
             {failure && !libraries ? (
-              <div className="mc-state"><CircleAlert /><h2>影视中心暂时不可用</h2><p>{failure}</p><button type="button" className="mc-glass" onClick={() => void loadLibraries()}>重试</button></div>
-            ) : page}
+              <div className="mc-state">
+                <CircleAlert />
+                <h2>影视中心暂时不可用</h2>
+                <p>{failure}</p>
+                <button type="button" className="mc-glass" onClick={() => void loadLibraries()}>
+                  重试
+                </button>
+              </div>
+            ) : (
+              page
+            )}
           </div>
           {dropping && (
-            <DropOverlay label={dropLabel} onLeave={() => setDropping(false)}
-              onDrop={(event) => { setDropping(false); void pickedFromDrop(event.dataTransfer).then(uploads.add); openUpload(uploadScope, uploadPreferred); }} />
+            <DropOverlay
+              label={dropLabel}
+              onLeave={() => setDropping(false)}
+              onDrop={(event) => {
+                setDropping(false);
+                void pickedFromDrop(event.dataTransfer).then(uploads.add);
+                openUpload(uploadScope, uploadPreferred);
+              }}
+            />
           )}
         </main>
-        {play && <Player request={play} onClose={closePlayer} onNavigate={(videoId) => setPlay({ videoId })} onSaved={() => undefined} />}
-        {renaming && (
-          <RenameDialog title={renaming} onClose={() => setRenaming(undefined)}
-            onDone={(message) => { setRenaming(undefined); toast({ text: message }); follow(); refresh(); }} />
+        {play && (
+          <Player
+            request={play}
+            onClose={closePlayer}
+            onNavigate={(videoId) => setPlay({ videoId })}
+            onSaved={() => undefined}
+          />
         )}
-        {picker && <CollectionPicker title={picker} onClose={() => setPicker(undefined)} onDone={(text) => { setPicker(undefined); toast({ text }); refresh(); }} />}
-        {editing && <LibraryDialog library={editing.library} spaces={editing.spaces} isAdmin={isAdmin} onClose={() => setEditing(undefined)}
-          onSaved={(library) => {
-            setEditing(undefined);
-            toast({ text: editing.library ? `已保存“${library.name}”，正在重新扫描` : `已创建“${library.name}”，正在扫描` });
-            follow();
-            refresh();
-          }} />}
+        {renaming && (
+          <RenameDialog
+            title={renaming}
+            onClose={() => setRenaming(undefined)}
+            onDone={(message) => {
+              setRenaming(undefined);
+              toast({ text: message });
+              follow();
+              refresh();
+            }}
+          />
+        )}
+        {picker && (
+          <CollectionPicker
+            title={picker}
+            onClose={() => setPicker(undefined)}
+            onDone={(text) => {
+              setPicker(undefined);
+              toast({ text });
+              refresh();
+            }}
+          />
+        )}
+        {editing && (
+          <LibraryDialog
+            library={editing.library}
+            spaces={editing.spaces}
+            isAdmin={isAdmin}
+            onClose={() => setEditing(undefined)}
+            onSaved={(library) => {
+              setEditing(undefined);
+              toast({
+                text: editing.library ? `已保存“${library.name}”，正在重新扫描` : `已创建“${library.name}”，正在扫描`,
+              });
+              follow();
+              refresh();
+            }}
+          />
+        )}
         {uploading && (
-          <UploadDialog uploads={uploads} libraries={libraries ?? []} scope={uploading.scope} preferred={uploading.preferred} onClose={closeUpload}
-            onCreateLibrary={canCreate ? () => { closeUpload(); void openLibraryDialog(); } : undefined} />
+          <UploadDialog
+            uploads={uploads}
+            libraries={libraries ?? []}
+            scope={uploading.scope}
+            preferred={uploading.preferred}
+            onClose={closeUpload}
+            onCreateLibrary={
+              canCreate
+                ? () => {
+                    closeUpload();
+                    void openLibraryDialog();
+                  }
+                : undefined
+            }
+          />
         )}
         {dialogs.dialog}
         {toasts}

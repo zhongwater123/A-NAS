@@ -16,8 +16,6 @@ func mustDiskID(t *testing.T, value string) hoststate.ResourceID {
 	return id
 }
 
-func pointer[T any](value T) *T { return &value }
-
 type found struct {
 	code     hoststate.FindingCode
 	severity hoststate.Health
@@ -39,13 +37,13 @@ func summarize(findings []hoststate.Finding) []found {
 
 func TestAssessTakesTheWorstObservedFact(t *testing.T) {
 	system := func() hoststate.Disk {
-		return hoststate.Disk{ID: mustDiskID(t, "disk:system"), Model: "NVMe", Role: hoststate.DiskRoleSystem, Health: hoststate.HealthHealthy, TemperatureCelsius: pointer(41)}
+		return hoststate.Disk{ID: mustDiskID(t, "disk:system"), Model: "NVMe", Role: hoststate.DiskRoleSystem, Health: hoststate.HealthHealthy, TemperatureCelsius: new(41)}
 	}
 	data := func() hoststate.Disk {
 		return hoststate.Disk{
 			ID: mustDiskID(t, "disk:data"), Model: "ST500DM002", Role: hoststate.DiskRoleData, Rotational: true, Health: hoststate.HealthHealthy,
-			TemperatureCelsius: pointer(38), FilesystemCapacityBytes: pointer(uint64(500 << 30)), FilesystemAvailableBytes: pointer(uint64(300 << 30)),
-			FilesystemErrors: pointer(uint64(0)),
+			TemperatureCelsius: new(38), FilesystemCapacityBytes: new(uint64(500 << 30)), FilesystemAvailableBytes: new(uint64(300 << 30)),
+			FilesystemErrors: new(uint64(0)),
 		}
 	}
 	spare := func() hoststate.Disk {
@@ -75,23 +73,23 @@ func TestAssessTakesTheWorstObservedFact(t *testing.T) {
 		}, hoststate.Expectations{DataVolume: true}, hoststate.HealthCritical, []found{{hoststate.FindingDiskFailing, hoststate.HealthCritical, "disk:spare", 0}}},
 		{"hot by medium", func() []hoststate.Disk {
 			hard, nvme := data(), system()
-			hard.TemperatureCelsius = pointer(55)
-			nvme.TemperatureCelsius = pointer(69)
+			hard.TemperatureCelsius = new(55)
+			nvme.TemperatureCelsius = new(69)
 			return []hoststate.Disk{nvme, hard}
 		}, hoststate.Expectations{DataVolume: true}, hoststate.HealthWarning, []found{{hoststate.FindingDiskHot, hoststate.HealthWarning, "disk:data", 55}}},
 		{"nearly full", func() []hoststate.Disk {
 			disk := data()
-			disk.FilesystemAvailableBytes = pointer(uint64(45 << 30))
+			disk.FilesystemAvailableBytes = new(uint64(45 << 30))
 			return []hoststate.Disk{system(), disk}
 		}, hoststate.Expectations{DataVolume: true}, hoststate.HealthWarning, []found{{hoststate.FindingVolumeNearlyFull, hoststate.HealthWarning, "disk:data", 91}}},
 		{"inside the write reserve", func() []hoststate.Disk {
 			disk := data()
-			disk.FilesystemAvailableBytes = pointer(uint64(24 << 30))
+			disk.FilesystemAvailableBytes = new(uint64(24 << 30))
 			return []hoststate.Disk{system(), disk}
 		}, hoststate.Expectations{DataVolume: true}, hoststate.HealthCritical, []found{{hoststate.FindingVolumeFull, hoststate.HealthCritical, "disk:data", 95}}},
 		{"read-only with errors, worst first", func() []hoststate.Disk {
 			disk := data()
-			disk.FilesystemErrors = pointer(uint64(3))
+			disk.FilesystemErrors = new(uint64(3))
 			disk.FilesystemReadOnly = true
 			return []hoststate.Disk{system(), disk}
 		}, hoststate.Expectations{DataVolume: true}, hoststate.HealthCritical, []found{

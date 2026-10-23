@@ -9,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, "/spike")
-from serve_client import Gateway, short  # noqa: E402
+from serve_client import Gateway, short
 
 
 async def main():

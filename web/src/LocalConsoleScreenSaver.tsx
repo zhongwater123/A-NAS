@@ -24,9 +24,14 @@ export async function loadScreenSaverVideos(): Promise<string[]> {
   if (!response.ok) throw new Error(`screen saver manifest returned ${response.status}`);
   const manifest = (await response.json()) as { videos?: unknown };
   if (!Array.isArray(manifest.videos)) throw new Error("screen saver manifest is invalid");
-  return [...new Set(manifest.videos.filter((video): video is string =>
-    typeof video === "string" && video.startsWith(screensaverVideoPrefix) && screensaverVideoPattern.test(video),
-  ))];
+  return [
+    ...new Set(
+      manifest.videos.filter(
+        (video): video is string =>
+          typeof video === "string" && video.startsWith(screensaverVideoPrefix) && screensaverVideoPattern.test(video),
+      ),
+    ),
+  ];
 }
 
 export async function loadSleepAfterMinutes(): Promise<number> {
@@ -89,24 +94,29 @@ export function LocalConsoleScreenSaver({
 
   // A failed video leaves the pool for this page; the idle period, and so
   // the moment the screen goes black, carries on.
-  const disableVideo = useCallback((failed: string) => {
-    if (current.current !== failed) return;
-    playlist.current = playlist.current.filter((candidate) => candidate !== failed);
-    if (selectVideo()) return;
-    current.current = undefined;
-    setCurrentSrc(undefined);
-    if (phaseRef.current === "saver") setPhase("awake");
-  }, [selectVideo, setPhase]);
+  const disableVideo = useCallback(
+    (failed: string) => {
+      if (current.current !== failed) return;
+      playlist.current = playlist.current.filter((candidate) => candidate !== failed);
+      if (selectVideo()) return;
+      current.current = undefined;
+      setCurrentSrc(undefined);
+      if (phaseRef.current === "saver") setPhase("awake");
+    },
+    [selectVideo, setPhase],
+  );
 
   useEffect(() => {
     if (!enabled || !videos) return;
     let cancelled = false;
-    void loadVideos().then((loaded) => {
-      if (cancelled) return;
-      playlist.current = loaded;
-      current.current = undefined;
-      setCurrentSrc(undefined);
-    }).catch(() => undefined);
+    void loadVideos()
+      .then((loaded) => {
+        if (cancelled) return;
+        playlist.current = loaded;
+        current.current = undefined;
+        setCurrentSrc(undefined);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
       playlist.current = [];
@@ -128,10 +138,15 @@ export function LocalConsoleScreenSaver({
       const period = idlePeriod.current;
       const since = Date.now();
       if (videos && selectVideo()) setPhase("saver");
-      void loadSleepAfter().catch(() => defaultSleepAfterMinutes).then((minutes) => {
-        if (period !== idlePeriod.current || !Number.isFinite(minutes) || minutes <= 0) return;
-        sleepTimer.current = window.setTimeout(() => setPhase("asleep"), Math.max(0, minutes * 60_000 - (Date.now() - since)));
-      });
+      void loadSleepAfter()
+        .catch(() => defaultSleepAfterMinutes)
+        .then((minutes) => {
+          if (period !== idlePeriod.current || !Number.isFinite(minutes) || minutes <= 0) return;
+          sleepTimer.current = window.setTimeout(
+            () => setPhase("asleep"),
+            Math.max(0, minutes * 60_000 - (Date.now() - since)),
+          );
+        });
     };
     const schedule = () => {
       clearTimers();

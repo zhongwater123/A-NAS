@@ -49,7 +49,7 @@ type request struct {
 	Path   string         `json:"path,omitempty"`
 	Target string         `json:"target,omitempty"`
 	Prefix string         `json:"prefix,omitempty"`
-	Skip   files.ScanSkip `json:"skip,omitempty"`
+	Skip   files.ScanSkip `json:"skip"`
 	// Paged says the caller reads a scan in pages. A Product Service from
 	// before pages gets the scan in one message, never a truncated one.
 	Paged bool `json:"paged,omitempty"`

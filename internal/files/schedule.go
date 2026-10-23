@@ -119,9 +119,10 @@ type SpaceLookup interface {
 // defaultSchedule protects a space nobody has set a schedule for: a daily
 // snapshot at 03:00, keeping the latest 14.
 func defaultSchedule(spaceID string) SnapshotSchedule {
-	return SnapshotSchedule{SpaceID: spaceID, SnapshotScheduleSettings: SnapshotScheduleSettings{
-		Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14, Retention: RetentionCount,
-	}, minuteOfDay: 3 * 60}
+	return SnapshotSchedule{
+		SpaceID: spaceID, Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14, Retention: RetentionCount,
+		minuteOfDay: 3 * 60,
+	}
 }
 
 // SnapshotSchedule returns the schedule of a space the actor can see. It reads

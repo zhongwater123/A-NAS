@@ -543,10 +543,8 @@ func (s *Store) start(id string, action appstore.JobAction, timeout time.Duratio
 	ctx, cancel := context.WithCancelCause(context.Background())
 	s.active, s.cancel = id, cancel
 	s.jobs[id] = job
-	s.wait.Add(1)
 
-	go func() {
-		defer s.wait.Done()
+	s.wait.Go(func() {
 		timed, stop := context.WithTimeout(ctx, timeout)
 		err := run(timed, &jobWriter{store: s, job: job})
 		stop()
@@ -555,7 +553,7 @@ func (s *Store) start(id string, action appstore.JobAction, timeout time.Duratio
 		s.end(job, err)
 		s.active, s.cancel = "", nil
 		cancel(nil)
-	}()
+	})
 	return copyJob(job), nil
 }
 

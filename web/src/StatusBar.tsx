@@ -15,7 +15,15 @@ const startAngle = -sweep / 2;
 // extra shows beside the clock while it has something to say, such as
 // transfers in progress; onOpenTransfers makes the network rates open the
 // transfer center.
-export function StatusBar({ host, extra, onOpenTransfers }: { host: HostStateView; extra?: ReactNode; onOpenTransfers?: () => void }) {
+export function StatusBar({
+  host,
+  extra,
+  onOpenTransfers,
+}: {
+  host: HostStateView;
+  extra?: ReactNode;
+  onOpenTransfers?: () => void;
+}) {
   const { metrics, disconnected: metricsDisconnected } = useHostMetrics();
   const disconnected = host.disconnected || metricsDisconnected;
   const connection = disconnected ? "offline" : host.snapshot ? "online" : "pending";
@@ -40,7 +48,13 @@ export function StatusBar({ host, extra, onOpenTransfers }: { host: HostStateVie
       </div>
       <span className="status-divider" aria-hidden="true" />
       {onOpenTransfers ? (
-        <button type="button" className="net-rates" aria-label="网络速率，打开传输中心" title="打开传输中心" onClick={onOpenTransfers}>
+        <button
+          type="button"
+          className="net-rates"
+          aria-label="网络速率，打开传输中心"
+          title="打开传输中心"
+          onClick={onOpenTransfers}
+        >
           <NetworkRate direction="down" label="下行" bytesPerSecond={metrics?.network.receiveBytesPerSecond} />
           <NetworkRate direction="up" label="上行" bytesPerSecond={metrics?.network.transmitBytesPerSecond} />
         </button>
@@ -55,8 +69,14 @@ export function StatusBar({ host, extra, onOpenTransfers }: { host: HostStateVie
       <div className="status-clock">
         <Clock />
         <div className="status-meta">
-          <span className={`status-dot ${connection}`} title={connectionLabel}><span className="sr-only">{connectionLabel}</span></span>
-          {disconnected ? <span className="source-badge offline">连接中断</span> : <SourceBadge state={host.snapshot} />}
+          <span className={`status-dot ${connection}`} title={connectionLabel}>
+            <span className="sr-only">{connectionLabel}</span>
+          </span>
+          {disconnected ? (
+            <span className="source-badge offline">连接中断</span>
+          ) : (
+            <SourceBadge state={host.snapshot} />
+          )}
         </div>
       </div>
     </header>
@@ -65,7 +85,9 @@ export function StatusBar({ host, extra, onOpenTransfers }: { host: HostStateVie
 
 export function SourceBadge({ state }: { state?: HostState }) {
   if (!state) return <span className="source-badge pending">等待数据</span>;
-  return <span className={`source-badge ${state.dataSource}`}>{state.dataSource === "live" ? "实时主机" : "模拟数据"}</span>;
+  return (
+    <span className={`source-badge ${state.dataSource}`}>{state.dataSource === "live" ? "实时主机" : "模拟数据"}</span>
+  );
 }
 
 function Gauge({ label, name, percent, detail }: { label: string; name: string; percent?: number; detail: string }) {
@@ -95,13 +117,28 @@ function Gauge({ label, name, percent, detail }: { label: string; name: string; 
           </linearGradient>
         </defs>
         <path className="gauge-track" d={arc} pathLength={100} />
-        <path className="gauge-value" d={arc} pathLength={100} stroke={`url(#${gradientID})`} strokeDasharray={`${value} 100`} />
+        <path
+          className="gauge-value"
+          d={arc}
+          pathLength={100}
+          stroke={`url(#${gradientID})`}
+          strokeDasharray={`${value} 100`}
+        />
         {Array.from({ length: 11 }, (_, index) => {
           const angle = startAngle + (sweep / 10) * index;
           const major = index % 5 === 0;
           const outer = pointAt(angle, radius - 9);
           const inner = pointAt(angle, radius - (major ? 15 : 12));
-          return <line key={index} className={`gauge-tick ${major ? "major" : ""}`} x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} />;
+          return (
+            <line
+              key={index}
+              className={`gauge-tick ${major ? "major" : ""}`}
+              x1={inner.x}
+              y1={inner.y}
+              x2={outer.x}
+              y2={outer.y}
+            />
+          );
         })}
         <g className="gauge-needle" style={{ transform: `rotate(${startAngle + (sweep * value) / 100}deg)` }}>
           <line x1={center.x} y1={center.y + 6} x2={center.x} y2={center.y - radius + 17} />
@@ -112,12 +149,23 @@ function Gauge({ label, name, percent, detail }: { label: string; name: string; 
           {percent !== undefined && <tspan className="gauge-unit">%</tspan>}
         </text>
       </svg>
-      <div className="gauge-caption"><span>{label}</span><small>{detail}</small></div>
+      <div className="gauge-caption">
+        <span>{label}</span>
+        <small>{detail}</small>
+      </div>
     </div>
   );
 }
 
-function NetworkRate({ direction, label, bytesPerSecond }: { direction: "up" | "down"; label: string; bytesPerSecond?: number }) {
+function NetworkRate({
+  direction,
+  label,
+  bytesPerSecond,
+}: {
+  direction: "up" | "down";
+  label: string;
+  bytesPerSecond?: number;
+}) {
   const [value, unit] = bytesPerSecond === undefined ? ["—", ""] : formatRate(bytesPerSecond);
   const Icon = direction === "down" ? ArrowDown : ArrowUp;
   return (
@@ -134,7 +182,12 @@ function Clock() {
   const now = useNow();
   const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
   const date = `${now.getMonth() + 1}月${now.getDate()}日 周${"日一二三四五六"[now.getDay()]}`;
-  return <time className="status-time" dateTime={now.toISOString()}><strong>{time}</strong><span>{date}</span></time>;
+  return (
+    <time className="status-time" dateTime={now.toISOString()}>
+      <strong>{time}</strong>
+      <span>{date}</span>
+    </time>
+  );
 }
 
 // Re-renders on each minute boundary so the clock never drifts behind.
@@ -143,10 +196,13 @@ function useNow(): Date {
   useEffect(() => {
     let timer: number;
     const schedule = () => {
-      timer = window.setTimeout(() => {
-        setNow(new Date());
-        schedule();
-      }, 60_000 - (Date.now() % 60_000) + 50);
+      timer = window.setTimeout(
+        () => {
+          setNow(new Date());
+          schedule();
+        },
+        60_000 - (Date.now() % 60_000) + 50,
+      );
     };
     schedule();
     return () => window.clearTimeout(timer);

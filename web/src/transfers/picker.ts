@@ -24,7 +24,7 @@ export function carriesFiles(transfer: DataTransfer | null): boolean {
 // folders carry no file and are not uploaded.
 export function pickedFromDrop(transfer: DataTransfer): Promise<PickedFile[]> {
   const entries = Array.from(transfer.items)
-    .map((item) => (item.kind === "file" ? item.webkitGetAsEntry?.() ?? null : null))
+    .map((item) => (item.kind === "file" ? (item.webkitGetAsEntry?.() ?? null) : null))
     .filter((entry): entry is FileSystemEntry => entry !== null);
   if (!entries.length) return Promise.resolve(Array.from(transfer.files).map((file) => ({ file, directories: [] })));
   return (async () => {

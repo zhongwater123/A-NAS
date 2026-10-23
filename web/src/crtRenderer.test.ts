@@ -81,9 +81,14 @@ function workingWebGLContext() {
   } as unknown as WebGLRenderingContext;
 }
 
-function stubCanvases(output: HTMLCanvasElement, internal: HTMLCanvasElement, context: CanvasRenderingContext2D, gl: WebGLRenderingContext) {
-  vi.spyOn(output, "getContext").mockImplementation(((kind: string) => kind === "2d" ? context : null) as never);
-  vi.spyOn(internal, "getContext").mockImplementation(((kind: string) => kind === "webgl" ? gl : null) as never);
+function stubCanvases(
+  output: HTMLCanvasElement,
+  internal: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
+  gl: WebGLRenderingContext,
+) {
+  vi.spyOn(output, "getContext").mockImplementation(((kind: string) => (kind === "2d" ? context : null)) as never);
+  vi.spyOn(internal, "getContext").mockImplementation(((kind: string) => (kind === "webgl" ? gl : null)) as never);
   const createElement = document.createElement.bind(document);
   vi.spyOn(document, "createElement").mockImplementation(((tag: string, options?: ElementCreationOptions) =>
     tag === "canvas" ? internal : createElement(tag, options)) as typeof document.createElement);

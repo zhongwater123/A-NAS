@@ -56,7 +56,7 @@ wsl -d Ubuntu-24.04 -u root
 
 ## 开发与检查
 
-运行前端类型检查与测试、生产资源构建、文档检查、部署脚本检查、Go 检查与 AI Worker 测试，并构建三个 Linux 命令：
+运行前端类型检查、lint、格式检查与测试、生产资源构建、文档检查、部署脚本检查、Go 检查（vet 与 golangci-lint）、Python lint 与 AI Worker 测试，并构建三个 Linux 命令（Ruff 需先安装，见[静态检查](docs/development/LOCAL_ENVIRONMENT.md#静态检查)）：
 
 ```bash
 make check

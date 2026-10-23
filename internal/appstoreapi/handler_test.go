@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -176,9 +177,7 @@ func TestIconsAreCacheableAndSandboxed(t *testing.T) {
 func serve(handler http.Handler, method, path, body string, headers http.Header) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Host = "127.0.0.1:8080"
-	for key, values := range headers {
-		request.Header[key] = values
-	}
+	maps.Copy(request.Header, headers)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder

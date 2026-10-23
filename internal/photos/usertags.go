@@ -170,7 +170,7 @@ func (s *Service) strings(ctx context.Context, query string, args ...any) ([]str
 // tagMatches reports whether any of the tags, joined by unit separators,
 // contains the folded query.
 func tagMatches(tags, folded string) bool {
-	for _, tag := range strings.Split(tags, "\x1f") {
+	for tag := range strings.SplitSeq(tags, "\x1f") {
 		if tag != "" && strings.Contains(strings.ToLower(tag), folded) {
 			return true
 		}

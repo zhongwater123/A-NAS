@@ -51,22 +51,28 @@ export function shortcutApp(shortcut: AppShortcut, onStopped?: () => void): Desk
   return {
     id: `app:${shortcut.id}`,
     label: shortcut.title,
-    ariaLabel: stopped ? `${shortcut.title}，没有在运行${onStopped ? "，在 Docker 中查看" : ""}` : `打开 ${shortcut.title}（新窗口）`,
+    ariaLabel: stopped
+      ? `${shortcut.title}，没有在运行${onStopped ? "，在 Docker 中查看" : ""}`
+      : `打开 ${shortcut.title}（新窗口）`,
     keywords: `应用 第三方 ${shortcut.id} ${shortcut.webPort}`,
     tone: "app",
     icon: <ShortcutIcon shortcut={shortcut} />,
     unavailable: stopped,
     note: stopped ? "未运行" : undefined,
-    onClick: stopped ? onStopped : () => {
-      const url = appURL(shortcut);
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
-    },
+    onClick: stopped
+      ? onStopped
+      : () => {
+          const url = appURL(shortcut);
+          if (url) window.open(url, "_blank", "noopener,noreferrer");
+        },
   };
 }
 
 function ShortcutIcon({ shortcut }: { shortcut: AppShortcut }) {
   const [failed, setFailed] = useState(false);
-  return failed
-    ? <b>{shortcut.title.slice(0, 1).toUpperCase()}</b>
-    : <img src={shortcutIconURL(shortcut.id)} alt="" draggable={false} onError={() => setFailed(true)} />;
+  return failed ? (
+    <b>{shortcut.title.slice(0, 1).toUpperCase()}</b>
+  ) : (
+    <img src={shortcutIconURL(shortcut.id)} alt="" draggable={false} onError={() => setFailed(true)} />
+  );
 }

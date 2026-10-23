@@ -26,6 +26,6 @@ $rt/venv/bin/python --version
 $rt/venv/bin/hermes --version 2>&1 | head -5 || true
 du -sh $rt/python $rt/venv $rt/src $rt | sed 's/^/size /'
 tar -C /opt/a-nas/assistant-runtimes --owner=0 --group=0 --numeric-owner -czf /out/runtime.tar.gz spike
-ls -l /out/runtime.tar.gz | awk '{print "tarball bytes", $5}'
+echo "tarball bytes $(stat -c %s /out/runtime.tar.gz)"
 sha256sum /out/runtime.tar.gz
 chown -R "$HOST_UID:$HOST_GID" /out

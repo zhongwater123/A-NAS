@@ -1,4 +1,12 @@
-import { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { moveItem, useDesktopOrder } from "./useDesktopOrder";
@@ -80,7 +88,10 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
       const moved = previous && (previous.left !== position.left || previous.top !== position.top);
       if (moved && id !== drag.current?.id && typeof slot.animate === "function") {
         slot.animate(
-          [{ transform: `translate(${previous.left - position.left}px, ${previous.top - position.top}px)` }, { transform: "none" }],
+          [
+            { transform: `translate(${previous.left - position.left}px, ${previous.top - position.top}px)` },
+            { transform: "none" },
+          ],
           { duration: 200, easing: "cubic-bezier(.2,.8,.2,1)" },
         );
       }
@@ -147,7 +158,12 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
         setDraggingID(state.id);
       }
       moveEvent.preventDefault();
-      const target = nearestIndex(grid, orderRef.current.map((slotID) => slots.current.get(slotID)), moveEvent.clientX, moveEvent.clientY);
+      const target = nearestIndex(
+        grid,
+        orderRef.current.map((slotID) => slots.current.get(slotID)),
+        moveEvent.clientX,
+        moveEvent.clientY,
+      );
       if (target !== orderRef.current.indexOf(state.id)) {
         setOrder((current) => moveItem(current, state.id, target));
       } else {
@@ -176,7 +192,10 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
     const step = keyboardSteps[event.key];
     if (!event.altKey || !step || !gridRef.current) return;
     event.preventDefault();
-    const columns = Math.max(1, getComputedStyle(gridRef.current).gridTemplateColumns.split(" ").filter(Boolean).length);
+    const columns = Math.max(
+      1,
+      getComputedStyle(gridRef.current).gridTemplateColumns.split(" ").filter(Boolean).length,
+    );
     const offset = { previous: -1, next: 1, up: -columns, down: columns }[step];
     const next = moveItem(orderRef.current, id, orderRef.current.indexOf(id) + offset);
     setOrder(next);
@@ -187,76 +206,91 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
   const draggingApp = draggingID ? appsByID.get(draggingID) : undefined;
   const draggingState = drag.current;
 
-  return <>
-    <section
-      ref={gridRef}
-      className={`desktop-grid ${draggingID ? "reordering" : ""}`}
-      aria-label="桌面应用"
-      aria-describedby="desktop-reorder-hint"
-      onClickCapture={(event) => {
-        if (!suppressClick.current) return;
-        suppressClick.current = false;
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-    >
-      {order.map((id) => {
-        const app = appsByID.get(id);
-        if (!app) return null;
-        return (
-          <div
-            key={id}
-            ref={(slot) => {
-              if (slot) slots.current.set(id, slot);
-              else slots.current.delete(id);
-            }}
-            className={`desktop-slot ${draggingID === id ? "dragging" : ""}`}
-            title={app.disabled ? `${app.label} · 规划中` : app.note ? `${app.label} · ${app.note}` : app.label}
-            onPointerDown={(event) => beginPointer(event, id)}
-            onKeyDown={(event) => moveWithKeyboard(event, id)}
-          >
-            <button
-              className={`desktop-shortcut ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""}`}
-              aria-label={app.ariaLabel}
-              aria-disabled={app.unavailable && !app.onClick ? true : undefined}
-              disabled={app.disabled}
-              onClick={app.onClick}
-            >
-              <ShortcutContents app={app} />
-            </button>
-          </div>
-        );
-      })}
-      <p id="desktop-reorder-hint" className="sr-only">拖动图标，或按 Alt 加方向键，可以调整图标顺序</p>
-      <p className="sr-only" aria-live="polite">{announcement}</p>
-    </section>
-    {draggingApp && draggingState?.started && createPortal(
-      <div
-        ref={previewRef}
-        className="desktop-drag-preview"
-        style={{ width: draggingState.width, height: draggingState.height }}
-        aria-hidden="true"
+  return (
+    <>
+      <section
+        ref={gridRef}
+        className={`desktop-grid ${draggingID ? "reordering" : ""}`}
+        aria-label="桌面应用"
+        aria-describedby="desktop-reorder-hint"
+        onClickCapture={(event) => {
+          if (!suppressClick.current) return;
+          suppressClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
       >
-        <div className={`desktop-shortcut ${draggingApp.active ? "running" : ""}`}>
-          <ShortcutContents app={draggingApp} />
-        </div>
-      </div>,
-      document.body,
-    )}
-  </>;
+        {order.map((id) => {
+          const app = appsByID.get(id);
+          if (!app) return null;
+          return (
+            <div
+              key={id}
+              ref={(slot) => {
+                if (slot) slots.current.set(id, slot);
+                else slots.current.delete(id);
+              }}
+              className={`desktop-slot ${draggingID === id ? "dragging" : ""}`}
+              title={app.disabled ? `${app.label} · 规划中` : app.note ? `${app.label} · ${app.note}` : app.label}
+              onPointerDown={(event) => beginPointer(event, id)}
+              onKeyDown={(event) => moveWithKeyboard(event, id)}
+            >
+              <button
+                className={`desktop-shortcut ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""}`}
+                aria-label={app.ariaLabel}
+                aria-disabled={app.unavailable && !app.onClick ? true : undefined}
+                disabled={app.disabled}
+                onClick={app.onClick}
+              >
+                <ShortcutContents app={app} />
+              </button>
+            </div>
+          );
+        })}
+        <p id="desktop-reorder-hint" className="sr-only">
+          拖动图标，或按 Alt 加方向键，可以调整图标顺序
+        </p>
+        <p className="sr-only" aria-live="polite">
+          {announcement}
+        </p>
+      </section>
+      {draggingApp &&
+        draggingState?.started &&
+        createPortal(
+          <div
+            ref={previewRef}
+            className="desktop-drag-preview"
+            style={{ width: draggingState.width, height: draggingState.height }}
+            aria-hidden="true"
+          >
+            <div className={`desktop-shortcut ${draggingApp.active ? "running" : ""}`}>
+              <ShortcutContents app={draggingApp} />
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }
 
 function ShortcutContents({ app }: { app: DesktopApp }) {
-  return <>
-    <span className={`desktop-icon icon-${app.tone}`}>{app.icon}</span>
-    <span>{app.label}</span>
-    {app.disabled ? <small>规划中</small> : app.note && <small>{app.note}</small>}
-  </>;
+  return (
+    <>
+      <span className={`desktop-icon icon-${app.tone}`}>{app.icon}</span>
+      <span>{app.label}</span>
+      {app.disabled ? <small>规划中</small> : app.note && <small>{app.note}</small>}
+    </>
+  );
 }
 
 // Grid cells keep their positions while items move between them, so the
 // nearest cell centre to the pointer is the drop index.
-function nearestIndex(grid: HTMLElement, slots: (HTMLDivElement | undefined)[], clientX: number, clientY: number): number {
+function nearestIndex(
+  grid: HTMLElement,
+  slots: (HTMLDivElement | undefined)[],
+  clientX: number,
+  clientY: number,
+): number {
   const box = grid.getBoundingClientRect();
   const x = clientX - box.left + grid.scrollLeft;
   const y = clientY - box.top + grid.scrollTop;

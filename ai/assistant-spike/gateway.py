@@ -13,9 +13,10 @@ import socketserver
 import sys
 import time
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 
 SOCK, LOG, UPSTREAM_HOST, KEY_FILE = sys.argv[1:5]
-KEY = open(KEY_FILE, encoding="utf-8").read().strip()
+KEY = Path(KEY_FILE).read_text(encoding="utf-8").strip()
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
 
 

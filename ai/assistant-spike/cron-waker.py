@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Starts a member's round of scheduled tasks when one of their Hermes jobs is due.
 
 `hermes serve` does not run Hermes's scheduler: only Hermes Desktop's backend does, with
@@ -13,7 +12,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 DATA = os.environ.get("ANAS_ASSISTANT_DATA", "/srv/a-nas/data/assistant")
 TOKENS = "/etc/a-nas-assistant/tokens"
@@ -54,7 +53,7 @@ def due(account, now):
         except ValueError:
             continue
         if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
+            when = when.replace(tzinfo=UTC)
         if when <= now:
             return True
     return False
@@ -66,7 +65,7 @@ def running(unit):
 
 def main():
     while True:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for account in accounts():
             unit = f"anas-assistant-cron@{account}.service"
             if due(account, now) and not running(unit):

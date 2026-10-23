@@ -113,7 +113,7 @@ func heifDimensions(file *os.File) (int, int, error) {
 	entries := binary.BigEndian.Uint32(data[4:])
 	pos := 8
 	var indices []int
-	for n := uint32(0); n < entries; n++ {
+	for range entries {
 		width := 2
 		if version >= 1 {
 			width = 4

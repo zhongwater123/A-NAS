@@ -129,7 +129,7 @@ func validateDocumentation(root string) ([]string, int) {
 		}
 
 		files++
-		data, readErr := os.ReadFile(path)
+		data, readErr := os.ReadFile(path) //nolint:gosec // G122: a developer tool reading the checkout's own documents.
 		if readErr != nil {
 			return readErr
 		}

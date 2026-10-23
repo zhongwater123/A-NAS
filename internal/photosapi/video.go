@@ -26,7 +26,7 @@ func (h *handler) videoRoutes() {
 // reports it: a comma-separated caps parameter.
 func browserCaps(values url.Values) photos.BrowserCaps {
 	var caps photos.BrowserCaps
-	for _, value := range strings.Split(values.Get("caps"), ",") {
+	for value := range strings.SplitSeq(values.Get("caps"), ",") {
 		switch strings.TrimSpace(value) {
 		case "hevc":
 			caps.HEVC = true

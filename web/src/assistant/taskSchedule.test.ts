@@ -3,16 +3,21 @@ import { describe, expect, it } from "vitest";
 import { scheduleText, whenText } from "./taskSchedule";
 
 const now = new Date(2026, 9, 20, 9, 30);
-const at = (month: number, day: number, hour: number, minute = 0, year = 2026) => new Date(year, month - 1, day, hour, minute).getTime() / 1000;
+const at = (month: number, day: number, hour: number, minute = 0, year = 2026) =>
+  new Date(year, month - 1, day, hour, minute).getTime() / 1000;
 
 describe("scheduleText", () => {
   it("says a daily cron expression with its day", () => {
     expect(scheduleText({ kind: "cron", expr: "0 8 * * *", display: "0 8 * * *" }, now)).toBe("每天 08:00");
-    expect(scheduleText({ kind: "cron", expr: "0 8,20 * * *", display: "0 8,20 * * *" }, now)).toBe("每天 08:00 和 20:00");
+    expect(scheduleText({ kind: "cron", expr: "0 8,20 * * *", display: "0 8,20 * * *" }, now)).toBe(
+      "每天 08:00 和 20:00",
+    );
   });
 
   it("words other cron expressions with cronstrue", () => {
-    expect(scheduleText({ kind: "cron", expr: "30 7 * * 1-5", display: "30 7 * * 1-5" }, now)).toBe("在07:30, 星期一至星期五");
+    expect(scheduleText({ kind: "cron", expr: "30 7 * * 1-5", display: "30 7 * * 1-5" }, now)).toBe(
+      "在07:30, 星期一至星期五",
+    );
     expect(scheduleText({ kind: "cron", expr: "*/15 * * * *", display: "*/15 * * * *" }, now)).toBe("每隔 15 分钟");
   });
 
@@ -29,7 +34,9 @@ describe("scheduleText", () => {
   });
 
   it("says when a one-off runs", () => {
-    expect(scheduleText({ kind: "once", runAt: at(10, 20, 15), display: "once at 2026-10-20 15:00" }, now)).toBe("仅一次 · 今天 15:00");
+    expect(scheduleText({ kind: "once", runAt: at(10, 20, 15), display: "once at 2026-10-20 15:00" }, now)).toBe(
+      "仅一次 · 今天 15:00",
+    );
   });
 
   it("falls back to Hermes's own words", () => {

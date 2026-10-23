@@ -288,7 +288,7 @@ func (l *Local) Directory(ctx context.Context, u shares.User, t shares.Target, n
 	}
 	ctx = l.publicationContext(ctx, t.ShareID)
 	var result string
-	for n := 0; n < 1000; n++ {
+	for n := range 1000 {
 		candidate := name
 		if n > 0 {
 			candidate = fmt.Sprintf("%s (%d)", name, n)
@@ -420,16 +420,14 @@ func (l *Local) Commit(ctx context.Context, u shares.User, id string) error {
 }
 func (l *Local) discard(p *pending) {
 	p.cancel()
-	l.cleanup.Add(1)
-	go func() {
-		defer l.cleanup.Done()
+	l.cleanup.Go(func() {
 		<-p.done
 		if p.upload != nil {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), 10*time.Second)
 			defer cancel()
 			_ = l.Files.AbortUpload(cleanup, p.actor, p.upload)
 		}
-	}()
+	})
 }
 func (l *Local) Abort(ctx context.Context, u shares.User, id string) error {
 	l.mu.Lock()

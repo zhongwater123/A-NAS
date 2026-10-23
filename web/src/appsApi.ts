@@ -50,7 +50,12 @@ export interface CatalogApp {
 
 // upstream marks the manifest's published value, still used by an app
 // installed before A-NAS generated its logins.
-export interface AppCredential { label: string; username?: string; secret: string; upstream?: boolean }
+export interface AppCredential {
+  label: string;
+  username?: string;
+  secret: string;
+  upstream?: boolean;
+}
 
 // How one service runs (ADR 0022): app starts as the app identity with no
 // capabilities; app-after-init starts as root and switches to it; image keeps
@@ -81,7 +86,13 @@ export interface InstallPlan {
   images: string[];
   containers: string[];
   ports: Array<{ hostPort: number; containerPort: number; protocol: string; purpose?: string }>;
-  mounts: Array<{ hostPath: string; containerPath: string; kind: "appdata" | "shared" | "system"; readOnly: boolean; purpose?: string }>;
+  mounts: Array<{
+    hostPath: string;
+    containerPath: string;
+    kind: "appdata" | "shared" | "system";
+    readOnly: boolean;
+    purpose?: string;
+  }>;
   // Docker networks the install creates and the address pools they come from.
   networks: string[];
   addressPools: string[];
@@ -91,7 +102,10 @@ export interface InstallPlan {
 }
 
 export class AppsAPIError extends Error {
-  constructor(readonly code: string, readonly detail = "") {
+  constructor(
+    readonly code: string,
+    readonly detail = "",
+  ) {
     super(`app center request failed: ${code}`);
   }
 }
@@ -143,7 +157,11 @@ export function shortcutIconURL(id: string): string {
 }
 
 function post(body: unknown): RequestInit {
-  return { method: "POST", headers: { "Content-Type": "application/json", ...csrfHeaders() }, body: JSON.stringify(body) };
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    body: JSON.stringify(body),
+  };
 }
 
 async function request(path: string, init: RequestInit): Promise<unknown> {
@@ -157,7 +175,10 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
     const failure = isRecord(body) && isRecord(body.error) ? body.error : {};
-    throw new AppsAPIError(typeof failure.code === "string" ? failure.code : "request_failed", typeof failure.message === "string" ? failure.message : "");
+    throw new AppsAPIError(
+      typeof failure.code === "string" ? failure.code : "request_failed",
+      typeof failure.message === "string" ? failure.message : "",
+    );
   }
   return body;
 }

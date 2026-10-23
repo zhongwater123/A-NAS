@@ -40,7 +40,9 @@ export function useSelection(order: PhotoAsset[]) {
     setSelected((current) => {
       const next = new Set(current);
       const all = ids.every((id) => next.has(id));
-      for (const id of ids) if (all) next.delete(id); else next.add(id);
+      for (const id of ids)
+        if (all) next.delete(id);
+        else next.add(id);
       return next;
     });
   }, []);
@@ -56,16 +58,24 @@ export function useSelection(order: PhotoAsset[]) {
   const beginSwipe = useCallback((asset: PhotoAsset) => {
     const snapshot = selectedRef.current;
     const target = !snapshot.has(asset.id);
-    return (to: string) => setSelected(() => {
-      const next = new Set(snapshot);
-      for (const id of between(orderRef.current, asset.id, to)) if (target) next.add(id); else next.delete(id);
-      anchor.current = to;
-      return next;
-    });
+    return (to: string) =>
+      setSelected(() => {
+        const next = new Set(snapshot);
+        for (const id of between(orderRef.current, asset.id, to))
+          if (target) next.add(id);
+          else next.delete(id);
+        anchor.current = to;
+        return next;
+      });
   }, []);
 
-  const endGesture = useCallback(() => { base.current = undefined; }, []);
-  const clear = useCallback(() => { setSelected(new Set()); anchor.current = undefined; }, []);
+  const endGesture = useCallback(() => {
+    base.current = undefined;
+  }, []);
+  const clear = useCallback(() => {
+    setSelected(new Set());
+    anchor.current = undefined;
+  }, []);
   const replace = useCallback((ids: Iterable<string>) => setSelected(new Set(ids)), []);
   return { selected, toggle, setGroup, marquee, beginSwipe, endGesture, clear, replace };
 }

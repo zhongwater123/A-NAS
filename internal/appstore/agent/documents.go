@@ -178,11 +178,9 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 			item.Category = ""
 		}
 		apps[i] = appstore.AppStatus{
-			App: appstore.App{
-				ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, UpstreamNotes: item.UpstreamNotes,
-				Category: item.Category, Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo,
-				Docs: item.Docs, Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
-			},
+			ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, UpstreamNotes: item.UpstreamNotes,
+			Category: item.Category, Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo,
+			Docs: item.Docs, Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
 			State: item.State, Running: item.Running, Total: item.Total, RuntimeOutdated: item.RuntimeOutdated,
 		}
 		if item.Job != nil {

@@ -81,7 +81,22 @@ void main(){
   gl_FragColor = vec4(min(col, 1.) * mask, 1.);
 }`;
 
-const uniformNames = ["uScene", "uGlow", "uRes", "uTime", "uAberr", "uBloom", "uOpen", "uOpenX", "uBeam", "uFlash", "uNoise", "uRoll", "uStatic", "uScanP"] as const;
+const uniformNames = [
+  "uScene",
+  "uGlow",
+  "uRes",
+  "uTime",
+  "uAberr",
+  "uBloom",
+  "uOpen",
+  "uOpenX",
+  "uBeam",
+  "uFlash",
+  "uNoise",
+  "uRoll",
+  "uStatic",
+  "uScanP",
+] as const;
 
 export function createRenderer(canvas: HTMLCanvasElement): Renderer | null {
   const output = canvas.getContext("2d");
@@ -94,7 +109,9 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer | null {
   const crt = createCrtRenderer(webglCanvas);
   if (!crt) return createPlainRenderer(canvas, output);
   return {
-    get lost() { return crt.lost; },
+    get lost() {
+      return crt.lost;
+    },
     render(scene, glow, params, now) {
       if (webglCanvas.width !== canvas.width || webglCanvas.height !== canvas.height) {
         webglCanvas.width = canvas.width;
@@ -133,7 +150,10 @@ function createCrtRenderer(canvas: HTMLCanvasElement): Renderer | null {
   gl.enableVertexAttribArray(position);
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
-  const u = Object.fromEntries(uniformNames.map((name) => [name, gl.getUniformLocation(program, name)])) as Record<(typeof uniformNames)[number], WebGLUniformLocation | null>;
+  const u = Object.fromEntries(uniformNames.map((name) => [name, gl.getUniformLocation(program, name)])) as Record<
+    (typeof uniformNames)[number],
+    WebGLUniformLocation | null
+  >;
   const sceneTexture = createTexture(gl, 0);
   const glowTexture = createTexture(gl, 1);
   gl.uniform1i(u.uScene, 0);
@@ -141,10 +161,18 @@ function createCrtRenderer(canvas: HTMLCanvasElement): Renderer | null {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 
   let lost = false;
-  canvas.addEventListener("webglcontextlost", () => { lost = true; }, { once: true });
+  canvas.addEventListener(
+    "webglcontextlost",
+    () => {
+      lost = true;
+    },
+    { once: true },
+  );
 
   return {
-    get lost() { return lost; },
+    get lost() {
+      return lost;
+    },
     render(scene, glow, params, now) {
       if (lost) return;
       gl.viewport(0, 0, canvas.width, canvas.height);

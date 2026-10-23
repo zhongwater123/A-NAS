@@ -8,9 +8,32 @@ import { MusicPanel } from "./MusicPanel";
 import { track } from "./testTracks";
 
 const library: Track[] = [
-  track("file:a1", { title: "晴天", artist: "周杰伦", artists: ["周杰伦"], album: "叶惠美", albumId: "album:yhm", trackNo: 2, durationMs: 269_000 }),
-  track("file:a2", { title: "以父之名", artist: "周杰伦", artists: ["周杰伦"], album: "叶惠美", albumId: "album:yhm", trackNo: 1, durationMs: 342_000 }),
-  track("file:b1", { title: "Lantern Light", artist: "Mira Chen", artists: ["Mira Chen"], album: "Midnight", albumId: "album:mid", durationMs: 200_000 }),
+  track("file:a1", {
+    title: "晴天",
+    artist: "周杰伦",
+    artists: ["周杰伦"],
+    album: "叶惠美",
+    albumId: "album:yhm",
+    trackNo: 2,
+    durationMs: 269_000,
+  }),
+  track("file:a2", {
+    title: "以父之名",
+    artist: "周杰伦",
+    artists: ["周杰伦"],
+    album: "叶惠美",
+    albumId: "album:yhm",
+    trackNo: 1,
+    durationMs: 342_000,
+  }),
+  track("file:b1", {
+    title: "Lantern Light",
+    artist: "Mira Chen",
+    artists: ["Mira Chen"],
+    album: "Midnight",
+    albumId: "album:mid",
+    durationMs: 200_000,
+  }),
 ];
 
 function json(body: unknown, status = 200) {
@@ -23,12 +46,21 @@ function serve(items: Track[] = library) {
     const url = String(input);
     const method = init?.method ?? "GET";
     if (url === "/api/v1/music/tracks") return json({ version: 1, items });
-    if (url === "/api/v1/music/library/scan") return json({ version: 1, tracks: items.length, scan: { state: "idle", done: 0, total: 0 } }, 202);
-    if (url === "/api/v1/music/library") return json({ version: 1, tracks: items.length, scan: { state: "idle", done: 0, total: 0 } });
-    if (url === "/api/v1/music/sources") return json({ custom: false, items: [{ spaceId: "space:shared", spaceKind: "shared", path: "" }] });
+    if (url === "/api/v1/music/library/scan")
+      return json({ version: 1, tracks: items.length, scan: { state: "idle", done: 0, total: 0 } }, 202);
+    if (url === "/api/v1/music/library")
+      return json({ version: 1, tracks: items.length, scan: { state: "idle", done: 0, total: 0 } });
+    if (url === "/api/v1/music/sources")
+      return json({ custom: false, items: [{ spaceId: "space:shared", spaceKind: "shared", path: "" }] });
     if (url === "/api/v1/music/playlists" && method === "POST") {
       const body = JSON.parse(String(init?.body));
-      const playlist = { id: "playlist:1", name: body.name, trackIds: body.trackIds, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" };
+      const playlist = {
+        id: "playlist:1",
+        name: body.name,
+        trackIds: body.trackIds,
+        createdAt: "2026-10-10T00:00:00Z",
+        updatedAt: "2026-10-10T00:00:00Z",
+      };
       playlists.push(playlist);
       return json(playlist, 201);
     }
@@ -43,10 +75,17 @@ function serve(items: Track[] = library) {
 const played: string[] = [];
 
 beforeEach(() => {
-  setSession({ csrfToken: "csrf", expiresAt: "2026-10-11T00:00:00Z", user: { id: "user:u1", username: "u1", role: "member", status: "active", createdAt: "", mustChangePassword: false } } as never);
+  setSession({
+    csrfToken: "csrf",
+    expiresAt: "2026-10-11T00:00:00Z",
+    user: { id: "user:u1", username: "u1", role: "member", status: "active", createdAt: "", mustChangePassword: false },
+  } as never);
   window.localStorage.clear();
   played.length = 0;
-  vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) { played.push(this.src); return Promise.resolve(); });
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
+    played.push(this.src);
+    return Promise.resolve();
+  });
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
 });
@@ -94,7 +133,12 @@ describe("MusicPanel", () => {
     render(<MusicPanel userId="user:u1" />);
     await screen.findByText("晴天");
     fireEvent.click(within(rowOf("晴天")).getByRole("button", { name: "收藏" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/music/favorites/file%3Aa1", expect.objectContaining({ method: "PUT" })));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/music/favorites/file%3Aa1",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: /我的收藏/ }));
     expect(await screen.findByRole("heading", { name: "我的收藏" })).toBeTruthy();
     expect(rowOf("晴天")).toBeTruthy();
@@ -112,7 +156,12 @@ describe("MusicPanel", () => {
     await user.click(screen.getByRole("menuitem", { name: "新建歌单…" }));
     await user.type(screen.getByRole("textbox", { name: "歌单名称" }), "夜跑");
     await user.click(screen.getByRole("button", { name: "创建" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/music/playlists", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "夜跑", trackIds: ["file:b1"] }) })));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/music/playlists",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "夜跑", trackIds: ["file:b1"] }) }),
+      ),
+    );
     expect(await screen.findByRole("button", { name: /夜跑/ })).toBeTruthy();
   });
 

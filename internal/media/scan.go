@@ -385,7 +385,7 @@ func (s *Service) readFolder(ctx context.Context, actor accounts.User, library l
 }
 
 func hiddenPath(directory string) bool {
-	for _, part := range strings.Split(directory, "/") {
+	for part := range strings.SplitSeq(directory, "/") {
 		if strings.HasPrefix(part, ".") || strings.HasPrefix(part, "@") || part == "#recycle" {
 			return true
 		}

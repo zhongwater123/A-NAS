@@ -7,7 +7,12 @@ import { listProfiles, type Profile } from "./api";
 // the photo library. Records that only carry a username (who wrote a
 // feedback item, who reset a password) are looked up here by that name.
 
-export interface Person { id?: string; username: string; nickname?: string; avatarVersion?: string }
+export interface Person {
+  id?: string;
+  username: string;
+  nickname?: string;
+  avatarVersion?: string;
+}
 
 export interface People {
   byId: (id: string | undefined) => Profile | undefined;
@@ -35,8 +40,11 @@ function publish(profiles: Profile[]) {
 // loadPeople reads the profiles again. A failure keeps what was there:
 // names then fall back to account names, which is never wrong, only plainer.
 export async function loadPeople(): Promise<void> {
-  try { publish(await listProfiles()); }
-  catch { /* keep the last directory */ }
+  try {
+    publish(await listProfiles());
+  } catch {
+    /* keep the last directory */
+  }
 }
 
 // rememberPerson updates one account after its owner changed it here, without
@@ -47,11 +55,18 @@ export function rememberPerson(profile: Profile) {
   publish([...next, { id, username, nickname, avatarVersion }]);
 }
 
-export function forgetPeople() { publish([]); }
+export function forgetPeople() {
+  publish([]);
+}
 
 export function usePeople(): People {
   return useSyncExternalStore(
-    (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     () => current,
   );
 }

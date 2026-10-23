@@ -1,0 +1,69 @@
+# golangci-lint v2, pinned by tools/golangci-lint/go.mod; `make go-lint` runs it.
+version: "2"
+
+run:
+  # Lint the integration tests too, which `go test` builds only on request.
+  build-tags: [rootintegration, dockerintegration]
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - ineffassign
+    - modernize
+    - staticcheck
+    - unused
+  # errcheck, the rest of golangci-lint's standard set, is not enabled: its
+  # 382 findings at the time it was tried were mostly deferred Close calls and
+  # best-effort writes, which need a review of their own.
+
+  settings:
+    errorlint:
+      # Code classifies a failure with a sentinel and keeps the cause as text,
+      # fmt.Errorf("%w: %v", ErrUnavailable, err), so that a caller's errors.Is
+      # matches the domain error and never the cause. Comparisons, switches and
+      # type assertions on errors are still checked.
+      errorf: false
+    gosec:
+      excludes:
+        - G101 # Hard-coded credentials: matches names such as NotificationCredentialReset.
+        - G104 # Unhandled errors: errcheck's subject, see above.
+        - G115 # Integer conversions: sizes, counts and IDs are checked where they come in.
+        - G118 # Not a security rule: some work outlives its request on purpose (volume conversion).
+        - G124 # Cookies without Secure: the LAN entry is plain HTTP (ADR 0012); HttpOnly and SameSite=Strict are set.
+        - G202 # SQL concatenation: queries join constant fragments and generated placeholders; values go through args.
+        - G204 # Subprocesses: the Host Agent runs system tools with argument lists by design, never through a shell.
+        - G301 # Directory permissions: chosen per path (shared spaces, ACL-managed trees).
+        - G302 # File permissions: as G301.
+        - G304 # Paths from variables: a NAS opens user paths by design; the file broker enforces access.
+        - G306 # WriteFile permissions: as G301.
+        - G703 # Path traversal by taint: as G304.
+        - G704 # SSRF by taint: requests go to fixed Unix sockets and loopback hosts.
+        - G705 # XSS by taint: handlers write JSON or files with an explicit Content-Type.
+
+  exclusions:
+    generated: strict
+    paths:
+      # npm packages can carry Go code (flatted), which `./...` then includes.
+      - web/node_modules
+    rules:
+      # Tests start throwaway servers, write fixtures and spawn tools.
+      - path: _test\.go
+        linters: [gosec]
+      # Test helpers close response bodies through t.Cleanup, which bodyclose
+      # cannot follow.
+      - path: _test\.go
+        linters: [bodyclose]
+      # coder/websocket documents that the caller never closes Dial's response body.
+      - linters: [bodyclose]
+        source: websocket\.Dial\(
+      # Error strings may start with a name.
+      - linters: [staticcheck]
+        text: "ST1005: error strings should not be capitalized"
+        source: '"(Docker|Linux) '
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

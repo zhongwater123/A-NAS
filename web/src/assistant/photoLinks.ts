@@ -9,7 +9,9 @@ export const photoLinkPrefix = "#a-nas-photo/";
 const photoLink = /\]\((?:photo:)?(photo:[A-Za-z0-9_.-]{1,128})\)/g;
 
 export function linkPhotos(text: string): string {
-  return text.includes("](photo:") ? text.replace(photoLink, (_, id: string) => `](${photoLinkPrefix}${encodeURIComponent(id)})`) : text;
+  return text.includes("](photo:")
+    ? text.replace(photoLink, (_, id: string) => `](${photoLinkPrefix}${encodeURIComponent(id)})`)
+    : text;
 }
 
 /** The photo a link names, when it is one. */

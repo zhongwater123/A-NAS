@@ -6,7 +6,15 @@ import { ContainerSummary } from "../containersApi";
 import { AppRef, Condition, WebPort } from "./model";
 
 // An App Center app's own icon, or a tile in the container's state colour.
-export function ContainerGlyph({ app, condition, size = "md" }: { app?: AppRef; condition?: Condition; size?: "sm" | "md" | "lg" }) {
+export function ContainerGlyph({
+  app,
+  condition,
+  size = "md",
+}: {
+  app?: AppRef;
+  condition?: Condition;
+  size?: "sm" | "md" | "lg";
+}) {
   const [failed, setFailed] = useState(false);
   if (app && !failed) {
     return (
@@ -15,11 +23,20 @@ export function ContainerGlyph({ app, condition, size = "md" }: { app?: AppRef; 
       </span>
     );
   }
-  return <span className={`dk-glyph ${condition?.tone ?? "ok"} ${size}`} aria-hidden="true"><Box /></span>;
+  return (
+    <span className={`dk-glyph ${condition?.tone ?? "ok"} ${size}`} aria-hidden="true">
+      <Box />
+    </span>
+  );
 }
 
 export function StatePill({ condition }: { condition: Condition }) {
-  return <span className={`dk-pill ${condition.tone}`}><i />{condition.label}</span>;
+  return (
+    <span className={`dk-pill ${condition.tone}`}>
+      <i />
+      {condition.label}
+    </span>
+  );
 }
 
 export function PortLinks({ ports, item }: { ports: WebPort[]; item: ContainerSummary }) {
@@ -37,22 +54,53 @@ export function PortLinks({ ports, item }: { ports: WebPort[]; item: ContainerSu
           aria-label={`打开 ${item.name} 的端口 ${port.hostPort}`}
           onClick={(event) => event.stopPropagation()}
         >
-          :{port.hostPort}<ExternalLink />
+          :{port.hostPort}
+          <ExternalLink />
         </a>
       ))}
     </span>
   );
 }
 
-export function IconAction({ label, icon, busy, disabled, tone, onClick }: { label: string; icon: ReactNode; busy?: boolean; disabled?: boolean; tone?: "danger"; onClick: () => void }) {
+export function IconAction({
+  label,
+  icon,
+  busy,
+  disabled,
+  tone,
+  onClick,
+}: {
+  label: string;
+  icon: ReactNode;
+  busy?: boolean;
+  disabled?: boolean;
+  tone?: "danger";
+  onClick: () => void;
+}) {
   return (
-    <button className={`dk-icon-btn ${tone ?? ""}`} aria-label={label} title={label} disabled={disabled} onClick={onClick}>
+    <button
+      className={`dk-icon-btn ${tone ?? ""}`}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
       {busy ? <span className="loader small" /> : icon}
     </button>
   );
 }
 
-export function Empty({ icon, title, tone, children }: { icon: ReactNode; title: string; tone?: "error" | "ok"; children?: ReactNode }) {
+export function Empty({
+  icon,
+  title,
+  tone,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  tone?: "error" | "ok";
+  children?: ReactNode;
+}) {
   return (
     <div className="dk-empty">
       <span className={`dk-empty-art ${tone ?? ""}`}>{icon}</span>
@@ -72,7 +120,13 @@ export function Layer({ label, onDismiss, children }: { label: string; onDismiss
     onDismiss();
   };
   return (
-    <div className="dk-layer" onKeyDown={onKeyDown} onPointerDown={(event) => { if (event.target === event.currentTarget) onDismiss(); }}>
+    <div
+      className="dk-layer"
+      onKeyDown={onKeyDown}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onDismiss();
+      }}
+    >
       <div ref={sheet} className="dk-sheet" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
         {children}
       </div>

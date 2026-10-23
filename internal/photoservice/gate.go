@@ -185,15 +185,16 @@ func waiting(slice, resource string) string {
 		}
 	}
 	slices.SortFunc(members, func(a, b member) int { return cmp.Compare(b.avg10, a.avg10) })
-	text := strconv.FormatFloat(own, 'f', 2, 64)
+	var text strings.Builder
+	text.WriteString(strconv.FormatFloat(own, 'f', 2, 64))
 	for i, m := range members[:min(3, len(members))] {
 		separator := ", "
 		if i == 0 {
 			separator = ": "
 		}
-		text += separator + m.name + " " + strconv.FormatFloat(m.avg10, 'f', 2, 64)
+		text.WriteString(separator + m.name + " " + strconv.FormatFloat(m.avg10, 'f', 2, 64))
 	}
-	return text
+	return text.String()
 }
 
 // systemSlices returns the cgroups that hold the device's work other than
@@ -206,18 +207,18 @@ func systemSlices(selfCgroup, mount string) []string {
 	if err != nil {
 		return nil
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		path, ok := strings.CutPrefix(line, "0::")
 		if !ok {
 			continue
 		}
-		i := strings.LastIndex(path, "/system.slice/")
-		if i < 0 {
+		before, _, ok := strings.CutLast(path, "/system.slice/")
+		if !ok {
 			return nil
 		}
 		var slices []string
 		for _, name := range []string{"system.slice", "user.slice"} {
-			slice := filepath.Join(mount, path[:i], name)
+			slice := filepath.Join(mount, before, name)
 			if _, err := os.Stat(filepath.Join(slice, "cpu.pressure")); err == nil {
 				slices = append(slices, slice)
 			}
@@ -258,7 +259,7 @@ func cgroupSomeAvg10(path string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != "some" {
 			continue

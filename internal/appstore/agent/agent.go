@@ -272,8 +272,7 @@ func StatusForError(err error) (int, string) {
 			return mapping.status, mapping.code
 		}
 	}
-	var policy *appstore.PolicyError
-	if errors.As(err, &policy) {
+	if _, ok := errors.AsType[*appstore.PolicyError](err); ok {
 		return http.StatusUnprocessableEntity, "policy_violation"
 	}
 	return http.StatusBadGateway, "app_engine_error"

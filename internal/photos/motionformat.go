@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -94,7 +95,7 @@ func motionLength(data []byte) (int64, bool, error) {
 	directoryDepth, depth := 0, 0
 	for {
 		token, err := decoder.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

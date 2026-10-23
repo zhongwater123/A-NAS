@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,12 +74,7 @@ func resolveTaskExecutable(name string) string {
 		if dir == "/etc/alternatives" {
 			return true
 		}
-		for _, candidate := range dirs {
-			if dir == candidate {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(dirs, dir)
 	}
 	candidates := []string{name}
 	if !path.IsAbs(name) {
@@ -368,7 +364,7 @@ func readTaskIconFile(root fs.FS, name string, limit int) ([]byte, error) {
 func parseTaskDesktop(data []byte) (string, string) {
 	section := ""
 	values := map[string]string{}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") {
 			section = line

@@ -38,35 +38,61 @@ export function useTileRenderer(grid: GridProps, badge?: (asset: PhotoAsset) => 
   const selecting = grid.selected.size > 0;
   const gridRef = useRef(grid);
   gridRef.current = grid;
-  const onToggle = useCallback((asset: PhotoAsset, event: MouseEvent) => gridRef.current.onToggle(asset, event.shiftKey), []);
-  const onOpen = useCallback((asset: PhotoAsset, image: HTMLImageElement | null) => gridRef.current.onOpen(asset, image), []);
+  const onToggle = useCallback(
+    (asset: PhotoAsset, event: MouseEvent) => gridRef.current.onToggle(asset, event.shiftKey),
+    [],
+  );
+  const onOpen = useCallback(
+    (asset: PhotoAsset, image: HTMLImageElement | null) => gridRef.current.onOpen(asset, image),
+    [],
+  );
   const onCheckDown = useCallback((asset: PhotoAsset, event: PointerEvent) => {
     const swipe = gridRef.current.onBeginSwipe(asset);
     gridRef.current.scroller.current?.beginSwipe(asset.id, event, swipe);
   }, []);
   const onDragIds = useCallback((asset: PhotoAsset) => gridRef.current.onDragIds?.(asset) ?? [asset.id], []);
   const draggable = Boolean(grid.onDragIds);
-  return useCallback((box: Box<PhotoAsset>) => (
-    <Tile
-      key={box.item.id}
-      box={box}
-      selected={grid.selected.has(box.item.id)}
-      selecting={selecting}
-      onOpen={onOpen}
-      onToggle={onToggle}
-      onCheckDown={onCheckDown}
-      onDragIds={draggable ? onDragIds : undefined}
-      badge={badge?.(box.item)}
-    />
-  ), [grid.selected, selecting, onOpen, onToggle, onCheckDown, onDragIds, draggable, badge]);
+  return useCallback(
+    (box: Box<PhotoAsset>) => (
+      <Tile
+        key={box.item.id}
+        box={box}
+        selected={grid.selected.has(box.item.id)}
+        selecting={selecting}
+        onOpen={onOpen}
+        onToggle={onToggle}
+        onCheckDown={onCheckDown}
+        onDragIds={draggable ? onDragIds : undefined}
+        badge={badge?.(box.item)}
+      />
+    ),
+    [grid.selected, selecting, onOpen, onToggle, onCheckDown, onDragIds, draggable, badge],
+  );
 }
 
 // DayHeader names a day and selects all of it.
-export function DayHeader({ entry, selected, onSelect }: { entry: Extract<Entry, { kind: "day" }>; selected: ReadonlySet<string>; onSelect: (ids: string[]) => void }) {
+export function DayHeader({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: Extract<Entry, { kind: "day" }>;
+  selected: ReadonlySet<string>;
+  onSelect: (ids: string[]) => void;
+}) {
   const all = entry.ids.every((id) => selected.has(id));
   return (
     <div className={`ph-day${selected.size ? " selecting" : ""}`}>
-      <button type="button" role="checkbox" aria-checked={all} aria-label={`选择${entry.label}的 ${entry.ids.length} 张照片`} className={`ph-day-check${all ? " on" : ""}`} onClick={() => onSelect(entry.ids)}><Check strokeWidth={3} /></button>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={all}
+        aria-label={`选择${entry.label}的 ${entry.ids.length} 张照片`}
+        className={`ph-day-check${all ? " on" : ""}`}
+        onClick={() => onSelect(entry.ids)}
+      >
+        <Check strokeWidth={3} />
+      </button>
       <h3>{entry.label}</h3>
       <small>{entry.ids.length} 张</small>
     </div>
@@ -79,8 +105,18 @@ const thumbnailChecks = 20;
 // usePendingThumbnails rechecks photos whose thumbnails are still being
 // rendered for about a minute, so the grid stops loading their full-size
 // originals once the thumbnails exist.
-export function usePendingThumbnails(assets: PhotoAsset[] | undefined, onReady: (ready: Map<string, PhotoAsset>) => void) {
-  const pending = useMemo(() => (assets ?? []).filter((asset) => asset.thumbnail === "pending").map((asset) => asset.id).join(","), [assets]);
+export function usePendingThumbnails(
+  assets: PhotoAsset[] | undefined,
+  onReady: (ready: Map<string, PhotoAsset>) => void,
+) {
+  const pending = useMemo(
+    () =>
+      (assets ?? [])
+        .filter((asset) => asset.thumbnail === "pending")
+        .map((asset) => asset.id)
+        .join(","),
+    [assets],
+  );
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   useEffect(() => {
@@ -89,7 +125,11 @@ export function usePendingThumbnails(assets: PhotoAsset[] | undefined, onReady: 
     const timer = window.setInterval(() => {
       if (++attempts >= thumbnailChecks) window.clearInterval(timer);
       void Promise.all(pending.split(",").map((id) => getPhoto(id).catch(() => undefined))).then((checked) => {
-        const ready = new Map(checked.filter((asset): asset is PhotoAsset => asset !== undefined && asset.thumbnail !== "pending").map((asset) => [asset.id, asset]));
+        const ready = new Map(
+          checked
+            .filter((asset): asset is PhotoAsset => asset !== undefined && asset.thumbnail !== "pending")
+            .map((asset) => [asset.id, asset]),
+        );
         if (ready.size) onReadyRef.current(ready);
       });
     }, thumbnailCheckInterval);

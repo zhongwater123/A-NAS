@@ -2,7 +2,15 @@ import { Activity, Layers } from "lucide-react";
 import { useState } from "react";
 import type { Task } from "./api";
 
-export function TaskIcon({ task, icons, processes }: { task: Task; icons?: Record<string, string>; processes: boolean }) {
+export function TaskIcon({
+  task,
+  icons,
+  processes,
+}: {
+  task: Task;
+  icons?: Record<string, string>;
+  processes: boolean;
+}) {
   const source = task.iconId ? icons?.[task.iconId] : undefined;
   const [failed, setFailed] = useState<string>();
   const localImage = source && source.length <= 24576 && /^data:image\/(png|svg\+xml);base64,/.test(source);

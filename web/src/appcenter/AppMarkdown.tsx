@@ -19,7 +19,12 @@ const components: Components = {
 
 export default function AppMarkdown({ children }: { children: string }) {
   return (
-    <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} disallowedElements={["img"]} unwrapDisallowed components={components}>
+    <Markdown
+      remarkPlugins={[remarkGfm, remarkBreaks]}
+      disallowedElements={["img"]}
+      unwrapDisallowed
+      components={components}
+    >
       {children}
     </Markdown>
   );

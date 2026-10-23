@@ -230,9 +230,7 @@ func TestOneFailedSessionLookupLeavesTheOthersWorking(t *testing.T) {
 	failures := make(chan error, 1)
 	var lookups sync.WaitGroup
 	for range 8 {
-		lookups.Add(1)
-		go func() {
-			defer lookups.Done()
+		lookups.Go(func() {
 			for range 200 {
 				if _, err := directory.ResolveSessionIdentity(ctx, session.Token); err != nil {
 					select {
@@ -242,7 +240,7 @@ func TestOneFailedSessionLookupLeavesTheOthersWorking(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	for range 200 {
 		if _, err := directory.ResolveSessionIdentity(abandoned, session.Token); err == nil || errors.Is(err, accounts.ErrSessionNotFound) {

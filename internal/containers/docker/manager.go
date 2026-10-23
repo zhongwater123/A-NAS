@@ -40,10 +40,10 @@ type Manager struct {
 	now    func() time.Time
 }
 
-// New connects using DOCKER_HOST (default unix:///var/run/docker.sock) and
-// negotiates the API version with the daemon.
+// New connects using DOCKER_HOST (default unix:///var/run/docker.sock); the
+// client negotiates the API version with the daemon.
 func New() (*Manager, error) {
-	engine, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	engine, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, err
 	}

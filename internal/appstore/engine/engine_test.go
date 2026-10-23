@@ -111,7 +111,7 @@ func (f *fakeRunner) Run(ctx context.Context, args []string, output io.Writer) e
 	if f.gate != nil {
 		<-f.gate
 	}
-	for i := 0; i < 45; i++ {
+	for i := range 45 {
 		fmt.Fprintf(output, "step %d\n", i)
 	}
 	if f.after != nil {

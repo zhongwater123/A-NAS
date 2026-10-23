@@ -369,10 +369,6 @@ func encodeDetail(reason string, expiresAt *time.Time) string {
 	return string(encoded)
 }
 
-func (s *Service) notify(ctx context.Context, userID string, kind NotificationKind, actorUsername, detail string) error {
-	return s.notifyTo(ctx, s.store.db, userID, kind, actorUsername, detail)
-}
-
 // notifyTo records a notification through db, which may be a transaction the
 // notification must commit with.
 func (s *Service) notifyTo(ctx context.Context, db sqlExecutor, userID string, kind NotificationKind, actorUsername, detail string) error {

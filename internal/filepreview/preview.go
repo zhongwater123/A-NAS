@@ -86,7 +86,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	if err := ctx.Err(); err != nil {
 		return Image{}, err
 	}
-	content, key, format, err := s.open(ctx, actor, id, size)
+	content, key, _, err := s.open(ctx, actor, id, size)
 	if err != nil {
 		return Image{}, err
 	}
@@ -104,7 +104,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	defer cancel()
 	// Reopen after waiting: permissions, source revision, or the file itself may
 	// have changed in the queue. Queued requests hold no source descriptors.
-	content, key, format, err = s.open(ctx, actor, id, size)
+	content, key, format, err := s.open(ctx, actor, id, size)
 	if err != nil {
 		return Image{}, err
 	}

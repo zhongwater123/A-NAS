@@ -1,11 +1,36 @@
 version: 2
+# Minor and patch updates of an ecosystem arrive as one pull request; a major
+# update gets its own.
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: monthly
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  # golangci-lint's own module (Makefile, go-lint). Its tool directive leaves
+  # every requirement marked indirect, which Dependabot skips unless allowed.
+  - package-ecosystem: gomod
+    directory: /tools/golangci-lint
+    schedule:
+      interval: monthly
+    allow:
+      - dependency-name: github.com/golangci/golangci-lint/v2
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: monthly
+    groups:
+      web:
+        update-types: [minor, patch]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        update-types: [minor, patch]

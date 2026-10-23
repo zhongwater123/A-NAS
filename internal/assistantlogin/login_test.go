@@ -80,13 +80,11 @@ func TestCacheLogsInOncePerTokenAndAgainWhenAskedOrExpiring(t *testing.T) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if token, err := cache.Token(ctx, "alice", false, login); err != nil || token != "token-1" {
 				t.Errorf("Token() = %q, %v", token, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if logins.Load() != 1 {

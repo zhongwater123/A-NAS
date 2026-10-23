@@ -6,7 +6,14 @@ import { createImageSearch, listImageSearchResults, type PhotoPage } from "./pho
 
 // An image to search the library by: what the browser made of the chosen,
 // dropped or pasted file. The photo service gets this JPEG, never the file.
-export interface ImageQuery { key: string; name: string; blob: Blob; url: string; width: number; height: number }
+export interface ImageQuery {
+  key: string;
+  name: string;
+  blob: Blob;
+  url: string;
+  width: number;
+  height: number;
+}
 
 // What reading the image came to: undefined while local AI reads it.
 export type ImageResult = { error?: string } | undefined;
@@ -16,14 +23,18 @@ export type ImageResult = { error?: string } | undefined;
 const queryEdge = 1600;
 let queries = 0;
 
-export const imageFile = (files?: FileList | null) => Array.from(files ?? []).find((file) => file.type.startsWith("image/"));
+export const imageFile = (files?: FileList | null) =>
+  Array.from(files ?? []).find((file) => file.type.startsWith("image/"));
 
 // pickImage lets the member choose one image to search by.
 export function pickImage(onImage: (file: File) => void) {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "image/*";
-  input.onchange = () => { const file = imageFile(input.files); if (file) onImage(file); };
+  input.onchange = () => {
+    const file = imageFile(input.files);
+    if (file) onImage(file);
+  };
   input.click();
 }
 
@@ -62,9 +73,14 @@ const encoded = new WeakSet<ImageQuery>();
 function searchId(query: ImageQuery, fresh = false) {
   const kept = fresh ? undefined : searches.get(query);
   if (kept) return kept;
-  const sent = createImageSearch(query.blob).then(({ id }) => { encoded.add(query); return id; });
+  const sent = createImageSearch(query.blob).then(({ id }) => {
+    encoded.add(query);
+    return id;
+  });
   searches.set(query, sent);
-  sent.catch(() => { if (searches.get(query) === sent) searches.delete(query); });
+  sent.catch(() => {
+    if (searches.get(query) === sent) searches.delete(query);
+  });
   return sent;
 }
 
@@ -102,9 +118,21 @@ export interface ImageDropProps {
 }
 
 // ImageSearchButton sits at the end of a search box.
-export function ImageSearchButton({ onPick, className = "ph-search-image" }: { onPick: () => void; className?: string }) {
+export function ImageSearchButton({
+  onPick,
+  className = "ph-search-image",
+}: {
+  onPick: () => void;
+  className?: string;
+}) {
   return (
-    <button type="button" className={className} aria-label="以图搜图" title="以图搜图：选择一张图片，或把图片拖到、粘贴到搜索框" onClick={onPick}>
+    <button
+      type="button"
+      className={className}
+      aria-label="以图搜图"
+      title="以图搜图：选择一张图片，或把图片拖到、粘贴到搜索框"
+      onClick={onPick}
+    >
       <Camera />
     </button>
   );
@@ -117,7 +145,9 @@ export function ImageReading({ query, topInset }: { query: ImageQuery; topInset:
   const aspect = Math.min(1.8, Math.max(0.6, query.width / query.height));
   return (
     <div className="ph-image-reading" style={{ paddingTop: topInset }} role="status">
-      <span className="ph-image-thumb" style={{ aspectRatio: `${aspect}` }}><img src={query.url} alt="" draggable={false} /></span>
+      <span className="ph-image-thumb" style={{ aspectRatio: `${aspect}` }}>
+        <img src={query.url} alt="" draggable={false} />
+      </span>
       <strong>正在识别这张图片</strong>
       <p>本地 AI 在这台 NAS 上分析画面和画中物品，图片不会被保存</p>
     </div>
@@ -126,19 +156,49 @@ export function ImageReading({ query, topInset }: { query: ImageQuery; topInset:
 
 // ImageSource shows the image photos are being found for and how far local
 // AI has got with it; another image can take its place.
-export function ImageSource({ query, result, over, drop, onReplace }: { query: ImageQuery; result: ImageResult; over: boolean; drop: ImageDropProps; onReplace: () => void }) {
+export function ImageSource({
+  query,
+  result,
+  over,
+  drop,
+  onReplace,
+}: {
+  query: ImageQuery;
+  result: ImageResult;
+  over: boolean;
+  drop: ImageDropProps;
+  onReplace: () => void;
+}) {
   const aspect = Math.min(1.8, Math.max(0.6, query.width / query.height));
   const reading = result === undefined;
   return (
-    <div className={`ph-similar-source ph-image-source${reading ? " reading" : ""}${over ? " image-drop" : ""}`} aria-busy={reading} {...drop}>
-      <span className="ph-image-thumb" style={{ aspectRatio: `${aspect}` }}><img src={query.url} alt="" draggable={false} /></span>
+    <div
+      className={`ph-similar-source ph-image-source${reading ? " reading" : ""}${over ? " image-drop" : ""}`}
+      aria-busy={reading}
+      {...drop}
+    >
+      <span className="ph-image-thumb" style={{ aspectRatio: `${aspect}` }}>
+        <img src={query.url} alt="" draggable={false} />
+      </span>
       <div>
         <strong title={query.name}>{query.name}</strong>
         <small className={result?.error ? "failed" : undefined}>
-          {reading ? "正在识别画面和画中物品…" : result.error ? "没能识别这张图片" : "按画面和画中物品的相似程度排列，最像的在前"}
+          {reading
+            ? "正在识别画面和画中物品…"
+            : result.error
+              ? "没能识别这张图片"
+              : "按画面和画中物品的相似程度排列，最像的在前"}
         </small>
       </div>
-      <button type="button" className="ph-image-replace" title="换一张图片搜索，也可以把图片拖到这里" onClick={onReplace}><Camera /><span>换一张</span></button>
+      <button
+        type="button"
+        className="ph-image-replace"
+        title="换一张图片搜索，也可以把图片拖到这里"
+        onClick={onReplace}
+      >
+        <Camera />
+        <span>换一张</span>
+      </button>
     </div>
   );
 }

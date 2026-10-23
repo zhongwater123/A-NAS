@@ -68,7 +68,7 @@ func (s *Service) applyRenames(ctx context.Context, actor accounts.User, renames
 // keep their IDs across a rename, so progress, favorites and collections
 // stay; the library is rescanned to read the title from the new name.
 func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID, name string) (VideoDetail, error) {
-	video, library, err := s.visibleVideo(ctx, actor, videoID)
+	_, library, err := s.visibleVideo(ctx, actor, videoID)
 	if err != nil {
 		return VideoDetail{}, err
 	}
@@ -76,7 +76,7 @@ func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID,
 	// catalog update. Reload after waiting, because another rename may have run.
 	unlock := s.lockRename(ctx, actor, library.ID)
 	defer unlock()
-	video, library, err = s.visibleVideo(ctx, actor, videoID)
+	video, library, err := s.visibleVideo(ctx, actor, videoID)
 	if err != nil {
 		return VideoDetail{}, err
 	}
