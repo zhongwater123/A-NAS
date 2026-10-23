@@ -21,10 +21,26 @@ export function stubAPI<A extends Answer>(answer: A): A {
   return answer;
 }
 
+// Requests remember the FormData or Blob they were built with: Vitest's jsdom
+// environment turns such a body into Node's on the way into a Request, and
+// loses the files' bytes and names (Vitest 5.0, jsdom 30.1). setup.ts calls
+// this before any module takes Request, as the typed client does.
+const builtWith = new WeakMap<Request, FormData | Blob>();
+export function rememberRequestBodies() {
+  const Base = globalThis.Request;
+  globalThis.Request = class extends Base {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(input, init);
+      if (init?.body instanceof FormData || init?.body instanceof Blob) builtWith.set(this, init.body);
+    }
+  };
+}
+
 async function bodyOf(request: Request): Promise<BodyInit | undefined> {
+  const built = builtWith.get(request);
+  if (built) return built;
   if (!request.body) return undefined;
   const type = request.headers.get("Content-Type") ?? "";
-  if (type.startsWith("multipart/form-data")) return request.formData();
   if (type.startsWith("application/json") || type.startsWith("text/")) return request.text();
   return request.blob();
 }
