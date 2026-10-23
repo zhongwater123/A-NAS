@@ -17,9 +17,35 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The main branch's ruleset requires the three jobs below by name: rename one
+# there too. A pull request that changes only documentation gets the document
+# checks; the two test jobs are skipped by their condition, which GitHub counts
+# as passed (path filters on the workflow would leave them pending instead and
+# block the merge).
 jobs:
+  scope:
+    name: Change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs-only: ${{ steps.scope.outputs.docs-only }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 2
+
+      # An explicit bash runs with pipefail, so a failure of the script fails the step.
+      - name: Find out whether only documentation changes
+        id: scope
+        shell: bash
+        run: scripts/ci-scope.sh "$GITHUB_EVENT_NAME" | tee -a "$GITHUB_OUTPUT"
+
   check:
     name: Project checks
+    needs: scope
+    # Also when the scope job fails: its answer is then empty, and every check runs.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,7 +61,12 @@ jobs:
             go.sum
             tools/golangci-lint/go.sum
 
+      - name: Check the documentation
+        if: ${{ needs.scope.outputs.docs-only == 'true' }}
+        run: make docs-check
+
       - name: Set up Node.js
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.9.0
@@ -45,6 +76,7 @@ jobs:
       # The runner's ShellCheck is older and judges differently; this is the
       # release the Makefile names, checked against its published SHA-256.
       - name: Install ShellCheck
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: |
           version="$(sed -n 's/^SHELLCHECK_VERSION = //p' Makefile)"
           curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "https://github.com/koalaman/shellcheck/releases/download/v$version/shellcheck-v$version.linux.x86_64.tar.xz"
@@ -55,6 +87,7 @@ jobs:
 
       # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.lock).
       - name: Set up Python
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
@@ -62,15 +95,19 @@ jobs:
       # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock, lets the
       # clustering tests run; the real-model tests need model files and stay skipped.
       - name: Install the AI tools and test dependencies
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: |
           python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r ai/requirements-dev.lock
           grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
 
       - name: Run checks
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: make check
 
   race:
     name: Go tests with the race detector
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -95,6 +132,8 @@ jobs:
 
   system:
     name: System test (Debian 13, systemd)
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
