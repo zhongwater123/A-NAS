@@ -20,6 +20,7 @@ EmbeddingGemma 系列是"带任务前缀"训练的，前缀不对，相似度会
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -38,6 +39,23 @@ PROMPTS = {
 }
 
 Vector = list[float]
+
+# 前缀表的版本：前缀改一个字，同样的文本就落到不同的向量上，所以它是向量空间身份的一部分
+PROMPTS_VERSION = hashlib.sha256(json.dumps(PROMPTS, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+
+
+def space_of(emb) -> dict:
+    """embedder 的向量空间身份：哪些东西变了，同一段文本的向量就不再可比（A-NAS #152 R1）。
+
+    包括实现、权重（服务端报告的指纹）、运行时、前缀版本、维度、归一化方式。只有名字和维度相同不算同一空间。
+    """
+    if hasattr(emb, "space"):
+        return emb.space()
+    return {"impl": type(emb).__name__, "name": getattr(emb, "name", None), "dim": getattr(emb, "dim", None)}
+
+
+def space_fingerprint(space: dict) -> str:
+    return hashlib.sha256(json.dumps(space, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 # ---------- 纯函数 ----------
@@ -119,6 +137,9 @@ class HashEmbedder:
         # 哈希向量不区分 query/document，前缀对它没有意义
         return [self._vec(t) for t in texts]
 
+    def space(self) -> dict:
+        return {"impl": "hash-ngram", "version": 1, "dim": self.dim, "ngrams": list(self.ngrams), "normalize": "l2"}
+
 
 class HttpEmbedder:
     """OpenAI 兼容的 /v1/embeddings 客户端（只用 urllib）。"""
@@ -136,6 +157,7 @@ class HttpEmbedder:
         self.api_key = api_key
         self.batch_size = batch_size
         self.name = f"http:{model}@{dim or 768}"
+        self._server: Optional[dict] = None
 
     def _post(self, inputs: list[str]) -> list[Vector]:
         body = json.dumps({"model": self.model, "input": inputs}).encode("utf-8")
@@ -152,6 +174,23 @@ class HttpEmbedder:
         if len(data) != len(inputs):
             raise EmbedError(f"向量服务返回 {len(data)} 条，期望 {len(inputs)} 条")
         return [truncate(d["embedding"], self.dim) for d in data]
+
+    def server_identity(self) -> dict:
+        """向服务端 /health 要它实际加载的权重指纹和运行时。请求里的 model 名字代替不了实际权重。"""
+        if self._server is None:
+            req = urllib.request.Request(self.url + "/health", headers={"Accept": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    h = json.loads(resp.read().decode("utf-8"))
+            except (OSError, http.client.HTTPException, ValueError) as e:
+                raise EmbedError(f"向量服务 {self.url} 报不出身份（/health）: {e}") from None
+            self._server = {k: h.get(k) for k in ("model", "weights", "runtime", "dims", "fake")}
+        return self._server
+
+    def space(self) -> dict:
+        return {"impl": "http", "url": self.url, "model": self.model, "dim": self.dim,
+                "add_prefix": self.add_prefix, "prompts": PROMPTS_VERSION if self.add_prefix else None,
+                "normalize": "truncate+l2", "server": self.server_identity()}
 
     def embed(self, texts: list[str], kind: str = "sts") -> list[Vector]:
         prefix = PROMPTS.get(kind, PROMPTS["sts"]) if self.add_prefix else ""
@@ -185,6 +224,12 @@ class ProviderEmbedder:
         prefix = PROMPTS.get(kind, PROMPTS["sts"]) if self.add_prefix else ""
         return [truncate([float(x) for x in self.provider.embed_text(prefix + t)], self.dim) for t in texts]
 
+    def space(self) -> dict:
+        # provider.model 已含权重哈希、MediaPipe 版本、视觉 token 与归一化（anas_ai.providers）
+        return {"impl": "provider", "model": getattr(self.provider, "model", None), "dim": self.dim,
+                "add_prefix": self.add_prefix, "prompts": PROMPTS_VERSION if self.add_prefix else None,
+                "normalize": "truncate+l2"}
+
 
 class CachedEmbedder:
     """磁盘缓存：按 (embedder 名, kind, 文本) 的 sha256 存一行 JSON。
@@ -197,6 +242,7 @@ class CachedEmbedder:
         self.name = inner.name
         self.dim = inner.dim
         self.semantic = inner.semantic
+        self._fp: Optional[str] = None
         self.path = Path(path) if path else None
         self._mem: dict[str, Vector] = {}
         if self.path and self.path.exists():
@@ -207,8 +253,14 @@ class CachedEmbedder:
                 except Exception:
                     continue
 
+    def space(self) -> dict:
+        return space_of(self.inner)
+
     def _key(self, kind: str, text: str) -> str:
-        return hashlib.sha256(f"{self.name}\x00{kind}\x00{text}".encode("utf-8")).hexdigest()
+        # 键用完整的向量空间身份（含服务地址、前缀开关、服务端权重指纹与运行参数），不只是名字和维度（A-NAS #152 R1）
+        if self._fp is None:
+            self._fp = space_fingerprint(self.space())
+        return hashlib.sha256(f"{self._fp}\x00{kind}\x00{text}".encode("utf-8")).hexdigest()
 
     def embed(self, texts: list[str], kind: str = "sts") -> list[Vector]:
         keys = [self._key(kind, t) for t in texts]

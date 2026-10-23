@@ -17,7 +17,8 @@ Worker 跑的是 LiteRT 文件（MediaPipe，见 anas_ai/providers.py）；微�
   POST /v1/embeddings  {"model": "...", "input": ["..."] 或 "..."}
       -> {"data": [{"index": 0, "embedding": [...]}, ...], "model": "...", "dims": 768}
       输入文本应已带任务前缀（embedders.PROMPTS）；本服务不改写输入。
-  GET  /health         -> {"ok": true, "model": "...", "fake": bool}
+  GET  /health         -> {"ok": true, "model": "...", "dims": 768, "fake": bool, "weights": "...", "runtime": "..."}
+      weights 是实际加载的权重指纹，runtime 含库版本、精度与截断长度；客户端把它们算进向量空间身份。
 """
 
 from __future__ import annotations
@@ -29,9 +30,26 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from finetune.embedders import HashEmbedder  # noqa: E402
+
+
+def weights_fingerprint(model_id: str) -> str:
+    """服务实际加载的权重的指纹。本地目录：所有文件的相对路径和大小，加上小配置文件的内容，一起做 sha256
+    （不读几 GB 的权重本体，换文件或改配置都会变，大小完全相同的替换测不出）；Hugging Face 模型名：就用名字。"""
+    import hashlib
+    root = Path(model_id)
+    if not root.is_dir():
+        return "hf:" + model_id
+    h = hashlib.sha256()
+    for f in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = f.relative_to(root).as_posix()
+        h.update(f"{rel}\0{f.stat().st_size}\0".encode("utf-8"))
+        if f.suffix in (".json", ".txt", ".model") and f.stat().st_size < 4 << 20:
+            h.update(f.read_bytes())
+    return "dir:" + h.hexdigest()[:32]
 
 
 class GemmaBackend:
@@ -59,6 +77,13 @@ class GemmaBackend:
         self.name = model_id
         self.dims = self.model.get_sentence_embedding_dimension() or 768
         self.model.encode(["预热"], normalize_embeddings=True)
+        self.weights = weights_fingerprint(model_id)
+        try:
+            import sentence_transformers  # type: ignore
+            self.runtime = (f"sentence-transformers {sentence_transformers.__version__} torch {torch.__version__} "
+                            f"{dtype} msl{self.model.max_seq_length}")
+        except Exception:
+            self.runtime = f"sentence-transformers {dtype} msl{self.model.max_seq_length}"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         out = self.model.encode(texts, normalize_embeddings=True, convert_to_numpy=True, batch_size=16)
@@ -70,6 +95,8 @@ class FakeBackend:
         self.h = HashEmbedder(dims)
         self.name = "fake-hash"
         self.dims = dims
+        self.weights = f"fake-hash@{dims}"
+        self.runtime = "fake"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self.h.embed(texts)
@@ -87,7 +114,8 @@ def make_handler(backend, fake: bool, lock: threading.Lock):
 
         def do_GET(self):  # noqa: N802
             if self.path.rstrip("/") in ("/health", ""):
-                self._json(200, {"ok": True, "model": backend.name, "dims": backend.dims, "fake": fake})
+                self._json(200, {"ok": True, "model": backend.name, "dims": backend.dims, "fake": fake,
+                                 "weights": getattr(backend, "weights", None), "runtime": getattr(backend, "runtime", None)})
             else:
                 self._json(404, {"error": "not found"})
 
