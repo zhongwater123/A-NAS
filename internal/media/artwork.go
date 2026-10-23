@@ -29,6 +29,11 @@ import (
 // docs/architecture/media-center.md#海报与剧照.
 const maxArtworkPixels = 50_000_000
 
+// maxArtworkWaiting bounds the requests waiting for the decode budget, each
+// with its picture's file open; more are ErrBusy. A poster wall loads far
+// fewer at once.
+const maxArtworkWaiting = 256
+
 // errUndecodable is a picture that is not artwork: its header is unreadable
 // or out of range, or the decoder rejects or panics on it.
 var errUndecodable = errors.New("the picture cannot be decoded as artwork")
@@ -170,8 +175,9 @@ func (s *Service) frame(videoID string) (Image, error) {
 }
 
 // resized returns a sidecar image scaled to fit size, read as the actor and
-// cached per file version. A version that cannot be decoded is remembered and
-// not read again, so a broken picture costs one decode and one log record.
+// cached per file version. A version that cannot be decoded is remembered
+// until the service restarts, so a broken picture costs one decode and one
+// log record, not one per request.
 func (s *Service) resized(ctx context.Context, actor accounts.User, entryID string, size artworkSize) (Image, error) {
 	entry, _, err := s.files.Lookup(ctx, actor, entryID)
 	if err != nil {
@@ -228,7 +234,7 @@ func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artwor
 	if config.Width <= 0 || config.Height <= 0 || pixels > maxArtworkPixels {
 		return nil, errUndecodable
 	}
-	if err := s.decoding.Acquire(ctx, pixels); err != nil {
+	if err := s.waitForPixels(ctx, pixels); err != nil {
 		return nil, err
 	}
 	// Released before the panic above is recovered, too.
@@ -249,6 +255,35 @@ func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artwor
 		return nil, err
 	}
 	return buffer.Bytes(), nil
+}
+
+// waitForPixels takes pixels from the decode budget, waiting in turn behind
+// the decodes in flight until the request ends.
+func (s *Service) waitForPixels(ctx context.Context, pixels int64) error {
+	if s.decoding.TryAcquire(pixels) {
+		return nil
+	}
+	if s.decodeWaiting.Add(1) > s.maxDecodeWaiting {
+		s.decodeWaiting.Add(-1)
+		return ErrBusy
+	}
+	defer s.decodeWaiting.Add(-1)
+	return s.decoding.Acquire(ctx, pixels)
+}
+
+// forgetUndecodable removes the undecodable markers of directory, so that
+// each start tries such pictures once more: the decoder, or this code, may
+// have been fixed since.
+func forgetUndecodable(directory string) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "--undecodable-") {
+			_ = os.Remove(filepath.Join(directory, entry.Name()))
+		}
+	}
 }
 
 // decodeFailure tells a picture the decoder refuses from a file that could
