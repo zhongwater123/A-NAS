@@ -64,6 +64,12 @@ vi.mock("./XtermSession", async () => {
   };
 });
 
+// The task manager has its own tests with full device samples; here only the
+// way into it matters.
+vi.mock("./taskmanager/TaskManagerSection", () => ({
+  TaskManagerSection: () => <div data-testid="task-manager" />,
+}));
+
 const session = {
   csrfToken: "csrf-test",
   expiresAt: "2026-10-07T22:00:00Z",
@@ -1111,6 +1117,28 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(statusBar).getByText("设备在线")).toBeTruthy();
     await user.click(network);
     expect(await screen.findByRole("dialog", { name: "传输中心" })).toBeTruthy();
+  });
+
+  it("opens the task manager from the utilisation gauges, also when settings shows another section", async () => {
+    stubFetch(healthyState);
+    const user = userEvent.setup();
+    render(<App />);
+
+    const statusBar = await screen.findByRole("banner", { name: "设备状态" });
+    const gauges = within(statusBar).getByRole("button", { name: "CPU 与内存占用，打开任务管理器" });
+    expect(within(gauges).getByRole("meter", { name: "CPU 占用" })).toBeTruthy();
+    expect(within(gauges).getByRole("meter", { name: "内存占用" })).toBeTruthy();
+    await user.click(gauges);
+    const settings = await screen.findByRole("dialog", { name: "设置" });
+    const section = (name: string) => within(settings).getByRole("button", { name });
+    expect(section("任务管理器").getAttribute("aria-current")).toBe("page");
+    expect(within(settings).getByTestId("task-manager")).toBeTruthy();
+
+    await user.click(section("概览"));
+    expect(within(settings).queryByTestId("task-manager")).toBeNull();
+    await user.click(gauges);
+    expect(section("任务管理器").getAttribute("aria-current")).toBe("page");
+    expect(within(settings).getByTestId("task-manager")).toBeTruthy();
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {

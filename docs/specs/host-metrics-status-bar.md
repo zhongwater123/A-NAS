@@ -1,7 +1,7 @@
 # 桌面状态栏与实时资源指标
 
 状态：implemented
-更新时间：2026-10-07
+更新时间：2026-10-23
 
 ## 目标
 
@@ -20,6 +20,12 @@
 - Given：产品服务以 `agent` 模式连接 Host Agent。
 - When：桌面处于前台。
 - Then：状态栏每 2 秒通过 `GET /api/v1/metrics` 刷新；CPU 与内存以 210° 仪表盘显示百分比，指针与弧线平滑过渡，60% 起读数转黄、85% 起转红；内存标注已用/总量 GiB，CPU 标注逻辑核数。
+
+### 从仪表盘打开任务管理器
+
+- Given：任一账号已登录桌面。
+- When：点击 CPU 与内存仪表盘，或用键盘聚焦后按 Enter 或空格。
+- Then：打开设置并切到“[任务管理器](task-manager.md)”分区；设置已打开时切换分区并置于前台，与点击网速打开传输中心相同。两个仪表盘同属一个名为“CPU 与内存占用，打开任务管理器”的按钮，各自仍以 meter 报告读数。
 
 ### 查看网速
 
@@ -53,7 +59,7 @@
 
 - Linux 采样：[指标测试](../../internal/hoststate/linux/metrics_test.go) 覆盖基线窗口、复用上次采样、快速轮询缓存、计数器重置、虚拟接口排除与回退、格式错误。
 - IPC 与 API：[Host Agent 测试](../../internal/hoststate/agent/agent_test.go)、[HTTP 测试](../../internal/httpapi/server_test.go)、[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[桌面测试](../../web/src/App.test.tsx) 与 [速率格式测试](../../web/src/StatusBar.test.ts)。
+- 前端：[桌面测试](../../web/src/App.test.tsx)（含点击网速打开传输中心、点击仪表盘打开任务管理器）与 [速率格式测试](../../web/src/StatusBar.test.ts)。
 - 2026-10-07 在 WSL2 以 `ANAS_HOSTSTATE_MODE=agent` 运行 Host Agent 与产品服务：14 核与 7.5 GiB 内存被正确识别，CPU 压测时仪表升至约 66%，限速下载期间下行速率与 curl 实际速率一致；并在 1024、820 和 375 px 宽度下检查布局。
 
 ## 关联

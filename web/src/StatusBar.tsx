@@ -14,38 +14,55 @@ const startAngle = -sweep / 2;
 
 // extra shows beside the clock while it has something to say, such as
 // transfers in progress; onOpenTransfers makes the network rates open the
-// transfer center.
+// transfer center, and onOpenTaskManager makes the gauges open the task manager.
 export function StatusBar({
   host,
   extra,
   onOpenTransfers,
+  onOpenTaskManager,
 }: {
   host: HostStateView;
   extra?: ReactNode;
   onOpenTransfers?: () => void;
+  onOpenTaskManager?: () => void;
 }) {
   const { metrics, disconnected: metricsDisconnected } = useHostMetrics();
   const disconnected = host.disconnected || metricsDisconnected;
   const connection = disconnected ? "offline" : host.snapshot ? "online" : "pending";
   const connectionLabel = { offline: "连接中断", online: "设备在线", pending: "正在连接" }[connection];
   const memory = metrics?.memory;
+  const gauges = (
+    <>
+      <Gauge
+        label="CPU"
+        name="CPU 占用"
+        percent={metrics?.cpu.usagePercent}
+        detail={metrics ? `${metrics.cpu.logicalCores} 核` : "—"}
+      />
+      <Gauge
+        label="内存"
+        name="内存占用"
+        percent={memory ? (memory.usedBytes / memory.totalBytes) * 100 : undefined}
+        detail={memory ? `${formatGiB(memory.usedBytes)} / ${formatGiB(memory.totalBytes)} GiB` : "—"}
+      />
+    </>
+  );
 
   return (
     <header className={`status-bar ${metricsDisconnected ? "stale" : ""}`} aria-label="设备状态">
-      <div className="status-gauges">
-        <Gauge
-          label="CPU"
-          name="CPU 占用"
-          percent={metrics?.cpu.usagePercent}
-          detail={metrics ? `${metrics.cpu.logicalCores} 核` : "—"}
-        />
-        <Gauge
-          label="内存"
-          name="内存占用"
-          percent={memory ? (memory.usedBytes / memory.totalBytes) * 100 : undefined}
-          detail={memory ? `${formatGiB(memory.usedBytes)} / ${formatGiB(memory.totalBytes)} GiB` : "—"}
-        />
-      </div>
+      {onOpenTaskManager ? (
+        <button
+          type="button"
+          className="status-gauges"
+          aria-label="CPU 与内存占用，打开任务管理器"
+          title="打开任务管理器"
+          onClick={onOpenTaskManager}
+        >
+          {gauges}
+        </button>
+      ) : (
+        <div className="status-gauges">{gauges}</div>
+      )}
       <span className="status-divider" aria-hidden="true" />
       {onOpenTransfers ? (
         <button

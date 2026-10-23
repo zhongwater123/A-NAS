@@ -1132,6 +1132,8 @@ button {
   display: grid;
   gap: 9px;
 }
+/* The gauges and the network rates open the task manager and the transfer center. */
+button.status-gauges,
 button.net-rates {
   margin: -6px -8px;
   padding: 6px 8px;
@@ -1144,12 +1146,15 @@ button.net-rates {
   cursor: pointer;
   transition: background 0.2s;
 }
+button.status-gauges:hover,
 button.net-rates:hover {
   background: rgba(255, 255, 255, 0.1);
 }
+button.status-gauges:active,
 button.net-rates:active {
   background: rgba(255, 255, 255, 0.16);
 }
+button.status-gauges:focus-visible,
 button.net-rates:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
