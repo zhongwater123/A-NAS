@@ -1,5 +1,5 @@
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import {
   HostState,
@@ -639,6 +639,37 @@ function DiskRow({ disk }: { disk: Disk }) {
 
 type WizardMode = "create" | "add";
 
+// minutesUntil is the whole minutes left before a time, none once it passed.
+export const minutesUntil = (until: number, now: number) => Math.max(0, Math.ceil((until - now) / 60_000));
+
+// useMinutesLeft counts the minutes left before a time and changes on its own
+// as each one passes, so a plan's expiry shows without anything else
+// rendering the page.
+export function useMinutesLeft(until: number | undefined): number {
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      let timer = 0;
+      const next = () => {
+        if (until === undefined) return;
+        const left = until - Date.now();
+        if (!(left > 0)) return;
+        // The count drops when the time left reaches the next whole minute.
+        timer = window.setTimeout(
+          () => {
+            changed();
+            next();
+          },
+          (left % 60_000 || 60_000) + 1,
+        );
+      };
+      next();
+      return () => window.clearTimeout(timer);
+    },
+    [until],
+  );
+  return useSyncExternalStore(subscribe, () => (until === undefined ? 0 : minutesUntil(until, Date.now())));
+}
+
 interface LayoutOption {
   layout: VolumeLayout;
   before?: number;
@@ -689,7 +720,8 @@ function VolumeWizard({
         : ["选择硬盘", "核对计划", "执行"];
 
   const pending = plan?.state === "planned" || plan?.state === "confirmed";
-  const expired = Boolean(plan && pending && Date.parse(plan.expiresAt) <= Date.now());
+  const minutesLeft = useMinutesLeft(plan && pending ? Date.parse(plan.expiresAt) : undefined);
+  const expired = Boolean(plan && pending && minutesLeft === 0);
   const running = busy === "execute" || plan?.state === "running";
   const state = !plan ? stage : running ? "running" : expired ? "expired" : plan.state;
   const review = steps.indexOf("核对计划");
@@ -703,7 +735,6 @@ function VolumeWizard({
           : state === "succeeded"
             ? steps.length
             : review;
-  const minutesLeft = plan ? Math.max(0, Math.ceil((Date.parse(plan.expiresAt) - Date.now()) / 60_000)) : 0;
   const title = mode === "add" ? "设置硬盘用途" : "初始化数据卷";
   const toggle = (id: string) =>
     setSelected((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));

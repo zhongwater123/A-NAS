@@ -38,14 +38,5 @@
     // Request stubs check each request's headers as it arrives.
     "vitest/no-conditional-expect": "off"
   },
-  "ignorePatterns": ["src/assistant/hermes/**"],
-  // The storage wizard reads the clock while it renders a plan's expiry and the minutes left. Without
-  // that they would change only with the next render, or count down on their own, which the user would
-  // see; until that is decided, purity is off for that file. Every other file must pass every rule.
-  "overrides": [
-    {
-      "files": ["src/settings/StorageSection.tsx"],
-      "rules": { "react-hooks-js/purity": "off" }
-    }
-  ]
+  "ignorePatterns": ["src/assistant/hermes/**"]
 }
