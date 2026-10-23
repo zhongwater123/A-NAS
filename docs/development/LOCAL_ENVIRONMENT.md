@@ -75,12 +75,12 @@ wsl -d Ubuntu-24.04 -u root
 
 ### 运行检查
 
-文档、运维与前端检查直接在 WSL 中运行：
+文档与运维检查可以直接在 `/mnt/d` 上运行：
 
 ```bash
 . ~/.anas-env
 cd /mnt/d/A-NAS
-make docs-check ops-check web-test web-build
+make docs-check ops-check
 ```
 
 完整门禁按 [check-in-wsl](../../.claude/skills/check-in-wsl/SKILL.md) 在 WSL 的 ext4 副本中运行，依赖 cgo（SQLite）的 Go 测试与构建直接用 WSL 的 gcc。要在 Debian 12 中复现 cgo 测试时，在 `anas-acl-matrix:bookworm` 中以当前用户运行；以 root 运行会改变依赖权限检查的文件代理与文件测试。模块缓存先在 WSL 中用 `go mod download` 填好：
