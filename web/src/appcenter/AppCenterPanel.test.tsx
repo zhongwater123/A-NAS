@@ -96,7 +96,7 @@ function serve(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "POST") {
-        expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("csrf-test");
+        expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-test");
         posts.push(url);
         return onPost(url);
       }

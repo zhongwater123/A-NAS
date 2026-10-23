@@ -782,7 +782,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       apps: async (url, init) => {
         if (init?.method === "POST") {
           posts.push({ url, body: JSON.parse(String(init.body)) });
-          expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe(session.csrfToken);
+          expect(new Headers(init.headers).get("X-CSRF-Token")).toBe(session.csrfToken);
           installed = url.endsWith("/install");
           return json(
             { appId: "memos", action: "install", state: "running", startedAt: "2026-10-07T00:00:00Z", output: [] },

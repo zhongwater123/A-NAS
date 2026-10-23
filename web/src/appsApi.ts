@@ -1,105 +1,16 @@
-import { DataSource, apiFetch, csrfHeaders } from "./api";
+import { APIError, call, client } from "./api";
+import type { AppListResponse, AppPlan, AppStatus } from "./api.generated";
 
+export type { AppCredential, AppJob, AppShortcut } from "./api.generated";
+export type CatalogApp = AppStatus;
+export type AppList = AppListResponse;
+export type InstallPlan = AppPlan;
 // failed: the last install failed and its containers could not be removed.
-export type InstallState = "available" | "installed" | "installing" | "uninstalling" | "failed";
-
-export interface AppJob {
-  appId: string;
-  action: "install" | "uninstall";
-  state: "running" | "succeeded" | "failed";
-  startedAt: string;
-  finishedAt?: string;
-  output: string[];
-  error?: string;
-}
-
-export interface CatalogApp {
-  id: string;
-  title: string;
-  tagline: string;
-  // Markdown from the vendored manifest; notes is its advice before first use, such as a default account.
-  description: string;
-  notes: string;
-  // The manifest's own notes, set only when notes is written for A-NAS because they describe CasaOS.
-  upstreamNotes?: string;
-  // An A-NAS category, or "" from a container agent that predates them.
-  category: string;
-  version: string;
-  author: string;
-  developer: string;
-  // Absolute http(s) links or "".
-  website: string;
-  repo: string;
-  docs: string;
-  // YYYY-MM-DD or "".
-  updated: string;
-  webPort?: number;
-  scheme: string;
-  path: string;
-  state: InstallState;
-  running: number;
-  total: number;
-  job?: AppJob;
-  // Containers that are not running: restarting, exited or never started.
-  problems?: Array<{ service: string; state: string; exitCode: number }>;
-  // Logins generated for the app, such as its admin password.
-  credentials?: AppCredential[];
-  // Installed under older runtime rules; reinstalling applies the current ones (ADR 0022).
-  runtimeOutdated?: boolean;
-}
-
-// upstream marks the manifest's published value, still used by an app
-// installed before A-NAS generated its logins.
-export interface AppCredential {
-  label: string;
-  username?: string;
-  secret: string;
-  upstream?: boolean;
-}
-
+export type InstallState = CatalogApp["state"];
 // How one service runs (ADR 0022): app starts as the app identity with no
 // capabilities; app-after-init starts as root and switches to it; image keeps
 // the image's own user, which may be root, and only reaches its app's data.
-export interface ServiceRuntime {
-  service: string;
-  runAs: "app" | "app-after-init" | "image";
-  user?: string;
-  groups?: string[];
-  capDrop?: string[];
-  shared?: "read" | "write";
-}
-
-export interface AppList {
-  dataSource: DataSource;
-  apps: CatalogApp[];
-}
-
-export interface InstallPlan {
-  appId: string;
-  title: string;
-  version: string;
-  project: string;
-  // The Linux account app-<id> allocated for the app; services says how each service uses it.
-  identity: { username: string; uid: number; gid: number };
-  // Absent from a container agent that predates runtime rules.
-  services?: ServiceRuntime[];
-  images: string[];
-  containers: string[];
-  ports: Array<{ hostPort: number; containerPort: number; protocol: string; purpose?: string }>;
-  mounts: Array<{
-    hostPath: string;
-    containerPath: string;
-    kind: "appdata" | "shared" | "system";
-    readOnly: boolean;
-    purpose?: string;
-  }>;
-  // Docker networks the install creates and the address pools they come from.
-  networks: string[];
-  addressPools: string[];
-  digest: string;
-  compose: string;
-  credentials?: AppCredential[];
-}
+export type ServiceRuntime = NonNullable<InstallPlan["services"]>[number];
 
 export class AppsAPIError extends Error {
   constructor(
@@ -111,76 +22,49 @@ export class AppsAPIError extends Error {
 }
 
 export async function readApps(signal?: AbortSignal): Promise<AppList> {
-  const value = await request("/api/v1/apps", { signal });
+  const value = await request(client.GET("/api/v1/apps", { signal }));
   if (!isRecord(value) || !Array.isArray(value.apps)) throw new AppsAPIError("malformed_response");
-  return value as unknown as AppList;
+  return value;
 }
 
-export async function readPlan(id: string, signal?: AbortSignal): Promise<InstallPlan> {
-  const value = await request(`/api/v1/apps/${id}/plan`, { signal });
+export async function readPlan(appId: string, signal?: AbortSignal): Promise<InstallPlan> {
+  const value = await request(client.GET("/api/v1/apps/{appId}/plan", { params: { path: { appId } }, signal }));
   if (!isRecord(value) || typeof value.digest !== "string") throw new AppsAPIError("malformed_response");
-  return value as unknown as InstallPlan;
+  return value;
 }
 
-export async function installApp(id: string, digest: string): Promise<AppJob> {
-  return (await request(`/api/v1/apps/${id}/install`, post({ digest }))) as AppJob;
-}
+export const installApp = (appId: string, digest: string) =>
+  request(client.POST("/api/v1/apps/{appId}/install", { params: { path: { appId } }, body: { digest } }));
 
-export async function uninstallApp(id: string): Promise<AppJob> {
-  return (await request(`/api/v1/apps/${id}/uninstall`, post({}))) as AppJob;
-}
+export const uninstallApp = (appId: string) =>
+  request(client.POST("/api/v1/apps/{appId}/uninstall", { params: { path: { appId } }, body: {} }));
 
 export function iconURL(id: string): string {
   return `/api/v1/apps/${id}/icon`;
 }
 
-// An installed app every signed-in user opens from the desktop.
-export interface AppShortcut {
-  id: string;
-  title: string;
-  webPort: number;
-  scheme: string;
-  path: string;
-  // Running and total containers; 0 running means the app is stopped.
-  running: number;
-  total: number;
-}
-
-export async function readShortcuts(signal?: AbortSignal): Promise<AppShortcut[]> {
-  const value = await request("/api/v1/app-shortcuts", { signal });
+// readShortcuts lists the installed apps every signed-in user opens from the desktop.
+export async function readShortcuts(signal?: AbortSignal) {
+  const value = await request(client.GET("/api/v1/app-shortcuts", { signal }));
   if (!isRecord(value) || !Array.isArray(value.items)) throw new AppsAPIError("malformed_response");
-  return value.items as AppShortcut[];
+  return value.items;
 }
 
 export function shortcutIconURL(id: string): string {
   return `/api/v1/app-shortcuts/${id}/icon`;
 }
 
-function post(body: unknown): RequestInit {
-  return {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...csrfHeaders() },
-    body: JSON.stringify(body),
-  };
-}
-
-async function request(path: string, init: RequestInit): Promise<unknown> {
-  let response: Response;
+// request unwraps an App Center call: a failed one throws an AppsAPIError
+// with the server's code, network_error when the request went nowhere and
+// malformed_response when the body was not JSON.
+async function request<Data>(pending: Promise<{ data?: Data; error?: unknown; response: Response }>): Promise<Data> {
   try {
-    response = await apiFetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
+    return await call(pending);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new AppsAPIError("network_error");
+    if (error instanceof APIError) throw new AppsAPIError(error.code, error.message);
+    throw new AppsAPIError(error instanceof TypeError ? "network_error" : "malformed_response");
   }
-  const body: unknown = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    const failure = isRecord(body) && isRecord(body.error) ? body.error : {};
-    throw new AppsAPIError(
-      typeof failure.code === "string" ? failure.code : "request_failed",
-      typeof failure.message === "string" ? failure.message : "",
-    );
-  }
-  return body;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
