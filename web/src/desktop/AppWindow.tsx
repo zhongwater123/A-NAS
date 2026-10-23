@@ -2,7 +2,8 @@ import { CircleAlert, Maximize2, Minus, PanelLeftClose, X } from "lucide-react";
 import { Component, ErrorInfo, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { WINDOW_ID } from "../windowSnapshot";
-import { lightTitleIcons, WindowAction, windowIcons, WindowModel } from "./windows";
+import { apps } from "./apps";
+import { WindowAction, WindowModel } from "./windows";
 
 export function AppWindow({
   model,
@@ -52,7 +53,7 @@ export function AppWindow({
     window.addEventListener("pointerup", stop, { once: true });
   };
 
-  const Icon = windowIcons[model.id];
+  const { title, icon: Icon, lightTitle } = apps[model.id];
   // The dock floats over the bottom of the desktop whenever a window is open,
   // so a maximized window ends above it and keeps its bottom controls reachable.
   const style = model.maximized
@@ -66,29 +67,29 @@ export function AppWindow({
       style={style}
       {...{ [WINDOW_ID]: model.id }}
       role="dialog"
-      aria-label={model.title}
+      aria-label={title}
       onPointerDown={() => dispatch({ type: "focus", id: model.id })}
     >
       <div className="window-titlebar" onPointerDown={beginDrag}>
         <div className="window-title">
-          <span className={`window-app-icon${lightTitleIcons.has(model.id) ? " light" : ""}`}>
+          <span className={`window-app-icon${lightTitle ? " light" : ""}`}>
             <Icon size={17} />
           </span>
-          {model.title}
+          {title}
         </div>
         <div className="window-actions">
-          <button aria-label={`最小化${model.title}`} onClick={() => dispatch({ type: "minimize", id: model.id })}>
+          <button aria-label={`最小化${title}`} onClick={() => dispatch({ type: "minimize", id: model.id })}>
             <Minus />
           </button>
           <button
-            aria-label={`${model.maximized ? "还原" : "最大化"}${model.title}`}
+            aria-label={`${model.maximized ? "还原" : "最大化"}${title}`}
             onClick={() => dispatch({ type: "maximize", id: model.id })}
           >
             {model.maximized ? <PanelLeftClose /> : <Maximize2 />}
           </button>
           <button
             className="close"
-            aria-label={`关闭${model.title}`}
+            aria-label={`关闭${title}`}
             onClick={() => dispatch({ type: "close", id: model.id })}
           >
             <X />
