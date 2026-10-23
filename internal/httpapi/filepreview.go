@@ -9,6 +9,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
@@ -17,7 +18,7 @@ func (h *productHandler) handleFilePreview(w http.ResponseWriter, r *http.Reques
 	// but must revalidate source access before every reuse (including 304).
 	w.Header().Set("Cache-Control", "private, no-store")
 	if h.previews == nil {
-		writeError(w, 503, "preview_unavailable", "file preview is unavailable")
+		httpjson.WriteError(w, 503, "preview_unavailable", "file preview is unavailable")
 		return
 	}
 	size := 320
@@ -26,16 +27,16 @@ func (h *productHandler) handleFilePreview(w http.ResponseWriter, r *http.Reques
 	case "preview":
 		size = 1600
 	default:
-		writeError(w, 400, "invalid_request", "unknown preview size")
+		httpjson.WriteError(w, 400, "invalid_request", "unknown preview size")
 		return
 	}
 	result, err := h.previews.Render(r.Context(), session.User, r.PathValue("fileID"), size)
 	if err != nil {
 		switch {
 		case errors.Is(err, filepreview.ErrUnsupported), errors.Is(err, mediaworker.ErrUnreadable):
-			writeError(w, 422, "preview_unsupported", "this file cannot be previewed")
+			httpjson.WriteError(w, 422, "preview_unsupported", "this file cannot be previewed")
 		case errors.Is(err, mediaworker.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-			writeError(w, 503, "preview_unavailable", "file preview is unavailable")
+			httpjson.WriteError(w, 503, "preview_unavailable", "file preview is unavailable")
 		default:
 			h.writeFileError(w, r, err)
 		}

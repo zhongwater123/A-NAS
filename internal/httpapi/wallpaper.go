@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 )
 
@@ -24,7 +25,7 @@ func (h *productHandler) wallpaperRoutes() {
 
 func (h *productHandler) personalizationReady(w http.ResponseWriter) bool {
 	if h.personalization == nil {
-		writeError(w, http.StatusServiceUnavailable, "personalization_unavailable", "personalization settings are unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "personalization_unavailable", "personalization settings are unavailable")
 		return false
 	}
 	return true
@@ -39,7 +40,7 @@ func (h *productHandler) handleWallpaper(w http.ResponseWriter, r *http.Request,
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, wallpaper)
+	httpjson.Write(w, http.StatusOK, wallpaper)
 }
 
 func (h *productHandler) handleUpdateWallpaper(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -49,20 +50,23 @@ func (h *productHandler) handleUpdateWallpaper(w http.ResponseWriter, r *http.Re
 	var request struct {
 		Style *string `json:"style"`
 	}
-	if err := decodeJSON(r, &request); err != nil || request.Style == nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
+		return
+	}
+	if request.Style == nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
 	wallpaper, err := h.personalization.SetWallpaperStyle(r.Context(), *request.Style)
 	if errors.Is(err, personalization.ErrInvalidStyle) {
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, wallpaper)
+	httpjson.Write(w, http.StatusOK, wallpaper)
 }
 
 // handleSetWallpaperImage takes the picture as the raw request body. The page
@@ -73,16 +77,16 @@ func (h *productHandler) handleSetWallpaperImage(w http.ResponseWriter, r *http.
 	}
 	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if !strings.HasPrefix(mediaType, "image/") {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_image", "send a JPEG, PNG, GIF or WebP picture")
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_image", "send a JPEG, PNG, GIF or WebP picture")
 		return
 	}
 	picture, err := io.ReadAll(http.MaxBytesReader(w, r.Body, personalization.MaxWallpaperUploadBytes))
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", personalization.ErrImageTooLarge.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "image_too_large", personalization.ErrImageTooLarge.Error())
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "the picture could not be read")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the picture could not be read")
 		return
 	}
 	select {
@@ -94,10 +98,10 @@ func (h *productHandler) handleSetWallpaperImage(w http.ResponseWriter, r *http.
 	<-pictureGate
 	switch {
 	case errors.Is(err, personalization.ErrImageTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", err.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "image_too_large", err.Error())
 		return
 	case errors.Is(err, personalization.ErrUnsupportedImage):
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_image", personalization.ErrUnsupportedImage.Error())
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_image", personalization.ErrUnsupportedImage.Error())
 		return
 	case err != nil:
 		h.internalError(w, r, err)
@@ -108,7 +112,7 @@ func (h *productHandler) handleSetWallpaperImage(w http.ResponseWriter, r *http.
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, wallpaper)
+	httpjson.Write(w, http.StatusOK, wallpaper)
 }
 
 func (h *productHandler) handleResetWallpaper(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -120,7 +124,7 @@ func (h *productHandler) handleResetWallpaper(w http.ResponseWriter, r *http.Req
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, wallpaper)
+	httpjson.Write(w, http.StatusOK, wallpaper)
 }
 
 // handleWallpaperImage serves the picture with ?v=<version>; a new picture has
@@ -131,7 +135,7 @@ func (h *productHandler) handleWallpaperImage(w http.ResponseWriter, r *http.Req
 	}
 	picture, err := h.personalization.WallpaperPicture(r.Context())
 	if errors.Is(err, personalization.ErrNoWallpaperImage) {
-		writeError(w, http.StatusNotFound, "not_found", "the default wallpaper is in use")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "the default wallpaper is in use")
 		return
 	}
 	if err != nil {

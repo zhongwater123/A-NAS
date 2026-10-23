@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -22,6 +21,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
@@ -243,7 +243,7 @@ func (h *productHandler) routes() {
 	h.profileRoutes()
 	h.wallpaperRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 }
 
@@ -252,7 +252,7 @@ func (h *productHandler) handleTerminal(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if h.terminal == nil {
-		writeError(w, http.StatusServiceUnavailable, "terminal_unavailable", "terminal service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "terminal_unavailable", "terminal service is unavailable")
 		return
 	}
 	h.terminal.ServeHTTP(w, r)
@@ -265,7 +265,7 @@ func (h *productHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *productHandler) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	if h.accounts == nil {
-		writeError(w, http.StatusServiceUnavailable, "accounts_unavailable", "account service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "accounts_unavailable", "account service is unavailable")
 		return
 	}
 	required, err := h.accounts.SetupRequired(r.Context())
@@ -273,7 +273,7 @@ func (h *productHandler) handleSetupStatus(w http.ResponseWriter, r *http.Reques
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": required, "setupAllowed": directLoopback(r)})
+	httpjson.Write(w, http.StatusOK, map[string]bool{"setupRequired": required, "setupAllowed": directLoopback(r)})
 }
 
 func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +281,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 	// is not set up yet, so nobody else on the LAN creates its administrator
 	// first. The LAN entry always adds forwarding headers (ADR 0012).
 	if !directLoopback(r) {
-		writeError(w, http.StatusForbidden, "setup_local_only", "the device can only be set up on its own screen or through an SSH tunnel")
+		httpjson.WriteError(w, http.StatusForbidden, "setup_local_only", "the device can only be set up on its own screen or through an SSH tunnel")
 		return
 	}
 	var request struct {
@@ -289,8 +289,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 		Password     string `json:"password"`
 		LocalConsole bool   `json:"localConsole"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	if _, err := h.accounts.SetupAdministrator(r.Context(), request.Username, request.Password); err != nil {
@@ -304,7 +303,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 	}
 	h.setSessionCookie(w, session)
 	h.keepAssistant(session.User, session.Token)
-	writeJSON(w, http.StatusCreated, h.publicSession(r.Context(), session))
+	httpjson.Write(w, http.StatusCreated, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -313,18 +312,17 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 		Password     string `json:"password"`
 		LocalConsole bool   `json:"localConsole"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	session, err := h.authenticate(r, request.Username, request.Password, request.LocalConsole)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "username or password is invalid")
+		httpjson.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "username or password is invalid")
 		return
 	}
 	h.setSessionCookie(w, session)
 	h.keepAssistant(session.User, session.Token)
-	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
+	httpjson.Write(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -337,7 +335,7 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 	}
 	// Also after the Product Service restarted, which forgets kept instances.
 	h.keepAssistant(session.User, token)
-	writeJSON(w, http.StatusOK, h.publicSession(r.Context(), session))
+	httpjson.Write(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
 
 // keepAssistant has the member's assistant started in the background and kept
@@ -399,11 +397,11 @@ func (h *productHandler) handleSpaces(w http.ResponseWriter, r *http.Request, se
 		}
 		items = append(items, visibleSpace{Space: space, Writable: writable && space.Viewing == nil})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 func (h *productHandler) handleEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
-		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
 		return
 	}
 	entries, err := h.files.List(r.Context(), session.User, r.PathValue("spaceID"), r.URL.Query().Get("parentId"))
@@ -414,20 +412,19 @@ func (h *productHandler) handleEntries(w http.ResponseWriter, r *http.Request, s
 	if entries == nil {
 		entries = []files.Entry{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": entries})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": entries})
 }
 
 func (h *productHandler) handleCreateDirectory(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
-		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
 		return
 	}
 	var request struct {
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	entry, err := h.files.CreateDirectory(r.Context(), session.User, r.PathValue("spaceID"), request.ParentID, request.Name)
@@ -435,17 +432,17 @@ func (h *productHandler) handleCreateDirectory(w http.ResponseWriter, r *http.Re
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, entry)
+	httpjson.Write(w, http.StatusCreated, entry)
 }
 
 func (h *productHandler) handleUpload(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
-		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
 		return
 	}
 	reader, err := r.MultipartReader()
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
 	var parentID string
@@ -455,7 +452,7 @@ func (h *productHandler) handleUpload(w http.ResponseWriter, r *http.Request, se
 			break
 		}
 		if nextErr != nil {
-			writeError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 			return
 		}
 		switch part.FormName() {
@@ -463,7 +460,7 @@ func (h *productHandler) handleUpload(w http.ResponseWriter, r *http.Request, se
 			value, readErr := io.ReadAll(io.LimitReader(part, 4097))
 			_ = part.Close()
 			if readErr != nil || len(value) > 4096 {
-				writeError(w, http.StatusBadRequest, "invalid_parent", "parent ID is invalid")
+				httpjson.WriteError(w, http.StatusBadRequest, "invalid_parent", "parent ID is invalid")
 				return
 			}
 			parentID = string(value)
@@ -479,18 +476,18 @@ func (h *productHandler) handleUpload(w http.ResponseWriter, r *http.Request, se
 				return
 			}
 			h.filesChanged(r, session, entry.SpaceID)
-			writeJSON(w, http.StatusCreated, entry)
+			httpjson.Write(w, http.StatusCreated, entry)
 			return
 		default:
 			_ = part.Close()
 		}
 	}
-	writeError(w, http.StatusBadRequest, "file_required", "one file part is required")
+	httpjson.WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
 }
 
 func (h *productHandler) handleDownload(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.files == nil {
-		writeError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "files_unavailable", "file service is unavailable")
 		return
 	}
 	content, err := h.files.OpenContent(r.Context(), session.User, r.PathValue("fileID"))
@@ -523,8 +520,7 @@ func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, 
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	// A move to another space changes both spaces.
@@ -543,7 +539,7 @@ func (h *productHandler) handleMoveFile(w http.ResponseWriter, r *http.Request, 
 		h.filesChanged(r, session, from)
 	}
 	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusOK, entry)
+	httpjson.Write(w, http.StatusOK, entry)
 }
 
 func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -552,8 +548,7 @@ func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, 
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	entry, err := h.files.Copy(r.Context(), session.User, r.PathValue("fileID"), request.SpaceID, request.ParentID, request.Name)
@@ -562,7 +557,7 @@ func (h *productHandler) handleCopyFile(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusCreated, entry)
+	httpjson.Write(w, http.StatusCreated, entry)
 }
 
 func (h *productHandler) handleDeleteFile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -572,7 +567,7 @@ func (h *productHandler) handleDeleteFile(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.filesChanged(r, session, item.SpaceID)
-	writeJSON(w, http.StatusOK, item)
+	httpjson.Write(w, http.StatusOK, item)
 }
 
 // filesChanged tells FilesChanged, if set, that a Web operation changed a space.
@@ -591,7 +586,7 @@ func (h *productHandler) handleTrash(w http.ResponseWriter, r *http.Request, ses
 	if items == nil {
 		items = []files.TrashItem{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -601,14 +596,13 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 		// Conflict is ask (the default), rename or replace, as for uploads.
 		Conflict files.ConflictPolicy `json:"conflict"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	switch request.Conflict {
 	case "", files.ConflictAsk, files.ConflictRename, files.ConflictReplace:
 	default:
-		writeError(w, http.StatusBadRequest, "invalid_request", "conflict must be ask, rename or replace")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "conflict must be ask, rename or replace")
 		return
 	}
 	restored, err := h.files.Restore(r.Context(), session.User, r.PathValue("trashID"), request.ParentID, request.Name, request.Conflict)
@@ -617,7 +611,7 @@ func (h *productHandler) handleRestoreTrash(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.filesChanged(r, session, restored.SpaceID)
-	writeJSON(w, http.StatusOK, restored)
+	httpjson.Write(w, http.StatusOK, restored)
 }
 
 func (h *productHandler) handlePurgeTrash(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -637,15 +631,14 @@ func (h *productHandler) handleSnapshots(w http.ResponseWriter, r *http.Request,
 	if items == nil {
 		items = []files.Snapshot{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *productHandler) handleCreateSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		Name string `json:"name"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	snapshot, err := h.files.CreateSnapshot(r.Context(), session.User, r.PathValue("spaceID"), request.Name)
@@ -653,7 +646,7 @@ func (h *productHandler) handleCreateSnapshot(w http.ResponseWriter, r *http.Req
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, snapshot)
+	httpjson.Write(w, http.StatusCreated, snapshot)
 }
 
 func (h *productHandler) handleSnapshotEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -665,7 +658,7 @@ func (h *productHandler) handleSnapshotEntries(w http.ResponseWriter, r *http.Re
 	if items == nil {
 		items = []files.SnapshotEntry{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *productHandler) handleSnapshotContent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -696,7 +689,7 @@ func (h *productHandler) handleSearchSnapshots(w http.ResponseWriter, r *http.Re
 	if items == nil {
 		items = []files.SnapshotMatch{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }
 
 func (h *productHandler) handleRemovedEntries(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -705,7 +698,7 @@ func (h *productHandler) handleRemovedEntries(w http.ResponseWriter, r *http.Req
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }
 
 func (h *productHandler) handleFileVersions(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -714,7 +707,7 @@ func (h *productHandler) handleFileVersions(w http.ResponseWriter, r *http.Reque
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, match)
+	httpjson.Write(w, http.StatusOK, match)
 }
 
 func (h *productHandler) handleSnapshotSchedule(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -723,13 +716,12 @@ func (h *productHandler) handleSnapshotSchedule(w http.ResponseWriter, r *http.R
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, schedule)
+	httpjson.Write(w, http.StatusOK, schedule)
 }
 
 func (h *productHandler) handleUpdateSnapshotSchedule(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request files.SnapshotScheduleSettings
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	schedule, err := h.files.UpdateSnapshotSchedule(r.Context(), session.User, r.PathValue("spaceID"), request)
@@ -737,7 +729,7 @@ func (h *productHandler) handleUpdateSnapshotSchedule(w http.ResponseWriter, r *
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, schedule)
+	httpjson.Write(w, http.StatusOK, schedule)
 }
 
 func (h *productHandler) handleKeepSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -746,7 +738,7 @@ func (h *productHandler) handleKeepSnapshot(w http.ResponseWriter, r *http.Reque
 		h.writeFileError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	httpjson.Write(w, http.StatusOK, snapshot)
 }
 
 func (h *productHandler) handleRestoreSnapshotEntry(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -755,8 +747,7 @@ func (h *productHandler) handleRestoreSnapshotEntry(w http.ResponseWriter, r *ht
 		Name     string `json:"name"`
 		Replace  bool   `json:"replace"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	entry, err := h.files.RestoreSnapshotEntry(r.Context(), session.User, r.PathValue("snapshotID"), r.PathValue("entryID"),
@@ -766,7 +757,7 @@ func (h *productHandler) handleRestoreSnapshotEntry(w http.ResponseWriter, r *ht
 		return
 	}
 	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusCreated, entry)
+	httpjson.Write(w, http.StatusCreated, entry)
 }
 
 func (h *productHandler) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -774,8 +765,7 @@ func (h *productHandler) handleRestoreSnapshot(w http.ResponseWriter, r *http.Re
 		ParentID string `json:"parentId"`
 		Name     string `json:"name"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	entry, err := h.files.RestoreSnapshot(r.Context(), session.User, r.PathValue("snapshotID"), request.ParentID, request.Name)
@@ -784,7 +774,7 @@ func (h *productHandler) handleRestoreSnapshot(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.filesChanged(r, session, entry.SpaceID)
-	writeJSON(w, http.StatusCreated, entry)
+	httpjson.Write(w, http.StatusCreated, entry)
 }
 
 func (h *productHandler) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -804,7 +794,7 @@ func (h *productHandler) handleUsers(w http.ResponseWriter, r *http.Request, ses
 	if users == nil {
 		users = []accounts.User{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": users})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": users})
 }
 
 func (h *productHandler) handleCreateUser(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -812,8 +802,7 @@ func (h *productHandler) handleCreateUser(w http.ResponseWriter, r *http.Request
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	user, err := h.accounts.CreateMember(r.Context(), session.User, request.Username, request.Password)
@@ -821,15 +810,14 @@ func (h *productHandler) handleCreateUser(w http.ResponseWriter, r *http.Request
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, user)
+	httpjson.Write(w, http.StatusCreated, user)
 }
 
 func (h *productHandler) handleResetUserCredential(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		Password string `json:"password"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	if err := h.accounts.ResetCredential(r.Context(), session.User, r.PathValue("userID"), request.Password); err != nil {
@@ -852,15 +840,14 @@ func (h *productHandler) handleCreateStoragePlan(w http.ResponseWriter, r *http.
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	var request struct {
 		DiskIDs []string       `json:"diskIds"`
 		Layout  storage.Layout `json:"layout"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	plan, err := h.storage.PlanVolume(r.Context(), request.DiskIDs, request.Layout)
@@ -868,12 +855,12 @@ func (h *productHandler) handleCreateStoragePlan(w http.ResponseWriter, r *http.
 		h.writeStorageError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, plan)
+	httpjson.Write(w, http.StatusCreated, plan)
 }
 
 func (h *productHandler) handleVolumes(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	volumes, err := h.storage.ListVolumes(r.Context())
@@ -884,7 +871,7 @@ func (h *productHandler) handleVolumes(w http.ResponseWriter, r *http.Request, _
 	if volumes == nil {
 		volumes = []storage.Volume{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": volumes})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": volumes})
 }
 
 // handleContinueConversion starts converting the data volume to its layout
@@ -894,7 +881,7 @@ func (h *productHandler) handleContinueConversion(w http.ResponseWriter, r *http
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	volumes, err := h.storage.ListVolumes(r.Context())
@@ -903,7 +890,7 @@ func (h *productHandler) handleContinueConversion(w http.ResponseWriter, r *http
 		return
 	}
 	if len(volumes) == 0 || volumes[0].ID != r.PathValue("volumeID") {
-		writeError(w, http.StatusNotFound, "not_found", "storage resource was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "storage resource was not found")
 		return
 	}
 	if err := h.storage.ContinueConversion(r.Context()); err != nil {
@@ -918,14 +905,13 @@ func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	var request struct {
 		ConfirmationPhrase string `json:"confirmationPhrase"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	plan, err := h.storage.ConfirmPlan(r.Context(), r.PathValue("planID"), request.ConfirmationPhrase)
@@ -933,7 +919,7 @@ func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http
 		h.writeStorageError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	httpjson.Write(w, http.StatusOK, plan)
 }
 
 func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -941,7 +927,7 @@ func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	plan, err := h.storage.ExecutePlan(r.Context(), r.PathValue("planID"))
@@ -955,7 +941,7 @@ func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http
 	if plan.State == storage.PlanStateRunning {
 		status = http.StatusAccepted
 	}
-	writeJSON(w, status, plan)
+	httpjson.Write(w, status, plan)
 }
 
 // handleUnfinishedStoragePlans lists the plans that still need the
@@ -965,10 +951,10 @@ func (h *productHandler) handleUnfinishedStoragePlans(w http.ResponseWriter, _ *
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": h.storage.UnfinishedPlans()})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": h.storage.UnfinishedPlans()})
 }
 
 func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -976,7 +962,7 @@ func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	plan, err := h.storage.CancelPlan(r.Context(), r.PathValue("planID"))
@@ -984,7 +970,7 @@ func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.
 		h.writeStorageError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	httpjson.Write(w, http.StatusOK, plan)
 }
 
 func (h *productHandler) handleOperation(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -992,7 +978,7 @@ func (h *productHandler) handleOperation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if h.storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
 	plan, err := h.storage.GetPlan(r.PathValue("operationID"))
@@ -1000,12 +986,12 @@ func (h *productHandler) handleOperation(w http.ResponseWriter, r *http.Request,
 		h.writeStorageError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	httpjson.Write(w, http.StatusOK, plan)
 }
 
 func (h *productHandler) requireAdministrator(w http.ResponseWriter, session accounts.Session) bool {
 	if session.User.Role != accounts.RoleAdmin {
-		writeError(w, http.StatusForbidden, "forbidden", "administrator permission is required")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "administrator permission is required")
 		return false
 	}
 	return true
@@ -1014,16 +1000,16 @@ func (h *productHandler) requireAdministrator(w http.ResponseWriter, session acc
 func (h *productHandler) withSession(next func(http.ResponseWriter, *http.Request, accounts.Session)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.accounts == nil {
-			writeError(w, http.StatusServiceUnavailable, "accounts_unavailable", "account service is unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "accounts_unavailable", "account service is unavailable")
 			return
 		}
 		session, token, ok := h.clientSession(r)
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
 		if session.User.MustChangePassword && !allowedDuringPasswordChange(r) {
-			writeError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
+			httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
 		// The File Broker verifies the token itself before acting as the user.
@@ -1066,7 +1052,7 @@ func (h *productHandler) clientSession(r *http.Request) (accounts.Session, strin
 func (h *productHandler) withAdministrator(next http.Handler) http.HandlerFunc {
 	serve := func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		if session.User.Role != accounts.RoleAdmin {
-			writeError(w, http.StatusForbidden, "forbidden", "only administrators manage applications")
+			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "only administrators manage applications")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -1102,8 +1088,7 @@ func (h *productHandler) handleChangePassword(w http.ResponseWriter, r *http.Req
 		CurrentPassword string `json:"currentPassword"`
 		NewPassword     string `json:"newPassword"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	if err := h.accounts.ChangePassword(r.Context(), session.User, request.CurrentPassword, request.NewPassword); err != nil {
@@ -1119,7 +1104,7 @@ func (h *productHandler) handleNotifications(w http.ResponseWriter, r *http.Requ
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": notifications})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": notifications})
 }
 
 func (h *productHandler) handleAcknowledgeNotification(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -1136,8 +1121,7 @@ func (h *productHandler) handleStartViewing(w http.ResponseWriter, r *http.Reque
 		Reason   string                `json:"reason"`
 		Scope    accounts.ViewingScope `json:"scope"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	start := h.accounts.StartViewing
@@ -1146,7 +1130,7 @@ func (h *productHandler) handleStartViewing(w http.ResponseWriter, r *http.Reque
 	case accounts.ViewingScopeLibrary:
 		start = h.accounts.StartLibraryViewing
 	default:
-		writeError(w, http.StatusBadRequest, "invalid_request", "scope must be space or library")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "scope must be space or library")
 		return
 	}
 	grant, err := start(r.Context(), session.User, r.PathValue("userID"), request.Password, request.Reason)
@@ -1154,7 +1138,7 @@ func (h *productHandler) handleStartViewing(w http.ResponseWriter, r *http.Reque
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, grant)
+	httpjson.Write(w, http.StatusCreated, grant)
 }
 
 func (h *productHandler) handleEndViewing(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -1212,7 +1196,7 @@ func (h *productHandler) withMutation(next func(http.ResponseWriter, *http.Reque
 	return h.withSession(func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		provided := r.Header.Get("X-CSRF-Token")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(session.CSRFToken)) != 1 {
-			writeError(w, http.StatusForbidden, "csrf_failed", "CSRF token is invalid")
+			httpjson.WriteError(w, http.StatusForbidden, "csrf_failed", "CSRF token is invalid")
 			return
 		}
 		next(w, r, session)
@@ -1251,54 +1235,38 @@ func (h *productHandler) publicSession(ctx context.Context, session accounts.Ses
 
 const timeFormat = "2006-01-02T15:04:05.999999999Z07:00"
 
-func decodeJSON(r *http.Request, target any) error {
-	if mediaType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])); mediaType != "application/json" {
-		return errors.New("Content-Type must be application/json")
-	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return errors.New("request must contain one JSON value")
-	}
-	return nil
-}
-
 func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, accounts.ErrSetupComplete):
-		writeError(w, http.StatusConflict, "setup_complete", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "setup_complete", err.Error())
 	case errors.Is(err, accounts.ErrUsernameUnavailable), errors.Is(err, accounts.ErrIdentityConflict):
-		writeError(w, http.StatusConflict, "username_unavailable", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "username_unavailable", err.Error())
 	case errors.Is(err, accounts.ErrViewingActive):
-		writeError(w, http.StatusConflict, "conflict", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, accounts.ErrNicknameUnavailable):
-		writeError(w, http.StatusConflict, "nickname_unavailable", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "nickname_unavailable", err.Error())
 	case errors.Is(err, accounts.ErrInvalidNickname):
-		writeError(w, http.StatusUnprocessableEntity, "invalid_nickname", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_nickname", err.Error())
 	case errors.Is(err, accounts.ErrInvalidUsername):
-		writeError(w, http.StatusUnprocessableEntity, "invalid_username", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_username", err.Error())
 	case errors.Is(err, accounts.ErrInvalidPassword):
-		writeError(w, http.StatusUnprocessableEntity, "invalid_password", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_password", err.Error())
 	case errors.Is(err, accounts.ErrPasswordUnchanged):
-		writeError(w, http.StatusUnprocessableEntity, "password_unchanged", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "password_unchanged", err.Error())
 	case errors.Is(err, accounts.ErrReasonRequired):
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, accounts.ErrInvalidCredentials):
-		writeError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")
+		httpjson.WriteError(w, http.StatusForbidden, "reauthentication_failed", "the password is incorrect")
 	case errors.Is(err, accounts.ErrVolumeUnavailable):
-		writeError(w, http.StatusLocked, "volume_unavailable", err.Error())
+		httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", err.Error())
 	case errors.Is(err, accounts.ErrSMBDisablePending):
-		writeError(w, http.StatusServiceUnavailable, "smb_disable_pending", err.Error())
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "smb_disable_pending", err.Error())
 	case errors.Is(err, accounts.ErrCredentialProvision):
-		writeError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "operation is forbidden")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "operation is forbidden")
 	case errors.Is(err, accounts.ErrUserNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "user was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "user was not found")
 	default:
 		h.internalError(w, r, err)
 	}
@@ -1307,29 +1275,29 @@ func (h *productHandler) writeAccountError(w http.ResponseWriter, r *http.Reques
 func (h *productHandler) writeStorageError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, storage.ErrDiskNotFound), errors.Is(err, storage.ErrPlanNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "storage resource was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "storage resource was not found")
 	case errors.Is(err, storage.ErrDiskNotEligible):
-		writeError(w, http.StatusUnprocessableEntity, "disk_not_eligible", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "disk_not_eligible", err.Error())
 	case errors.Is(err, storage.ErrConfirmation):
-		writeError(w, http.StatusUnprocessableEntity, "confirmation_mismatch", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "confirmation_mismatch", err.Error())
 	case errors.Is(err, storage.ErrPlanExpired):
-		writeError(w, http.StatusGone, "plan_expired", err.Error())
+		httpjson.WriteError(w, http.StatusGone, "plan_expired", err.Error())
 	case errors.Is(err, storage.ErrPlanState):
-		writeError(w, http.StatusConflict, "plan_state_conflict", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "plan_state_conflict", err.Error())
 	case errors.Is(err, storage.ErrVolumeUnavailable):
-		writeError(w, http.StatusConflict, "volume_unavailable", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "volume_unavailable", err.Error())
 	case errors.Is(err, storage.ErrVolumeBusy):
-		writeError(w, http.StatusConflict, "volume_busy", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "volume_busy", err.Error())
 	case errors.Is(err, storage.ErrVolumeExists):
-		writeError(w, http.StatusConflict, "volume_exists", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "volume_exists", err.Error())
 	case errors.Is(err, storage.ErrNoConversion):
-		writeError(w, http.StatusConflict, "no_conversion", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "no_conversion", err.Error())
 	case errors.Is(err, storage.ErrInvalidLayout):
-		writeError(w, http.StatusUnprocessableEntity, "invalid_layout", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_layout", err.Error())
 	case errors.Is(err, storage.ErrLayoutTooSmall):
-		writeError(w, http.StatusUnprocessableEntity, "layout_too_small", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "layout_too_small", err.Error())
 	case errors.Is(err, storage.ErrOperationAttention), errors.Is(err, storage.ErrDiskChanged):
-		writeError(w, http.StatusServiceUnavailable, "operation_needs_attention", err.Error())
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_needs_attention", err.Error())
 	default:
 		h.internalError(w, r, err)
 	}
@@ -1338,22 +1306,22 @@ func (h *productHandler) writeStorageError(w http.ResponseWriter, r *http.Reques
 func (h *productHandler) writeFileError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, files.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "file space access is forbidden")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "file space access is forbidden")
 	case errors.Is(err, files.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "file resource was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "file resource was not found")
 	case errors.Is(err, files.ErrConflict):
-		writeError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
+		httpjson.WriteError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
 	case errors.Is(err, files.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):
-		writeError(w, http.StatusUnprocessableEntity, "name_too_long", "names may hold at most 255 bytes")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "name_too_long", "names may hold at most 255 bytes")
 	case errors.Is(err, files.ErrNameNotPortable):
-		writeError(w, http.StatusUnprocessableEntity, "name_not_portable", "the name cannot be used on Windows or macOS")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "name_not_portable", "the name cannot be used on Windows or macOS")
 	case errors.Is(err, files.ErrInvalidName), errors.Is(err, files.ErrUnsupportedType),
 		errors.Is(err, files.ErrInvalidQuery), errors.Is(err, files.ErrInvalidSchedule):
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, files.ErrVolumeUnavailable):
-		writeError(w, http.StatusLocked, "volume_unavailable", err.Error())
+		httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", err.Error())
 	case errors.Is(err, files.ErrInsufficientSpace):
-		writeError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
+		httpjson.WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
 	default:
 		h.internalError(w, r, err)
 	}
@@ -1361,5 +1329,5 @@ func (h *productHandler) writeFileError(w http.ResponseWriter, r *http.Request, 
 
 func (h *productHandler) internalError(w http.ResponseWriter, r *http.Request, err error) {
 	h.logger.ErrorContext(r.Context(), "product request failed", "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
+	httpjson.WriteError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
 }

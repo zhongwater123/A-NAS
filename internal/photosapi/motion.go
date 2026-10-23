@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -19,21 +20,21 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2*photos.DefaultMaxImportBytes+(1<<20))
 	reader, err := r.MultipartReader()
 	if err != nil {
-		WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
+		httpjson.WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
 		return
 	}
 	var directoryID string
 	for {
 		part, err := reader.NextPart()
 		if err != nil {
-			WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
+			httpjson.WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
 			return
 		}
 		if part.FormName() == "directoryId" {
 			value, err := io.ReadAll(io.LimitReader(part, 4097))
 			_ = part.Close()
 			if err != nil || len(value) > 4096 {
-				WriteError(w, 400, "invalid_multipart", "目录无效")
+				httpjson.WriteError(w, 400, "invalid_multipart", "目录无效")
 				return
 			}
 			directoryID = string(value)
@@ -41,7 +42,7 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 		}
 		if part.FormName() != "file" {
 			_ = part.Close()
-			WriteError(w, 400, "invalid_multipart", "请先提交照片，再提交同名 MOV")
+			httpjson.WriteError(w, 400, "invalid_multipart", "请先提交照片，再提交同名 MOV")
 			return
 		}
 		name := part.FileName()
@@ -53,7 +54,7 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, asset)
+		httpjson.Write(w, http.StatusCreated, asset)
 		return
 	}
 }
@@ -64,7 +65,7 @@ func (h *handler) uploadLiveVideo(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, photos.DefaultMaxImportBytes+(1<<20))
 	reader, err := r.MultipartReader()
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
 	for {
@@ -89,10 +90,10 @@ func (h *handler) uploadLiveVideo(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
+		httpjson.Write(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
 		return
 	}
-	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
+	httpjson.WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
 }
 
 type pairedPartReader struct {
@@ -155,7 +156,7 @@ func (h *handler) metadata(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, metadata)
+	httpjson.Write(w, http.StatusOK, metadata)
 }
 
 func (h *handler) motion(w http.ResponseWriter, r *http.Request) {

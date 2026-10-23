@@ -2,12 +2,14 @@ package sharesapi
 
 import (
 	"context"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const SessionHeader = "X-A-NAS-Session"
@@ -32,6 +34,6 @@ func NewProxy(socketPath string, logger *slog.Logger) *Proxy {
 		req.Out.Header.Set(SessionHeader, accounts.SessionToken(req.In.Context()))
 	}, Transport: transport, ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 		logger.WarnContext(r.Context(), "share service unreachable", "error", err)
-		WriteError(w, 503, "shares_unavailable", "member shares are not available")
+		httpjson.WriteError(w, 503, "shares_unavailable", "member shares are not available")
 	}}}
 }

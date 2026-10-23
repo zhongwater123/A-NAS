@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const (
@@ -215,7 +216,7 @@ func (u *upstream) serverRequestOf(requestID string) string {
 // session gate, with only the allowed part of `hermes serve` passed either way.
 func (h *handler) gateway(w http.ResponseWriter, r *http.Request, account string) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		writeError(w, http.StatusUpgradeRequired, "upgrade_required", "the assistant gateway is a WebSocket")
+		httpjson.WriteError(w, http.StatusUpgradeRequired, "upgrade_required", "the assistant gateway is a WebSocket")
 		return
 	}
 	// Server read and write timeouts stay attached to hijacked connections.

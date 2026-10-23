@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // The 记忆 page (docs/specs/ai-assistant.md): what the assistant remembers and
@@ -119,14 +121,14 @@ func (h *handler) getMemory(w http.ResponseWriter, r *http.Request, account stri
 		h.unavailable(w, account, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpjson.Write(w, http.StatusOK, result)
 }
 
 // memoryID reads the path's id and checks that it is in the member's graph now.
 func (h *handler) memoryID(w http.ResponseWriter, r *http.Request, account string) (string, bool) {
 	id := r.PathValue("id")
 	if !memoryIDPattern.MatchString(id) {
-		writeError(w, http.StatusBadRequest, "invalid_memory", "invalid memory id")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_memory", "invalid memory id")
 		return "", false
 	}
 	current, err := h.learning(r.Context(), account)
@@ -135,7 +137,7 @@ func (h *handler) memoryID(w http.ResponseWriter, r *http.Request, account strin
 		return "", false
 	}
 	if !current.has(id) {
-		writeError(w, http.StatusNotFound, "memory_not_found", "the assistant no longer has this")
+		httpjson.WriteError(w, http.StatusNotFound, "memory_not_found", "the assistant no longer has this")
 		return "", false
 	}
 	return id, true
@@ -153,7 +155,7 @@ func (h *handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account 
 	if !h.call(w, r, account, http.MethodGet, "/api/learning/node?"+url.Values{"id": {id}}.Encode(), nil, &detail) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"id": id, "kind": detail.Kind, "content": detail.Content})
+	httpjson.Write(w, http.StatusOK, map[string]string{"id": id, "kind": detail.Kind, "content": detail.Content})
 }
 
 func (h *handler) deleteMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
@@ -163,7 +165,7 @@ func (h *handler) deleteMemoryItem(w http.ResponseWriter, r *http.Request, accou
 	}
 	switch err := h.forget(r.Context(), account, id); {
 	case errors.Is(err, errMemoryChanged):
-		writeError(w, http.StatusConflict, "memory_changed", "the assistant's memory changed; reload it")
+		httpjson.WriteError(w, http.StatusConflict, "memory_changed", "the assistant's memory changed; reload it")
 	case err != nil:
 		h.unavailable(w, account, err)
 	default:
@@ -233,7 +235,7 @@ func (h *handler) clearMemory(w http.ResponseWriter, r *http.Request, account st
 	}
 	h.logger.Info("assistant memory cleared", "account", account, "memories", result["memories"], "skills", result["skills"],
 		"conversations", result["conversations"])
-	writeJSON(w, http.StatusOK, result)
+	httpjson.Write(w, http.StatusOK, result)
 }
 
 // deleteConversations deletes every stored conversation; one with a turn

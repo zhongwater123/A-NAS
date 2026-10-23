@@ -10,6 +10,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/avatar"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // pictureGate decodes one uploaded avatar or wallpaper at a time; a
@@ -31,15 +32,18 @@ func (h *productHandler) handleProfiles(w http.ResponseWriter, r *http.Request, 
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": profiles})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": profiles})
 }
 
 func (h *productHandler) handleUpdateProfile(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		Nickname *string `json:"nickname"`
 	}
-	if err := decodeJSON(r, &request); err != nil || request.Nickname == nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
+		return
+	}
+	if request.Nickname == nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
 	user, err := h.accounts.SetNickname(r.Context(), session.User, *request.Nickname)
@@ -47,7 +51,7 @@ func (h *productHandler) handleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	httpjson.Write(w, http.StatusOK, user)
 }
 
 // handleSetAvatar takes the picture as the raw request body. The page crops
@@ -56,16 +60,16 @@ func (h *productHandler) handleUpdateProfile(w http.ResponseWriter, r *http.Requ
 func (h *productHandler) handleSetAvatar(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if !strings.HasPrefix(mediaType, "image/") {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_image", "send a JPEG, PNG, GIF or WebP picture")
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_image", "send a JPEG, PNG, GIF or WebP picture")
 		return
 	}
 	picture, err := io.ReadAll(http.MaxBytesReader(w, r.Body, avatar.MaxUploadBytes))
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", avatar.ErrTooLarge.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "image_too_large", avatar.ErrTooLarge.Error())
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "the picture could not be read")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the picture could not be read")
 		return
 	}
 	select {
@@ -77,10 +81,10 @@ func (h *productHandler) handleSetAvatar(w http.ResponseWriter, r *http.Request,
 	<-pictureGate
 	switch {
 	case errors.Is(err, avatar.ErrTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", err.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "image_too_large", err.Error())
 		return
 	case errors.Is(err, avatar.ErrUnsupported):
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_image", avatar.ErrUnsupported.Error())
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_image", avatar.ErrUnsupported.Error())
 		return
 	case err != nil:
 		h.internalError(w, r, err)
@@ -91,7 +95,7 @@ func (h *productHandler) handleSetAvatar(w http.ResponseWriter, r *http.Request,
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	httpjson.Write(w, http.StatusOK, user)
 }
 
 func (h *productHandler) handleRemoveAvatar(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -100,7 +104,7 @@ func (h *productHandler) handleRemoveAvatar(w http.ResponseWriter, r *http.Reque
 		h.writeAccountError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	httpjson.Write(w, http.StatusOK, user)
 }
 
 // handleAvatar serves an account's avatar to anyone signed in. Pages ask for
@@ -109,7 +113,7 @@ func (h *productHandler) handleRemoveAvatar(w http.ResponseWriter, r *http.Reque
 func (h *productHandler) handleAvatar(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 	picture, err := h.accounts.Avatar(r.Context(), r.PathValue("userID"))
 	if errors.Is(err, accounts.ErrAvatarNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "the account has no avatar")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "the account has no avatar")
 		return
 	}
 	if err != nil {

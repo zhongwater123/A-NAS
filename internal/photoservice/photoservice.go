@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
@@ -354,14 +355,14 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 		user, err := sessions.ResolveSessionUser(r.Context(), r.Header.Get(photosapi.SessionHeader))
 		switch {
 		case errors.Is(err, accounts.ErrSessionNotFound):
-			photosapi.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		case err != nil:
 			logger.ErrorContext(r.Context(), "session lookup failed", "error", err)
-			photosapi.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 			return
 		case user.MustChangePassword:
-			photosapi.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
+			httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
 		if r.URL.Path != photosapi.AIStatusPath {

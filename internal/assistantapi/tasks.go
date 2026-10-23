@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"regexp"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // Scheduled tasks (ADR 0024 decision 8) are Hermes's cron jobs: the member
@@ -157,7 +159,7 @@ func (h *handler) listTasks(w http.ResponseWriter, r *http.Request, account stri
 			tasks = append(tasks, job.view())
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+	httpjson.Write(w, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
 // taskRun is one run of a task. A run that did not involve the model (a
@@ -194,7 +196,7 @@ func (h *handler) taskRuns(w http.ResponseWriter, r *http.Request, account strin
 		}
 		runs = append(runs, run)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+	httpjson.Write(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
 // changeTask pauses or resumes a task.
@@ -207,7 +209,7 @@ func (h *handler) changeTask(action string) func(http.ResponseWriter, *http.Requ
 		var job hermesJob
 		if h.taskCall(w, r, account, http.MethodPost, "/api/cron/jobs/"+id+"/"+action, &job) {
 			h.logger.Info("assistant task changed", "account", account, "task", id, "action", action)
-			writeJSON(w, http.StatusOK, map[string]any{"task": job.view()})
+			httpjson.Write(w, http.StatusOK, map[string]any{"task": job.view()})
 		}
 	}
 }
@@ -289,11 +291,11 @@ func (h *handler) runTask(w http.ResponseWriter, r *http.Request, account string
 			var job hermesJob
 			_ = json.Unmarshal(result.data, &job)
 			h.logger.Info("assistant task run", "account", account, "task", id)
-			writeJSON(w, http.StatusOK, map[string]any{"task": job.view(), "finished": true})
+			httpjson.Write(w, http.StatusOK, map[string]any{"task": job.view(), "finished": true})
 		}
 	case <-time.After(runStartWait):
 		h.logger.Info("assistant task run started", "account", account, "task", id)
-		writeJSON(w, http.StatusAccepted, map[string]any{"finished": false})
+		httpjson.Write(w, http.StatusAccepted, map[string]any{"finished": false})
 	case <-r.Context().Done():
 	}
 }
@@ -317,7 +319,7 @@ func (h *handler) taskCall(w http.ResponseWriter, r *http.Request, account, meth
 	}
 	if err := json.Unmarshal(data, into); err != nil {
 		h.logger.Warn("assistant reply undecodable", "account", account, "error", err)
-		writeError(w, http.StatusBadGateway, "assistant_unavailable", "the assistant answered unexpectedly")
+		httpjson.WriteError(w, http.StatusBadGateway, "assistant_unavailable", "the assistant answered unexpectedly")
 		return false
 	}
 	return true
@@ -326,9 +328,9 @@ func (h *handler) taskCall(w http.ResponseWriter, r *http.Request, account, meth
 func (h *handler) relayTaskError(w http.ResponseWriter, status int, detail []byte) {
 	switch status {
 	case http.StatusNotFound:
-		writeError(w, http.StatusNotFound, "task_not_found", "no such task")
+		httpjson.WriteError(w, http.StatusNotFound, "task_not_found", "no such task")
 	case http.StatusConflict:
-		writeError(w, http.StatusConflict, "task_running", "the task is already running")
+		httpjson.WriteError(w, http.StatusConflict, "task_running", "the task is already running")
 	default:
 		h.relayError(w, status, detail)
 	}
@@ -337,7 +339,7 @@ func (h *handler) relayTaskError(w http.ResponseWriter, status int, detail []byt
 func taskID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := r.PathValue("id")
 	if !taskIDPattern.MatchString(id) {
-		writeError(w, http.StatusBadRequest, "invalid_task", "invalid task id")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_task", "invalid task id")
 		return "", false
 	}
 	return id, true

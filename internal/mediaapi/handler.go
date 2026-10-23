@@ -6,7 +6,6 @@ package mediaapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/media"
 )
 
@@ -84,14 +84,14 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 		h.mux.HandleFunc(method+" "+PathPrefix+path, h.withUser(route))
 	}
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {
-		writeError(w, http.StatusServiceUnavailable, "media_unavailable", "the media center is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media center is unavailable")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -101,58 +101,39 @@ func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, account
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(userKey{}).(accounts.User)
 		if !ok || user.ID == "" {
-			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
 		next(w, r, user)
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
-}
-
-func decode(r *http.Request, target any) error {
-	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/json" {
-		return errors.New("Content-Type must be application/json")
-	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
-}
-
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, media.ErrNotFound), errors.Is(err, files.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, media.ErrForbidden), errors.Is(err, files.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "you cannot do this")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "you cannot do this")
 	case errors.Is(err, media.ErrInvalid):
-		writeError(w, http.StatusBadRequest, "invalid_request", strings.TrimPrefix(err.Error(), media.ErrInvalid.Error()+": "))
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", strings.TrimPrefix(err.Error(), media.ErrInvalid.Error()+": "))
 	case errors.Is(err, media.ErrConflict):
-		writeError(w, http.StatusConflict, "folders_overlap", "a folder is already part of another library")
+		httpjson.WriteError(w, http.StatusConflict, "folders_overlap", "a folder is already part of another library")
 	case errors.Is(err, media.ErrBusy):
-		writeError(w, http.StatusServiceUnavailable, "media_busy", "too many videos are being converted")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_busy", "too many videos are being converted")
 	case errors.Is(err, media.ErrUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "media_worker_unavailable", "video conversion is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_worker_unavailable", "video conversion is unavailable")
 	case errors.Is(err, media.ErrUnreadable):
-		writeError(w, http.StatusUnprocessableEntity, "media_unreadable", "the video cannot be read")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "media_unreadable", "the video cannot be read")
 	case errors.Is(err, files.ErrConflict):
-		writeError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
+		httpjson.WriteError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
 	case errors.Is(err, files.ErrInvalidName):
-		writeError(w, http.StatusBadRequest, "invalid_request", "the file name is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the file name is invalid")
 	case errors.Is(err, files.ErrVolumeUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "volume_unavailable", "the data volume is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "volume_unavailable", "the data volume is unavailable")
 	case errors.Is(err, context.Canceled):
 	default:
 		h.logger.ErrorContext(r.Context(), "media request failed", "path", r.URL.Path, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "the request failed")
+		httpjson.WriteError(w, http.StatusInternalServerError, "internal_error", "the request failed")
 	}
 }
 
@@ -163,7 +144,7 @@ func (h *handler) libraries(w http.ResponseWriter, r *http.Request, user account
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": libraries, "processing": h.service.Processing()})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": libraries, "processing": h.service.Processing()})
 }
 
 func (h *handler) library(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -172,13 +153,12 @@ func (h *handler) library(w http.ResponseWriter, r *http.Request, user accounts.
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, library)
+	httpjson.Write(w, http.StatusOK, library)
 }
 
 func (h *handler) createLibrary(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var input media.LibraryInput
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	library, err := h.service.CreateLibrary(r.Context(), user, input)
@@ -186,13 +166,12 @@ func (h *handler) createLibrary(w http.ResponseWriter, r *http.Request, user acc
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, library)
+	httpjson.Write(w, http.StatusCreated, library)
 }
 
 func (h *handler) updateLibrary(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var input media.LibraryInput
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	library, err := h.service.UpdateLibrary(r.Context(), user, r.PathValue("id"), input)
@@ -200,7 +179,7 @@ func (h *handler) updateLibrary(w http.ResponseWriter, r *http.Request, user acc
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, library)
+	httpjson.Write(w, http.StatusOK, library)
 }
 
 func (h *handler) deleteLibrary(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -217,7 +196,7 @@ func (h *handler) scanLibrary(w http.ResponseWriter, r *http.Request, user accou
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, library)
+	httpjson.Write(w, http.StatusAccepted, library)
 }
 
 func (h *handler) home(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -227,7 +206,7 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request, user accounts.Use
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, home)
+	httpjson.Write(w, http.StatusOK, home)
 }
 
 func integer(values url.Values, name string, fallback int) int {
@@ -248,7 +227,7 @@ func (h *handler) titles(w http.ResponseWriter, r *http.Request, user accounts.U
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, results)
+	httpjson.Write(w, http.StatusOK, results)
 }
 
 func (h *handler) show(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -257,7 +236,7 @@ func (h *handler) show(w http.ResponseWriter, r *http.Request, user accounts.Use
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, show)
+	httpjson.Write(w, http.StatusOK, show)
 }
 
 func (h *handler) video(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -266,7 +245,7 @@ func (h *handler) video(w http.ResponseWriter, r *http.Request, user accounts.Us
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, video)
+	httpjson.Write(w, http.StatusOK, video)
 }
 
 // capabilities reads the browser's codec support from caps=hevc,av1,...
@@ -311,7 +290,7 @@ func (h *handler) playback(w http.ResponseWriter, r *http.Request, user accounts
 		}
 		playback.URL = base + "/stream?" + parameters.Encode()
 	}
-	writeJSON(w, http.StatusOK, playback)
+	httpjson.Write(w, http.StatusOK, playback)
 }
 
 func (h *handler) original(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -370,8 +349,7 @@ func (h *handler) progress(w http.ResponseWriter, r *http.Request, user accounts
 		Position float64 `json:"position"`
 		Duration float64 `json:"duration"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	progress, err := h.service.SaveProgress(r.Context(), user, r.PathValue("id"), input.Position, input.Duration)
@@ -379,15 +357,14 @@ func (h *handler) progress(w http.ResponseWriter, r *http.Request, user accounts
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, progress)
+	httpjson.Write(w, http.StatusOK, progress)
 }
 
 func (h *handler) watched(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var input struct {
 		Watched bool `json:"watched"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	if err := h.service.SetWatched(r.Context(), user, r.PathValue("id"), input.Watched); err != nil {
@@ -403,7 +380,7 @@ func (h *handler) favorites(w http.ResponseWriter, r *http.Request, user account
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+	httpjson.Write(w, http.StatusOK, page)
 }
 
 func (h *handler) favorite(favorite bool) func(http.ResponseWriter, *http.Request, accounts.User) {
@@ -423,7 +400,7 @@ func (h *handler) history(w http.ResponseWriter, r *http.Request, user accounts.
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+	httpjson.Write(w, http.StatusOK, page)
 }
 
 func (h *handler) clearHistory(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -448,7 +425,7 @@ func (h *handler) collections(w http.ResponseWriter, r *http.Request, user accou
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": collections})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": collections})
 }
 
 func (h *handler) createCollection(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -456,8 +433,7 @@ func (h *handler) createCollection(w http.ResponseWriter, r *http.Request, user 
 		Name  string   `json:"name"`
 		Items []string `json:"items"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	collection, err := h.service.CreateCollection(r.Context(), user, input.Name, input.Items)
@@ -465,7 +441,7 @@ func (h *handler) createCollection(w http.ResponseWriter, r *http.Request, user 
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, collection)
+	httpjson.Write(w, http.StatusCreated, collection)
 }
 
 func (h *handler) collection(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -474,7 +450,7 @@ func (h *handler) collection(w http.ResponseWriter, r *http.Request, user accoun
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	httpjson.Write(w, http.StatusOK, detail)
 }
 
 // renameShow renames a show's folder and the episode files that carry its
@@ -483,8 +459,7 @@ func (h *handler) renameShow(w http.ResponseWriter, r *http.Request, user accoun
 	var input struct {
 		Name string `json:"name"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	detail, err := h.service.RenameShow(r.Context(), user, r.PathValue("id"), input.Name)
@@ -492,7 +467,7 @@ func (h *handler) renameShow(w http.ResponseWriter, r *http.Request, user accoun
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	httpjson.Write(w, http.StatusOK, detail)
 }
 
 // renameVideo renames the video's file, the 片源, as the user.
@@ -500,8 +475,7 @@ func (h *handler) renameVideo(w http.ResponseWriter, r *http.Request, user accou
 	var input struct {
 		FileName string `json:"fileName"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	detail, err := h.service.RenameVideo(r.Context(), user, r.PathValue("id"), input.FileName)
@@ -509,15 +483,14 @@ func (h *handler) renameVideo(w http.ResponseWriter, r *http.Request, user accou
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	httpjson.Write(w, http.StatusOK, detail)
 }
 
 func (h *handler) renameCollection(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var input struct {
 		Name string `json:"name"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	if err := h.service.RenameCollection(r.Context(), user, r.PathValue("id"), input.Name); err != nil {
@@ -539,8 +512,7 @@ func (h *handler) addToCollection(w http.ResponseWriter, r *http.Request, user a
 	var input struct {
 		Items []string `json:"items"`
 	}
-	if err := decode(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &input) {
 		return
 	}
 	if err := h.service.AddToCollection(r.Context(), user, r.PathValue("id"), input.Items); err != nil {
@@ -564,7 +536,7 @@ func (h *handler) folderRoots(w http.ResponseWriter, r *http.Request, user accou
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": roots})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": roots})
 }
 
 func (h *handler) folder(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -573,7 +545,7 @@ func (h *handler) folder(w http.ResponseWriter, r *http.Request, user accounts.U
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, listing)
+	httpjson.Write(w, http.StatusOK, listing)
 }
 
 func (h *handler) artwork(w http.ResponseWriter, r *http.Request, user accounts.User) {

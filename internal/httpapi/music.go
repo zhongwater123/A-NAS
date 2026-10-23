@@ -11,6 +11,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/music"
 )
 
@@ -52,7 +53,7 @@ func (h *productHandler) withMusicMutation(next musicHandler) http.HandlerFunc {
 func (h *productHandler) requireMusic(next musicHandler) musicHandler {
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		if h.music == nil {
-			writeError(w, http.StatusServiceUnavailable, "music_unavailable", "music library is unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "music_unavailable", "music library is unavailable")
 			return
 		}
 		next(w, r, session)
@@ -65,7 +66,7 @@ func (h *productHandler) handleMusicStatus(w http.ResponseWriter, r *http.Reques
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, status)
+	httpjson.Write(w, http.StatusOK, status)
 }
 
 func (h *productHandler) handleMusicScan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -74,7 +75,7 @@ func (h *productHandler) handleMusicScan(w http.ResponseWriter, r *http.Request,
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, status)
+	httpjson.Write(w, http.StatusAccepted, status)
 }
 
 func (h *productHandler) handleMusicTracks(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -83,7 +84,7 @@ func (h *productHandler) handleMusicTracks(w http.ResponseWriter, r *http.Reques
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, library)
+	httpjson.Write(w, http.StatusOK, library)
 }
 
 func (h *productHandler) handleMusicStream(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -116,7 +117,7 @@ func (h *productHandler) streamDecodedTrack(w http.ResponseWriter, r *http.Reque
 	if value := r.URL.Query().Get("start"); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
-			writeError(w, http.StatusBadRequest, "invalid_request", "start must be a non-negative number of seconds")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "start must be a non-negative number of seconds")
 			return
 		}
 		start = parsed
@@ -139,7 +140,7 @@ func (h *productHandler) handleMusicLyrics(w http.ResponseWriter, r *http.Reques
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"text": lyrics})
+	httpjson.Write(w, http.StatusOK, map[string]string{"text": lyrics})
 }
 
 func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -148,7 +149,7 @@ func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request
 		size = music.CoverSmall
 	}
 	if size != music.CoverSmall && size != music.CoverLarge {
-		writeError(w, http.StatusBadRequest, "invalid_request", "size must be small or large")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "size must be small or large")
 		return
 	}
 	file, err := h.music.CoverPath(r.Context(), session.User, r.PathValue("coverID"), size)
@@ -158,7 +159,7 @@ func (h *productHandler) handleMusicCover(w http.ResponseWriter, r *http.Request
 	}
 	content, err := os.Open(file)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "music resource was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "music resource was not found")
 		return
 	}
 	defer func() { _ = content.Close() }()
@@ -179,7 +180,7 @@ func (h *productHandler) handleMusicSources(w http.ResponseWriter, r *http.Reque
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sources)
+	httpjson.Write(w, http.StatusOK, sources)
 }
 
 func (h *productHandler) handleSetMusicSources(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -187,8 +188,7 @@ func (h *productHandler) handleSetMusicSources(w http.ResponseWriter, r *http.Re
 		Custom bool                `json:"custom"`
 		Items  []music.SourceInput `json:"items"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	sources, err := h.music.SetSources(r.Context(), session.User, request.Items, !request.Custom)
@@ -196,7 +196,7 @@ func (h *productHandler) handleSetMusicSources(w http.ResponseWriter, r *http.Re
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sources)
+	httpjson.Write(w, http.StatusOK, sources)
 }
 
 func (h *productHandler) handleMusicFavorites(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -205,7 +205,7 @@ func (h *productHandler) handleMusicFavorites(w http.ResponseWriter, r *http.Req
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *productHandler) handleMusicFavorite(favorite bool) musicHandler {
@@ -224,7 +224,7 @@ func (h *productHandler) handleMusicRecent(w http.ResponseWriter, r *http.Reques
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *productHandler) handleClearMusicRecent(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -239,8 +239,11 @@ func (h *productHandler) handleMusicPlay(w http.ResponseWriter, r *http.Request,
 	var request struct {
 		TrackID string `json:"trackId"`
 	}
-	if err := decodeJSON(r, &request); err != nil || strings.TrimSpace(request.TrackID) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
+		return
+	}
+	if strings.TrimSpace(request.TrackID) == "" {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
 	if err := h.music.RecordPlay(r.Context(), session.User, request.TrackID); err != nil {
@@ -256,7 +259,7 @@ func (h *productHandler) handleMusicPlaylists(w http.ResponseWriter, r *http.Req
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *productHandler) handleCreateMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -264,8 +267,7 @@ func (h *productHandler) handleCreateMusicPlaylist(w http.ResponseWriter, r *htt
 		Name     string   `json:"name"`
 		TrackIDs []string `json:"trackIds"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	playlist, err := h.music.CreatePlaylist(r.Context(), session.User, request.Name, request.TrackIDs)
@@ -273,13 +275,12 @@ func (h *productHandler) handleCreateMusicPlaylist(w http.ResponseWriter, r *htt
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, playlist)
+	httpjson.Write(w, http.StatusCreated, playlist)
 }
 
 func (h *productHandler) handleUpdateMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var change music.PlaylistChange
-	if err := decodeJSON(r, &change); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &change) {
 		return
 	}
 	playlist, err := h.music.UpdatePlaylist(r.Context(), session.User, r.PathValue("playlistID"), change)
@@ -287,7 +288,7 @@ func (h *productHandler) handleUpdateMusicPlaylist(w http.ResponseWriter, r *htt
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, playlist)
+	httpjson.Write(w, http.StatusOK, playlist)
 }
 
 func (h *productHandler) handleDeleteMusicPlaylist(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -302,8 +303,7 @@ func (h *productHandler) handleAddToMusicPlaylist(w http.ResponseWriter, r *http
 	var request struct {
 		TrackIDs []string `json:"trackIds"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	playlist, err := h.music.AddToPlaylist(r.Context(), session.User, r.PathValue("playlistID"), request.TrackIDs)
@@ -311,21 +311,21 @@ func (h *productHandler) handleAddToMusicPlaylist(w http.ResponseWriter, r *http
 		h.writeMusicError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, playlist)
+	httpjson.Write(w, http.StatusOK, playlist)
 }
 
 func (h *productHandler) writeMusicError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, music.ErrNotFound), errors.Is(err, files.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "music resource was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "music resource was not found")
 	case errors.Is(err, music.ErrInvalid):
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "music request is invalid")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", "music request is invalid")
 	case errors.Is(err, music.ErrUndecodable):
-		writeError(w, http.StatusUnprocessableEntity, "undecodable", "the music file cannot be decoded")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "undecodable", "the music file cannot be decoded")
 	case errors.Is(err, music.ErrDecoderUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "decoder_unavailable", "the media worker that decodes this format is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "decoder_unavailable", "the media worker that decodes this format is unavailable")
 	case errors.Is(err, accounts.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "music library access is forbidden")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "music library access is forbidden")
 	default:
 		h.writeFileError(w, r, err)
 	}

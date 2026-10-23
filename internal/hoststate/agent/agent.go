@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
@@ -220,12 +221,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path != "/v1/state" && r.URL.Path != "/v1/metrics" {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.observer == nil {
@@ -233,70 +234,70 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/metrics" {
 			code, message = "metrics_unavailable", "host metrics are unavailable"
 		}
-		writeError(w, http.StatusServiceUnavailable, code, message)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, code, message)
 		return
 	}
 	if r.URL.Path == "/v1/metrics" {
 		metrics, err := h.observer.ReadMetrics(r.Context())
 		if err != nil {
 			h.logger.ErrorContext(r.Context(), "host metrics read failed", "error", err)
-			writeError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
 			return
 		}
-		writeJSON(w, http.StatusOK, metricsDocumentFromDomain(metrics))
+		httpjson.Write(w, http.StatusOK, metricsDocumentFromDomain(metrics))
 		return
 	}
 	state, err := h.observer.Read(r.Context())
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "host state read failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
 		return
 	}
 	state.ReconcileFailed = h.reconcileFailed != nil && h.reconcileFailed()
-	writeJSON(w, http.StatusOK, documentFromDomain(state))
+	httpjson.Write(w, http.StatusOK, documentFromDomain(state))
 }
 
 // handleSnapshots takes a snapshot (POST) or keeps only the named ones (PUT).
 func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		w.Header().Set("Allow", http.MethodPost+", "+http.MethodPut)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.snapshots == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
 		return
 	}
 	if r.Method == http.MethodPut {
 		var request snapshotKeepDocument
 		if err := decodeRequest(r, &request); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 			return
 		}
 		pruned, err := h.snapshots.Prune(r.Context(), request.Keep)
 		if errors.Is(err, files.ErrVolumeUnavailable) {
-			writeError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+			httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
 			return
 		}
 		if err != nil {
 			h.logger.ErrorContext(r.Context(), "prune snapshots failed", "error", err)
-			writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
 			return
 		}
 		if pruned.Removed > 0 {
 			h.logger.InfoContext(r.Context(), "deleted snapshots nobody keeps", "count", pruned.Removed)
 		}
-		writeJSON(w, http.StatusOK, pruned)
+		httpjson.Write(w, http.StatusOK, pruned)
 		return
 	}
 	var request snapshotDocument
 	if err := decodeRequest(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
 	if err := h.snapshots.Create(r.Context(), request.SpaceID, request.SnapshotID); err != nil {
 		h.logger.ErrorContext(r.Context(), "create snapshot failed", "snapshot", request.SnapshotID, "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -304,24 +305,24 @@ func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request) {
 	if h.snapshots == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
 		return
 	}
 	remainder := strings.TrimPrefix(r.URL.Path, "/v1/snapshots/")
 	snapshotID, suffix, _ := strings.Cut(remainder, "/")
 	if snapshotID == "" || strings.Contains(snapshotID, "/") {
-		writeError(w, http.StatusBadRequest, "invalid_request", "snapshot ID is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "snapshot ID is invalid")
 		return
 	}
 	if r.Method == http.MethodDelete && suffix == "" {
 		spaceID := r.URL.Query().Get("spaceId")
 		if err := h.snapshots.Delete(r.Context(), spaceID, snapshotID); err != nil {
 			if errors.Is(err, files.ErrNotFound) {
-				writeError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
+				httpjson.WriteError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
 				return
 			}
 			h.logger.ErrorContext(r.Context(), "delete snapshot failed", "snapshot", snapshotID, "error", err)
-			writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -335,7 +336,7 @@ func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request)
 		key := r.URL.Query().Get("key")
 		reader, object, err := h.snapshots.Open(r.Context(), snapshotID, key)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "not_found", "snapshot object was not found")
+			httpjson.WriteError(w, http.StatusNotFound, "not_found", "snapshot object was not found")
 			return
 		}
 		defer reader.Close()
@@ -350,7 +351,7 @@ func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Allow", http.MethodGet+", "+http.MethodDelete)
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 }
 
 // streamSnapshotObjects writes a snapshot's objects as they are walked, one
@@ -374,11 +375,11 @@ func (h *handler) streamSnapshotObjects(w http.ResponseWriter, r *http.Request, 
 	})
 	if err != nil && !started {
 		if errors.Is(err, files.ErrNotFound) {
-			writeError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
+			httpjson.WriteError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
 			return
 		}
 		h.logger.ErrorContext(r.Context(), "list snapshot objects failed", "snapshot", snapshotID, "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
 		return
 	}
 	start()
@@ -395,16 +396,16 @@ func (h *handler) streamSnapshotObjects(w http.ResponseWriter, r *http.Request, 
 func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.volume == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
 		return
 	}
 	var document createVolumeDocument
 	if err := decodeRequest(r, &document); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
 	operation, err := h.volume.StartCreateVolume(r.Context(), storage.CreateVolumeRequest{
@@ -414,22 +415,22 @@ func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		h.writeVolumeOperationError(w, r, "start creating the data volume failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, operation)
+	httpjson.Write(w, http.StatusOK, operation)
 }
 
 func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.volume == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
 		return
 	}
 	var document addDisksDocument
 	if err := decodeRequest(r, &document); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
 	operation, err := h.volume.StartAddDisks(r.Context(), storage.AddDisksRequest{
@@ -439,7 +440,7 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 		h.writeVolumeOperationError(w, r, "start adding disks to the data volume failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, operation)
+	httpjson.Write(w, http.StatusOK, operation)
 }
 
 // handleVolumeOperation reports a plan's data-volume operation, which runs
@@ -447,16 +448,16 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 func (h *handler) handleVolumeOperation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.volume == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
 		return
 	}
 	planID := strings.TrimPrefix(r.URL.Path, volumeOperationsPath)
 	if planID == "" || strings.Contains(planID, "/") {
-		writeError(w, http.StatusBadRequest, "invalid_request", "plan ID is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "plan ID is invalid")
 		return
 	}
 	operation, err := h.volume.VolumeOperation(r.Context(), planID)
@@ -464,38 +465,38 @@ func (h *handler) handleVolumeOperation(w http.ResponseWriter, r *http.Request) 
 		h.writeVolumeOperationError(w, r, "read the data-volume operation failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, operation)
+	httpjson.Write(w, http.StatusOK, operation)
 }
 
 func (h *handler) writeVolumeOperationError(w http.ResponseWriter, r *http.Request, message string, err error) {
 	switch {
 	case errors.Is(err, storage.ErrOperationNotFound):
-		writeError(w, http.StatusNotFound, operationNotFoundCode, "the plan has no data-volume operation")
+		httpjson.WriteError(w, http.StatusNotFound, operationNotFoundCode, "the plan has no data-volume operation")
 	case errors.Is(err, storage.ErrPlanState):
-		writeError(w, http.StatusConflict, operationConflictCode, "another data-volume operation is running, or the plan asked for another one")
+		httpjson.WriteError(w, http.StatusConflict, operationConflictCode, "another data-volume operation is running, or the plan asked for another one")
 	default:
 		h.logger.ErrorContext(r.Context(), message, "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
 	}
 }
 
 func (h *handler) handleContinueConversion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.volume == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
 		return
 	}
 	if err := h.volume.ContinueConversion(r.Context()); err != nil {
 		if errors.Is(err, storage.ErrNoConversion) {
-			writeError(w, http.StatusConflict, noConversionCode, "the data volume has nothing to convert")
+			httpjson.WriteError(w, http.StatusConflict, noConversionCode, "the data volume has nothing to convert")
 			return
 		}
 		h.logger.ErrorContext(r.Context(), "continue data-volume conversion failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "volume operation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -504,16 +505,16 @@ func (h *handler) handleContinueConversion(w http.ResponseWriter, r *http.Reques
 func (h *handler) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		w.Header().Set("Allow", http.MethodPut)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.credentials == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
 		return
 	}
 	var request credentialDocument
 	if err := decodeRequest(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
 	if err := h.credentials.SetCredential(r.Context(), accounts.CredentialRequest{
@@ -530,16 +531,16 @@ func (h *handler) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 func (h *handler) handleSyncIdentities(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		w.Header().Set("Allow", http.MethodPut)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.identities == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "identity operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "identity operation is unavailable")
 		return
 	}
 	var request identitiesDocument
 	if err := decodeRequest(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
 	identities := make([]accounts.Identity, len(request.Identities))
@@ -556,10 +557,10 @@ func (h *handler) handleSyncIdentities(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) writeAccountError(w http.ResponseWriter, err error) {
 	if errors.Is(err, accounts.ErrIdentityConflict) {
-		writeError(w, http.StatusConflict, identityConflictCode, "identity conflicts with an existing host account")
+		httpjson.WriteError(w, http.StatusConflict, identityConflictCode, "identity conflicts with an existing host account")
 		return
 	}
-	writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+	httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
 }
 
 const (
@@ -571,21 +572,21 @@ const (
 func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		w.Header().Set("Allow", http.MethodDelete)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.credentials == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
 		return
 	}
 	username := strings.TrimPrefix(r.URL.Path, "/v1/accounts/credential/")
 	if username == "" || strings.Contains(username, "/") {
-		writeError(w, http.StatusBadRequest, "invalid_request", "username is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "username is invalid")
 		return
 	}
 	if err := h.credentials.DisableCredential(r.Context(), username); err != nil {
 		h.logger.ErrorContext(r.Context(), "disable credential failed", "username", username, "error", err)
-		writeError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -638,19 +639,19 @@ type viewingDocument struct {
 
 func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {
 	if h.viewing == nil {
-		writeError(w, http.StatusServiceUnavailable, "operation_unavailable", "viewing operation is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "viewing operation is unavailable")
 		return
 	}
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/viewing-grants":
 		var document viewingDocument
 		if err := decodeRequest(r, &document); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 			return
 		}
 		expiresAt, err := time.Parse(time.RFC3339Nano, document.ExpiresAt)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "expiry is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "expiry is invalid")
 			return
 		}
 		if err := h.viewing.GrantViewing(r.Context(), accounts.ViewingRequest{
@@ -658,28 +659,28 @@ func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {
 			AdminUID: document.AdminUID, ExpiresAt: expiresAt,
 		}); err != nil {
 			if errors.Is(err, accounts.ErrVolumeUnavailable) {
-				writeError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+				httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
 				return
 			}
 			h.logger.ErrorContext(r.Context(), "grant viewing failed", "grant", document.ID, "error", err)
-			writeError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/viewing-grants/"):
 		id := strings.TrimPrefix(r.URL.Path, "/v1/viewing-grants/")
 		if id == "" || strings.Contains(id, "/") {
-			writeError(w, http.StatusBadRequest, "invalid_request", "grant is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "grant is invalid")
 			return
 		}
 		if err := h.viewing.RevokeViewing(r.Context(), id); err != nil {
 			h.logger.ErrorContext(r.Context(), "revoke viewing failed", "grant", id, "error", err)
-			writeError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "viewing operation failed")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
 }
 
@@ -1308,18 +1309,6 @@ type errorDetail struct {
 
 type errorDocument struct {
 	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorDocument{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
-	}
 }
 
 var _ hoststate.Observer = (*Client)(nil)

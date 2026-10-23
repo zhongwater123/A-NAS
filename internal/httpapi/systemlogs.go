@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
@@ -19,19 +20,19 @@ func (h *productHandler) handleSystemLogs(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if h.systemLogs == nil {
-		writeError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
 		return
 	}
 	q, err := systemlog.ParseQuery(r.URL.Query())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_query", "system log filters are invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_query", "system log filters are invalid")
 		return
 	}
 	page, err := h.systemLogs.ReadLogs(r.Context(), q)
 	if err != nil {
 		h.logger.WarnContext(r.Context(), "system logs unavailable", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs cannot be read right now")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs cannot be read right now")
 		return
 	}
-	writeJSON(w, http.StatusOK, systemLogResponse{Page: page, DataSource: h.dataSource})
+	httpjson.Write(w, http.StatusOK, systemLogResponse{Page: page, DataSource: h.dataSource})
 }

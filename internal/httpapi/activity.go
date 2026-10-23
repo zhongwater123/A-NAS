@@ -13,6 +13,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
@@ -68,7 +69,7 @@ func (h *productHandler) handleActivity(w http.ResponseWriter, r *http.Request, 
 	ctx := r.Context()
 	q, err := activity.ParseQuery(r.URL.Query())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_query", "activity filters are invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_query", "activity filters are invalid")
 		return
 	}
 	directory, err := h.accounts.Directory(ctx)
@@ -84,7 +85,7 @@ func (h *productHandler) handleActivity(w http.ResponseWriter, r *http.Request, 
 	if admin {
 		scope, actorFilter = "all", r.URL.Query().Get("actor")
 		if _, known := directory.Users[actorFilter]; actorFilter != "" && actorFilter != systemActor && !known {
-			writeError(w, http.StatusBadRequest, "invalid_query", "activity filters are invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_query", "activity filters are invalid")
 			return
 		}
 		reveal := &activity.Reveal{ViewerID: viewer.ID}
@@ -151,7 +152,7 @@ func (h *productHandler) handleActivity(w http.ResponseWriter, r *http.Request, 
 	if more {
 		response.Next = events[len(events)-1].Key.String()
 	}
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 func presentActivity(event activity.Event, directory accounts.Directory, reveal *activity.Reveal) activityItem {

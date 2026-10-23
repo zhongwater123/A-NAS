@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 )
 
@@ -19,7 +20,7 @@ func (h *productHandler) handleLocalDisplay(w http.ResponseWriter, r *http.Reque
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, display)
+	httpjson.Write(w, http.StatusOK, display)
 }
 
 func (h *productHandler) handleUpdateLocalDisplay(w http.ResponseWriter, r *http.Request, session accounts.Session) {
@@ -29,18 +30,21 @@ func (h *productHandler) handleUpdateLocalDisplay(w http.ResponseWriter, r *http
 	var request struct {
 		SleepAfterMinutes *int `json:"sleepAfterMinutes"`
 	}
-	if err := decodeJSON(r, &request); err != nil || request.SleepAfterMinutes == nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
+		return
+	}
+	if request.SleepAfterMinutes == nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
 	display, err := h.personalization.SetLocalDisplay(r.Context(), personalization.LocalDisplay{SleepAfterMinutes: *request.SleepAfterMinutes})
 	if errors.Is(err, personalization.ErrInvalidSetting) {
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, display)
+	httpjson.Write(w, http.StatusOK, display)
 }
