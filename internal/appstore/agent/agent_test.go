@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestClientRoundTripsTheAppCenter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := agent.NewClient(serve(t, agent.NewHandler(store, slog.New(slog.NewTextHandler(io.Discard, nil)))))
+	client := agent.NewClient(serve(t, agent.NewHandler(store, testIdentities, discard)))
 	ctx := context.Background()
 
 	apps, err := client.Apps(ctx)
@@ -107,3 +108,95 @@ func serve(t *testing.T, handler http.Handler) string {
 }
 
 var testIdentity = appstore.Identity{Username: "app-memos", UID: 30002, GID: 30002}
+
+var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+// testIdentities is the host's account database: memos has its account,
+// and another account holds 30003.
+var testIdentities = fakeIdentities{
+	accounts: map[string]appstore.Identity{"memos": testIdentity},
+	used:     map[int]bool{30002: true, 30003: true},
+}
+
+type fakeIdentities struct {
+	accounts map[string]appstore.Identity
+	used     map[int]bool
+}
+
+func (f fakeIdentities) App(id string) (appstore.Identity, bool, error) {
+	identity, ok := f.accounts[id]
+	return identity, ok, nil
+}
+
+func (f fakeIdentities) Unused(id int) (bool, error) { return !f.used[id], nil }
+
+// recordingStore records the identities plans and installs run as.
+type recordingStore struct {
+	appstore.Store
+	mu        sync.Mutex
+	installed []appstore.Identity
+}
+
+func (s *recordingStore) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
+	s.mu.Lock()
+	s.installed = append(s.installed, identity)
+	s.mu.Unlock()
+	return s.Store.Install(ctx, id, digest, identity)
+}
+
+// The container agent runs an app as the account the Host Agent made for
+// it, whatever identity the caller names (issue #176).
+func TestAgentRunsAppsAsTheirAccounts(t *testing.T) {
+	store, err := fake.New(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recording := &recordingStore{Store: store}
+	client := agent.NewClient(serve(t, agent.NewHandler(recording, testIdentities, discard)))
+	ctx := context.Background()
+	other := appstore.Identity{Username: "app-memos", UID: 30003, GID: 30003}
+
+	plan, err := client.Plan(ctx, "memos", other)
+	if err != nil || plan.Identity != testIdentity {
+		t.Fatalf("Plan(memos) = %+v, %v; want it as app-memos", plan.Identity, err)
+	}
+	if _, err := client.Install(ctx, "memos", plan.Digest, other); err != nil {
+		t.Fatalf("Install(memos) error = %v", err)
+	}
+	store.Wait()
+
+	// Before its first install an app has no account yet: the plan shows the
+	// UID the Host Agent reserved, which no account or group may hold, and
+	// the app cannot be installed until the account exists.
+	reserved := appstore.Identity{Username: "app-navidrome", UID: 30004, GID: 30004}
+	plan, err = client.Plan(ctx, "navidrome", reserved)
+	if err != nil || plan.Identity != reserved {
+		t.Fatalf("Plan(navidrome) = %+v, %v; want the reserved identity", plan.Identity, err)
+	}
+	for _, identity := range []appstore.Identity{
+		{UID: 30003, GID: 30003}, {UID: 30002, GID: 30002}, {UID: 0, GID: 0}, {UID: 20100, GID: 20100}, {UID: 30004, GID: 30005},
+	} {
+		if _, err := client.Plan(ctx, "navidrome", identity); err == nil || !strings.Contains(err.Error(), "invalid_request") {
+			t.Errorf("Plan(navidrome, %d:%d) error = %v, want invalid_request", identity.UID, identity.GID, err)
+		}
+	}
+	if _, err := client.Install(ctx, "navidrome", plan.Digest, reserved); !errors.Is(err, appstore.ErrUnavailable) {
+		t.Fatalf("Install(navidrome) without its account error = %v, want ErrUnavailable", err)
+	}
+
+	recording.mu.Lock()
+	defer recording.mu.Unlock()
+	if len(recording.installed) != 1 || recording.installed[0] != testIdentity {
+		t.Fatalf("installs ran as %+v, want only app-memos", recording.installed)
+	}
+}
+
+func TestSystemIdentitiesReadTheHostsAccounts(t *testing.T) {
+	identities := agent.SystemIdentities{}
+	if identity, ok, err := identities.App("no-such-app-176"); ok || err != nil {
+		t.Fatalf("App(missing) = %+v, %v, %v", identity, ok, err)
+	}
+	if unused, err := identities.Unused(0); unused || err != nil {
+		t.Fatalf("Unused(0) = %v, %v; root holds it", unused, err)
+	}
+}

@@ -86,6 +86,10 @@ type Executor struct {
 	mountPoint    string
 	mountUnitName string
 	smbInterface  string
+	// stateOwner owns the Host Agent's records: root, as which it runs.
+	stateOwner int
+	// stateFailures are the records that cannot be used, by path.
+	stateFailures map[string]error
 	spaceRootsMu  sync.RWMutex
 	spaceRoots    map[string]string
 	registryPath  string
@@ -147,16 +151,30 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	if executor.logger == nil {
 		executor.logger = slog.Default()
 	}
-	executor.registryPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "space-registry.json")
+	stateDirectory := filepath.Join(executor.systemRoot, "var", "lib", stateDirectoryName)
+	executor.registryPath = filepath.Join(stateDirectory, "space-registry.json")
+	executor.identityPath = filepath.Join(stateDirectory, "identity-registry.json")
+	executor.viewingPath = filepath.Join(stateDirectory, "viewing-grants.json")
+	executor.appsPath = filepath.Join(stateDirectory, "app-identities.json")
+	executor.operationsPath = filepath.Join(stateDirectory, "volume-operations.json")
+	executor.stateOwner = os.Geteuid()
+	executor.stateFailures = executor.prepareState(stateDirectory, filepath.Join(executor.systemRoot, "var", "lib", legacyStateDirectoryName), []string{
+		executor.registryPath, executor.identityPath, executor.viewingPath, executor.appsPath, executor.operationsPath,
+	})
 	executor.registryError = executor.loadSpaceRegistry()
-	executor.identityPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "identity-registry.json")
+	// Viewing grants are checked against the identities, so those load first.
 	executor.identityError = executor.loadIdentityRegistry()
-	executor.viewingPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "viewing-grants.json")
 	executor.viewingError = executor.loadViewingRegistry()
-	executor.appsPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "app-identities.json")
 	executor.appsError = executor.loadAppsRegistry()
-	executor.operationsPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "volume-operations.json")
 	executor.operationsError = executor.loadOperations()
+	for path, err := range map[string]error{
+		executor.registryPath: executor.registryError, executor.identityPath: executor.identityError,
+		executor.viewingPath: executor.viewingError, executor.appsPath: executor.appsError, executor.operationsPath: executor.operationsError,
+	} {
+		if err != nil {
+			executor.logger.Error("a Host Agent record cannot be used; the operations that need it fail", "file", path, "error", err)
+		}
+	}
 	return executor
 }
 
@@ -372,7 +390,7 @@ func commandError(action string, err error, output []byte) error {
 }
 
 func (e *Executor) loadSpaceRegistry() error {
-	contents, err := os.ReadFile(e.registryPath)
+	contents, err := e.readState(e.registryPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -383,12 +401,14 @@ func (e *Executor) loadSpaceRegistry() error {
 	if err := json.Unmarshal(contents, &roots); err != nil {
 		return fmt.Errorf("decode space registry: %w", err)
 	}
+	// A registry that fails a check is not used at all.
 	for spaceID, root := range roots {
-		clean := filepath.Clean(root)
-		if strings.TrimSpace(spaceID) == "" || !withinDirectory(e.mountPoint, clean) {
-			return errors.New("space registry contains an invalid path")
+		if !e.validSpace(spaceID, root) {
+			return fmt.Errorf("space registry: %s is not a space root", root)
 		}
-		e.spaceRoots[spaceID] = clean
+	}
+	if roots != nil {
+		e.spaceRoots = roots
 	}
 	return nil
 }
@@ -400,10 +420,10 @@ func (e *Executor) registerSpaces(spaces map[string]string) error {
 	e.spaceRootsMu.Lock()
 	defer e.spaceRootsMu.Unlock()
 	for spaceID, root := range spaces {
-		if strings.TrimSpace(spaceID) == "" || !withinDirectory(e.mountPoint, root) {
+		if !e.validSpace(spaceID, root) {
 			return errors.New("cannot register invalid space path")
 		}
-		e.spaceRoots[spaceID] = filepath.Clean(root)
+		e.spaceRoots[spaceID] = root
 	}
 	contents, err := json.MarshalIndent(e.spaceRoots, "", "  ")
 	if err != nil {
@@ -411,6 +431,19 @@ func (e *Executor) registerSpaces(spaces map[string]string) error {
 	}
 	contents = append(contents, '\n')
 	return writeAtomic(e.registryPath, contents, 0o600)
+}
+
+// validSpace reports whether root is where a space with the ID lives: the
+// Shared folder, or a private space named after its owner (ADR 0008).
+// Registered roots are kept as written, so they must be clean.
+func (e *Executor) validSpace(spaceID, root string) bool {
+	if strings.TrimSpace(spaceID) == "" || root != filepath.Clean(root) {
+		return false
+	}
+	if spaceID == sharedSpaceID {
+		return root == filepath.Join(e.mountPoint, "spaces", "shared")
+	}
+	return filepath.Dir(root) == filepath.Join(e.mountPoint, "spaces", "private") && validUsername(filepath.Base(root))
 }
 
 func withinDirectory(root, path string) bool {

@@ -264,7 +264,7 @@ func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) e
 }
 
 func (e *Executor) loadIdentityRegistry() error {
-	contents, err := os.ReadFile(e.identityPath)
+	contents, err := e.readState(e.identityPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -275,11 +275,19 @@ func (e *Executor) loadIdentityRegistry() error {
 	if err := json.Unmarshal(contents, &records); err != nil {
 		return fmt.Errorf("decode identity registry: %w", err)
 	}
+	owners := make(map[int]string, len(records))
 	for username, record := range records {
 		if err := validIdentity(accounts.Identity{Username: username, UID: record.UID, Role: record.Role}); err != nil {
 			return fmt.Errorf("identity registry: %w", err)
 		}
-		e.identities[username] = record
+		// accountState never gives one UID to two accounts.
+		if other, taken := owners[record.UID]; taken {
+			return fmt.Errorf("identity registry: %s and %s have UID %d", other, username, record.UID)
+		}
+		owners[record.UID] = username
+	}
+	if records != nil {
+		e.identities = records
 	}
 	return nil
 }

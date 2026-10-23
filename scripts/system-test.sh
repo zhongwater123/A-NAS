@@ -188,6 +188,13 @@ chmod 0755 /usr/local/sbin/lsblk
 # The Host Agent derives disk IDs from the WWN (internal/hoststate/linux).
 data_disk="disk:$(printf 'a-nas:disk:v1\0wwn:0x5000000000000002' | sha256sum | cut -c1-32)"
 
+# A record of the Host Agent's as a release before issue #176 left it, in the
+# Product Service's StateDirectory; the Host Agent moves it to its own.
+install -d -m 0700 /var/lib/a-nas
+printf '{\n  "legacy-app": 30000\n}\n' > /var/lib/a-nas/app-identities.json
+chmod 0600 /var/lib/a-nas/app-identities.json
+cp -p /var/lib/a-nas/app-identities.json /tmp/legacy-app-identities.json
+
 iface=$(ip -o -4 route show to default | awk '{print $5; exit}')
 ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit}')
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -258,6 +265,14 @@ check "Host Agent holds only the capabilities its unit names" \
   test "$(awk '/^CapBnd:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-host-agent)/status")" = 00000000012a00ff
 check "Host Agent's memory and tasks are limited" \
   test "$(systemctl show -p MemoryMax --value anas-host-agent):$(systemctl show -p TasksMax --value anas-host-agent)" = 1073741824:512
+# Its records live where only root can open them (issue #176).
+check "Host Agent's state directory is root's alone" test "$(stat -c '%U:%G %a' /var/lib/a-nas-host)" = 'root:root 700'
+check "Host Agent moved an older release's record into it" \
+  cmp -s /tmp/legacy-app-identities.json /var/lib/a-nas-host/app-identities.json
+check "the moved record is root's alone" \
+  test "$(stat -c '%U:%G %a' /var/lib/a-nas-host/app-identities.json)" = 'root:root 600'
+check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
+check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
 # --- Accounts: an administrator and a member, each with one Linux identity.

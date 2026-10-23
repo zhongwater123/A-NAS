@@ -197,20 +197,30 @@ func (e *Executor) makeFolders(ctx context.Context, root, path string, mode uint
 }
 
 func (e *Executor) loadAppsRegistry() error {
-	contents, err := os.ReadFile(e.appsPath)
+	contents, err := e.readState(e.appsPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(contents, &e.apps); err != nil {
+	var apps map[string]int
+	if err := json.Unmarshal(contents, &apps); err != nil {
 		return fmt.Errorf("decode app identity registry: %w", err)
 	}
-	for id, uid := range e.apps {
-		if !appid.Valid(id) || uid < appid.FirstUID || uid > appid.LastUID {
-			return errors.New("app identity registry contains an invalid entry")
+	owners := make(map[int]string, len(apps))
+	for id, uid := range apps {
+		if !appid.Valid(id) || !validUsername(appid.Username(id)) || uid < appid.FirstUID || uid > appid.LastUID {
+			return fmt.Errorf("app identity registry: the entry for %q is invalid", id)
 		}
+		// AppIdentity never gives one UID to two apps.
+		if other, taken := owners[uid]; taken {
+			return fmt.Errorf("app identity registry: %s and %s have UID %d", other, id, uid)
+		}
+		owners[uid] = id
+	}
+	if apps != nil {
+		e.apps = apps
 	}
 	return nil
 }

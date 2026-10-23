@@ -104,6 +104,9 @@ ops-check:
 	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'install -d -o root -g root -m 0700 /var/lib/a-nas-host' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'anas-photos-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
