@@ -266,7 +266,7 @@ UNION SELECT poster_entry FROM shows UNION SELECT backdrop_entry FROM shows`)
 		return
 	}
 	for _, entry := range entries {
-		// Names are <entry>--<size>-<modified>.jpg.
+		// Names are <entry>--<size>-<modified>.jpg and <entry>--undecodable-<modified>.
 		if key, _, _ := strings.Cut(entry.Name(), "--"); !referenced[key] {
 			_ = os.Remove(filepath.Join(s.cacheDir, "artwork", entry.Name()))
 		}

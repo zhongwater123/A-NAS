@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,10 @@ import (
 // for a crafted progressive JPEG; see
 // docs/architecture/media-center.md#海报与剧照.
 const maxArtworkPixels = 50_000_000
+
+// errUndecodable is a picture that is not artwork: its header is unreadable
+// or out of range, or the decoder rejects or panics on it.
+var errUndecodable = errors.New("the picture cannot be decoded as artwork")
 
 type artworkSize struct {
 	name          string
@@ -165,15 +170,21 @@ func (s *Service) frame(videoID string) (Image, error) {
 }
 
 // resized returns a sidecar image scaled to fit size, read as the actor and
-// cached per file version.
+// cached per file version. A version that cannot be decoded is remembered and
+// not read again, so a broken picture costs one decode and one log record.
 func (s *Service) resized(ctx context.Context, actor accounts.User, entryID string, size artworkSize) (Image, error) {
 	entry, _, err := s.files.Lookup(ctx, actor, entryID)
 	if err != nil {
 		return Image{}, ErrNotFound
 	}
-	target := filepath.Join(s.cacheDir, "artwork", fmt.Sprintf("%s--%s-%d.jpg", cacheName(entryID), size.name, entry.ModifiedAt.UnixNano()))
+	version := entry.ModifiedAt.UnixNano()
+	target := filepath.Join(s.cacheDir, "artwork", fmt.Sprintf("%s--%s-%d.jpg", cacheName(entryID), size.name, version))
 	if file, err := os.Open(target); err == nil {
 		return Image{File: file, Modified: entry.ModifiedAt}, nil
+	}
+	undecodable := filepath.Join(s.cacheDir, "artwork", fmt.Sprintf("%s--undecodable-%d", cacheName(entryID), version))
+	if _, err := os.Stat(undecodable); err == nil {
+		return Image{}, ErrNotFound
 	}
 	content, err := s.files.OpenContent(ctx, actor, entryID)
 	if err != nil {
@@ -181,6 +192,11 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 	}
 	defer func() { _ = content.Reader.Close() }()
 	scaled, err := s.scaleArtwork(ctx, content.Reader, size)
+	if errors.Is(err, errUndecodable) {
+		// A marker that cannot be written only means decoding it again.
+		_ = writeAtomically(undecodable, nil)
+		return Image{}, ErrNotFound
+	}
 	if err != nil {
 		return Image{}, err
 	}
@@ -196,21 +212,21 @@ func (s *Service) resized(ctx context.Context, actor accounts.User, entryID stri
 
 // scaleArtwork decodes a sidecar image and encodes it as a JPEG that fits
 // size, once its pixels are free in the decode budget; waiting ends with the
-// request. An image the decoder panics on is not artwork, like one it rejects.
+// request. An image the decoder panics on is undecodable, like one it rejects.
 func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artworkSize) (encoded []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			decodepanic.Log("media artwork", recovered)
-			encoded, err = nil, ErrNotFound
+			encoded, err = nil, errUndecodable
 		}
 	}()
 	config, _, err := image.DecodeConfig(r)
-	if err != nil || config.Width <= 0 || config.Height <= 0 {
-		return nil, ErrNotFound
+	if err != nil {
+		return nil, decodeFailure(err)
 	}
 	pixels := int64(config.Width) * int64(config.Height)
-	if pixels > maxArtworkPixels {
-		return nil, ErrNotFound
+	if config.Width <= 0 || config.Height <= 0 || pixels > maxArtworkPixels {
+		return nil, errUndecodable
 	}
 	if err := s.decoding.Acquire(ctx, pixels); err != nil {
 		return nil, err
@@ -222,7 +238,7 @@ func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artwor
 	}
 	decoded, err := imaging.Decode(r, imaging.AutoOrientation(true))
 	if err != nil {
-		return nil, ErrNotFound
+		return nil, decodeFailure(err)
 	}
 	scaled := decoded
 	if decoded.Bounds().Dx() > size.width || decoded.Bounds().Dy() > size.height {
@@ -233,4 +249,13 @@ func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artwor
 		return nil, err
 	}
 	return buffer.Bytes(), nil
+}
+
+// decodeFailure tells a picture the decoder refuses from a file that could
+// not be read, which may succeed later and is not remembered.
+func decodeFailure(err error) error {
+	if _, ok := errors.AsType[*fs.PathError](err); ok {
+		return ErrNotFound
+	}
+	return errUndecodable
 }

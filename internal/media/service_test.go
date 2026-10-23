@@ -617,14 +617,42 @@ func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
 	if err != nil || movies.Total != 1 || !movies.Items[0].Artwork.Poster {
 		t.Fatalf("Titles() = %+v, %v", movies.Items, err)
 	}
-	if _, err := env.media.Artwork(env.ctx, env.bob, movies.Items[0].ID, "poster"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
+	id := movies.Items[0].ID
+	// The second request finds the picture remembered as undecodable.
+	for range 2 {
+		if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
+		}
 	}
-	imagetest.RequirePanicLogged(t, panics(), "media artwork", "Heat", "电影")
+	logged := panics()
+	if len(logged) != 1 {
+		t.Fatalf("logged %d recovered panics, want the first request's only", len(logged))
+	}
+	imagetest.RequirePanicLogged(t, logged, "media artwork", "Heat", "电影")
 	// The panicking decode gave its pixels back.
 	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
 		t.Fatal("the decode budget is still held after the panic")
 	}
+	env.media.decoding.Release(maxArtworkPixels)
+
+	// A replaced picture is a new version and is decoded.
+	var poster bytes.Buffer
+	if err := jpeg.Encode(&poster, image.NewGray(image.Rect(0, 0, 60, 90)), nil); err != nil {
+		t.Fatal(err)
+	}
+	env.write(t, env.shared, "电影/Heat (1995)-poster.jpg", poster.String())
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(env.spaceRoot(env.shared), "电影", "Heat (1995)-poster.jpg"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.files.Tree(env.ctx, env.admin, env.shared.ID, env.folder(t, env.admin, env.shared, "电影")); err != nil {
+		t.Fatal(err)
+	}
+	served, err := env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("Artwork() of the replaced picture = %v", err)
+	}
+	_ = served.File.Close()
 }
 
 func TestArtworkDecodesWaitForTheirPixelsInTheBudget(t *testing.T) {
