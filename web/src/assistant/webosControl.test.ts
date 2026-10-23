@@ -4,6 +4,7 @@ import { domToCanvas } from "modern-screenshot";
 
 import { request } from "../api";
 import { ControlError, type Danger, type Screenshot, WebosController } from "./webosControl";
+import { stubAPI } from "../test/api";
 
 vi.mock("modern-screenshot", () => ({ domToCanvas: vi.fn() }));
 
@@ -77,8 +78,7 @@ function writes(id: string, method: string, path: string) {
 beforeEach(() => {
   desktop();
   sent = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       sent.push(`${init?.method ?? "GET"} ${String(input)}`);
       return new Response(null, { status: 204 });

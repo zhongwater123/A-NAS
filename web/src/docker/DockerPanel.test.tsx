@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import type { ContainerSnapshot, ContainerSummary } from "../containersApi";
 import { DockerPanel } from "./DockerPanel";
+import { stubAPI } from "../test/api";
 
 function container(name: string, overrides: Partial<ContainerSummary> = {}): ContainerSummary {
   return {
@@ -59,8 +60,7 @@ function json(body: unknown, status = 200) {
 
 function serve() {
   const actions: Array<{ url: string; body: unknown }> = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "POST") {
@@ -175,10 +175,7 @@ describe("DockerPanel", () => {
   });
 
   it("explains when Docker is not enabled", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => json({ error: { code: "containers_disabled", message: "disabled" } }, 503)),
-    );
+    stubAPI(vi.fn(async () => json({ error: { code: "containers_disabled", message: "disabled" } }, 503)));
     render(<DockerPanel />);
     expect(await screen.findByText("Docker 未启用")).toBeTruthy();
   });

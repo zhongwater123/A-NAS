@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import { PhotosPanel } from "./PhotosPanel";
 import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./photosApi";
+import { stubAPI } from "../test/api";
 
 // jsdom decodes no images: the image searched by is the file as it came.
 vi.mock("./imageSearch", async (original) => ({
@@ -97,7 +98,7 @@ function serve(...routes: Route[]) {
       return json(asset(decodeURIComponent(url.split("/").at(-1) ?? "")));
     return json({ items: [] });
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 

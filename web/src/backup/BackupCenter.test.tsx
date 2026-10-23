@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileEntry, Space } from "../api";
 import { BackupCenter } from "./BackupCenter";
 import type { RemovedEntry, Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./backupApi";
+import { stubAPI } from "../test/api";
 
 const owner = "user:owner";
 const personal: Space = {
@@ -111,18 +112,25 @@ interface Call {
 }
 type Route = (url: string, init?: RequestInit) => Response | undefined;
 
-function serve(options: { schedules?: Record<string, SnapshotSchedule>; routes?: Route[] } = {}) {
+// wait holds back the answer to a request until the promise it returns settles.
+function serve(
+  options: {
+    schedules?: Record<string, SnapshotSchedule>;
+    routes?: Route[];
+    wait?: (url: string) => Promise<void> | undefined;
+  } = {},
+) {
   const calls: Call[] = [];
   const schedules = options.schedules ?? {
     [personal.id]: schedule(personal, { enabled: true, nextRunAt: new Date(Date.now() + 3_600_000).toISOString() }),
     [shared.id]: schedule(shared),
   };
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      await options.wait?.(url);
       for (const route of options.routes ?? []) {
         const response = route(url, init);
         if (response) return response;
@@ -179,15 +187,12 @@ describe("BackupCenter", () => {
   });
 
   it("says nothing about protection until every space has answered", async () => {
-    serve();
     let release!: () => void;
     const pending = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const answer = vi.mocked(fetch).getMockImplementation()!;
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      if (String(input).endsWith(`/spaces/${encodeURIComponent(shared.id)}/snapshot-schedule`)) await pending;
-      return answer(input, init);
+    serve({
+      wait: (url) => (url.endsWith(`/spaces/${encodeURIComponent(shared.id)}/snapshot-schedule`) ? pending : undefined),
     });
     render(<BackupCenter userId={owner} isAdmin />);
     const hero = await screen.findByRole("region", { name: "保护状态" });

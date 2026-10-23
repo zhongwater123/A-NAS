@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SharesProvider, useShares } from "./SharesProvider";
 import { SharesPanel } from "./SharesPanel";
+import { stubAPI } from "../test/api";
 
 const file = {
   id: "source",
@@ -41,8 +42,7 @@ const files = () => screen.getByRole("region", { name: "分享内容" });
 
 it("shares ordinary files with multiple members, Unicode emoji and a stable request key", async () => {
   const sent: unknown[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       if (String(url).endsWith("/members"))
         return json({
@@ -82,8 +82,7 @@ it("shares ordinary files with multiple members, Unicode emoji and a stable requ
 
 it("opens a received private thread and renders markup as text, marking only displayed messages read", async () => {
   const reads: unknown[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/read")) {
@@ -116,8 +115,7 @@ it("opens a received private thread and renders markup as text, marking only dis
 
 it("reads every page of the notification backlog without replaying it and resumes from the per-account cursor", async () => {
   const offsets: number[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const address = new URL(String(url), "http://nas");
       if (!address.pathname.endsWith("/notifications")) return json({ items: [] });
@@ -159,10 +157,7 @@ it("reads every page of the notification backlog without replaying it and resume
 
 it("summarises what is unread when the desktop opens", async () => {
   const fresh = { ...share, recipients: [{ ...share.recipients[0], lastMessage: 0 }] };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url) => json({ items: String(url).includes("direction=received") ? [fresh] : [] })),
-  );
+  stubAPI(vi.fn(async (url) => json({ items: String(url).includes("direction=received") ? [fresh] : [] })));
   render(
     <SharesProvider userId="bob" active={false} onOpen={() => undefined}>
       <div />
@@ -175,8 +170,7 @@ it("summarises what is unread when the desktop opens", async () => {
 it("groups live replies of one conversation into a single toast", async () => {
   vi.useFakeTimers();
   let polls = 0;
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const address = new URL(String(url), "http://nas");
       if (!address.pathname.endsWith("/notifications")) return json({ items: [] });
@@ -219,8 +213,7 @@ it("groups live replies of one conversation into a single toast", async () => {
 
 it("retries an uncertain send with the same key and preserves the draft", async () => {
   const requests: { requestId: string }[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       if (String(url).endsWith("/members")) return json({ items: [{ id: "bob", username: "Bob" }] });
       if (init?.method === "POST") {
@@ -259,8 +252,7 @@ it("saves a subset in a writable folder and reloads persisted jobs after reopeni
       { id: "other", path: "其他.txt", isDir: false, size: 5 },
     ],
   };
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/save")) {
@@ -326,8 +318,7 @@ it("saves a subset in a writable folder and reloads persisted jobs after reopeni
 it("switches sender private threads without showing the previous recipient messages", async () => {
   const sent = { ...share, recipients: [...share.recipients, { ...share.recipients[0], userId: "carol" }] };
   const readRequests: { recipientId: string }[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/read")) {
@@ -368,8 +359,7 @@ it("switches sender private threads without showing the previous recipient messa
 it("suppresses only the active visible thread and not a minimized thread", async () => {
   vi.useFakeTimers();
   let sequence = 0;
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) =>
       String(url).includes("/notifications")
         ? json({
@@ -413,8 +403,7 @@ it("does not mark replies hidden behind a content preview as read", async () => 
   let count = 1;
   const reads: number[] = [];
   const value = { ...share, entries: [{ id: "photo", path: "photo.jpg", isDir: false, size: 2 }] };
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/read")) {
@@ -464,8 +453,7 @@ it("does not mark replies hidden behind a content preview as read", async () => 
 
 it("keeps older loaded shares visible when the background list refreshes", async () => {
   vi.useFakeTimers();
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const path = String(url);
       if (path.includes("direction=received")) {
@@ -506,8 +494,7 @@ it("keeps older loaded shares visible when the background list refreshes", async
 it("retries a failed read cursor update after the connection recovers", async () => {
   vi.useFakeTimers();
   let reads = 0;
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const path = String(url);
       if (path.endsWith("/read")) {
@@ -542,10 +529,7 @@ it("retries a failed read cursor update after the connection recovers", async ()
 
 it("marks a newly received share unread even when it has no initial message", async () => {
   const value = { ...share, recipients: [{ ...share.recipients[0], lastMessage: 0 }] };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url) => json({ items: String(url).includes("direction=received") ? [value] : [] })),
-  );
+  stubAPI(vi.fn(async (url) => json({ items: String(url).includes("direction=received") ? [value] : [] })));
   render(
     <SharesProvider userId="bob" active onOpen={() => undefined}>
       <SharesPanel />
@@ -557,8 +541,7 @@ it("marks a newly received share unread even when it has no initial message", as
 
 it("records a visible share view even if loading saved jobs fails", async () => {
   let viewed = false;
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const path = String(url);
       if (path.endsWith("/jobs")) throw new Error("保存任务暂不可用");
@@ -582,8 +565,7 @@ it("records a visible share view even if loading saved jobs fails", async () => 
 });
 
 it("finishes previewing an empty text file instead of showing a permanent loading state", async () => {
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const path = String(url);
       if (path.endsWith("/content")) return new Response("");
@@ -607,8 +589,7 @@ it("finishes previewing an empty text file instead of showing a permanent loadin
 
 it("shows uncertain save results separately from confirmed saved file counts", async () => {
   const value = { ...share, recipients: [{ ...share.recipients[0], saveUncertain: true, saved: true, savedFiles: 1 }] };
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url) => {
       const path = String(url);
       if (path.endsWith("/s1")) return json(value);
@@ -630,8 +611,7 @@ it("shows uncertain save results separately from confirmed saved file counts", a
 
 it("sends a private reply over LAN HTTP without randomUUID", async () => {
   const replies: { recipientId: string; text: string; requestId: string }[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/messages") && init?.method === "POST") {
@@ -663,8 +643,7 @@ it("sends a private reply over LAN HTTP without randomUUID", async () => {
 it("shows request-key failures instead of silently ignoring Send", async () => {
   vi.stubGlobal("crypto", {});
   const posted = vi.fn();
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       if (String(url).endsWith("/members")) return json({ items: [{ id: "bob", username: "Bob" }] });
       if (init?.method === "POST") posted();
@@ -687,8 +666,7 @@ it("shows request-key failures instead of silently ignoring Send", async () => {
 
 it("keeps selected recipients when searching by nickname or account", async () => {
   const sent: { recipientIds: string[] }[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       if (String(url).endsWith("/members"))
         return json({
@@ -724,8 +702,7 @@ it("keeps a reply draft while chat is collapsed and marks new messages read only
   vi.useFakeTimers();
   let sequence = 1;
   const reads: number[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/read")) {
@@ -779,8 +756,7 @@ it("saves all top-level entries without requiring manual selection", async () =>
       { id: "other", path: "其他.txt", isDir: false, size: 5 },
     ],
   };
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       const path = String(url);
       if (path.endsWith("/save")) {

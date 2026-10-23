@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import type { AppJob, CatalogApp, InstallPlan } from "../appsApi";
 import { AppCenterPanel } from "./AppCenterPanel";
+import { stubAPI } from "../test/api";
 
 function app(id: string, overrides: Partial<CatalogApp> = {}): CatalogApp {
   return {
@@ -91,8 +92,7 @@ function serve(
   plan: InstallPlan = memosPlan,
 ) {
   const posts: string[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "POST") {

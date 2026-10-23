@@ -6,6 +6,7 @@ import type { Session } from "../api";
 import { forgetRememberedFilters } from "./common";
 import { LogsSection } from "./LogsSection";
 import type { ActivityEvent, SystemLogEntry } from "./logsApi";
+import { json, stubAPI } from "../test/api";
 
 const admin: Session = {
   csrfToken: "csrf",
@@ -129,8 +130,7 @@ interface API {
 function installAPI(api: API) {
   const mock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://127.0.0.1");
-    const respond = (body: unknown, status = 200) =>
-      ({ ok: status < 400, status, headers: new Headers(), json: async () => body }) as Response;
+    const respond = (body: unknown, status = 200) => json(body, status);
     if (url.pathname === "/api/v1/users") return respond({ items: [{ ...admin.user }, { ...member.user }] });
     if (url.pathname === "/api/v1/activity")
       return respond(api.activity?.(url.searchParams) ?? { items: [], scope: "all" });
@@ -142,7 +142,7 @@ function installAPI(api: API) {
     }
     return respond({ items: [] });
   });
-  vi.stubGlobal("fetch", mock);
+  stubAPI(mock);
   return mock;
 }
 

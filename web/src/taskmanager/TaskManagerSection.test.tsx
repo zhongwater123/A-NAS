@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../SettingsPanel";
 import { onSessionEnded, type Session } from "../api";
+import { json, stubAPI } from "../test/api";
 
 vi.mock("../settings/AvatarDialog", () => ({ AvatarDialog: () => null }));
 vi.mock("../settings/TerminalSection", () => ({ TerminalSection: () => null }));
@@ -95,18 +96,16 @@ function api(options: { device?: unknown; tasks?: unknown; status?: number } = {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input);
     const status = path.includes("task-manager") ? (options.status ?? 200) : 200;
-    return {
-      ok: status === 200,
+    return json(
+      path.endsWith("/device")
+        ? (options.device ?? device)
+        : path.endsWith("/tasks")
+          ? (options.tasks ?? tasks)
+          : { items: [] },
       status,
-      json: async () =>
-        path.endsWith("/device")
-          ? (options.device ?? device)
-          : path.endsWith("/tasks")
-            ? (options.tasks ?? tasks)
-            : { items: [] },
-    } as Response;
+    );
   });
-  vi.stubGlobal("fetch", fetcher);
+  stubAPI(fetcher);
   return fetcher;
 }
 afterEach(() => {

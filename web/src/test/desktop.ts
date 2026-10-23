@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
 import { transferStore } from "../transfers/store";
+import { apiError, json, stubAPI } from "./api";
 
 export const session = {
   csrfToken: "csrf-test",
@@ -96,8 +97,7 @@ export function installAPI(
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
-    if (path.startsWith("/api/v1/files/") && path.includes("/content"))
-      return { ok: true, status: 200, text: async () => options.textPreview ?? "" } as Response;
+    if (path.startsWith("/api/v1/files/") && path.includes("/content")) return new Response(options.textPreview ?? "");
     if (path === "/api/v1/volumes") return ok({ items: options.volumes ?? [] });
     if (path === "/api/v1/storage/plans" && init?.method === "POST") return ok(options.storagePlan ?? {}, 201);
     if (path === "/api/v1/storage/plans") return ok({ items: options.unfinishedPlans ?? [] });
@@ -111,13 +111,7 @@ export function installAPI(
         : ok({ ...(options.storagePlan as object), state: "succeeded" });
     if (path.startsWith("/api/v1/storage/plans/") && path.endsWith("/cancel"))
       return ok({ ...(options.storagePlan as object), state: "cancelled" });
-    if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion"))
-      return {
-        ok: true,
-        status: 202,
-        headers: new Headers({ "Content-Length": "0" }),
-        json: async () => undefined,
-      } as Response;
+    if (path.startsWith("/api/v1/volumes/") && path.endsWith("/conversion")) return new Response(null, { status: 202 });
     if (path === "/api/v1/users" && init?.method === "POST") {
       const { username } = JSON.parse(String(init.body)) as { username: string };
       return ok(
@@ -156,16 +150,12 @@ export function installAPI(
     }
     return ok({ items: [] });
   });
-  vi.stubGlobal("fetch", mock);
+  stubAPI(mock);
   return mock;
 }
 
-function ok(body: unknown, status = 200) {
-  return { ok: true, status, json: async () => body } as Response;
-}
-function failure(status: number, code: string) {
-  return { ok: false, status, json: async () => ({ error: { code, message: code } }) } as Response;
-}
+const ok = json;
+const failure = apiError;
 
 export async function openSettingsSection(
   user: ReturnType<typeof userEvent.setup>,
@@ -184,8 +174,7 @@ export function routeFetch(routes: {
   containers?: (url: string, init?: RequestInit) => Promise<Response>;
   apps?: (url: string, init?: RequestInit) => Promise<Response>;
 }) {
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).startsWith("/api/v1/containers") && routes.containers)
         return routes.containers(String(input), init);
@@ -217,27 +206,15 @@ export function stubDesktopFetch(state: unknown, terminalEnabled: boolean) {
 }
 
 export function okResponse(state: unknown) {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => state,
-  } as Response;
+  return json(state);
 }
 
 export function sessionExpiredResponse() {
-  return {
-    ok: false,
-    status: 401,
-    json: async () => ({ error: { code: "authentication_required", message: "authentication is required" } }),
-  } as Response;
+  return apiError(401, "authentication_required", "authentication is required");
 }
 
 export function errorResponse(status: number) {
-  return {
-    ok: false,
-    status,
-    json: async () => ({ error: { code: "state_unavailable", message: "host state is unavailable" } }),
-  } as Response;
+  return apiError(status, "state_unavailable", "host state is unavailable");
 }
 
 // resetDesktop undoes what a desktop test leaves behind: transfers, fake

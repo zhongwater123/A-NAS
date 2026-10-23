@@ -6,6 +6,7 @@ import { setSession } from "../api";
 import type { Playlist, Track } from "./musicApi";
 import { MusicPanel } from "./MusicPanel";
 import { track } from "./testTracks";
+import { stubAPI } from "../test/api";
 
 const library: Track[] = [
   track("file:a1", {
@@ -68,7 +69,7 @@ function serve(items: Track[] = library) {
     if (method !== "GET") return new Response(null, { status: 204 });
     return json({ items: [] });
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 
@@ -118,8 +119,7 @@ describe("MusicPanel", () => {
     const lyrics = new Promise<Response>((resolve) => {
       deliver = resolve;
     });
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
         String(input).endsWith("/lyrics") ? lyrics : answer(input, init),
       ),

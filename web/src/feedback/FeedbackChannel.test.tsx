@@ -7,6 +7,7 @@ import { forgetPeople, rememberPerson } from "../people";
 import { FeedbackChannel } from "./FeedbackChannel";
 import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
 import { describeTime } from "./time";
+import { stubAPI } from "../test/api";
 
 const capture = vi.hoisted(() => ({ result: undefined as Blob | undefined }));
 vi.mock("./capture", async (original) => ({
@@ -78,7 +79,7 @@ function serve(items: FeedbackItem[], ...handlers: Handler[]) {
     if (url === "/api/v1/feedback" && (init.method ?? "GET") === "GET") return json({ items });
     return json({ error: { code: "not_found", message: "not found" } }, 404);
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 

@@ -40,6 +40,7 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 import { transferStore, type UploadTarget } from "./store";
 import { TransferCenter } from "./TransferCenter";
 import type { Transfer } from "./transfersApi";
+import { json, stubAPI } from "../test/api";
 
 const target: UploadTarget = {
   spaceId: "space:shared",
@@ -72,11 +73,10 @@ function transfer(change: Partial<Transfer>): Transfer {
 beforeEach(() => {
   tus.uploads.length = 0;
   server = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL) => {
       const body = String(input) === "/api/v1/transfers" ? { items: server } : {};
-      return { ok: true, status: 200, json: async () => body } as Response;
+      return json(body);
     }),
   );
 });

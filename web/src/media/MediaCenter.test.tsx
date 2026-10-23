@@ -7,6 +7,7 @@ import { transferStore } from "../transfers/store";
 import { MediaCenter } from "./MediaCenter";
 import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./mediaApi";
 import { Player } from "./Player";
+import { stubAPI } from "../test/api";
 
 const art = { poster: true, backdrop: true, thumb: true, version: "1" };
 const film: Title = {
@@ -108,7 +109,7 @@ function serve(libraries: MediaLibrary[], ...routes: Route[]) {
     if (init?.method && init.method !== "GET") return json(undefined, 204);
     return json({ items: [] });
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 

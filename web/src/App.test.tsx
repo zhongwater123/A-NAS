@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import { apiError, json } from "./test/api";
 import {
   errorResponse,
   healthyState,
@@ -707,7 +708,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       containers: async (url, init) => {
         if (init?.method === "POST") {
           actions.push({ id: url.split("/")[4], body: JSON.parse(String(init.body)) });
-          return { ok: true, status: 204, json: async () => undefined } as Response;
+          return json(undefined, 204);
         }
         if (url.endsWith("/logs?tail=200")) {
           return okResponse({
@@ -764,12 +765,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   it("explains when Docker management is disabled", async () => {
     routeFetch({
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      containers: async () =>
-        ({
-          ok: false,
-          status: 503,
-          json: async () => ({ error: { code: "containers_disabled", message: "disabled" } }),
-        }) as Response,
+      containers: async () => apiError(503, "containers_disabled", "disabled"),
     });
     const user = userEvent.setup();
     render(<App />);
@@ -788,17 +784,10 @@ describe("A-NAS v1.0.1 desktop", () => {
           posts.push({ url, body: JSON.parse(String(init.body)) });
           expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe(session.csrfToken);
           installed = url.endsWith("/install");
-          return {
-            ok: true,
-            status: 202,
-            json: async () => ({
-              appId: "memos",
-              action: "install",
-              state: "running",
-              startedAt: "2026-10-07T00:00:00Z",
-              output: [],
-            }),
-          } as Response;
+          return json(
+            { appId: "memos", action: "install", state: "running", startedAt: "2026-10-07T00:00:00Z", output: [] },
+            202,
+          );
         }
         if (url.endsWith("/plan")) return okResponse(memosPlan);
         return okResponse(
@@ -851,13 +840,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
       apps: async (url, init) => {
         if (init?.method === "POST") {
-          return {
-            ok: false,
-            status: 409,
-            json: async () => ({
-              error: { code: "port_in_use", message: "a published port is already in use: 5230 is used by other" },
-            }),
-          } as Response;
+          return apiError(409, "port_in_use", "a published port is already in use: 5230 is used by other");
         }
         if (url.endsWith("/plan")) return okResponse(memosPlan);
         return okResponse(appList({}));
@@ -874,12 +857,7 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     routeFetch({
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async () =>
-        ({
-          ok: false,
-          status: 503,
-          json: async () => ({ error: { code: "apps_disabled", message: "disabled" } }),
-        }) as Response,
+      apps: async () => apiError(503, "apps_disabled", "disabled"),
     });
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
@@ -894,13 +872,7 @@ describe("A-NAS v1.0.1 desktop", () => {
         if (url.endsWith("/plan")) {
           return poolConfigured
             ? okResponse({ ...memosPlan, networks: ["default"], addressPools: ["10.96.64.0/19"] })
-            : ({
-                ok: false,
-                status: 409,
-                json: async () => ({
-                  error: { code: "address_pool_missing", message: "Docker has no address pool for app networks" },
-                }),
-              } as Response);
+            : apiError(409, "address_pool_missing", "Docker has no address pool for app networks");
         }
         return okResponse(appList({}));
       },
@@ -926,11 +898,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
       apps: async (url, init) => {
         if (init?.method === "POST") {
-          return {
-            ok: false,
-            status: 423,
-            json: async () => ({ error: { code: "volume_unavailable", message: "the data volume is not available" } }),
-          } as Response;
+          return apiError(423, "volume_unavailable", "the data volume is not available");
         }
         if (url.endsWith("/plan")) return okResponse(memosPlan);
         return okResponse(appList({}));
