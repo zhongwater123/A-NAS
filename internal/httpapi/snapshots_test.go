@@ -87,7 +87,7 @@ func TestBackupCenterAPIManagesSchedulesSearchesAndRestoresFolders(t *testing.T)
 	var mu sync.Mutex
 	now := time.Date(2026, 10, 12, 10, 30, 0, 0, time.UTC)
 	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: clock, Location: time.UTC,
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -70,12 +70,13 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 16. 影视中心不持有存储：媒体文件只经文件代理以有效会话的用户身份读取，媒体库的可见性与所在空间的读权限一致；FFmpeg 只在没有网络、看不到数据卷与产品服务状态的按连接 Worker 中运行，只接收只读描述符（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）。
 17. 应用容器只以应用身份接触共享空间：服务以 `app-<id>` 启动，或由入口程序从 root 降到 `app-<id>`，并通过写在自身 Compose 中的 `a-nas-users` 组访问共享空间，挂载默认只读；保留镜像用户（可能是 root）的服务只能挂载自己的应用数据。宿主机账号的组成员关系不进入容器，容器代理安装后核对用户、组、能力与只读挂载（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）。
 18. 在服务进程内解码用户文件或宿主机图片时（音乐封面、影视海报、头像、壁纸、任务图标、相册缩略图与搜图），先读头部限制像素数，并把解码器 panic 当作无法解码处理；后台扫描和 Host Agent 不能因一张图片退出或反复出错。恢复的 panic 经 [`internal/decodepanic`](../../internal/decodepanic/decodepanic.go) 记一条错误日志，只含解码点名称、panic 值的类型（运行时错误另记其消息，它只说长度与类型）与不带源码路径的栈；解码器自己的 panic 消息可能引用正在读的内容，所以不记，文件名也不记，因为管理员能读系统日志（[日志规格](../specs/logs.md)）。同一种 panic 沿同一个栈每 10 分钟只记一条，附上其间的重复次数，反复请求同一个坏文件不会刷屏。这样解码器缺陷、有人试探缺陷与我们自己代码的缺陷不会被当成一张坏图片。新增解码点同样处理，并用 `internal/imagetest` 的测试图片与日志记录覆盖。
+19. 产品服务的配置在启动时从环境一次解析并校验（[`cmd/anas-api/config.go`](../../cmd/anas-api/config.go)，各二进制经 [`internal/envconfig`](../../internal/envconfig/envconfig.go) 读取环境）。`ANAS_HOSTSTATE_MODE` 没有默认值，开发写 `fake`，NAS 写 `agent`；`agent` 拒绝任何开发用的 Adapter：进程内 FFmpeg、Fake 容器、开发用 AI、直连助手套接字与 spike 的更改代理。监听地址只能是回环地址。文件服务必须由调用方给出文件系统：生产是文件代理，进程内的本地文件系统只能经 `files.NewLocalService` 显式选择（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）。
 
 ## 当前代码入口
 
 | 路径 | 责任 | 实现状态 |
 |---|---|---|
-| `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、手动与定时快照、可选终端与容器管理已接线 |
+| `cmd/anas-api` | 非特权产品 API 进程入口；`config.go` 是产品、相册与分享服务进程的全部环境变量及其校验 | 持久化账号、存储、文件、回收站、手动与定时快照、可选终端与容器管理已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
 | `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、[个性化](../specs/personalization.md)、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口、随机单视频循环屏保与屏保后息屏已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |

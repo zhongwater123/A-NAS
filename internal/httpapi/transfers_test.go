@@ -50,7 +50,7 @@ func newTransferFixture(t *testing.T) *transferFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	service, err := transfers.Open(filepath.Join(t.TempDir(), "transfers.db"), fileService, accountService, transfers.Options{})
 	if err != nil {
 		t.Fatal(err)

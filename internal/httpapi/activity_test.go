@@ -88,7 +88,7 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(dir, "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: now})
+	fileService := files.NewLocalService(fileStore, filepath.Join(dir, "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: now})
 	photoService, err := photos.Open(filepath.Join(dir, "photos"), photos.Options{DisableCapacityReserve: true, Now: now})
 	if err != nil {
 		t.Fatal(err)

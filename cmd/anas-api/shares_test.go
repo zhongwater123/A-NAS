@@ -57,9 +57,9 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	}
 	defer func() { _ = catalog.Close() }()
 	volume := filepath.Join(root, "volume")
-	fs := files.NewService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	fs := files.NewLocalService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	api, closeShares, err := configuredShares(ctx, false, volume, users, fs, nil, logger)
+	api, closeShares, err := configuredShares(ctx, Config{Mode: ModeFake, DataMount: volume}, users, fs, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

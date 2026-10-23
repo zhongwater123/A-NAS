@@ -69,7 +69,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
-	fixture.files = files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fixture.files = files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	shared := filepath.Join(volume, "spaces", "shared", "影视")
 	var poster bytes.Buffer
 	if err := jpeg.Encode(&poster, image.NewGray(image.Rect(0, 0, 4, 6)), nil); err != nil {

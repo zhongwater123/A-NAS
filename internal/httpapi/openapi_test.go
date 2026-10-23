@@ -343,7 +343,7 @@ func transfersAPI(t *testing.T) transferContract {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	entry, err := fileService.Upload(ctx, admin, contract.space, "", "clip.bin", strings.NewReader("0123456789"))
 	if err != nil {
 		t.Fatal(err)

@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,20 +28,21 @@ import (
 
 const requestTimeout = 3 * time.Second
 
-const socketEnvironmentVariable = "ANAS_HOST_AGENT_SOCKET"
-
 var ErrUnavailable = errors.New("host agent state is unavailable")
 
-func SocketPath() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv(socketEnvironmentVariable)); configured != "" {
+// SocketPath is the Host Agent's socket: configured (ANAS_HOST_AGENT_SOCKET)
+// when set, otherwise a-nas/host-agent.sock in the runtime directory
+// (XDG_RUNTIME_DIR), as for a user service. Both binaries read the two
+// variables from their own configuration.
+func SocketPath(configured, runtimeDirectory string) (string, error) {
+	if configured != "" {
 		if !filepath.IsAbs(configured) {
 			return "", errors.New("ANAS_HOST_AGENT_SOCKET must be an absolute path")
 		}
 		return filepath.Clean(configured), nil
 	}
-	runtimeDirectory := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
 	if runtimeDirectory == "" || !filepath.IsAbs(runtimeDirectory) {
-		return "", errors.New("XDG_RUNTIME_DIR must be an absolute path")
+		return "", errors.New("XDG_RUNTIME_DIR must be an absolute path when ANAS_HOST_AGENT_SOCKET is not set")
 	}
 	return filepath.Join(runtimeDirectory, "a-nas", "host-agent.sock"), nil
 }

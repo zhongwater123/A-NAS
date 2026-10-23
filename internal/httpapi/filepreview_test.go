@@ -49,7 +49,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = fileStore.Close() }()
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	spaces, err := accountService.ListSpaces(ctx, owner)
 	if err != nil {
 		t.Fatal(err)

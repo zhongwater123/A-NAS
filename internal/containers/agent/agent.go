@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,13 +23,14 @@ import (
 
 const (
 	defaultSocketPath = "/run/a-nas-container/agent.sock"
-	socketEnvironment = "ANAS_CONTAINER_AGENT_SOCKET"
 	// Stats sampling alone takes about a second; stop and restart wait up to ten.
 	requestTimeout = 20 * time.Second
 )
 
-func SocketPath() (string, error) {
-	configured := strings.TrimSpace(os.Getenv(socketEnvironment))
+// SocketPath is the container agent's socket: configured
+// (ANAS_CONTAINER_AGENT_SOCKET) when set, otherwise the one systemd's
+// RuntimeDirectory provides.
+func SocketPath(configured string) (string, error) {
 	if configured == "" {
 		return defaultSocketPath, nil
 	}
