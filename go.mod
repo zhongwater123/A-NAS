@@ -27,7 +27,7 @@ require (
 	github.com/prometheus/procfs v0.22.0
 	github.com/razsteinmetz/go-ptn v1.0.0
 	github.com/tus/tusd/v2 v2.10.1
-	go.yaml.in/yaml/v4 v4.0.0-rc.4
+	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/crypto v0.57.0
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
 	golang.org/x/image v0.47.0
