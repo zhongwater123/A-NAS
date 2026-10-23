@@ -1430,7 +1430,9 @@ button.net-rates:focus-visible {
 .window-actions svg {
   width: 14px;
 }
-.window-content {
+/* No specificity, so each app's own .window-content-<app> rule wins wherever
+   its stylesheet loads; app stylesheets load before this file. */
+:where(.window-content) {
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -1546,13 +1548,6 @@ button.net-rates:focus-visible {
   gap: 12px;
 }
 
-/* File manager: styles live in files/files.css. The window rule stays here,
-   after .window-content, which would otherwise win. */
-.window-content-files {
-  overflow: hidden;
-  background: #f6f8fb;
-  container: filewindow / inline-size;
-}
 .sr-only {
   position: absolute !important;
   width: 1px !important;

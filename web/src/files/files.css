@@ -1,4 +1,9 @@
 /* File manager window. */
+.window-content-files {
+  overflow: hidden;
+  background: #f6f8fb;
+  container: filewindow / inline-size;
+}
 .file-manager {
   --file-left-pane: 205px;
   --file-right-pane: 238px;
