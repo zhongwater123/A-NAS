@@ -541,6 +541,30 @@ describe("PhotosPanel viewer", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("says so when a photo another window asks for cannot be read", async () => {
+    serve(
+      (url) =>
+        url === "/api/v1/photos/assets/photo%3Agone"
+          ? json({ error: { code: "not_found", message: "asset not found" } }, 404)
+          : undefined,
+      timeline(privateLibrary.id, () => [asset("photo:a")]),
+    );
+    const handled = vi.fn();
+    render(
+      <PhotosPanel
+        userId="user:alice"
+        userName="alice"
+        isAdmin={false}
+        focus={{ assetId: "photo:gone", at: 1 }}
+        onFocusHandled={handled}
+      />,
+    );
+    expect(await screen.findByText("照片或相册已不存在")).toBeTruthy();
+    expect(handled).toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByRole("button", { name: "查看 photo:a.jpg" })).toBeTruthy();
+  });
+
   it("moves a photo to the trash and undoes it", async () => {
     let trashed = false;
     const fetchMock = serve(
@@ -1203,6 +1227,18 @@ describe("PhotosPanel people and pets", () => {
 });
 
 describe("PhotosPanel search and viewing", () => {
+  it("reports a search it cannot even send instead of failing the window", async () => {
+    serve(timeline(privateLibrary.id, () => [asset("photo:home")]));
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:home.jpg" });
+    // A lone surrogate cannot be put in a URL, so building the request throws.
+    const box = screen.getByRole("searchbox", { name: "搜索照片" });
+    fireEvent.change(box, { target: { value: "猫\uD800" } });
+    fireEvent.submit(box.closest("form")!);
+    expect(await screen.findByText("URI malformed")).toBeTruthy();
+    expect(screen.getByRole("searchbox", { name: "搜索照片" })).toBeTruthy();
+  });
+
   it("searches from any page into AI search and divides the closest results from the less related", async () => {
     const results: Record<string, object> = {
       "%E6%B5%B7%E8%BE%B9%E7%9A%84%E7%8C%AB": {

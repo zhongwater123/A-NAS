@@ -903,7 +903,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
         }
       })
       .catch((reason) => {
-        if (current) focusFailed(reason);
+        if (current) focusFailed(messageOf(reason));
       })
       .finally(() => focusHandled());
     return () => {

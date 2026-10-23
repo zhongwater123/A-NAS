@@ -37,7 +37,8 @@ export function AssetGrid(props: Props) {
   const fetchPage = useCallback(
     (cursor: string, current: number) => {
       busy.current = true;
-      return load(cursor)
+      // A load that throws at once fails like one that rejects.
+      return new Promise<PhotoPage>((resolve) => resolve(load(cursor)))
         .then((page) => {
           if (current !== generation.current) return;
           setAssets((value) => (cursor && value ? [...value, ...page.items] : page.items));
