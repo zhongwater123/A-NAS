@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -107,7 +108,7 @@ var (
 	blue  = solidPNG(20, 20, 220)
 )
 
-func searchService(t *testing.T) (*photos.Service, *colorEmbedder, *clock) {
+func searchService(t *testing.T) (*photos.Service, *colorEmbedder, *clocktest.Clock) {
 	t.Helper()
 	c := newClock()
 	embedder := &colorEmbedder{}

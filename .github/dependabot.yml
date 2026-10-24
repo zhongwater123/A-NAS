@@ -1,6 +1,6 @@
 version: 2
-# Minor and patch updates of an ecosystem arrive as one pull request; a major
-# update gets its own.
+# Minor and patch updates of an ecosystem arrive as one pull request (web
+# packages as two, below); a major update gets its own.
 updates:
   - package-ecosystem: gomod
     directory: /
@@ -19,12 +19,31 @@ updates:
     allow:
       - dependency-name: github.com/golangci/golangci-lint/v2
 
+  # Web packages come in groups, so that an update that needs work does not
+  # hold back the others: one group for all of them failed 29 tests on the
+  # @assistant-ui bumps (#232). A package joins the first group it matches.
+  # Below 1.0 a minor release may break, so tools/depcheck (make ops-check)
+  # fails when a 0.x package is in a group.
   - package-ecosystem: npm
     directory: /web
     schedule:
       interval: monthly
+    ignore:
+      # The versions of Hermes Desktop's lockfile, with the @assistant-ui/tap
+      # override: they move when vendor-hermes-ui.py copies a newer Desktop
+      # (ADR 0024, decision 9). update-types confines this to version
+      # updates, so security updates still come.
+      - dependency-name: "@assistant-ui/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
     groups:
+      # New findings or formatting, fixed in the same pull request.
+      lint:
+        patterns: ["@biomejs/*", "oxlint", "eslint-plugin-*"]
+        update-types: [minor, patch]
+      # The 0.x packages get a pull request each.
       web:
+        patterns: ["*"]
+        exclude-patterns: ["@xterm/addon-fit", "dom-accessibility-api"]
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions

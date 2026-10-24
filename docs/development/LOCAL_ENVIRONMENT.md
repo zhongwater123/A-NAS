@@ -264,7 +264,7 @@ make check
 
 日常迭代先运行受影响的现有目标，例如 `go test ./internal/storage`、`make web-test` 或 `make ops-check`；RC 提交只运行一次完整 `make check VERSION=<RC>`。完整检查会把提交、产品版本和两个二进制哈希写入可丢弃的 `build/.validated-build`，`deploy-dev.ps1` 只有在四者全部一致时才复用结果，否则自动重跑完整门禁。这样不会用“跳过测试”换速度，也不会为同一制品重复执行全量测试。
 
-完整检查中的 `make vuln-check` 用 `go.mod` 的 `tool` 指令固定的 govulncheck 扫描代码可达的已知漏洞，需要能访问 `vuln.go.dev`。它报告可达漏洞时检查失败：升级对应模块，或一起修改 `.go-version` 与 `go.mod` 的 `toolchain` 行来升级 Go。
+完整检查中的 `make vuln-check` 用 `go.mod` 的 `tool` 指令固定的 govulncheck 扫描代码可达的已知漏洞，需要能访问 `vuln.go.dev`。它报告可达漏洞时检查失败：升级对应模块，或一起修改 `.go-version` 与 `go.mod` 的 `toolchain` 行来升级 Go。CI 每周一还在 `main` 上单独运行一次（`.github/workflows/vuln.yml`，也可手动触发），这样没有人推送时，新公布的漏洞也会报出；修改这个工作流的 PR 也会运行它，其他 PR 不运行，所以它不能设为必需检查。
 
 只开发界面时：
 
@@ -285,7 +285,7 @@ npm run dev
 | `make web-lint` | `web/` 中的 `npm run lint`：Oxlint 与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
 | `make ai-lint` | Ruff 检查 `ai/`；`ai/requirements-dev.lock` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
-| `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
+| `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`，由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
 
 Ruff 不随 npm 或 Go 安装。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
@@ -296,9 +296,15 @@ python3 -m venv ~/.local/opt/ruff
 
 开发机 B 的 Python 3.14 没有 `ensurepip`：从 PyPI 下载本机平台的 wheel，核对 SHA-256 与锁文件中的一项相同，再解出其中的 `ruff-<版本>.data/scripts/ruff`。
 
-`make race-test` 以竞态检测器、每次 4 个包运行全部 Go 测试，需要 gcc；CI 另开作业运行，修改并发代码时本地也运行。
+`make race-test` 以竞态检测器、每次 4 个包运行全部 Go 测试，需要 gcc；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
 
 Web 代码由 Biome 格式化：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
+
+## CI
+
+`.github/workflows/ci.yml` 对每个 PR 和每次合入 `main` 运行三个作业：`Project checks`（`make check`）、`Go tests with the race detector`（`make race-test`）与 `System test (Debian 13, systemd)`（`make system-test`）。`main` 的规则集按作业名要求三者通过才能合并，改作业名时同时改规则集。新的强制检查加进这三个作业，通常是 Makefile 的 `check-steps`，规则集不用改。
+
+PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
 
 ## 尚待决定后再安装
 

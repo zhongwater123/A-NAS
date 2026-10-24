@@ -177,6 +177,6 @@
 - 架构：[总览](../architecture/OVERVIEW.md)、[存储与文件](../architecture/storage-and-files.md)。
 - ADR：[统一身份与文件 ACL](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)。
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[传输中心](transfer-center.md)。
-- 现有代码：[文件代理](../../internal/filebroker/server.go)、[文件操作](../../internal/files/service.go)、[桌面与通知](../../web/src/App.tsx)、[文件预览](../../web/src/files/FileViewer.tsx)。
+- 现有代码：[文件代理](../../internal/filebroker/server.go)、[文件操作](../../internal/files/service.go)、[桌面](../../web/src/desktop/Desktop.tsx)与[通知](../../web/src/desktop/NotificationCenter.tsx)、[文件预览](../../web/src/files/FileViewer.tsx)。
 - 界面：[分享窗口](../../web/src/shares/SharesPanel.tsx)、[详情](../../web/src/shares/ShareDetail.tsx)、[私聊](../../web/src/shares/Conversation.tsx)、[提醒与未读](../../web/src/shares/SharesProvider.tsx)；[界面测试](../../web/src/shares/shares.test.tsx)；已读游标见[讨论](../../internal/shares/discussions.go)与[测试](../../internal/shares/lifecycle_test.go)。
-- 现有测试参考：[文件操作测试](../../internal/files/service_test.go)、[桌面工作流测试](../../web/src/App.test.tsx)。
+- 现有测试参考：[文件操作测试](../../internal/files/service_test.go)、[文件管理测试](../../web/src/files/FilePanel.test.tsx)。
