@@ -1,0 +1,41 @@
+# Qdrant settings of every A-NAS vector index instance
+# (docs/architecture/vector-index.md). Each owning service has an instance of
+# its own in a private network namespace, reached only through its Unix socket
+# proxy; the unit gives each its storage paths. The tests start the pinned
+# binary with this same file.
+log_level: INFO
+
+storage:
+  # A collection's write-ahead log is allocated a segment at a time: the
+  # default 32 MB per collection is most of a small index's disk.
+  wal:
+    wal_capacity_mb: 8
+  performance:
+    # Searches may use the free cores; index building takes one, so that it
+    # never competes with the desktop or file sharing for more.
+    optimizer_cpu_budget: 1
+  optimizers:
+    default_segment_number: 2
+    max_optimization_threads: 1
+  hnsw_index:
+    max_indexing_threads: 1
+
+service:
+  # Only the instance's own loopback exists in its namespace; gRPC panics on a
+  # host name, so this stays an address. The proxy forwards only the gRPC
+  # port; the REST port cannot be turned off and nothing reaches it.
+  host: 127.0.0.1
+  http_port: 6333
+  grpc_port: 6334
+  enable_cors: false
+  # The Web UI would be served without authentication.
+  enable_static_content: false
+  # Snapshots are never restored from a URL; the index is rebuilt instead.
+  enable_snapshot_url_recovery: false
+
+cluster:
+  enabled: false
+
+# Usage statistics and panic reports would go to telemetry.qdrant.io; the
+# command line turns them off as well, in case this file is not read.
+telemetry_disabled: true
