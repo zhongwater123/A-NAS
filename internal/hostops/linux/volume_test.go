@@ -436,6 +436,10 @@ func (h *diskHost) Run(ctx context.Context, name string, args []string, _ string
 	return h.apply(name, args), nil
 }
 
+func (h *diskHost) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return h.Run(ctx, name, args, stdin)
+}
+
 // apply makes the command take effect on the host.
 func (h *diskHost) apply(name string, args []string) []byte {
 	h.mu.Lock()

@@ -34,6 +34,10 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 	}
 }
 
+func (r *photosRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return r.Run(ctx, name, args, stdin)
+}
+
 // notFound is getent's exit status for an unknown key.
 type notFound struct{}
 

@@ -112,7 +112,7 @@ func (e *Executor) createVolume(ctx context.Context, operation *volumeOperation)
 	if output, err := e.runner.Run(ctx, "mkfs.btrfs", format, ""); err != nil {
 		return storage.Volume{}, commandError("mkfs.btrfs failed", err, output)
 	}
-	uuidBytes, err := e.runner.Run(ctx, "blkid", []string{"--output", "value", "--match-tag", "UUID", devices[0].PartitionPath}, "")
+	uuidBytes, err := e.runner.Output(ctx, "blkid", []string{"--output", "value", "--match-tag", "UUID", devices[0].PartitionPath}, "")
 	if err != nil {
 		return storage.Volume{}, fmt.Errorf("read Btrfs UUID: %w", err)
 	}
@@ -265,7 +265,7 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 		return nil
 	}
 	for _, device := range devices {
-		output, err := e.runner.Run(ctx, "blkid", []string{"--probe", "--output", "value", "--match-tag", "UUID", device.PartitionPath}, "")
+		output, err := e.runner.Output(ctx, "blkid", []string{"--probe", "--output", "value", "--match-tag", "UUID", device.PartitionPath}, "")
 		if err == nil && strings.EqualFold(strings.TrimSpace(string(output)), uuid) {
 			return nil
 		}

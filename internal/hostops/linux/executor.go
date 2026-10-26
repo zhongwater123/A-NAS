@@ -2,6 +2,7 @@
 package linux
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -64,8 +65,16 @@ func (r HostStateResolver) MountedDataVolume(ctx context.Context) (*hoststate.Da
 	return state.DataVolume, nil
 }
 
+// CommandRunner runs the fixed host commands with their arguments and
+// standard input.
 type CommandRunner interface {
+	// Run returns what the command wrote to standard output and standard
+	// error together, for commands whose output only explains a failure.
 	Run(context.Context, string, []string, string) ([]byte, error)
+	// Output returns only what the command wrote to standard output, for
+	// commands whose output is parsed: Samba tools print warnings on standard
+	// error even when they succeed. A failure's error carries standard error.
+	Output(context.Context, string, []string, string) ([]byte, error)
 }
 
 type Options struct {
@@ -498,11 +507,25 @@ func writeAtomic(path string, contents []byte, mode os.FileMode) error {
 type execCommandRunner struct{}
 
 func (execCommandRunner) Run(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return hostCommand(ctx, name, args, stdin).CombinedOutput()
+}
+
+func (execCommandRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	output, err := hostCommand(ctx, name, args, stdin).Output()
+	if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
+		if detail := bytes.TrimSpace(exitError.Stderr); len(detail) != 0 {
+			err = fmt.Errorf("%w: %s", err, detail)
+		}
+	}
+	return output, err
+}
+
+func hostCommand(ctx context.Context, name string, args []string, stdin string) *exec.Cmd {
 	command := exec.CommandContext(ctx, name, args...)
 	if stdin != "" {
 		command.Stdin = strings.NewReader(stdin)
 	}
-	return command.CombinedOutput()
+	return command
 }
 
 var _ storage.VolumeExecutor = (*Executor)(nil)

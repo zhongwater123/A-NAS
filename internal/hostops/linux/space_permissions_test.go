@@ -224,6 +224,10 @@ func (r *unknownACLUserRunner) Run(ctx context.Context, name string, args []stri
 	return output, err
 }
 
+func (r *unknownACLUserRunner) Output(ctx context.Context, name string, args []string, input string) ([]byte, error) {
+	return r.Run(ctx, name, args, input)
+}
+
 func (r *spacePermissionRunner) ran(command spacePermissionCommand) bool {
 	return slices.ContainsFunc(r.commands, func(got spacePermissionCommand) bool {
 		return got.name == command.name && slices.Equal(got.args, command.args)
@@ -243,4 +247,8 @@ func (r *spacePermissionRunner) Run(_ context.Context, name string, args []strin
 	}
 	r.commands = append(r.commands, spacePermissionCommand{name: name, args: recorded})
 	return nil, nil
+}
+
+func (r *spacePermissionRunner) Output(ctx context.Context, name string, args []string, input string) ([]byte, error) {
+	return r.Run(ctx, name, args, input)
 }

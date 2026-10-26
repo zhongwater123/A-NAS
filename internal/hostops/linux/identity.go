@@ -1,6 +1,7 @@
 package linux
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -191,7 +192,7 @@ type exitCoder interface{ ExitCode() int }
 // getent returns the colon-separated fields of one passwd or group entry.
 // Exit status 2 means the key does not exist.
 func (e *Executor) getent(ctx context.Context, database, key string) ([]string, bool, error) {
-	output, err := e.runner.Run(ctx, "getent", []string{database, key}, "")
+	output, err := e.runner.Output(ctx, "getent", []string{database, key}, "")
 	if err != nil {
 		var coded exitCoder
 		if errors.As(err, &coded) && coded.ExitCode() == 2 {
@@ -226,11 +227,14 @@ var smbPID = regexp.MustCompile(`^[1-9][0-9]{0,9}$`)
 // disabled user loses established sessions instead of keeping them until the
 // client disconnects.
 func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) error {
-	output, err := e.runner.Run(ctx, "smbstatus", []string{"--processes", "--user=" + username, "--json"}, "")
+	// Only standard output is JSON: under the unit's RestrictAddressFamilies,
+	// smbstatus also warns on standard error that it found no network
+	// interfaces.
+	output, err := e.runner.Output(ctx, "smbstatus", []string{"--processes", "--user=" + username, "--json"}, "")
 	if err != nil {
 		return commandError("list SMB sessions", err, output)
 	}
-	if len(strings.TrimSpace(string(output))) == 0 {
+	if len(bytes.TrimSpace(output)) == 0 {
 		return nil
 	}
 	var status struct {
@@ -241,7 +245,7 @@ func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) e
 			} `json:"server_id"`
 		} `json:"sessions"`
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(output)))
+	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.UseNumber()
 	if err := decoder.Decode(&status); err != nil {
 		return fmt.Errorf("decode SMB sessions: %w", err)
