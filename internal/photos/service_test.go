@@ -62,16 +62,51 @@ func TestImportPersistsOriginalAcrossRestart(t *testing.T) {
 // pngHeader returns a PNG signature and IHDR chunk declaring the given size;
 // nothing after the header is needed to read the image configuration.
 func pngHeader(width, height uint32) []byte {
+	return pngHeaderFormat(width, height, 8, 2)
+}
+
+func pngHeaderFormat(width, height uint32, depth, colorType byte) []byte {
 	ihdr := make([]byte, 13)
 	binary.BigEndian.PutUint32(ihdr[0:], width)
 	binary.BigEndian.PutUint32(ihdr[4:], height)
-	ihdr[8], ihdr[9] = 8, 2
+	ihdr[8], ihdr[9] = depth, colorType
 	var chunk bytes.Buffer
 	_ = binary.Write(&chunk, binary.BigEndian, uint32(len(ihdr)))
 	chunk.WriteString("IHDR")
 	chunk.Write(ihdr)
 	_ = binary.Write(&chunk, binary.BigEndian, crc32.ChecksumIEEE(append([]byte("IHDR"), ihdr...)))
 	return append([]byte("\x89PNG\r\n\x1a\n"), chunk.Bytes()...)
+}
+
+func TestImportRejectsPhotoDecodeBudgetBeforeAllocatingPixels(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		width, height    uint32
+		depth, colorType byte
+	}{
+		{"two GiB RGBA16", 16384, 16384, 16, 6},
+		{"512 MiB RGBA16", 8192, 8192, 16, 6},
+		{"large RGB8", 9000, 9000, 8, 2},
+		{"extremely wide", 1 << 24, 1, 8, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _, root := newService(t)
+			private, _ := libraries(t, service, alice)
+			_, err := service.Import(context.Background(), alice, photos.ImportRequest{
+				LibraryID: private.ID, Name: "large.png",
+				Content: bytes.NewReader(pngHeaderFormat(tc.width, tc.height, tc.depth, tc.colorType)),
+			})
+			if !errors.Is(err, photos.ErrTooLarge) {
+				t.Fatalf("Import() error = %v, want ErrTooLarge from the header alone", err)
+			}
+			if entries, _ := os.ReadDir(filepath.Join(root, "staging")); len(entries) != 0 {
+				t.Fatalf("staging left behind: %v", entries)
+			}
+			if files := objectFiles(t, root); len(files) != 0 {
+				t.Fatalf("objects left behind: %v", files)
+			}
+		})
+	}
 }
 
 func TestImportRejectsUnsupportedOrUnsafeContent(t *testing.T) {

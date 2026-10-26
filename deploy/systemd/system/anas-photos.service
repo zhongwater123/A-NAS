@@ -14,6 +14,9 @@ ExecStart=/opt/a-nas/current/anas-api photo-service
 Environment=ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos
 Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock
 Environment=ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock
+# Collect decoded rasters before reaching MemoryMax; leave headroom for
+# SQLite, mapped files and other memory outside the Go heap's soft budget.
+Environment=GOMEMLIMIT=1GiB
 # Only the Product Service, a member of the a-nas-photos group, reaches the
 # API socket.
 RuntimeDirectory=a-nas-photos

@@ -9106,6 +9106,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
         };
     };
     changePhotoLibrary: {
@@ -9888,6 +9889,7 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -10024,6 +10026,7 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };

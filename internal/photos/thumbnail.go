@@ -2,6 +2,7 @@ package photos
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"io"
@@ -17,18 +18,18 @@ const (
 
 // renderThumbnail scales an original to fit thumbnailEdge, turns it upright
 // according to its EXIF orientation and encodes a JPEG on a white background.
-func renderThumbnail(r io.Reader, orientation int) ([]byte, int, int, error) {
-	return renderUpright(r, orientation, thumbnailEdge, thumbnailQuality)
+func renderThumbnail(r io.ReadSeeker, orientation int) ([]byte, int, int, error) {
+	return renderUpright(context.Background(), r, orientation, thumbnailEdge, thumbnailQuality)
 }
 
-// renderUpright decodes an original and renders it with uprightJPEG. The
-// original was already bounded by maxImagePixels at import.
-func renderUpright(r io.Reader, orientation, edge, quality int) ([]byte, int, int, error) {
-	src, err := imaging.Decode(r)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	return uprightJPEG(src, orientation, edge, quality)
+// renderUpright rechecks the original's memory budget, then holds the shared
+// decode slot until its pixels have been resized and encoded as a JPEG.
+func renderUpright(ctx context.Context, r io.ReadSeeker, orientation, edge, quality int) (data []byte, width, height int, err error) {
+	err = withDecodedImage(ctx, r, func(src image.Image) error {
+		data, width, height, err = uprightJPEG(src, orientation, edge, quality)
+		return err
+	})
+	return
 }
 
 // uprightJPEG scales an image to fit edge, turns it upright and encodes a

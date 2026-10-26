@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-10-26：相册进程内解码超过服务内存上限](2026-10-26-photo-decode-memory-budget.md)（fixed，#187）
 - [2026-10-26：旧目录响应覆盖当前文件列表，重命名变成移动](2026-10-26-file-listing-navigation-race.md)（fixed）
 - [2026-10-26：未识别块设备阻断整次宿主机观测](2026-10-26-unidentified-device-blocks-host-state.md)（fixed locally，#183）
 - [2026-10-06：本地 Kiosk 可进入通用 Chromium 界面](2026-10-06-kiosk-browser-confinement.md)（open, deferred for developer baseline）
