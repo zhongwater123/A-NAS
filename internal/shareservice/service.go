@@ -9,12 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
-	"github.com/zhongwater123/A-NAS/internal/sharefiles"
-	"github.com/zhongwater123/A-NAS/internal/shares"
-	"github.com/zhongwater123/A-NAS/internal/sharesapi"
-	"golang.org/x/sys/unix"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +17,15 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/sharefiles"
+	"github.com/zhongwater123/A-NAS/internal/shares"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
 type SessionResolver interface {
@@ -68,16 +71,16 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handl
 		token := r.Header.Get(sharesapi.SessionHeader)
 		user, err := sessions.ResolveSessionUser(r.Context(), token)
 		if errors.Is(err, accounts.ErrSessionNotFound) || err == nil && user.UserID == "" {
-			sharesapi.WriteError(w, 401, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, 401, "authentication_required", "authentication is required")
 			return
 		}
 		if err != nil {
 			logger.WarnContext(r.Context(), "share session lookup failed", "error", err)
-			sharesapi.WriteError(w, 503, "shares_unavailable", "session lookup unavailable")
+			httpjson.WriteError(w, 503, "shares_unavailable", "session lookup unavailable")
 			return
 		}
 		if user.MustChangePassword {
-			sharesapi.WriteError(w, 403, "password_change_required", "choose a new password before continuing")
+			httpjson.WriteError(w, 403, "password_change_required", "choose a new password before continuing")
 			return
 		}
 		ctx := accounts.WithSessionToken(r.Context(), token)

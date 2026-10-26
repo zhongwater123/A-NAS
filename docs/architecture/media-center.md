@@ -62,7 +62,7 @@ anas-api（a-nas）
 
 合计上限取单张上限，是因为内存随像素数线性增长，最坏的情况由格式决定。在 4900 万像素的图片上实测，解码、缩放与编码共分配：基线 JPEG（4:2:0）2.0 字节/像素，8 位 PNG 4.5，16 位 PNG 8.5。渐进式 JPEG 解码时还要为每个全分辨率分量保留 4 字节/像素的 DCT 系数（`image/jpeg` 的 `progCoeffs`），构造的 4:4:4 CMYK 渐进式图片因此约 20 字节/像素。所以无论多少请求同时到达，正在解码的海报普通情况下约 100 MB（JPEG）到 425 MB（16 位 PNG），构造的最坏情况约 1 GB，约为 8 GB 设备内存的八分之一；此前没有合计上限，每个并发请求都可能占这么多。Go 的垃圾回收在下一轮之前还留着已放开的缓冲，进程常驻内存可能短暂高于这个数。
 
-不按格式估算字节数：`image.DecodeConfig` 给出的颜色模型能区分 PNG 的位深，却看不出 JPEG 是否渐进式与色度采样，为每种解码器维护估算表也不比按像素计更可靠。同一进程里的其他解码另有自己的上限，合起来仍有界：音乐封面用同样的单张上限，只在扫描中解码，而音乐扫描在全进程逐个进行（[`music.go`](../../internal/music/music.go) 的 `work`）；上传的头像与壁纸不超过 2500 万像素，经 `pictureGate` 一次只解码一张（[`profile.go`](../../internal/httpapi/profile.go)）。
+不按格式估算字节数：`image.DecodeConfig` 给出的颜色模型能区分 PNG 的位深，却看不出 JPEG 是否渐进式与色度采样，为每种解码器维护估算表也不比按像素计更可靠。同一进程里的其他解码另有自己的上限，合起来仍有界：音乐封面用同样的单张上限，只在扫描中解码，而音乐扫描在全进程逐个进行（[`music.go`](../../internal/music/music.go) 的 `work`）；上传的头像与壁纸不超过 2500 万像素，经产品服务共用的一个信号量一次只解码一张（[`accountsapi.go`](../../internal/accountsapi/accountsapi.go)、[`personalizationapi.go`](../../internal/personalizationapi/personalizationapi.go)）。
 
 ## 播放
 

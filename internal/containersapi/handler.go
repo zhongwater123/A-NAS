@@ -4,8 +4,6 @@
 package containersapi
 
 import (
-	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	"github.com/zhongwater123/A-NAS/internal/containers/agent"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 )
 
@@ -60,13 +59,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, snapshotResponse{DataSource: h.dataSource, SnapshotDocument: agent.SnapshotFromDomain(snapshot)})
+		httpjson.Write(w, http.StatusOK, snapshotResponse{DataSource: h.dataSource, SnapshotDocument: agent.SnapshotFromDomain(snapshot)})
 		return
 	}
 
 	id, operation, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, PathPrefix+"/"), "/")
 	if !ok || strings.Contains(operation, "/") || (operation != "actions" && operation != "logs") {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	if operation == "logs" {
@@ -77,7 +76,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if value := r.URL.Query().Get("tail"); value != "" {
 			parsed, err := strconv.Atoi(value)
 			if err != nil || parsed < 1 || parsed > containers.MaxLogLines {
-				writeError(w, http.StatusBadRequest, "invalid_request", "tail must be between 1 and 500")
+				httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "tail must be between 1 and 500")
 				return
 			}
 			tail = parsed
@@ -87,7 +86,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, agent.LogsFromDomain(lines))
+		httpjson.Write(w, http.StatusOK, agent.LogsFromDomain(lines))
 		return
 	}
 
@@ -95,7 +94,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := localorigin.CheckWrite(r); err != nil {
-		writeError(w, http.StatusForbidden, "forbidden", "container actions must come from the local desktop")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "container actions must come from the local desktop")
 		return
 	}
 	if !h.enabled(w) {
@@ -104,10 +103,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action containers.Action `json:"action"`
 	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1024))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body); err != nil || !body.Action.Valid() {
-		writeError(w, http.StatusBadRequest, "invalid_request", "action must be start, stop or restart")
+	if err := httpjson.Decode(w, r, 1024, &body); err != nil {
+		httpjson.WriteDecodeError(w, err, "invalid_request", "action must be start, stop or restart")
+		return
+	}
+	if !body.Action.Valid() {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "action must be start, stop or restart")
 		return
 	}
 	// Stop and restart wait up to the engine's grace period, which can exceed
@@ -125,7 +126,7 @@ func (h *handler) enabled(w http.ResponseWriter) bool {
 	if h.manager != nil {
 		return true
 	}
-	writeError(w, http.StatusServiceUnavailable, "containers_disabled", "container management is disabled")
+	httpjson.WriteError(w, http.StatusServiceUnavailable, "containers_disabled", "container management is disabled")
 	return false
 }
 
@@ -141,7 +142,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if status >= 500 {
 		h.logger.ErrorContext(r.Context(), "container request failed", "path", r.URL.Path, "error", err)
 	}
-	writeError(w, status, code, messages[code])
+	httpjson.WriteError(w, status, code, messages[code])
 }
 
 type snapshotResponse struct {
@@ -154,27 +155,6 @@ func allow(w http.ResponseWriter, r *http.Request, method string) bool {
 		return true
 	}
 	w.Header().Set("Allow", method)
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	return false
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type errorResponse struct {
-	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
-	}
 }

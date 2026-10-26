@@ -11,8 +11,10 @@ import (
 
 type InstallRequest struct {
 	Digest string `json:"digest,omitempty"`
-	UID    int    `json:"uid,omitempty"`
-	GID    int    `json:"gid,omitempty"`
+	// UID and GID are what agents before issue #176 run the app as. Newer
+	// agents look the app's account up themselves and ignore them.
+	UID int `json:"uid,omitempty"`
+	GID int `json:"gid,omitempty"`
 }
 
 type AppsDocument struct {

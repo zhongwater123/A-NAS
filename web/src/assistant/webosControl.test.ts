@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { domToCanvas } from "modern-screenshot";
 
-import { request } from "../api";
+import { apiFetch } from "../api";
 import { ControlError, type Danger, type Screenshot, WebosController } from "./webosControl";
+import { stubAPI } from "../test/api";
 
 vi.mock("modern-screenshot", () => ({ domToCanvas: vi.fn() }));
 
@@ -70,15 +71,14 @@ let uninstall: () => void = () => undefined;
 // A button whose click sends one product API write, as the apps do.
 function writes(id: string, method: string, path: string) {
   document.getElementById(id)!.addEventListener("click", () => {
-    void request(path, { method }, true).catch(() => undefined);
+    void apiFetch(path, { method }).catch(() => undefined);
   });
 }
 
 beforeEach(() => {
   desktop();
   sent = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       sent.push(`${init?.method ?? "GET"} ${String(input)}`);
       return new Response(null, { status: 204 });
@@ -157,8 +157,8 @@ describe("WebosController", () => {
   it("sends the step's writes once the member allows it, asking once for all of them", async () => {
     const { control, asked } = controller(true);
     document.getElementById("share")!.addEventListener("click", () => {
-      void request("/api/v1/shares", { method: "POST" }, true);
-      void request("/api/v1/shares/x/messages", { method: "POST" }, true);
+      void apiFetch("/api/v1/shares", { method: "POST" });
+      void apiFetch("/api/v1/shares/x/messages", { method: "POST" });
     });
     await control.run("browser_click", { ref: refOf(await look(control), "分享") });
     expect(asked).toEqual([{ what: "点击“分享”", where: "文件管理", why: "这一步会把内容分享给其他成员" }]);
@@ -180,7 +180,7 @@ describe("WebosController", () => {
     const { control, asked } = controller(false);
     await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
     vi.setSystemTime(Date.now() + 16_000);
-    await request("/api/v1/files/f1", { method: "DELETE" }, true);
+    await apiFetch("/api/v1/files/f1", { method: "DELETE" });
     expect(asked).toEqual([]);
     expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
   });
@@ -190,7 +190,7 @@ describe("WebosController", () => {
     const form = document.getElementById("rename") as HTMLFormElement;
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void request("/api/v1/files/f1", { method: "PATCH" }, true).catch(() => undefined);
+      void apiFetch("/api/v1/files/f1", { method: "PATCH" }).catch(() => undefined);
     });
     await control.run("browser_type", { ref: refOf(await look(control), "新名称"), text: "公开.md" });
     await expect(control.run("browser_press", { key: "Enter" })).rejects.toThrow("成员没有允许");

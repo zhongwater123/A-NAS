@@ -6,6 +6,7 @@ import { scheduledPrompt } from "./AssistantPanel";
 import type { AssistantTask } from "./assistantApi";
 import { TaskToasts, plainText } from "./TaskToasts";
 import { TasksView } from "./TasksView";
+import { stubAPI } from "../test/api";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -46,8 +47,7 @@ const photos: AssistantTask = {
 describe("TasksView", () => {
   it("shows each task's schedule and last run, and opens a run as a conversation", async () => {
     const calls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         calls.push(`${init?.method ?? "GET"} ${url}`);
@@ -91,8 +91,7 @@ describe("TasksView", () => {
   });
 
   it("marks a task whose result the member has not read", async () => {
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/assistant/tasks")) return json({ tasks: [daily, photos] });
@@ -120,8 +119,7 @@ describe("TasksView", () => {
 
   it("deletes a task only once the member confirms, runs included", async () => {
     const calls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         calls.push(`${init?.method ?? "GET"} ${url}`);
@@ -141,9 +139,10 @@ describe("TasksView", () => {
   });
 
   it("suggests tasks to ask for when there are none", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => json({ tasks: [] })),
+    stubAPI(
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith("/api/v1/notifications") ? json({ items: [] }) : json({ tasks: [] }),
+      ),
     );
     const onPlan = vi.fn();
     const user = userEvent.setup();
@@ -157,8 +156,7 @@ describe("TasksView", () => {
 describe("TaskToasts", () => {
   it("tells of finished runs only, and reading one acknowledges it", async () => {
     const calls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         calls.push(`${init?.method ?? "GET"} ${url}`);
@@ -207,7 +205,7 @@ describe("TaskToasts", () => {
 
   it("asks nothing when the member has no assistant", () => {
     const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
+    stubAPI(fetch);
     render(<TaskToasts enabled={false} onOpen={() => undefined} />);
     expect(fetch).not.toHaveBeenCalled();
   });

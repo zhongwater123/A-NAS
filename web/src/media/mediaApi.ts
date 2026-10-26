@@ -1,297 +1,140 @@
-import { request } from "../api";
+import { call, client } from "../api";
+import type {
+  MediaFolderListing,
+  MediaLibrary,
+  MediaLibraryInput,
+  MediaPlayback,
+  MediaTitle,
+  MediaVideoDetail,
+  operations,
+} from "../api.generated";
 
-export type LibraryKind = "movies" | "shows" | "mixed" | "other";
-export type TitleType = "movie" | "show" | "episode" | "other";
-export type Category = "all" | "movie" | "show" | "other";
-export type SortOrder = "added" | "name" | "year" | "rating";
-export type Quality = "original" | "1080p" | "720p" | "480p";
+export type {
+  MediaLibrary,
+  MediaArtwork as Artwork,
+  MediaCollection as Collection,
+  MediaCollectionDetail as CollectionDetail,
+  MediaCollectionRef as CollectionRef,
+  MediaEpisode as Episode,
+  MediaFolderListing as FolderListing,
+  MediaFolderRoot as FolderRoot,
+  MediaHome as Home,
+  MediaPlayback as Playback,
+  MediaProgress as Progress,
+  MediaShowDetail as ShowDetail,
+  MediaTitle as Title,
+  MediaTitlePage as TitlePage,
+  MediaTitleResults as TitleResults,
+  MediaVideoDetail as VideoDetail,
+} from "../api.generated";
+export type LibraryInput = MediaLibraryInput;
+export type LibraryKind = MediaLibrary["kind"];
+export type LibraryFolder = MediaLibrary["folders"][number];
+export type TitleType = MediaTitle["type"];
+export type TitleQuery = NonNullable<operations["listMediaTitles"]["parameters"]["query"]>;
+export type Category = NonNullable<TitleQuery["category"]>;
+export type SortOrder = NonNullable<TitleQuery["sort"]>;
+export type Quality = MediaPlayback["quality"];
+export type AudioTrack = MediaVideoDetail["audio"][number];
+export type SubtitleTrack = MediaVideoDetail["subtitles"][number];
+export type Folder = MediaFolderListing["folders"][number];
+export type ArtworkKind = operations["getMediaArtwork"]["parameters"]["path"]["kind"];
 
-export interface LibraryFolder {
-  entryId: string;
-  name: string;
-  path: string;
-  missing?: boolean;
-}
-export interface MediaLibrary {
-  id: string;
-  name: string;
-  kind: LibraryKind;
-  spaceId: string;
-  spaceKind: "private" | "shared";
-  ownerUserId?: string;
-  createdBy: string;
-  createdAt: string;
-  folders: LibraryFolder[];
-  counts: { movies: number; shows: number; episodes: number; others: number; sizeBytes: number };
-  scan: { state: "idle" | "scanning" | "processing"; pending: number; scannedAt?: string; error?: string };
-  canManage: boolean;
-  covers: string[];
-}
-export interface LibraryInput {
-  name: string;
-  kind?: LibraryKind;
-  spaceId?: string;
-  folderIds?: string[];
-}
-
-export interface Artwork {
-  poster: boolean;
-  backdrop: boolean;
-  thumb: boolean;
-  version?: string;
-}
-export interface Progress {
-  position: number;
-  duration: number;
-  watched: boolean;
-  playedAt?: string;
-}
-export interface Title {
-  id: string;
-  type: TitleType;
-  libraryId: string;
-  title: string;
-  originalTitle?: string;
-  year?: number;
-  genres?: string[];
-  rating?: number;
-  addedAt: string;
-  duration?: number;
-  resolution?: "4K" | "1080p" | "720p" | "SD";
-  hdr?: string;
-  artwork: Artwork;
-  favorite: boolean;
-  progress?: Progress;
-  seasons?: number;
-  episodes?: number;
-  watchedEpisodes?: number;
-  showId?: string;
-  showTitle?: string;
-  season?: number;
-  episode?: number;
-}
-export interface TitlePage {
-  items: Title[];
-  total: number;
-}
-export interface TitleResults extends TitlePage {
-  genres: string[];
-}
-export interface Home {
-  featured: Title[];
-  continue: Title[];
-  recent: Title[];
-  movies: Title[];
-  shows: Title[];
-  others: Title[];
-  favorites: Title[];
-  libraries: number;
-  scanning: boolean;
-}
-export interface CollectionRef {
-  id: string;
-  name: string;
-}
-export interface Episode {
-  id: string;
-  season: number;
-  episode: number;
-  title: string;
-  plot?: string;
-  duration?: number;
-  addedAt: string;
-  artwork: Artwork;
-  progress?: Progress;
-  file?: string;
-}
-// folder names the folder the show has to itself; namedByNfo tells that tvshow.nfo, not file names, gives the title.
-export interface ShowDetail extends Title {
-  plot?: string;
-  next?: Episode;
-  seasonList: { number: number; episodes: Episode[] }[];
-  collections: CollectionRef[];
-  folder?: string;
-  namedByNfo?: boolean;
-}
-export interface AudioTrack {
-  index: number;
-  label: string;
-  language?: string;
-  codec: string;
-  channels?: number;
-  default?: boolean;
-}
-export interface SubtitleTrack {
-  id: string;
-  label: string;
-  language?: string;
-  external: boolean;
-  default?: boolean;
-}
-export interface VideoDetail extends Title {
-  plot?: string;
-  episodeTitle?: string;
-  file: { name: string; folder: string; sizeBytes: number; modifiedAt: string };
-  media?: {
-    container: string;
-    videoCodec?: string;
-    audioCodec?: string;
-    width?: number;
-    height?: number;
-    frameRate?: number;
-    bitrate?: number;
-  };
-  probeState: "pending" | "ready" | "failed";
-  audio: AudioTrack[];
-  subtitles: SubtitleTrack[];
-  previousId?: string;
-  nextId?: string;
-  collections: CollectionRef[];
-  collection?: string;
-  // namedByNfo tells that an NFO document, not the file name, gives the title.
-  namedByNfo?: boolean;
-}
-// mime names a converted stream's codecs, so the player can buffer it itself.
-export interface Playback {
-  mode: "direct" | "remux" | "transcode";
-  url: string;
-  duration?: number;
-  reason?: string;
-  audio: number;
-  quality: Quality;
-  qualities: Quality[];
-  mime?: string;
-}
-export interface Collection {
-  id: string;
-  name: string;
-  automatic: boolean;
-  count: number;
-  updatedAt: string;
-  covers: string[];
-}
-export interface CollectionDetail extends Collection {
-  items: Title[];
-}
-export interface FolderRoot {
-  libraryId: string;
-  libraryName: string;
-  entryId: string;
-  name: string;
-  path: string;
-  videos: number;
-  cover?: string;
-  missing?: boolean;
-}
-export interface Folder {
-  name: string;
-  path: string;
-  videos: number;
-  cover?: string;
-}
-export interface FolderListing {
-  root: FolderRoot;
-  path: string;
-  folders: Folder[];
-  videos: Title[];
-}
-
-const base = "/api/v1/media";
 const id = encodeURIComponent;
-const body = (method: string, value: unknown): RequestInit => ({
-  method,
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(value),
-});
+const library = (libraryId: string) => ({ params: { path: { libraryId } } });
+const video = (videoId: string) => ({ params: { path: { videoId } } });
+const title = (titleId: string) => ({ params: { path: { titleId } } });
+const collection = (collectionId: string) => ({ params: { path: { collectionId } } });
 
-export const listLibraries = () => request<{ items: MediaLibrary[]; processing: boolean }>(`${base}/libraries`);
-export const createLibrary = (input: LibraryInput) =>
-  request<MediaLibrary>(`${base}/libraries`, body("POST", input), true);
+export const listLibraries = () => call(client.GET("/api/v1/media/libraries"));
+export const createLibrary = (input: LibraryInput) => call(client.POST("/api/v1/media/libraries", { body: input }));
 export const updateLibrary = (libraryId: string, input: LibraryInput) =>
-  request<MediaLibrary>(`${base}/libraries/${id(libraryId)}`, body("PATCH", input), true);
+  call(client.PATCH("/api/v1/media/libraries/{libraryId}", { ...library(libraryId), body: input }));
 export const deleteLibrary = (libraryId: string) =>
-  request<void>(`${base}/libraries/${id(libraryId)}`, { method: "DELETE" }, true);
+  call(client.DELETE("/api/v1/media/libraries/{libraryId}", library(libraryId)));
 // scanLibrary starts a scan and returns the library as it reads while scanning.
 export const scanLibrary = (libraryId: string) =>
-  request<MediaLibrary>(`${base}/libraries/${id(libraryId)}/scan`, { method: "POST" }, true);
+  call(client.POST("/api/v1/media/libraries/{libraryId}/scan", library(libraryId)));
 
-export const getHome = () => request<Home>(`${base}/home`);
-export interface TitleQuery {
-  category?: Category;
-  library?: string;
-  genre?: string;
-  sort?: SortOrder;
-  q?: string;
-  offset?: number;
-  limit?: number;
-}
+export const getHome = () => call(client.GET("/api/v1/media/home"));
+// listTitles leaves out the empty parts of the query.
 export function listTitles(query: TitleQuery) {
-  const parameters = new URLSearchParams();
-  for (const [key, value] of Object.entries(query))
-    if (value !== undefined && value !== "") parameters.set(key, String(value));
-  return request<TitleResults>(`${base}/titles?${parameters}`);
+  const given = Object.fromEntries(Object.entries(query).filter(([, value]) => value !== "")) as TitleQuery;
+  return call(client.GET("/api/v1/media/titles", { params: { query: given } }));
 }
-export const getShow = (showId: string) => request<ShowDetail>(`${base}/shows/${id(showId)}`);
-export const getVideo = (videoId: string) => request<VideoDetail>(`${base}/videos/${id(videoId)}`);
+export const getShow = (showId: string) =>
+  call(client.GET("/api/v1/media/shows/{showId}", { params: { path: { showId } } }));
+export const getVideo = (videoId: string) => call(client.GET("/api/v1/media/videos/{videoId}", video(videoId)));
 // renameVideoFile renames the 片源, the video's file, with the subtitles, NFO
 // and artwork named after it.
 export const renameVideoFile = (videoId: string, fileName: string) =>
-  request<VideoDetail>(`${base}/videos/${id(videoId)}`, body("PATCH", { fileName }), true);
+  call(client.PATCH("/api/v1/media/videos/{videoId}", { ...video(videoId), body: { fileName } }));
 // renameShow renames a show's own folder and the episode files carrying its title.
 export const renameShow = (showId: string, name: string) =>
-  request<ShowDetail>(`${base}/shows/${id(showId)}`, body("PATCH", { name }), true);
-export function getPlayback(videoId: string, options: { caps: string; audio?: number; quality?: Quality }) {
-  const parameters = new URLSearchParams({
-    caps: options.caps,
-    audio: String(options.audio ?? -1),
-    quality: options.quality ?? "original",
-  });
-  return request<Playback>(`${base}/videos/${id(videoId)}/playback?${parameters}`);
-}
+  call(client.PATCH("/api/v1/media/shows/{showId}", { params: { path: { showId } }, body: { name } }));
+// A playback's mime names a converted stream's codecs, so the player can buffer it itself.
+export const getPlayback = (videoId: string, options: { caps: string; audio?: number; quality?: Quality }) =>
+  call(
+    client.GET("/api/v1/media/videos/{videoId}/playback", {
+      params: {
+        path: { videoId },
+        query: { caps: options.caps, audio: options.audio ?? -1, quality: options.quality ?? "original" },
+      },
+    }),
+  );
 // streamURL asks for a converted stream directly, for when the original
 // file turned out not to play.
 export function streamURL(videoId: string, mode: "remux" | "transcode", audio: number, quality: Quality, caps: string) {
-  return `${base}/videos/${id(videoId)}/stream?${new URLSearchParams({ mode, audio: String(audio), quality, caps })}`;
+  return `/api/v1/media/videos/${id(videoId)}/stream?${new URLSearchParams({ mode, audio: String(audio), quality, caps })}`;
 }
 // Progress is saved while the page may be closing, so it keeps the request alive.
 export const saveProgress = (videoId: string, position: number, duration: number) =>
-  request<Progress>(
-    `${base}/videos/${id(videoId)}/progress`,
-    { ...body("PUT", { position: Math.max(0, position), duration: Math.max(0, duration) }), keepalive: true },
-    true,
+  call(
+    client.PUT("/api/v1/media/videos/{videoId}/progress", {
+      ...video(videoId),
+      body: { position: Math.max(0, position), duration: Math.max(0, duration) },
+      keepalive: true,
+    }),
   );
 export const setWatched = (titleId: string, watched: boolean) =>
-  request<void>(`${base}/titles/${id(titleId)}/watched`, body("PUT", { watched }), true);
+  call(client.PUT("/api/v1/media/titles/{titleId}/watched", { ...title(titleId), body: { watched } }));
 export const setFavorite = (titleId: string, favorite: boolean) =>
-  request<void>(`${base}/favorites/${id(titleId)}`, { method: favorite ? "PUT" : "DELETE" }, true);
-export const listFavorites = () => request<TitlePage>(`${base}/favorites`);
+  call(
+    favorite
+      ? client.PUT("/api/v1/media/favorites/{titleId}", title(titleId))
+      : client.DELETE("/api/v1/media/favorites/{titleId}", title(titleId)),
+  );
+export const listFavorites = () => call(client.GET("/api/v1/media/favorites"));
 export const listHistory = (offset = 0, limit = 200) =>
-  request<TitlePage>(`${base}/history?offset=${offset}&limit=${limit}`);
+  call(client.GET("/api/v1/media/history", { params: { query: { offset, limit } } }));
 export const removeHistory = (videoId: string) =>
-  request<void>(`${base}/history/${id(videoId)}`, { method: "DELETE" }, true);
-export const clearHistory = () => request<void>(`${base}/history`, { method: "DELETE" }, true);
-export const listCollections = async () => (await request<{ items: Collection[] }>(`${base}/collections`)).items;
+  call(client.DELETE("/api/v1/media/history/{videoId}", video(videoId)));
+export const clearHistory = () => call(client.DELETE("/api/v1/media/history"));
+export const listCollections = async () => (await call(client.GET("/api/v1/media/collections"))).items;
 export const createCollection = (name: string, items: string[] = []) =>
-  request<Collection>(`${base}/collections`, body("POST", { name, items }), true);
+  call(client.POST("/api/v1/media/collections", { body: { name, items } }));
 export const getCollection = (collectionId: string) =>
-  request<CollectionDetail>(`${base}/collections/${id(collectionId)}`);
+  call(client.GET("/api/v1/media/collections/{collectionId}", collection(collectionId)));
 export const renameCollection = (collectionId: string, name: string) =>
-  request<void>(`${base}/collections/${id(collectionId)}`, body("PATCH", { name }), true);
+  call(client.PATCH("/api/v1/media/collections/{collectionId}", { ...collection(collectionId), body: { name } }));
 export const deleteCollection = (collectionId: string) =>
-  request<void>(`${base}/collections/${id(collectionId)}`, { method: "DELETE" }, true);
+  call(client.DELETE("/api/v1/media/collections/{collectionId}", collection(collectionId)));
 export const addToCollection = (collectionId: string, items: string[]) =>
-  request<void>(`${base}/collections/${id(collectionId)}/items`, body("POST", { items }), true);
+  call(client.POST("/api/v1/media/collections/{collectionId}/items", { ...collection(collectionId), body: { items } }));
 export const removeFromCollection = (collectionId: string, titleId: string) =>
-  request<void>(`${base}/collections/${id(collectionId)}/items/${id(titleId)}`, { method: "DELETE" }, true);
-export const listFolderRoots = async () => (await request<{ items: FolderRoot[] }>(`${base}/folders`)).items;
+  call(
+    client.DELETE("/api/v1/media/collections/{collectionId}/items/{titleId}", {
+      params: { path: { collectionId, titleId } },
+    }),
+  );
+export const listFolderRoots = async () => (await call(client.GET("/api/v1/media/folders"))).items;
 export const getFolder = (entryId: string, path = "") =>
-  request<FolderListing>(`${base}/folders/${id(entryId)}?path=${id(path)}`);
+  call(client.GET("/api/v1/media/folders/{entryId}", { params: { path: { entryId }, query: { path } } }));
 
-export type ArtworkKind = "poster" | "backdrop" | "thumb";
 export const artworkURL = (titleId: string, kind: ArtworkKind, version = "") =>
-  `${base}/artwork/${id(titleId)}/${kind}${version ? `?v=${id(version)}` : ""}`;
+  `/api/v1/media/artwork/${id(titleId)}/${kind}${version ? `?v=${id(version)}` : ""}`;
 export const subtitleURL = (videoId: string, trackId: string) =>
-  `${base}/videos/${id(videoId)}/subtitles/${id(trackId)}`;
+  `/api/v1/media/videos/${id(videoId)}/subtitles/${id(trackId)}`;
 
 // browserCapabilities lists what this browser decodes beyond what every
 // browser plays, so the server can play more files without converting them.

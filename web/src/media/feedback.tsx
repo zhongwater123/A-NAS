@@ -137,12 +137,26 @@ export interface Toast {
 export function useToasts() {
   const [toasts, setToasts] = useState<Array<Toast & { id: number }>>([]);
   const next = useRef(0);
+  // Closing the media center clears the toasts' timers, which would
+  // otherwise update a component that is gone.
+  const timers = useRef(new Set<number>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach((timer) => window.clearTimeout(timer));
+  }, []);
   const dismiss = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
   const toast = useCallback(
     (value: Toast) => {
       const id = ++next.current;
       setToasts((current) => [...current.slice(-2), { ...value, id }]);
-      window.setTimeout(() => dismiss(id), value.action || value.tone === "error" ? 8000 : 3500);
+      const timer = window.setTimeout(
+        () => {
+          timers.current.delete(timer);
+          dismiss(id);
+        },
+        value.action || value.tone === "error" ? 8000 : 3500,
+      );
+      timers.current.add(timer);
     },
     [dismiss],
   );

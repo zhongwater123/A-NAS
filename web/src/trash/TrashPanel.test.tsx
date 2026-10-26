@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileEntry, Space, TrashItem } from "../api";
 import { expiryOf, groupItems, restoredName } from "./model";
 import { TrashPanel } from "./TrashPanel";
+import { stubAPI } from "../test/api";
 
 const personal: Space = {
   id: "space:personal",
@@ -81,8 +82,7 @@ const taken = () => json({ error: { code: "name_conflict", message: "a file with
 function serve(items: TrashItem[], restore?: (id: string, body: RestoreBody, attempt: number) => Response) {
   const calls: Call[] = [];
   let attempts = 0;
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -248,8 +248,7 @@ describe("TrashPanel", () => {
       });
     });
     const fetcher = globalThis.fetch;
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
         String(input) === "/api/v1/trash" ? json({ items: listed }) : fetcher(input, init),
       ),

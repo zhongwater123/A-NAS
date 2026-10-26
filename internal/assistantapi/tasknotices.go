@@ -34,7 +34,9 @@ const summaryRunes = 200
 // that finished since they last heard, including runs while they were away.
 // It runs beside the kept instance and ends with it; scheduled runs while
 // nobody is signed in are told at the next sign-in.
-func (h *handler) watchTasks(account string, k *keep) {
+func (h *Handler) watchTasks(account string, k *keep) {
+	ticker := time.NewTicker(taskWatchInterval)
+	defer ticker.Stop()
 	for {
 		h.keepsMu.Lock()
 		session := ""
@@ -51,16 +53,20 @@ func (h *handler) watchTasks(account string, k *keep) {
 		ctx, cancel := context.WithTimeout(accounts.WithSessionToken(h.ctx, session), requestTimeout)
 		err := h.noteTaskRuns(ctx, account, k.userID)
 		cancel()
-		if err != nil && !errors.Is(err, ErrNoAssistant) && !errors.Is(err, ErrSessionRejected) {
+		if err != nil && !errors.Is(err, ErrNoAssistant) && !errors.Is(err, ErrSessionRejected) && h.ctx.Err() == nil {
 			h.logger.Warn("assistant tasks not checked", "account", account, "error", err)
 		}
-		time.Sleep(taskWatchInterval)
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 
 // noteTaskRuns records a notice for each task whose latest run the member
 // has not heard of.
-func (h *handler) noteTaskRuns(ctx context.Context, account, userID string) error {
+func (h *Handler) noteTaskRuns(ctx context.Context, account, userID string) error {
 	var jobs []hermesJob
 	if err := h.restJSON(ctx, account, "/api/cron/jobs", &jobs); err != nil {
 		return err
@@ -98,7 +104,7 @@ func (h *handler) noteTaskRuns(ctx context.Context, account, userID string) erro
 // describeRun adds a run's conversation and the start of its answer, or of
 // its error. A run that answered only Hermes's silence marker had nothing to
 // report: it is quiet.
-func (h *handler) describeRun(ctx context.Context, account string, job hermesJob, run *accounts.AssistantTaskRun) error {
+func (h *Handler) describeRun(ctx context.Context, account string, job hermesJob, run *accounts.AssistantTaskRun) error {
 	if run.Status != "ok" && job.LastError != nil {
 		run.Summary = summarize(*job.LastError)
 	}
@@ -143,7 +149,7 @@ func (h *handler) describeRun(ctx context.Context, account string, job hermesJob
 }
 
 // restJSON gets path from the account's instance and decodes the reply.
-func (h *handler) restJSON(ctx context.Context, account, path string, into any) error {
+func (h *Handler) restJSON(ctx context.Context, account, path string, into any) error {
 	status, data, err := h.rest(ctx, account, http.MethodGet, path, nil)
 	if err != nil {
 		return err

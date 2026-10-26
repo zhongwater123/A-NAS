@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-10-22
+更新时间：2026-10-26
 
 ## 目的
 
@@ -16,12 +16,11 @@
 
 ## 步骤
 
-### 部署 #212–#215 与 #225 之后
-
-部署要求见[当前状态](../status/CURRENT.md#实验-nas-上运行什么)。
+### Host Agent、应用安装与媒体 Worker
 
 - Host Agent（#166）：核对 `CapBnd`、`systemd-cgls` 中文件 Worker 与终端 Shell 各自的 scope、裸机上 `/sys` 是否只读，以及加盘后 udev 重新探测是否仍正常；运行一周后查看 `MemoryPeak` 与 `TasksCurrent`，确认上限合适（[调查](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)）。
 - 应用安装（#169）：安装过程中重启容器代理，确认显示安装被中断且没有留下容器（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
+- 应用身份由容器代理自己解析（#249）：在应用中心打开一个已安装应用的安装计划，运行身份与 NAS 上 `id app-<id>` 的 UID、GID 一致。
 - 媒体 Worker（#168）：相册服务日志出现 `photo jobs recovered`，此前失败的 HEIC 照片得到缩略图（[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
 
 ### 文件管理、登录与账号

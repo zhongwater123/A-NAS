@@ -38,7 +38,7 @@ func TestSetCredentialCreatesIdentityInTheReservedRange(t *testing.T) {
 			t.Errorf("missing command %q; got:\n%s", want, strings.Join(host.commands, "\n"))
 		}
 	}
-	registry, err := os.ReadFile(filepath.Join(systemRoot, "var", "lib", "a-nas", "identity-registry.json"))
+	registry, err := os.ReadFile(filepath.Join(systemRoot, "var", "lib", "a-nas-host", "identity-registry.json"))
 	if err != nil {
 		t.Fatalf("read identity registry: %v", err)
 	}
@@ -267,4 +267,41 @@ func (h *fakeHost) getent(database, key string) ([]byte, error) {
 		}
 	}
 	return nil, exitStatus(2)
+}
+
+// An account removed outside A-NAS leaves its entry in the registry. When its
+// UID goes to a new identity, the entry is dropped, so the registry still
+// loads after a restart (it refuses one UID listed twice).
+func TestSyncIdentitiesDropsAnEntryWhoseUIDWentToANewAccount(t *testing.T) {
+	host := newFakeHost()
+	systemRoot := t.TempDir()
+	options := linux.Options{SystemRoot: systemRoot, MountPoint: filepath.Join(t.TempDir(), "data")}
+	executor := linux.NewExecutor(nil, host, options)
+	if err := executor.SyncIdentities(context.Background(), []accounts.Identity{
+		{Username: "gone", UID: 20105, Role: accounts.RoleMember, Enabled: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delete(host.users, "gone")
+	delete(host.groups, "gone")
+	if err := executor.SyncIdentities(context.Background(), []accounts.Identity{
+		{Username: "newer", UID: 20105, Role: accounts.RoleMember, Enabled: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := os.ReadFile(filepath.Join(systemRoot, "var", "lib", "a-nas-host", "identity-registry.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records map[string]json.RawMessage
+	if err := json.Unmarshal(registry, &records); err != nil || len(records) != 1 || records["newer"] == nil {
+		t.Fatalf("identity registry = %s (err %v), want only newer", registry, err)
+	}
+	// The restarted Host Agent loads it and synchronizes again.
+	restarted := linux.NewExecutor(nil, host, options)
+	if err := restarted.SyncIdentities(context.Background(), []accounts.Identity{
+		{Username: "newer", UID: 20105, Role: accounts.RoleMember, Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncIdentities() after a restart error = %v", err)
+	}
 }

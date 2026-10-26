@@ -41,7 +41,7 @@ func TestFileEventsCarryTheirSpaceAndMembersSeeOnlyTheirOwn(t *testing.T) {
 	t.Cleanup(func() { _ = catalog.Close() })
 	// Events a millisecond apart would be ordered by their random IDs.
 	now := time.Date(2026, time.October, 12, 8, 0, 0, 0, time.UTC)
-	service := files.NewService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
+	service := files.NewLocalService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true,
 		Now: func() time.Time { now = now.Add(time.Second); return now },
 	})

@@ -1,4 +1,4 @@
-package httpapi
+package filesapi
 
 import "testing"
 

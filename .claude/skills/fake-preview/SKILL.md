@@ -5,7 +5,7 @@ description: 在开发机上启动一套 Fake 模式的 A-NAS 预览栈：模拟
 
 # 启动 Fake 模式预览栈
 
-产品服务 `anas-api` 在没有 `ANAS_HOSTSTATE_MODE`（或设为 `fake`）时使用模拟的宿主机：两块确定性磁盘加一块空闲盘、模拟的存储执行、Fake 容器与应用目录（[`cmd/anas-api`](../../../cmd/anas-api/main.go)）。Web 桌面嵌入在同一个二进制中，所以一个进程就是一整套栈。
+产品服务 `anas-api` 在 `ANAS_HOSTSTATE_MODE=fake` 时使用模拟的宿主机：两块确定性磁盘加一块空闲盘、模拟的存储执行、Fake 容器与应用目录（[`cmd/anas-api/config.go`](../../../cmd/anas-api/config.go)）。这个变量没有默认值，不设置时服务拒绝启动。Web 桌面嵌入在同一个二进制中，所以一个进程就是一整套栈。
 
 ## 为什么每套栈用自己的主机名
 

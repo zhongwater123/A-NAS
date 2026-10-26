@@ -9,9 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
-
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
@@ -94,20 +91,12 @@ func storageAdmin(t *testing.T, executor storage.VolumeExecutor) *contractClient
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	storageService := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{})
 	t.Cleanup(storageService.Close)
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewWithSpareDisk(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		Storage: storageService,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	return f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 }
 

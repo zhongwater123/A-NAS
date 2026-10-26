@@ -318,7 +318,7 @@ func TestASignedInMemberHearsOfEachFinishedRunOnce(t *testing.T) {
 	serve.addJob(&fakeJob{id: "dddddddddddd", name: "还没运行过", state: "scheduled"})
 	notices := &heardRuns{}
 	h := New(Options{Connector: NewSocketConnector(serve.dir, serve.dir), SocketDir: serve.dir, Notices: notices,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*handler)
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	h.Keep(alice, "alice-session")
 	t.Cleanup(func() { h.Forget("alice-session") })
 

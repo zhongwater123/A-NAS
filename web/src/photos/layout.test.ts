@@ -50,8 +50,8 @@ describe("timelineEntries", () => {
     const now = new Date("2026-10-10T08:00:00Z");
     const entries = timelineEntries(
       [
-        { month: "2026-05", photos: 3 },
-        { month: "2025-12", photos: 40 },
+        { month: "2026-05", photos: 3, videos: 0 },
+        { month: "2025-12", photos: 40, videos: 0 },
       ],
       new Map([["2026-05", { assets: may }]]),
       [],
@@ -72,7 +72,7 @@ describe("timelineEntries", () => {
 
   it("puts uploads first and leaves out months that emptied", () => {
     const entries = timelineEntries(
-      [{ month: "2026-05", photos: 1 }],
+      [{ month: "2026-05", photos: 1, videos: 0 }],
       new Map([["2026-05", { assets: [] }]]),
       [{ key: "upload-1", name: "new.jpg", url: "blob:1", aspect: 1.5, progress: 0.5, state: "uploading" }],
       900,

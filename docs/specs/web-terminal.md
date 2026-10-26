@@ -67,7 +67,7 @@
 - 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环对端与 Host 校验（含经局域网入口以 IP 访问）、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）、会话失效后结束、会话库短暂出错不挂断而持续出错会挂断、读不出会话时暂不可用，以及 Shell 进入 scope 后才执行和 scope 建不成时照常启动；[进程组测试](../../internal/terminal/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
 - root：[终端身份测试](../../internal/hostops/linux/root_terminal_integration_test.go) 在特权容器中验证 Shell 的 UID、组、起始目录与 PTY 属主，且读取其他成员的文件被拒绝。
 - 契约：[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖桌面上没有终端图标、从设置打开、切换分区与最小化后保留同一 Shell、关闭设置后结束、退出后新建会话与未开启说明；[协议测试](../../web/src/terminal.test.ts) 覆盖地址、调整尺寸消息与退出码解析。
+- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖桌面上没有终端图标；[设置测试](../../web/src/SettingsPanel.test.tsx) 覆盖从设置打开、切换分区与最小化后保留同一 Shell、关闭设置后结束、退出后新建会话与未开启说明；[协议测试](../../web/src/terminal.test.ts) 覆盖地址、调整尺寸消息与退出码解析。
 - 2026-10-07 在 WSL2 中以 `ANAS_TERMINAL=enabled` 运行 `build/anas-api`，经浏览器从图标打开终端，验证命令输出、中文、窗口自适应、最小化后变量保留与退出提示。
 - 2026-10-13 在模拟模式下经无头 Chrome 打开“设置 → 终端”，验证已连接状态、命令与中文输出、最大化和窄窗口下的行列自适应、切到“日志”时终端隐藏且侧栏显示运行圆点、切回后仍是同一 Shell、退出后的提示，以及未开启时的说明页。
 

@@ -19,6 +19,12 @@ TimeoutStopSec=20s
 # Separate session directories preserve the photo and share socket group permissions.
 RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions
 RuntimeDirectoryMode=0750
+# The Host Agent's records (spaces, identities, viewing grants, app
+# identities, data-volume operations) live where only root can open them.
+# Releases before issue #176 kept them in /var/lib/a-nas, the Product
+# Service's StateDirectory; the Host Agent moves them from there at start.
+StateDirectory=a-nas-host
+StateDirectoryMode=0700
 UMask=0007
 NoNewPrivileges=true
 PrivateTmp=true
@@ -28,6 +34,8 @@ ProtectSystem=strict
 # The Host Agent is already the typed root trust boundary and writes systemd units.
 # /sys/devices: after adding a disk to the data volume, the Host Agent asks
 # udev to probe it again by writing its uevent file (ProtectKernelTunables).
+# /var/lib/a-nas: the Product Service's session database, which the File
+# Broker reads, and the records of older releases it moves out.
 ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba /sys/devices
 RestrictAddressFamilies=AF_UNIX
 # What the Host Agent and its commands use (issue #166): users' identities for

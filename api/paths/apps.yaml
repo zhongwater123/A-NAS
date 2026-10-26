@@ -1,0 +1,193 @@
+/api/v1/apps:
+  get:
+    operationId: listApps
+    summary: List App Center catalog apps with their install state
+    responses:
+      "200":
+        description: Every catalog app; installed apps report running and total containers, and the latest job.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/apps.yaml#/schemas/AppListResponse"
+      "503":
+        $ref: "../components/apps.yaml#/responses/AppsUnavailable"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/apps/{appId}/icon:
+  get:
+    operationId: getAppIcon
+    summary: Read an app icon from the catalog
+    parameters:
+      - $ref: "../components/apps.yaml#/parameters/AppId"
+    responses:
+      "200":
+        description: PNG or SVG icon, served with a sandboxing Content-Security-Policy.
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/svg+xml:
+            schema:
+              type: string
+      "404":
+        $ref: "../components/apps.yaml#/responses/AppNotFound"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "503":
+        $ref: "../components/apps.yaml#/responses/AppsUnavailable"
+/api/v1/app-shortcuts:
+  get:
+    operationId: listAppShortcuts
+    summary: List the installed apps every signed-in user opens from the desktop
+    description: >-
+      Installed App Center apps that have a web interface, for every signed-in user. Each opens in a new window
+      at <scheme>://<the host the desktop was opened from>:<webPort><path>. Installing, uninstalling and
+      available apps have none; the list is empty while the App Center is disabled.
+    responses:
+      "200":
+        description: Desktop shortcuts, in catalog order.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/apps.yaml#/schemas/AppShortcutListResponse"
+      "401":
+        $ref: "../components/common.yaml#/responses/ProductError"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "503":
+        $ref: "../components/apps.yaml#/responses/AppsUnavailable"
+/api/v1/app-shortcuts/{appId}/icon:
+  get:
+    operationId: getAppShortcutIcon
+    summary: Read an app icon for the desktop
+    parameters:
+      - $ref: "../components/apps.yaml#/parameters/AppId"
+    responses:
+      "200":
+        description: PNG or SVG icon, served with a sandboxing Content-Security-Policy.
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/svg+xml:
+            schema:
+              type: string
+      "401":
+        $ref: "../components/common.yaml#/responses/ProductError"
+      "404":
+        $ref: "../components/apps.yaml#/responses/AppNotFound"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/apps/{appId}/plan:
+  get:
+    operationId: getAppInstallPlan
+    summary: Render the install plan the owner must confirm
+    description: >-
+      Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and
+      host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own
+      folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the
+      install policy answer 422.
+    parameters:
+      - $ref: "../components/apps.yaml#/parameters/AppId"
+    responses:
+      "200":
+        description: The install plan.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/apps.yaml#/schemas/AppPlan"
+      "404":
+        $ref: "../components/apps.yaml#/responses/AppNotFound"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "422":
+        $ref: "../components/apps.yaml#/responses/AppConflict"
+      "503":
+        $ref: "../components/apps.yaml#/responses/AppsUnavailable"
+/api/v1/apps/{appId}/install:
+  post:
+    operationId: installApp
+    summary: Start installing an app from a confirmed plan
+    description: >-
+      Administrators only, with the session CSRF token. The plan is re-rendered for the app identity and
+      refused with plan_changed unless the digest matches; the Host Agent then creates the mounted folders
+      (Docker never creates host folders) and grants Shared access if the plan mounts from it. Refused with 423
+      volume_unavailable while the data volume is offline. Only one install or uninstall runs at a time.
+      Requests must also name this device by localhost or IP address in the Host header, use a JSON body and,
+      when an Origin is sent, come from the same origin.
+    parameters:
+      - $ref: "../components/apps.yaml#/parameters/AppId"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [digest]
+            properties:
+              digest:
+                type: string
+                pattern: "^[a-f0-9]{64}$"
+    responses:
+      "202":
+        description: The install job started.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/apps.yaml#/schemas/AppJob"
+      "400":
+        $ref: "../components/apps.yaml#/responses/AppRequestInvalid"
+      "403":
+        $ref: "../components/apps.yaml#/responses/AppRequestInvalid"
+      "404":
+        $ref: "../components/apps.yaml#/responses/AppNotFound"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "409":
+        $ref: "../components/apps.yaml#/responses/AppConflict"
+      "422":
+        $ref: "../components/apps.yaml#/responses/AppConflict"
+      "423":
+        $ref: "../components/common.yaml#/responses/ProductError"
+      "502":
+        $ref: "../components/apps.yaml#/responses/AppConflict"
+      "503":
+        $ref: "../components/apps.yaml#/responses/AppsUnavailable"
+/api/v1/apps/{appId}/uninstall:
+  post:
+    operationId: uninstallApp
+    summary: Start removing an installed app while keeping its data
+    description: Administrators only, with the session CSRF token. The app identity's Shared access is withdrawn at once.
+    parameters:
+      - $ref: "../components/apps.yaml#/parameters/AppId"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+    responses:
+      "202":
+        description: The uninstall job started; containers and the project network are removed, app data is kept.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/apps.yaml#/schemas/AppJob"
+      "400":
+        $ref: "../components/apps.yaml#/responses/AppRequestInvalid"
+      "403":
+        $ref: "../components/apps.yaml#/responses/AppRequestInvalid"
+      "404":
+        $ref: "../components/apps.yaml#/responses/AppNotFound"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "409":
+        $ref: "../components/apps.yaml#/responses/AppConflict"
+      "502":
+        $ref: "../components/apps.yaml#/responses/AppConflict"
+      "503":
+        $ref: "../components/apps.yaml#/responses/AppsUnavailable"

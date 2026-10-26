@@ -57,7 +57,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 身份与一致性
 
 - 磁盘以 Linux 稳定硬件链接形成的 `disk:*` ID 标识，执行前重新验证型号、容量、传输类型和指纹。
-- 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
+- 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas-host/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
+- Host Agent 的记录（空间登记、身份表、查看授权、应用身份与数据卷操作日志）在它自己的 `StateDirectory`：`/var/lib/a-nas-host`，`root:root 0700`，产品服务打不开（[#176](https://github.com/zhongwater123/A-NAS/issues/176)）。只读取 root 所有、只有一个链接的普通文件，并按对应请求的规则逐条校验：空间根只能是 `spaces/shared` 或以账号命名的 `spaces/private/<用户名>`；身份与应用身份不得共用 UID；查看授权超出时限或管理员已不能查看时按已到期读入，下次检查即撤销；操作日志的每条记录须与其类型的盘数、冗余方式、步骤和结果一致。校验不通过的记录整份停用，相应操作报错；身份表停用时不重做任何空间的 ACL（否则每个个人空间都会落到无属主的封闭 ACL），也不覆盖数据卷上的身份表副本。每次写入记录都在改名后刷盘所在目录，操作日志等在断电后仍在。更早的版本把它们放在产品服务的 `/var/lib/a-nas`，Host Agent 启动时移过来一次，回滚步骤见[实机配置手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。
 - Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由目录对账吸收（见下条）。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。复制先写成目标文件夹中的隐藏副本 `.a-nas-copy-*`，完成后改名就位；Product Service 在内存中持有进行中的副本，目录对账只列出副本本身而不进入，并删除无人持有的副本（重启中断的复制留下的）。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
 - 对账与 Web 变更按空间排序（[调查](../investigations/2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)）。删除、恢复、清除、移动、复制、上传与新建文件夹从第一次文件操作到其行提交为止处于“在途”；对账与 Samba 回收导入记下扫描开始时的代次，开始时有变更在途、或扫描期间有变更开始或结束，就整体丢弃这次扫描：变更自己的行已是最新，SMB 的改动由下一轮补上。扫描结果在一个事务内写入，期间同一空间的新变更等待。必须拿到结果的扫描（上传完成时的文件夹已被 SMB 移走，分享选择的文件夹内容）先等在途变更结束，再独占扫描与写入。扫描到的 inode 属于回收站行时，回收站仍持有该 inode 或无法确认就不收录，否则删除这条过期的回收站行；打开条目时路径上的 inode 必须与记录一致，不一致视为不存在。写入时一行也没改的对账不推进代次，因此浏览文件夹不会让同时进行的整空间对账被丢弃。
@@ -74,7 +75,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 工作进程用 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` 解析数据卷内路径：`..` 与符号链接无法越界，经过仅可穿过的容器与回收站目录只需执行权限。改名使用 `RENAME_NOREPLACE`，不会覆盖已有条目。需要 Linux 5.6 及以上内核。
 - 下载与上传的文件内容不经过 root：工作进程打开或新建文件后经 `SCM_RIGHTS` 把描述符交回 Product Service。容量检查在 Product Service 中对数据卷根目录执行；复制目录按其中文件总大小检查，分片上传开始时检查整个文件、之后每片再检查一次，旧的 multipart 上传只检查下一块数据。
 - 回收站条目只对删除者可见并只能由其恢复或清除，因为每个用户的回收目录只授予本人。
-- 例外：只读快照仍由 root Host Agent 创建、列出并读出对象内容；恢复时由工作进程以用户身份写入目标空间。
+- 例外：只读快照仍由 root Host Agent 创建、列出并读出对象内容；恢复时由工作进程以用户身份写入目标空间。列出时跳过符号链接；读出时由内核在快照根之下解析路径（`openat2` 的 `RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS`），路径中任何一段是符号链接都按不存在处理（[#176](https://github.com/zhongwater123/A-NAS/issues/176)）。
 - 派生工作进程要求 Host Agent 保留 `CAP_SETUID`/`CAP_SETGID`。systemd 257 在单元同时写 `User=` 与 seccomp 过滤（`RestrictAddressFamilies`）时会拿走 `CAP_SETUID`，所以 `anas-host-agent.service` 不写 `User=`/`Group=`，由 `make ops-check` 保证。Broker 启动时以 `nobody` 身份按工作进程相同的参数运行探针，记录 `file broker identity switch verified` 或失败原因；安装器在探针未通过或能力缺失时以退出码 5 结束。
 - Product Service 以 `ProtectSystem=strict` 运行，它看到的数据卷挂载始终是只读的。它在文件操作前只确认挂载的是预期的数据卷（Btrfs、卷标记与已初始化卷的 UUID 一致），预期 UUID 取自已初始化卷的记录，不在每次请求时读取主机状态，也不判断可写性；真正只读的数据卷由执行写入的工作进程以 `EROFS` 报告为卷不可用。
 
@@ -103,7 +104,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 管理员查看模式
 
 - Product Service 校验管理员密码与原因后在 `viewing_grants` 记录授权、写审计并通知所有者，再请求 Host Agent 授予；Policy 在到期或结束前把该个人空间以只读方式列给该管理员，写操作一律拒绝。
-- Host Agent 先把授权写入 `/var/lib/a-nas/viewing-grants.json`，再从空间根目录用 `O_NOFOLLOW` 文件描述符逐级为每个目录与普通文件加入 `user:<管理员>` 只读条目（目录另加默认条目），直接读写 `system.posix_acl_*` 扩展属性且不改变已有 mask。空间根、回收站根与个人回收目录的完整 ACL 在授权期间包含该条目，因此漂移修复不会将其移除。
+- Host Agent 先把授权写入 `/var/lib/a-nas-host/viewing-grants.json`，再从空间根目录用 `O_NOFOLLOW` 文件描述符逐级为每个目录与普通文件加入 `user:<管理员>` 只读条目（目录另加默认条目），直接读写 `system.posix_acl_*` 扩展属性且不改变已有 mask。空间根、回收站根与个人回收目录的完整 ACL 在授权期间包含该条目，因此漂移修复不会将其移除。
 - Host Agent 开始提供服务后在后台撤销到期授权，此后每分钟一次；数据卷离线时保留记录，卷恢复后撤销。撤销同样逐级移除条目，再恢复根目录的精确 ACL。大空间上撤销需要数分钟，不阻塞文件代理；其间 Product Service 已按到期时间拒绝这份授权，ACL 是第二道防线。
 - SQLite 各模块使用 WAL 和单连接串行化写事务。密码摘要、会话令牌摘要、目录、回收站、快照、计划和审计均在系统盘持久化。
 
@@ -119,7 +120,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 失败语义
 
 - 计划十分钟过期，执行前可以取消（`cancelled`）。
-- 执行与发起它的请求无关（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）：Host Agent 在自己的上下文中运行建卷或加盘，按计划 ID 把所在步骤、格式化出的文件系统与结果记在系统盘的 `/var/lib/a-nas/volume-operations.json`，`GET /v1/storage/operations/{planId}` 查询；同一时间只运行一个操作。产品服务每秒查询一次直到结束，重启后对仍为 `running` 的计划接着查询，所以关闭页面、断网或重启产品服务都不会中途杀死 `wipefs`、`mkfs.btrfs` 或 `btrfs device add`。
+- 执行与发起它的请求无关（[#165](https://github.com/zhongwater123/A-NAS/issues/165)）：Host Agent 在自己的上下文中运行建卷或加盘，按计划 ID 把所在步骤、格式化出的文件系统与结果记在系统盘的 `/var/lib/a-nas-host/volume-operations.json`，`GET /v1/storage/operations/{planId}` 查询；同一时间只运行一个操作。产品服务每秒查询一次直到结束，重启后对仍为 `running` 的计划接着查询，所以关闭页面、断网或重启产品服务都不会中途杀死 `wipefs`、`mkfs.btrfs` 或 `btrfs device add`。
 - Host Agent 自身停止（重启、断电）时，日志中的操作在下次启动读为 `interrupted`，计划进入 `needs_attention`，不自动重做。管理员重试同一计划时，Host Agent 重新核对硬盘并从停下处继续：新卷挂载前从头清除并格式化（上面不可能有文件），挂载后只补齐子卷、卷标记与空间；已经加入数据卷的硬盘不再清除。Host Agent 从没收到的计划什么也没改，同样进入 `needs_attention` 等待重试。失败原因只写步骤与类别，设备路径与命令输出只进 Host Agent 的系统日志。
 - 新建数据卷不碰不是本计划建出的数据卷：已挂载的卷只有由本计划格式化，或卷标记写着本计划（更早版本的标记：首块硬盘相同）且成员恰为计划中的硬盘时才接管；mount unit 指向的文件系统只有由一次未成功的建卷格式化、或就在本计划将清除的硬盘上时才可替换，否则离线的数据卷会在下次开机被遗忘、它的硬盘显示为未使用。产品服务没有记录数据卷、宿主机却显示一个时，拒绝新建计划（`409 volume_exists`），由留下它的那次计划重试接管。
 - 加盘先把目标冗余方式作为 `pending`（计划 ID、方式、加入后的设备数）写进卷标记，再执行 `btrfs device add`，之后改写为 `layout`。硬盘加入后进程被杀时，Host Agent 的检查在内核列出足够的设备后把 `pending` 转为 `layout` 并开始转换。加盘成功后的冗余方式转换不属于计划，被中断时由 Host Agent 的检查接着做。
@@ -141,6 +142,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [`api/openapi.yaml`](../../api/openapi.yaml)
 - [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md) 与[数据卷操作](../../internal/hostops/linux/volume.go)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
+- [Host Agent 记录的目录与迁移](../../internal/hostops/linux/state.go)、[读入校验与迁移测试](../../internal/hostops/linux/state_internal_test.go) 与 [root 集成测试 `TestRootStateLeavesTheProductServiceDirectory`](../../internal/hostops/linux/root_integration_test.go)
 - [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)
 - [按范围对账](../../internal/files/reconcile.go)、[范围回归测试](../../internal/files/reconcile_scope_test.go) 与[规模测量](../../internal/files/reconcile_scale_test.go)
 - [文件代理的分页、取消与工作进程池](../../internal/filebroker/server.go) 与[测试](../../internal/filebroker/worker_test.go)

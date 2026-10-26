@@ -84,7 +84,7 @@
 - `TestReaderReportsADataVolumeReadOnlyAndItsBtrfsErrors`、`TestBtrfsErrorsAreUnknownWithoutTheirCounters`：读取器从 `statfs` 与 sysfs 取得只读状态和错误计数。
 - `TestClientReadsTheDataVolumeReadOnlyStateAndErrors`、`TestClientRejectsDataVolumeFactsOnAnotherDisk`：Host Agent 文档的往返与校验。
 - `TestHostStateAssessesTheSystemHealth` 与 OpenAPI 契约测试：接口返回评估结果与原因。
-- `App.test.tsx` 的“says why the system is rated as it is and leads to storage”“says what was checked when nothing is wrong”，以及 `web/src/settings/health.test.ts`。
+- `SettingsPanel.test.tsx` 的“says why the system is rated as it is and leads to storage”“says what was checked when nothing is wrong”，以及 `web/src/settings/health.test.ts`。
 - 实机：部署后在概览核对实验 NAS 的健康与原因，并与 `smartctl`、`findmnt`、`/sys/fs/btrfs/*/devinfo/*/error_stats` 对照。
 
 ## 关联

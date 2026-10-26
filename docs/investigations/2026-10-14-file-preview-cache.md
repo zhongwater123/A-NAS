@@ -39,7 +39,7 @@ go test ./internal/filepreview -run 'TestDirectoryRevisit|TestCachedPreview' -co
 ## 关联
 
 - [预览服务与回归](../../internal/filepreview)
-- [HTTP 预览接口](../../internal/httpapi/filepreview.go)、[HTTP 回归](../../internal/httpapi/filepreview_test.go)
+- [HTTP 预览接口](../../internal/filepreviewapi/filepreviewapi.go)、[HTTP 回归](../../internal/httpapi/filepreview_test.go)
 - [系统沙箱验收](../../scripts/system-test.sh)
 - [启动配置](../../cmd/anas-api/main.go)
 - [原视频与 HEIC 适配调查](2026-10-14-file-media-previews.md)

@@ -2,6 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import type { SessionMessage } from "./hermes/types/hermes";
+import { stubAPI } from "../test/api";
 
 // An answer that cannot be rendered, whatever the reason.
 vi.mock("@assistant-ui/react-streamdown", async (original) => ({
@@ -42,8 +43,7 @@ const history = [
 ] as SessionMessage[];
 
 it("keeps the conversation list and a way out when a conversation fails to render", async () => {
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/assistant/sessions"))

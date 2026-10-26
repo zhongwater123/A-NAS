@@ -69,7 +69,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
-	fixture.files = files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fixture.files = files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	shared := filepath.Join(volume, "spaces", "shared", "影视")
 	var poster bytes.Buffer
 	if err := jpeg.Encode(&poster, image.NewGray(image.Rect(0, 0, 4, 6)), nil); err != nil {
@@ -152,7 +152,7 @@ func mediaAPIFor(service *media.Service, user accounts.User) http.Handler {
 
 func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	fixture := newMediaFixture(t)
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: fixture.accounts, Files: fixture.files,
 		Media: mediaapi.New(fixture.media, nil), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -220,7 +220,7 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 // about Web file changes, signed in as the administrator.
 func signedInMediaHandler(t *testing.T, fixture *mediaFixture) (http.Handler, *http.Cookie, string, func() string) {
 	t.Helper()
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: fixture.accounts, Files: fixture.files,
 		Media: mediaapi.New(fixture.media, nil), FilesChanged: fixture.media.SpaceChanged, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
