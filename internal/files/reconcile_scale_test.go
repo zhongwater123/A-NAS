@@ -66,9 +66,8 @@ func TestReconcileAtScale(t *testing.T) {
 	volume := filepath.Join(t.TempDir(), "volume")
 	root := filepath.Join(volume, "spaces", "private", "owner")
 	recorder := &recordingFileSystem{FileSystem: files.NewRootFileSystem(volume, true)}
-	service := files.NewService(catalog, volume, accountService, files.Options{
-		DisableCapacityReserve: true, AllowUnverifiedVolume: true, FileSystem: recorder,
-		SnapshotBackend: walkingSnapshots{root: root},
+	service := files.NewService(catalog, volume, accountService, recorder, files.Options{
+		DisableCapacityReserve: true, AllowUnverifiedVolume: true, SnapshotBackend: walkingSnapshots{root: root},
 	})
 	writes := countEntryWrites(t, catalogDB(t, catalogPath))
 

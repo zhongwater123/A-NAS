@@ -266,7 +266,7 @@ make check
 
 完整检查中的 `make vuln-check` 用 `go.mod` 的 `tool` 指令固定的 govulncheck 扫描代码可达的已知漏洞，需要能访问 `vuln.go.dev`。它报告可达漏洞时检查失败：升级对应模块，或一起修改 `.go-version` 与 `go.mod` 的 `toolchain` 行来升级 Go。CI 每周一还在 `main` 上单独运行一次（`.github/workflows/vuln.yml`，也可手动触发），这样没有人推送时，新公布的漏洞也会报出；修改这个工作流的 PR 也会运行它，其他 PR 不运行，所以它不能设为必需检查。
 
-只开发界面时：
+只开发界面时，先在 `127.0.0.1:8080` 上启动 `ANAS_HOSTSTATE_MODE=fake` 的产品服务（见 [README](../../README.md)），再：
 
 ```bash
 cd web

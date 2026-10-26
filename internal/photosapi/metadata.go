@@ -3,6 +3,7 @@ package photosapi
 import (
 	"net/http"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -38,7 +39,7 @@ func (h *handler) listAlbums(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[photos.Album]{Items: albums})
+	httpjson.Write(w, http.StatusOK, itemsResponse[photos.Album]{Items: albums})
 }
 
 func (h *handler) createAlbum(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +53,7 @@ func (h *handler) createAlbum(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, album)
+	httpjson.Write(w, http.StatusCreated, album)
 }
 
 func (h *handler) renameAlbum(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +67,7 @@ func (h *handler) renameAlbum(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, album)
+	httpjson.Write(w, http.StatusOK, album)
 }
 
 func (h *handler) deleteAlbum(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +90,7 @@ func (h *handler) albumPhotos(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+	httpjson.Write(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 func (h *handler) addToAlbum(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +104,7 @@ func (h *handler) addToAlbum(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) removeFromAlbum(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +127,7 @@ func (h *handler) addTag(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) removeTag(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +137,7 @@ func (h *handler) removeTag(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) hideAILabel(w http.ResponseWriter, r *http.Request) {
@@ -146,5 +147,5 @@ func (h *handler) hideAILabel(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }

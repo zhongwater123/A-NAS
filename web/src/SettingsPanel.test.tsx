@@ -44,12 +44,6 @@ vi.mock("./XtermSession", async () => {
   };
 });
 
-// The task manager has its own tests with full device samples; here only the
-// way into it matters.
-vi.mock("./taskmanager/TaskManagerSection", () => ({
-  TaskManagerSection: () => <div data-testid="task-manager" />,
-}));
-
 beforeEach(() => {
   localStorage.clear();
   xterm.mounts = 0;
@@ -852,6 +846,10 @@ describe("Settings", () => {
     await user.click(within(settings).getByRole("button", { name: "修改我的密码" }));
     expect(within(settings).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
     expect(within(settings).getByRole("form", { name: "修改密码" })).toBeTruthy();
+    // The request opens the form once; coming back to My account later does not.
+    await user.click(within(settings).getByRole("button", { name: "概览" }));
+    await user.click(within(settings).getByRole("button", { name: "我的账号" }));
+    expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
     prompt.mockRestore();
   });
 

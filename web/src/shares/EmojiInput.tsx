@@ -165,7 +165,38 @@ export function EmojiInput({
       </div>
       {open && (
         <div ref={panel} id={id} className="sh-emoji" role="dialog" aria-label="表情">
+          {/* Categories, search and close share one row when the panel is
+              wide enough, leaving the rest of its fixed height to the grid. */}
           <div className="sh-emoji-head">
+            <nav aria-label="表情分类">
+              <button
+                type="button"
+                aria-label="最近使用"
+                title="最近使用"
+                aria-pressed={!query && category === "最近使用"}
+                onClick={() => {
+                  setCategory("最近使用");
+                  setQuery("");
+                }}
+              >
+                🕘
+              </button>
+              {emojiGroups.map((group) => (
+                <button
+                  type="button"
+                  key={group.name}
+                  aria-label={group.name}
+                  title={group.name}
+                  aria-pressed={!query && category === group.name}
+                  onClick={() => {
+                    setCategory(group.name);
+                    setQuery("");
+                  }}
+                >
+                  {group.icon}
+                </button>
+              ))}
+            </nav>
             <label className="sh-emoji-search">
               <Search />
               <input
@@ -186,37 +217,7 @@ export function EmojiInput({
               <X />
             </button>
           </div>
-          <nav aria-label="表情分类">
-            <button
-              type="button"
-              aria-label="最近使用"
-              title="最近使用"
-              aria-pressed={!query && category === "最近使用"}
-              onClick={() => {
-                setCategory("最近使用");
-                setQuery("");
-              }}
-            >
-              🕘
-            </button>
-            {emojiGroups.map((group) => (
-              <button
-                type="button"
-                key={group.name}
-                aria-label={group.name}
-                title={group.name}
-                aria-pressed={!query && category === group.name}
-                onClick={() => {
-                  setCategory(group.name);
-                  setQuery("");
-                }}
-              >
-                {group.icon}
-              </button>
-            ))}
-          </nav>
-          <p className="sh-emoji-caption">{query ? `搜索结果 · ${filtered.length}` : category}</p>
-          <div className="sh-emoji-grid">
+          <div className="sh-emoji-grid" role="group" aria-label={query ? `搜索结果 · ${filtered.length}` : category}>
             {filtered.map(({ emoji, name }) => (
               <button type="button" key={emoji} aria-label={emoji} title={name} onClick={() => insert(emoji)}>
                 {emoji}

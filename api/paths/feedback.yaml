@@ -4,6 +4,7 @@
     summary: "Every feedback item, newest first; all signed-in accounts read the same list"
     responses:
       "200": { description: Feedback items, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } } } } }
+      "503": { description: "feedback_unavailable: the feedback list is not running", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
   post:
     operationId: createFeedback
     summary: File a problem or suggestion with text, images or both

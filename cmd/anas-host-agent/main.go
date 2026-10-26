@@ -12,12 +12,12 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
@@ -60,15 +60,73 @@ func main() {
 	}
 }
 
+// config is the Host Agent's configuration, read from its environment once.
+type config struct {
+	Socket     string `env:"ANAS_HOST_AGENT_SOCKET"`
+	RuntimeDir string `env:"XDG_RUNTIME_DIR"`
+	// Group may open the Host Agent's and the File Broker's sockets.
+	Group        string `env:"ANAS_HOST_AGENT_GROUP"`
+	DataMount    string `env:"ANAS_DATA_MOUNT" envDefault:"/srv/a-nas/data"`
+	SMBInterface string `env:"ANAS_SMB_INTERFACE"`
+	StateDir     string `env:"ANAS_STATE_DIR" envDefault:"/var/lib/a-nas"`
+	// FileBrokerSocket defaults to the socket beside the Host Agent's.
+	FileBrokerSocket string `env:"ANAS_FILE_BROKER_SOCKET"`
+	// The AI assistant is not shipped yet (ADR 0024): off unless its
+	// sockets are named. With it come the session gate and the executor of
+	// its changes, which keeps the copies the members' cards show beside
+	// the assistant directories (by default assistant/.changes on the data
+	// volume), where only root may read them.
+	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
+	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
+	AssistantTokens        string `env:"ANAS_ASSISTANT_TOKEN_DIR" envDefault:"/etc/a-nas-assistant/tokens"`
+	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
+	// Without the photo service's group the photo service is not installed
+	// and its session lookup is off; the default is the service's user.
+	PhotoSessionGroup  string `env:"ANAS_PHOTO_SESSION_GROUP"`
+	PhotoSessionSocket string `env:"ANAS_PHOTO_SESSION_SOCKET" envDefault:"/run/a-nas-sessions/photos.sock"`
+	// PhotoAssistantLookup=1 looks accounts up by UID for the photo
+	// service's socket for members' AI assistants, which is not shipped yet.
+	PhotoAssistantLookup string `env:"ANAS_PHOTO_ASSISTANT_LOOKUP"`
+	ShareSessionGroup    string `env:"ANAS_SHARE_SESSION_GROUP"`
+	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
+}
+
+func loadConfig(environment map[string]string) (config, error) {
+	c, err := envconfig.Parse[config](environment)
+	if err != nil {
+		return c, err
+	}
+	if c.Socket, err = agent.SocketPath(c.Socket, c.RuntimeDir); err != nil {
+		return c, err
+	}
+	if c.FileBrokerSocket == "" {
+		c.FileBrokerSocket = filepath.Join(filepath.Dir(c.Socket), "file-broker.sock")
+	}
+	if c.AssistantSockets != "" && c.AssistantChanges == "" {
+		c.AssistantChanges = filepath.Join(c.DataMount, "assistant", ".changes")
+	}
+	if c.AssistantSockets == "" {
+		c.AssistantChanges = ""
+	}
+	if c.PhotoSessionGroup == "" {
+		c.PhotoSessionGroup = accounts.PhotoServiceUser
+	}
+	if c.ShareSessionGroup == "" {
+		c.ShareSessionGroup = accounts.ShareServiceUser
+	}
+	return c, nil
+}
+
 func run(logger *slog.Logger) error {
 	if os.Geteuid() != 0 {
 		return errors.New("A-NAS Host Agent must run as root")
 	}
-	socketPath, err := agent.SocketPath()
+	config, err := loadConfig(envconfig.Environment())
 	if err != nil {
 		return err
 	}
-	listener, err := listen(socketPath, strings.TrimSpace(os.Getenv("ANAS_HOST_AGENT_GROUP")))
+	socketPath := config.Socket
+	listener, err := listen(socketPath, config.Group)
 	if err != nil {
 		return err
 	}
@@ -84,10 +142,10 @@ func run(logger *slog.Logger) error {
 			logger.Warn("initial SMART read failed", "error", err)
 		}
 	}()
-	mountPoint := environment("ANAS_DATA_MOUNT", "/srv/a-nas/data")
+	mountPoint := config.DataMount
 	executor := linuxhostops.NewExecutor(linuxhostops.HostStateResolver{Reader: reader}, nil, linuxhostops.Options{
 		MountPoint:   mountPoint,
-		SMBInterface: strings.TrimSpace(os.Getenv("ANAS_SMB_INTERFACE")),
+		SMBInterface: config.SMBInterface,
 		Logger:       logger,
 	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -99,18 +157,11 @@ func run(logger *slog.Logger) error {
 			SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	sessions := accounts.NewSessionDirectory(filepath.Join(environment("ANAS_STATE_DIR", "/var/lib/a-nas"), "control.db"))
+	sessions := accounts.NewSessionDirectory(filepath.Join(config.StateDir, "control.db"))
 	defer func() { _ = sessions.Close() }()
-	// The AI assistant is not shipped yet (ADR 0024): off unless its sockets
-	// are named. With it come the session gate and the executor of its changes,
-	// which keeps the copies the members' cards show beside the assistant
-	// directories, where only root may read them.
-	assistantSockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
-	var assistantChanges string
-	if assistantSockets != "" {
-		assistantChanges = environment("ANAS_ASSISTANT_CHANGES_DIR", filepath.Join(mountPoint, "assistant", ".changes"))
-	}
+	assistantChanges := config.AssistantChanges
 	// File workers and terminal shells run in scopes of their own, so they
 	// share neither the Host Agent's limits nor its name in the journal.
 	// Without systemd, as in development, they stay in the Host Agent's.
@@ -123,8 +174,8 @@ func run(logger *slog.Logger) error {
 	}
 	broker, err := filebroker.NewServer(filebroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
-		AssistantSockets: assistantSockets,
-		AssistantTokens:  environment("ANAS_ASSISTANT_TOKEN_DIR", "/etc/a-nas-assistant/tokens"),
+		AssistantSockets: config.AssistantSockets,
+		AssistantTokens:  config.AssistantTokens,
 		AssistantChanges: assistantChanges,
 		Accounts:         sessions,
 		Scopes:           scopes,
@@ -141,8 +192,8 @@ func run(logger *slog.Logger) error {
 	} else {
 		logger.Info("file broker identity switch verified")
 	}
-	brokerSocket := environment("ANAS_FILE_BROKER_SOCKET", filepath.Join(filepath.Dir(socketPath), "file-broker.sock"))
-	brokerListener, err := listen(brokerSocket, strings.TrimSpace(os.Getenv("ANAS_HOST_AGENT_GROUP")))
+	brokerSocket := config.FileBrokerSocket
+	brokerListener, err := listen(brokerSocket, config.Group)
 	if err != nil {
 		return err
 	}
@@ -156,18 +207,18 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 	if assistantChanges != "" {
-		stopChanges, err := serveAssistantChanges(broker, logger)
+		stopChanges, err := serveAssistantChanges(config.AssistantChangesSocket, broker, logger)
 		if err != nil {
 			return err
 		}
 		defer stopChanges()
 	}
-	stopSessionLookup, err := serveSessionLookup(sessions, logger)
+	stopSessionLookup, err := serveSessionLookup(config, sessions, logger)
 	if err != nil {
 		return err
 	}
 	defer stopSessionLookup()
-	stopShareLookup, err := serveShareSessionLookup(sessions, logger)
+	stopShareLookup, err := serveShareSessionLookup(config, sessions, logger)
 	if err != nil {
 		return err
 	}
@@ -206,8 +257,7 @@ func run(logger *slog.Logger) error {
 // serveAssistantChanges answers the assistants' MCP tool. The socket is open
 // to everyone but sits in /run/a-nas, which members cannot enter; the units
 // bind it into each assistant's sandbox, and the member is the caller's UID.
-func serveAssistantChanges(broker *filebroker.Server, logger *slog.Logger) (func(), error) {
-	socketPath := environment("ANAS_ASSISTANT_CHANGES_SOCKET", "/run/a-nas/assistant-changes.sock")
+func serveAssistantChanges(socketPath string, broker *filebroker.Server, logger *slog.Logger) (func(), error) {
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -233,13 +283,13 @@ func serveAssistantChanges(broker *filebroker.Server, logger *slog.Logger) (func
 // session token (ADR 0011). Only the photo service's group can reach the
 // socket; without that group the photo service is not installed and nothing
 // is served.
-func serveSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
-	group := environment("ANAS_PHOTO_SESSION_GROUP", accounts.PhotoServiceUser)
+func serveSessionLookup(config config, sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+	group := config.PhotoSessionGroup
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info("photo service is not installed; session lookup is off", "group", group)
 		return func() {}, nil
 	}
-	socketPath := environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock")
+	socketPath := config.PhotoSessionSocket
 	listener, err := listen(socketPath, group)
 	if err != nil {
 		return nil, fmt.Errorf("listen for photo session lookups: %w", err)
@@ -247,7 +297,7 @@ func serveSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger
 	// Looking accounts up by UID serves the photo service's socket for members' AI
 	// assistants (ADR 0024), which is not shipped yet; it stays off until named.
 	var accountsByUID sessionlookup.AccountResolver
-	if os.Getenv("ANAS_PHOTO_ASSISTANT_LOOKUP") == "1" {
+	if config.PhotoAssistantLookup == "1" {
 		accountsByUID = sessions
 	}
 	server := &http.Server{
@@ -426,20 +476,13 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 	return listener, nil
 }
 
-func environment(name, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func serveShareSessionLookup(sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
-	group := environment("ANAS_SHARE_SESSION_GROUP", accounts.ShareServiceUser)
+func serveShareSessionLookup(config config, sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+	group := config.ShareSessionGroup
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info("share service is not installed; lookup is off")
 		return func() {}, nil
 	}
-	socket := environment("ANAS_SHARE_SESSION_SOCKET", "/run/a-nas-share-sessions/shares.sock")
+	socket := config.ShareSessionSocket
 	listener, err := listen(socket, group)
 	if err != nil {
 		return nil, err

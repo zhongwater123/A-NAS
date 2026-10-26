@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
@@ -43,12 +44,12 @@ func (h *handler) handleTaskManager(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	reader, ok := h.observer.(taskmanager.Reader)
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "task_manager_unavailable", "task manager is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "task_manager_unavailable", "task manager is unavailable")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -72,8 +73,8 @@ func (h *handler) handleTaskManager(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "task manager read failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "task_manager_unavailable", "task manager is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "task_manager_unavailable", "task manager is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpjson.Write(w, http.StatusOK, result)
 }

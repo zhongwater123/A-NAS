@@ -37,7 +37,7 @@ func TestTrashItemsSayWhereTheyCameFromAndWhenTheyGo(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	deletedAt := time.Date(2026, 10, 13, 9, 30, 0, 0, time.UTC)
-	service := files.NewService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
+	service := files.NewLocalService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: func() time.Time { return deletedAt },
 	})
 
@@ -146,7 +146,7 @@ func TestRestoreOntoATakenNameKeepsBothOrReplaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
-	service := files.NewService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
+	service := files.NewLocalService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true,
 	})
 	trashed := func(name, contents string) files.TrashItem {

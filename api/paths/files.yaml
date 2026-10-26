@@ -9,6 +9,8 @@
     parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { name: parentId, in: query, schema: { type: string } }]
     responses:
       "200": { description: Directory entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/spaces/{spaceId}/directories:
   post:
@@ -17,7 +19,12 @@
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileDestination" } } } }
     responses:
       "201": { description: Directory created, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
       "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/spaces/{spaceId}/uploads:
   post:
@@ -26,14 +33,23 @@
     requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { parentId: { type: string }, file: { type: string, format: binary } } } } } }
     responses:
       "201": { description: File uploaded, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "400": { description: "invalid_multipart, invalid_parent or file_required", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
       "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/files/{fileId}/content:
   get:
     operationId: downloadFile
     parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }, { name: Range, in: header, schema: { type: string } }, { name: disposition, in: query, description: Use inline for browser-previewable raster images and PDF documents; other files remain attachments., schema: { type: string, enum: [inline] } }]
     responses:
-      "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
-      "206": { description: Partial file content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+      "200": { description: "File content, typed by the file name's extension", content: { "*/*": { schema: { type: string, format: binary } } } }
+      "206": { description: Partial file content, content: { "*/*": { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/files/{fileId}/preview:
   get:
     operationId: renderFilePreview
@@ -67,11 +83,21 @@
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileTransfer" } } } }
     responses:
       "200": { description: File moved, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
   delete:
     operationId: trashFile
     parameters: [{ $ref: "../components/files.yaml#/parameters/FileID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "200": { description: Trash item, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/TrashItem" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/files/{fileId}/versions:
   get:
     operationId: listFileVersions
@@ -91,6 +117,13 @@
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileTransfer" } } } }
     responses:
       "201": { description: File copied, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/trash:
   get:
     operationId: listTrash
@@ -105,11 +138,18 @@
     responses:
       "200": { description: Restored entry, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/RestoredEntry" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/trash/{trashId}:
   delete:
     operationId: purgeTrash
     parameters: [{ $ref: "../components/files.yaml#/parameters/TrashID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "204": { description: Item permanently removed }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }

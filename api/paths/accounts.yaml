@@ -15,6 +15,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: "credential_provision_failed: the Host Agent could not enable the account for SMB", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
 /api/v1/session:
   post:
     security: []
@@ -124,6 +125,7 @@
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/ViewingRequest" } } } }
     responses:
       "201": { description: Read-only access granted, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/ViewingGrant" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -157,6 +159,7 @@
     responses:
       "204": { description: User disabled }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/users/{userId}/credential:
   patch:

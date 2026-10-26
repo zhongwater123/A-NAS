@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // SessionHeader carries the browser's session token from the Product Service
@@ -45,7 +46,7 @@ func NewProxy(socketPath string, logger *slog.Logger) *Proxy {
 		Transport: transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			logger.WarnContext(r.Context(), "photo service unreachable", "error", err)
-			WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 		},
 	}}
 }

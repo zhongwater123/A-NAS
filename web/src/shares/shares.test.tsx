@@ -80,6 +80,48 @@ it("shares ordinary files with multiple members, Unicode emoji and a stable requ
   });
 });
 
+it("lists chosen members as tags that survive a search and can be removed", async () => {
+  const sent: unknown[] = [];
+  stubAPI(
+    vi.fn(async (url, init) => {
+      if (String(url).endsWith("/members"))
+        return json({
+          items: [
+            { id: "bob", username: "Bob" },
+            { id: "carol", username: "Carol" },
+          ],
+        });
+      if (init?.method === "POST") {
+        sent.push(JSON.parse(init.body));
+        return json({ ...share, status: "preparing" });
+      }
+      return json({ items: [] });
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <SharesProvider userId="alice" active={false} onOpen={() => undefined}>
+      <Launcher />
+    </SharesProvider>,
+  );
+  await user.click(screen.getByText("新分享"));
+  await user.click(await screen.findByLabelText("Bob"));
+  await user.click(screen.getByLabelText("Carol"));
+  await user.type(screen.getByRole("searchbox", { name: "搜索成员" }), "Bob");
+  const tags = screen.getByRole("list", { name: "已选成员" });
+  expect(
+    within(tags)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["BBob", "CCarol"]);
+  await user.click(within(tags).getByRole("button", { name: "取消选择 Carol" }));
+  expect(document.activeElement).toBe(within(tags).getByRole("button", { name: "取消选择 Bob" }));
+  expect(screen.getByText("已选 1 人")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "发送分享" }));
+  await waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]).toMatchObject({ recipientIds: ["bob"], message: "" });
+});
+
 it("opens a received private thread and renders markup as text, marking only displayed messages read", async () => {
   const reads: unknown[] = [];
   stubAPI(

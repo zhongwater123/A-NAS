@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member's AI assistant (proposed in ADR 0024).
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (proposed in ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -191,6 +191,12 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '503':
+          description: 'credential_provision_failed: the Host Agent could not enable the account for SMB'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/session:
     post:
       security: []
@@ -421,6 +427,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ViewingGrant'
+        '400':
+          $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
         '409':
@@ -495,6 +503,8 @@ paths:
         '204':
           description: User disabled
         '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -917,6 +927,10 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FileEntry'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
         '423':
           $ref: '#/components/responses/ProductError'
   /api/v1/spaces/{spaceId}/directories:
@@ -938,7 +952,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileEntry'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
         '507':
           $ref: '#/components/responses/ProductError'
@@ -969,6 +993,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileEntry'
+        '400':
+          description: invalid_multipart, invalid_parent or file_required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
         '507':
           $ref: '#/components/responses/ProductError'
   /api/v1/files/{fileId}/content:
@@ -989,19 +1029,25 @@ paths:
               - inline
       responses:
         '200':
-          description: File content
+          description: File content, typed by the file name's extension
           content:
-            application/octet-stream:
+            '*/*':
               schema:
                 type: string
                 format: binary
         '206':
           description: Partial file content
           content:
-            application/octet-stream:
+            '*/*':
               schema:
                 type: string
                 format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/files/{fileId}/preview:
     get:
       operationId: renderFilePreview
@@ -1073,6 +1119,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileEntry'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
     delete:
       operationId: trashFile
       parameters:
@@ -1085,6 +1145,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TrashItem'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/files/{fileId}/versions:
     get:
       operationId: listFileVersions
@@ -1122,6 +1188,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileEntry'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/trash:
     get:
       operationId: listTrash
@@ -1161,9 +1241,17 @@ paths:
                 $ref: '#/components/schemas/RestoredEntry'
         '400':
           $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
         '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
+        '507':
           $ref: '#/components/responses/ProductError'
   /api/v1/trash/{trashId}:
     delete:
@@ -1174,6 +1262,12 @@ paths:
       responses:
         '204':
           description: Item permanently removed
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/spaces/{spaceId}/snapshots:
     get:
       operationId: listSnapshots
@@ -4058,6 +4152,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaHome'
+        '503':
+          description: 'media_unavailable: the media center is not running'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/media/titles:
     get:
       operationId: listMediaTitles
@@ -5465,6 +5565,12 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FeedbackItem'
+        '503':
+          description: 'feedback_unavailable: the feedback list is not running'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     post:
       operationId: createFeedback
       summary: File a problem or suggestion with text, images or both
