@@ -56,7 +56,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 身份与一致性
 
-- 磁盘以 Linux 稳定硬件链接形成的 `disk:*` ID 标识，执行前重新验证型号、容量、传输类型和指纹。
+- 磁盘以 WWN（缺少时为规范化型号与序列号）派生的 `disk:*` ID 标识，执行前重新验证型号、容量、传输类型和指纹。缺少或重复硬件身份时只生成 `observation:*` 展示键，不能用于操作，也不能当作稳定身份保存；状态观测保留设备角色、占用和文件系统事实，并把单个设备的异常传到产品 API。资格与显示规则见[基础存储规格](../specs/basic-storage-and-sharing.md#服务与错误)。
 - 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas-host/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
 - Host Agent 的记录（空间登记、身份表、查看授权、应用身份与数据卷操作日志）在它自己的 `StateDirectory`：`/var/lib/a-nas-host`，`root:root 0700`，产品服务打不开（[#176](https://github.com/zhongwater123/A-NAS/issues/176)）。只读取 root 所有、只有一个链接的普通文件，并按对应请求的规则逐条校验：空间根只能是 `spaces/shared` 或以账号命名的 `spaces/private/<用户名>`；身份与应用身份不得共用 UID；查看授权超出时限或管理员已不能查看时按已到期读入，下次检查即撤销；操作日志的每条记录须与其类型的盘数、冗余方式、步骤和结果一致。校验不通过的记录整份停用，相应操作报错；身份表停用时不重做任何空间的 ACL（否则每个个人空间都会落到无属主的封闭 ACL），也不覆盖数据卷上的身份表副本。每次写入记录都在改名后刷盘所在目录，操作日志等在断电后仍在。更早的版本把它们放在产品服务的 `/var/lib/a-nas`，Host Agent 启动时移过来一次，回滚步骤见[实机配置手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。

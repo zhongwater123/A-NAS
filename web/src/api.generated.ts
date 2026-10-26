@@ -3788,9 +3788,13 @@ export interface components {
         };
         Disk: {
             id: components["schemas"]["StableResourceID"];
+            /** @description Empty when the device does not report a model; then ineligibleReasons includes missing_model. */
             model: string;
             transport: components["schemas"]["Transport"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage.
+             */
             capacityBytes: number;
             rotational: boolean;
             removable: boolean;
@@ -3800,6 +3804,7 @@ export interface components {
             health: components["schemas"]["Health"];
             smartStatus: components["schemas"]["Health"];
             eligibleForDataVolume: boolean;
+            /** @description Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets. */
             ineligibleReasons: string[];
             temperatureCelsius?: number;
         };

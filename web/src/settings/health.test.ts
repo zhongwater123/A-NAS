@@ -34,6 +34,11 @@ describe("describeFinding", () => {
     expect(describeFinding({ code: "disk_failing", severity: "critical", diskId: "disk:gone" }, disks).title).toBe(
       "一块硬盘的 SMART 自检未通过",
     );
+    expect(
+      describeFinding({ code: "disk_health_unknown", severity: "warning", diskId: "observation:system" }, [
+        disk("observation:system", "", false),
+      ]).title,
+    ).toBe("读不到一块硬盘的健康信息");
   });
 
   it("says what a full volume means for writing", () => {

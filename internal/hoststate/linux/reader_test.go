@@ -202,25 +202,8 @@ func TestReaderKeepsDiskIdentityWhenKernelNameChanges(t *testing.T) {
 
 func TestReaderRejectsInvalidBlockDeviceObservations(t *testing.T) {
 	tests := map[string]string{
-		"malformed JSON": `{`,
-		"missing stable identity": `{
-  "blockdevices": [{
-    "name": "sda", "type": "disk", "size": 1, "model": "Disk",
-    "mountpoints": ["/"]
-  }]
-}`,
-		"duplicate stable identity": `{
-  "blockdevices": [
-    {
-      "name": "sda", "type": "disk", "size": 1, "model": "Disk A",
-      "wwn": "duplicate", "mountpoints": ["/"]
-    },
-    {
-      "name": "sdb", "type": "disk", "size": 2, "model": "Disk B",
-      "wwn": "duplicate", "mountpoints": []
-    }
-  ]
-}`,
+		"malformed JSON":        `{`,
+		"invalid capacity type": `{"blockdevices":[{"name":"sda","type":"disk","size":"bad"}]}`,
 	}
 
 	for name, observation := range tests {
