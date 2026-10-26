@@ -148,21 +148,18 @@ const alice = {
   },
 };
 const sizes = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
+// jsdom lays nothing out; the photo scroller gets a window-sized view.
+// virtual-core measures it by offset* before 3.19 and by client* since.
+const scrollerSize = { offsetHeight: 800, offsetWidth: 1000, clientHeight: 800, clientWidth: 1000 };
 
 beforeEach(() => {
-  // jsdom lays nothing out; the photo scroller gets a window-sized view.
-  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-    configurable: true,
-    get() {
-      return this.classList?.contains("ph-scroll") ? 800 : 0;
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-    configurable: true,
-    get() {
-      return this.classList?.contains("ph-scroll") ? 1000 : 0;
-    },
-  });
+  for (const [name, size] of Object.entries(scrollerSize))
+    Object.defineProperty(HTMLElement.prototype, name, {
+      configurable: true,
+      get() {
+        return this.classList?.contains("ph-scroll") ? size : 0;
+      },
+    });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -185,6 +182,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   for (const name of ["offsetHeight", "offsetWidth"] as const)
     Object.defineProperty(HTMLElement.prototype, name, sizes[name]);
+  // client* are Element.prototype's; without HTMLElement's stubs they show again.
+  for (const name of ["clientHeight", "clientWidth"] as const) Reflect.deleteProperty(HTMLElement.prototype, name);
   window.localStorage.clear();
   FakeUpload.sent = [];
   setSession();

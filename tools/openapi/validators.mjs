@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 import { Ajv2020 } from "ajv/dist/2020.js";
 import standaloneCode from "ajv/dist/standalone/index.js";
-import yaml from "js-yaml";
+import { load } from "js-yaml";
 
 // The responses the desktop shell renders outside any window's error
 // boundary: sign-in, the status bar, the rail, notifications, people, the
@@ -54,7 +54,7 @@ const VALIDATED = [
 ];
 
 const [bundlePath, outPath] = process.argv.slice(2);
-const bundle = yaml.load(readFileSync(bundlePath, "utf8"));
+const bundle = load(readFileSync(bundlePath, "utf8"));
 const pointer = (...parts) => "#/" + parts.map((part) => encodeURIComponent(part.replaceAll("~", "~0").replaceAll("/", "~1"))).join("/");
 
 // The check is of shape: types, required fields, enums, nulls. Formats and
