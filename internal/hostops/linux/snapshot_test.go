@@ -86,7 +86,7 @@ func TestOpenReadsOnlyObjectsBeneathTheSnapshot(t *testing.T) {
 	if err != nil || string(contents) != "inside" || object.Name != "a.txt" || object.SizeBytes != 6 {
 		t.Fatalf("Open(docs/a.txt) = %q, %+v, %v", contents, object, err)
 	}
-	for _, key := range []string{"linked/secret.txt", "docs/link.txt", "../../secret.txt", "docs/../../x", "/etc/passwd", "missing"} {
+	for _, key := range []string{"linked/secret.txt", "docs/link.txt", "../../secret.txt", "docs/../../x", "/etc/passwd", "missing", "docs/a.txt/x", "a\x00b"} {
 		if reader, _, err := executor.Open(ctx, "snapshot:1", key); !errors.Is(err, files.ErrNotFound) {
 			if reader != nil {
 				_ = reader.Close()

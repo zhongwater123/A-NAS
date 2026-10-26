@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -53,9 +54,12 @@ func (e *Executor) Objects(ctx context.Context, snapshotID string, visit func(fi
 func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
 	root := e.snapshotRoot(snapshotID)
 	relative := filepath.FromSlash(key)
+	if strings.ContainsRune(relative, 0) {
+		return nil, files.SnapshotObject{}, files.ErrNotFound
+	}
 	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, files.SnapshotObject{}, files.ErrNotFound
+		return nil, files.SnapshotObject{}, snapshotOpenError(root, err)
 	}
 	defer unix.Close(rootFD)
 	fd, err := unix.Openat2(rootFD, relative, &unix.OpenHow{
@@ -63,7 +67,7 @@ func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadClose
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 	})
 	if err != nil {
-		return nil, files.SnapshotObject{}, files.ErrNotFound
+		return nil, files.SnapshotObject{}, snapshotOpenError(key, err)
 	}
 	reader := os.NewFile(uintptr(fd), filepath.Join(root, relative))
 	info, err := reader.Stat()
@@ -76,6 +80,17 @@ func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadClose
 		return nil, files.SnapshotObject{}, files.ErrUnsupportedType
 	}
 	return reader, files.SnapshotObject{Key: key, Name: info.Name(), Kind: files.EntryKindFile, SizeBytes: info.Size()}, nil
+}
+
+// snapshotOpenError reads a missing entry, a symbolic link on the way, or a
+// path out of the snapshot as not found; anything else is a failure.
+func snapshotOpenError(path string, err error) error {
+	for _, missing := range []error{unix.ENOENT, unix.ENOTDIR, unix.ELOOP, unix.EXDEV} {
+		if errors.Is(err, missing) {
+			return files.ErrNotFound
+		}
+	}
+	return &os.PathError{Op: "open", Path: path, Err: err}
 }
 
 func (e *Executor) Delete(ctx context.Context, spaceID, snapshotID string) error {
