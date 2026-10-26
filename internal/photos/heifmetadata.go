@@ -1,173 +1,217 @@
 package photos
 
 import (
-	"encoding/binary"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
+
+	"github.com/abema/go-mp4"
 )
+
+// go-mp4 walks the ISO-BMFF boxes; it does not define the HEIF item property
+// boxes (ISO/IEC 23008-12), so they are declared here for its unmarshaller.
+var (
+	boxTypePitm = mp4.StrToBoxType("pitm")
+	boxTypeIprp = mp4.StrToBoxType("iprp")
+	boxTypeIpco = mp4.StrToBoxType("ipco")
+	boxTypeIpma = mp4.StrToBoxType("ipma")
+	boxTypeIspe = mp4.StrToBoxType("ispe")
+	boxTypeIrot = mp4.StrToBoxType("irot")
+)
+
+func init() {
+	mp4.AddBoxDef(&heifPitm{}, 0, 1)
+	mp4.AddBoxDef(&heifIprp{})
+	mp4.AddBoxDef(&heifIpco{})
+	mp4.AddBoxDef(&heifIpma{}, 0, 1)
+	mp4.AddBoxDef(&heifIspe{}, 0)
+	mp4.AddBoxDef(&heifIrot{})
+}
+
+// Version 0 boxes use 16-bit item IDs and version 1 32-bit ones; the field of
+// the other version stays zero.
+type heifPitm struct {
+	mp4.FullBox `mp4:"0,extend"`
+	ItemIDV0    uint16 `mp4:"1,size=16,ver=0"`
+	ItemIDV1    uint32 `mp4:"2,size=32,nver=0"`
+}
+
+func (*heifPitm) GetType() mp4.BoxType { return boxTypePitm }
+
+type heifIprp struct{ mp4.Box }
+
+func (*heifIprp) GetType() mp4.BoxType { return boxTypeIprp }
+
+type heifIpco struct{ mp4.Box }
+
+func (*heifIpco) GetType() mp4.BoxType { return boxTypeIpco }
+
+type heifIpma struct {
+	mp4.FullBox `mp4:"0,extend"`
+	EntryCount  uint32          `mp4:"1,size=32"`
+	Entries     []heifIpmaEntry `mp4:"2,len=dynamic"`
+}
+
+func (*heifIpma) GetType() mp4.BoxType { return boxTypeIpma }
+
+func (ipma *heifIpma) GetFieldLength(string, mp4.Context) uint { return uint(ipma.EntryCount) }
+
+type heifIpmaEntry struct {
+	mp4.BaseCustomFieldObject
+	ItemIDV0         uint16            `mp4:"0,size=16,ver=0"`
+	ItemIDV1         uint32            `mp4:"1,size=32,nver=0"`
+	AssociationCount uint8             `mp4:"2,size=8"`
+	Associations     []heifAssociation `mp4:"3,len=dynamic"`
+}
+
+func (entry *heifIpmaEntry) GetFieldLength(string, mp4.Context) uint {
+	return uint(entry.AssociationCount)
+}
+
+// Flag 1 widens property indices from 7 to 15 bits; the other field stays zero.
+type heifAssociation struct {
+	Essential bool   `mp4:"0,size=1"`
+	Index     uint16 `mp4:"1,size=7,nopt=0x000001"`
+	IndexWide uint16 `mp4:"2,size=15,opt=0x000001"`
+}
+
+type heifIspe struct {
+	mp4.FullBox `mp4:"0,extend"`
+	Width       uint32 `mp4:"1,size=32"`
+	Height      uint32 `mp4:"2,size=32"`
+}
+
+func (*heifIspe) GetType() mp4.BoxType { return boxTypeIspe }
+
+type heifIrot struct {
+	mp4.Box
+	Reserved uint8 `mp4:"0,size=6"`
+	Angle    uint8 `mp4:"1,size=2"`
+}
+
+func (*heifIrot) GetType() mp4.BoxType { return boxTypeIrot }
+
+// go-mp4 allocates a few KiB for each box it visits and each ipma entry it
+// decodes, so the walk is bounded by box count and by the bytes it reads. Both
+// limits sit far above real files and above libheif's default security limits
+// (100 children per box, 1000 items), beyond which the Media Worker could not
+// decode the file anyway.
+const (
+	maxHEIFBoxes    = 4096
+	maxHEIFMetadata = 64 << 10
+)
+
+// heifProperty is one ipco child at its one-based index. Only the properties
+// that set display dimensions are read; a broken one fails only if the
+// primary item uses it.
+type heifProperty struct {
+	box mp4.IBox
+	err error
+}
 
 // HEIF display dimensions come from the primary item's associated properties,
 // not an EXIF thumbnail or one of the tiles of a grid image. All metadata reads
-// are bounded and skip mdat/mpvd payloads without allocating them.
+// are bounded and skip mdat/mpvd payloads without reading them.
 func heifDimensions(file *os.File) (int, int, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return 0, 0, err
 	}
 	var primary uint32
-	var properties [][]byte
-	var associations []byte
-	budget := int64(maxMotionMetadata)
-	var walk func(int64, int64, int) error
-	walk = func(start, end int64, depth int) error {
-		if depth > 4 {
-			return ErrUnsupportedType
+	var properties []heifProperty
+	var associations []*heifIpma
+	boxes, budget := 0, int64(maxHEIFMetadata)
+	read := func(h *mp4.ReadHandle) (mp4.IBox, uint64, error) {
+		if budget -= int64(h.BoxInfo.Size - h.BoxInfo.HeaderSize); budget < 0 {
+			return nil, 0, ErrTooLarge
 		}
-		for pos := start; pos+8 <= end; {
-			var header [16]byte
-			if _, err := file.ReadAt(header[:8], pos); err != nil {
-				return err
-			}
-			size := int64(binary.BigEndian.Uint32(header[:4]))
-			head := int64(8)
-			if size == 1 {
-				if _, err := file.ReadAt(header[8:], pos+8); err != nil {
-					return err
-				}
-				raw := binary.BigEndian.Uint64(header[8:])
-				if raw > uint64(end-pos) {
-					return ErrUnsupportedType
-				}
-				size = int64(raw)
-				head = 16
-			}
-			if size == 0 {
-				size = end - pos
-			}
-			if size < head || size > end-pos {
-				return ErrUnsupportedType
-			}
-			budget -= head
-			if budget < 0 || len(properties) > 32767 {
-				return ErrTooLarge
-			}
-			kind := string(header[4:8])
-			body := pos + head
-			switch kind {
-			case "meta":
-				if err := walk(body+4, pos+size, depth+1); err != nil {
-					return err
-				}
-			case "iprp", "ipco":
-				if err := walk(body, pos+size, depth+1); err != nil {
-					return err
-				}
-			case "pitm", "ipma", "ispe", "irot", "imir", "hvcC", "pixi", "colr", "auxC", "clap":
-				count := size - head
-				if count > budget {
-					return ErrTooLarge
-				}
-				budget -= count
-				data := make([]byte, count)
-				if _, err := file.ReadAt(data, body); err != nil && err != io.EOF {
-					return err
-				}
-				if kind == "pitm" {
-					if len(data) < 6 {
-						return ErrUnsupportedType
-					}
-					if data[0] == 0 {
-						primary = uint32(binary.BigEndian.Uint16(data[4:]))
-					} else {
-						if len(data) < 8 {
-							return ErrUnsupportedType
-						}
-						primary = binary.BigEndian.Uint32(data[4:])
-					}
-				}
-				if kind == "ipma" {
-					associations = data
-				}
-				// Properties retain their one-based indices, including ignored types.
-				if depth == 3 {
-					properties = append(properties, append([]byte(kind), data...))
-				}
-			default:
-				if depth == 3 {
-					properties = append(properties, nil)
-				}
-			}
-			pos += size
+		return h.ReadPayload()
+	}
+	_, err = mp4.ReadBoxStructure(io.NewSectionReader(file, 0, info.Size()), func(h *mp4.ReadHandle) (any, error) {
+		box := h.BoxInfo
+		if box.Size < box.HeaderSize || box.Offset+box.Size > uint64(info.Size()) {
+			return nil, ErrUnsupportedType
 		}
-		return nil
-	}
-	if err := walk(0, info.Size(), 0); err != nil {
-		return 0, 0, err
-	}
-	if primary == 0 || len(associations) < 8 {
+		if boxes++; boxes > maxHEIFBoxes {
+			return nil, ErrTooLarge
+		}
+		payload := box.Size - box.HeaderSize
+		// Containers are expanded only along meta/iprp/ipco, so the depth
+		// names the parent.
+		switch depth := len(h.Path); {
+		case depth == 1 && box.Type == mp4.BoxTypeMeta(),
+			depth == 2 && box.Type == boxTypeIprp,
+			depth == 3 && box.Type == boxTypeIpco:
+			_, err := h.Expand()
+			return nil, err
+		case depth == 2 && box.Type == boxTypePitm:
+			pitm, _, err := read(h)
+			if err != nil {
+				return nil, err
+			}
+			primary = uint32(pitm.(*heifPitm).ItemIDV0) + pitm.(*heifPitm).ItemIDV1
+		case depth == 3 && box.Type == boxTypeIpma:
+			ipma, _, err := read(h)
+			if err != nil {
+				return nil, err
+			}
+			associations = append(associations, ipma.(*heifIpma))
+		case depth == 4:
+			var property heifProperty
+			switch box.Type {
+			case boxTypeIspe:
+				var n uint64
+				property.box, n, property.err = read(h)
+				if property.err == nil && n != payload {
+					property.err = ErrUnsupportedType
+				}
+			case boxTypeIrot:
+				// irot is one byte; any other size is ignored.
+				if payload == 1 {
+					property.box, _, property.err = read(h)
+				}
+			}
+			if heifFatal(property.err) {
+				return nil, property.err
+			}
+			properties = append(properties, property)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		if heifFatal(err) {
+			return 0, 0, err
+		}
 		return 0, 0, ErrUnsupportedType
 	}
-	data := associations
-	version := data[0]
-	wide := data[3]&1 != 0
-	entries := binary.BigEndian.Uint32(data[4:])
-	pos := 8
-	var indices []int
-	for range entries {
-		width := 2
-		if version >= 1 {
-			width = 4
-		}
-		if pos+width+1 > len(data) {
-			return 0, 0, ErrUnsupportedType
-		}
-		id := uint32(binary.BigEndian.Uint16(data[pos:]))
-		if width == 4 {
-			id = binary.BigEndian.Uint32(data[pos:])
-		}
-		pos += width
-		count := int(data[pos])
-		pos++
-		for range count {
-			width = 1
-			if wide {
-				width = 2
-			}
-			if pos+width > len(data) {
-				return 0, 0, ErrUnsupportedType
-			}
-			index := int(data[pos] & 0x7f)
-			if wide {
-				index = int(binary.BigEndian.Uint16(data[pos:]) & 0x7fff)
-			}
-			pos += width
-			if id == primary {
-				indices = append(indices, index)
-			}
-		}
+	if primary == 0 || len(associations) == 0 {
+		return 0, 0, ErrUnsupportedType
 	}
 	w, h, rotation := 0, 0, 0
-	for _, index := range indices {
-		if index == 0 {
-			continue
-		}
-		if index > len(properties) {
-			return 0, 0, ErrUnsupportedType
-		}
-		p := properties[index-1]
-		if len(p) < 4 {
-			continue
-		}
-		switch string(p[:4]) {
-		case "ispe":
-			if len(p) != 16 {
-				return 0, 0, ErrUnsupportedType
+	for _, ipma := range associations {
+		for _, entry := range ipma.Entries {
+			if uint32(entry.ItemIDV0)+entry.ItemIDV1 != primary {
+				continue
 			}
-			w = int(binary.BigEndian.Uint32(p[8:12]))
-			h = int(binary.BigEndian.Uint32(p[12:16]))
-		case "irot":
-			if len(p) == 5 {
-				rotation = int(p[4] & 3)
+			for _, association := range entry.Associations {
+				index := int(association.Index + association.IndexWide)
+				if index == 0 {
+					continue
+				}
+				if index > len(properties) {
+					return 0, 0, ErrUnsupportedType
+				}
+				property := properties[index-1]
+				if property.err != nil {
+					return 0, 0, ErrUnsupportedType
+				}
+				switch box := property.box.(type) {
+				case *heifIspe:
+					w, h = int(box.Width), int(box.Height)
+				case *heifIrot:
+					rotation = int(box.Angle)
+				}
 			}
 		}
 	}
@@ -181,4 +225,11 @@ func heifDimensions(file *os.File) (int, int, error) {
 		w, h = h, w
 	}
 	return w, h, nil
+}
+
+// heifFatal reports the errors that are not about the file's format: the
+// metadata budget and I/O.
+func heifFatal(err error) bool {
+	var pathErr *fs.PathError
+	return errors.Is(err, ErrTooLarge) || errors.As(err, &pathErr)
 }
