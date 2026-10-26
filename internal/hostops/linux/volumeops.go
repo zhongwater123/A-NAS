@@ -44,7 +44,7 @@ type operationsDocument struct {
 // StartCreateVolume starts erasing the planned disks and formatting them as
 // the data volume in the background.
 func (e *Executor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
-	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || len(request.Disks) == 0 || !request.Layout.Fits(len(request.Disks)) {
+	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(request.Disks) || !request.Layout.Fits(len(request.Disks)) {
 		return storage.VolumeOperation{}, errors.New("invalid create-volume request")
 	}
 	return e.startOperation(volumeOperation{
@@ -55,7 +55,7 @@ func (e *Executor) StartCreateVolume(_ context.Context, request storage.CreateVo
 // StartAddDisks starts erasing the planned disks and adding them to the
 // mounted data volume in the background.
 func (e *Executor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
-	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || len(request.Disks) == 0 || request.Layout == storage.LayoutSingle ||
+	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(request.Disks) || request.Layout == storage.LayoutSingle ||
 		!request.Layout.Fits(len(request.Disks)+1) || !filesystemUUIDPattern.MatchString(request.FilesystemUUID) {
 		return storage.VolumeOperation{}, errors.New("invalid add-disks request")
 	}
@@ -256,6 +256,13 @@ func (e *Executor) loadOperations() error {
 	return nil
 }
 
+// validDiskTargets reports whether a request names its disks, each by an ID.
+// A request is checked with it before it is journaled and the journal again
+// when it loads, so the Host Agent never writes a journal it then refuses.
+func validDiskTargets(disks []storage.DiskTarget) bool {
+	return len(disks) > 0 && !slices.ContainsFunc(disks, func(disk storage.DiskTarget) bool { return strings.TrimSpace(disk.DiskID) == "" })
+}
+
 // validRecordedOperation checks a journal entry against what the requests
 // that start operations accept and the steps each kind goes through. Only a
 // volume creation formats filesystems, and only a successful operation
@@ -265,7 +272,7 @@ func validRecordedOperation(operation *volumeOperation) error {
 		return errors.New("an operation has no plan")
 	}
 	invalid := fmt.Errorf("the operation of plan %s is invalid", operation.PlanID)
-	if len(operation.Disks) == 0 || slices.ContainsFunc(operation.Disks, func(disk storage.DiskTarget) bool { return strings.TrimSpace(disk.DiskID) == "" }) {
+	if !validDiskTargets(operation.Disks) {
 		return invalid
 	}
 	var steps []storage.OperationStep

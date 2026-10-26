@@ -93,9 +93,6 @@ func (e *Executor) moveStateFile(legacy, path string) (bool, error) {
 	if err := writeAtomic(path, contents, 0o600); err != nil {
 		return false, fmt.Errorf("move %s: %w", filepath.Base(legacy), err)
 	}
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
-		return false, fmt.Errorf("move %s: %w", filepath.Base(legacy), err)
-	}
 	// The copy is in use either way; an original left behind is dropped on
 	// the next start.
 	if err := os.Remove(legacy); err != nil {

@@ -490,7 +490,9 @@ func writeAtomic(path string, contents []byte, mode os.FileMode) error {
 		return err
 	}
 	committed = true
-	return nil
+	// The rename is on disk only once the directory is: records such as the
+	// operation journal must survive a power cut right after they are written.
+	return syncDirectory(filepath.Dir(path))
 }
 
 type execCommandRunner struct{}
