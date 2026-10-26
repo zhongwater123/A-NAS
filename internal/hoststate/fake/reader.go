@@ -54,6 +54,25 @@ func NewUnavailable() *Reader {
 	return &Reader{err: errUnavailable}
 }
 
+// NewWithUnusableDisks keeps a usable disk alongside an empty card reader
+// and two disks reporting the same hardware identity.
+func NewWithUnusableDisks() *Reader {
+	state := baseState()
+	state.Disks = append(state.Disks, hoststate.Disk{
+		ID: mustResourceID("observation:empty-reader"), Transport: hoststate.TransportUSB,
+		Role: hoststate.DiskRoleUnassigned, Health: hoststate.HealthUnknown, SMARTStatus: hoststate.HealthUnknown,
+		ObservationIssues: []hoststate.DiskObservationIssue{hoststate.DiskMissingModel, hoststate.DiskMissingCapacity, hoststate.DiskMissingIdentity},
+	})
+	for _, id := range []string{"observation:duplicate-1", "observation:duplicate-2"} {
+		state.Disks = append(state.Disks, hoststate.Disk{
+			ID: mustResourceID(id), Model: "Duplicate bridge", CapacityBytes: 512_000_000_000, Transport: hoststate.TransportSATA,
+			Role: hoststate.DiskRoleUnassigned, Health: hoststate.HealthUnknown, SMARTStatus: hoststate.HealthUnknown,
+			ObservationIssues: []hoststate.DiskObservationIssue{hoststate.DiskDuplicateIdentity},
+		})
+	}
+	return newReader(state)
+}
+
 func newReader(state hoststate.State) *Reader {
 	sort.Slice(state.Disks, func(i, j int) bool {
 		return state.Disks[i].ID.String() < state.Disks[j].ID.String()
@@ -153,6 +172,7 @@ func cloneState(state hoststate.State) hoststate.State {
 		}
 		cloned.Disks[i].Filesystems = append([]string(nil), disk.Filesystems...)
 		cloned.Disks[i].Signatures = append([]hoststate.Signature(nil), disk.Signatures...)
+		cloned.Disks[i].ObservationIssues = append([]hoststate.DiskObservationIssue(nil), disk.ObservationIssues...)
 	}
 	if state.DataVolume != nil {
 		volume := *state.DataVolume

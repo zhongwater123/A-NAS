@@ -277,6 +277,9 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 		filesystems = []string{}
 	}
 	reasons := make([]string, 0, 4)
+	for _, issue := range disk.ObservationIssues {
+		reasons = append(reasons, string(issue))
+	}
 	switch disk.Role {
 	case hoststate.DiskRoleSystem:
 		reasons = append(reasons, "system_disk")

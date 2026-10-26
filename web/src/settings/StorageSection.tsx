@@ -576,6 +576,12 @@ function ConversionProgress({
 }
 
 const reasonText: Record<string, string> = {
+  missing_identity: "无法识别硬盘的稳定身份",
+  duplicate_identity: "硬盘身份与其他设备重复，不能安全选择",
+  missing_model: "设备未提供型号",
+  missing_capacity: "未检测到存储介质或容量未知",
+  read_only: "设备为只读，不能加入数据卷",
+  invalid_device_name: "设备信息无效，不能加入数据卷",
   unsupported_transport: "USB 等外接硬盘不能加入数据卷",
   removable: "可移除设备不能加入数据卷",
   in_use: "正被挂载、磁盘阵列、LVM 或加密卷使用",
@@ -596,13 +602,13 @@ function DiskRow({ disk }: { disk: Disk }) {
     unassigned: { label: "未使用", tone: "neutral" as Tone },
   }[disk.role];
   const spare = disk.role === "unassigned";
-  const blocked = spare && !disk.eligibleForDataVolume ? ineligibleText(disk) : "";
+  const blocked = !disk.eligibleForDataVolume ? ineligibleText(disk) : "";
   return (
     <div className="set-row">
       <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} size="lg" />
       <div className="set-row-text">
         <span>
-          <strong>{disk.model}</strong>
+          <strong>{disk.model || "未识别设备"}</strong>
           <Pill tone={role.tone} outline={spare}>
             {role.label}
           </Pill>
@@ -620,10 +626,16 @@ function DiskRow({ disk }: { disk: Disk }) {
       </div>
       <div className="disk-end">
         <strong
-          title={`硬盘标称 ${formatNominalCapacity(disk.capacityBytes)}：厂商按 1000 进制计算，这里按 1024 进制（GiB），所以数字更小`}
+          title={
+            disk.capacityBytes > 0
+              ? `硬盘标称 ${formatNominalCapacity(disk.capacityBytes)}：厂商按 1000 进制计算，这里按 1024 进制（GiB），所以数字更小`
+              : undefined
+          }
         >
-          {formatBytes(disk.capacityBytes)}
-          <span className="disk-nominal">标称 {formatNominalCapacity(disk.capacityBytes)}</span>
+          {disk.capacityBytes > 0 ? formatBytes(disk.capacityBytes) : "容量未知"}
+          {disk.capacityBytes > 0 && (
+            <span className="disk-nominal">标称 {formatNominalCapacity(disk.capacityBytes)}</span>
+          )}
         </strong>
         <small className={`tone-${health.tone}`}>
           <span className="set-dot" />
@@ -832,7 +844,7 @@ function VolumeWizard({
                       <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} />
                       <span className="set-row-text">
                         <span>
-                          <strong>{disk.model}</strong>
+                          <strong>{disk.model || "未识别设备"}</strong>
                           {disk.filesystems.length > 0 && (
                             <Pill tone="warning" outline>
                               有旧数据
@@ -845,7 +857,9 @@ function VolumeWizard({
                         </small>
                         {blocked && <small className="wiz-reason">{ineligibleText(disk) || "不能使用这块硬盘"}</small>}
                       </span>
-                      <strong className="wiz-disk-size">{formatBytes(disk.capacityBytes)}</strong>
+                      <strong className="wiz-disk-size">
+                        {disk.capacityBytes > 0 ? formatBytes(disk.capacityBytes) : "容量未知"}
+                      </strong>
                     </label>
                   );
                 })}
