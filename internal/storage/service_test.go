@@ -233,6 +233,26 @@ type stateReader struct {
 	failing bool
 }
 
+func TestUnusableDiskObservationsCannotBePlanned(t *testing.T) {
+	reader := fake.NewWithUnusableDisks()
+	state, err := reader.Read(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{})
+	for _, disk := range state.Disks {
+		if len(disk.ObservationIssues) == 0 {
+			continue
+		}
+		if _, err := service.PlanVolume(t.Context(), []string{disk.ID.String()}, ""); !errors.Is(err, storage.ErrDiskNotEligible) {
+			t.Fatalf("plan for %s = %v, want ErrDiskNotEligible", disk.ID, err)
+		}
+	}
+	if _, err := service.PlanVolume(t.Context(), []string{"disk:fake-data-01"}, ""); err != nil {
+		t.Fatalf("unusable devices blocked healthy disk plan: %v", err)
+	}
+}
+
 func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
 	r.reads++
 	if err := ctx.Err(); err != nil {

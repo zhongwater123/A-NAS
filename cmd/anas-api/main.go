@@ -341,7 +341,7 @@ func run(logger *slog.Logger) error {
 		// like everything else.
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	tasks.Go(func() error { syncIdentities(background, accountService, logger); return nil })
+	tasks.Go(func() error { syncIdentities(background, accountService.SyncIdentities, logger); return nil })
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A
 	// snapshot that stopping interrupts is deleted again before the catalog
@@ -445,13 +445,38 @@ func configuredMediaWorker(config Config) mediaworker.Worker {
 	return nil
 }
 
+// The pause before synchronizing identities again after a failure, doubling
+// up to identitySyncRetryMax. Tests shorten them.
+var (
+	identitySyncRetryMin = 2 * time.Second
+	identitySyncRetryMax = 15 * time.Minute
+)
+
 // syncIdentities converges host accounts on the control plane at startup, so
-// accounts created before ADR 0008 receive their A-NAS UID and groups.
-func syncIdentities(ctx context.Context, accountService *accounts.Service, logger *slog.Logger) {
-	syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	if err := accountService.SyncIdentities(syncCtx); err != nil {
-		logger.ErrorContext(ctx, "identity synchronization failed", "error", err)
+// accounts created before ADR 0008 receive their A-NAS UID and groups, and
+// disabled accounts lose their SMB sessions. It tries again until it
+// succeeds: when both services restart together, the Host Agent may not be
+// accepting connections yet.
+func syncIdentities(ctx context.Context, sync func(context.Context) error, logger *slog.Logger) {
+	delay := identitySyncRetryMin
+	for attempt := 1; ; attempt++ {
+		syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err := sync(syncCtx)
+		cancel()
+		if err == nil {
+			logger.InfoContext(ctx, "identity synchronization succeeded", "attempt", attempt)
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		logger.ErrorContext(ctx, "identity synchronization failed", "error", err, "attempt", attempt, "retry", delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, identitySyncRetryMax)
 	}
 }
 

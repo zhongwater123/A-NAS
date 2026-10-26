@@ -476,6 +476,43 @@ describe("Settings", () => {
     expect(within(settings).queryByRole("region", { name: "初始化数据卷" })).toBeNull();
   });
 
+  it("shows unusable devices with reasons and never offers them for initialization", async () => {
+    const unusable: Disk[] = [
+      {
+        ...healthyState.disks[0],
+        id: "observation:empty",
+        model: "",
+        capacityBytes: 0,
+        eligibleForDataVolume: false,
+        ineligibleReasons: ["missing_model", "missing_capacity", "missing_identity"],
+      },
+      ...["one", "two"].map(
+        (name): Disk => ({
+          ...healthyState.disks[0],
+          id: `observation:${name}`,
+          model: `Bridge ${name}`,
+          eligibleForDataVolume: false,
+          ineligibleReasons: ["duplicate_identity"],
+        }),
+      ),
+    ];
+    installAPI({ hostState: { ...healthyState, disks: [...healthyState.disks, ...unusable] }, volumes: [] });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "存储");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(await within(settings).findByText("未识别设备")).toBeTruthy();
+    expect(within(settings).getByText("容量未知")).toBeTruthy();
+    expect(within(settings).getAllByText("硬盘身份与其他设备重复，不能安全选择")).toHaveLength(2);
+    await user.click(within(settings).getByRole("button", { name: "初始化数据卷…" }));
+    const candidates = within(settings).getByRole("group", { name: "候选硬盘" });
+    for (const box of within(candidates).getAllByRole("checkbox")) {
+      const input = box as HTMLInputElement;
+      expect(input.disabled).toBe(input.value.startsWith("observation:"));
+    }
+    expect(within(candidates).getAllByRole("checkbox")).toHaveLength(4);
+  });
+
   it("adds a new disk to the data volume as a mirror", async () => {
     const dataDisk: Disk = {
       ...healthyState.disks[0],

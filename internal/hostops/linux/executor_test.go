@@ -147,6 +147,11 @@ func (r *recordingRunner) Run(_ context.Context, name string, args []string, std
 	return nil, nil
 }
 
+// Output is Run: the recorded commands print nothing on standard error.
+func (r *recordingRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return r.Run(ctx, name, args, stdin)
+}
+
 type accountFailureRunner struct{}
 
 func (accountFailureRunner) Run(_ context.Context, name string, _ []string, _ string) ([]byte, error) {
@@ -158,4 +163,8 @@ func (accountFailureRunner) Run(_ context.Context, name string, _ []string, _ st
 	default:
 		return nil, nil
 	}
+}
+
+func (r accountFailureRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return r.Run(ctx, name, args, stdin)
 }

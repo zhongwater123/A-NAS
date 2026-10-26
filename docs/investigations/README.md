@@ -4,6 +4,8 @@
 
 ## 索引
 
+- [2026-10-26：旧目录响应覆盖当前文件列表，重命名变成移动](2026-10-26-file-listing-navigation-race.md)（fixed）
+- [2026-10-26：未识别块设备阻断整次宿主机观测](2026-10-26-unidentified-device-blocks-host-state.md)（fixed locally，#183）
 - [2026-10-06：本地 Kiosk 可进入通用 Chromium 界面](2026-10-06-kiosk-browser-confinement.md)（open, deferred for developer baseline）
 - [2026-10-06：Host Agent 无法创建运行时 Socket](2026-10-06-host-agent-runtime-directory.md)（resolved）
 - [2026-10-06：桌面时钟持续落后于系统时间](2026-10-06-system-clock-drift-and-network-sync.md)（resolved）
@@ -48,6 +50,8 @@
 - [2026-10-21：媒体 Worker 短暂不可用让 HEIC 与视频的缩略图和 AI 永久失败](2026-10-21-media-worker-shared-budget.md)（fixed locally；Experimental NAS verification pending）
 
 - [2026-10-21：每次列目录对账整个空间，大空间下列目录与影视扫描以十秒计](2026-10-21-whole-space-reconcile-scale.md)（fixed locally；待部署验收）
+
+- [2026-10-26：smbstatus 的告警混进 JSON，禁用账号与启动时的身份同步失败](2026-10-26-smbstatus-warning-fails-identity-sync.md)（fixed locally in PR #261；Experimental NAS verification pending）
 
 ## 使用方式
 

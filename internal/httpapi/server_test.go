@@ -1,10 +1,12 @@
 package httpapi_test
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -63,6 +65,49 @@ func TestDisksEndpointReturnsStableOrderedInventory(t *testing.T) {
 	const want = "{\"observedAt\":\"2026-10-06T00:00:00Z\",\"items\":[{\"id\":\"disk:fake-data-01\",\"model\":\"A-NAS Fake HDD\",\"transport\":\"sata\",\"capacityBytes\":512000000000,\"rotational\":true,\"removable\":false,\"inUse\":false,\"filesystems\":[],\"role\":\"unassigned\",\"health\":\"healthy\",\"smartStatus\":\"healthy\",\"eligibleForDataVolume\":true,\"ineligibleReasons\":[],\"temperatureCelsius\":31},{\"id\":\"disk:fake-system-01\",\"model\":\"A-NAS Fake SSD\",\"transport\":\"nvme\",\"capacityBytes\":125000000000,\"rotational\":false,\"removable\":false,\"inUse\":true,\"filesystems\":[\"ext4\"],\"role\":\"system\",\"health\":\"healthy\",\"smartStatus\":\"healthy\",\"eligibleForDataVolume\":false,\"ineligibleReasons\":[\"system_disk\",\"in_use\"],\"temperatureCelsius\":36}]}\n"
 	if got := recorder.Body.String(); got != want {
 		t.Fatalf("body = %s, want %s", got, want)
+	}
+}
+
+func TestUnusableDisksStayVisibleAndIneligibleInThePublicContract(t *testing.T) {
+	handler := contractChecked(t, newHandler(fake.NewWithUnusableDisks()))
+	for _, path := range []string{"/api/v1/disks", "/api/v1/host-state", "/api/v1/system"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s = %d: %s", path, recorder.Code, recorder.Body.String())
+		}
+		if path != "/api/v1/disks" {
+			continue
+		}
+		var body struct {
+			Items []struct {
+				ID       string   `json:"id"`
+				Eligible bool     `json:"eligibleForDataVolume"`
+				Reasons  []string `json:"ineligibleReasons"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Items) != 5 {
+			t.Fatalf("items = %+v", body.Items)
+		}
+		for _, disk := range body.Items {
+			switch disk.ID {
+			case "disk:fake-data-01":
+				if !disk.Eligible {
+					t.Fatal("healthy disk unavailable")
+				}
+			case "observation:empty-reader":
+				if disk.Eligible || !slices.Contains(disk.Reasons, "missing_capacity") || !slices.Contains(disk.Reasons, "missing_identity") {
+					t.Fatalf("empty reader = %+v", disk)
+				}
+			case "observation:duplicate-1", "observation:duplicate-2":
+				if disk.Eligible || !slices.Contains(disk.Reasons, "duplicate_identity") {
+					t.Fatalf("duplicate = %+v", disk)
+				}
+			}
+		}
 	}
 }
 

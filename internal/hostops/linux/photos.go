@@ -98,7 +98,7 @@ func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceU
 		return false, err
 	}
 	target := openedPath(directory)
-	current, err := e.runner.Run(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
+	current, err := e.runner.Output(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
 	if err != nil {
 		return false, commandError("read owned store ACL", err, current)
 	}

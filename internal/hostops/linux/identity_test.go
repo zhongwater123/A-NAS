@@ -146,6 +146,57 @@ func TestDisableCredentialDisconnectsEstablishedSMBSessions(t *testing.T) {
 	}
 }
 
+// Under the Host Agent's unit, which allows only AF_UNIX sockets, smbstatus
+// prints a warning on standard error before its JSON. Mixed into the output,
+// the warning failed every disable and every identity synchronization of a
+// disabled account with a Samba entry: "decode SMB sessions: invalid
+// character 'W'".
+func TestSMBSessionsAreFoundPastAWarningOnStandardError(t *testing.T) {
+	bob := accounts.Identity{Username: "bob", UID: 20101, Role: accounts.RoleMember}
+	for _, test := range []struct {
+		name    string
+		disable func(context.Context, *linux.Executor) error
+	}{
+		{name: "disable", disable: func(ctx context.Context, executor *linux.Executor) error {
+			enabled := bob
+			enabled.Enabled = true
+			if err := executor.SyncIdentities(ctx, []accounts.Identity{enabled}); err != nil {
+				return err
+			}
+			return executor.DisableCredential(ctx, bob.Username)
+		}},
+		{name: "synchronize", disable: func(ctx context.Context, executor *linux.Executor) error {
+			return executor.SyncIdentities(ctx, []accounts.Identity{bob})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			host := newFakeHost()
+			host.samba["bob"] = true
+			host.stderr["smbstatus"] = "WARNING: no network interfaces found\n"
+			host.smbstatus = `{"sessions": {"1": {"session_id": "1", "server_id": {"pid": "42"}, "username": "bob"}}}`
+			systemRoot := t.TempDir()
+			executor := linux.NewExecutor(nil, host, linux.Options{SystemRoot: systemRoot, MountPoint: filepath.Join(t.TempDir(), "data")})
+
+			if err := test.disable(context.Background(), executor); err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			if !host.ran("smbcontrol 42 shutdown") {
+				t.Fatalf("the session was not disconnected:\n%s", strings.Join(host.commands, "\n"))
+			}
+			registry, err := os.ReadFile(filepath.Join(systemRoot, "var", "lib", "a-nas-host", "identity-registry.json"))
+			if err != nil {
+				t.Fatalf("read identity registry: %v", err)
+			}
+			var records map[string]struct {
+				Enabled bool `json:"enabled"`
+			}
+			if err := json.Unmarshal(registry, &records); err != nil || records["bob"].Enabled {
+				t.Fatalf("identity registry = %s (err %v), want bob disabled", registry, err)
+			}
+		})
+	}
+}
+
 func TestSyncIdentitiesContinuesPastAConflictingAccount(t *testing.T) {
 	host := newFakeHost()
 	host.users["admin"] = [2]int{999, 999}
@@ -212,16 +263,24 @@ type fakeHost struct {
 	groups    map[string]int
 	samba     map[string]bool
 	smbstatus string
-	commands  []string
+	// stderr is what a command prints on standard error even when it
+	// succeeds: Run returns it before the output, Output leaves it out.
+	stderr   map[string]string
+	commands []string
 }
 
 func newFakeHost() *fakeHost {
-	return &fakeHost{users: map[string][2]int{"root": {0, 0}}, groups: map[string]int{"root": 0}, samba: map[string]bool{}}
+	return &fakeHost{users: map[string][2]int{"root": {0, 0}}, groups: map[string]int{"root": 0}, samba: map[string]bool{}, stderr: map[string]string{}}
 }
 
 func (h *fakeHost) ran(command string) bool { return slices.Contains(h.commands, command) }
 
-func (h *fakeHost) Run(_ context.Context, name string, args []string, _ string) ([]byte, error) {
+func (h *fakeHost) Run(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	output, err := h.Output(ctx, name, args, stdin)
+	return append([]byte(h.stderr[name]), output...), err
+}
+
+func (h *fakeHost) Output(_ context.Context, name string, args []string, _ string) ([]byte, error) {
 	h.commands = append(h.commands, strings.TrimSpace(name+" "+strings.Join(args, " ")))
 	switch name {
 	case "getent":

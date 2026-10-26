@@ -278,11 +278,13 @@ describe("file manager", () => {
     );
     const inspector = within(dialog).getByRole("complementary", { name: "详细信息" });
     expect(within(inspector).queryByRole("button")).toBeNull();
-    await user.dblClick(
-      within(dialog)
-        .getAllByRole("row")
-        .find((row) => row.textContent?.includes("图库"))!,
-    );
+    // Pasting refreshes asynchronously; do not click a row that the loading
+    // state is about to remove from the document.
+    await waitFor(() => {
+      expect(within(dialog).queryByText("正在复制 1 个项目…")).toBeNull();
+      expect(within(dialog).getByRole("table", { name: "文件列表" }).getAttribute("aria-busy")).toBe("false");
+    });
+    await user.dblClick(await within(dialog).findByRole("row", { name: /图库/ }));
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 

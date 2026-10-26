@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1044,6 +1045,8 @@ type operatingSystemDocument struct {
 }
 
 type diskDocument struct {
+	ObservationIssues []hoststate.DiskObservationIssue `json:"observationIssues,omitempty"`
+
 	ID                       string              `json:"id"`
 	Model                    string              `json:"model"`
 	Transport                hoststate.Transport `json:"transport"`
@@ -1067,6 +1070,7 @@ func documentFromDomain(state hoststate.State) stateDocument {
 	disks := make([]diskDocument, len(state.Disks))
 	for i, disk := range state.Disks {
 		disks[i] = diskDocument{
+			ObservationIssues:        append([]hoststate.DiskObservationIssue(nil), disk.ObservationIssues...),
 			ID:                       disk.ID.String(),
 			Model:                    disk.Model,
 			Transport:                disk.Transport,
@@ -1155,8 +1159,18 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			return hoststate.State{}, errors.New("duplicate disk ID")
 		}
 		seen[id.String()] = struct{}{}
-		if strings.TrimSpace(disk.Model) == "" || disk.CapacityBytes == 0 || !validTransport(disk.Transport) || !validRole(disk.Role) || !validHealth(disk.Health) || !validHealth(disk.SMARTStatus) {
+		if (strings.TrimSpace(disk.Model) == "" && !slices.Contains(disk.ObservationIssues, hoststate.DiskMissingModel)) ||
+			(disk.CapacityBytes == 0 && !slices.Contains(disk.ObservationIssues, hoststate.DiskMissingCapacity)) ||
+			!validTransport(disk.Transport) || !validRole(disk.Role) || !validHealth(disk.Health) || !validHealth(disk.SMARTStatus) {
 			return hoststate.State{}, errors.New("invalid disk state")
+		}
+		for _, issue := range disk.ObservationIssues {
+			if !issue.Valid() {
+				return hoststate.State{}, errors.New("invalid disk observation issue")
+			}
+		}
+		if strings.HasPrefix(disk.ID, "observation:") && len(disk.ObservationIssues) == 0 {
+			return hoststate.State{}, errors.New("unidentified disk without an observation issue")
 		}
 		if (disk.FilesystemCapacityBytes == nil) != (disk.FilesystemAvailableBytes == nil) {
 			return hoststate.State{}, errors.New("incomplete filesystem usage")
@@ -1180,6 +1194,7 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			signatures = append(signatures, hoststate.Signature{Type: signature.Type, Label: signature.Label, UUID: signature.UUID})
 		}
 		disks[i] = hoststate.Disk{
+			ObservationIssues:        append([]hoststate.DiskObservationIssue(nil), disk.ObservationIssues...),
 			ID:                       id,
 			Model:                    disk.Model,
 			Transport:                disk.Transport,

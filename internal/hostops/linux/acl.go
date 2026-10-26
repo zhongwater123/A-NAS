@@ -211,7 +211,7 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, res
 		return false, existed, err
 	}
 	target := openedPath(directory)
-	current, err := e.runner.Run(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
+	current, err := e.runner.Output(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
 	if err != nil {
 		return false, existed, commandError("read ACL", err, current)
 	}

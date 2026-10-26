@@ -262,7 +262,7 @@ export function FilePanel({
     setContextMenu(undefined);
   };
   const refreshAll = () => {
-    void reload();
+    reload();
     void refreshVolume();
   };
   // Downloads go through the transfer center, which follows their progress;
@@ -361,7 +361,7 @@ export function FilePanel({
       await createDirectory(spaceID, parentID, name);
       form.reset();
       setCreatingDirectory(false);
-      await reload();
+      reload();
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -420,8 +420,8 @@ export function FilePanel({
       if (clipboard.mode === "move") setClipboard(undefined);
       setSelectedItemID("");
       setSelectedItemIDs([]);
-      await Promise.all([reload(), refreshVolume()]);
-      setError("");
+      reload();
+      await refreshVolume();
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -439,12 +439,11 @@ export function FilePanel({
     }
     setActivity(`正在重命名“${renaming.name}”…`);
     try {
-      await moveFile(renaming.id, parentID, name);
+      await moveFile(renaming.id, renaming.parentId ?? "", name);
       setRenaming(undefined);
       setSelectedItemID("");
       setSelectedItemIDs([]);
-      await reload();
-      setError("");
+      reload();
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -459,8 +458,8 @@ export function FilePanel({
       setPendingDelete(undefined);
       setSelectedItemID("");
       setSelectedItemIDs([]);
-      await Promise.all([reload(), refreshVolume()]);
-      setError("");
+      reload();
+      await refreshVolume();
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
