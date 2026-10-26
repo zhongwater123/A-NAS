@@ -120,7 +120,7 @@ func TestFeedbackIsOneListEverySignedInAccountEdits(t *testing.T) {
 	if _, err := accountService.CreateMember(ctx, admin, "member", "member horse battery staple"); err != nil {
 		t.Fatal(err)
 	}
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		Feedback: feedbackapi.New(openFeedback(t), nil), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

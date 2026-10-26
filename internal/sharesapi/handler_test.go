@@ -39,6 +39,9 @@ func fixture(t *testing.T) (*shares.Store, http.Handler, *atomic.Int64) {
 }
 func request(h http.Handler, user, method, url, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, url, strings.NewReader(body))
+	if body != "" {
+		r.Header.Set("Content-Type", "application/json")
+	}
 	if user != "" {
 		r = r.WithContext(WithUser(r.Context(), accounts.User{ID: user, Username: user}))
 	}

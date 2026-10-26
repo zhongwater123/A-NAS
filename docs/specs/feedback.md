@@ -106,5 +106,5 @@
 - 规格：[系统快捷栏](system-rail.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
-- 代码：[反馈存储](../../internal/feedback/feedback.go)、[反馈 API](../../internal/feedbackapi/handler.go)、[产品 API 挂载](../../internal/httpapi/product.go)、[接口契约](../../api/openapi.yaml)、[反馈面板](../../web/src/feedback/FeedbackChannel.tsx)、[撰写框](../../web/src/feedback/FeedbackEditor.tsx)、[评论区](../../web/src/feedback/FeedbackThread.tsx)、[评论存储](../../internal/feedback/comments.go)、[界面截图](../../web/src/feedback/capture.ts) 与[桌面画法](../../web/src/desktopPicture.ts)
+- 代码：[反馈存储](../../internal/feedback/feedback.go)、[反馈 API](../../internal/feedbackapi/handler.go)、[产品 API 挂载](../../internal/httpapi/routes.go)、[接口契约](../../api/openapi.yaml)、[反馈面板](../../web/src/feedback/FeedbackChannel.tsx)、[撰写框](../../web/src/feedback/FeedbackEditor.tsx)、[评论区](../../web/src/feedback/FeedbackThread.tsx)、[评论存储](../../internal/feedback/comments.go)、[界面截图](../../web/src/feedback/capture.ts) 与[桌面画法](../../web/src/desktopPicture.ts)
 - 测试：[反馈存储测试](../../internal/feedback/feedback_test.go)、[评论存储测试](../../internal/feedback/comments_test.go)、[产品 API 测试](../../internal/httpapi/feedback_test.go)、[反馈面板测试](../../web/src/feedback/FeedbackChannel.test.tsx)

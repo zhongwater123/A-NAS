@@ -11,8 +11,10 @@ import (
 	"strings"
 
 	tusd "github.com/tus/tusd/v2/pkg/handler"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 )
 
@@ -134,7 +136,7 @@ func (s uploadStore) failure(ctx context.Context, err error) error {
 }
 
 func uploadError(status int, code, message string) tusd.Error {
-	body, _ := json.Marshal(errorBody(code, message))
+	body, _ := json.Marshal(httpjson.Error{Error: httpjson.ErrorDetail{Code: code, Message: message}})
 	return tusd.Error{
 		ErrorCode: code, Message: message,
 		HTTPResponse: tusd.HTTPResponse{StatusCode: status, Body: string(body), Header: tusd.HTTPHeader{"Content-Type": "application/json"}},

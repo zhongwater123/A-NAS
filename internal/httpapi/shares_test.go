@@ -32,6 +32,8 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 		}
 		w.WriteHeader(204)
 	})
+	// The probe stands in for the share API, so the exchanges are not the
+	// specified ones.
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{Accounts: users, Shares: probe})
 	account := signIn(t, handler, "owner", "correct horse battery staple")
 	for _, path := range []string{"/api/v1/shares", "/api/v1/shares/id/messages", "/api/v1/shares/id/save", "/api/v1/shares/id/revoke"} {

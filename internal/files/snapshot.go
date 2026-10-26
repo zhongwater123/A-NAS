@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -729,6 +730,28 @@ func (s *Service) authorizeSnapshot(ctx context.Context, actor accounts.User, sn
 	}
 	space, _, err := s.authorizedSpace(ctx, actor, snapshot.SpaceID, false)
 	return snapshot, space, err
+}
+
+// unconfiguredSnapshots stands in when NewService was given no snapshot
+// backend: every snapshot operation fails as unavailable.
+type unconfiguredSnapshots struct{}
+
+var errNoSnapshotBackend = fmt.Errorf("%w: no snapshot backend is configured", ErrVolumeUnavailable)
+
+func (unconfiguredSnapshots) Create(context.Context, string, string) error {
+	return errNoSnapshotBackend
+}
+func (unconfiguredSnapshots) Objects(context.Context, string, func(SnapshotObject) error) error {
+	return errNoSnapshotBackend
+}
+func (unconfiguredSnapshots) Open(context.Context, string, string) (io.ReadCloser, SnapshotObject, error) {
+	return nil, SnapshotObject{}, errNoSnapshotBackend
+}
+func (unconfiguredSnapshots) Delete(context.Context, string, string) error {
+	return errNoSnapshotBackend
+}
+func (unconfiguredSnapshots) Prune(context.Context, []string) (SnapshotPrune, error) {
+	return SnapshotPrune{}, errNoSnapshotBackend
 }
 
 type directorySnapshotBackend struct {

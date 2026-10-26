@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const requestTimeout = 20 * time.Second
@@ -233,12 +234,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, AppsFromDomain(apps))
+		httpjson.Write(w, http.StatusOK, AppsFromDomain(apps))
 		return
 	}
 	id, operation, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/apps/"), "/")
 	if !ok || !appstore.ValidID(id) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	switch operation {
@@ -259,7 +260,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		identity, err := h.planIdentity(id, r.URL.Query().Get("uid"), r.URL.Query().Get("gid"))
 		if errors.Is(err, errInvalidIdentity) {
-			writeError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
 			return
 		}
 		if err != nil {
@@ -271,7 +272,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, PlanFromDomain(plan))
+		httpjson.Write(w, http.StatusOK, PlanFromDomain(plan))
 	case "install", "uninstall":
 		if !allow(w, r, http.MethodPost) {
 			return
@@ -280,7 +281,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 1024))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 			return
 		}
 		var job appstore.Job
@@ -300,9 +301,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.InfoContext(r.Context(), "app job started", "app", id, "action", job.Action)
-		writeJSON(w, http.StatusAccepted, JobFromDomain(job))
+		httpjson.Write(w, http.StatusAccepted, JobFromDomain(job))
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	}
 }
 
@@ -368,7 +369,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if status >= 500 {
 		h.logger.ErrorContext(r.Context(), "app store operation failed", "path", r.URL.Path, "error", err)
 	}
-	writeError(w, status, code, err.Error())
+	httpjson.WriteError(w, status, code, err.Error())
 }
 
 var errorCodes = []struct {
@@ -423,7 +424,7 @@ func allow(w http.ResponseWriter, r *http.Request, method string) bool {
 		return true
 	}
 	w.Header().Set("Allow", method)
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	return false
 }
 
@@ -434,18 +435,6 @@ type errorDetail struct {
 
 type errorDocument struct {
 	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorDocument{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
-	}
 }
 
 var _ appstore.Store = (*Client)(nil)

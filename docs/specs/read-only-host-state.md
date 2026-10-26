@@ -49,7 +49,7 @@
 
 ## 边界与失败
 
-- 默认只监听 `127.0.0.1:8080`；可通过 `ANAS_HTTP_ADDR` 覆盖。
+- 默认只监听 `127.0.0.1:8080`；可通过 `ANAS_HTTP_ADDR` 换成其他回环地址与端口，非回环地址拒绝启动（[`config.go`](../../cmd/anas-api/config.go)）。
 - `healthz` 是存活检查，不代表宿主机状态 Reader 可用。
 - 健康状态只使用 `healthy`、`warning`、`critical` 和 `unknown`。
 - 磁盘角色只使用 `system`、`data` 和 `unassigned`。

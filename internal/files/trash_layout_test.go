@@ -35,7 +35,7 @@ func TestSambaKeeptreeDeletionsBecomeSeparateRestorableItems(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volumeRoot := filepath.Join(t.TempDir(), "volume")
-	service := files.NewService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	service := files.NewLocalService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	spaceRoot := filepath.Join(volumeRoot, "spaces", "private", "owner")
 
 	docs, err := service.CreateDirectory(ctx, owner, privateSpace.ID, "", "docs")

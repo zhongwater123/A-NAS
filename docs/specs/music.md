@@ -92,5 +92,5 @@
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[ADR 0018：音乐以文件代理原地索引](../adr/0018-index-music-in-place-through-the-file-broker.md)、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[ADR 0006](../adr/0006-use-a-managed-photo-library.md)
-- 代码：[音乐库](../../internal/music/music.go)、[扫描](../../internal/music/scan.go)、[元数据](../../internal/music/metadata.go)、[媒体 Worker](../../internal/mediaworker/protocol.go)、[封面](../../internal/music/covers.go)、[HTTP 接口](../../internal/httpapi/music.go)、[音乐窗口](../../web/src/music/MusicPanel.tsx)、[播放器](../../web/src/music/player.ts)、[音乐库模型](../../web/src/music/library.ts)
+- 代码：[音乐库](../../internal/music/music.go)、[扫描](../../internal/music/scan.go)、[元数据](../../internal/music/metadata.go)、[媒体 Worker](../../internal/mediaworker/protocol.go)、[封面](../../internal/music/covers.go)、[HTTP 接口](../../internal/musicapi/musicapi.go)、[音乐窗口](../../web/src/music/MusicPanel.tsx)、[播放器](../../web/src/music/player.ts)、[音乐库模型](../../web/src/music/library.ts)
 - 测试：见“验收证据”
