@@ -13,7 +13,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
@@ -30,8 +29,7 @@ func TestSystemLogsAreForAdministratorsAndFollowTheContract(t *testing.T) {
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		SystemLogs: systemlog.NewFake(nil), Logger: logger,
 	})
-	router := openapitest.Router(t)
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	session, err := accountService.ResolveSession(ctx, asAdmin.cookie.Value)
 	if err != nil {

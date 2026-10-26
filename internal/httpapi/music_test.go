@@ -16,8 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
@@ -45,7 +43,6 @@ func silentMP3(title string, frames int) []byte {
 type contractClient struct {
 	t       *testing.T
 	handler http.Handler
-	router  routers.Router
 	cookie  *http.Cookie
 	csrf    string
 	// forwardedFor is the LAN address the client signed in from, which its
@@ -81,29 +78,8 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 	if recorder.Code != want {
 		c.t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, want, recorder.Body.String())
 	}
-	validateExchange(c.t, c.router, newRequest(), recorder)
+	openapitest.Check(c.t, newRequest(), recorder)
 	return recorder
-}
-
-// validateExchange checks a request, made again because serving consumed its
-// body, and the response it got against the OpenAPI contract.
-func validateExchange(t *testing.T, router routers.Router, request *http.Request, recorder *httptest.ResponseRecorder) {
-	t.Helper()
-	route, params, err := router.FindRoute(request)
-	if err != nil {
-		t.Fatalf("find OpenAPI route for %s %s: %v", request.Method, request.URL.Path, err)
-	}
-	input := &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route, Options: &openapi3filter.Options{
-		AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error { return nil },
-	}}
-	if err := openapi3filter.ValidateRequest(context.Background(), input); err != nil {
-		t.Fatalf("validate %s %s request: %v", request.Method, request.URL.Path, err)
-	}
-	response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header()}
-	response.SetBodyBytes(recorder.Body.Bytes())
-	if err := openapi3filter.ValidateResponse(context.Background(), response); err != nil {
-		t.Fatalf("validate %s %s response: %v", request.Method, request.URL.Path, err)
-	}
 }
 
 func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
@@ -133,8 +109,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Music: library, Logger: logger,
 	})
-	router := openapitest.Router(t)
-	client := &contractClient{t: t, handler: handler, router: router}
+	client := &contractClient{t: t, handler: handler}
 
 	unauthenticated := httptest.NewRecorder()
 	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/v1/music/tracks", nil))

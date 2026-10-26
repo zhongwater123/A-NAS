@@ -12,7 +12,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
@@ -97,8 +96,7 @@ func storageAdmin(t *testing.T, executor storage.VolumeExecutor) *contractClient
 		Storage: storageService,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	router := openapitest.Router(t)
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	return f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 }
 

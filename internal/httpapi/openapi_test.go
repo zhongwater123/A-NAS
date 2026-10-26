@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
@@ -35,8 +34,6 @@ import (
 )
 
 func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
-	ctx := context.Background()
-	router := openapitest.Router(t)
 
 	photoHandler, photoLibraryID, photoAssetID := photoAPI(t)
 	movies := newMediaFixture(t)
@@ -247,30 +244,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 			if got := recorder.Code; got != test.wantStatus {
 				t.Fatalf("status = %d, want %d", got, test.wantStatus)
 			}
-			route, pathParams, err := router.FindRoute(request)
-			if err != nil {
-				t.Fatalf("find OpenAPI route: %v", err)
-			}
-			requestInput := &openapi3filter.RequestValidationInput{
-				Request:    request,
-				PathParams: pathParams,
-				Route:      route,
-				Options: &openapi3filter.Options{AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error {
-					return nil
-				}},
-			}
-			if err := openapi3filter.ValidateRequest(ctx, requestInput); err != nil {
-				t.Fatalf("validate request: %v", err)
-			}
-			responseInput := &openapi3filter.ResponseValidationInput{
-				RequestValidationInput: requestInput,
-				Status:                 recorder.Code,
-				Header:                 recorder.Header(),
-			}
-			responseInput.SetBodyBytes(recorder.Body.Bytes())
-			if err := openapi3filter.ValidateResponse(ctx, responseInput); err != nil {
-				t.Fatalf("validate response: %v", err)
-			}
+			openapitest.Check(t, request, recorder)
 		})
 	}
 }

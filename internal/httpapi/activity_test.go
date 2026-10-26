@@ -101,9 +101,8 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Photos: photoAPI(photoService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	router := openapitest.Router(t)
 	return &activityFixture{t: t, handler: handler, accounts: accountService, files: fileService, photos: photoService,
-		client: &contractClient{t: t, handler: handler, router: router}}
+		client: &contractClient{t: t, handler: handler}}
 }
 
 // signIn signs in from a LAN browser, or sets the device up from its own
@@ -127,7 +126,7 @@ func (f *activityFixture) signIn(path, username, password, address string, want 
 	if recorder.Code != want {
 		f.t.Fatalf("sign in %s status = %d, want %d; body=%s", username, recorder.Code, want, recorder.Body.String())
 	}
-	validateExchange(f.t, f.client.router, newRequest(), recorder)
+	openapitest.Check(f.t, newRequest(), recorder)
 	if want >= 300 {
 		return nil
 	}

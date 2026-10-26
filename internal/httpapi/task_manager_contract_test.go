@@ -30,8 +30,7 @@ func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
 	if _, err := service.CreateMember(ctx, admin, "member", "member password for testing"); err != nil {
 		t.Fatal(err)
 	}
-	router := openapitest.Router(t)
-	client := &contractClient{t: t, router: router, handler: httpapi.NewProduct(httpapi.ProductDependencies{
+	client := &contractClient{t: t, handler: httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: iconContractReader{fake.NewHealthy()}, DataSource: httpapi.DataSourceSimulated, Accounts: service,
 	})}
 	paths := []string{"/api/v1/task-manager/device", "/api/v1/task-manager/tasks"}
