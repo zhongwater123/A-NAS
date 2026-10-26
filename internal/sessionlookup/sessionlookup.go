@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const (
@@ -62,18 +63,18 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_request"})
+			httpjson.Write(w, http.StatusBadRequest, errorResponse{Error: "invalid_request"})
 			return
 		}
 		user, err := resolver.ResolveSessionUser(r.Context(), request.Token)
 		switch {
 		case errors.Is(err, accounts.ErrSessionNotFound):
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "session_invalid"})
+			httpjson.Write(w, http.StatusUnauthorized, errorResponse{Error: "session_invalid"})
 		case err != nil:
 			logger.ErrorContext(r.Context(), "session lookup failed", "error", err)
-			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "sessions_unavailable"})
+			httpjson.Write(w, http.StatusServiceUnavailable, errorResponse{Error: "sessions_unavailable"})
 		default:
-			writeJSON(w, http.StatusOK, user)
+			httpjson.Write(w, http.StatusOK, user)
 		}
 	})
 	if accountResolver != nil {
@@ -82,18 +83,18 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 			decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&request); err != nil || request.UID <= 0 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_request"})
+				httpjson.Write(w, http.StatusBadRequest, errorResponse{Error: "invalid_request"})
 				return
 			}
 			user, err := accountResolver.ResolveAccountUID(r.Context(), request.UID)
 			switch {
 			case errors.Is(err, accounts.ErrUserNotFound):
-				writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "account_invalid"})
+				httpjson.Write(w, http.StatusUnauthorized, errorResponse{Error: "account_invalid"})
 			case err != nil:
 				logger.ErrorContext(r.Context(), "account lookup failed", "error", err)
-				writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "accounts_unavailable"})
+				httpjson.Write(w, http.StatusServiceUnavailable, errorResponse{Error: "accounts_unavailable"})
 			default:
-				writeJSON(w, http.StatusOK, user)
+				httpjson.Write(w, http.StatusOK, user)
 			}
 		})
 	}
@@ -103,19 +104,13 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 		mux.HandleFunc("GET /v1/members", func(w http.ResponseWriter, r *http.Request) {
 			members, err := directory.ActiveProfiles(r.Context())
 			if err != nil {
-				writeJSON(w, 503, errorResponse{Error: "members_unavailable"})
+				httpjson.Write(w, 503, errorResponse{Error: "members_unavailable"})
 				return
 			}
-			writeJSON(w, 200, members)
+			httpjson.Write(w, 200, members)
 		})
 	}
 	return mux
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }
 
 // Client resolves sessions through the Host Agent's lookup socket.

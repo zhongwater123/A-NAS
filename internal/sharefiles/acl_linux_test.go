@@ -218,7 +218,7 @@ func TestShareACLMatrix(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { _ = catalog.Close() }()
-	fs := files.NewService(catalog, volume, users, files.Options{FileSystem: client, AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	fs := files.NewService(catalog, volume, users, client, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	local := NewLocal(fs, users)
 	local.SetBroker(client)
 	bridgePath := filepath.Join(state, "bridge.sock")

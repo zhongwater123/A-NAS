@@ -74,19 +74,19 @@ build/anas-container-agent
 
 Go 模块路径为 `github.com/zhongwater123/A-NAS`。架构语言决策记录在 [ADR 0001](docs/adr/0001-use-go-for-product-services.md)。
 
-启动带内嵌 Web 桌面和确定性 Fake Adapter 的本地产品服务：
+启动带内嵌 Web 桌面和确定性 Fake Adapter 的本地产品服务。`ANAS_HOSTSTATE_MODE` 没有默认值：开发时写 `fake`，NAS 上由安装器写 `agent`，不设置时服务拒绝启动：
 
 ```bash
 make web-build
-go run ./cmd/anas-api
+ANAS_HOSTSTATE_MODE=fake go run ./cmd/anas-api
 ```
 
-浏览器访问 `http://127.0.0.1:8080/`。服务默认只监听回环地址，可通过 `ANAS_HTTP_ADDR` 覆盖；聚合状态接口为 `/api/v1/host-state`，完整契约见 [OpenAPI](api/openapi.yaml)。
+浏览器访问 `http://127.0.0.1:8080/`。服务只监听回环地址，可通过 `ANAS_HTTP_ADDR` 换成其他回环地址与端口；聚合状态接口为 `/api/v1/host-state`，完整契约见 [OpenAPI](api/openapi.yaml)。全部变量及其校验见 [`cmd/anas-api/config.go`](cmd/anas-api/config.go)。
 
 需要由设备管理员在“设置 → 终端”中打开设备 Shell 时，显式启用终端（设备上按[运行手册](docs/runbooks/enable-admin-terminal.md)开启）；生产中 Shell 经文件代理以该管理员本人的 Linux 账号运行（本地模拟模式下以开发进程用户运行），只接受已认证管理员的回环同源连接，边界见[终端规格](docs/specs/web-terminal.md)：
 
 ```bash
-ANAS_TERMINAL=enabled go run ./cmd/anas-api
+ANAS_HOSTSTATE_MODE=fake ANAS_TERMINAL=enabled go run ./cmd/anas-api
 ```
 
 桌面“Docker”应用在模拟模式下默认使用确定性的 Fake 容器；连接真实 Docker 需要容器代理，见 [ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md) 与[安装运行手册](docs/runbooks/install-container-agent.md)。

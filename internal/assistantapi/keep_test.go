@@ -55,11 +55,11 @@ func (g *endingGate) lastAsked() string {
 	return g.asked[len(g.asked)-1]
 }
 
-func newKeeper(t *testing.T) (*handler, *fakeServe, *endingGate) {
+func newKeeper(t *testing.T) (*Handler, *fakeServe, *endingGate) {
 	t.Helper()
 	serve := newFakeServe(t)
 	gate := &endingGate{inner: NewSocketConnector(serve.dir, serve.dir), ended: map[string]bool{}}
-	h := New(Options{Connector: gate, SocketDir: serve.dir, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*handler)
+	h := New(Options{Connector: gate, SocketDir: serve.dir, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	t.Cleanup(func() {
 		// Sessions that are still kept end with the test.
 		h.keepsMu.Lock()
@@ -103,13 +103,13 @@ func waitClosed(t *testing.T, f *fakeServe, what string) {
 	}
 }
 
-func (h *handler) kept(account string) bool {
+func (h *Handler) kept(account string) bool {
 	h.keepsMu.Lock()
 	defer h.keepsMu.Unlock()
 	return h.keeps[account] != nil
 }
 
-func waitNotKept(t *testing.T, h *handler, account string) {
+func waitNotKept(t *testing.T, h *Handler, account string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for h.kept(account) {
@@ -182,5 +182,47 @@ func TestNothingIsKeptForAMemberWithoutAnAssistant(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if serve.connections() != 0 || gate.lastAsked() != "" || h.kept("bob") {
 		t.Fatalf("kept an instance for a member without one: %d connections", serve.connections())
+	}
+}
+
+// Stopping the Product Service ends the kept connection and the watch over
+// the member's tasks, and Wait returns once they stopped (#192).
+func TestStoppingEndsTheKeptInstanceAndTheTaskWatch(t *testing.T) {
+	serve := newFakeServe(t)
+	ctx, stop := context.WithCancel(context.Background())
+	h := New(Options{Connector: NewSocketConnector(serve.dir, serve.dir), SocketDir: serve.dir, Notices: &heardRuns{},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Context: ctx})
+	h.Keep(alice, "alice-session")
+	waitConnections(t, serve, 1)
+	stop()
+	waitClosed(t, serve, "stopping left the kept connection open")
+	stopped := make(chan struct{})
+	go func() {
+		h.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the keeper or the task watch did not stop")
+	}
+	// Nothing is kept once stopping began.
+	h.Keep(accounts.User{ID: "u-alice", Username: "alice"}, "later-session")
+	time.Sleep(100 * time.Millisecond)
+	if got := serve.connections(); got != 1 {
+		t.Fatalf("connections after stopping = %d", got)
+	}
+}
+
+// A request still running while stopping waits must not start a keeper the
+// wait has already missed: once Wait began, Keep starts nothing, even before
+// the context ended.
+func TestKeepStartsNothingOnceWaitBegan(t *testing.T) {
+	h, serve, _ := newKeeper(t)
+	h.Wait()
+	h.Keep(alice, "late-session")
+	time.Sleep(100 * time.Millisecond)
+	if serve.connections() != 0 || h.kept("alice") {
+		t.Fatalf("kept an instance after Wait began: %d connections", serve.connections())
 	}
 }

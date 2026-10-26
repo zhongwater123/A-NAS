@@ -33,7 +33,7 @@ func TestShareSelectionDeduplicatesDescendantsAndKeepsEmptyDirectories(t *testin
 	}
 	defer func() { _ = catalog.Close() }()
 	volume := t.TempDir()
-	service := files.NewService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	service := files.NewLocalService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	dir, err := service.CreateDirectory(ctx, owner, space.ID, "", "photos")
 	if err != nil {
 		t.Fatal(err)

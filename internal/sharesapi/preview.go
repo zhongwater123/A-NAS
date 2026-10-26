@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
-	"github.com/zhongwater123/A-NAS/internal/shares"
 	"io"
 	"net/http"
 	"path"
 	"strings"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 const maxPreviewSource = 64 << 20
@@ -29,11 +31,11 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.media == nil {
-		WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
+		httpjson.WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
 		return
 	}
 	if entry.Size > maxPreviewSource {
-		WriteError(w, 413, "share_preview_too_large", "HEIC preview source exceeds 64 MiB")
+		httpjson.WriteError(w, 413, "share_preview_too_large", "HEIC preview source exceeds 64 MiB")
 		return
 	}
 	select {
@@ -72,14 +74,14 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	if decodeErr != nil {
 		if errors.Is(decodeErr, mediaworker.ErrUnreadable) {
-			WriteError(w, 422, "share_preview_unreadable", "image cannot be previewed")
+			httpjson.WriteError(w, 422, "share_preview_unreadable", "image cannot be previewed")
 		} else {
-			WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
+			httpjson.WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
 		}
 		return
 	}
 	if len(data) > 16<<20 || !bytes.HasPrefix(data, []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
-		WriteError(w, 422, "share_preview_unreadable", "image decoder returned invalid output")
+		httpjson.WriteError(w, 422, "share_preview_unreadable", "image decoder returned invalid output")
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")

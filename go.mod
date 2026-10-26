@@ -6,6 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/abema/go-mp4 v1.7.3
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/coder/websocket v1.8.15
 	github.com/compose-spec/compose-go/v2 v2.16.1
 	github.com/containerd/errdefs v1.0.0

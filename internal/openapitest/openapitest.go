@@ -17,6 +17,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+
 	"github.com/zhongwater123/A-NAS/api"
 )
 
@@ -74,7 +75,9 @@ func Check(t testing.TB, request *http.Request, recorder *httptest.ResponseRecor
 	if err := openapi3filter.ValidateRequest(context.Background(), input); err != nil {
 		t.Fatalf("validate %s %s request: %v", request.Method, request.URL.Path, err)
 	}
-	response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header()}
+	// A status the contract does not declare for the operation fails too.
+	response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header(),
+		Options: &openapi3filter.Options{IncludeResponseStatus: true}}
 	response.SetBodyBytes(recorder.Body.Bytes())
 	if err := openapi3filter.ValidateResponse(context.Background(), response); err != nil {
 		t.Fatalf("validate %s %s response: %v", request.Method, request.URL.Path, err)

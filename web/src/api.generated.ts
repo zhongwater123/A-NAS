@@ -6091,6 +6091,15 @@ export interface operations {
             403: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            /** @description credential_provision_failed: the Host Agent could not enable the account for SMB */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     getSession: {
@@ -6408,6 +6417,7 @@ export interface operations {
                     "application/json": components["schemas"]["ViewingGrant"];
                 };
             };
+            400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
@@ -6509,6 +6519,7 @@ export interface operations {
                 content?: never;
             };
             403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -7014,6 +7025,8 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
             423: components["responses"]["ProductError"];
         };
     };
@@ -7043,7 +7056,12 @@ export interface operations {
                     "application/json": components["schemas"]["FileEntry"];
                 };
             };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
             507: components["responses"]["ProductError"];
         };
     };
@@ -7077,6 +7095,20 @@ export interface operations {
                     "application/json": components["schemas"]["FileEntry"];
                 };
             };
+            /** @description invalid_multipart, invalid_parent or file_required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
             507: components["responses"]["ProductError"];
         };
     };
@@ -7096,13 +7128,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description File content */
+            /** @description File content, typed by the file name's extension */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": string;
+                    "*/*": string;
                 };
             };
             /** @description Partial file content */
@@ -7111,9 +7143,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": string;
+                    "*/*": string;
                 };
             };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     renderFilePreview: {
@@ -7180,6 +7215,9 @@ export interface operations {
                     "application/json": components["schemas"]["TrashItem"];
                 };
             };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     moveFile: {
@@ -7208,6 +7246,13 @@ export interface operations {
                     "application/json": components["schemas"]["FileEntry"];
                 };
             };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     listFileVersions: {
@@ -7260,6 +7305,13 @@ export interface operations {
                     "application/json": components["schemas"]["FileEntry"];
                 };
             };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     listTrash: {
@@ -7311,8 +7363,12 @@ export interface operations {
                 };
             };
             400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     purgeTrash: {
@@ -7335,6 +7391,9 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     listSnapshots: {
@@ -10484,6 +10543,15 @@ export interface operations {
                     "application/json": components["schemas"]["MediaHome"];
                 };
             };
+            /** @description media_unavailable: the media center is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listMediaTitles: {
@@ -12116,6 +12184,15 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["FeedbackItem"][];
                     };
+                };
+            };
+            /** @description feedback_unavailable: the feedback list is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

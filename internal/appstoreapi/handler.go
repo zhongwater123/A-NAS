@@ -7,10 +7,8 @@ package appstoreapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -18,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/appstore/agent"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 )
 
@@ -72,6 +71,7 @@ func Matches(path string) bool {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path == PathPrefix {
 		if !allow(w, r, http.MethodGet) || !h.enabled(w) {
 			return
@@ -81,13 +81,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, appsResponse{DataSource: h.dataSource, AppsDocument: agent.AppsFromDomain(apps)})
+		httpjson.Write(w, http.StatusOK, appsResponse{DataSource: h.dataSource, AppsDocument: agent.AppsFromDomain(apps)})
 		return
 	}
 
 	id, operation, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, PathPrefix+"/"), "/")
 	if !ok || !appstore.ValidID(id) || strings.Contains(operation, "/") {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	switch operation {
@@ -120,23 +120,25 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, agent.PlanFromDomain(plan))
+		httpjson.Write(w, http.StatusOK, agent.PlanFromDomain(plan))
 	case "install", "uninstall":
 		if !allow(w, r, http.MethodPost) {
 			return
 		}
 		if err := localorigin.CheckWrite(r); err != nil {
-			writeError(w, http.StatusForbidden, "forbidden", "app changes must come from the local desktop")
+			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "app changes must come from the local desktop")
 			return
 		}
 		if !h.enabled(w) {
 			return
 		}
 		var request agent.InstallRequest
-		decoder := json.NewDecoder(io.LimitReader(r.Body, 1024))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&request); err != nil || (operation == "install" && len(request.Digest) != 64) {
-			writeError(w, http.StatusBadRequest, "invalid_request", "install requires the confirmed plan digest")
+		if err := httpjson.Decode(w, r, 1024, &request); err != nil {
+			httpjson.WriteDecodeError(w, err, "invalid_request", "install requires the confirmed plan digest")
+			return
+		}
+		if operation == "install" && len(request.Digest) != 64 {
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "install requires the confirmed plan digest")
 			return
 		}
 		var job appstore.Job
@@ -152,7 +154,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if errors.Is(err, errVolumeUnavailable) {
-			writeError(w, http.StatusLocked, "volume_unavailable", "the data volume is not available")
+			httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", "the data volume is not available")
 			return
 		}
 		if err != nil {
@@ -160,9 +162,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.InfoContext(r.Context(), "app job requested", "app", id, "action", job.Action)
-		writeJSON(w, http.StatusAccepted, agent.JobFromDomain(job))
+		httpjson.Write(w, http.StatusAccepted, agent.JobFromDomain(job))
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	}
 }
 
@@ -197,7 +199,7 @@ func (h *handler) enabled(w http.ResponseWriter) bool {
 	if h.store != nil {
 		return true
 	}
-	writeError(w, http.StatusServiceUnavailable, "apps_disabled", "the App Center is disabled")
+	httpjson.WriteError(w, http.StatusServiceUnavailable, "apps_disabled", "the App Center is disabled")
 	return false
 }
 
@@ -212,7 +214,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if _, ok := errors.AsType[*appstore.PolicyError](err); ok {
 		message = "this app's manifest does not meet the install policy"
 	}
-	writeError(w, status, code, message)
+	httpjson.WriteError(w, status, code, message)
 }
 
 type appsResponse struct {
@@ -225,30 +227,8 @@ func allow(w http.ResponseWriter, r *http.Request, method string) bool {
 		return true
 	}
 	w.Header().Set("Allow", method)
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	return false
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type errorResponse struct {
-	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
-	}
 }
 
 // DevelopmentHost stands in for the Host Agent with the fake app store: each

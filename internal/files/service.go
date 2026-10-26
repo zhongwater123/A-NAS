@@ -146,9 +146,6 @@ type Options struct {
 	// Location is the time zone snapshot schedules are read in; it defaults
 	// to the system's.
 	Location *time.Location
-	// FileSystem performs file operations. Production passes the File Broker
-	// client; the default operates directly beneath the volume root.
-	FileSystem FileSystem
 }
 
 type Store struct {
@@ -360,7 +357,34 @@ type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func NewService(store *Store, volumeRoot string, policy Policy, options Options) *Service {
+// NewService serves the spaces beneath volumeRoot through fsys, which
+// production makes the File Broker client so that every operation runs as the
+// signed-in user (ADR 0008). Without Options.SnapshotBackend snapshots fail
+// as unavailable. NewLocalService is the development and test service.
+func NewService(store *Store, volumeRoot string, policy Policy, fsys FileSystem, options Options) *Service {
+	if fsys == nil {
+		panic("files.NewService needs a FileSystem; development and tests use NewLocalService")
+	}
+	service := newService(store, volumeRoot, policy, fsys, options)
+	if options.SnapshotBackend == nil {
+		service.snapshots = unconfiguredSnapshots{}
+	}
+	return service
+}
+
+// NewLocalService opens the files beneath volumeRoot in this process and,
+// unless Options.SnapshotBackend names another, keeps snapshots as copies in
+// a directory there. Development and tests use it; production never does,
+// since files must be opened as the signed-in user (ADR 0008).
+func NewLocalService(store *Store, volumeRoot string, policy Policy, options Options) *Service {
+	service := newService(store, volumeRoot, policy, NewRootFileSystem(volumeRoot, true), options)
+	if options.SnapshotBackend == nil {
+		service.snapshots = newDirectorySnapshotBackend(service.volumeRoot, service.snapshotSpaceRoot)
+	}
+	return service
+}
+
+func newService(store *Store, volumeRoot string, policy Policy, fsys FileSystem, options Options) *Service {
 	now := options.Now
 	if now == nil {
 		now = time.Now
@@ -373,7 +397,7 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 		store: store, volumeRoot: filepath.Clean(volumeRoot), policy: policy,
 		now: now, random: random, disableCapacityReserve: options.DisableCapacityReserve,
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
-		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: options.FileSystem,
+		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: fsys, snapshots: options.SnapshotBackend,
 		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
 		temporaries: make(map[string]struct{}), takingSnapshots: make(map[string]struct{}),
 		orders: make(map[string]*spaceOrder),
@@ -381,16 +405,8 @@ func NewService(store *Store, volumeRoot string, policy Policy, options Options)
 	if service.location == nil {
 		service.location = time.Local
 	}
-	if service.fs == nil {
-		service.fs = NewRootFileSystem(service.volumeRoot, true)
-	}
 	if service.trashRetention <= 0 {
 		service.trashRetention = 30 * 24 * time.Hour
-	}
-	if options.SnapshotBackend != nil {
-		service.snapshots = options.SnapshotBackend
-	} else {
-		service.snapshots = newDirectorySnapshotBackend(service.volumeRoot, service.snapshotSpaceRoot)
 	}
 	return service
 }

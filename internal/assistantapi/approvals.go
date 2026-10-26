@@ -131,7 +131,7 @@ type member struct {
 	upstreams map[*upstream]struct{}
 }
 
-func (h *handler) member(account string) *member {
+func (h *Handler) member(account string) *member {
 	h.membersMu.Lock()
 	defer h.membersMu.Unlock()
 	m, ok := h.members[account]
@@ -227,7 +227,7 @@ func (m *member) running(session string) (bool, string) {
 
 // observe follows a turn through Hermes's events: when it runs, the call of
 // 提交更改 under way, and when it ends. It returns the cards that changed.
-func (h *handler) observe(m *member, u *upstream, ev event) {
+func (h *Handler) observe(m *member, u *upstream, ev event) {
 	var payload struct {
 		ToolID     string          `json:"tool_id"`
 		Name       string          `json:"name"`
@@ -333,7 +333,7 @@ func (m *member) endCards(match func(*card) bool, status string) []*card {
 // session becomes a change card; one for a dangerous command or a script in a
 // running turn becomes a command card showing it. Every other approval (the
 // background review's) is denied without being shown.
-func (h *handler) approval(m *member, u *upstream, request frame) {
+func (h *Handler) approval(m *member, u *upstream, request frame) {
 	var params struct {
 		SessionID    string   `json:"session_id"`
 		RequestID    string   `json:"request_id"`
@@ -397,7 +397,7 @@ func (h *handler) approval(m *member, u *upstream, request frame) {
 
 // question passes the clarify tool's questions in a running turn on as a
 // card; the member's answers go back as the reply to Hermes's request.
-func (h *handler) question(m *member, u *upstream, request frame) {
+func (h *Handler) question(m *member, u *upstream, request frame) {
 	var params struct {
 		SessionID string `json:"session_id"`
 		Questions []struct {
@@ -428,7 +428,7 @@ func (h *handler) question(m *member, u *upstream, request frame) {
 }
 
 // raise keeps a new card and shows it to every window of the account.
-func (h *handler) raise(m *member, c *card) {
+func (h *Handler) raise(m *member, c *card) {
 	c.Status, c.CreatedAt = cardAwaiting, time.Now().Unix()
 	m.mu.Lock()
 	m.prune()
@@ -450,7 +450,7 @@ var (
 // executes nothing; a command runs in the sandbox once Hermes hears "once",
 // or "session" when the member allows it for the rest of the conversation.
 // Rejecting a question skips it.
-func (h *handler) decide(ctx context.Context, m *member, requestID string, confirm, forSession bool) (card, error) {
+func (h *Handler) decide(ctx context.Context, m *member, requestID string, confirm, forSession bool) (card, error) {
 	m.mu.Lock()
 	m.prune()
 	c, ok := m.cards[requestID]
@@ -532,7 +532,7 @@ const maxAnswer = 4000
 
 // answerQuestion replies to a question card's request on the connection
 // Hermes asked on: the member's answers by question, or none to skip them.
-func (h *handler) answerQuestion(m *member, requestID string, answers map[string]*string) (card, error) {
+func (h *Handler) answerQuestion(m *member, requestID string, answers map[string]*string) (card, error) {
 	m.mu.Lock()
 	m.prune()
 	c, ok := m.cards[requestID]
@@ -596,7 +596,7 @@ func (h *handler) answerQuestion(m *member, requestID string, answers map[string
 
 // respond answers Hermes with approval.respond on the connection the approval
 // came on, or any other of the account's: Hermes takes it from any.
-func (h *handler) respond(ctx context.Context, m *member, c *card, choice string) (bool, error) {
+func (h *Handler) respond(ctx context.Context, m *member, c *card, choice string) (bool, error) {
 	m.mu.Lock()
 	candidates := []*upstream{}
 	if c.owner != nil {
@@ -628,7 +628,7 @@ func (h *handler) respond(ctx context.Context, m *member, c *card, choice string
 }
 
 // expire ends what a card Hermes withdrew still holds: the executor's change.
-func (h *handler) expire(m *member, u *upstream, c *card) {
+func (h *Handler) expire(m *member, u *upstream, c *card) {
 	if c.Kind != kindChange {
 		h.broadcast(m, c)
 		return
@@ -648,7 +648,7 @@ func (h *handler) expire(m *member, u *upstream, c *card) {
 }
 
 // refresh reads the executor's outcome once the tool applied a change.
-func (h *handler) refresh(m *member, u *upstream, c *card) {
+func (h *Handler) refresh(m *member, u *upstream, c *card) {
 	ctx, cancel := context.WithTimeout(accounts.WithSessionToken(context.Background(), u.session), requestTimeout)
 	defer cancel()
 	change, err := h.options.Changes.Get(ctx, m.account, c.changeID)
@@ -696,7 +696,7 @@ func (m *member) prune() {
 }
 
 // broadcast tells every window of the account how a card stands.
-func (h *handler) broadcast(m *member, c *card) {
+func (h *Handler) broadcast(m *member, c *card) {
 	m.mu.Lock()
 	view := *c
 	targets := make([]*upstream, 0, len(m.upstreams))

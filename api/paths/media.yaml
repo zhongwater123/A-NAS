@@ -60,6 +60,7 @@
     summary: The start page; stale libraries are scanned in the background
     responses:
       "200": { description: Rows of the start page, content: { application/json: { schema: { $ref: "../components/media.yaml#/schemas/MediaHome" } } } }
+      "503": { description: "media_unavailable: the media center is not running", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
 /api/v1/media/titles:
   get:
     operationId: listMediaTitles

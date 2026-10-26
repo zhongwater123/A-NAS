@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
@@ -21,25 +22,25 @@ const systemLogsTimeout = 20 * time.Second
 func (h *handler) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.systemLogs == nil {
-		writeError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
 		return
 	}
 	q, err := systemlog.ParseQuery(r.URL.Query())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
 	page, err := h.systemLogs.ReadLogs(r.Context(), q)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "system log read failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+	httpjson.Write(w, http.StatusOK, page)
 }
 
 // ReadLogs reads allowlisted service logs through the Host Agent.
