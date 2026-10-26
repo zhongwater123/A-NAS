@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
@@ -191,7 +192,7 @@ func TestAndroidMotionPhotoFormats(t *testing.T) {
 
 // Minimal, big-endian EXIF with Apple's maker-note content identifier. The
 // inline ASCII value exercises the real metadata parser without a personal file.
-func appleJPEG(t *testing.T, id string) []byte {
+func appleJPEG(t testing.TB, id string) []byte {
 	if len(id) < 1 || len(id) > 100 {
 		t.Fatal("invalid fixture identifier")
 	}
@@ -232,6 +233,28 @@ func appleJPEG(t *testing.T, id string) []byte {
 	result = append(result, segment...)
 	result = append(result, payload...)
 	return append(result, original[2:]...)
+}
+func FuzzAppleJPEGContentID(f *testing.F) {
+	for _, id := range []string{"abc", "01234567-89AB-CDEF-0123-456789ABCDEF"} {
+		f.Add(appleJPEG(f, id))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		path := filepath.Join(t.TempDir(), "live.jpg")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = file.Close() }()
+		packets, _ := photos.JPEGAPP1(file, int64(len(data)), []byte("Exif\x00\x00"))
+		for _, packet := range packets {
+			if id := photos.AppleTIFFID(packet); len(id) > 128 || strings.ContainsFunc(id, func(r rune) bool { return r < 33 || r > 126 }) {
+				t.Fatalf("content identifier %q", id)
+			}
+		}
+	})
 }
 func TestAppleContentIdentifiersPairAndRejectMismatch(t *testing.T) {
 	for _, id := range []string{"abc", "bad", "01234567-89AB-CDEF-0123-456789ABCDEF"} {

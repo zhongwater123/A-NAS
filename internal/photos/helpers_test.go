@@ -60,7 +60,7 @@ func encodePNG(shade uint8) []byte {
 	return buffer.Bytes()
 }
 
-func jpegBytes(t *testing.T) []byte {
+func jpegBytes(t testing.TB) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
 	var buffer bytes.Buffer
