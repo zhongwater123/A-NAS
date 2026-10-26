@@ -7,6 +7,7 @@ import { transferStore } from "../transfers/store";
 import { MediaCenter } from "./MediaCenter";
 import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./mediaApi";
 import { Player } from "./Player";
+import { json, stubAPI } from "../test/api";
 
 const art = { poster: true, backdrop: true, thumb: true, version: "1" };
 const film: Title = {
@@ -80,13 +81,6 @@ function detail(title: Title, overrides: Partial<VideoDetail> = {}): VideoDetail
   };
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 type Route = (url: string, init?: RequestInit) => Response | undefined;
 
 function serve(libraries: MediaLibrary[], ...routes: Route[]) {
@@ -96,7 +90,8 @@ function serve(libraries: MediaLibrary[], ...routes: Route[]) {
       const response = route(url, init);
       if (response) return response;
     }
-    if (url === "/api/v1/media/libraries" && !init?.method) return json({ items: libraries, processing: true });
+    if (url === "/api/v1/media/libraries" && (init?.method ?? "GET") === "GET")
+      return json({ items: libraries, processing: true });
     if (url === "/api/v1/media/home")
       return json(
         libraries.length
@@ -108,7 +103,7 @@ function serve(libraries: MediaLibrary[], ...routes: Route[]) {
     if (init?.method && init.method !== "GET") return json(undefined, 204);
     return json({ items: [] });
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 
@@ -403,7 +398,7 @@ describe("MediaCenter", () => {
       progress: { position: 0, duration: 2700, watched: true, playedAt: "2026-10-10T07:00:00Z" },
     };
     const fetchMock = serve([library], (url, init) =>
-      url.startsWith("/api/v1/media/history?") && !init?.method
+      url.startsWith("/api/v1/media/history?") && (init?.method ?? "GET") === "GET"
         ? json({ items: [resuming, episode], total: 2 })
         : undefined,
     );
@@ -490,7 +485,7 @@ describe("MediaCenter", () => {
       },
       // The server keeps reporting the scan while it runs.
       (url, init) =>
-        scanned && url === "/api/v1/media/libraries" && !init?.method
+        scanned && url === "/api/v1/media/libraries" && (init?.method ?? "GET") === "GET"
           ? json({ items: [scanning], processing: true })
           : undefined,
     );
@@ -508,7 +503,7 @@ describe("MediaCenter", () => {
 
   it("creates a collection and adds a title to it from a card", async () => {
     const fetchMock = serve([library], (url, init) =>
-      url === "/api/v1/media/collections" && !init?.method
+      url === "/api/v1/media/collections" && (init?.method ?? "GET") === "GET"
         ? json({
             items: [
               { id: "collection:weekend", name: "周末片单", automatic: false, count: 0, updatedAt: "", covers: [] },

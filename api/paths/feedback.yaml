@@ -1,0 +1,131 @@
+/api/v1/feedback:
+  get:
+    operationId: listFeedback
+    summary: "Every feedback item, newest first; all signed-in accounts read the same list"
+    responses:
+      "200": { description: Feedback items, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } } } } }
+  post:
+    operationId: createFeedback
+    summary: File a problem or suggestion with text, images or both
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              text: { type: string, maxLength: 5000 }
+              image: { type: array, maxItems: 6, description: "PNG, JPEG, GIF or WebP; at most 10 MiB each. The server sniffs the type.", items: { type: string, format: binary } }
+    responses:
+      "201": { description: The new item, content: { application/json: { schema: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/feedback/{feedbackId}:
+  parameters: [{ $ref: "../components/feedback.yaml#/parameters/FeedbackID" }]
+  put:
+    operationId: editFeedback
+    summary: "Replace an item's text and images; refused with feedback_changed when someone edited it after the given version"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [version]
+            properties:
+              version: { type: integer, minimum: 1, description: The version the edit was made from. }
+              text: { type: string, maxLength: 5000 }
+              keep: { type: array, description: "IDs of the attached images that stay; the others are removed.", items: { type: string } }
+              image: { type: array, description: Images to add., items: { type: string, format: binary } }
+    responses:
+      "200": { description: The edited item, content: { application/json: { schema: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+  patch:
+    operationId: resolveFeedback
+    summary: "Mark an item handled, which strikes it through, or open again; this is not an edit and keeps the version"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [resolved], properties: { resolved: { type: boolean } } } } } }
+    responses:
+      "200": { description: The item, content: { application/json: { schema: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteFeedback
+    summary: Delete an item and its images
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Deleted }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/feedback/{feedbackId}/comments:
+  post:
+    operationId: addFeedbackComment
+    summary: "Reply under an item with text, images or both; answers with the item and all its comments"
+    parameters: [{ $ref: "../components/feedback.yaml#/parameters/FeedbackID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              text: { type: string, maxLength: 2000 }
+              image: { type: array, maxItems: 3, description: "PNG, JPEG, GIF or WebP; at most 10 MiB each.", items: { type: string, format: binary } }
+    responses:
+      "201": { description: The item with the new comment, content: { application/json: { schema: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/feedback/{feedbackId}/comments/{commentId}:
+  parameters: [{ $ref: "../components/feedback.yaml#/parameters/FeedbackID" }, { name: commentId, in: path, required: true, schema: { type: string } }]
+  put:
+    operationId: editFeedbackComment
+    summary: "Replace a comment's text and images; any account may, and comment_changed refuses an edit made from a stale version"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [version]
+            properties:
+              version: { type: integer, minimum: 1, description: The comment version the edit was made from. }
+              text: { type: string, maxLength: 2000 }
+              keep: { type: array, description: "IDs of the attached images that stay; the others are removed.", items: { type: string } }
+              image: { type: array, description: Images to add., items: { type: string, format: binary } }
+    responses:
+      "200": { description: The item with the edited comment, content: { application/json: { schema: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteFeedbackComment
+    summary: Delete a comment and its images; any account may
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The item without the comment, content: { application/json: { schema: { $ref: "../components/feedback.yaml#/schemas/FeedbackItem" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/feedback/{feedbackId}/images/{imageId}:
+  get:
+    operationId: getFeedbackImage
+    summary: "One image attached to the item or to a comment under it; its content never changes, so it may be cached"
+    parameters: [{ $ref: "../components/feedback.yaml#/parameters/FeedbackID" }, { name: imageId, in: path, required: true, schema: { type: string } }]
+    responses:
+      "200":
+        description: The image
+        content:
+          image/png: { schema: { type: string, format: binary } }
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/gif: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }

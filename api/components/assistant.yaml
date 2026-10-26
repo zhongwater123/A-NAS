@@ -1,0 +1,174 @@
+parameters:
+  AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).", schema: { type: string, pattern: "^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$" } }
+  AssistantTaskID: { name: taskId, in: path, required: true, description: "A Hermes cron job id; a job's name is not accepted.", schema: { type: string, pattern: "^[0-9a-f]{12}$" } }
+  AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
+  AssistantRequestID: { name: requestId, in: path, required: true, description: "The approval's request id from Hermes.", schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" } }
+schemas:
+  AssistantStatus:
+    type: object
+    additionalProperties: false
+    required: [available]
+    properties:
+      available: { type: boolean, description: The member has an assistant instance. }
+  AssistantSession:
+    type: object
+    additionalProperties: false
+    required: [id, title, preview, startedAt, messageCount]
+    properties:
+      id: { type: string }
+      title: { type: string, description: Empty until the member or the assistant names the conversation. }
+      preview: { type: string }
+      startedAt: { type: number, description: Unix seconds. }
+      lastActive: { type: number, description: Unix seconds. }
+      messageCount: { type: integer, minimum: 0 }
+  AssistantTask:
+    type: object
+    additionalProperties: false
+    required: [id, name, prompt, schedule, state, completed]
+    properties:
+      id: { type: string, pattern: "^[0-9a-f]{12}$" }
+      name: { type: string }
+      prompt: { type: string, description: What the task asks the assistant each time it runs. }
+      schedule:
+        type: object
+        additionalProperties: false
+        required: [kind, display]
+        properties:
+          kind: { type: string, description: "cron, interval or once." }
+          expr: { type: string, description: A cron expression (kind cron). }
+          minutes: { type: integer, description: The interval (kind interval). }
+          runAt: { type: number, description: Unix seconds (kind once). }
+          display: { type: string, description: "Hermes's own wording, in English." }
+      state: { type: string, description: "Hermes's: scheduled, paused, completed (a one-off that ran, or its repeats used up) or error (the schedule cannot be computed)." }
+      running: { type: boolean }
+      nextRunAt: { type: number, description: Unix seconds. }
+      lastRunAt: { type: number, description: Unix seconds. }
+      lastStatus: { type: string, description: "ok, or what went wrong (error, ...)." }
+      lastError: { type: string }
+      createdAt: { type: number, description: Unix seconds. }
+      completed: { type: integer, minimum: 0, description: Runs so far. }
+      times: { type: integer, description: How many runs it has in all; without it the task repeats for good. }
+  AssistantTaskEnvelope:
+    type: object
+    additionalProperties: false
+    required: [task]
+    properties:
+      task: { $ref: "#/schemas/AssistantTask" }
+  AssistantTaskRun:
+    type: object
+    additionalProperties: false
+    required: [startedAt, messageCount]
+    properties:
+      id: { type: string, description: "The run's conversation; a run that only ran a script has none." }
+      startedAt: { type: number, description: Unix seconds. }
+      endedAt: { type: number, description: Unix seconds. }
+      messageCount: { type: integer, minimum: 0 }
+  AssistantMessage:
+    type: object
+    description: "One transcript row as Hermes Agent stores it; fields beyond role and content vary with the row (tool_calls, tool_call_id, reasoning, finish_reason, timestamp, display_metadata and others)."
+    required: [role]
+    properties:
+      role: { type: string, enum: [user, assistant, tool, system] }
+      content: {}
+    additionalProperties: true
+  AssistantMemory:
+    type: object
+    additionalProperties: false
+    required: [memories, skills]
+    properties:
+      memories:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, store, text]
+          properties:
+            id: { type: string }
+            store: { type: string, enum: [memory, profile], description: "memory for the assistant's notes, profile for what it noted about the member." }
+            text: { type: string, description: "The memory, at most its first 1,200 characters." }
+            updatedAt: { type: integer, description: Unix seconds. }
+      skills:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, useCount]
+          properties:
+            id: { type: string, description: "The skill's name." }
+            category: { type: string }
+            createdBy: { type: string, description: "learn when the member asked for it, agent when the assistant made it itself; absent when it only used it." }
+            useCount: { type: integer, minimum: 0 }
+            updatedAt: { type: integer, description: Unix seconds. }
+  AssistantApprovalEnvelope:
+    type: object
+    additionalProperties: false
+    required: [approval]
+    properties:
+      approval: { $ref: "#/schemas/AssistantApproval" }
+  AssistantApproval:
+    type: object
+    description: "One thing the assistant asked the member in a running turn (ADR 0024 decisions 3 and 4)."
+    additionalProperties: false
+    required: [requestId, kind, sessionId, status, createdAt]
+    properties:
+      requestId: { type: string }
+      kind:
+        type: string
+        enum: [change, command, question]
+        description: "change: a call of 提交更改 the executor carries out as the member (change). command: a dangerous command or a script the assistant runs in its sandbox, which reaches nothing outside its own folder (command). question: the clarify tool's questions (questions), answered with /answer."
+      sessionId: { type: string, description: "The live conversation (Hermes's runtime id) it was asked in." }
+      storedSessionId: { type: string, description: "The stored conversation, when known." }
+      status: { type: string, enum: [awaiting, deciding, approved, answered, applied, failed, rejected, expired, stopped], description: "Only awaiting can be confirmed, rejected or answered; a rejected question was skipped." }
+      createdAt: { type: integer, description: Unix seconds. }
+      change: { $ref: "#/schemas/AssistantChange" }
+      command:
+        type: object
+        additionalProperties: false
+        required: [text]
+        properties:
+          text: { type: string, description: "The command, or the whole script, as it will run." }
+          description: { type: string, description: "Why Hermes asks, as it names the pattern." }
+          script: { type: boolean, description: "An execute_code script, approved as a whole." }
+          forSession: { type: boolean, description: "It may be allowed for the rest of the conversation." }
+      questions:
+        type: array
+        maxItems: 5
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, text]
+          properties:
+            id: { type: string }
+            text: { type: string }
+            choices: { type: array, items: { type: string } }
+            multiSelect: { type: boolean }
+      answers:
+        type: object
+        description: "The member's answers by question id; null for one left out."
+        additionalProperties: { type: [string, "null"] }
+  AssistantChange:
+    type: object
+    description: "The change as the executor prepared it: each operation, with the text before and after each write."
+    additionalProperties: true
+    required: [id, summary, status, operations]
+    properties:
+      id: { type: string }
+      summary: { type: string }
+      status: { type: string, enum: [awaiting, approved, applying, applied, failed, rejected, expired] }
+      error: { type: string, description: Why a confirmed change failed. }
+      operations:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [op, path]
+          properties:
+            op: { type: string, enum: [write, copy, delete, move, mkdir] }
+            path: { type: string, description: "Path as the assistant sees it, under /nas." }
+            to: { type: string, description: Destination of a move. }
+            from: { type: string, description: "What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder)." }
+            size: { type: integer, description: "Bytes a copy copies; a folder's files together." }
+            folder: { type: boolean, description: A copy of a whole folder. }
+            exists: { type: boolean, description: The target existed when the card was made. }
+            before: { type: string, description: "Text of a written file when the card was made; absent when it is new or not text." }
+            after: { type: string, description: "Text the write leaves; absent when it is not text." }

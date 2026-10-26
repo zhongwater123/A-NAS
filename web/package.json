@@ -13,6 +13,7 @@
     "test": "vitest run",
     "build": "vite build",
     "format": "biome format --write .",
+    "generate": "make -C .. api",
     "lint": "oxlint --deny-warnings src vite.config.ts && biome format ."
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "lrc-kit": "1.2.1",
     "lucide-react": "1.52.0",
     "modern-screenshot": "4.7.0",
+    "openapi-fetch": "0.17.0",
     "pinyin-pro": "3.29.4",
     "radix-ui": "1.8.1",
     "react": "19.3.0",

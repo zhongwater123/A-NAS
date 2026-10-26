@@ -1,0 +1,153 @@
+/healthz:
+  get:
+    security: []
+    operationId: getHealth
+    summary: Report whether the API process is alive
+    responses:
+      "200":
+        description: The API process is alive.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/HealthResponse"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/system:
+  get:
+    operationId: getSystemState
+    summary: Read the latest observed host system state
+    responses:
+      "200":
+        description: The observed system state.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/SystemResponse"
+      "503":
+        $ref: "../components/system.yaml#/responses/StateUnavailable"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/disks:
+  get:
+    operationId: listDisks
+    summary: List disks by stable resource ID
+    responses:
+      "200":
+        description: Disks ordered by stable resource ID.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/DisksResponse"
+      "503":
+        $ref: "../components/system.yaml#/responses/StateUnavailable"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/host-state:
+  get:
+    operationId: getHostState
+    summary: Read one atomic host system and disk snapshot
+    responses:
+      "200":
+        description: The observed host state and its data source.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/HostStateResponse"
+      "503":
+        $ref: "../components/system.yaml#/responses/StateUnavailable"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+/api/v1/task-manager/device:
+  get:
+    operationId: getTaskManagerDevice
+    summary: Read device utilisation and accelerator availability
+    description: >-
+      Every signed-in account, including members, can read this snapshot. This API is read-only.
+      Rates use the shared Host Agent sampling window; CPU percentages use whole-machine capacity.
+      Unknown metrics are present as null. Partial or unavailable groups retain explicit status and arrays.
+      No command lines, environment variables or host paths are exposed.
+    responses:
+      "200":
+        description: The latest observation and its data source.
+        headers:
+          Cache-Control:
+            schema: { type: string, const: no-store }
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/TaskManagerDeviceResponse"
+      "401":
+        description: A valid signed-in session is required.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "503":
+        description: The observation cannot currently be read (task_manager_unavailable).
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+/api/v1/task-manager/tasks:
+  get:
+    operationId: getTaskManagerTasks
+    summary: Read running services and processes
+    description: >-
+      Every signed-in account, including members, can read this snapshot. This API is read-only.
+      Rates use the shared Host Agent sampling window; CPU percentages use whole-machine capacity.
+      Unknown metrics are present as null. Partial or unavailable groups retain explicit status and arrays.
+      No command lines, environment variables or host paths are exposed.
+    responses:
+      "200":
+        description: The latest observation and its data source.
+        headers:
+          Cache-Control:
+            schema: { type: string, const: no-store }
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/TaskManagerTasksResponse"
+      "401":
+        description: A valid signed-in session is required.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"
+      "503":
+        description: The observation cannot currently be read (task_manager_unavailable).
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+/api/v1/metrics:
+  get:
+    operationId: getHostMetrics
+    summary: Read current CPU, memory and network utilisation
+    description: >-
+      CPU usage and network rates cover the interval since the previous sample (at least 0.5 seconds);
+      polls arriving sooner receive the previous result. Network rates sum physical interfaces and exclude
+      loopback and virtual links. Memory counts MemTotal minus MemAvailable as used.
+    responses:
+      "200":
+        description: The latest utilisation observation.
+        headers:
+          Cache-Control:
+            schema:
+              type: string
+              const: no-store
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system.yaml#/schemas/MetricsResponse"
+      "503":
+        description: Host metrics cannot currently be read.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/schemas/ErrorResponse"
+      "405":
+        $ref: "../components/common.yaml#/responses/MethodNotAllowed"

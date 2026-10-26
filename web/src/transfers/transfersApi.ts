@@ -1,63 +1,24 @@
-import { request } from "../api";
+import { call, client } from "../api";
+import type { Transfer, TransferLocation } from "../api.generated";
 
-export type TransferDirection = "upload" | "download";
-export type TransferState = "pending" | "running" | "paused" | "interrupted" | "completed" | "failed" | "canceled";
-export interface TransferFolder {
-  id: string;
-  name: string;
-}
-export interface TransferLocation {
-  spaceId: string;
-  spaceKind: "private" | "shared";
-  folders: TransferFolder[];
-}
-export interface TransferFailure {
-  code: string;
-  message: string;
-}
+export type { Transfer, TransferFailure, TransferLocation } from "../api.generated";
+export type TransferDirection = Transfer["direction"];
+export type TransferState = Transfer["state"];
+export type TransferFolder = TransferLocation["folders"][number];
 
-// Transfer mirrors internal/transfers.Transfer.
-export interface Transfer {
-  id: string;
-  direction: TransferDirection;
-  kind: "file" | "archive";
-  name: string;
-  location: TransferLocation;
-  totalBytes: number;
-  transferredBytes: number;
-  bytesPerSecond: number;
-  state: TransferState;
-  error?: TransferFailure;
-  batch?: string;
-  relativePath?: string;
-  lastModified?: number;
-  entryId?: string;
-  savedName?: string;
-  replaced?: boolean;
-  skipped?: number;
-  contentUrl?: string;
-  createdAt: string;
-  updatedAt: string;
-  finishedAt?: string;
-}
-
-const base = "/api/v1/transfers";
-const id = (value: string) => encodeURIComponent(value);
-const post = (): RequestInit => ({ method: "POST" });
+const transfer = (transferId: string) => ({ params: { path: { transferId } } });
 
 export const uploadEndpoint = "/api/v1/uploads";
-export const uploadURL = (transferId: string) => `${uploadEndpoint}/${id(transferId)}`;
-export const listTransfers = async () => (await request<{ items: Transfer[] }>(base)).items;
-export const getTransfer = (transferId: string) => request<Transfer>(`${base}/${id(transferId)}`);
+export const uploadURL = (transferId: string) => `${uploadEndpoint}/${encodeURIComponent(transferId)}`;
+export const listTransfers = async () => (await call(client.GET("/api/v1/transfers"))).items;
+export const getTransfer = (transferId: string) =>
+  call(client.GET("/api/v1/transfers/{transferId}", transfer(transferId)));
 export const createDownload = (entryIds: string[]) =>
-  request<Transfer>(
-    `${base}/downloads`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entryIds }) },
-    true,
-  );
-export const pauseTransfer = (transferId: string) => request<Transfer>(`${base}/${id(transferId)}/pause`, post(), true);
+  call(client.POST("/api/v1/transfers/downloads", { body: { entryIds } }));
+export const pauseTransfer = (transferId: string) =>
+  call(client.POST("/api/v1/transfers/{transferId}/pause", transfer(transferId)));
 export const cancelTransfer = (transferId: string) =>
-  request<Transfer>(`${base}/${id(transferId)}/cancel`, post(), true);
+  call(client.POST("/api/v1/transfers/{transferId}/cancel", transfer(transferId)));
 export const removeTransfer = (transferId: string) =>
-  request<void>(`${base}/${id(transferId)}`, { method: "DELETE" }, true);
-export const clearFinishedTransfers = () => request<void>(base, { method: "DELETE" }, true);
+  call(client.DELETE("/api/v1/transfers/{transferId}", transfer(transferId)));
+export const clearFinishedTransfers = () => call(client.DELETE("/api/v1/transfers"));

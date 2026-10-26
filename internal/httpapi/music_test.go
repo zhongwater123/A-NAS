@@ -16,16 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
 
 // silentMP3 is an ID3v2.3 title followed by silent MPEG-1 Layer III frames.
@@ -46,7 +43,6 @@ func silentMP3(title string, frames int) []byte {
 type contractClient struct {
 	t       *testing.T
 	handler http.Handler
-	router  routers.Router
 	cookie  *http.Cookie
 	csrf    string
 	// forwardedFor is the LAN address the client signed in from, which its
@@ -82,22 +78,7 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 	if recorder.Code != want {
 		c.t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, want, recorder.Body.String())
 	}
-	request := newRequest()
-	route, params, err := c.router.FindRoute(request)
-	if err != nil {
-		c.t.Fatalf("find OpenAPI route for %s %s: %v", method, path, err)
-	}
-	input := &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route, Options: &openapi3filter.Options{
-		AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error { return nil },
-	}}
-	if err := openapi3filter.ValidateRequest(context.Background(), input); err != nil {
-		c.t.Fatalf("validate %s %s request: %v", method, path, err)
-	}
-	response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header()}
-	response.SetBodyBytes(recorder.Body.Bytes())
-	if err := openapi3filter.ValidateResponse(context.Background(), response); err != nil {
-		c.t.Fatalf("validate %s %s response: %v", method, path, err)
-	}
+	openapitest.Check(c.t, newRequest(), recorder)
 	return recorder
 }
 
@@ -128,15 +109,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Music: library, Logger: logger,
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &contractClient{t: t, handler: handler, router: router}
+	client := &contractClient{t: t, handler: handler}
 
 	unauthenticated := httptest.NewRecorder()
 	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/v1/music/tracks", nil))

@@ -1,0 +1,41 @@
+parameters:
+  FeedbackID: { name: feedbackId, in: path, required: true, schema: { type: string } }
+schemas:
+  FeedbackItem:
+    type: object
+    additionalProperties: false
+    required: [id, text, images, version, createdBy, createdAt, resolved, comments]
+    properties:
+      id: { type: string }
+      text: { type: string, maxLength: 5000 }
+      images: { type: array, maxItems: 6, items: { $ref: "#/schemas/FeedbackImage" } }
+      version: { type: integer, minimum: 1, description: "Counts edits to the text and images; resolving does not change it." }
+      createdBy: { type: string, description: Username of the account that filed the item. }
+      createdAt: { type: string, format: date-time }
+      updatedBy: { type: string, description: Username of the latest editor of the text or images. }
+      updatedAt: { type: string, format: date-time }
+      resolved: { type: boolean }
+      resolvedBy: { type: string }
+      resolvedAt: { type: string, format: date-time }
+      comments: { type: array, description: "Replies under the item, oldest first.", items: { $ref: "#/schemas/FeedbackComment" } }
+  FeedbackComment:
+    type: object
+    additionalProperties: false
+    required: [id, text, images, version, createdBy, createdAt]
+    properties:
+      id: { type: string }
+      text: { type: string, maxLength: 2000 }
+      images: { type: array, maxItems: 3, items: { $ref: "#/schemas/FeedbackImage" } }
+      version: { type: integer, minimum: 1, description: Counts edits to the comment. }
+      createdBy: { type: string, description: Username of the account that wrote the comment. }
+      createdAt: { type: string, format: date-time }
+      updatedBy: { type: string, description: Username of the latest editor. }
+      updatedAt: { type: string, format: date-time }
+  FeedbackImage:
+    type: object
+    additionalProperties: false
+    required: [id, contentType, sizeBytes]
+    properties:
+      id: { type: string }
+      contentType: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp] }
+      sizeBytes: { type: integer, minimum: 1, maximum: 10485760 }

@@ -34,15 +34,13 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 import { transferStore, type UploadTarget } from "./store";
 import { TransferIndicator, TransferToasts } from "./TransferNotices";
+import { json, stubAPI } from "../test/api";
 
 const target: UploadTarget = { spaceId: "space:shared", spaceKind: "shared", parentId: "", folders: [] };
 
 beforeEach(() => {
   tus.uploads.length = 0;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [] }) }) as Response),
-  );
+  stubAPI(vi.fn(async () => json({ items: [] })));
   transferStore.attach("user:alice");
 });
 

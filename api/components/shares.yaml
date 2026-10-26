@@ -1,0 +1,260 @@
+schemas:
+  MemberShareEntry:
+    type: object
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+      path:
+        type: string
+      isDir:
+        type: boolean
+      size:
+        type: integer
+        minimum: 0
+    required:
+    - id
+    - path
+    - isDir
+    - size
+  MemberShareRecipient:
+    type: object
+    additionalProperties: false
+    properties:
+      userId:
+        type: string
+      viewedAt:
+        type: string
+        format: date-time
+      readThrough:
+        type: integer
+        minimum: 0
+      senderReadThrough:
+        type: integer
+        minimum: 0
+      saved:
+        type: boolean
+      saveUncertain:
+        type: boolean
+        description: Some complete files may exist but publication confirmation was lost.
+      savedFiles:
+        type: integer
+        minimum: 0
+      lastMessage:
+        type: integer
+        minimum: 0
+    required:
+    - userId
+    - readThrough
+    - senderReadThrough
+    - saved
+    - savedFiles
+    - lastMessage
+  MemberShare:
+    type: object
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+      sender:
+        type: object
+        additionalProperties: false
+        properties:
+          id:
+            type: string
+          username:
+            type: string
+        required:
+        - id
+        - username
+      status:
+        type: string
+        enum:
+        - preparing
+        - published
+        - failed
+        - revoked
+        - expired
+      createdAt:
+        type: string
+        format: date-time
+      publishedAt:
+        type: string
+        format: date-time
+      expiresAt:
+        type: string
+        format: date-time
+      entries:
+        type: array
+        items:
+          $ref: '#/schemas/MemberShareEntry'
+      recipients:
+        type: array
+        items:
+          $ref: '#/schemas/MemberShareRecipient'
+      error:
+        type: string
+      preparedBytes:
+        type: integer
+        minimum: 0
+    required:
+    - id
+    - sender
+    - status
+    - createdAt
+    - entries
+    - recipients
+    - preparedBytes
+  MemberShareMessage:
+    type: object
+    additionalProperties: false
+    properties:
+      id:
+        type: integer
+        minimum: 0
+      sender:
+        type: object
+        additionalProperties: false
+        properties:
+          id:
+            type: string
+          username:
+            type: string
+        required:
+        - id
+        - username
+      text:
+        type: string
+      createdAt:
+        type: string
+        format: date-time
+    required:
+    - id
+    - sender
+    - text
+    - createdAt
+  MemberShareJob:
+    type: object
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+      shareId:
+        type: string
+      userId:
+        type: string
+      status:
+        type: string
+        enum:
+        - running
+        - completed
+        - failed
+        - cancelled
+        - interrupted
+      createdAt:
+        type: string
+        format: date-time
+      finishedAt:
+        type: string
+        format: date-time
+      bytesDone:
+        type: integer
+        minimum: 0
+      bytesTotal:
+        type: integer
+        minimum: 0
+      completedIds:
+        type: array
+        items:
+          type: string
+      entryIds:
+        type: array
+        items:
+          type: string
+      error:
+        type: string
+    required:
+    - id
+    - shareId
+    - userId
+    - status
+    - createdAt
+    - bytesDone
+    - bytesTotal
+    - completedIds
+    - entryIds
+  MemberShareNotification:
+    type: object
+    additionalProperties: false
+    properties:
+      id:
+        type: integer
+        minimum: 0
+      shareId:
+        type: string
+      recipientId:
+        type: string
+      kind:
+        type: string
+      messageId:
+        type: integer
+        minimum: 0
+      createdAt:
+        type: string
+        format: date-time
+    required:
+    - id
+    - shareId
+    - recipientId
+    - kind
+    - createdAt
+  CreateMemberShare:
+    type: object
+    additionalProperties: false
+    properties:
+      requestId:
+        type: string
+        minLength: 1
+      sourceIds:
+        type: array
+        minItems: 1
+        maxItems: 100
+        items:
+          type: string
+      recipientIds:
+        type: array
+        minItems: 1
+        maxItems: 100
+        items:
+          type: string
+      message:
+        type: string
+    required:
+    - requestId
+    - sourceIds
+    - recipientIds
+  SaveMemberShare:
+    type: object
+    additionalProperties: false
+    properties:
+      requestId:
+        type: string
+        minLength: 1
+      entryIds:
+        type: array
+        items:
+          type: string
+      target:
+        type: object
+        additionalProperties: false
+        properties:
+          rootId:
+            type: string
+          parentId:
+            type: string
+        required:
+        - rootId
+    required:
+    - requestId
+    - entryIds
+    - target

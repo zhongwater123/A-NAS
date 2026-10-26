@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { Disk, StoragePlan, User } from "./api.generated";
 import type { SessionStatus } from "./terminal";
 import { healthyState, installAPI, openSettingsSection, resetDesktop, session, stubFetch } from "./test/desktop";
 
@@ -65,12 +66,13 @@ describe("Settings storage", () => {
             model: "A-NAS Fake HDD",
             capacityBytes: 512000000000,
             fingerprint: "blank-disk-fingerprint",
-            signatures: null,
+            signatures: null as unknown as [],
           },
         ],
         confirmationPhrase: "ERASE data-01",
-        actions: null,
+        actions: null as unknown as [],
         state: "planned",
+        createdAt: "2026-10-07T10:00:00Z",
         expiresAt: "2026-10-07T10:10:00Z",
       },
     });
@@ -213,12 +215,13 @@ describe("ADR 0008 account safeguards", () => {
   });
 
   it("lets an administrator start read-only viewing with a reason and password", async () => {
-    const alice = {
+    const alice: User = {
       id: "user:alice",
       username: "alice",
       role: "member",
       status: "active",
       createdAt: "2026-10-07T10:00:00Z",
+      mustChangePassword: false,
     };
     const fetchMock = installAPI({ users: [session.user, alice] });
     const user = userEvent.setup();
@@ -243,12 +246,13 @@ describe("ADR 0008 account safeguards", () => {
   });
 
   it("lets an administrator view a member's private photo library as its own grant", async () => {
-    const alice = {
+    const alice: User = {
       id: "user:alice",
       username: "alice",
       role: "member",
       status: "active",
       createdAt: "2026-10-07T10:00:00Z",
+      mustChangePassword: false,
     };
     const fetchMock = installAPI({ users: [session.user, alice] });
     const user = userEvent.setup();
@@ -275,12 +279,13 @@ describe("ADR 0008 account safeguards", () => {
 });
 
 describe("Settings", () => {
-  const alice = {
+  const alice: User = {
     id: "user:alice",
     username: "alice",
     role: "member",
     status: "active",
     createdAt: "2026-10-07T10:00:00Z",
+    mustChangePassword: false,
   };
 
   it("shows members their account, task manager, overview and read-only storage", async () => {
@@ -383,6 +388,7 @@ describe("Settings", () => {
         confirmationPhrase: "ERASE data-01",
         actions: [],
         state: "planned",
+        createdAt: "2026-10-07T10:00:00Z",
         expiresAt: "2099-01-01T00:00:00Z",
       },
     });
@@ -471,7 +477,7 @@ describe("Settings", () => {
   });
 
   it("adds a new disk to the data volume as a mirror", async () => {
-    const dataDisk = {
+    const dataDisk: Disk = {
       ...healthyState.disks[0],
       id: "disk:data",
       model: "ST500DM002-1BD142",
@@ -482,14 +488,14 @@ describe("Settings", () => {
       eligibleForDataVolume: false,
       ineligibleReasons: ["data_volume", "in_use"],
     };
-    const spareDisk = {
+    const spareDisk: Disk = {
       ...healthyState.disks[0],
       id: "disk:spare",
       model: "ST500DM002-1BD142",
       capacityBytes: 500_107_862_016,
       filesystems: ["linux_raid_member"],
     };
-    const usbDisk = {
+    const usbDisk: Disk = {
       ...healthyState.disks[0],
       id: "disk:usb",
       model: "USB Stick",
@@ -498,7 +504,7 @@ describe("Settings", () => {
       eligibleForDataVolume: false,
       ineligibleReasons: ["unsupported_transport", "removable"],
     };
-    const plan = {
+    const plan: StoragePlan = {
       id: "plan:add",
       kind: "add_disks",
       layout: "mirror",
@@ -516,6 +522,7 @@ describe("Settings", () => {
       confirmationPhrase: "ERASE k:spare",
       actions: [{ kind: "convert_layout", description: "在后台把数据卷从单盘转换为镜像（RAID 1），期间可以照常使用" }],
       state: "planned",
+      createdAt: "2026-10-07T10:00:00Z",
       expiresAt: "2099-01-01T00:00:00Z",
     };
     const fetchMock = installAPI({
@@ -587,6 +594,7 @@ describe("Settings", () => {
         confirmationPhrase: "ERASE data-01",
         actions: [],
         state: "planned",
+        createdAt: "2026-10-07T10:00:00Z",
         expiresAt: "2099-01-01T00:00:00Z",
       },
     });
@@ -614,7 +622,7 @@ describe("Settings", () => {
   });
 
   it("follows a plan that runs on the device when the page comes back", async () => {
-    const plan = {
+    const plan: StoragePlan = {
       id: "plan:run",
       kind: "create_volume",
       layout: "single",
@@ -632,6 +640,7 @@ describe("Settings", () => {
       actions: [],
       state: "running",
       step: "format",
+      createdAt: "2026-10-07T10:00:00Z",
       expiresAt: "2099-01-01T00:00:00Z",
     };
     const fetchMock = installAPI({
@@ -650,7 +659,7 @@ describe("Settings", () => {
   });
 
   it("offers to retry a plan that stopped on the device", async () => {
-    const plan = {
+    const plan: StoragePlan = {
       id: "plan:stopped",
       kind: "create_volume",
       layout: "single",
@@ -668,6 +677,7 @@ describe("Settings", () => {
       actions: [],
       state: "needs_attention",
       step: "mount",
+      createdAt: "2026-10-07T10:00:00Z",
       expiresAt: "2026-10-21T09:10:00Z",
       failure: "the Host Agent stopped during the mount step; retrying continues after the steps that are done",
     };
@@ -693,7 +703,7 @@ describe("Settings", () => {
   });
 
   it("shows why a retried plan stopped again", async () => {
-    const plan = {
+    const plan: StoragePlan = {
       id: "plan:again",
       kind: "add_disks",
       layout: "mirror",
@@ -711,6 +721,7 @@ describe("Settings", () => {
       actions: [],
       state: "needs_attention",
       step: "erase",
+      createdAt: "2026-10-07T10:00:00Z",
       expiresAt: "2026-10-21T09:10:00Z",
       failure: "the Host Agent stopped during the erase step; retrying continues after the steps that are done",
     };
@@ -733,7 +744,7 @@ describe("Settings", () => {
   });
 
   it("shows how far a conversion has come and continues a stopped one", async () => {
-    const disks = [
+    const disks: Disk[] = [
       {
         ...healthyState.disks[0],
         id: "disk:data",
@@ -899,12 +910,13 @@ describe("Settings", () => {
 });
 
 describe("Avatars and nicknames", () => {
-  const alice = {
+  const alice: User = {
     id: "user:alice",
     username: "alice",
     role: "member",
     status: "active",
     createdAt: "2026-10-07T10:00:00Z",
+    mustChangePassword: false,
   };
 
   // jsdom neither decodes images nor draws on a canvas.
