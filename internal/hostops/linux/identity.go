@@ -264,7 +264,7 @@ func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) e
 }
 
 func (e *Executor) loadIdentityRegistry() error {
-	contents, err := os.ReadFile(e.identityPath)
+	contents, err := e.readState(e.identityPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -275,18 +275,35 @@ func (e *Executor) loadIdentityRegistry() error {
 	if err := json.Unmarshal(contents, &records); err != nil {
 		return fmt.Errorf("decode identity registry: %w", err)
 	}
+	owners := make(map[int]string, len(records))
 	for username, record := range records {
 		if err := validIdentity(accounts.Identity{Username: username, UID: record.UID, Role: record.Role}); err != nil {
 			return fmt.Errorf("identity registry: %w", err)
 		}
-		e.identities[username] = record
+		// accountState never gives one UID to two accounts.
+		if other, taken := owners[record.UID]; taken {
+			return fmt.Errorf("identity registry: %s and %s have UID %d", other, username, record.UID)
+		}
+		owners[record.UID] = username
+	}
+	if records != nil {
+		e.identities = records
 	}
 	return nil
 }
 
+// recordIdentity records an identity ensureIdentity has just made sure of.
+// No other account holds its UID then, so another entry with the UID names
+// an account that is gone, and is dropped: a registry never lists one UID
+// twice.
 func (e *Executor) recordIdentity(identity accounts.Identity) error {
 	e.identitiesMu.Lock()
 	defer e.identitiesMu.Unlock()
+	for username, record := range e.identities {
+		if record.UID == identity.UID && username != identity.Username {
+			delete(e.identities, username)
+		}
+	}
 	e.identities[identity.Username] = identityRecord{UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
 	return e.writeIdentityRegistryLocked(e.identityPath)
 }
@@ -312,9 +329,11 @@ func (e *Executor) writeIdentityRegistryLocked(path string) error {
 }
 
 // mirrorIdentityManifest copies the identity registry onto the data volume
-// when it is mounted. An offline volume is left untouched.
+// when it is mounted. An offline volume is left untouched, and so is the copy
+// on the volume while the registry cannot be loaded: it may be what restores
+// the accounts.
 func (e *Executor) mirrorIdentityManifest() error {
-	if !e.dataVolumeReady() {
+	if e.identityError != nil || !e.dataVolumeReady() {
 		return nil
 	}
 	e.identitiesMu.Lock()

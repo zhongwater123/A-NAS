@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -54,7 +55,7 @@ func (h *handler) videoPlayback(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, playback)
+	httpjson.Write(w, http.StatusOK, playback)
 }
 
 func (h *handler) videoOriginal(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +75,7 @@ func (h *handler) videoStream(w http.ResponseWriter, r *http.Request) {
 	if value := query.Get("start"); value != "" {
 		var err error
 		if start, err = strconv.ParseFloat(value, 64); err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid_request", "start must be a number of seconds")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "start must be a number of seconds")
 			return
 		}
 	}
@@ -110,10 +111,10 @@ func (f flushingWriter) Write(data []byte) (int, error) {
 // a MOV completed.
 func (h *handler) uploadResult(w http.ResponseWriter, result photos.UploadResult) {
 	if result.Asset != nil {
-		writeJSON(w, http.StatusCreated, result.Asset)
+		httpjson.Write(w, http.StatusCreated, result.Asset)
 		return
 	}
-	writeJSON(w, http.StatusOK, completedResponse{Completed: result.Completed})
+	httpjson.Write(w, http.StatusOK, completedResponse{Completed: result.Completed})
 }
 
 type completedResponse struct {

@@ -1026,27 +1026,6 @@ button {
   position: relative;
   pointer-events: none;
 }
-/* The gauges sit at the bar's rounded left end: the button keeps 4px inside
-   its padding there and follows its curve, and its focus ring is drawn inside. */
-.status-gauges-open {
-  position: absolute;
-  inset: -4px -8px -4px -4px;
-  border: 0;
-  border-radius: 20px 14px 14px 20px;
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.status-gauges-open:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-.status-gauges-open:active {
-  background: rgba(255, 255, 255, 0.16);
-}
-.status-gauges-open:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: -2px;
-}
 .status-extra {
   display: flex;
   align-items: center;
@@ -1160,27 +1139,47 @@ button {
   display: grid;
   gap: 9px;
 }
+/* The gauges' and the network rates' buttons look and react alike. */
+.status-gauges-open,
 button.net-rates {
-  margin: -6px -8px;
-  padding: 6px 8px;
   border: 0;
-  border-radius: 14px;
-  color: inherit;
   background: transparent;
-  font: inherit;
-  text-align: left;
   cursor: pointer;
   transition: background 0.2s;
 }
-button.net-rates:hover {
-  background: rgba(255, 255, 255, 0.1);
+/* Only where a pointer hovers: on a touch screen :hover sticks after a tap. */
+@media (hover: hover) {
+  .status-gauges-open:hover,
+  button.net-rates:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
+.status-gauges-open:active,
 button.net-rates:active {
   background: rgba(255, 255, 255, 0.16);
 }
+.status-gauges-open:focus-visible,
 button.net-rates:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
+}
+button.net-rates {
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+/* The gauges sit at the bar's rounded left end: their button keeps 4px inside
+   its padding there and follows its curve, and its focus ring is drawn inside. */
+.status-gauges-open {
+  position: absolute;
+  inset: -4px -8px -4px -4px;
+  border-radius: 20px 14px 14px 20px;
+}
+.status-gauges-open:focus-visible {
+  outline-offset: -2px;
 }
 .net-row {
   display: flex;

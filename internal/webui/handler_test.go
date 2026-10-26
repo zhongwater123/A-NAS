@@ -252,7 +252,9 @@ func newHandler(t *testing.T) http.Handler {
 func newHandlerWithOptions(t *testing.T, options webui.Options) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	api := httpapi.New(fake.NewHealthy(), httpapi.DataSourceSimulated, "test-version", logger)
+	api := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, ProductVersion: "test-version", Logger: logger,
+	})
 	handler, err := webui.NewWithOptions(api, options)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -23,7 +23,7 @@ import type {
 } from "../api.generated";
 import { transferStore } from "../transfers/store";
 import { apiError, json, stubAPI } from "./api";
-import { healthyState, metricsState, session as sessionFixture } from "./fixtures";
+import { healthyState, metricsState, session as sessionFixture, taskManagerDevice, taskManagerTasks } from "./fixtures";
 
 export { healthyState, metricsState } from "./fixtures";
 export const session = sessionFixture();
@@ -86,6 +86,8 @@ export function installAPI(
     if (path === "/api/v1/notifications") return ok({ items: options.notifications ?? [] });
     if (path === "/api/v1/host-state") return ok(options.hostState ?? healthyState);
     if (path === "/api/v1/metrics") return ok(metricsState);
+    if (path === "/api/v1/task-manager/device") return ok(taskManagerDevice);
+    if (path === "/api/v1/task-manager/tasks") return ok(taskManagerTasks);
     if (path === "/api/v1/terminal") return ok({ enabled: options.terminalEnabled ?? false });
     if (path === "/api/v1/spaces") return ok({ items: options.spaces ?? [] });
     if (path.startsWith("/api/v1/spaces/") && path.includes("/entries")) return ok({ items: options.entries ?? [] });
@@ -182,6 +184,10 @@ export function routeFetch(routes: {
           return routes.metrics ? routes.metrics() : okResponse(metricsState);
         case "/api/v1/terminal":
           return okResponse({ enabled: routes.terminalEnabled ?? true });
+        case "/api/v1/task-manager/device":
+          return okResponse(taskManagerDevice);
+        case "/api/v1/task-manager/tasks":
+          return okResponse(taskManagerTasks);
         default:
           return okResponse(fresh[String(input)] ?? { items: [] });
       }

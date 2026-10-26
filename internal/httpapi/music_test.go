@@ -78,6 +78,9 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 	if recorder.Code != want {
 		c.t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, want, recorder.Body.String())
 	}
+	if guardAnswer(recorder) {
+		return recorder
+	}
 	openapitest.Check(c.t, newRequest(), recorder)
 	return recorder
 }
@@ -96,7 +99,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
 	volume := filepath.Join(dir, "volume")
-	fileService := files.NewService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	musicStore, err := music.OpenSQLite(filepath.Join(dir, "music.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +108,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{Worker: decodingWorker{}})
 	t.Cleanup(library.Close)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Music: library, Logger: logger,
 	})

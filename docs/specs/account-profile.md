@@ -76,5 +76,5 @@
 - 规格：[设置](settings.md)、[系统快捷栏](system-rail.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[问题反馈](feedback.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
-- 代码：[账号资料](../../internal/accounts/profile.go)、[头像压缩](../../internal/avatar/avatar.go)、[资料接口](../../internal/httpapi/profile.go)、[头像对话框](../../web/src/settings/AvatarDialog.tsx)、[图片来源（与壁纸共用）](../../web/src/settings/ImageSources.tsx)、[账号资料目录](../../web/src/people.ts)、[头像组件](../../web/src/PersonAvatar.tsx)、[OpenAPI](../../api/openapi.yaml)
+- 代码：[账号资料](../../internal/accounts/profile.go)、[头像压缩](../../internal/avatar/avatar.go)、[资料接口](../../internal/accountsapi/accountsapi.go)、[头像对话框](../../web/src/settings/AvatarDialog.tsx)、[图片来源（与壁纸共用）](../../web/src/settings/ImageSources.tsx)、[账号资料目录](../../web/src/people.ts)、[头像组件](../../web/src/PersonAvatar.tsx)、[OpenAPI](../../api/openapi.yaml)
 - 测试：见“验收证据”

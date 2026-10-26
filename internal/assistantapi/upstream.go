@@ -114,7 +114,7 @@ func gated(conn net.Conn) *http.Client {
 // rest makes one REST request to the account's instance and returns the
 // status and the body. Each request gets its own gated connection. A refused
 // access token (the instance restarted) is replaced by a fresh login once.
-func (h *handler) rest(ctx context.Context, account, method, path string, body []byte) (int, []byte, error) {
+func (h *Handler) rest(ctx context.Context, account, method, path string, body []byte) (int, []byte, error) {
 	status, data, err := h.restOnce(ctx, account, method, path, body, false)
 	if err == nil && status == http.StatusUnauthorized {
 		return h.restOnce(ctx, account, method, path, body, true)
@@ -122,7 +122,7 @@ func (h *handler) rest(ctx context.Context, account, method, path string, body [
 	return status, data, err
 }
 
-func (h *handler) restOnce(ctx context.Context, account, method, path string, body []byte, fresh bool) (int, []byte, error) {
+func (h *Handler) restOnce(ctx context.Context, account, method, path string, body []byte, fresh bool) (int, []byte, error) {
 	conn, token, err := h.options.Connector.Connect(ctx, account, fresh)
 	if err != nil {
 		return 0, nil, err
@@ -152,7 +152,7 @@ func (h *handler) restOnce(ctx context.Context, account, method, path string, bo
 // dialGateway opens the instance's JSON-RPC WebSocket through the gate. The
 // URL carries the access token, so it is never logged. A refused token (the
 // instance restarted) is replaced by a fresh login once.
-func (h *handler) dialGateway(ctx context.Context, account string) (*websocket.Conn, error) {
+func (h *Handler) dialGateway(ctx context.Context, account string) (*websocket.Conn, error) {
 	upstream, refused, err := h.dialGatewayOnce(ctx, account, false)
 	if refused {
 		upstream, _, err = h.dialGatewayOnce(ctx, account, true)
@@ -160,7 +160,7 @@ func (h *handler) dialGateway(ctx context.Context, account string) (*websocket.C
 	return upstream, err
 }
 
-func (h *handler) dialGatewayOnce(ctx context.Context, account string, fresh bool) (*websocket.Conn, bool, error) {
+func (h *Handler) dialGatewayOnce(ctx context.Context, account string, fresh bool) (*websocket.Conn, bool, error) {
 	conn, token, err := h.options.Connector.Connect(ctx, account, fresh)
 	if err != nil {
 		return nil, false, err

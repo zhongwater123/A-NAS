@@ -119,9 +119,8 @@ func newRaceFixtureOn(t *testing.T, wrap func(files.FileSystem) files.FileSystem
 		fs:   &hookedFileSystem{FileSystem: wrap(files.NewRootFileSystem(volume, true))},
 		db:   catalogDB(t, catalogPath),
 	}
-	fixture.service = files.NewService(catalog, volume, accountService, files.Options{
-		DisableCapacityReserve: true, AllowUnverifiedVolume: true, FileSystem: fixture.fs,
-	})
+	fixture.service = files.NewService(catalog, volume, accountService, fixture.fs, files.Options{
+		DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	return fixture
 }
 

@@ -79,7 +79,7 @@ func setupFS(t *testing.T, wrap func(files.FileSystem) files.FileSystem) *fixtur
 	if wrap != nil {
 		fsys = wrap(fsys)
 	}
-	fs := files.NewService(catalog, volume, users, files.Options{FileSystem: fsys, AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	fs := files.NewService(catalog, volume, users, fsys, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	f := &fixture{local: NewLocal(fs, users), files: fs, users: users, alice: alice, bob: bob, ac: accounts.WithSessionToken(ctx, a.Token), bc: accounts.WithSessionToken(ctx, b.Token), volume: volume}
 	for _, u := range []accounts.User{alice, bob} {
 		spaces, e := users.ListSpaces(ctx, u)

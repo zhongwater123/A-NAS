@@ -6,7 +6,6 @@ package feedbackapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,12 +16,16 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const PathPrefix = "/api/v1/feedback"
 
 // maxRequestBytes admits the most images an item can hold, plus its text.
 const maxRequestBytes = feedback.MaxImages*feedback.MaxImageBytes + 1<<20
+
+// maxResolveBytes bounds the JSON that marks an item resolved.
+const maxResolveBytes = 1 << 10
 
 type userKey struct{}
 
@@ -59,14 +62,14 @@ func New(store *feedback.Store, logger *slog.Logger) http.Handler {
 		h.mux.HandleFunc(method+" "+PathPrefix+path, h.withUser(route))
 	}
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "feedback_unavailable", "feedback is unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "feedback_unavailable", "feedback is unavailable")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -76,7 +79,7 @@ func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, feedbac
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(userKey{}).(accounts.User)
 		if !ok || user.ID == "" {
-			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
 		next(w, r, feedback.Actor{ID: user.ID, Username: user.Username})
@@ -89,7 +92,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request, _ feedback.Actor)
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request, actor feedback.Actor) {
@@ -99,7 +102,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, actor feedback.
 		return
 	}
 	if form.versioned || len(form.content.Keep) > 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "a new item has no version or kept images")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "a new item has no version or kept images")
 		return
 	}
 	item, err := h.store.Create(r.Context(), actor, form.content)
@@ -107,7 +110,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, actor feedback.
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	httpjson.Write(w, http.StatusCreated, item)
 }
 
 func (h *handler) edit(w http.ResponseWriter, r *http.Request, actor feedback.Actor) {
@@ -117,7 +120,7 @@ func (h *handler) edit(w http.ResponseWriter, r *http.Request, actor feedback.Ac
 		return
 	}
 	if !form.versioned {
-		writeError(w, http.StatusBadRequest, "invalid_request", "an edit names the version it was made from")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "an edit names the version it was made from")
 		return
 	}
 	item, err := h.store.Edit(r.Context(), actor, r.PathValue("id"), form.version, form.content)
@@ -125,15 +128,18 @@ func (h *handler) edit(w http.ResponseWriter, r *http.Request, actor feedback.Ac
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	httpjson.Write(w, http.StatusOK, item)
 }
 
 func (h *handler) resolve(w http.ResponseWriter, r *http.Request, actor feedback.Actor) {
 	var request struct {
 		Resolved *bool `json:"resolved"`
 	}
-	if err := decode(r, &request); err != nil || request.Resolved == nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, maxResolveBytes, &request) {
+		return
+	}
+	if request.Resolved == nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
 	item, err := h.store.SetResolved(r.Context(), actor, r.PathValue("id"), *request.Resolved)
@@ -141,7 +147,7 @@ func (h *handler) resolve(w http.ResponseWriter, r *http.Request, actor feedback
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	httpjson.Write(w, http.StatusOK, item)
 }
 
 // Comment writes answer with the whole item, so the list replaces it in place.
@@ -152,7 +158,7 @@ func (h *handler) addComment(w http.ResponseWriter, r *http.Request, actor feedb
 		return
 	}
 	if form.versioned || len(form.content.Keep) > 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "a new comment has no version or kept images")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "a new comment has no version or kept images")
 		return
 	}
 	item, err := h.store.AddComment(r.Context(), actor, r.PathValue("id"), form.content)
@@ -160,7 +166,7 @@ func (h *handler) addComment(w http.ResponseWriter, r *http.Request, actor feedb
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	httpjson.Write(w, http.StatusCreated, item)
 }
 
 func (h *handler) editComment(w http.ResponseWriter, r *http.Request, actor feedback.Actor) {
@@ -170,7 +176,7 @@ func (h *handler) editComment(w http.ResponseWriter, r *http.Request, actor feed
 		return
 	}
 	if !form.versioned {
-		writeError(w, http.StatusBadRequest, "invalid_request", "an edit names the version it was made from")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "an edit names the version it was made from")
 		return
 	}
 	item, err := h.store.EditComment(r.Context(), actor, r.PathValue("id"), r.PathValue("commentID"), form.version, form.content)
@@ -178,7 +184,7 @@ func (h *handler) editComment(w http.ResponseWriter, r *http.Request, actor feed
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	httpjson.Write(w, http.StatusOK, item)
 }
 
 func (h *handler) deleteComment(w http.ResponseWriter, r *http.Request, _ feedback.Actor) {
@@ -187,7 +193,7 @@ func (h *handler) deleteComment(w http.ResponseWriter, r *http.Request, _ feedba
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	httpjson.Write(w, http.StatusOK, item)
 }
 
 func (h *handler) delete(w http.ResponseWriter, r *http.Request, _ feedback.Actor) {
@@ -311,47 +317,28 @@ func bodyError(err error) error {
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, feedback.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "feedback not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "feedback not found")
 	case errors.Is(err, feedback.ErrCommentNotFound):
-		writeError(w, http.StatusNotFound, "comment_not_found", "comment not found")
+		httpjson.WriteError(w, http.StatusNotFound, "comment_not_found", "comment not found")
 	case errors.Is(err, feedback.ErrChanged):
-		writeError(w, http.StatusConflict, "feedback_changed", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "feedback_changed", err.Error())
 	case errors.Is(err, feedback.ErrCommentChanged):
-		writeError(w, http.StatusConflict, "comment_changed", err.Error())
+		httpjson.WriteError(w, http.StatusConflict, "comment_changed", err.Error())
 	case errors.Is(err, feedback.ErrEmpty):
-		writeError(w, http.StatusBadRequest, "feedback_empty", err.Error())
+		httpjson.WriteError(w, http.StatusBadRequest, "feedback_empty", err.Error())
 	case errors.Is(err, feedback.ErrTextTooLong):
-		writeError(w, http.StatusBadRequest, "text_too_long", err.Error())
+		httpjson.WriteError(w, http.StatusBadRequest, "text_too_long", err.Error())
 	case errors.Is(err, feedback.ErrTooManyImages):
-		writeError(w, http.StatusBadRequest, "too_many_images", err.Error())
+		httpjson.WriteError(w, http.StatusBadRequest, "too_many_images", err.Error())
 	case errors.Is(err, feedback.ErrImageTooLarge), errors.Is(err, errRequestTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large", feedback.ErrImageTooLarge.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "image_too_large", feedback.ErrImageTooLarge.Error())
 	case errors.Is(err, feedback.ErrUnsupportedImage):
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_image", err.Error())
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_image", err.Error())
 	case errors.Is(err, errInvalid), errors.Is(err, errPartTooLarge):
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 	case errors.Is(err, context.Canceled):
 	default:
 		h.logger.ErrorContext(r.Context(), "feedback request failed", "path", r.URL.Path, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "the request failed")
+		httpjson.WriteError(w, http.StatusInternalServerError, "internal_error", "the request failed")
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
-}
-
-func decode(r *http.Request, target any) error {
-	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/json" {
-		return errors.New("Content-Type must be application/json")
-	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<10))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
 }

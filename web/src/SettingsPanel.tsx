@@ -29,7 +29,7 @@ import {
   UserX,
   type LucideIcon,
 } from "lucide-react";
-import { FormEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import {
   Health,
@@ -142,7 +142,10 @@ export function SettingsPanel({
   const isAdmin = user.role === "admin";
   const current =
     (section === "users" || section === "terminal" || section === "personalization") && !isAdmin ? "overview" : section;
-  const [editingPassword, setEditingPassword] = useState(false);
+  // 用户与权限 can open My account with its password form showing; the request
+  // is used up once the form is shown. The form's own state lives in
+  // AccountSection, so switching away from My account by any route closes it.
+  const [passwordFormRequested, setPasswordFormRequested] = useState(false);
   // "登录记录" in My account opens the logs on sign-ins.
   const [logsPreset, setLogsPreset] = useState<LogsPreset>();
   const volumes = useVolumes(storagePlan.plan?.state);
@@ -151,13 +154,6 @@ export function SettingsPanel({
   const [terminalOpened, setTerminalOpened] = useState(current === "terminal");
   const [terminalStatus, setTerminalStatus] = useState<SessionStatus>();
   if (current === "terminal" && !terminalOpened) setTerminalOpened(true);
-  // Other windows can switch the section too (the status bar opens the task
-  // manager), so a password form left half filled ends with any switch away.
-  if (current !== "account" && editingPassword) setEditingPassword(false);
-  const navigate = (next: SettingsSection) => {
-    setEditingPassword(false);
-    onSectionChange(next);
-  };
   return (
     <div className="set-shell">
       <nav className="set-nav" aria-label="设置分区">
@@ -165,7 +161,7 @@ export function SettingsPanel({
           className={`set-nav-account ${current === "account" ? "active" : ""}`}
           aria-label="我的账号"
           aria-current={current === "account" ? "page" : undefined}
-          onClick={() => navigate("account")}
+          onClick={() => onSectionChange("account")}
         >
           <Avatar who={user} />
           <span>
@@ -180,7 +176,7 @@ export function SettingsPanel({
               key={id}
               className={current === id ? "active" : ""}
               aria-current={current === id ? "page" : undefined}
-              onClick={() => navigate(id)}
+              onClick={() => onSectionChange(id)}
             >
               <IconTile tone={tone} icon={icon} />
               {label}
@@ -205,13 +201,13 @@ export function SettingsPanel({
             {current === "account" && (
               <AccountSection
                 session={session}
-                editing={editingPassword}
-                onEditingChange={setEditingPassword}
+                openPasswordForm={passwordFormRequested}
+                onPasswordFormShown={() => setPasswordFormRequested(false)}
                 onUserChange={onUserChange}
                 onLogout={onLogout}
                 onShowSignIns={() => {
                   setLogsPreset({ category: "session", id: Date.now() });
-                  navigate("logs");
+                  onSectionChange("logs");
                 }}
               />
             )}
@@ -220,7 +216,7 @@ export function SettingsPanel({
                 host={host}
                 volumes={volumes}
                 isAdmin={isAdmin}
-                onOpenStorage={() => navigate("storage")}
+                onOpenStorage={() => onSectionChange("storage")}
               />
             )}
             {current === "storage" && (
@@ -231,8 +227,8 @@ export function SettingsPanel({
               <UsersSection
                 currentUser={user}
                 onChangeOwnPassword={() => {
+                  setPasswordFormRequested(true);
                   onSectionChange("account");
-                  setEditingPassword(true);
                 }}
               />
             )}
@@ -257,20 +253,25 @@ export function SettingsPanel({
 
 function AccountSection({
   session,
-  editing,
-  onEditingChange,
+  openPasswordForm,
+  onPasswordFormShown,
   onUserChange,
   onLogout,
   onShowSignIns,
 }: {
   session: Session;
-  editing: boolean;
-  onEditingChange: (editing: boolean) => void;
+  openPasswordForm: boolean;
+  onPasswordFormShown: () => void;
   onUserChange: (user: User) => void;
   onLogout: () => void;
   onShowSignIns: () => void;
 }) {
   const { user } = session;
+  const [editing, setEditing] = useState(openPasswordForm);
+  const shown = useEffectEvent(() => {
+    if (openPasswordForm) onPasswordFormShown();
+  });
+  useEffect(() => shown(), []);
   const people = usePeople();
   const [choosingAvatar, setChoosingAvatar] = useState(false);
   const [profileNotice, setProfileNotice] = useState("");
@@ -299,11 +300,11 @@ function AccountSection({
   const open = () => {
     setError("");
     setNotice("");
-    onEditingChange(true);
+    setEditing(true);
   };
   const cancel = () => {
     setError("");
-    onEditingChange(false);
+    setEditing(false);
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -323,7 +324,7 @@ function AccountSection({
       await changePassword(String(data.get("currentPassword")), next);
       setError("");
       setNotice("密码已更新，SMB 凭据已同步。");
-      onEditingChange(false);
+      setEditing(false);
     } catch (caught) {
       setError(messageOf(caught));
     } finally {

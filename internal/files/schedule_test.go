@@ -99,7 +99,7 @@ func (f *snapshotFixture) open() *files.Service {
 		f.t.Fatalf("open file catalog: %v", err)
 	}
 	f.t.Cleanup(func() { _ = catalog.Close() })
-	f.files = files.NewService(catalog, f.volumeRoot, f.accounts, files.Options{
+	f.files = files.NewLocalService(catalog, f.volumeRoot, f.accounts, files.Options{
 		DisableCapacityReserve: true, VolumeGuard: f.volume, Now: f.clock.Now, Location: shanghai,
 		SnapshotBackend: f.backend,
 	})

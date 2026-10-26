@@ -105,12 +105,102 @@ func TestRootIdentityLifecycle(t *testing.T) {
 	}
 }
 
+// The Host Agent's records leave the Product Service's StateDirectory for
+// one only root can open; a record the service account wrote is not used
+// (issue #176).
+func TestRootStateLeavesTheProductServiceDirectory(t *testing.T) {
+	resetAgentState(t)
+	if _, err := exec.Command("id", "a-nas").CombinedOutput(); err != nil {
+		run(t, "useradd", "--system", "--no-create-home", "--home-dir", "/var/lib/a-nas", "--shell", "/usr/sbin/nologin", "a-nas")
+	}
+	run(t, "install", "-d", "-o", "a-nas", "-g", "a-nas", "-m", "0700", "/var/lib/a-nas")
+	identities := `{"owner":{"uid":20100,"role":"admin","enabled":true}}` + "\n"
+	writeFile(t, "/var/lib/a-nas/identity-registry.json", identities)
+	if got := asUser("a-nas", "sh", "-c", `printf '{"jellyfin":30000}' > /var/lib/a-nas/app-identities.json`); !got.ok {
+		t.Fatalf("plant a record as a-nas: %s", got.output)
+	}
+
+	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline")})
+	if executor.identityError != nil || !executor.identityKnown("owner") {
+		t.Fatalf("moved identity registry = %v, %v", executor.identities, executor.identityError)
+	}
+	if executor.appsError == nil || !strings.Contains(executor.appsError.Error(), "owned by") || len(executor.apps) != 0 {
+		t.Fatalf("a-nas's app registry = %v, %v; want it refused", executor.apps, executor.appsError)
+	}
+	if got := run(t, "stat", "-c", "%U:%G %a", "/var/lib/a-nas-host"); got != "root:root 700" {
+		t.Errorf("state directory = %s, want root:root 700", got)
+	}
+	if got := run(t, "stat", "-c", "%U:%G %a", "/var/lib/a-nas-host/identity-registry.json"); got != "root:root 600" {
+		t.Errorf("moved registry = %s, want root:root 600", got)
+	}
+	if got := readFile(t, "/var/lib/a-nas-host/identity-registry.json"); got != identities {
+		t.Errorf("moved registry = %q, want %q", got, identities)
+	}
+	if _, err := os.Lstat("/var/lib/a-nas/identity-registry.json"); !os.IsNotExist(err) {
+		t.Errorf("the original stayed in the Product Service's directory: %v", err)
+	}
+	if _, err := os.Lstat("/var/lib/a-nas-host/app-identities.json"); !os.IsNotExist(err) {
+		t.Errorf("a-nas's record was moved: %v", err)
+	}
+	for _, command := range [][]string{
+		{"ls", "/var/lib/a-nas-host"},
+		{"sh", "-c", "printf '{}' > /var/lib/a-nas-host/space-registry.json"},
+	} {
+		if got := asUser("a-nas", command...); got.ok {
+			t.Errorf("a-nas ran %v in the Host Agent's directory: %s", command, got.output)
+		}
+	}
+}
+
+// A refused identity registry leaves the spaces' ACLs and the registry's copy
+// on the data volume as they were: without it, every private space would get
+// the fail-closed ACL and the copy would be emptied.
+func TestRootRefusedIdentityRegistryLeavesSpacesAlone(t *testing.T) {
+	ctx := context.Background()
+	mount := "/srv/a-nas/data"
+	resetAgentState(t)
+	setUpDataVolume(t, mount)
+	startSamba(t)
+	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
+	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+		UserID: "user:regcheck", PrivateSpaceID: "space:regcheck", Username: "regcheck",
+		Password: "regcheck password for tests", Role: accounts.RoleMember, UID: 20190, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(mount, "spaces", "private", "regcheck")
+	manifest := filepath.Join(mount, identityManifestName)
+	aclBefore := run(t, "getfacl", "--omit-header", "--absolute-names", private)
+	manifestBefore := readFile(t, manifest)
+	writeFile(t, "/var/lib/a-nas-host/identity-registry.json",
+		`{"regcheck":{"uid":20190,"role":"member","enabled":true},"regcheck2":{"uid":20190,"role":"member","enabled":true}}`)
+
+	restarted := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
+	if restarted.identityError == nil {
+		t.Fatal("an identity registry with one UID twice loaded")
+	}
+	if _, err := restarted.ReconcileDataVolume(ctx); err == nil {
+		t.Error("ReconcileDataVolume() with a refused identity registry succeeded")
+	}
+	if err := restarted.DisableCredential(ctx, "regcheck"); err != nil {
+		t.Errorf("DisableCredential() error = %v", err)
+	}
+	if got := run(t, "getfacl", "--omit-header", "--absolute-names", private); got != aclBefore {
+		t.Errorf("private space ACL changed:\n%s\nwant:\n%s", got, aclBefore)
+	}
+	if got := readFile(t, manifest); got != manifestBefore {
+		t.Errorf("identity manifest = %q, want it unchanged (%q)", got, manifestBefore)
+	}
+}
+
 // resetAgentState gives each test fresh Host Agent registries; the container
 // is disposable, so nothing else depends on them.
 func resetAgentState(t *testing.T) {
 	t.Helper()
-	if err := os.RemoveAll("/var/lib/a-nas"); err != nil {
-		t.Fatal(err)
+	for _, directory := range []string{"/var/lib/a-nas", "/var/lib/a-nas-host"} {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

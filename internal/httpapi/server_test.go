@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/taskmanagerapi"
 )
 
 func TestHealthEndpointReportsLiveProcess(t *testing.T) {
@@ -178,7 +180,14 @@ func TestHealthEndpointDoesNotDependOnHostState(t *testing.T) {
 	}
 }
 
+// newHandler serves the host state and the task manager without asking for a
+// session, as the product does once a request passed its guard.
 func newHandler(reader *fake.Reader) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return httpapi.New(reader, httpapi.DataSourceSimulated, "test-version", logger)
+	mux := http.NewServeMux()
+	for _, route := range taskmanagerapi.New(reader, string(httpapi.DataSourceSimulated), logger).Routes() {
+		mux.HandleFunc(route.Pattern, func(w http.ResponseWriter, r *http.Request) { route.Handler(w, r, accounts.Session{}) })
+	}
+	mux.Handle("/", httpapi.New(reader, httpapi.DataSourceSimulated, "test-version", logger))
+	return mux
 }
