@@ -189,6 +189,7 @@ ops-check:
 	grep -Fqx '  enable_static_content: false' deploy/qdrant/config.yaml
 	grep -Fqx '  host: 127.0.0.1' deploy/qdrant/config.yaml
 	grep -Fq 'systemctl enable anas-vectors-proxy@a-nas-photos.socket' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock' deploy/systemd/system/anas-photos.service
 	grep -Fq 'anas-vectors-system@.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'vectors-qdrant.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket

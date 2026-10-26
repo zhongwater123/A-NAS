@@ -25,6 +25,7 @@ import (
 
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 )
 
 // ServerVersion is the Qdrant release the client is built for, as
@@ -79,6 +80,14 @@ func (c *Client) Close() error {
 	err := c.client.Close()
 	c.client = nil
 	return err
+}
+
+// Warm reports whether a connection to the instance is open and ready, so
+// that the next request does not wait for the instance to start.
+func (c *Client) Warm() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.client != nil && c.client.GetConnection().GetState() == connectivity.Ready
 }
 
 // connection returns the open connection, opening it and checking the

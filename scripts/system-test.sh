@@ -818,8 +818,23 @@ same_network_namespace() {
   [[ "$index" != 0 && "$proxy" != 0 && "$(readlink "/proc/$index/ns/net")" == "$(readlink "/proc/$proxy/ns/net")" &&
     "$(readlink "/proc/$index/ns/net")" != "$(readlink /proc/1/ns/net)" ]]
 }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within a minute
+  for _ in $(seq 1 120); do
+    journal_has "$@" && return 0
+    sleep 0.5
+  done
+  return 1
+}
 check "the installer enables the photo service's vector index socket" \
   systemctl is-enabled --quiet anas-vectors-proxy@a-nas-photos.socket
+check "the photo service builds its vector index from the Catalog" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index created"
+check "and brings the organised photo into it" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index synced"
+check "a search is compared with the vector index in the background" semantic_search 猫
+check "and the comparison is logged" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index shadow search"
 check "only the photo service reaches its vector index" \
   test "$(stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock)" = "600 a-nas-photos a-nas-photos"
 check "the Product Service account cannot connect to the photo vector index" \

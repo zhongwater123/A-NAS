@@ -164,8 +164,17 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		hits = newestHits(candidates)
 		page.Semantic = true
 		page.Closest = len(hits)
-	} else if hits, err = s.queryHits(ctx, cmp.Or(rest, query), candidates, &page); err != nil {
-		return SearchPage{}, err
+	} else {
+		text := cmp.Or(rest, query)
+		queryVector, model := s.embedQuery(ctx, text)
+		if hits, err = s.queryHits(ctx, text, queryVector, model, candidates, &page); err != nil {
+			return SearchPage{}, err
+		}
+		// The vector index answers the same question in the background;
+		// only a first page without people compares like with like.
+		if queryVector != nil && after == nil && len(names) == 0 {
+			s.shadowSearch(queryVector, model, args)
+		}
 	}
 	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
 	if err != nil {
@@ -242,12 +251,12 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 	return assets, next, nil
 }
 
-// queryHits ranks the candidates for a query: name or user tag matches first,
-// then every photo with a vector by similarity, at most maxSemanticResults
-// of them. It records on the page whether the query was encoded and where the
-// closest group ends.
-func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate, page *SearchPage) ([]searchHit, error) {
-	queryVector, model := s.embedQuery(ctx, query)
+// queryHits ranks the candidates for a query, whose vector of model is
+// queryVector or nil: name or user tag matches first, then every photo with
+// a vector by similarity, at most maxSemanticResults of them. It records on
+// the page whether the query was encoded and where the closest group ends.
+func (s *Service) queryHits(ctx context.Context, query string, queryVector []float32, model string, candidates []candidate,
+	page *SearchPage) ([]searchHit, error) {
 	folded := strings.ToLower(query)
 	calibration := s.objectCalibration
 	mentions := s.matcher.Mentions(query)
