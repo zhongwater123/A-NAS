@@ -40,23 +40,20 @@ const [bundlePath, outPath] = process.argv.slice(2);
 const bundle = yaml.load(readFileSync(bundlePath, "utf8"));
 const pointer = (...parts) => "#/" + parts.map((part) => encodeURIComponent(part.replaceAll("~", "~0").replaceAll("/", "~1"))).join("/");
 
-// Formats are left unchecked: a date that does not parse breaks no desktop.
-// unicode: false counts string lengths in UTF-16 units, so the code needs no
-// Ajv at run time; Ajv calls the option deprecated, and that notice is dropped.
+// The check is of shape: types, required fields, enums, nulls. Formats and
+// string lengths are left to the server, which counts a nickname's length in
+// characters; Ajv's standalone code would count UTF-16 units, or need Ajv at
+// run time to count characters, and a string of any length breaks no desktop.
 // Error messages and inlined references would only make the code larger.
 const ajv = new Ajv2020({
   strict: false,
   validateFormats: false,
-  unicode: false,
   messages: false,
   inlineRefs: false,
   code: { source: true, esm: true, lines: true },
-  logger: {
-    log: console.log,
-    warn: (...args) => String(args[0]).startsWith("DEPRECATED: option unicode") || console.warn(...args),
-    error: console.error,
-  },
 });
+ajv.removeKeyword("minLength");
+ajv.removeKeyword("maxLength");
 ajv.addSchema(bundle, "openapi.json");
 
 const exports = {};
