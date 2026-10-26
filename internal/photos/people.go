@@ -976,7 +976,7 @@ func (s *Service) OccurrenceAvatar(ctx context.Context, p Principal, occurrenceI
 	if !visible {
 		return nil, ErrNotFound
 	}
-	avatar, err := s.avatarTile(derivation, objectID, ordinal)
+	avatar, err := s.avatarTile(ctx, derivation, objectID, ordinal)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNotFound
 	}

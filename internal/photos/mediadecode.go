@@ -48,7 +48,7 @@ func (s *Service) renderPhoto(ctx context.Context, file *os.File, orientation, e
 	var header [32]byte
 	n, _ := file.ReadAt(header[:], 0)
 	if sniffMediaType(header[:n]) != "image/heic" {
-		return renderUpright(file, orientation, edge, quality)
+		return renderUpright(ctx, file, orientation, edge, quality)
 	}
 	if s.media == nil {
 		return nil, 0, 0, mediaworker.ErrUnavailable
@@ -57,7 +57,7 @@ func (s *Service) renderPhoto(ctx context.Context, file *os.File, orientation, e
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	return renderUpright(bytes.NewReader(data), 1, edge, quality)
+	return renderUpright(ctx, bytes.NewReader(data), 1, edge, quality)
 }
 
 // Preview returns a compatible JPEG for HEIC and a video's poster frame;

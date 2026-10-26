@@ -198,7 +198,7 @@ func classify(header []byte, clip bool) (string, error) {
 }
 
 // readMetadata reads only the image header and EXIF: it proves the bytes are
-// the declared format, bounds the pixel count before anything decodes them,
+// the declared format, bounds decoding memory before anything decodes them,
 // and records what the timeline needs immediately. A header the decoder
 // panics on is an unsupported upload.
 func (s *Service) readMetadata(staged stagedObject) (metadata photoMetadata, err error) {
@@ -220,8 +220,8 @@ func (s *Service) readMetadata(staged stagedObject) (metadata photoMetadata, err
 	if err != nil || "image/"+format != staged.mediaType || config.Width <= 0 || config.Height <= 0 {
 		return photoMetadata{}, ErrUnsupportedType
 	}
-	if int64(config.Width)*int64(config.Height) > maxImagePixels {
-		return photoMetadata{}, ErrTooLarge
+	if err := checkImageDecodeBudget(config); err != nil {
+		return photoMetadata{}, err
 	}
 	metadata = photoMetadata{width: config.Width, height: config.Height}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
