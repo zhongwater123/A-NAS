@@ -25,9 +25,10 @@ Caddyfile text eol=lf
 
 # Copied from Hermes by ai/assistant-spike/vendor-hermes-ui.py; GitHub folds it in diffs.
 web/src/assistant/hermes/** linguist-generated=true
-# Written by `make api`.
+# Written by `make api`, which api-check compares byte for byte; Biome skips
+# the TypeScript ones, so nothing else would keep them LF.
 api/openapi.bundle.yaml linguist-generated=true
-web/src/*.generated.ts linguist-generated=true
+web/src/*.generated.ts text eol=lf linguist-generated=true
 
 *.png binary
 *.jpg binary
