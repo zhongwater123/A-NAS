@@ -1,7 +1,7 @@
 import { type DetailedError, Upload } from "tus-js-client";
 import { useSyncExternalStore } from "react";
 
-import { APIError, csrfHeaders, passWriteGate, sessionEnded } from "../api";
+import { APIError, csrfHeader, passWriteGate, sessionEnded } from "../api";
 import { RateMeter } from "./meter";
 import {
   cancelTransfer,
@@ -633,7 +633,7 @@ export class TransferStore {
       // the upload is the write a VNAS step may have to ask the member about
       // (a conflict answered with 替换); its parts follow from it.
       onBeforeRequest: async (request) => {
-        for (const [name, value] of Object.entries(csrfHeaders())) request.setHeader(name, value);
+        for (const [name, value] of Object.entries(csrfHeader(request.getMethod()))) request.setHeader(name, value);
         if (request.getMethod() === "POST") await passWriteGate("POST", request.getURL());
       },
       onUploadUrlAvailable: () => {

@@ -2,6 +2,7 @@ import { Clapperboard, ImagePlus, Monitor, Moon, RotateCcw, Scaling } from "luci
 import { useEffect, useState } from "react";
 
 import {
+  type LocalDisplay,
   readLocalDisplay,
   resetWallpaper,
   updateLocalDisplay,
@@ -18,7 +19,9 @@ import "./personalization.css";
 
 const saverDelayMinutes = localConsoleScreenSaverIdleMs / 60_000;
 
-const sleepChoices: Array<{ minutes: number; label: string }> = [
+type SleepAfter = LocalDisplay["sleepAfterMinutes"];
+
+const sleepChoices: Array<{ minutes: SleepAfter; label: string }> = [
   { minutes: 10, label: "10 分钟" },
   { minutes: 30, label: "30 分钟" },
   { minutes: 60, label: "1 小时" },
@@ -166,7 +169,7 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
 }
 
 function LocalScreenGroup({ onError }: { onError: (message: string) => void }) {
-  const [sleepAfter, setSleepAfter] = useState<number>();
+  const [sleepAfter, setSleepAfter] = useState<SleepAfter>();
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let active = true;
@@ -181,7 +184,7 @@ function LocalScreenGroup({ onError }: { onError: (message: string) => void }) {
       active = false;
     };
   }, [onError]);
-  const choose = async (minutes: number) => {
+  const choose = async (minutes: SleepAfter) => {
     if (sleepAfter === undefined || minutes === sleepAfter) return;
     const previous = sleepAfter;
     setSleepAfter(minutes);

@@ -1,0 +1,39 @@
+schemas:
+  LocalDisplay:
+    type: object
+    additionalProperties: false
+    required: [sleepAfterMinutes]
+    properties:
+      sleepAfterMinutes:
+        type: integer
+        enum: [0, 10, 30, 60]
+        description: >-
+          Minutes the screen saver plays before the screen turns black; 0 keeps it on. Defaults to 30. The server
+          refuses other values with 422 validation_failed.
+  WallpaperStyle:
+    type: string
+    enum: [fill, fit, stretch, center, tile]
+    description: >-
+      fill covers the desktop keeping proportions; fit shows the whole picture on navy; stretch fills the width and
+      height; center shows the picture at its own size in the middle; tile repeats it at its own size from the top
+      left.
+  Wallpaper:
+    type: object
+    additionalProperties: false
+    required: [style]
+    properties:
+      style: { $ref: "#/schemas/WallpaperStyle" }
+      image:
+        type: object
+        additionalProperties: false
+        required: [version, width, height]
+        properties:
+          version: { type: string, description: "Changes with the picture; ask for /api/v1/wallpaper/image?v=<version>." }
+          width: { type: integer, minimum: 1 }
+          height: { type: integer, minimum: 1 }
+  WallpaperStyleChange:
+    type: object
+    additionalProperties: false
+    required: [style]
+    properties:
+      style: { $ref: "#/schemas/WallpaperStyle" }

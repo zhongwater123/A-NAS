@@ -1,0 +1,439 @@
+/api/v1/shares:
+  get:
+    operationId: listMemberShares
+    summary: List received or sent member shares
+    responses:
+      '200':
+        description: List received or sent member shares
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/shares.yaml#/schemas/MemberShare'
+                nextOffset:
+                  type: integer
+                  minimum: 0
+              required:
+              - items
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - name: direction
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+        - received
+        - sent
+    - name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+  post:
+    operationId: createMemberShare
+    summary: Prepare an independent copy for specified NAS members
+    responses:
+      '202':
+        description: Prepare an independent copy for specified NAS members
+        content:
+          application/json:
+            schema:
+              $ref: '../components/shares.yaml#/schemas/MemberShare'
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - $ref: '../components/common.yaml#/parameters/CSRFToken'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/shares.yaml#/schemas/CreateMemberShare'
+/api/v1/shares/members:
+  get:
+    operationId: listShareMembers
+    summary: List enabled members excluding the signed-in user
+    responses:
+      '200':
+        description: List enabled members excluding the signed-in user
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      username:
+                        type: string
+                      nickname:
+                        type: string
+                      avatarVersion:
+                        type: string
+                    required:
+                    - id
+                    - username
+              required:
+              - items
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+/api/v1/shares/notifications:
+  get:
+    operationId: listShareNotifications
+    summary: Catch up on notifications after the per-account cursor
+    responses:
+      '200':
+        description: Catch up on notifications after the per-account cursor
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/shares.yaml#/schemas/MemberShareNotification'
+              required:
+              - items
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - name: after
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+/api/v1/shares/jobs/{jobId}:
+  parameters:
+  - name: jobId
+    in: path
+    required: true
+    schema:
+      type: string
+  get:
+    operationId: getShareSaveJob
+    summary: Read own persisted save progress
+    responses:
+      '200':
+        description: Read own persisted save progress
+        content:
+          application/json:
+            schema:
+              $ref: '../components/shares.yaml#/schemas/MemberShareJob'
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+/api/v1/shares/{shareId}:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  get:
+    operationId: getMemberShare
+    summary: Read share details without marking viewed
+    responses:
+      '200':
+        description: Read share details without marking viewed
+        content:
+          application/json:
+            schema:
+              $ref: '../components/shares.yaml#/schemas/MemberShare'
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+/api/v1/shares/{shareId}/view:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  post:
+    operationId: viewMemberShare
+    summary: Mark this recipient as having viewed the share
+    responses:
+      '200':
+        description: Mark this recipient as having viewed the share
+        content:
+          application/json:
+            schema:
+              $ref: '../components/shares.yaml#/schemas/MemberShare'
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - $ref: '../components/common.yaml#/parameters/CSRFToken'
+/api/v1/shares/{shareId}/messages:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  get:
+    operationId: listShareMessages
+    summary: Read the private sender-recipient conversation
+    responses:
+      '200':
+        description: Read the private sender-recipient conversation
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/shares.yaml#/schemas/MemberShareMessage'
+              required:
+              - items
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - name: recipientId
+      in: query
+      required: true
+      schema:
+        type: string
+    - name: after
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+  post:
+    operationId: sendShareMessage
+    summary: Send a private reply supporting Unicode emoji
+    responses:
+      '201':
+        description: Send a private reply supporting Unicode emoji
+        content:
+          application/json:
+            schema:
+              $ref: '../components/shares.yaml#/schemas/MemberShareMessage'
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - $ref: '../components/common.yaml#/parameters/CSRFToken'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              recipientId:
+                type: string
+              requestId:
+                type: string
+              text:
+                type: string
+            required:
+            - recipientId
+            - requestId
+            - text
+/api/v1/shares/{shareId}/read:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  post:
+    operationId: readShareMessages
+    summary: Advance the private conversation read cursor
+    responses:
+      '204':
+        description: Advance the private conversation read cursor
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - $ref: '../components/common.yaml#/parameters/CSRFToken'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              recipientId:
+                type: string
+              through:
+                type: integer
+                minimum: 0
+            required:
+            - recipientId
+            - through
+/api/v1/shares/{shareId}/save:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  post:
+    operationId: saveMemberShare
+    summary: Save selected entries to a writable destination with conflict renaming
+    responses:
+      '202':
+        description: Save selected entries to a writable destination with conflict renaming
+        content:
+          application/json:
+            schema:
+              $ref: '../components/shares.yaml#/schemas/MemberShareJob'
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - $ref: '../components/common.yaml#/parameters/CSRFToken'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/shares.yaml#/schemas/SaveMemberShare'
+    description: Seven days after publication new saves are refused. Jobs already accepted finish after
+      natural expiry; manual revocation fences all further publications immediately. The sender never
+      learns the target path.
+/api/v1/shares/{shareId}/jobs:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  get:
+    operationId: listShareSaveJobs
+    summary: List own save jobs for this share
+    responses:
+      '200':
+        description: List own save jobs for this share
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/shares.yaml#/schemas/MemberShareJob'
+              required:
+              - items
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+/api/v1/shares/{shareId}/revoke:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  post:
+    operationId: revokeMemberShare
+    summary: Revoke the share and stop ongoing saves before acknowledging
+    responses:
+      '204':
+        description: Revoke the share and stop ongoing saves before acknowledging
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+    parameters:
+    - $ref: '../components/common.yaml#/parameters/CSRFToken'
+/api/v1/shares/{shareId}/entries/{entryId}/content:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  - name: entryId
+    in: path
+    required: true
+    schema:
+      type: string
+  get:
+    operationId: getShareContent
+    summary: Read authorized content
+    responses:
+      '200':
+        description: Read authorized content
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'
+      '206':
+        description: Partial authorized content
+      '416':
+        description: Unsatisfiable range
+    parameters:
+    - name: Range
+      in: header
+      required: false
+      schema:
+        type: string
+/api/v1/shares/{shareId}/entries/{entryId}/preview:
+  parameters:
+  - name: shareId
+    in: path
+    required: true
+    schema:
+      type: string
+  - name: entryId
+    in: path
+    required: true
+    schema:
+      type: string
+  get:
+    operationId: getSharePreview
+    summary: Convert HEIC preview in the isolated media worker
+    responses:
+      '200':
+        description: Convert HEIC preview in the isolated media worker
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+      default:
+        $ref: '../components/common.yaml#/responses/ProductError'

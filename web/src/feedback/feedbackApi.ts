@@ -1,37 +1,6 @@
-import { APIError, request } from "../api";
+import { APIError, call, client, rawBody } from "../api";
 
-export interface FeedbackImage {
-  id: string;
-  contentType: string;
-  sizeBytes: number;
-}
-export interface FeedbackItem {
-  id: string;
-  text: string;
-  images: FeedbackImage[];
-  // Counts edits to the text and images; an edit names the version it started from.
-  version: number;
-  createdBy: string;
-  createdAt: string;
-  updatedBy?: string;
-  updatedAt?: string;
-  resolved: boolean;
-  resolvedBy?: string;
-  resolvedAt?: string;
-  // Replies under the item, oldest first.
-  comments: FeedbackComment[];
-}
-// Anyone may edit or delete any comment; the latest editor is recorded.
-export interface FeedbackComment {
-  id: string;
-  text: string;
-  images: FeedbackImage[];
-  version: number;
-  createdBy: string;
-  createdAt: string;
-  updatedBy?: string;
-  updatedAt?: string;
-}
+export type { FeedbackComment, FeedbackImage, FeedbackItem } from "../api.generated";
 
 // Limits the server enforces; the editor checks them first to explain the problem.
 export const MAX_IMAGES = 6;
@@ -41,68 +10,65 @@ export const MAX_COMMENT_IMAGES = 3;
 export const MAX_COMMENT_TEXT = 2000;
 export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
-const base = "/api/v1/feedback";
-const itemPath = (id: string) => `${base}/${encodeURIComponent(id)}`;
+const item = (feedbackId: string) => ({ params: { path: { feedbackId } } });
+const comment = (feedbackId: string, commentId: string) => ({ params: { path: { feedbackId, commentId } } });
 
-export const listFeedback = async () => (await request<{ items: FeedbackItem[] }>(base)).items;
+export const listFeedback = async () => (await call(client.GET("/api/v1/feedback"))).items;
 
-export function createFeedback(text: string, images: Blob[]) {
-  return request<FeedbackItem>(base, { method: "POST", body: form(text, images) }, true);
-}
+export const createFeedback = (text: string, images: Blob[]) =>
+  call(client.POST("/api/v1/feedback", rawBody(form(text, images))));
 
 // editFeedback replaces the text, keeps the listed images and adds new ones;
 // it fails with feedback_changed when someone edited the item after version.
-export function editFeedback(id: string, version: number, text: string, keep: string[], images: Blob[]) {
-  const body = form(text, images);
-  body.set("version", String(version));
-  for (const imageId of keep) body.append("keep", imageId);
-  return request<FeedbackItem>(itemPath(id), { method: "PUT", body }, true);
-}
-
-export const resolveFeedback = (id: string, resolved: boolean) =>
-  request<FeedbackItem>(
-    itemPath(id),
-    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resolved }) },
-    true,
+export const editFeedback = (feedbackId: string, version: number, text: string, keep: string[], images: Blob[]) =>
+  call(
+    client.PUT("/api/v1/feedback/{feedbackId}", { ...item(feedbackId), ...rawBody(edit(version, text, keep, images)) }),
   );
 
-export const deleteFeedback = (id: string) => request<void>(itemPath(id), { method: "DELETE" }, true);
+export const resolveFeedback = (feedbackId: string, resolved: boolean) =>
+  call(client.PATCH("/api/v1/feedback/{feedbackId}", { ...item(feedbackId), body: { resolved } }));
+
+export const deleteFeedback = (feedbackId: string) =>
+  call(client.DELETE("/api/v1/feedback/{feedbackId}", item(feedbackId)));
 
 // Comment writes answer with the whole item, which replaces the one in the list.
-export function addComment(itemId: string, text: string, images: Blob[]) {
-  return request<FeedbackItem>(`${itemPath(itemId)}/comments`, { method: "POST", body: form(text, images) }, true);
-}
+export const addComment = (feedbackId: string, text: string, images: Blob[]) =>
+  call(client.POST("/api/v1/feedback/{feedbackId}/comments", { ...item(feedbackId), ...rawBody(form(text, images)) }));
 
 // editComment fails with comment_changed when someone edited the comment after version.
-export function editComment(
-  itemId: string,
+export const editComment = (
+  feedbackId: string,
   commentId: string,
   version: number,
   text: string,
   keep: string[],
   images: Blob[],
-) {
-  const body = form(text, images);
-  body.set("version", String(version));
-  for (const imageId of keep) body.append("keep", imageId);
-  return request<FeedbackItem>(
-    `${itemPath(itemId)}/comments/${encodeURIComponent(commentId)}`,
-    { method: "PUT", body },
-    true,
+) =>
+  call(
+    client.PUT("/api/v1/feedback/{feedbackId}/comments/{commentId}", {
+      ...comment(feedbackId, commentId),
+      ...rawBody(edit(version, text, keep, images)),
+    }),
   );
-}
 
-export const deleteComment = (itemId: string, commentId: string) =>
-  request<FeedbackItem>(`${itemPath(itemId)}/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" }, true);
+export const deleteComment = (feedbackId: string, commentId: string) =>
+  call(client.DELETE("/api/v1/feedback/{feedbackId}/comments/{commentId}", comment(feedbackId, commentId)));
 
 // Images of the item and of its comments share one address.
-export const feedbackImageURL = (itemId: string, imageId: string) =>
-  `${itemPath(itemId)}/images/${encodeURIComponent(imageId)}`;
+export const feedbackImageURL = (feedbackId: string, imageId: string) =>
+  `/api/v1/feedback/${encodeURIComponent(feedbackId)}/images/${encodeURIComponent(imageId)}`;
 
 function form(text: string, images: Blob[]) {
   const body = new FormData();
   body.set("text", text);
   images.forEach((image, index) => body.append("image", image, `image-${index + 1}`));
+  return body;
+}
+
+function edit(version: number, text: string, keep: string[], images: Blob[]) {
+  const body = form(text, images);
+  body.set("version", String(version));
+  for (const imageId of keep) body.append("keep", imageId);
   return body;
 }
 

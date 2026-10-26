@@ -1,0 +1,77 @@
+schemas:
+  ActivityCategory:
+    type: string
+    enum: [session, account, file, storage, photo]
+  ActivityAccount:
+    type: object
+    additionalProperties: false
+    required: [id, username]
+    properties:
+      id: { type: string }
+      username: { type: string }
+      nickname: { type: string, description: "The account's current nickname, which pages show instead of username." }
+  ActivityEvent:
+    type: object
+    additionalProperties: false
+    required: [id, occurredAt, category, action, resourceType]
+    properties:
+      id: { type: string }
+      occurredAt: { type: string, format: date-time }
+      category: { type: string, enum: [session, account, file, storage, photo, other] }
+      action: { type: string, description: "Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded." }
+      actor: { $ref: "#/schemas/ActivityAccount" }
+      system: { type: boolean, description: The device did this on its own. }
+      subject: { $ref: "#/schemas/ActivityAccount" }
+      resourceType: { type: string }
+      resourceId: { type: string }
+      detail:
+        type: string
+        description: >-
+          A file or photo name, a snapshot name, a storage failure, or JSON for session events
+          ({via: local-console|lan|loopback, address, username, reason: invalid_password|unknown_user|disabled|unavailable})
+          and viewing events ({reason, expiresAt}).
+      space:
+        type: object
+        additionalProperties: false
+        required: [id, kind]
+        properties:
+          id: { type: string }
+          kind: { type: string, enum: [private, shared] }
+          owner: { $ref: "#/schemas/ActivityAccount" }
+      redacted: { type: boolean, description: Names in another member's private space were left out. }
+  ActivityPage:
+    type: object
+    additionalProperties: false
+    required: [items, scope]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/ActivityEvent" } }
+      next: { type: string, description: Pass as before to read older events; absent when there are none. }
+      scope: { type: string, enum: [all, self] }
+      unavailable: { type: array, items: { $ref: "#/schemas/ActivityCategory" }, description: Categories whose records could not be read this time. }
+  SystemLogService:
+    type: string
+    enum: [api, host-agent, photos, shares, containers, ai, media, kiosk, samba, caddy]
+  SystemLogEntry:
+    type: object
+    additionalProperties: false
+    required: [cursor, time, service, level, message]
+    properties:
+      cursor: { type: string }
+      time: { type: string, format: date-time }
+      service: { $ref: "#/schemas/SystemLogService" }
+      unit: { type: string }
+      level: { type: string, enum: [error, warning, info, debug] }
+      message: { type: string }
+      fields: { type: object, additionalProperties: { type: string } }
+      pid: { type: integer }
+      truncated: { type: boolean, description: The message was cut at 16 KiB. }
+  SystemLogPage:
+    type: object
+    additionalProperties: false
+    required: [items, dataSource]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/SystemLogEntry" } }
+      next: { type: string, description: Pass as before to continue with older lines; absent at the start of the journal. }
+      scannedThrough: { type: string, format: date-time, description: The page stopped at its scan limit before filling; older lines were not checked yet. }
+      overflow: { type: boolean, description: An after query found more new lines than one page holds. }
+      dataSource: { $ref: "common.yaml#/schemas/DataSource" }

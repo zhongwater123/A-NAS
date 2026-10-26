@@ -1,0 +1,92 @@
+/api/v1/volumes:
+  get:
+    operationId: listVolumes
+    responses:
+      "200": { description: Data volumes, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/storage.yaml#/schemas/Volume" } } } } } } }
+/api/v1/volumes/{volumeId}/conversion:
+  post:
+    operationId: continueVolumeConversion
+    description: >-
+      Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion;
+      the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
+    parameters: [{ name: volumeId, in: path, required: true, schema: { type: string } }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "202": { description: Conversion started }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/storage/plans:
+  get:
+    operationId: listUnfinishedStoragePlans
+    description: >-
+      Administrators only. The plans that still need the administrator, newest first: the one running, and the
+      newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them
+      again after a reload.
+    responses:
+      "200": { description: Unfinished storage plans, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createStoragePlan
+    description: >-
+      Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk,
+      mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
+      to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable,
+      volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks,
+      layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host
+      shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan
+      that has not run; while a plan runs it answers 409 plan_state_conflict.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [diskIds]
+            properties:
+              diskIds: { type: array, minItems: 1, maxItems: 8, uniqueItems: true, items: { $ref: "../components/common.yaml#/schemas/StableResourceID" } }
+              layout: { $ref: "../components/storage.yaml#/schemas/VolumeLayout" }
+    responses:
+      "201": { description: Destructive storage plan, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/storage/plans/{planId}/confirm:
+  post:
+    operationId: confirmStoragePlan
+    parameters: [{ $ref: "../components/storage.yaml#/parameters/PlanID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirmationPhrase], properties: { confirmationPhrase: { type: string } } } } } }
+    responses:
+      "200": { description: Confirmed plan, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
+      "410": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/storage/plans/{planId}/execute:
+  post:
+    operationId: executeStoragePlan
+    description: >-
+      Starts a confirmed plan on the Host Agent, which runs it apart from this request: closing the page or
+      restarting the product service does not stop it. 202 with the plan running, whose step tells how far it came;
+      GET /api/v1/operations/{planId} follows it. 200 when it already ended. A plan in needs_attention is retried:
+      the Host Agent checks the disks again and continues after the steps that are done, and takes over a data
+      volume the plan made before it stopped. Executing a running or succeeded plan returns it unchanged.
+    parameters: [{ $ref: "../components/storage.yaml#/parameters/PlanID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: Plan that ended, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
+      "202": { description: Plan running on the Host Agent, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/storage/plans/{planId}/cancel:
+  post:
+    operationId: cancelStoragePlan
+    description: >-
+      Gives up a planned or confirmed plan, which has not touched any disk, so that a new plan can be made at once.
+      Cancelling a cancelled plan returns it again; a running or finished plan answers 409 plan_state_conflict.
+    parameters: [{ $ref: "../components/storage.yaml#/parameters/PlanID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: Cancelled plan, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/operations/{operationId}:
+  get:
+    operationId: getOperation
+    parameters: [{ name: operationId, in: path, required: true, schema: { type: string } }]
+    responses:
+      "200": { description: Operation state, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }

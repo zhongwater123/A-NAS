@@ -1,0 +1,43 @@
+/api/v1/activity:
+  get:
+    operationId: listActivity
+    summary: Page through the activity log, newest first
+    description: >-
+      Merges the account, sign-in, file, storage and photo audit trails. Administrators see every account's events,
+      members only their own and what was done to their account or private space. File names in another member's
+      private space are left out (redacted), and photo events are only shown to the account that made them.
+    parameters:
+      - { name: before, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: since, in: query, schema: { type: string, format: date-time } }
+      - { name: until, in: query, schema: { type: string, format: date-time } }
+      - { name: category, in: query, schema: { $ref: "../components/logs.yaml#/schemas/ActivityCategory" } }
+      - { name: actor, in: query, description: "Administrators only: an account ID, or system for what the device did on its own; members always get their own events.", schema: { type: string } }
+      - { name: q, in: query, description: "Matches file and photo names, action codes, client addresses and account names.", schema: { type: string, maxLength: 100 } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    responses:
+      "200": { description: One page of events, content: { application/json: { schema: { $ref: "../components/logs.yaml#/schemas/ActivityPage" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/system-logs:
+  get:
+    operationId: listSystemLogs
+    summary: Read A-NAS service logs from the systemd journal through the Host Agent, newest first
+    description: >-
+      Administrators only. The Host Agent reads only the allowlisted A-NAS services (ADR 0020); levels, messages
+      and fields of JSON log lines come from the line itself. A page stops after 20,000 scanned lines; next then
+      continues from the last line scanned.
+    parameters:
+      - { name: service, in: query, schema: { $ref: "../components/logs.yaml#/schemas/SystemLogService" } }
+      - { name: level, in: query, description: The least severe level to include., schema: { type: string, enum: [error, warning, info, debug] } }
+      - { name: since, in: query, schema: { type: string, format: date-time } }
+      - { name: until, in: query, schema: { type: string, format: date-time } }
+      - { name: q, in: query, description: "Plain text matched against messages and fields, case-insensitively.", schema: { type: string, maxLength: 200 } }
+      - { name: before, in: query, description: Continue with lines older than this cursor (the next value of the previous page)., schema: { type: string } }
+      - { name: after, in: query, description: "Only lines newer than this cursor, for following the log.", schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+    responses:
+      "200": { description: One page of log lines, content: { application/json: { schema: { $ref: "../components/logs.yaml#/schemas/SystemLogPage" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
