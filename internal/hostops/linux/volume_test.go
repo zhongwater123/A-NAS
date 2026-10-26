@@ -230,6 +230,30 @@ func TestAddDisksNeedsTheMountedDataVolume(t *testing.T) {
 	}
 }
 
+// A disk without an ID is refused before the operation is journaled: the
+// journal refuses to load with such an entry.
+func TestVolumeOperationsNeedEveryDiskByID(t *testing.T) {
+	host := newDiskHost(t, "disk:first")
+	executor := host.executor()
+	disks := append(host.targets("disk:first"), storage.DiskTarget{DiskID: " ", Fingerprint: "f"})
+	if _, err := executor.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
+		PlanID: "plan:create", Layout: storage.LayoutMirror, Disks: disks,
+	}); err == nil {
+		t.Error("StartCreateVolume() accepted a disk without an ID")
+	}
+	if _, err := executor.StartAddDisks(context.Background(), storage.AddDisksRequest{
+		PlanID: "plan:add", FilesystemUUID: volumeUUID, Layout: storage.LayoutMirror, Disks: disks[1:],
+	}); err == nil {
+		t.Error("StartAddDisks() accepted a disk without an ID")
+	}
+	if _, err := executor.VolumeOperation(context.Background(), "plan:create"); !errors.Is(err, storage.ErrOperationNotFound) {
+		t.Fatalf("VolumeOperation() error = %v; want nothing journaled", err)
+	}
+	if len(host.lines()) != 0 {
+		t.Fatalf("commands = %v; want none", host.lines())
+	}
+}
+
 // The layout is recorded before Btrfs adds the disks. Killed right after
 // the disks joined, the retry skips them and only records the layout.
 func TestAddingDisksRecordsTheLayoutFirstAndContinuesAfterAKill(t *testing.T) {

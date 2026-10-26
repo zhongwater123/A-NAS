@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os/user"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,9 @@ func (c *Client) Icon(ctx context.Context, id string) ([]byte, string, error) {
 	return icon, contentType, err
 }
 
+// Plan asks for the app's plan. The agent renders it as the app's account;
+// identity, the one the Host Agent reserved, is shown until the account
+// exists. Agents before issue #176 render it as identity.
 func (c *Client) Plan(ctx context.Context, id string, identity appstore.Identity) (appstore.Plan, error) {
 	if !appstore.ValidID(id) {
 		return appstore.Plan{}, appstore.ErrNotFound
@@ -67,6 +71,9 @@ func (c *Client) Plan(ctx context.Context, id string, identity appstore.Identity
 	return document.ToDomain(), nil
 }
 
+// Install starts installing the confirmed plan as the app's account, which
+// the agent looks up itself; identity is sent for agents before issue #176,
+// which require it.
 func (c *Client) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
 	if !appstore.ValidID(id) {
 		return appstore.Job{}, appstore.ErrNotFound
@@ -130,17 +137,85 @@ func (c *Client) do(ctx context.Context, method, path string, body any, into any
 	return response.Header.Get("Content-Type"), nil
 }
 
-type handler struct {
-	store  appstore.Store
-	logger *slog.Logger
+// Identities is where the container agent reads app identities: the host's
+// account database, in which the Host Agent creates app-<id> (ADR 0008).
+type Identities interface {
+	// App returns the account app-<id>; ok is false while it does not exist.
+	App(id string) (identity appstore.Identity, ok bool, err error)
+	// Unused reports whether uid is free for app-<id>: no account holds it,
+	// and no group but app-<id>'s own, which the Host Agent creates first
+	// and may have left behind without the account.
+	Unused(id string, uid int) (bool, error)
 }
 
-// NewHandler serves /v1/apps on the container agent socket.
-func NewHandler(store appstore.Store, logger *slog.Logger) http.Handler {
+// SystemIdentities reads the host's passwd and group databases.
+type SystemIdentities struct{}
+
+// App accepts only an account the Host Agent could have made: in the app
+// range, with GID equal to UID, its own group, and itself as the account the
+// UID resolves to (the first passwd entry with it, as for getent).
+func (SystemIdentities) App(id string) (appstore.Identity, bool, error) {
+	username := appstore.IdentityName(id)
+	account, err := user.Lookup(username)
+	if _, missing := errors.AsType[user.UnknownUserError](err); missing {
+		return appstore.Identity{}, false, nil
+	}
+	if err != nil {
+		return appstore.Identity{}, false, err
+	}
+	invalid := fmt.Errorf("account %s is not an A-NAS app identity", username)
+	uid, uidErr := strconv.Atoi(account.Uid)
+	gid, gidErr := strconv.Atoi(account.Gid)
+	if uidErr != nil || gidErr != nil || uid != gid || uid < appstore.FirstAppUID || uid > appstore.LastAppUID {
+		return appstore.Identity{}, true, invalid
+	}
+	group, err := user.LookupGroupId(account.Gid)
+	if err != nil {
+		return appstore.Identity{}, true, fmt.Errorf("%w: %v", invalid, err)
+	}
+	owner, err := user.LookupId(account.Uid)
+	if err != nil {
+		return appstore.Identity{}, true, fmt.Errorf("%w: %v", invalid, err)
+	}
+	if group.Name != username || owner.Username != username {
+		return appstore.Identity{}, true, invalid
+	}
+	return appstore.Identity{Username: username, UID: uid, GID: gid}, true, nil
+}
+
+func (SystemIdentities) Unused(id string, uid int) (bool, error) {
+	name := strconv.Itoa(uid)
+	if _, err := user.LookupId(name); err == nil {
+		return false, nil
+	} else if _, missing := errors.AsType[user.UnknownUserIdError](err); !missing {
+		return false, err
+	}
+	group, err := user.LookupGroupId(name)
+	if _, missing := errors.AsType[user.UnknownGroupIdError](err); missing {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return group.Name == appstore.IdentityName(id), nil
+}
+
+type handler struct {
+	store      appstore.Store
+	identities Identities
+	logger     *slog.Logger
+}
+
+// NewHandler serves /v1/apps on the container agent socket. Apps run as the
+// identities it reads from identities; nil reads the host's.
+func NewHandler(store appstore.Store, identities Identities, logger *slog.Logger) http.Handler {
+	if identities == nil {
+		identities = SystemIdentities{}
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &handler{store: store, logger: logger}
+	return &handler{store: store, identities: identities, logger: logger}
 }
 
 // Matches reports whether a path belongs to the App Center protocol.
@@ -182,9 +257,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !allow(w, r, http.MethodGet) {
 			return
 		}
-		identity, ok := identityFrom(id, r.URL.Query().Get("uid"), r.URL.Query().Get("gid"))
-		if !ok {
+		identity, err := h.planIdentity(id, r.URL.Query().Get("uid"), r.URL.Query().Get("gid"))
+		if errors.Is(err, errInvalidIdentity) {
 			writeError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
+			return
+		}
+		if err != nil {
+			h.fail(w, r, err)
 			return
 		}
 		plan, err := h.store.Plan(r.Context(), id, identity)
@@ -207,12 +286,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var job appstore.Job
 		var err error
 		if operation == "install" {
-			identity, ok := identityFrom(id, strconv.Itoa(request.UID), strconv.Itoa(request.GID))
-			if !ok {
-				writeError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
-				return
+			// The app runs as its account; the request's UID and GID, which
+			// product services still send for older agents, are not used.
+			var identity appstore.Identity
+			if identity, err = h.installIdentity(id); err == nil {
+				job, err = h.store.Install(r.Context(), id, request.Digest, identity)
 			}
-			job, err = h.store.Install(r.Context(), id, request.Digest, identity)
 		} else {
 			job, err = h.store.Uninstall(r.Context(), id)
 		}
@@ -227,8 +306,52 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var errInvalidIdentity = errors.New("app identity is invalid")
+
+// planIdentity is the identity a plan runs as: the app's account. Before the
+// first install the account does not exist yet (the Host Agent creates it
+// with the app's folders), and the plan shows the UID the Host Agent
+// reserved, which the caller passes: it must be in the app range and held by
+// no account, nor by a group other than the app's own. Install renders the
+// plan again as the account and compares digests, so only a plan shown with
+// the account's UID installs.
+func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
+	identity, ok, err := h.identities.App(id)
+	if err != nil {
+		return appstore.Identity{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	if ok {
+		return identity, nil
+	}
+	reserved, valid := identityFrom(id, uid, gid)
+	if !valid {
+		return appstore.Identity{}, errInvalidIdentity
+	}
+	unused, err := h.identities.Unused(id, reserved.UID)
+	if err != nil {
+		return appstore.Identity{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	if !unused {
+		return appstore.Identity{}, errInvalidIdentity
+	}
+	return reserved, nil
+}
+
+// installIdentity is the app's account, which the Host Agent creates before
+// the product service asks for the install.
+func (h *handler) installIdentity(id string) (appstore.Identity, error) {
+	identity, ok, err := h.identities.App(id)
+	if err != nil {
+		return appstore.Identity{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	}
+	if !ok {
+		return appstore.Identity{}, fmt.Errorf("%w: account %s does not exist", appstore.ErrUnavailable, appstore.IdentityName(id))
+	}
+	return identity, nil
+}
+
 // identityFrom accepts only the app identity range the Host Agent
-// allocates, so a request can never render a plan that runs as root or as a
+// allocates, so a plan never shows a reserved identity of root or a
 // member's account.
 func identityFrom(id, uid, gid string) (appstore.Identity, bool) {
 	parsedUID, uidErr := strconv.Atoi(uid)
