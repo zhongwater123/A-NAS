@@ -142,6 +142,58 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 	}
 }
 
+// Going back to a build before the vector index takes the statements of
+// docs/runbooks/enable-vector-index.md#回退: the Catalog is then the older
+// build's, and a later build adds the outbox again.
+func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"DROP TRIGGER embeddings_vector_outbox_insert",
+		"DROP TRIGGER embeddings_vector_outbox_update",
+		"DROP TRIGGER embeddings_vector_outbox_delete",
+		"DROP TRIGGER assets_vector_outbox_insert",
+		"DROP TRIGGER assets_vector_outbox_delete",
+		"DROP TRIGGER assets_vector_outbox_update",
+		"DROP TABLE vector_outbox",
+		"DROP TABLE vector_index_state",
+		"PRAGMA user_version = 13",
+	} {
+		if _, err := service.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	var leftovers int
+	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE '%vector_outbox%' OR name LIKE '%vector_index%'").Scan(&leftovers); err != nil || leftovers != 0 {
+		t.Fatalf("schema objects left after undoing = %d, %v", leftovers, err)
+	}
+	_ = service.Close()
+
+	service, err = Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	var version, queued int
+	if err := service.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+		t.Fatalf("user_version = %d, %v", version, err)
+	}
+	if _, err := service.db.ExecContext(ctx, "INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES(?, 1, 'image/png', '')", zeroObjectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.db.ExecContext(ctx, "INSERT INTO assets(id, library_id, object_id, name, uploaded_by, imported_at) VALUES('photo:a', ?, ?, 'a.png', 'user:a', '')",
+		service.sharedLibraryID, zeroObjectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM vector_outbox").Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("queued after migrating again = %d, %v", queued, err)
+	}
+}
+
 const zeroObjectID = "0000000000000000000000000000000000000000000000000000000000000000"
 
 func mustMkdir(t *testing.T, path string) string {
