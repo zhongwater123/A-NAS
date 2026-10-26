@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/systemlogapi"
+	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 	"github.com/zhongwater123/A-NAS/internal/taskmanagerapi"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 )
@@ -74,6 +75,9 @@ func (h *productHandler) table() []apiroute.Route {
 		{Method: get, Pattern: "/api/v1/terminal/session", Posture: admin, Handler: h.handleTerminal},
 	}
 	logger := h.logger
+	// The task manager needs a reader that also observes tasks, as the Host
+	// Agent's client and the Fake Adapter do; without one it is unavailable.
+	tasks, _ := h.reader.(taskmanager.Reader)
 	for _, domain := range []interface{ Routes() []apiroute.Route }{
 		filesapi.New(h.files, h.changed, logger),
 		filepreviewapi.New(h.previews, logger),
@@ -82,7 +86,7 @@ func (h *productHandler) table() []apiroute.Route {
 		musicapi.New(h.music, logger),
 		activityapi.New(activityapi.Sources{Accounts: h.accounts, Files: h.files, Storage: h.storage, Photos: h.photoActivitySource(), Logger: logger}),
 		systemlogapi.New(h.systemLogs, string(h.dataSource), logger),
-		taskmanagerapi.New(h.reader, string(h.dataSource), logger),
+		taskmanagerapi.New(tasks, string(h.dataSource), logger),
 	} {
 		routes = append(routes, domain.Routes()...)
 	}
@@ -180,7 +184,9 @@ func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 			httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
-		if route.Posture == apiroute.Mutation || !apiroute.Safe(r.Method) {
+		// The method decides: checkPosture keeps every Mutation route a
+		// write and every Session route with a method a read.
+		if !apiroute.Safe(r.Method) {
 			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(session.CSRFToken)) != 1 {
 				httpjson.WriteError(w, http.StatusForbidden, "csrf_failed", "CSRF token is invalid")
 				return

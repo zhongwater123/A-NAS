@@ -20,11 +20,12 @@ const (
 	// Public routes need no session: the health check, setting up the
 	// device, signing in, and what the local screen's sign-in page reads.
 	Public Posture = iota
-	// Session routes need a signed-in user. A route mounted for every
-	// method also needs the CSRF token for anything but GET and HEAD.
+	// Session routes need a signed-in user. A route with a method only
+	// reads; a route mounted for every method needs the CSRF token for
+	// anything but GET and HEAD.
 	Session
-	// Mutation routes change something: they need a signed-in user and
-	// the session's CSRF token.
+	// Mutation routes change something: they need a signed-in user and,
+	// like every write, the session's CSRF token.
 	Mutation
 	// Admin routes need an administrator, and the CSRF token for anything
 	// but GET and HEAD.

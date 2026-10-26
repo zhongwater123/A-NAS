@@ -21,16 +21,16 @@ const (
 	tasksPath  = "/api/v1/task-manager/tasks"
 )
 
-// API observes through reader, which answers task_manager_unavailable
-// unless it is a taskmanager.Reader. dataSource tells the page whether the
+// API observes through reader; without one it answers
+// task_manager_unavailable. dataSource tells the page whether the
 // observations are simulated or live.
 type API struct {
-	reader     any
+	reader     taskmanager.Reader
 	dataSource string
 	logger     *slog.Logger
 }
 
-func New(reader any, dataSource string, logger *slog.Logger) *API {
+func New(reader taskmanager.Reader, dataSource string, logger *slog.Logger) *API {
 	return &API{reader: reader, dataSource: dataSource, logger: logger}
 }
 
@@ -50,8 +50,8 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request, _ accounts.Session) 
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	reader, ok := a.reader.(taskmanager.Reader)
-	if !ok {
+	reader := a.reader
+	if reader == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "task_manager_unavailable", "task manager is unavailable")
 		return
 	}

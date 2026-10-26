@@ -87,6 +87,9 @@ type Handler struct {
 	// keeps holds the instances kept running for signed-in members, by account.
 	keepsMu sync.Mutex
 	keeps   map[string]*keep
+	// waiting is set by Wait, under keepsMu, so that Keep starts nothing the
+	// wait could miss.
+	waiting bool
 }
 
 // New returns the assistant API.
@@ -135,9 +138,15 @@ func New(options Options) *Handler {
 	return h
 }
 
-// Wait returns once the background work stopped after Options.Context
-// ended. Call it only when no more requests can arrive.
-func (h *Handler) Wait() { h.background.Wait() }
+// Wait keeps anything new from starting and returns once the background work
+// already running stopped. Call it after Options.Context ended; requests may
+// still be arriving.
+func (h *Handler) Wait() {
+	h.keepsMu.Lock()
+	h.waiting = true
+	h.keepsMu.Unlock()
+	h.background.Wait()
+}
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")

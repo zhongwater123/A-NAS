@@ -56,6 +56,9 @@ func (h *Handler) Keep(user accounts.User, sessionToken string) {
 	}
 	h.keepsMu.Lock()
 	defer h.keepsMu.Unlock()
+	if h.waiting {
+		return
+	}
 	k := h.keeps[user.Username]
 	if k == nil {
 		k = &keep{userID: user.ID, sessions: map[string]struct{}{}}

@@ -31,10 +31,6 @@ const (
 	DataSourceLive      DataSource = "live"
 )
 
-func New(reader hoststate.Observer, dataSource DataSource, productVersion string, logger *slog.Logger) http.Handler {
-	return newStateHandler(reader, dataSource, productVersion, logger)
-}
-
 func newStateHandler(reader hoststate.Observer, dataSource DataSource, productVersion string, logger *slog.Logger) *handler {
 	if logger == nil {
 		logger = slog.Default()

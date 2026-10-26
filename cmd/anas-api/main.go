@@ -141,9 +141,11 @@ func run(logger *slog.Logger) error {
 	live, stateDirectory, volumeRoot := config.Live(), config.StateDir, config.DataMount
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	// Background work ends after the server stopped and before the stores it
-	// writes to close: the deferred closes run once run returns.
-	background, stopBackground := context.WithCancel(context.Background())
+	// Background work stops as soon as the process is told to stop, while
+	// open requests drain, so that both fit in the unit's TimeoutStopSec; or
+	// when the server fails. run waits for it before returning, and so before
+	// the deferred closes of the stores it writes to.
+	background, stopBackground := context.WithCancel(ctx)
 	defer stopBackground()
 	var tasks errgroup.Group
 	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
@@ -362,15 +364,16 @@ func run(logger *slog.Logger) error {
 	return err
 }
 
-// shutdownGrace is how long stopping waits for open requests; the unit's
-// TimeoutStopSec leaves room for the background work after it.
+// shutdownGrace is how long stopping waits for open requests. The system
+// unit's TimeoutStopSec of 20 s leaves room for the background work that is
+// still stopping then.
 var shutdownGrace = 15 * time.Second
 
 // serve runs server on listener until the process is told to stop or the
 // server fails. Stopping ends the terminal sessions, which hijacked their
-// connections, and waits shutdownGrace for the other requests; connections
-// still open then, such as long media, music or download streams, are closed,
-// which is not a failure.
+// connections, while it waits shutdownGrace for the other requests; each has
+// the whole grace period. Connections still open then, such as long media,
+// music or download streams, are closed, which is not a failure.
 func serve(ctx context.Context, server *http.Server, listener net.Listener, terminals *terminal.Handler, logger *slog.Logger) error {
 	listenError := make(chan error, 1)
 	go func() { listenError <- server.Serve(listener) }()
@@ -382,13 +385,18 @@ func serve(ctx context.Context, server *http.Server, listener net.Listener, term
 	logger.Info("A-NAS API shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	if err := terminals.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("terminal sessions did not end in time", "error", err)
-	}
+	terminalsEnded := make(chan struct{})
+	go func() {
+		defer close(terminalsEnded)
+		if err := terminals.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("terminal sessions did not end in time", "error", err)
+		}
+	}()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("requests still open when stopping were cut off", "error", err)
 		_ = server.Close()
 	}
+	<-terminalsEnded
 	if err := <-listenError; !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

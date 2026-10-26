@@ -6,8 +6,10 @@ info:
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
     the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
-    container agent, and each member's AI assistant (proposed in ADR 0024). A JSON request body larger than the
-    operation accepts (1 MiB unless it says otherwise) answers 413 request_too_large.
+    container agent, and each member's AI assistant (proposed in ADR 0024). Every operation that takes a JSON body
+    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, 65 KiB for
+    assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
+    feedback resolved.
 servers:
   - url: http://127.0.0.1:8080
 security:

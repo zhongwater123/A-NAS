@@ -150,6 +150,30 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 	}
 }
 
+// A relative state directory is reported as such, also where the default
+// could not be found either, and every problem comes in the same order.
+func TestConfigNamesEveryProblemInTheSameOrder(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	environment := map[string]string{
+		"ANAS_HOSTSTATE_MODE": "agent", "ANAS_HOST_AGENT_SOCKET": "/run/a-nas/host-agent.sock", "ANAS_STATE_DIR": "state",
+		"ANAS_PHOTOS_SOCKET": "photos.sock", "ANAS_SHARES_SOCKET": "shares.sock", "ANAS_MEDIA_SOCKET": "media.sock",
+		"ANAS_AI_SOCKET": "/run/a-nas-ai/ai.sock", "ANAS_ASSISTANT_TOKEN_DIR": "/etc/a-nas-assistant/tokens",
+	}
+	_, err := loadConfig(environment)
+	if err == nil || !strings.Contains(err.Error(), "ANAS_STATE_DIR must be an absolute path") {
+		t.Fatalf("loadConfig() error = %v, want the relative state directory named", err)
+	}
+	for range 20 {
+		if _, again := loadConfig(environment); again == nil || again.Error() != err.Error() {
+			t.Fatalf("errors changed order:\n%v\n%v", err, again)
+		}
+	}
+	if _, err := loadConfig(map[string]string{"ANAS_HOSTSTATE_MODE": "fake"}); err == nil || !strings.Contains(err.Error(), "no user configuration directory") {
+		t.Fatalf("loadConfig() without a state directory or HOME = %v", err)
+	}
+}
+
 // The installer writes the only environment the Product Service has on a NAS.
 func TestTheInstallersEnvironmentIsAValidNASConfiguration(t *testing.T) {
 	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install-v1.0.1-system-services.sh"))

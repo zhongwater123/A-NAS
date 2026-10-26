@@ -213,3 +213,16 @@ func TestStoppingEndsTheKeptInstanceAndTheTaskWatch(t *testing.T) {
 		t.Fatalf("connections after stopping = %d", got)
 	}
 }
+
+// A request still running while stopping waits must not start a keeper the
+// wait has already missed: once Wait began, Keep starts nothing, even before
+// the context ended.
+func TestKeepStartsNothingOnceWaitBegan(t *testing.T) {
+	h, serve, _ := newKeeper(t)
+	h.Wait()
+	h.Keep(alice, "late-session")
+	time.Sleep(100 * time.Millisecond)
+	if serve.connections() != 0 || h.kept("alice") {
+		t.Fatalf("kept an instance after Wait began: %d connections", serve.connections())
+	}
+}

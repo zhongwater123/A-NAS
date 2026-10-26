@@ -155,12 +155,11 @@ func loadConfig(environment map[string]string) (Config, error) {
 	live := c.Live()
 	problem(loopbackAddress(c.HTTPAddr))
 
-	path("ANAS_STATE_DIR", &c.StateDir)
-	if c.StateDir == "" {
-		directory, err := os.UserConfigDir()
-		if err != nil {
-			return Config{}, fmt.Errorf("ANAS_STATE_DIR is not set and there is no user configuration directory: %w", err)
-		}
+	if c.StateDir != "" {
+		path("ANAS_STATE_DIR", &c.StateDir)
+	} else if directory, err := os.UserConfigDir(); err != nil {
+		problem(fmt.Errorf("ANAS_STATE_DIR is not set and there is no user configuration directory: %w", err))
+	} else {
 		c.StateDir = filepath.Join(directory, "a-nas", "state")
 	}
 	path("ANAS_DATA_MOUNT", &c.DataMount)
@@ -170,13 +169,17 @@ func loadConfig(environment map[string]string) (Config, error) {
 			c.DataMount = "/srv/a-nas/data"
 		}
 	}
-	for name, value := range map[string]*string{
-		"ANAS_PHOTOS_SOCKET": &c.PhotosSocket, "ANAS_SHARES_SOCKET": &c.SharesSocket,
-		"ANAS_SHARE_FILES_SOCKET": &c.ShareFilesSocket, "ANAS_MEDIA_SOCKET": &c.Media.Socket,
-		"ANAS_MEDIA_SLOTS": &c.Media.Slots, "ANAS_SCREENSAVER_DIRECTORY": &c.ScreensaverDirectory,
-		"ANAS_ASSISTANT_SOCKET_DIR": &c.Assistant.SocketDir,
+	// Problems are reported in the order of these lists, the same every time.
+	for _, variable := range []struct {
+		name  string
+		value *string
+	}{
+		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_MEDIA_SOCKET", &c.Media.Socket},
+		{"ANAS_MEDIA_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
+		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir},
 	} {
-		path(name, value)
+		path(variable.name, variable.value)
 	}
 	if live {
 		socket, err := hostagent.SocketPath(c.HostAgentSocket, c.RuntimeDir)
@@ -243,13 +246,13 @@ func loadConfig(environment map[string]string) (Config, error) {
 		problem(errors.New("ANAS_ASSISTANT_CHANGES_SOCKET is the Host Agent's; the Product Service's stand-in for development is ANAS_ASSISTANT_SPIKE_BROKER_SOCKET"))
 	}
 	if live {
-		for name, value := range map[string]string{
-			"ANAS_AI_SOCKET":                     c.DevelopmentAISocket,
-			"ANAS_ASSISTANT_TOKEN_DIR":           c.Assistant.TokenDir,
-			"ANAS_ASSISTANT_SPIKE_BROKER_SOCKET": c.Assistant.SpikeBrokerSocket,
+		for _, variable := range []struct{ name, value string }{
+			{"ANAS_AI_SOCKET", c.DevelopmentAISocket},
+			{"ANAS_ASSISTANT_TOKEN_DIR", c.Assistant.TokenDir},
+			{"ANAS_ASSISTANT_SPIKE_BROKER_SOCKET", c.Assistant.SpikeBrokerSocket},
 		} {
-			if value != "" {
-				problem(fmt.Errorf("%s is for development only; on a NAS that goes through its own service", name))
+			if variable.value != "" {
+				problem(fmt.Errorf("%s is for development only; on a NAS that goes through its own service", variable.name))
 			}
 		}
 	}
