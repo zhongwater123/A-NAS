@@ -819,8 +819,9 @@ same_network_namespace() {
     "$(readlink "/proc/$index/ns/net")" != "$(readlink /proc/1/ns/net)" ]]
 }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within a minute
-  for _ in $(seq 1 120); do
+journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within three minutes; the vector sync waits,
+  # as AI work does, while the device's other work is under pressure
+  for _ in $(seq 1 360); do
     journal_has "$@" && return 0
     sleep 0.5
   done
@@ -832,6 +833,7 @@ check "the photo service builds its vector index from the Catalog" \
   journal_shows anas-photos.service "$installed_at" "photo vector index created"
 check "and brings the organised photo into it" \
   journal_shows anas-photos.service "$installed_at" "photo vector index synced"
+journalctl -u anas-photos.service --since "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
 check "a search is compared with the vector index in the background" semantic_search 猫
 check "and the comparison is logged" \
   journal_shows anas-photos.service "$installed_at" "photo vector index shadow search"

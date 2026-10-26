@@ -94,7 +94,7 @@ func TestVectorOutboxFollowsTheCatalog(t *testing.T) {
 	queued("copying to another library")
 
 	// Renaming changes neither.
-	if _, err := service.Update(ctx, alice, asset.ID, photos.AssetUpdate{Name: ptr("renamed.png")}); err != nil {
+	if _, err := service.Update(ctx, alice, asset.ID, photos.AssetUpdate{Name: new("renamed.png")}); err != nil {
 		t.Fatal(err)
 	}
 	if outboxVersion(t, db, object) != 0 {
@@ -441,5 +441,3 @@ func TestShadowComparesFirstPagesOfSearches(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 }
-
-func ptr[T any](value T) *T { return &value }

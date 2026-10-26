@@ -56,6 +56,7 @@ func Start(t testing.TB) Instance {
 
 	work := t.TempDir()
 	httpPort, grpcPort := freePort(t), freePort(t)
+	//nolint:gosec // G702: the pinned binary, fetched by hash or named by the developer for tests.
 	command := exec.Command(binary, "--config-path", filepath.Join(root, "deploy", "qdrant", "config.yaml"), "--disable-telemetry")
 	command.Dir = work
 	command.Env = append(os.Environ(),
