@@ -89,6 +89,22 @@ ip -brief link
 
 完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-media.socket` 已启用且 `/run/a-nas-media/media.sock` 为 `root:a-nas 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
+### 移入 Host Agent 的记录
+
+Host Agent 的五个记录（`space-registry`、`identity-registry`、`viewing-grants`、`app-identities` 与 `volume-operations`，均为 `.json`）自 [issue #176](https://github.com/zhongwater123/A-NAS/issues/176) 起在 `/var/lib/a-nas-host`，Host Agent 启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来，但只移动 root 所有、只有一个链接的普通文件。安装器在改动任何东西之前核对：某个记录在新位置还没有，旧位置的又不符合时，以退出码 3 停止并给出 `stat` 结果，否则重启后这个记录会停用（日志 `a Host Agent record cannot be used`）。产品服务的 `StateDirectory=a-nas` 在目录本身属主不对时会把整个目录递归改归 `a-nas`，这是记录不归 root 的可能原因。处理时先停服务，再逐个核对：
+
+```bash
+systemctl stop anas-api anas-host-agent
+record=/var/lib/a-nas/app-identities.json   # 安装器报出的文件
+stat -c '%U:%G %h %F %y' -- "$record"
+cat -- "$record"
+```
+
+- 是普通文件、内容可以确认是 Host Agent 写的（与 `getent passwd`、空间目录和数据卷的 `.a-nas-identities.json` 对照）时，换成 root 的单链接副本：`install -o root -g root -m 0600 -- "$record" "$record.new" && mv -f -- "$record.new" "$record"`。
+- 符号链接、硬链接，或无法确认的内容：移出目录留作证据，例如 `mv -- "$record" /root/`。Host Agent 对这个记录从空开始，后果见[回滚](#回滚)中对空记录的说明。
+
+然后重新运行安装器。
+
 ## 升级到统一身份（ADR 0008）
 
 rc.5 及更早版本用系统区间 UID 创建了 A-NAS 账号（如 `admin`）。统一身份版本只接管 UID 20100–29999 内由 A-NAS 分配的账号；遇到旧账号时 Product Service 日志出现 `identity synchronization failed` 与 `conflicts with an existing host account`，且不会修改该账号。实验卷只含可丢弃测试数据，不迁移旧 UID 的文件。
@@ -183,7 +199,7 @@ systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
 
 AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。旧版本也拒绝打开比它新的相册 Catalog：回滚跨过 Catalog 迁移时，先按该版本的手册把 Catalog 退回，例如物体检测的 migration 7。
 
-Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷操作）在 `/var/lib/a-nas-host`，只有 root 能打开（[issue #176](https://github.com/zhongwater123/A-NAS/issues/176)）。新版本启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来：先写入并刷盘新副本，再删除原件；不移动符号链接、硬链接或不归 root 所有的文件，对应的记录报错停用（日志 `a Host Agent record cannot be used`），需管理员核对后删除。旧版本只在 `/var/lib/a-nas` 读这些记录，所以回滚到它之前时，上面的脚本先停止 Host Agent，再把记录移回去。漏掉这一步时，旧二进制以空记录启动：不修复任何空间的目录与 ACL，快照与管理员查看找不到空间，应用身份从空表分配、与已有账号冲突而报错，新版本发出的查看授权到期也不撤销（再次升级后由新版本撤销）；它写下的新记录留在 `/var/lib/a-nas`。再次升级时，新版本只用 `/var/lib/a-nas-host` 中已有的记录，删除与之相同的旧副本，并在日志中报告内容不同的旧记录（`differs from the one in use`），由管理员核对。按脚本移回的记录会在再次升级时重新移入。
+Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷操作）在 `/var/lib/a-nas-host`，只有 root 能打开（[issue #176](https://github.com/zhongwater123/A-NAS/issues/176)）。新版本启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来：先写入并刷盘新副本，再删除原件；不移动符号链接、硬链接或不归 root 所有的文件，安装器遇到它们会先停下（见[移入 Host Agent 的记录](#移入-host-agent-的记录)）。旧版本只在 `/var/lib/a-nas` 读这些记录，所以回滚到它之前时，上面的脚本先停止 Host Agent，再把记录移回去。漏掉这一步时，旧二进制以空记录启动：不修复任何空间的目录与 ACL，快照与管理员查看找不到空间，应用身份从空表分配、与已有账号冲突而报错，新版本发出的查看授权到期也不撤销（再次升级后由新版本撤销）；它写下的新记录留在 `/var/lib/a-nas`。再次升级时，新版本只用 `/var/lib/a-nas-host` 中已有的记录，删除与之相同的旧副本，并在日志中报告内容不同的旧记录（`differs from the one in use`），由管理员核对。按脚本移回的记录会在再次升级时重新移入。
 
 `/etc/a-nas/*.env` 由安装器按固定内容生成，旧版本忽略新增的变量，不需要恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。另外：
 

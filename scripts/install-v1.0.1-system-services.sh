@@ -124,6 +124,23 @@ if command -v caddy >/dev/null; then
     { echo "LAN Web entry configuration does not validate: $source_release/Caddyfile" >&2; exit 2; }
   lan_entry=true
 fi
+# The Host Agent moves each of its records out of /var/lib/a-nas when it
+# starts, but only a regular file with one link that root owns (issue #176):
+# any other record would be unusable after the restart. Stop before changing
+# anything; the provisioning runbook says how to check such a file.
+for record in space-registry identity-registry viewing-grants app-identities volume-operations; do
+  legacy=/var/lib/a-nas/$record.json
+  [[ -e "$legacy" || -L "$legacy" ]] || continue
+  [[ -e "/var/lib/a-nas-host/$record.json" || -L "/var/lib/a-nas-host/$record.json" ]] && continue
+  details=$(stat -c '%u %h %F' -- "$legacy")
+  case "$details" in
+    '0 1 regular file' | '0 1 regular empty file') ;;
+    *)
+      echo "$legacy is not a regular file with one link owned by root ($details), so the Host Agent would not move it; check it as the provisioning runbook describes, then run the installer again" >&2
+      exit 3
+      ;;
+  esac
+done
 
 getent group a-nas >/dev/null || groupadd --system a-nas
 if ! id a-nas >/dev/null 2>&1; then
