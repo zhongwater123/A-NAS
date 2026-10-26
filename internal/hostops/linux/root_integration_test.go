@@ -152,6 +152,47 @@ func TestRootStateLeavesTheProductServiceDirectory(t *testing.T) {
 	}
 }
 
+// A refused identity registry leaves the spaces' ACLs and the registry's copy
+// on the data volume as they were: without it, every private space would get
+// the fail-closed ACL and the copy would be emptied.
+func TestRootRefusedIdentityRegistryLeavesSpacesAlone(t *testing.T) {
+	ctx := context.Background()
+	mount := "/srv/a-nas/data"
+	resetAgentState(t)
+	setUpDataVolume(t, mount)
+	startSamba(t)
+	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
+	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+		UserID: "user:regcheck", PrivateSpaceID: "space:regcheck", Username: "regcheck",
+		Password: "regcheck password for tests", Role: accounts.RoleMember, UID: 20190, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(mount, "spaces", "private", "regcheck")
+	manifest := filepath.Join(mount, identityManifestName)
+	aclBefore := run(t, "getfacl", "--omit-header", "--absolute-names", private)
+	manifestBefore := readFile(t, manifest)
+	writeFile(t, "/var/lib/a-nas-host/identity-registry.json",
+		`{"regcheck":{"uid":20190,"role":"member","enabled":true},"regcheck2":{"uid":20190,"role":"member","enabled":true}}`)
+
+	restarted := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
+	if restarted.identityError == nil {
+		t.Fatal("an identity registry with one UID twice loaded")
+	}
+	if _, err := restarted.ReconcileDataVolume(ctx); err == nil {
+		t.Error("ReconcileDataVolume() with a refused identity registry succeeded")
+	}
+	if err := restarted.DisableCredential(ctx, "regcheck"); err != nil {
+		t.Errorf("DisableCredential() error = %v", err)
+	}
+	if got := run(t, "getfacl", "--omit-header", "--absolute-names", private); got != aclBefore {
+		t.Errorf("private space ACL changed:\n%s\nwant:\n%s", got, aclBefore)
+	}
+	if got := readFile(t, manifest); got != manifestBefore {
+		t.Errorf("identity manifest = %q, want it unchanged (%q)", got, manifestBefore)
+	}
+}
+
 // resetAgentState gives each test fresh Host Agent registries; the container
 // is disposable, so nothing else depends on them.
 func resetAgentState(t *testing.T) {

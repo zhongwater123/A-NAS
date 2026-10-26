@@ -89,6 +89,12 @@ func userTrashACL(username string, viewers ...string) string {
 }
 
 func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, error) {
+	// Each space's ACL names its owner and its trash users from the identity
+	// registry. Without the registry every private space would get the
+	// fail-closed ACL below, so nothing is applied until it loads.
+	if e.identityError != nil {
+		return nil, e.identityError
+	}
 	e.materializeMu.Lock()
 	defer e.materializeMu.Unlock()
 	var repaired []string
