@@ -112,15 +112,18 @@ var testIdentity = appstore.Identity{Username: "app-memos", UID: 30002, GID: 300
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // testIdentities is the host's account database: memos has its account,
-// and another account holds 30003.
+// another account holds 30003, navidrome's group alone was made (a creation
+// cut short) and another group holds 30005.
 var testIdentities = fakeIdentities{
 	accounts: map[string]appstore.Identity{"memos": testIdentity},
-	used:     map[int]bool{30002: true, 30003: true},
+	users:    map[int]bool{30002: true, 30003: true},
+	groups:   map[int]string{30002: "app-memos", 30003: "other", 30004: "app-navidrome", 30005: "app-other"},
 }
 
 type fakeIdentities struct {
 	accounts map[string]appstore.Identity
-	used     map[int]bool
+	users    map[int]bool
+	groups   map[int]string
 }
 
 func (f fakeIdentities) App(id string) (appstore.Identity, bool, error) {
@@ -128,7 +131,10 @@ func (f fakeIdentities) App(id string) (appstore.Identity, bool, error) {
 	return identity, ok, nil
 }
 
-func (f fakeIdentities) Unused(id int) (bool, error) { return !f.used[id], nil }
+func (f fakeIdentities) Unused(id string, uid int) (bool, error) {
+	group := f.groups[uid]
+	return !f.users[uid] && (group == "" || group == appstore.IdentityName(id)), nil
+}
 
 // recordingStore records the identities plans and installs run as.
 type recordingStore struct {
@@ -166,15 +172,17 @@ func TestAgentRunsAppsAsTheirAccounts(t *testing.T) {
 	store.Wait()
 
 	// Before its first install an app has no account yet: the plan shows the
-	// UID the Host Agent reserved, which no account or group may hold, and
-	// the app cannot be installed until the account exists.
+	// UID the Host Agent reserved, which no account and no other app's group
+	// may hold (navidrome's own group, left by a creation cut short, may),
+	// and the app cannot be installed until the account exists.
 	reserved := appstore.Identity{Username: "app-navidrome", UID: 30004, GID: 30004}
 	plan, err = client.Plan(ctx, "navidrome", reserved)
 	if err != nil || plan.Identity != reserved {
 		t.Fatalf("Plan(navidrome) = %+v, %v; want the reserved identity", plan.Identity, err)
 	}
 	for _, identity := range []appstore.Identity{
-		{UID: 30003, GID: 30003}, {UID: 30002, GID: 30002}, {UID: 0, GID: 0}, {UID: 20100, GID: 20100}, {UID: 30004, GID: 30005},
+		{UID: 30003, GID: 30003}, {UID: 30002, GID: 30002}, {UID: 30005, GID: 30005}, {UID: 0, GID: 0}, {UID: 20100, GID: 20100},
+		{UID: 30004, GID: 30005},
 	} {
 		if _, err := client.Plan(ctx, "navidrome", identity); err == nil || !strings.Contains(err.Error(), "invalid_request") {
 			t.Errorf("Plan(navidrome, %d:%d) error = %v, want invalid_request", identity.UID, identity.GID, err)
@@ -196,7 +204,7 @@ func TestSystemIdentitiesReadTheHostsAccounts(t *testing.T) {
 	if identity, ok, err := identities.App("no-such-app-176"); ok || err != nil {
 		t.Fatalf("App(missing) = %+v, %v, %v", identity, ok, err)
 	}
-	if unused, err := identities.Unused(0); unused || err != nil {
+	if unused, err := identities.Unused("no-such-app-176", 0); unused || err != nil {
 		t.Fatalf("Unused(0) = %v, %v; root holds it", unused, err)
 	}
 }

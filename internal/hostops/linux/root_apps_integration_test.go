@@ -113,8 +113,16 @@ func TestRootContainerAgentReadsAppIdentitiesFromTheHost(t *testing.T) {
 	if identity, ok, err := identities.App("agentcheck"); ok || err != nil {
 		t.Fatalf("App() before the account exists = %+v, %v, %v", identity, ok, err)
 	}
-	if unused, err := identities.Unused(30940); !unused || err != nil {
+	if unused, err := identities.Unused("agentcheck", 30940); !unused || err != nil {
 		t.Fatalf("Unused(30940) before the account exists = %v, %v", unused, err)
+	}
+	// A creation cut short after its group: the UID is still the app's.
+	run(t, "groupadd", "--gid", "30940", "app-agentcheck")
+	if unused, err := identities.Unused("agentcheck", 30940); !unused || err != nil {
+		t.Fatalf("Unused(30940) with only the app's group = %v, %v", unused, err)
+	}
+	if unused, err := identities.Unused("othercheck", 30940); unused || err != nil {
+		t.Fatalf("Unused(30940) for another app = %v, %v; app-agentcheck's group holds it", unused, err)
 	}
 	if err := executor.ensureAccount(context.Background(), "app-agentcheck", 30940); err != nil {
 		t.Fatal(err)
@@ -123,7 +131,7 @@ func TestRootContainerAgentReadsAppIdentitiesFromTheHost(t *testing.T) {
 	if want := (appid.Identity{Username: "app-agentcheck", UID: 30940, GID: 30940}); !ok || err != nil || identity != want {
 		t.Fatalf("App() = %+v, %v, %v; want %+v", identity, ok, err, want)
 	}
-	if unused, err := identities.Unused(30940); unused || err != nil {
+	if unused, err := identities.Unused("agentcheck", 30940); unused || err != nil {
 		t.Fatalf("Unused(30940) with the account = %v, %v", unused, err)
 	}
 

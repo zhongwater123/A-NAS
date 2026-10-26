@@ -142,16 +142,18 @@ func (c *Client) do(ctx context.Context, method, path string, body any, into any
 type Identities interface {
 	// App returns the account app-<id>; ok is false while it does not exist.
 	App(id string) (identity appstore.Identity, ok bool, err error)
-	// Unused reports whether no account and no group has the ID.
-	Unused(id int) (bool, error)
+	// Unused reports whether uid is free for app-<id>: no account holds it,
+	// and no group but app-<id>'s own, which the Host Agent creates first
+	// and may have left behind without the account.
+	Unused(id string, uid int) (bool, error)
 }
 
 // SystemIdentities reads the host's passwd and group databases.
 type SystemIdentities struct{}
 
 // App accepts only an account the Host Agent could have made: in the app
-// range, with GID equal to UID, its own group, and no other account on the
-// UID.
+// range, with GID equal to UID, its own group, and itself as the account the
+// UID resolves to (the first passwd entry with it, as for getent).
 func (SystemIdentities) App(id string) (appstore.Identity, bool, error) {
 	username := appstore.IdentityName(id)
 	account, err := user.Lookup(username)
@@ -181,19 +183,21 @@ func (SystemIdentities) App(id string) (appstore.Identity, bool, error) {
 	return appstore.Identity{Username: username, UID: uid, GID: gid}, true, nil
 }
 
-func (SystemIdentities) Unused(id int) (bool, error) {
-	name := strconv.Itoa(id)
+func (SystemIdentities) Unused(id string, uid int) (bool, error) {
+	name := strconv.Itoa(uid)
 	if _, err := user.LookupId(name); err == nil {
 		return false, nil
 	} else if _, missing := errors.AsType[user.UnknownUserIdError](err); !missing {
 		return false, err
 	}
-	if _, err := user.LookupGroupId(name); err == nil {
-		return false, nil
-	} else if _, missing := errors.AsType[user.UnknownGroupIdError](err); !missing {
+	group, err := user.LookupGroupId(name)
+	if _, missing := errors.AsType[user.UnknownGroupIdError](err); missing {
+		return true, nil
+	}
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return group.Name == appstore.IdentityName(id), nil
 }
 
 type handler struct {
@@ -308,8 +312,9 @@ var errInvalidIdentity = errors.New("app identity is invalid")
 // first install the account does not exist yet (the Host Agent creates it
 // with the app's folders), and the plan shows the UID the Host Agent
 // reserved, which the caller passes: it must be in the app range and held by
-// no account or group. Install renders the plan again as the account and
-// compares digests, so only a plan shown with the account's UID installs.
+// no account, nor by a group other than the app's own. Install renders the
+// plan again as the account and compares digests, so only a plan shown with
+// the account's UID installs.
 func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
 	identity, ok, err := h.identities.App(id)
 	if err != nil {
@@ -322,7 +327,7 @@ func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
 	if !valid {
 		return appstore.Identity{}, errInvalidIdentity
 	}
-	unused, err := h.identities.Unused(reserved.UID)
+	unused, err := h.identities.Unused(id, reserved.UID)
 	if err != nil {
 		return appstore.Identity{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
 	}
