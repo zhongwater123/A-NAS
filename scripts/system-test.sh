@@ -930,6 +930,39 @@ check "the old password no longer opens SMB" denied smb alice alice ls
 smb_auth alice "$new_password"
 check "the new password opens SMB" quiet smb alice alice ls
 
+# --- Disabling an account ends its SMB sessions. Under the Host Agent's
+# RestrictAddressFamilies=AF_UNIX, smbstatus warns on standard error that it
+# found no network interfaces; read together with its JSON, the warning
+# failed every disable and every start's identity synchronization
+# (docs/investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_sessions_of() { # USER -> how many SMB sessions USER has
+  smbstatus --processes --user="$1" --json 2>/dev/null | jq --arg user "$1" '[.sessions[] | select(.username == $user)] | length'
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_sessions_end() { for _ in $(seq 1 50); do [[ "$(smb_sessions_of "$1")" == 0 ]] && return; sleep 0.2; done; return 1; }
+carol_password=$(secret)
+carol_user=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"carol\",\"password\":\"$carol_password\"}" "$api/api/v1/users" | jq -r .id || true)
+smb_auth carol "$carol_password"
+# A client that stays connected, as a mapped drive does.
+smbclient "//$ip/carol" -A /tmp/carol.smb -m SMB3 --client-protection=encrypt < <(sleep 60) >/dev/null 2>&1 &
+carol_client=$!
+for _ in $(seq 1 50); do [[ "$(smb_sessions_of carol)" -gt 0 ]] && break; sleep 0.2; done
+check "a member stays connected over SMB" test "$(smb_sessions_of carol)" -gt 0
+check "the administrator disables the member" test "$(status_of -X DELETE -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user")" = 204
+check "disabling ends the member's SMB session" smb_sessions_end carol
+check "the disabled member cannot open SMB" denied smb carol carol ls
+kill "$carol_client" 2>/dev/null || true
+# Every start synchronizes identities, the disabled member's SMB entry too.
+synced_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-api
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "the Product Service's start synchronizes identities with a disabled SMB account" \
+  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-api --since '$synced_at' -o cat --no-pager |
+    grep -Fq 'identity synchronization succeeded' && exit 0; sleep 1; done; exit 1"
+
 # --- Restarting the Host Agent keeps all of the above.
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent

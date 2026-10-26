@@ -218,6 +218,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - Host Agent 保留 `CAP_SETUID`/`CAP_SETGID` 并通过启动自检；
 - Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
 - SMB 与 Web 互相可见对方写入的文件，使用同一组 ACL、同一个回收站和同一个密码；
+- 禁用账号会断开它连着的 SMB 会话，之后产品服务启动时的身份同步照常成功。Host Agent 的沙箱让 Samba 命令在标准错误打印告警，root 集成测试碰不到这一点（[调查](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)）；
 - 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
 - 安装器配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
 - 活动记录为经入口的登录记下客户端地址、为本机屏幕登录记下来源；Host Agent 在正式单元的沙箱中以 `journalctl` 读到产品服务与 systemd 关于白名单单元的日志，成员读不到系统日志，白名单外的单元被拒绝（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)）；
